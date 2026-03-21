@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>CivilierERP</title>
+        <meta
+            name="description"
+            content="CivilierERP — Enterprise Resource Planning Built for Civil Contractors"
+        />
+        <meta name="author" content="Rajwada Infotech" />
+
+        <!-- Favicon - file placed directly in public/ -->
+        <link rel="icon" type="image/jpeg" href="/CivilierERP.png" />
+
+        <meta property="og:title" content="CivilierERP" />
+        <meta
+            property="og:description"
+            content="Enterprise Resource Planning Built for Civil Contractors"
+        />
+        <meta property="og:type" content="website" />
+        <meta name="twitter:card" content="summary_large_image" />
+
+        <script>
+            // Synchronous theme initialization to prevent flash
+            (function () {
+                var theme = localStorage.getItem("civilier-theme") || "dark";
+                document.documentElement.setAttribute("data-theme", theme);
+            })();
+        </script>
+    </head>
+    <body>
+        <div id="root"></div>
+        <script type="module" src="/src/main.tsx"></script>
+    </body>
+</html>
