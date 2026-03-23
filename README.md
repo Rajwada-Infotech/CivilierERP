@@ -1,8 +1,5 @@
 # CivilierERP
 
-<p align="center">
-  <img src="public/Civilier.jpeg" alt="CivilierERP Logo" width="180"/>
-</p>
 
 ## Overview
 
