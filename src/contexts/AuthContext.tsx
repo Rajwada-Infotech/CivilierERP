@@ -10,10 +10,12 @@ export type PageKey =
   | "widgets"
   | "master_contractors"
   | "master_suppliers"
+  | "master_customers"
   | "master_banks"
   | "master_expenses"
   | "setup_account_groups"
-  | "setup_account_heads";
+  | "setup_account_heads"
+  | "tasks";
 
 // Actions available per page
 export type PageAction = "view" | "create" | "edit" | "delete";
@@ -48,10 +50,12 @@ export const PAGE_DEFINITIONS: {
   { key: "widgets",               label: "Widgets",          path: "/widgets",                  group: "Main",    availableActions: ["view"] },
   { key: "master_contractors",    label: "Contractor Master",path: "/masters/contractors",      group: "Masters", availableActions: ["view", "create", "edit", "delete"] },
   { key: "master_suppliers",      label: "Supplier Master",  path: "/masters/suppliers",        group: "Masters", availableActions: ["view", "create", "edit", "delete"] },
+  { key: "master_customers",      label: "Customer Master",  path: "/masters/customers",        group: "Masters", availableActions: ["view", "create", "edit", "delete"] },
   { key: "master_banks",          label: "Bank Master",      path: "/masters/banks",            group: "Masters", availableActions: ["view", "create", "edit", "delete"] },
   { key: "master_expenses",       label: "Expenses Master",  path: "/masters/expenses",         group: "Masters", availableActions: ["view", "create", "edit", "delete"] },
   { key: "setup_account_groups",  label: "Account Groups",   path: "/setup/account-groups",     group: "Setup",   availableActions: ["view", "create", "edit", "delete"] },
   { key: "setup_account_heads",   label: "Account Heads",    path: "/setup/account-heads",      group: "Setup",   availableActions: ["view", "create", "edit", "delete"] },
+  { key: "tasks",                 label: "Tasks",            path: "/tasks",                    group: "Main",    availableActions: ["view", "create", "edit", "delete"] },
 ];
 
 // Full access helper
@@ -99,6 +103,7 @@ export const DEMO_USERS: (AppUser & { password: string })[] = [
       { page: "transactions",   actions: ["view", "create"] },
       { page: "reports",        actions: ["view"] },
       { page: "master_contractors", actions: ["view"] },
+      { page: "tasks", actions: ["view", "create", "edit"] },
     ],
     isActive: true,
   },

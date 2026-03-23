@@ -212,7 +212,7 @@ const SubSection: React.FC<{
       </button>
       {expanded && (
         <div className="p-4 border-t border-border">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {master.fields.map((field) => (
               <FieldRenderer key={field.name} field={field} form={form} errors={errors} updateField={updateField} />
             ))}
@@ -307,7 +307,7 @@ const AccountGroupMaster: React.FC = () => {
         <h2 className="font-heading font-semibold text-foreground text-lg mb-4">
           {editingId !== null ? "Edit Account Group" : "Add Account Group"}
         </h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {mainFields.map((field) => (
             <FieldRenderer key={field.name} field={field} form={form} errors={errors} updateField={updateField} />
           ))}
