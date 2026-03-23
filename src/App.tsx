@@ -21,8 +21,10 @@ import BankMaster from "./pages/masters/BankMaster";
 import ExpensesMaster from "./pages/masters/ExpensesMaster";
 import AccountGroupMaster from "./pages/setup/AccountGroupMaster";
 import AccountHeadMaster from "./pages/setup/AccountHeadMaster";
+
 import AdminModule from "./pages/admin/AdminModule";
 import NotFound from "./pages/NotFound";
+import Users from "./pages/Users";
 
 const queryClient = new QueryClient();
 
@@ -39,6 +41,7 @@ const App = () => (
                   <Route path="/login" element={<LoginPage />} />
                   <Route path="/" element={<Dashboard />} />
                   <Route path="/transactions" element={<Transactions />} />
+                  <Route path="/users" element={<Users />} />
                   <Route path="/reports" element={<Reports />} />
                   <Route path="/widgets" element={<Widgets />} />
                   <Route path="/tasks" element={<Tasks />} />
