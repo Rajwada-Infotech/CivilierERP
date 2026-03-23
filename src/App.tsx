@@ -7,6 +7,7 @@ import { ThemeProvider } from "@/contexts/ThemeContext";
 import { ModuleProvider } from "@/contexts/ModuleContext";
 import { AuthProvider, useAuth } from "@/contexts/AuthContext";
 import { TaskProvider } from "@/contexts/TaskContext";
+import { FinYearProvider } from "@/contexts/FinYearContext";
 
 import LoginPage from "./pages/Login";
 import Dashboard from "./pages/Dashboard";
@@ -23,6 +24,12 @@ import ExpensesMaster from "./pages/masters/ExpensesMaster";
 import AccountGroupMaster from "./pages/setup/AccountGroupMaster";
 import AccountHeadMaster from "./pages/setup/AccountHeadMaster";
 import AdminModule from "./pages/admin/AdminModule";
+import AdminDashboard from "./pages/admin/AdminDashboard";
+import MenuRights from "./pages/admin/MenuRights";
+import WidgetsRights from "./pages/admin/WidgetsRights";
+import FinYearRights from "./pages/admin/FinYearRights";
+import ApprovalSetup from "./pages/admin/ApprovalSetup";
+import PostApprovalRights from "./pages/admin/PostApprovalRights";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -56,25 +63,31 @@ const AppRoutes = () => (
     <Route path="/masters/expenses"      element={<ProtectedRoute><ExpensesMaster /></ProtectedRoute>} />
     <Route path="/setup/account-groups"  element={<ProtectedRoute><AccountGroupMaster /></ProtectedRoute>} />
     <Route path="/setup/account-heads"   element={<ProtectedRoute><AccountHeadMaster /></ProtectedRoute>} />
-    <Route path="/admin"                 element={<ProtectedRoute><AdminModule /></ProtectedRoute>} />
+    <Route path="/admin"                 element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
+    <Route path="/admin/dashboard"       element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
+    <Route path="/admin/rights/menu"      element={<ProtectedRoute><MenuRights /></ProtectedRoute>} />
+    <Route path="/admin/rights/widgets"   element={<ProtectedRoute><WidgetsRights /></ProtectedRoute>} />
+    <Route path="/admin/rights/fin-year"  element={<ProtectedRoute><FinYearRights /></ProtectedRoute>} />
+    <Route path="/admin/approval/setup"   element={<ProtectedRoute><ApprovalSetup /></ProtectedRoute>} />
+    <Route path="/admin/approval/post-rights" element={<ProtectedRoute><PostApprovalRights /></ProtectedRoute>} />
     <Route path="*"                      element={<NotFound />} />
   </Routes>
 );
 
-// AppRoutes needs to be inside BrowserRouter to use useLocation
-// AuthProvider wraps everything so useAuth works inside ProtectedRoute/PublicRoute
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <ThemeProvider>
       <AuthProvider>
         <TaskProvider>
           <ModuleProvider>
-            <TooltipProvider>
-              <Sonner />
-              <BrowserRouter>
-                <AppRoutes />
-              </BrowserRouter>
-            </TooltipProvider>
+            <FinYearProvider>
+              <TooltipProvider>
+                <Sonner />
+                <BrowserRouter>
+                  <AppRoutes />
+                </BrowserRouter>
+              </TooltipProvider>
+            </FinYearProvider>
           </ModuleProvider>
         </TaskProvider>
       </AuthProvider>
@@ -83,3 +96,4 @@ const App = () => (
 );
 
 export default App;
+
