@@ -11,7 +11,7 @@
         <meta name="author" content="Rajwada Infotech" />
 
         <!-- Favicon - file placed directly in public/ -->
-        <link rel="icon" type="image/jpeg" href="/CivilierERP.png" />
+        <link rel="icon" type="image/jpeg" href="/Civilier.png" />
 
         <meta property="og:title" content="CivilierERP" />
         <meta
@@ -25,8 +25,8 @@
             // Synchronous theme initialization to prevent flash
             (function () {
                 var theme = localStorage.getItem("civilier-theme") || "dark";
-            var valid = ["dark", "light", "midnight", "sepia", "crimson"];
-            if (!valid.includes(theme)) theme = "dark";
+                var valid = ["dark", "light", "midnight", "sepia", "crimson"];
+                if (!valid.includes(theme)) theme = "dark";
                 document.documentElement.setAttribute("data-theme", theme);
             })();
         </script>
