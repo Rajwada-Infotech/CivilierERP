@@ -28,7 +28,6 @@ import {
   ChevronsRight,
 } from "lucide-react";
 
-// ─── Dropdown ─────────────────────────────────────────────────────────────────
 const Dropdown = ({
   open,
   onClose,
@@ -119,13 +118,6 @@ export const TopNavbar = () => {
   const RoleIcon = isSuperAdmin ? Crown : isAdmin ? Shield : null;
   const roleColor = isSuperAdmin ? "#7c3aed" : "#2563eb";
 
-  const closeAll = () => {
-    setSetupOpen(false);
-    setModuleOpen(false);
-    setUserOpen(false);
-    setThemeOpen(false);
-  };
-
   const handleSetupClick = useCallback(() => {
     if (!isModuleActive) return;
     setSetupOpen((p) => !p);
@@ -136,7 +128,6 @@ export const TopNavbar = () => {
 
   return (
     <header className="fixed top-0 left-0 right-0 h-14 z-50 flex items-center justify-between px-4 border-b border-border bg-card/80 backdrop-blur-lg">
-      {/* Logo */}
       <button
         onClick={() => navigate("/")}
         className="flex items-center gap-2 hover:opacity-80 transition-opacity shrink-0"
@@ -144,12 +135,12 @@ export const TopNavbar = () => {
         <LogoFull />
       </button>
 
-      {/* ── DESKTOP NAV ─────────────────────────────────────────────────── */}
+      {/* ── DESKTOP NAV ── */}
       <div className="hidden md:flex items-center gap-1">
         {/* Collapse toggle */}
         <button
           onClick={() => setNavCollapsed((p) => !p)}
-          title={navCollapsed ? "Expand navigation" : "Collapse navigation"}
+          title={navCollapsed ? "Expand" : "Collapse"}
           className="p-1.5 rounded-md bg-muted hover:bg-muted/80 text-foreground border border-border transition-all duration-200 shrink-0"
         >
           {navCollapsed ? (
@@ -159,12 +150,14 @@ export const TopNavbar = () => {
           )}
         </button>
 
-        {/* Collapsible block */}
+        {/* Collapsible block — overflow:visible when open so dropdowns aren't clipped */}
         <div
-          className="flex items-center gap-1 overflow-hidden transition-all duration-300 ease-in-out"
+          className="flex items-center gap-1 transition-all duration-300 ease-in-out"
           style={{
             maxWidth: navCollapsed ? 0 : 600,
             opacity: navCollapsed ? 0 : 1,
+            overflow: navCollapsed ? "hidden" : "visible",
+            pointerEvents: navCollapsed ? "none" : "auto",
           }}
         >
           {/* Setup */}
@@ -242,113 +235,111 @@ export const TopNavbar = () => {
               </span>
             )}
           </button>
+        </div>
 
-          {/* Module */}
-          <div className="relative shrink-0">
-            <button
-              onClick={() => {
-                setModuleOpen((p) => !p);
-                setSetupOpen(false);
-                setUserOpen(false);
-                setThemeOpen(false);
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading hover:bg-muted transition-all duration-200 text-foreground whitespace-nowrap"
+        {/* Module — outside collapsible so its dropdown never gets clipped */}
+        <div className="relative shrink-0">
+          <button
+            onClick={() => {
+              setModuleOpen((p) => !p);
+              setSetupOpen(false);
+              setUserOpen(false);
+              setThemeOpen(false);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading hover:bg-muted transition-all duration-200 text-foreground whitespace-nowrap"
+          >
+            <LayoutGrid size={16} /> Module
+          </button>
+          <Dropdown
+            open={moduleOpen}
+            onClose={() => setModuleOpen(false)}
+            className="right-0 w-80 p-3"
+          >
+            <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-3">
+              Select Module
+            </p>
+            <div
+              className={`grid gap-3 ${isAdmin ? "grid-cols-2" : "grid-cols-1"}`}
             >
-              <LayoutGrid size={16} /> Module
-            </button>
-            <Dropdown
-              open={moduleOpen}
-              onClose={() => setModuleOpen(false)}
-              className="right-0 w-80 p-3"
-            >
-              <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-3">
-                Select Module
-              </p>
-              <div
-                className={`grid gap-3 ${isAdmin ? "grid-cols-2" : "grid-cols-1"}`}
+              <button
+                onClick={() => {
+                  setActiveModule("finance");
+                  setModuleOpen(false);
+                  navigate("/");
+                }}
+                className={`group flex flex-col items-center gap-2 p-4 rounded-lg border transition-all ${activeModule === "finance" ? "border-primary bg-primary/10" : "border-border hover:border-primary hover:bg-muted"}`}
               >
+                <svg width="32" height="32" viewBox="0 0 36 36" fill="none">
+                  <circle
+                    cx="12"
+                    cy="22"
+                    r="7"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    className="text-primary"
+                  />
+                  <circle
+                    cx="24"
+                    cy="22"
+                    r="7"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    className="text-secondary"
+                  />
+                  <rect
+                    x="8"
+                    y="6"
+                    width="20"
+                    height="3"
+                    rx="1.5"
+                    fill="currentColor"
+                    className="text-primary"
+                  />
+                </svg>
+                <span className="text-xs font-heading text-muted-foreground group-hover:text-foreground transition-colors">
+                  Finance
+                </span>
+                {activeModule === "finance" && (
+                  <span className="text-[10px] text-primary font-heading">
+                    Active
+                  </span>
+                )}
+              </button>
+              {isAdmin && (
                 <button
                   onClick={() => {
-                    setActiveModule("finance");
                     setModuleOpen(false);
-                    navigate("/");
+                    navigate("/admin");
                   }}
-                  className={`group flex flex-col items-center gap-2 p-4 rounded-lg border transition-all ${activeModule === "finance" ? "border-primary bg-primary/10" : "border-border hover:border-primary hover:bg-muted"}`}
+                  className={`group flex flex-col items-center gap-2 p-4 rounded-lg border transition-all ${location.pathname.startsWith("/admin") ? "border-primary bg-primary/10" : "border-border hover:border-primary hover:bg-muted"}`}
                 >
-                  <svg width="32" height="32" viewBox="0 0 36 36" fill="none">
-                    <circle
-                      cx="12"
-                      cy="22"
-                      r="7"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      className="text-primary"
+                  <div className="relative">
+                    <ShieldCheck
+                      size={32}
+                      className={`transition-colors ${location.pathname.startsWith("/admin") ? "text-primary" : "text-muted-foreground group-hover:text-primary"}`}
                     />
-                    <circle
-                      cx="24"
-                      cy="22"
-                      r="7"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      className="text-secondary"
-                    />
-                    <rect
-                      x="8"
-                      y="6"
-                      width="20"
-                      height="3"
-                      rx="1.5"
-                      fill="currentColor"
-                      className="text-primary"
-                    />
-                  </svg>
+                    {isSuperAdmin && (
+                      <span
+                        className="absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center"
+                        style={{ background: "#7c3aed" }}
+                      >
+                        <Crown size={8} className="text-white" />
+                      </span>
+                    )}
+                  </div>
                   <span className="text-xs font-heading text-muted-foreground group-hover:text-foreground transition-colors">
-                    Finance
+                    Admin
                   </span>
-                  {activeModule === "finance" && (
+                  {location.pathname.startsWith("/admin") && (
                     <span className="text-[10px] text-primary font-heading">
                       Active
                     </span>
                   )}
                 </button>
-                {isAdmin && (
-                  <button
-                    onClick={() => {
-                      setModuleOpen(false);
-                      navigate("/admin");
-                    }}
-                    className={`group flex flex-col items-center gap-2 p-4 rounded-lg border transition-all ${location.pathname.startsWith("/admin") ? "border-primary bg-primary/10" : "border-border hover:border-primary hover:bg-muted"}`}
-                  >
-                    <div className="relative">
-                      <ShieldCheck
-                        size={32}
-                        className={`transition-colors ${location.pathname.startsWith("/admin") ? "text-primary" : "text-muted-foreground group-hover:text-primary"}`}
-                      />
-                      {isSuperAdmin && (
-                        <span
-                          className="absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center"
-                          style={{ background: "#7c3aed" }}
-                        >
-                          <Crown size={8} className="text-white" />
-                        </span>
-                      )}
-                    </div>
-                    <span className="text-xs font-heading text-muted-foreground group-hover:text-foreground transition-colors">
-                      Admin
-                    </span>
-                    {location.pathname.startsWith("/admin") && (
-                      <span className="text-[10px] text-primary font-heading">
-                        Active
-                      </span>
-                    )}
-                  </button>
-                )}
-              </div>
-            </Dropdown>
-          </div>
+              )}
+            </div>
+          </Dropdown>
         </div>
-
-        {/* ── Always visible: Theme + User ── */}
 
         {/* Theme */}
         <div className="relative shrink-0">
@@ -478,7 +469,7 @@ export const TopNavbar = () => {
         </div>
       </div>
 
-      {/* ── MOBILE RIGHT ─────────────────────────────────────────────────── */}
+      {/* ── MOBILE: just user avatar + overdue badge ── */}
       <div className="flex md:hidden items-center">
         {overdueCount > 0 && (
           <button
@@ -491,12 +482,9 @@ export const TopNavbar = () => {
             </span>
           </button>
         )}
-        {/* User avatar */}
         <div className="relative">
           <button
-            onClick={() => {
-              setUserOpen((p) => !p);
-            }}
+            onClick={() => setUserOpen((p) => !p)}
             className="relative w-8 h-8 rounded-full gradient-accent flex items-center justify-center text-xs font-heading text-primary-foreground font-bold"
           >
             {currentUser?.initials || "?"}
