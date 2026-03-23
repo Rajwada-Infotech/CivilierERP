@@ -1,3 +1,5 @@
+import React from "react";
+
 export const LogoIcon = ({ size = 32 }: { size?: number }) => (
   <img
     src="/Civilier.png"
