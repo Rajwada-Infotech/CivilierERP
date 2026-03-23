@@ -1,18 +1,23 @@
 import React, { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { BarChart3, CreditCard, Menu, X } from "lucide-react";
+import { BarChart3, CheckCircle2, Menu, X, Scale, ChevronDown, ChevronUp, FileText } from "lucide-react";
 import { useModule } from "@/contexts/ModuleContext";
-
-const navItems = [
-  { label: "Dashboard", icon: BarChart3, path: "/" },
-  { label: "Transactions", icon: CreditCard, path: "/transactions" },
-];
 
 export const MobileNav: React.FC = () => {
   const [open, setOpen] = useState(false);
+  const [queryOpen, setQueryOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   const { moduleLabel } = useModule();
+
+  const isAdminPage = location.pathname.startsWith("/admin");
+
+  const go = (path: string) => { navigate(path); setOpen(false); };
+
+  const navItems = [
+    { label: "Dashboard", icon: BarChart3, path: "/" },
+    { label: "Tasks",     icon: CheckCircle2, path: "/tasks" },
+  ];
 
   return (
     <>
@@ -33,23 +38,48 @@ export const MobileNav: React.FC = () => {
                 <X size={18} />
               </button>
             </div>
-            <div className="space-y-1">
-              {navItems.map((item) => {
-                const active = location.pathname === item.path;
-                return (
+
+            {isAdminPage ? (
+              <p className="text-xs text-muted-foreground text-center py-4 font-heading">Admin Module — no sub-navigation</p>
+            ) : (
+              <div className="space-y-1">
+                {/* Dashboard + Tasks */}
+                {navItems.map(item => (
                   <button
                     key={item.path}
-                    onClick={() => { navigate(item.path); setOpen(false); }}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all ${active ? "bg-primary/15 text-primary font-medium" : "text-foreground hover:bg-muted"}`}
+                    onClick={() => go(item.path)}
+                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all ${location.pathname === item.path ? "bg-primary/15 text-primary font-medium" : "text-foreground hover:bg-muted"}`}
                   >
-                    <item.icon size={18} />
-                    <span>{item.label}</span>
+                    <item.icon size={18} /> {item.label}
                   </button>
-                );
-              })}
-            </div>
+                ))}
+
+                {/* Query group */}
+                <div>
+                  <button
+                    onClick={() => setQueryOpen(p => !p)}
+                    className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-foreground hover:bg-muted transition-all"
+                  >
+                    <Scale size={18} />
+                    <span className="flex-1 text-left">Query</span>
+                    {queryOpen ? <ChevronUp size={14} className="text-muted-foreground" /> : <ChevronDown size={14} className="text-muted-foreground" />}
+                  </button>
+                  {queryOpen && (
+                    <div className="ml-4 pl-3 border-l border-border mt-0.5 space-y-0.5">
+                      <button
+                        onClick={() => go("/transactions")}
+                        className={`w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-all ${location.pathname === "/transactions" ? "bg-primary/15 text-primary font-medium" : "text-foreground hover:bg-muted"}`}
+                      >
+                        <FileText size={15} /> Trial Balance
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className="mt-4 px-2 py-1.5 rounded-md bg-muted text-xs font-heading text-muted-foreground text-center">
-              {moduleLabel}
+              {isAdminPage ? "Admin Module" : moduleLabel}
             </div>
           </div>
         </div>
