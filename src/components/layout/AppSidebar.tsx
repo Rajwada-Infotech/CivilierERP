@@ -34,7 +34,7 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
     label: "Rights",
     icon: Shield,
     children: [
-      { label: "Menu Right", path: "/admin/rights/menu" },
+{ label: "Menu Rights", path: "/admin/rights/menu" },
       { label: "Widgets Rights", path: "/admin/rights/widgets" },
       { label: "Fin Year Rights", path: "/admin/rights/fin-year" },
     ],
