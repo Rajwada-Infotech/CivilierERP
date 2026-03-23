@@ -5,7 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useSidebarState } from "./AppLayout";
 import {
   BarChart3, CheckCircle2, ChevronLeft, ChevronRight,
-  ChevronDown, ChevronUp, FileText, Scale,
+  ChevronDown, ChevronUp, FileText, Scale, Shield,
 } from "lucide-react";
 
 interface SubItem { label: string; path: string }
@@ -26,6 +26,27 @@ const NAV_ITEMS: NavItem[] = [
     ],
   },
   { label: "Tasks", icon: CheckCircle2, path: "/tasks" },
+];
+
+const ADMIN_NAV_ITEMS: NavItem[] = [
+  { label: "Dashboard", icon: BarChart3, path: "/admin" },
+  {
+    label: "Rights",
+    icon: Shield,
+    children: [
+      { label: "Menu Right", path: "/admin/rights/menu" },
+      { label: "Widgets Rights", path: "/admin/rights/widgets" },
+      { label: "Fin Year Rights", path: "/admin/rights/fin-year" },
+    ],
+  },
+  {
+    label: "Approval",
+    icon: CheckCircle2,
+    children: [
+      { label: "Approval Setup", path: "/admin/approval/setup" },
+      { label: "Post Approval Rights", path: "/admin/approval/post-rights" },
+    ],
+  },
 ];
 
 const NavButton = ({ item, collapsed, active }: { item: NavItem; collapsed: boolean; active: boolean }) => {
@@ -141,9 +162,28 @@ export const AppSidebar = () => {
           );
         })}
 
-        {isAdminPage && !collapsed && (
-          <p className="px-3 py-4 text-xs text-muted-foreground font-heading text-center">Admin Module</p>
-        )}
+
+
+        {isAdminPage && ADMIN_NAV_ITEMS.map(item => {
+          if (item.children) {
+            return (
+              <NavGroup
+                key={item.label}
+                item={item}
+                collapsed={collapsed}
+                activeChild={item.children.some(c => location.pathname.startsWith(c.path))}
+              />
+            );
+          }
+          return (
+            <NavButton
+              key={item.label}
+              item={item}
+              collapsed={collapsed}
+              active={location.pathname.startsWith(item.path || "")}
+            />
+          );
+        })}
       </div>
 
       <div className="border-t border-sidebar-border p-2 space-y-2">
