@@ -100,7 +100,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({ title, fields, columns, 
   return (
     <div>
       {/* Form */}
-      <div className="rounded-xl bg-card border border-border p-5 mb-6">
+      <div className="rounded-xl bg-card border border-border p-4 sm:p-5 mb-5">
         <h2 className="font-heading font-semibold text-foreground text-lg mb-4">{editingId !== null ? `Edit ${title}` : `Add ${title}`}</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {fields.map((field) => {
