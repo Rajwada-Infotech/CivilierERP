@@ -16,6 +16,7 @@ interface NavItem {
   children?: SubItem[];
 }
 
+// NORMAL NAV (Users removed)
 const NAV_ITEMS: NavItem[] = [
   { label: "Dashboard", icon: BarChart3, path: "/" },
   {
@@ -26,6 +27,17 @@ const NAV_ITEMS: NavItem[] = [
     ],
   },
   { label: "Tasks", icon: CheckCircle2, path: "/tasks" },
+];
+
+// ADMIN NAV
+const ADMIN_NAV_ITEMS: NavItem[] = [
+  {
+    label: "User Control",
+    icon: FileText,
+    children: [
+      { label: "Manage Users", path: "/users" },
+    ],
+  },
 ];
 
 const NavButton = ({ item, collapsed, active }: { item: NavItem; collapsed: boolean; active: boolean }) => {
@@ -114,13 +126,20 @@ export const AppSidebar = () => {
   const location = useLocation();
   const { moduleLabel } = useModule();
   const { collapsed, setCollapsed } = useSidebarState();
-  const isAdminPage = location.pathname.startsWith("/admin");
+  useAuth();
+
+  // ✅ ONLY CHANGE HERE
+  const isAdminPage =
+    location.pathname.startsWith("/admin") ||
+    location.pathname.startsWith("/users");
+
+  const itemsToRender = isAdminPage ? ADMIN_NAV_ITEMS : NAV_ITEMS;
 
   return (
     <aside className={`fixed top-14 left-0 bottom-0 z-40 flex flex-col border-r border-sidebar-border bg-sidebar transition-[width] duration-300 ease-in-out ${collapsed ? "w-16" : "w-56"} max-md:hidden`}>
       <div className="flex-1 flex flex-col gap-1 p-2 pt-4 overflow-y-auto">
 
-        {!isAdminPage && NAV_ITEMS.map(item => {
+        {itemsToRender.map(item => {
           if (item.children) {
             return (
               <NavGroup
@@ -141,9 +160,6 @@ export const AppSidebar = () => {
           );
         })}
 
-        {isAdminPage && !collapsed && (
-          <p className="px-3 py-4 text-xs text-muted-foreground font-heading text-center">Admin Module</p>
-        )}
       </div>
 
       <div className="border-t border-sidebar-border p-2 space-y-2">
