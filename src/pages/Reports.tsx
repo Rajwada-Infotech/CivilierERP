@@ -44,7 +44,7 @@ const Reports: React.FC = () => (
     <h1 className="text-xl font-heading font-bold text-foreground mb-4">Reports</h1>
 
     {/* Summary */}
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
       {[
         { label: "Total Income", value: "₹43,05,000", icon: IndianRupee, color: "hsl(142, 71%, 45%)" },
         { label: "Total Expenses", value: "₹26,48,500", icon: TrendingUp, color: "hsl(0, 72%, 51%)" },
@@ -57,7 +57,7 @@ const Reports: React.FC = () => (
           </div>
           <div>
             <p className="text-xs text-muted-foreground font-heading">{s.label}</p>
-            <p className="text-lg font-heading font-bold text-foreground">{s.value}</p>
+            <p className="text-base sm:text-lg font-heading font-bold text-foreground">{s.value}</p>
           </div>
         </div>
       ))}
@@ -82,8 +82,8 @@ const Reports: React.FC = () => (
       {/* Expense by Category */}
       <div className="rounded-xl bg-card border border-border p-5">
         <h2 className="font-heading font-semibold text-foreground text-sm mb-4">Expense by Category</h2>
-        <div className="flex items-center gap-4">
-          <ResponsiveContainer width="50%" height={200}>
+        <div className="flex flex-col sm:flex-row items-center gap-4">
+          <ResponsiveContainer width="100%" height={200}>
             <PieChart>
               <Pie data={categoryData} dataKey="value" cx="50%" cy="50%" outerRadius={80} innerRadius={40}>
                 {categoryData.map((entry, i) => <Cell key={i} fill={entry.color} />)}

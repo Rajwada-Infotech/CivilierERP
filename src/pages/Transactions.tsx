@@ -29,7 +29,7 @@ const Transactions: React.FC = () => (
     <h1 className="text-xl font-heading font-bold text-foreground mb-4">Transactions</h1>
 
     {/* Summary Cards */}
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
       {summaryStats.map((s) => (
         <div key={s.label} className="rounded-xl bg-card border border-border p-4 flex items-center gap-4" style={{ borderLeftWidth: 3, borderLeftColor: s.color }}>
           <div className="p-2 rounded-lg" style={{ background: `${s.color}20` }}>
@@ -37,7 +37,7 @@ const Transactions: React.FC = () => (
           </div>
           <div>
             <p className="text-xs text-muted-foreground font-heading">{s.label}</p>
-            <p className="text-lg font-heading font-bold text-foreground">{s.value}</p>
+            <p className="text-base sm:text-lg font-heading font-bold text-foreground">{s.value}</p>
             {s.change && <p className={`text-xs ${s.change.startsWith("+") ? "text-green-500" : "text-red-500"}`}>{s.change} vs last month</p>}
           </div>
         </div>
