@@ -26,6 +26,7 @@ interface NavItem {
   children?: SubItem[];
 }
 
+// NORMAL NAV
 const NAV_ITEMS: NavItem[] = [
   { label: "Dashboard", icon: BarChart3, path: "/" },
   {
@@ -36,14 +37,20 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Tasks", icon: CheckCircle2, path: "/tasks" },
 ];
 
+// ADMIN NAV (merged properly)
 const ADMIN_NAV_ITEMS: NavItem[] = [
   { label: "Dashboard", icon: BarChart3, path: "/admin" },
+  {
+    label: "User Control",
+    icon: FileText,
+    children: [{ label: "Manage Users", path: "/users" }],
+  },
   {
     label: "Rights",
     icon: Shield,
     children: [
-      { label: "Menu ", path: "/admin/rights/menu" },
-      { label: "Widgets ", path: "/admin/rights/widgets" },
+      { label: "Menu", path: "/admin/rights/menu" },
+      { label: "Widgets", path: "/admin/rights/widgets" },
       { label: "Financial Year", path: "/admin/rights/fin-year" },
     ],
   },
@@ -57,6 +64,7 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
   },
 ];
 
+// CLEAN NavButton (typed version)
 const NavButton = ({
   item,
   collapsed,
@@ -67,6 +75,7 @@ const NavButton = ({
   active: boolean;
 }) => {
   const navigate = useNavigate();
+
   return (
     <button
       onClick={() => item.path && navigate(item.path)}
@@ -79,7 +88,9 @@ const NavButton = ({
     >
       <item.icon size={18} className="shrink-0" />
       <span
-        className={`truncate transition-opacity duration-200 ${collapsed ? "opacity-0 w-0 overflow-hidden" : "opacity-100"}`}
+        className={`truncate transition-opacity duration-200 ${
+          collapsed ? "opacity-0 w-0 overflow-hidden" : "opacity-100"
+        }`}
       >
         {item.label}
       </span>
@@ -113,15 +124,17 @@ const NavGroup = ({
       >
         <item.icon size={18} className="shrink-0" />
         <span
-          className={`flex-1 text-left truncate transition-opacity duration-200 ${collapsed ? "opacity-0 w-0 overflow-hidden" : "opacity-100"}`}
+          className={`flex-1 text-left truncate transition-opacity duration-200 ${
+            collapsed ? "opacity-0 w-0 overflow-hidden" : "opacity-100"
+          }`}
         >
           {item.label}
         </span>
         {!collapsed &&
           (open ? (
-            <ChevronUp size={14} className="shrink-0 text-muted-foreground" />
+            <ChevronUp size={14} />
           ) : (
-            <ChevronDown size={14} className="shrink-0 text-muted-foreground" />
+            <ChevronDown size={14} />
           ))}
       </button>
 
@@ -131,32 +144,13 @@ const NavGroup = ({
             <button
               key={child.path}
               onClick={() => navigate(child.path)}
-              className={`w-full text-left px-3 py-1.5 rounded-lg text-xs font-heading transition-colors ${
+              className={`w-full text-left px-3 py-1.5 rounded-lg text-xs ${
                 location.pathname === child.path
                   ? "bg-primary/15 text-primary font-semibold"
                   : "text-sidebar-foreground hover:bg-sidebar-accent"
               }`}
             >
               {child.label}
-            </button>
-          ))}
-        </div>
-      )}
-
-      {collapsed && item.children && (
-        <div className="mt-0.5 space-y-0.5">
-          {item.children.map((child) => (
-            <button
-              key={child.path}
-              onClick={() => navigate(child.path)}
-              title={child.label}
-              className={`w-full flex items-center justify-center py-1.5 rounded-lg text-xs transition-colors ${
-                location.pathname === child.path
-                  ? "bg-primary/15 text-primary"
-                  : "text-sidebar-foreground hover:bg-sidebar-accent"
-              }`}
-            >
-              <FileText size={14} className="shrink-0" />
             </button>
           ))}
         </div>
@@ -169,73 +163,55 @@ export const AppSidebar = () => {
   const location = useLocation();
   const { moduleLabel } = useModule();
   const { collapsed, setCollapsed } = useSidebarState();
-  const isAdminPage = location.pathname.startsWith("/admin");
+  useAuth();
+
+  const isAdminPage =
+    location.pathname.startsWith("/admin") ||
+    location.pathname.startsWith("/users");
+
+  const itemsToRender = isAdminPage ? ADMIN_NAV_ITEMS : NAV_ITEMS;
 
   return (
     <aside
-      className={`fixed top-14 left-0 bottom-0 z-40 flex flex-col border-r border-sidebar-border bg-sidebar transition-[width] duration-300 ease-in-out ${collapsed ? "w-16" : "w-56"} max-md:hidden`}
+      className={`fixed top-14 left-0 bottom-0 z-40 flex flex-col border-r bg-sidebar transition-all ${
+        collapsed ? "w-16" : "w-56"
+      }`}
     >
       <div className="flex-1 flex flex-col gap-1 p-2 pt-4 overflow-y-auto">
-        {!isAdminPage &&
-          NAV_ITEMS.map((item) => {
-            if (item.children) {
-              return (
-                <NavGroup
-                  key={item.label}
-                  item={item}
-                  collapsed={collapsed}
-                  activeChild={item.children.some(
-                    (c) => location.pathname === c.path,
-                  )}
-                />
-              );
-            }
+        {itemsToRender.map((item) => {
+          if (item.children) {
             return (
-              <NavButton
+              <NavGroup
                 key={item.label}
                 item={item}
                 collapsed={collapsed}
-                active={location.pathname === item.path}
+                activeChild={item.children.some((c) =>
+                  location.pathname.startsWith(c.path)
+                )}
               />
             );
-          })}
+          }
 
-        {isAdminPage &&
-          ADMIN_NAV_ITEMS.map((item) => {
-            if (item.children) {
-              return (
-                <NavGroup
-                  key={item.label}
-                  item={item}
-                  collapsed={collapsed}
-                  activeChild={item.children.some((c) =>
-                    location.pathname.startsWith(c.path),
-                  )}
-                />
-              );
-            }
-            return (
-              <NavButton
-                key={item.label}
-                item={item}
-                collapsed={collapsed}
-                active={location.pathname.startsWith(item.path || "")}
-              />
-            );
-          })}
+          return (
+            <NavButton
+              key={item.label}
+              item={item}
+              collapsed={collapsed}
+              active={location.pathname.startsWith(item.path || "")}
+            />
+          );
+        })}
       </div>
 
-      <div className="border-t border-sidebar-border p-2 space-y-2">
-        <div
-          className={`transition-all duration-200 overflow-hidden ${collapsed ? "h-0 opacity-0" : "h-auto opacity-100"}`}
-        >
-          <div className="px-2 py-1.5 rounded-md bg-sidebar-accent text-xs font-heading text-sidebar-accent-foreground text-center">
+      <div className="border-t p-2 space-y-2">
+        {!collapsed && (
+          <div className="px-2 py-1.5 rounded-md bg-sidebar-accent text-xs text-center">
             {isAdminPage ? "Admin Module" : moduleLabel}
           </div>
-        </div>
+        )}
         <button
           onClick={() => setCollapsed(!collapsed)}
-          className="w-full flex items-center justify-center py-1.5 rounded-md hover:bg-sidebar-accent transition-colors text-sidebar-foreground"
+          className="w-full flex justify-center py-1.5"
         >
           {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
         </button>
