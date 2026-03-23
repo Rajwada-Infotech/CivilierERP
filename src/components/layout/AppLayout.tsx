@@ -2,8 +2,6 @@ import React, { createContext, useContext, useState, useMemo } from "react";
 import { TopNavbar } from "./TopNavbar";
 import { AppSidebar } from "./AppSidebar";
 import { MobileNav } from "./MobileNav";
-import { useAuth } from "@/contexts/AuthContext";
-import { Navigate } from "react-router-dom";
 import { useIsMobile } from "@/hooks/use-mobile";
 
 interface SidebarContextType { collapsed: boolean; setCollapsed: (v: boolean) => void }
@@ -11,12 +9,9 @@ const SidebarContext = createContext<SidebarContextType>({ collapsed: false, set
 export const useSidebarState = () => useContext(SidebarContext);
 
 export const AppLayout = ({ children }: { children: React.ReactNode }) => {
-  const { currentUser } = useAuth();
   const [collapsed, setCollapsed] = useState(false);
   const isMobile = useIsMobile();
   const sidebarValue = useMemo(() => ({ collapsed, setCollapsed }), [collapsed]);
-
-  if (!currentUser) return <Navigate to="/login" replace />;
 
   return (
     <SidebarContext.Provider value={sidebarValue}>

@@ -15,10 +15,15 @@ export type PageKey =
   | "master_expenses"
   | "setup_account_groups"
   | "setup_account_heads"
-  | "tasks";
+  | "tasks"
+  | "admin_menu_rights"
+  | "admin_widgets_rights"
+  | "admin_fin_year_rights"
+  | "admin_approval_setup"
+  | "admin_post_approval_rights";
 
-// Actions available per page
-export type PageAction = "view" | "create" | "edit" | "delete";
+// Expanded Actions available per page
+export type PageAction = "view" | "create" | "edit" | "delete" | "print" | "preview" | "export" | "approve" | "reject";
 
 export interface PagePermission {
   page: PageKey;
@@ -36,7 +41,7 @@ export interface AppUser {
   createdBy?: string;
 }
 
-// Page metadata for display
+// Page metadata for display - updated with intelligent actions per menu
 export const PAGE_DEFINITIONS: {
   key: PageKey;
   label: string;
@@ -44,18 +49,30 @@ export const PAGE_DEFINITIONS: {
   group: string;
   availableActions: PageAction[];
 }[] = [
-  { key: "dashboard",             label: "Dashboard",        path: "/",                         group: "Main",    availableActions: ["view"] },
-  { key: "transactions",          label: "Transactions",     path: "/transactions",             group: "Main",    availableActions: ["view", "create", "edit", "delete"] },
-  { key: "reports",               label: "Reports",          path: "/reports",                  group: "Main",    availableActions: ["view"] },
-  { key: "widgets",               label: "Widgets",          path: "/widgets",                  group: "Main",    availableActions: ["view"] },
-  { key: "master_contractors",    label: "Contractor Master",path: "/masters/contractors",      group: "Masters", availableActions: ["view", "create", "edit", "delete"] },
-  { key: "master_suppliers",      label: "Supplier Master",  path: "/masters/suppliers",        group: "Masters", availableActions: ["view", "create", "edit", "delete"] },
-  { key: "master_customers",      label: "Customer Master",  path: "/masters/customers",        group: "Masters", availableActions: ["view", "create", "edit", "delete"] },
-  { key: "master_banks",          label: "Bank Master",      path: "/masters/banks",            group: "Masters", availableActions: ["view", "create", "edit", "delete"] },
-  { key: "master_expenses",       label: "Expenses Master",  path: "/masters/expenses",         group: "Masters", availableActions: ["view", "create", "edit", "delete"] },
-  { key: "setup_account_groups",  label: "Account Groups",   path: "/setup/account-groups",     group: "Setup",   availableActions: ["view", "create", "edit", "delete"] },
-  { key: "setup_account_heads",   label: "Account Heads",    path: "/setup/account-heads",      group: "Setup",   availableActions: ["view", "create", "edit", "delete"] },
-  { key: "tasks",                 label: "Tasks",            path: "/tasks",                    group: "Main",    availableActions: ["view", "create", "edit", "delete"] },
+  // Admin group
+  { key: "admin_menu_rights", label: "Menu Rights", path: "/admin/rights/menu", group: "Admin", availableActions: ["view", "create", "edit", "delete"] },
+  { key: "admin_widgets_rights", label: "Widgets Rights", path: "/admin/rights/widgets", group: "Admin", availableActions: ["view", "create", "edit", "delete"] },
+  { key: "admin_fin_year_rights", label: "Fin Year Rights", path: "/admin/rights/fin-year", group: "Admin", availableActions: ["view", "create", "edit", "delete"] },
+  { key: "admin_approval_setup", label: "Approval Setup", path: "/admin/approval/setup", group: "Admin", availableActions: ["view", "create", "edit", "delete"] },
+  { key: "admin_post_approval_rights", label: "Post Approval Rights", path: "/admin/approval/post-rights", group: "Admin", availableActions: ["view", "create", "edit", "delete", "approve", "reject"] },
+
+  // Main group
+  { key: "dashboard", label: "Dashboard", path: "/", group: "Main", availableActions: ["view", "print", "export"] },
+  { key: "transactions", label: "Transactions", path: "/transactions", group: "Main", availableActions: ["view", "create", "edit", "delete", "print", "export", "approve", "reject"] },
+  { key: "reports", label: "Reports", path: "/reports", group: "Main", availableActions: ["view", "print", "preview", "export"] },
+  { key: "widgets", label: "Widgets", path: "/widgets", group: "Main", availableActions: ["view", "print", "export"] },
+  { key: "tasks", label: "Tasks", path: "/tasks", group: "Main", availableActions: ["view", "create", "edit", "delete", "print"] },
+
+  // Masters group
+  { key: "master_contractors", label: "Contractor Master", path: "/masters/contractors", group: "Masters", availableActions: ["view", "create", "edit", "delete", "print", "export"] },
+  { key: "master_suppliers", label: "Supplier Master", path: "/masters/suppliers", group: "Masters", availableActions: ["view", "create", "edit", "delete", "print", "export"] },
+  { key: "master_customers", label: "Customer Master", path: "/masters/customers", group: "Masters", availableActions: ["view", "create", "edit", "delete", "print", "export"] },
+  { key: "master_banks", label: "Bank Master", path: "/masters/banks", group: "Masters", availableActions: ["view", "create", "edit", "delete", "print", "export"] },
+  { key: "master_expenses", label: "Expenses Master", path: "/masters/expenses", group: "Masters", availableActions: ["view", "create", "edit", "delete", "print", "export"] },
+
+  // Setup group
+  { key: "setup_account_groups", label: "Account Groups", path: "/setup/account-groups", group: "Setup", availableActions: ["view", "create", "edit", "delete"] },
+  { key: "setup_account_heads", label: "Account Heads", path: "/setup/account-heads", group: "Setup", availableActions: ["view", "create", "edit", "delete"] },
 ];
 
 // Full access helper
@@ -67,7 +84,7 @@ const FULL_ACCESS: PagePermission[] = PAGE_DEFINITIONS.map(p => ({
 // Default new user gets view-only on dashboard + reports
 const DEFAULT_USER_ACCESS: PagePermission[] = [
   { page: "dashboard", actions: ["view"] },
-  { page: "reports",   actions: ["view"] },
+  { page: "reports", actions: ["view"] },
 ];
 
 export const DEMO_USERS: (AppUser & { password: string })[] = [
@@ -99,11 +116,11 @@ export const DEMO_USERS: (AppUser & { password: string })[] = [
     role: "user",
     initials: "RK",
     pagePermissions: [
-      { page: "dashboard",      actions: ["view"] },
-      { page: "transactions",   actions: ["view", "create"] },
-      { page: "reports",        actions: ["view"] },
-      { page: "master_contractors", actions: ["view"] },
-      { page: "tasks", actions: ["view", "create", "edit"] },
+      { page: "dashboard", actions: ["view", "print"] },
+      { page: "transactions", actions: ["view", "create", "print"] },
+      { page: "reports", actions: ["view", "print", "export"] },
+      { page: "master_contractors", actions: ["view", "edit", "print"] },
+      { page: "tasks", actions: ["view", "create", "edit", "print"] },
     ],
     isActive: true,
   },
@@ -226,3 +243,4 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
+
