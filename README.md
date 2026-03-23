@@ -1,3 +1,2 @@
-# Welcome to your Lovable project
+CodeBase For CivilierERP
 
-TODO: Document your project here
