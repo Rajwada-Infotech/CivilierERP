@@ -19,6 +19,7 @@ interface SubItem {
   label: string;
   path: string;
 }
+
 interface NavItem {
   label: string;
   icon: React.ElementType;
@@ -37,7 +38,7 @@ const NAV_ITEMS: NavItem[] = [
   { label: "Tasks", icon: CheckCircle2, path: "/tasks" },
 ];
 
-// ADMIN NAV (merged properly)
+// ADMIN NAV
 const ADMIN_NAV_ITEMS: NavItem[] = [
   { label: "Dashboard", icon: BarChart3, path: "/admin" },
   {
@@ -64,7 +65,6 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
   },
 ];
 
-// CLEAN NavButton (typed version)
 const NavButton = ({
   item,
   collapsed,
@@ -83,7 +83,7 @@ const NavButton = ({
         active
           ? "bg-primary/15 text-primary font-medium"
           : "text-sidebar-foreground hover:bg-sidebar-accent"
-      }`}
+      } ${collapsed ? "justify-center" : "justify-start"}`}
       title={collapsed ? item.label : undefined}
     >
       <item.icon size={18} className="shrink-0" />
@@ -111,16 +111,28 @@ const NavGroup = ({
   const location = useLocation();
   const [open, setOpen] = useState(activeChild);
 
+  const handleParentClick = () => {
+    if (collapsed) {
+      // When collapsed → navigate to first child if exists
+      if (item.children && item.children.length > 0) {
+        navigate(item.children[0].path);
+      }
+      return;
+    }
+    // When expanded → toggle submenu
+    setOpen((prev) => !prev);
+  };
+
   return (
     <div>
       <button
-        onClick={() => !collapsed && setOpen((p) => !p)}
+        onClick={handleParentClick}
         title={collapsed ? item.label : undefined}
         className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors duration-200 ${
           activeChild
             ? "bg-primary/10 text-primary"
             : "text-sidebar-foreground hover:bg-sidebar-accent"
-        }`}
+        } ${collapsed ? "justify-center" : "justify-start"}`}
       >
         <item.icon size={18} className="shrink-0" />
         <span
@@ -132,9 +144,9 @@ const NavGroup = ({
         </span>
         {!collapsed &&
           (open ? (
-            <ChevronUp size={14} />
+            <ChevronUp size={14} className="shrink-0" />
           ) : (
-            <ChevronDown size={14} />
+            <ChevronDown size={14} className="shrink-0" />
           ))}
       </button>
 
@@ -173,7 +185,7 @@ export const AppSidebar = () => {
 
   return (
     <aside
-      className={`fixed top-14 left-0 bottom-0 z-40 flex flex-col border-r bg-sidebar transition-all ${
+      className={`fixed top-14 left-0 bottom-0 z-40 flex flex-col border-r bg-sidebar transition-all duration-300 ${
         collapsed ? "w-16" : "w-56"
       }`}
     >
@@ -186,12 +198,11 @@ export const AppSidebar = () => {
                 item={item}
                 collapsed={collapsed}
                 activeChild={item.children.some((c) =>
-                  location.pathname.startsWith(c.path)
+                  location.pathname.startsWith(c.path),
                 )}
               />
             );
           }
-
           return (
             <NavButton
               key={item.label}
@@ -211,7 +222,7 @@ export const AppSidebar = () => {
         )}
         <button
           onClick={() => setCollapsed(!collapsed)}
-          className="w-full flex justify-center py-1.5"
+          className="w-full flex justify-center py-1.5 hover:bg-sidebar-accent rounded-lg transition-colors"
         >
           {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
         </button>
