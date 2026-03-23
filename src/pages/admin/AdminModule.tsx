@@ -100,7 +100,7 @@ const PageAccessEditor = ({
               return (
                 <div key={key} className={`flex items-center gap-3 px-4 py-3 transition-colors ${hasView ? "bg-card" : "bg-muted/30"}`}>
                   {/* Page name + master toggle */}
-                  <div className="flex items-center gap-2 w-40 shrink-0">
+                  <div className="flex items-center gap-2 w-28 sm:w-40 shrink-0">
                     <button
                       onClick={() => toggleAllPage(key, availableActions)}
                       className={`w-4 h-4 rounded border flex items-center justify-center transition-colors shrink-0 ${hasAll ? "bg-primary border-primary" : hasView ? "bg-primary/30 border-primary/50" : "border-border bg-muted"}`}
@@ -115,7 +115,7 @@ const PageAccessEditor = ({
                   </div>
 
                   {/* Action pills */}
-                  <div className="flex items-center gap-2 flex-wrap">
+                  <div className="flex items-center gap-1.5 flex-wrap flex-1">
                     {availableActions.map(action => {
                       const on = currentActions.includes(action);
                       const disabled = action !== "view" && !hasView;
@@ -412,7 +412,7 @@ export default function AdminModule() {
       </div>
 
       {/* Stats */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
         {[
           { label: "Total Users",    value: allUsers.length,                          color: "hsl(var(--primary))" },
           { label: "Active Users",   value: allUsers.filter(u => u.isActive).length,  color: "hsl(142,71%,45%)" },
