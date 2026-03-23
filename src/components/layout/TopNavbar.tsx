@@ -59,8 +59,6 @@ export const TopNavbar = () => {
   const [moduleOpen,     setModuleOpen]     = useState(false);
   const [userOpen,       setUserOpen]       = useState(false);
   const [themeOpen,      setThemeOpen]      = useState(false);
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [mobilePaletteOpen, setMobilePaletteOpen] = useState(false);
   const [navCollapsed,   setNavCollapsed]   = useState(false);
 
   const isModuleActive = activeModule !== null;
@@ -249,9 +247,9 @@ export const TopNavbar = () => {
       </div>
 
       {/* ── MOBILE RIGHT ─────────────────────────────────────────────────── */}
-      <div className="flex md:hidden items-center gap-2">
+      <div className="flex md:hidden items-center">
         {overdueCount > 0 && (
-          <button onClick={() => navigate("/tasks")} className="relative p-1.5">
+          <button onClick={() => navigate("/tasks")} className="relative p-1.5 mr-1">
             <CheckCircle2 size={18} className="text-foreground" />
             <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center">
               {overdueCount > 9 ? "9+" : overdueCount}
@@ -260,7 +258,7 @@ export const TopNavbar = () => {
         )}
         {/* User avatar */}
         <div className="relative">
-          <button onClick={() => { setUserOpen(p => !p); setMobileMenuOpen(false); }}
+          <button onClick={() => { setUserOpen(p => !p); }}
             className="relative w-8 h-8 rounded-full gradient-accent flex items-center justify-center text-xs font-heading text-primary-foreground font-bold">
             {currentUser?.initials || "?"}
             {RoleIcon && (
@@ -281,91 +279,6 @@ export const TopNavbar = () => {
               <LogOut size={14} /> Sign Out
             </button>
           </Dropdown>
-        </div>
-        {/* Hamburger */}
-        <button onClick={() => setMobileMenuOpen(p => !p)} className="p-1.5 rounded-md hover:bg-muted text-foreground transition-colors">
-          {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
-        </button>
-      </div>
-
-      {/* ── MOBILE MENU — clean, minimal ─────────────────────────────────── */}
-      <div
-        className={`absolute top-14 left-0 right-0 bg-card/95 backdrop-blur-lg border-b border-border shadow-xl md:hidden z-40 transition-all duration-300 ease-in-out overflow-hidden ${
-          mobileMenuOpen ? "max-h-[500px] opacity-100" : "max-h-0 opacity-0 pointer-events-none"
-        }`}
-      >
-        <div className="p-3 space-y-1">
-          {/* Core nav — only what matters */}
-          {[
-            { label: "Dashboard",    path: "/" },
-            { label: "Trial Balance", path: "/transactions" },
-            { label: "Reports",      path: "/reports" },
-            { label: "Tasks",        path: "/tasks", badge: overdueCount },
-          ].map(item => (
-            <button key={item.path} onClick={() => { navigate(item.path); setMobileMenuOpen(false); }}
-              className={`w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-heading transition-colors ${
-                (item.path === "/" ? location.pathname === "/" : location.pathname.startsWith(item.path))
-                  ? "bg-primary/10 text-primary" : "text-foreground hover:bg-muted"
-              }`}>
-              <span>{item.label}</span>
-              {item.badge && item.badge > 0 && (
-                <span className="px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[10px] font-bold">{item.badge}</span>
-              )}
-            </button>
-          ))}
-
-          {/* Admin — only if eligible */}
-          {isAdmin && (
-            <button onClick={() => { navigate("/admin"); setMobileMenuOpen(false); }}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-heading transition-colors ${location.pathname.startsWith("/admin") ? "bg-primary/10 text-primary" : "text-foreground hover:bg-muted"}`}>
-              Admin Module
-            </button>
-          )}
-
-          {/* Masters — compact grid */}
-          <div className="pt-2 border-t border-border mt-1">
-            <p className="px-3 text-[10px] uppercase tracking-widest text-muted-foreground font-heading pb-1.5">Masters</p>
-            <div className="grid grid-cols-5 gap-1.5 px-1">
-              {masterItems.map(({ icon: Icon, label, path, color }) => (
-                <button key={label} onClick={() => { navigate(path); setMobileMenuOpen(false); }}
-                  className={`flex flex-col items-center gap-1.5 p-2 rounded-xl border transition-all ${location.pathname === path ? "border-primary/60 bg-primary/10" : "border-border/40 hover:bg-muted"}`}>
-                  <Icon size={18} className={color} />
-                  <span className="text-[9px] font-heading text-muted-foreground text-center leading-tight">{label}</span>
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* ── MOBILE FLOATING THEME BUTTON ─────────────────────────────────── */}
-      <div className="md:hidden">
-        {/* Palette FAB */}
-        <div className="fixed bottom-20 right-4 z-50">
-          <button
-            onClick={() => setMobilePaletteOpen(p => !p)}
-            className="w-11 h-11 rounded-full gradient-accent shadow-lg flex items-center justify-center transition-all duration-200 hover:scale-105 active:scale-95"
-          >
-            {mobilePaletteOpen
-              ? <X size={18} className="text-primary-foreground" />
-              : <Palette size={18} className="text-primary-foreground" />
-            }
-          </button>
-
-          {/* Theme options — fan up from FAB */}
-          <div className={`absolute bottom-14 right-0 transition-all duration-300 ease-in-out ${mobilePaletteOpen ? "opacity-100 translate-y-0 pointer-events-auto" : "opacity-0 translate-y-4 pointer-events-none"}`}>
-            <div className="bg-card border border-border rounded-xl shadow-2xl p-2 w-40">
-              <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading px-2 py-1 mb-0.5">Appearance</p>
-              {(Object.entries(THEME_DOTS) as [Theme, { bg: string; label: string }][]).map(([t, { bg, label }]) => (
-                <button key={t} onClick={() => { setTheme(t); setMobilePaletteOpen(false); }}
-                  className={`w-full flex items-center gap-2.5 px-2 py-2 rounded-lg text-sm font-heading transition-all duration-150 ${theme === t ? "bg-primary/10 text-primary" : "text-foreground hover:bg-muted"}`}>
-                  <span className="w-3.5 h-3.5 rounded-full shrink-0 border border-border/50" style={{ background: bg }} />
-                  <span className="text-xs">{label}</span>
-                  {theme === t && <span className="ml-auto text-primary text-xs">✓</span>}
-                </button>
-              ))}
-            </div>
-          </div>
         </div>
       </div>
 
