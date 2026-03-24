@@ -63,7 +63,7 @@ export default function TaskDetail() {
 
   const handleClose = () => {
     if (!allCriteriaMet) { return; }
-    closeTask(task.id, currentUser!.id, currentUser!.name);
+    closeTask(task.id); // FIX: userId/userName params removed from closeTask signature
   };
 
   const handleComment = () => {

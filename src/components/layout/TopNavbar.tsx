@@ -472,7 +472,7 @@ export const TopNavbar = () => {
               <User size={14} /> Profile
             </button>
             <button
-              onClick={() => logout()}
+              onMouseDown={() => { logout(); navigate("/login"); }}
               className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted transition-colors text-destructive"
             >
               <LogOut size={14} /> Sign Out
@@ -529,7 +529,7 @@ export const TopNavbar = () => {
               <User size={14} /> Profile
             </button>
             <button
-              onClick={() => logout()}
+              onMouseDown={() => { logout(); navigate("/login"); }}
               className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted transition-colors text-destructive"
             >
               <LogOut size={14} /> Sign Out

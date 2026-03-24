@@ -25,6 +25,7 @@ import AccountGroupMaster from "./pages/setup/AccountGroupMaster";
 import AccountHeadMaster from "./pages/setup/AccountHeadMaster";
 
 import AdminDashboard from "./pages/admin/AdminDashboard";
+import AdminModule from "./pages/admin/AdminModule";
 import MenuRights from "./pages/admin/MenuRights";
 import WidgetsRights from "./pages/admin/WidgetsRights";
 import FinYearRights from "./pages/admin/FinYearRights";
@@ -33,8 +34,11 @@ import PostApprovalRights from "./pages/admin/PostApprovalRights";
 import NotFound from "./pages/NotFound";
 import Users from "./pages/Users";
 
+// FIX: QueryClient created outside component to avoid re-creation on every render
 const queryClient = new QueryClient();
 
+// FIX: BrowserRouter moved to wrap ALL providers so that hooks like useLocation
+//      and useNavigate work inside AuthProvider and other contexts.
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { currentUser } = useAuth();
   const location = useLocation();
@@ -84,24 +88,26 @@ const AppRoutes = () => (
   </Routes>
 );
 
+// FIX: BrowserRouter is now the outermost wrapper so all context providers
+//      (and their children) can safely use React Router hooks.
 const App = () => (
   <QueryClientProvider client={queryClient}>
-    <ThemeProvider>
-      <AuthProvider>
-        <TaskProvider>
-          <ModuleProvider>
-            <FinYearProvider>
-              <TooltipProvider>
-                <Sonner />
-                <BrowserRouter>
+    <BrowserRouter>
+      <ThemeProvider>
+        <AuthProvider>
+          <TaskProvider>
+            <ModuleProvider>
+              <FinYearProvider>
+                <TooltipProvider>
+                  <Sonner />
                   <AppRoutes />
-                </BrowserRouter>
-              </TooltipProvider>
-            </FinYearProvider>
-          </ModuleProvider>
-        </TaskProvider>
-      </AuthProvider>
-    </ThemeProvider>
+                </TooltipProvider>
+              </FinYearProvider>
+            </ModuleProvider>
+          </TaskProvider>
+        </AuthProvider>
+      </ThemeProvider>
+    </BrowserRouter>
   </QueryClientProvider>
 );
 
