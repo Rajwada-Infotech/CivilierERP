@@ -20,7 +20,10 @@ export type PageKey =
   | "admin_widgets_rights"
   | "admin_fin_year_rights"
   | "admin_approval_setup"
-  | "admin_post_approval_rights";
+  | "admin_post_approval_rights"
+  | "master_hsn"
+  | "master_items"
+  | "master_item_groups";
 
 // Expanded Actions available per page
 export type PageAction = "view" | "create" | "edit" | "delete" | "print" | "preview" | "export" | "approve" | "reject";
@@ -70,7 +73,8 @@ export const PAGE_DEFINITIONS: {
   { key: "master_banks", label: "Bank Master", path: "/masters/banks", group: "Masters", availableActions: ["view", "create", "edit", "delete", "print", "export"] },
   { key: "master_expenses", label: "Expenses Master", path: "/masters/expenses", group: "Masters", availableActions: ["view", "create", "edit", "delete", "print", "export"] },
   { key: "master_items", label: "Item Master", path: "/masters/items", group: "Masters", availableActions: ["view", "create", "edit", "delete", "print", "export"] },
-  { key: "master_item_groups", label: "Item Group Master", path: "/masters/item-groups", group: "Masters", availableActions: ["view", "create", "edit", "delete"] },
+{ key: "master_item_groups", label: "Item Group Master", path: "/masters/item-groups", group: "Masters", availableActions: ["view", "create", "edit", "delete"] },
+  { key: "master_hsn", label: "HSN Master", path: "/masters/hsn", group: "Masters", availableActions: ["view", "create", "edit", "delete", "print", "export"] },
 
   // Setup group
   { key: "setup_account_groups", label: "Account Groups", path: "/setup/account-groups", group: "Setup", availableActions: ["view", "create", "edit", "delete"] },

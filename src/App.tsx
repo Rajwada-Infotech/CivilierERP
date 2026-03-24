@@ -23,6 +23,7 @@ import BankMaster from "./pages/masters/BankMaster";
 import ExpensesMaster from "./pages/masters/ExpensesMaster";
 import ItemMaster from "./pages/masters/ItemMaster";
 import ItemGroupMaster from "./pages/masters/ItemGroupMaster";
+import HsnMaster from "./pages/masters/Hsn";
 import AccountGroupMaster from "./pages/setup/AccountGroupMaster";
 import AccountHeadMaster from "./pages/setup/AccountHeadMaster";
 
@@ -35,6 +36,7 @@ import ApprovalSetup from "./pages/admin/ApprovalSetup";
 import PostApprovalRights from "./pages/admin/PostApprovalRights";
 import NotFound from "./pages/NotFound";
 import Users from "./pages/Users";
+
 
 // FIX: QueryClient created outside component to avoid re-creation on every render
 const queryClient = new QueryClient();
@@ -79,6 +81,7 @@ const AppRoutes = () => (
     <Route path="/masters/expenses" element={<ProtectedRoute><ExpensesMaster /></ProtectedRoute>} />
     <Route path="/masters/items" element={<ProtectedRoute><ItemMaster /></ProtectedRoute>} />
     <Route path="/masters/item-groups" element={<ProtectedRoute><ItemGroupMaster /></ProtectedRoute>} />
+    <Route path="/masters/hsn" element={<ProtectedRoute><HsnMaster /></ProtectedRoute>} />
     <Route path="/setup/account-groups" element={<ProtectedRoute><AccountGroupMaster /></ProtectedRoute>} />
     <Route path="/setup/account-heads" element={<ProtectedRoute><AccountHeadMaster /></ProtectedRoute>} />
     <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
@@ -88,7 +91,8 @@ const AppRoutes = () => (
     <Route path="/admin/rights/fin-year" element={<ProtectedRoute><FinYearRights /></ProtectedRoute>} />
     <Route path="/admin/approval/setup" element={<ProtectedRoute><ApprovalSetup /></ProtectedRoute>} />
     <Route path="/admin/approval/post-rights" element={<ProtectedRoute><PostApprovalRights /></ProtectedRoute>} />
-    <Route path="*" element={<NotFound />} />
+    <Route path="*" element={<NotFound/>} />
+  
   </Routes>
 );
 

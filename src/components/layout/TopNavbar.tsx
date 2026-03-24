@@ -27,6 +27,7 @@ import {
   ChevronsRight,
   Package,
   Layers,
+  Hash
 } from "lucide-react";
 
 // ─── Dropdown ─────────────────────────────────────────────────────────────────
@@ -101,6 +102,12 @@ const masterItems = [
     label: "Items",
     path: "/masters/items",
     color: "text-teal-400",
+  },
+  {
+    icon: Hash,
+    label: "HSN",
+    path: "/masters/hsn",
+    color: "text-pink-400",
   },
   {
     icon: Layers,

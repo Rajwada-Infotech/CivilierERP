@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import {
   BarChart3, CheckCircle2, Menu, X, Scale,
   ChevronDown, ChevronUp, FileText, Palette,
-  ShieldCheck, Receipt, Truck, Users, HardHat, Landmark,
+  ShieldCheck, Receipt, Truck, Users, HardHat, Landmark, Hash, Package
 } from "lucide-react";
 import { useModule } from "@/contexts/ModuleContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -15,6 +15,7 @@ const masterItems = [
   { icon: Users,    label: "Customers",   path: "/masters/customers",   color: "text-purple-400" },
   { icon: HardHat,  label: "Contractors", path: "/masters/contractors", color: "text-yellow-400" },
   { icon: Landmark, label: "Banks",       path: "/masters/banks",       color: "text-green-400" },
+{ icon: Hash,  label: "HSN",         path: "/masters/hsn",         color: "text-pink-400" },
 ];
 
 export const MobileNav: React.FC = () => {
