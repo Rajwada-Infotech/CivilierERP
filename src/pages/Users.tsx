@@ -6,7 +6,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 
 const Users = () => {
-  const { allUsers, addUser, deleteUser } = useAuth();
+  const { allUsers, addUser, deleteUser, toggleUserStatus } = useAuth();
 
   const [form, setForm] = useState({
     name: "",
@@ -14,113 +14,145 @@ const Users = () => {
     phone: "",
     alias: "",
     password: "",
-    discontinue: false,
+    isActive: true,
   });
 
   const [editUserId, setEditUserId] = useState<string | null>(null);
   const [filter, setFilter] = useState("");
   const [showFilter, setShowFilter] = useState(false);
-  const [viewUser, setViewUser] = useState<string | null>(null);
+  const [viewUserId, setViewUserId] = useState<string | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [showPass, setShowPass] = useState(false);
 
+  // Load user data when editing
   useEffect(() => {
     if (editUserId) {
-      const user = allUsers.find(u => u.id === editUserId);
+      const user = allUsers.find((u) => u.id === editUserId);
       if (user) {
         setForm({
           name: user.name,
           email: user.email,
-          phone: user.phone || "",
-          alias: user.alias || "",
+          phone: (user as any).phone || "",
+          alias: (user as any).alias || "",
           password: "",
-          discontinue: !user.isActive,
+          isActive: user.isActive,
         });
       }
     } else {
       resetForm();
     }
-  }, [editUserId]);
+  }, [editUserId, allUsers]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value, type, checked } = e.target;
-    setForm(prev => ({ ...prev, [name]: type === "checkbox" ? checked : value }));
+    setForm((prev) => ({
+      ...prev,
+      [name]: type === "checkbox" ? checked : value,
+    }));
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-
-    if (!form.name.trim() || !form.email.trim() || (!editUserId && !form.password.trim())) {
-      toast.error("Name, email and password are required.");
+    if (!form.name.trim() || !form.email.trim()) {
+      toast.error("Name and Email are required.");
+      return;
+    }
+    if (!editUserId && !form.password.trim()) {
+      toast.error("Password is required when adding a new user.");
       return;
     }
 
-    if (editUserId) {
-      const user = allUsers.find(u => u.id === editUserId);
-      if (!user) return;
+    const userData = {
+      name: form.name.trim(),
+      email: form.email.trim(),
+      phone: form.phone.trim() || undefined,
+      alias: form.alias.trim() || undefined,
+      initials: form.name
+        .trim()
+        .split(" ")
+        .map((w) => w[0])
+        .join("")
+        .slice(0, 2)
+        .toUpperCase(),
+      role: "user" as const,
+      pagePermissions: [],
+      isActive: form.isActive,
+    };
 
-      user.name = form.name.trim();
-      user.email = form.email.trim();
-      user.alias = form.alias.trim();
-      user.phone = form.phone.trim();
-      user.isActive = !form.discontinue;
-      toast.success(`User "${form.name}" updated.`);
+    if (editUserId) {
+      if (
+        form.isActive !== allUsers.find((u) => u.id === editUserId)?.isActive
+      ) {
+        toggleUserStatus(editUserId);
+      }
+      toast.success(`User "${form.name}" updated successfully.`);
       setEditUserId(null);
       resetForm();
     } else {
       addUser({
-        name: form.name.trim(),
-        email: form.email.trim(),
-        phone: form.phone.trim(),
-        alias: form.alias.trim(),
-        initials: form.name
-          .trim()
-          .split(" ")
-          .map(w => w[0])
-          .join("")
-          .slice(0, 2)
-          .toUpperCase(),
-        role: "user",
-        pagePermissions: [],
-        isActive: !form.discontinue,
+        ...userData,
         password: form.password,
       });
-      toast.success(`User "${form.name}" added.`);
+      toast.success(`User "${form.name}" added successfully.`);
       resetForm();
     }
   };
 
   const resetForm = () => {
-    setForm({ name: "", email: "", phone: "", alias: "", password: "", discontinue: false });
+    setForm({
+      name: "",
+      email: "",
+      phone: "",
+      alias: "",
+      password: "",
+      isActive: true,
+    });
     setEditUserId(null);
   };
 
-  const handleEdit = (userId: string) => setEditUserId(userId);
+  const handleEdit = (userId: string) => {
+    setEditUserId(userId);
+  };
+
   const handleDelete = (userId: string) => {
     deleteUser(userId);
     setDeleteConfirmId(null);
-    toast.success("User removed.");
+    toast.success("User has been deleted.");
+  };
+
+  const toggleStatus = (userId: string) => {
+    toggleUserStatus(userId);
+    toast.success("User status updated.");
   };
 
   const filteredUsers = allUsers.filter(
-    u => u.name.toLowerCase().includes(filter.toLowerCase()) || u.email.toLowerCase().includes(filter.toLowerCase())
+    (u) =>
+      u.name.toLowerCase().includes(filter.toLowerCase()) ||
+      u.email.toLowerCase().includes(filter.toLowerCase()),
   );
 
-  const viewedUser = viewUser ? allUsers.find(u => u.id === viewUser) : null;
+  const viewedUser = viewUserId
+    ? allUsers.find((u) => u.id === viewUserId)
+    : null;
 
   return (
     <AppLayout>
       <Breadcrumbs items={["Dashboard", "Admin", "Users"]} />
+      <h1 className="text-xl font-heading font-bold text-foreground mb-6">
+        User Master
+      </h1>
 
-      <h1 className="text-xl font-heading font-bold text-foreground mb-4">User Master</h1>
-
-      {/* FORM */}
-      <div className="glass rounded-xl p-5 mb-8">
-        <h2 className="font-heading font-semibold text-foreground mb-4">{editUserId ? "Edit User" : "Add New User"}</h2>
+      {/* ADD / EDIT FORM */}
+      <div className="glass rounded-xl p-6 mb-8">
+        <h2 className="font-heading font-semibold text-foreground mb-5">
+          {editUserId ? "Edit User" : "Add New User"}
+        </h2>
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5">
             <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Full Name *</label>
+              <label className="text-xs text-muted-foreground mb-1 block">
+                Full Name *
+              </label>
               <input
                 name="name"
                 value={form.name}
@@ -129,9 +161,10 @@ const Users = () => {
                 className="w-full h-10 px-3 bg-input/70 border border-border rounded-md focus:ring-1 focus:ring-primary focus:border-primary outline-none"
               />
             </div>
-
             <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Alias</label>
+              <label className="text-xs text-muted-foreground mb-1 block">
+                Alias
+              </label>
               <input
                 name="alias"
                 value={form.alias}
@@ -139,9 +172,10 @@ const Users = () => {
                 className="w-full h-10 px-3 bg-input/70 border border-border rounded-md focus:ring-1 focus:ring-primary focus:border-primary outline-none"
               />
             </div>
-
             <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Email *</label>
+              <label className="text-xs text-muted-foreground mb-1 block">
+                Email *
+              </label>
               <input
                 name="email"
                 type="email"
@@ -151,9 +185,10 @@ const Users = () => {
                 className="w-full h-10 px-3 bg-input/70 border border-border rounded-md focus:ring-1 focus:ring-primary focus:border-primary outline-none"
               />
             </div>
-
             <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Phone</label>
+              <label className="text-xs text-muted-foreground mb-1 block">
+                Phone
+              </label>
               <input
                 name="phone"
                 value={form.phone}
@@ -164,7 +199,9 @@ const Users = () => {
 
             {!editUserId && (
               <div className="relative">
-                <label className="text-xs text-muted-foreground mb-1 block">Password *</label>
+                <label className="text-xs text-muted-foreground mb-1 block">
+                  Password *
+                </label>
                 <input
                   name="password"
                   type={showPass ? "text" : "password"}
@@ -175,35 +212,34 @@ const Users = () => {
                 />
                 <button
                   type="button"
-                  onClick={() => setShowPass(p => !p)}
-                  className="absolute right-3 top-7 text-muted-foreground hover:text-foreground transition-colors"
+                  onClick={() => setShowPass((p) => !p)}
+                  className="absolute right-3 top-7 text-muted-foreground hover:text-foreground"
                 >
                   {showPass ? <EyeOff size={15} /> : <Eye size={15} />}
                 </button>
               </div>
             )}
 
-            {/* Discontinue checkbox */}
-            <div className="flex items-end">
-              <label className="flex items-center gap-2 text-sm text-muted-foreground">
-                <input
-                  type="checkbox"
-                  name="discontinue"
-                  checked={form.discontinue}
-                  onChange={handleChange}
-                  className="h-4 w-4"
-                />
-                Mark as Inactive
+            <div className="flex items-center gap-2 pt-2">
+              <input
+                type="checkbox"
+                name="isActive"
+                checked={form.isActive}
+                onChange={handleChange}
+                className="h-4 w-4 accent-primary"
+              />
+              <label className="text-sm text-muted-foreground cursor-pointer">
+                Active User
               </label>
             </div>
           </div>
 
-          <div className="flex justify-end gap-2">
+          <div className="flex justify-end gap-3">
             {editUserId && (
               <button
                 type="button"
                 onClick={resetForm}
-                className="px-4 h-10 bg-destructive text-destructive-foreground rounded-md hover:opacity-90 transition text-sm font-medium"
+                className="px-5 h-10 border border-border hover:bg-muted rounded-md text-sm font-medium transition"
               >
                 Cancel
               </button>
@@ -218,76 +254,169 @@ const Users = () => {
         </form>
       </div>
 
-      {/* SEARCH & TABLE */}
+      {/* SEARCH */}
       <div className="flex items-center gap-3 mb-5">
-        <button onClick={() => setShowFilter(!showFilter)} className="p-2 bg-secondary text-secondary-foreground rounded-md">
-          <Search size={16} />
+        <button
+          onClick={() => setShowFilter(!showFilter)}
+          className="p-2.5 bg-secondary text-secondary-foreground rounded-md hover:bg-secondary/80 transition"
+        >
+          <Search size={18} />
         </button>
         {showFilter && (
           <input
             value={filter}
             onChange={(e) => setFilter(e.target.value)}
-            className="px-3 h-10 bg-input/70 border border-border rounded-md focus:ring-1 focus:ring-primary outline-none"
+            placeholder="Search by name or email..."
+            className="px-4 h-10 bg-input/70 border border-border rounded-md focus:ring-1 focus:ring-primary outline-none w-80"
           />
         )}
       </div>
 
+      {/* USERS TABLE */}
       <div className="glass rounded-xl overflow-hidden">
         <table className="w-full text-sm">
-          <thead className="bg-muted/40 text-muted-foreground">
+          <thead className="bg-muted/50 text-muted-foreground">
             <tr>
-              <th className="px-5 py-3 text-left">Name</th>
-              <th className="px-5 py-3 text-left">Email</th>
-              <th className="px-5 py-3 text-left">Status</th>
-              <th className="px-5 py-3 text-right">Actions</th>
+              <th className="px-6 py-4 text-left font-medium">Name</th>
+              <th className="px-6 py-4 text-left font-medium">Email</th>
+              <th className="px-6 py-4 text-left font-medium">Status</th>
+              <th className="px-6 py-4 text-right font-medium">Actions</th>
             </tr>
           </thead>
           <tbody>
             {filteredUsers.length === 0 ? (
               <tr>
-                <td colSpan={4} className="px-5 py-8 text-center text-muted-foreground text-sm">
-                  {filter ? "No users match your search." : "No users added yet."}
+                <td
+                  colSpan={4}
+                  className="px-6 py-12 text-center text-muted-foreground"
+                >
+                  {filter
+                    ? "No users found matching your search."
+                    : "No users added yet."}
                 </td>
               </tr>
-            ) : filteredUsers.map(u => (
-              <tr key={u.id} className="border-t border-border hover:bg-muted/20">
-                <td className="px-5 py-3 font-medium">{u.name}</td>
-                <td className="px-5 py-3 text-muted-foreground">{u.email}</td>
-                <td className="px-5 py-3">
-                  <span className={`px-2 py-0.5 text-xs rounded-full ${u.isActive ? "bg-primary/20 text-primary" : "bg-destructive/20 text-destructive"}`}>
-                    {u.isActive ? "Active" : "Inactive"}
-                  </span>
-                </td>
-                <td className="px-5 py-3 flex justify-end gap-2">
-                  <button onClick={() => setViewUser(u.id)} className="p-1.5 rounded hover:bg-muted" title="View"><Eye size={15} /></button>
-                  <button onClick={() => handleEdit(u.id)} className="p-1.5 rounded hover:bg-muted" title="Edit"><Edit size={15} /></button>
-                  {deleteConfirmId === u.id ? (
-                    <>
-                      <button onClick={() => handleDelete(u.id)} className="text-xs text-destructive hover:underline px-1">Confirm</button>
-                      <button onClick={() => setDeleteConfirmId(null)} className="text-xs text-muted-foreground hover:underline px-1">Cancel</button>
-                    </>
-                  ) : (
-                    <button onClick={() => setDeleteConfirmId(u.id)} className="p-1.5 rounded hover:bg-destructive/10 text-destructive" title="Delete"><Trash2 size={15} /></button>
-                  )}
-                </td>
-              </tr>
-            ))}
+            ) : (
+              filteredUsers.map((user) => (
+                <tr
+                  key={user.id}
+                  className="border-t border-border hover:bg-muted/30 transition"
+                >
+                  <td className="px-6 py-4 font-medium">{user.name}</td>
+                  <td className="px-6 py-4 text-muted-foreground">
+                    {user.email}
+                  </td>
+                  <td className="px-6 py-4">
+                    <span
+                      className={`inline-block px-3 py-1 text-xs font-medium rounded-full ${
+                        user.isActive
+                          ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400"
+                          : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                      }`}
+                    >
+                      {user.isActive ? "Active" : "Inactive"}
+                    </span>
+                  </td>
+                  <td className="px-6 py-4 flex justify-end gap-2">
+                    <button
+                      onClick={() => setViewUserId(user.id)}
+                      className="p-2 rounded hover:bg-muted transition"
+                      title="View Details"
+                    >
+                      <Eye size={16} />
+                    </button>
+
+                    <button
+                      onClick={() => handleEdit(user.id)}
+                      className="p-2 rounded hover:bg-muted transition"
+                      title="Edit User"
+                    >
+                      <Edit size={16} />
+                    </button>
+
+                    <button
+                      onClick={() => toggleStatus(user.id)}
+                      className="p-2 rounded hover:bg-muted transition"
+                      title={user.isActive ? "Deactivate" : "Activate"}
+                    >
+                      {user.isActive ? "Deactivate" : "Activate"}
+                    </button>
+
+                    {deleteConfirmId === user.id ? (
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleDelete(user.id)}
+                          className="text-xs px-3 py-1 bg-destructive text-destructive-foreground rounded hover:bg-destructive/90"
+                        >
+                          Confirm
+                        </button>
+                        <button
+                          onClick={() => setDeleteConfirmId(null)}
+                          className="text-xs px-3 py-1 text-muted-foreground hover:underline"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setDeleteConfirmId(user.id)}
+                        className="p-2 rounded hover:bg-destructive/10 text-destructive transition"
+                        title="Delete User"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>
 
-      {/* VIEW MODAL */}
+      {/* VIEW USER MODAL */}
       {viewedUser && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setViewUser(null)}>
-          <div className="glass p-6 rounded-xl w-full max-w-md" onClick={e => e.stopPropagation()}>
-            <h2 className="mb-4 font-semibold text-foreground text-lg">User Details</h2>
-            <div className="space-y-2 text-sm">
-              <p><span className="text-muted-foreground">Name:</span> {viewedUser.name}</p>
-              <p><span className="text-muted-foreground">Email:</span> {viewedUser.email}</p>
-              <p><span className="text-muted-foreground">Role:</span> {viewedUser.role}</p>
-              <p><span className="text-muted-foreground">Status:</span> {viewedUser.isActive ? "Active" : "Inactive"}</p>
+        <div
+          className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+          onClick={() => setViewUserId(null)}
+        >
+          <div
+            className="glass p-6 rounded-2xl w-full max-w-md"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-lg font-semibold mb-5">User Details</h2>
+            <div className="space-y-3 text-sm">
+              <p>
+                <span className="text-muted-foreground">Name:</span>{" "}
+                {viewedUser.name}
+              </p>
+              <p>
+                <span className="text-muted-foreground">Email:</span>{" "}
+                {viewedUser.email}
+              </p>
+              <p>
+                <span className="text-muted-foreground">Role:</span>{" "}
+                {viewedUser.role}
+              </p>
+              <p>
+                <span className="text-muted-foreground">Status:</span>
+                <span
+                  className={`font-medium ${
+                    viewedUser.isActive
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : "text-red-600 dark:text-red-400"
+                  }`}
+                >
+                  {" "}
+                  {viewedUser.isActive ? "Active" : "Inactive"}
+                </span>
+              </p>
             </div>
-            <button onClick={() => setViewUser(null)} className="mt-5 w-full h-10 bg-primary text-primary-foreground rounded-md hover:opacity-90 transition">Close</button>
+            <button
+              onClick={() => setViewUserId(null)}
+              className="mt-6 w-full h-10 bg-primary text-primary-foreground rounded-xl hover:opacity-90 transition"
+            >
+              Close
+            </button>
           </div>
         </div>
       )}
