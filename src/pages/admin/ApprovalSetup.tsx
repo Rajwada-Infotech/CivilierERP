@@ -331,7 +331,7 @@ export default function ApprovalSetup() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:gap-6 mb-8 lg:grid-cols-4">
+      <div className="grid gap-6 mb-8 md:grid-cols-2 lg:grid-cols-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Workflows</CardTitle>
@@ -376,19 +376,19 @@ export default function ApprovalSetup() {
             <CardTitle>Approval Workflows</CardTitle>
             <CardDescription>Define multi-level approval chains</CardDescription>
           </div>
-          <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-            <div className="relative flex-1 min-w-0">
+          <div className="flex gap-2">
+            <div className="relative">
               <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
               <Input
                 placeholder="Search workflows..."
-                className="pl-10 w-full"
+                className="pl-10 w-64 max-md:w-40"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
               />
             </div>
             <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-full sm:w-32">
-                <SelectValue placeholder="Status" />
+              <SelectTrigger className="w-32 max-md:w-24">
+                <SelectValue placeholder="All Status" />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All Status</SelectItem>
@@ -398,7 +398,7 @@ export default function ApprovalSetup() {
             </Select>
           </div>
         </CardHeader>
-        <CardContent className="overflow-x-auto">
+        <CardContent>
           {filteredWorkflows.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <Search className="h-12 w-12 text-muted-foreground mb-4" />
@@ -414,47 +414,45 @@ export default function ApprovalSetup() {
               )}
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[200px]">Workflow</TableHead>
-                    <TableHead className="w-[120px]">Module</TableHead>
-                    <TableHead className="w-[80px]">Levels</TableHead>
-                    <TableHead className="min-w-[150px]">Approvers</TableHead>
-                    <TableHead className="w-[100px]">Status</TableHead>
-                    <TableHead className="w-[120px]">Actions</TableHead>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Workflow</TableHead>
+                  <TableHead>Module</TableHead>
+                  <TableHead>Levels</TableHead>
+                  <TableHead>Approvers</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredWorkflows.map((item) => (
+                  <TableRow key={item.id}>
+                    <TableCell className="font-medium">{item.name}</TableCell>
+                    <TableCell>{item.module}</TableCell>
+                    <TableCell>{item.levels}</TableCell>
+                    <TableCell>{item.approvers.join(" > ")}</TableCell>
+                    <TableCell className="w-24">
+                      <Switch 
+                        checked={item.status === 'Active'}
+                        onCheckedChange={() => toggleStatus(item.id)}
+                        disabled={!canDoAction('admin_approval_setup' as PageKey, 'edit')}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex gap-1">
+                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0" disabled={!canDoAction('admin_approval_setup' as PageKey, 'edit')} onClick={() => handleQuickEdit(item.id)}>
+                          <Edit className="h-4 w-4" />
+                        </Button>
+                        <Button variant="ghost" size="sm" className="h-8 w-8 p-0" disabled={!canDoAction('admin_approval_setup' as PageKey, 'delete')} onClick={() => deleteWorkflow(item.id)}>
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    </TableCell>
                   </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredWorkflows.map((item) => (
-                    <TableRow key={item.id}>
-                      <TableCell className="font-medium max-w-[200px] truncate">{item.name}</TableCell>
-                      <TableCell className="max-w-[120px] truncate">{item.module}</TableCell>
-                      <TableCell className="w-[80px]">{item.levels}</TableCell>
-                      <TableCell className="min-w-[150px] max-w-[200px] truncate">{item.approvers.join(" > ")}</TableCell>
-                      <TableCell className="w-[100px]">
-                        <Switch 
-                          checked={item.status === 'Active'}
-                          onCheckedChange={() => toggleStatus(item.id)}
-                          disabled={!canDoAction('admin_approval_setup' as PageKey, 'edit')}
-                        />
-                      </TableCell>
-                      <TableCell className="w-[120px]">
-                        <div className="flex gap-1">
-                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" disabled={!canDoAction('admin_approval_setup' as PageKey, 'edit')} onClick={() => handleQuickEdit(item.id)}>
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                          <Button variant="ghost" size="sm" className="h-8 w-8 p-0" disabled={!canDoAction('admin_approval_setup' as PageKey, 'delete')} onClick={() => deleteWorkflow(item.id)}>
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
+                ))}
+              </TableBody>
+            </Table>
           )}
         </CardContent>
       </Card>

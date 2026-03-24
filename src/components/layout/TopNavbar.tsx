@@ -4,7 +4,6 @@ import { LogoFull } from "../Logo";
 import { useTheme, THEME_DOTS, Theme } from "@/contexts/ThemeContext";
 import { useModule } from "@/contexts/ModuleContext";
 import { useAuth } from "@/contexts/AuthContext";
-import { useTask } from "@/contexts/TaskContext";
 import {
   Settings,
   BarChart3,
@@ -26,6 +25,8 @@ import {
   Landmark,
   ChevronsLeft,
   ChevronsRight,
+  Package,
+  Layers,
 } from "lucide-react";
 
 // ─── Dropdown ─────────────────────────────────────────────────────────────────
@@ -95,6 +96,18 @@ const masterItems = [
     path: "/masters/banks",
     color: "text-green-400",
   },
+  {
+    icon: Package,
+    label: "Items",
+    path: "/masters/items",
+    color: "text-teal-400",
+  },
+  {
+    icon: Layers,
+    label: "Item Groups",
+    path: "/masters/item-groups",
+    color: "text-indigo-400",
+  },
 ];
 
 export const TopNavbar = () => {
@@ -103,9 +116,6 @@ export const TopNavbar = () => {
   const { theme, setTheme } = useTheme();
   const { activeModule, setActiveModule } = useModule();
   const { currentUser, logout } = useAuth();
-  const { getOverdueTasks } = useTask();
-  const overdueCount = getOverdueTasks().length;
-
   const [setupOpen, setSetupOpen] = useState(false);
   const [moduleOpen, setModuleOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
@@ -232,19 +242,6 @@ export const TopNavbar = () => {
             <Puzzle size={16} /> Widgets
           </button>
 
-          {/* Tasks */}
-          <button
-            onClick={() => navigate("/tasks")}
-            className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all duration-200 whitespace-nowrap ${location.pathname.startsWith("/tasks") ? "bg-primary/10 text-primary" : "hover:bg-muted text-foreground"}`}
-          >
-            <CheckCircle2 size={16} /> Tasks
-            {overdueCount > 0 && (
-              <span className="ml-0.5 w-4 h-4 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
-                {overdueCount > 9 ? "9+" : overdueCount}
-              </span>
-            )}
-          </button>
-
           {/* Module */}
           <div className="relative shrink-0">
             <button
@@ -362,13 +359,10 @@ export const TopNavbar = () => {
               setModuleOpen(false);
               setUserOpen(false);
             }}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-heading hover:bg-muted transition-all duration-200 text-foreground"
+            className="p-2 rounded-md hover:bg-muted transition-all duration-200 text-foreground"
+            title="Change theme"
           >
-            <span
-              className="w-3 h-3 rounded-full shrink-0"
-              style={{ background: THEME_DOTS[theme].bg }}
-            />
-            <span className="hidden lg:inline text-xs">Theme</span>
+            <Palette size={17} />
           </button>
           <Dropdown
             open={themeOpen}
@@ -483,17 +477,6 @@ export const TopNavbar = () => {
 
       {/* ── MOBILE RIGHT ─────────────────────────────────────────────────── */}
       <div className="flex md:hidden items-center">
-        {overdueCount > 0 && (
-          <button
-            onClick={() => navigate("/tasks")}
-            className="relative p-1.5 mr-1"
-          >
-            <CheckCircle2 size={18} className="text-foreground" />
-            <span className="absolute -top-0.5 -right-0.5 w-4 h-4 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center">
-              {overdueCount > 9 ? "9+" : overdueCount}
-            </span>
-          </button>
-        )}
         {/* User avatar */}
         <div className="relative">
           <button
