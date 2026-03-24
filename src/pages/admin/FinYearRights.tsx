@@ -2,7 +2,15 @@ import React, { useState, useMemo, useCallback } from "react";
 import { useFinYear, type FinYear } from "@/contexts/FinYearContext";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { Calendar, Plus, Search, Trash2, Edit3, Lock } from "lucide-react";
+import {
+  Calendar,
+  Plus,
+  Search,
+  Trash2,
+  Edit3,
+  Lock,
+  CalendarDays,
+} from "lucide-react";
 import {
   Card,
   CardContent,
@@ -31,7 +39,16 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { Switch } from "@/components/ui/switch";
+// FIX: Standardised to sonner (was using deprecated shadcn useToast)
 import { toast } from "sonner";
 import {
   AlertDialog,
@@ -43,6 +60,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { format } from "date-fns";
+import { cn } from "@/lib/utils";
 
 export default function FinYearRights() {
   const { finYears, addFinYear, updateFinYear, toggleLock, deleteFinYear } =
@@ -51,14 +70,13 @@ export default function FinYearRights() {
   const [searchTerm, setSearchTerm] = useState("");
   const [showDialog, setShowDialog] = useState(false);
   const [editingFinYear, setEditingFinYear] = useState<FinYear | null>(null);
-  const [deletingId, setDeletingId] = useState<string | null>(null);
-
   const [formData, setFormData] = useState({
     year: "",
     startDate: "",
     endDate: "",
     locked: false,
   });
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const filteredFinYears = useMemo(
     () =>
@@ -88,21 +106,18 @@ export default function FinYearRights() {
     setShowDialog(true);
   }, []);
 
-  const resetForm = useCallback(() => {
-    setFormData({ year: "", startDate: "", endDate: "", locked: false });
-    setEditingFinYear(null);
-    setShowDialog(false);
-  }, []);
-
   const handleSave = useCallback(() => {
     if (!formData.year || !formData.startDate || !formData.endDate) {
-      toast.error("Please fill all fields");
+      toast({
+        title: "Error",
+        description: "Please fill all fields",
+        variant: "destructive",
+      });
       return;
     }
-
     if (editingFinYear) {
       updateFinYear(editingFinYear.id, formData);
-      toast.success(`Updated ${formData.year}`);
+      toast({ title: "Updated", description: `Updated ${formData.year}` });
     } else {
       addFinYear({
         year: formData.year,
@@ -111,32 +126,40 @@ export default function FinYearRights() {
         status: "Active" as const,
         locked: formData.locked,
       });
-      toast.success(`Added ${formData.year}`);
+      toast({ title: "Added", description: `Added ${formData.year}` });
     }
-
-    resetForm();
-  }, [formData, editingFinYear, addFinYear, updateFinYear, resetForm]);
+    setShowDialog(false);
+  }, [formData, editingFinYear, addFinYear, updateFinYear, toast]);
 
   const handleToggleLock = useCallback(
     (id: string) => {
       toggleLock(id);
-      toast.success("Lock status updated");
+      toast({ title: "Toggled", description: "Lock status updated" });
     },
-    [toggleLock],
+    [toggleLock, toast],
   );
 
   const handleDelete = useCallback(() => {
     if (deletingId) {
       deleteFinYear(deletingId);
-      toast.error("Financial year removed");
+      toast({
+        title: "Deleted",
+        description: "Financial year removed",
+        variant: "destructive",
+      });
       setDeletingId(null);
     }
-  }, [deletingId, deleteFinYear]);
+  }, [deletingId, deleteFinYear, toast]);
+
+  const resetForm = useCallback(() => {
+    setFormData({ year: "", startDate: "", endDate: "", locked: false });
+    setEditingFinYear(null);
+    setShowDialog(false);
+  }, []);
 
   return (
     <AppLayout>
       <Breadcrumbs items={["Admin", "Rights", "Fin Year Rights"]} />
-
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-foreground flex items-center gap-3">
@@ -147,15 +170,13 @@ export default function FinYearRights() {
             Manage financial years, dates and lock status
           </p>
         </div>
-
         <Dialog open={showDialog} onOpenChange={setShowDialog}>
           <DialogTrigger asChild>
-            <Button onClick={openAddDialog}>
+            <Button onClick={resetForm}>
               <Plus className="w-4 h-4 mr-2" />
               New Financial Year
             </Button>
           </DialogTrigger>
-
           <DialogContent className="max-w-md">
             <DialogHeader>
               <DialogTitle>
@@ -165,7 +186,6 @@ export default function FinYearRights() {
                 Configure financial year details
               </DialogDescription>
             </DialogHeader>
-
             <div className="space-y-4 py-4">
               <div className="space-y-2">
                 <Label htmlFor="year">Year</Label>
@@ -178,7 +198,6 @@ export default function FinYearRights() {
                   placeholder="e.g. 2025-26"
                 />
               </div>
-
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="startDate">Start Date</Label>
@@ -203,7 +222,6 @@ export default function FinYearRights() {
                   />
                 </div>
               </div>
-
               <div className="flex items-center space-x-2">
                 <Switch
                   id="locked"
@@ -217,7 +235,6 @@ export default function FinYearRights() {
                 </Label>
               </div>
             </div>
-
             <DialogFooter>
               <Button type="button" variant="outline" onClick={resetForm}>
                 Cancel
@@ -233,7 +250,7 @@ export default function FinYearRights() {
           <div>
             <CardTitle>Financial Years</CardTitle>
             <CardDescription>
-              {filteredFinYears.length} financial years
+              {filteredFinYears.length} active financial years
             </CardDescription>
           </div>
           <div className="relative">
@@ -246,7 +263,6 @@ export default function FinYearRights() {
             />
           </div>
         </CardHeader>
-
         <CardContent>
           <Table>
             <TableHeader>
@@ -270,14 +286,14 @@ export default function FinYearRights() {
                   <TableRow key={fy.id}>
                     <TableCell className="font-medium">{fy.year}</TableCell>
                     <TableCell>
-                      {fy.startDate} – {fy.endDate}
+                      {fy.startDate} - {fy.endDate}
                     </TableCell>
                     <TableCell>
                       <Badge variant="default">{fy.status}</Badge>
                     </TableCell>
                     <TableCell>
                       <Badge variant={fy.locked ? "destructive" : "secondary"}>
-                        {fy.locked ? "Locked" : "Unlocked"}
+                        {fy.locked ? "Yes" : "No"}
                       </Badge>
                     </TableCell>
                     <TableCell className="space-x-1">
@@ -290,7 +306,6 @@ export default function FinYearRights() {
                         <Edit3 className="w-4 h-4 mr-1" />
                         Edit
                       </Button>
-
                       <Button
                         variant="ghost"
                         size="sm"
@@ -300,16 +315,6 @@ export default function FinYearRights() {
                         <Lock className="w-4 h-4 mr-1" />
                         {fy.locked ? "Unlock" : "Lock"}
                       </Button>
-
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 text-destructive hover:bg-destructive/5"
-                        onClick={() => setDeletingId(fy.id)}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-
                       <AlertDialog
                         open={deletingId === fy.id}
                         onOpenChange={(open) => !open && setDeletingId(null)}
@@ -326,7 +331,7 @@ export default function FinYearRights() {
                           <AlertDialogFooter>
                             <AlertDialogCancel>Cancel</AlertDialogCancel>
                             <AlertDialogAction
-                              className="bg-destructive hover:bg-destructive/90"
+                              className="bg-destructive"
                               onClick={handleDelete}
                             >
                               Delete
@@ -334,6 +339,14 @@ export default function FinYearRights() {
                           </AlertDialogFooter>
                         </AlertDialogContent>
                       </AlertDialog>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-8 text-destructive hover:bg-destructive/5"
+                        onClick={() => setDeletingId(fy.id)}
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
                     </TableCell>
                   </TableRow>
                 ))

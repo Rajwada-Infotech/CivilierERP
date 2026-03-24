@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useModule } from "@/contexts/ModuleContext";
 import { useAuth } from "@/contexts/AuthContext";
+import { useTask } from "@/contexts/TaskContext";
 import { useSidebarState } from "./AppLayout";
 import {
   BarChart3,
@@ -18,6 +19,7 @@ import {
 interface SubItem {
   label: string;
   path: string;
+  badge?: number; // for overdue count
 }
 
 interface NavItem {
@@ -27,15 +29,17 @@ interface NavItem {
   children?: SubItem[];
 }
 
-// NORMAL NAV
-const NAV_ITEMS: NavItem[] = [
+// NORMAL NAV — Tasks moved into Query as submenu alongside Trial Balance
+const buildNavItems = (overdueCount: number): NavItem[] => [
   { label: "Dashboard", icon: BarChart3, path: "/" },
   {
     label: "Query",
     icon: Scale,
-    children: [{ label: "Trial Balance", path: "/transactions" }],
+    children: [
+      { label: "Trial Balance", path: "/transactions" },
+      { label: "Tasks", path: "/tasks", badge: overdueCount > 0 ? overdueCount : undefined },
+    ],
   },
-  { label: "Tasks", icon: CheckCircle2, path: "/tasks" },
 ];
 
 // ADMIN NAV
@@ -50,8 +54,8 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
     label: "Rights",
     icon: Shield,
     children: [
-      { label: "Menu", path: "/admin/rights/menu" },
-      { label: "Widgets", path: "/admin/rights/widgets" },
+      { label: "Menu",           path: "/admin/rights/menu" },
+      { label: "Widgets",        path: "/admin/rights/widgets" },
       { label: "Financial Year", path: "/admin/rights/fin-year" },
     ],
   },
@@ -59,7 +63,7 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
     label: "Approval",
     icon: CheckCircle2,
     children: [
-      { label: "Approval Setup", path: "/admin/approval/setup" },
+      { label: "Approval Setup",       path: "/admin/approval/setup" },
       { label: "Post Approval Rights", path: "/admin/approval/post-rights" },
     ],
   },
@@ -113,13 +117,9 @@ const NavGroup = ({
 
   const handleParentClick = () => {
     if (collapsed) {
-      // When collapsed → navigate to first child if exists
-      if (item.children && item.children.length > 0) {
-        navigate(item.children[0].path);
-      }
+      if (item.children && item.children.length > 0) navigate(item.children[0].path);
       return;
     }
-    // When expanded → toggle submenu
     setOpen((prev) => !prev);
   };
 
@@ -156,13 +156,20 @@ const NavGroup = ({
             <button
               key={child.path}
               onClick={() => navigate(child.path)}
-              className={`w-full text-left px-3 py-1.5 rounded-lg text-xs ${
-                location.pathname === child.path
+              className={`w-full text-left px-3 py-1.5 rounded-lg text-xs flex items-center justify-between gap-2 ${
+                location.pathname === child.path ||
+                (child.path === "/tasks" && location.pathname.startsWith("/tasks"))
                   ? "bg-primary/15 text-primary font-semibold"
                   : "text-sidebar-foreground hover:bg-sidebar-accent"
               }`}
             >
-              {child.label}
+              <span>{child.label}</span>
+              {/* Overdue badge on Tasks submenu item */}
+              {child.badge !== undefined && child.badge > 0 && (
+                <span className="w-4 h-4 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center shrink-0">
+                  {child.badge > 9 ? "9+" : child.badge}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -177,10 +184,15 @@ export const AppSidebar = () => {
   const { collapsed, setCollapsed } = useSidebarState();
   useAuth();
 
+  // Get overdue count for Tasks badge in sidebar
+  const { getOverdueTasks } = useTask();
+  const overdueCount = getOverdueTasks().length;
+
   const isAdminPage =
     location.pathname.startsWith("/admin") ||
     location.pathname.startsWith("/users");
 
+  const NAV_ITEMS = buildNavItems(overdueCount);
   const itemsToRender = isAdminPage ? ADMIN_NAV_ITEMS : NAV_ITEMS;
 
   return (
@@ -198,7 +210,8 @@ export const AppSidebar = () => {
                 item={item}
                 collapsed={collapsed}
                 activeChild={item.children.some((c) =>
-                  location.pathname.startsWith(c.path),
+                  location.pathname === c.path ||
+                  (c.path === "/tasks" && location.pathname.startsWith("/tasks"))
                 )}
               />
             );
@@ -208,7 +221,11 @@ export const AppSidebar = () => {
               key={item.label}
               item={item}
               collapsed={collapsed}
-              active={location.pathname.startsWith(item.path || "")}
+              active={
+                item.path === "/"
+                  ? location.pathname === "/"
+                  : location.pathname.startsWith(item.path || "___")
+              }
             />
           );
         })}
