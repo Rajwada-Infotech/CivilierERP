@@ -19,32 +19,43 @@ export interface ColumnDef {
   label: string;
 }
 
+// FIX: Use a stable unique ID per record instead of array index.
+//      Index-based IDs break when records are filtered/deleted — editing
+//      filtered row 0 would overwrite actual row 0 in the unfiltered array.
+type RecordWithId = Record<string, unknown> & { _id: string };
+
 interface MasterPageProps {
   title: string;
   fields: FieldDef[];
   columns: ColumnDef[];
-  initialData: Record<string, any>[];
+  initialData: Record<string, unknown>[];
+}
+
+function getDefaults(f: FieldDef[]): Record<string, unknown> {
+  const d: Record<string, unknown> = {};
+  f.forEach((field) => {
+    if (field.type === "toggle") d[field.name] = field.defaultValue ?? true;
+    else if (field.type === "multiselect") d[field.name] = field.defaultValue ?? [];
+    else d[field.name] = field.defaultValue ?? "";
+  });
+  return d;
+}
+
+// Attach stable IDs to seed data
+function seedWithIds(rows: Record<string, unknown>[]): RecordWithId[] {
+  return rows.map((row, i) => ({ ...row, _id: `seed-${i}-${Date.now()}` }));
 }
 
 export const MasterPage: React.FC<MasterPageProps> = ({ title, fields, columns, initialData }) => {
-  const [data, setData] = useState(initialData);
-  const [form, setForm] = useState<Record<string, any>>(() => getDefaults(fields));
-  const [editingId, setEditingId] = useState<number | null>(null);
+  const [data, setData] = useState<RecordWithId[]>(() => seedWithIds(initialData));
+  const [form, setForm] = useState<Record<string, unknown>>(() => getDefaults(fields));
+  // FIX: editingId is now a stable string ID, not a fragile array index
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [search, setSearch] = useState("");
-  const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
-  function getDefaults(f: FieldDef[]): Record<string, any> {
-    const d: Record<string, any> = {};
-    f.forEach((field) => {
-      if (field.type === "toggle") d[field.name] = field.defaultValue ?? true;
-      else if (field.type === "multiselect") d[field.name] = field.defaultValue ?? [];
-      else d[field.name] = field.defaultValue ?? "";
-    });
-    return d;
-  }
-
-  const updateField = (name: string, value: any, field: FieldDef) => {
+  const updateField = (name: string, value: unknown, field: FieldDef) => {
     let v = value;
     if (field.uppercase && typeof v === "string") v = v.toUpperCase();
     setForm((prev) => ({ ...prev, [name]: v }));
@@ -54,7 +65,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({ title, fields, columns, 
   const validate = () => {
     const errs: Record<string, boolean> = {};
     fields.forEach((f) => {
-      if (f.required && (!form[f.name] || (typeof form[f.name] === "string" && !form[f.name].trim()))) errs[f.name] = true;
+      if (f.required && (!form[f.name] || (typeof form[f.name] === "string" && !(form[f.name] as string).trim()))) errs[f.name] = true;
     });
     setErrors(errs);
     return Object.keys(errs).length === 0;
@@ -63,26 +74,30 @@ export const MasterPage: React.FC<MasterPageProps> = ({ title, fields, columns, 
   const handleSave = () => {
     if (!validate()) return;
     if (editingId !== null) {
-      setData((prev) => prev.map((row, i) => (i === editingId ? { ...form } : row)));
+      // FIX: Match by stable _id, not by array position
+      setData((prev) => prev.map((row) => row._id === editingId ? { ...form, _id: editingId } : row));
       setEditingId(null);
       toast.success("Record updated successfully ✓");
     } else {
-      setData((prev) => [...prev, { ...form }]);
+      const newRecord: RecordWithId = { ...form, _id: `record-${Date.now()}` };
+      setData((prev) => [...prev, newRecord]);
       toast.success("Record saved successfully ✓");
     }
     setForm(getDefaults(fields));
   };
 
-  const handleEdit = (index: number) => {
-    setForm({ ...data[index] });
-    setEditingId(index);
+  const handleEdit = (id: string) => {
+    const row = data.find((r) => r._id === id);
+    if (!row) return;
+    setForm({ ...row });
+    setEditingId(id);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const handleDelete = (index: number) => {
-    setData((prev) => prev.filter((_, i) => i !== index));
-    setDeleteConfirm(null);
-    if (editingId === index) { setEditingId(null); setForm(getDefaults(fields)); }
+  const handleDelete = (id: string) => {
+    setData((prev) => prev.filter((r) => r._id !== id));
+    setDeleteConfirmId(null);
+    if (editingId === id) { setEditingId(null); setForm(getDefaults(fields)); }
     toast.success("Record deleted");
   };
 
@@ -115,14 +130,14 @@ export const MasterPage: React.FC<MasterPageProps> = ({ title, fields, columns, 
                     {field.prefix && <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">{field.prefix}</span>}
                     <input
                       type={field.type === "number" ? "number" : "text"}
-                      value={form[field.name] || ""}
+                      value={(form[field.name] as string) || ""}
                       onChange={(e) => updateField(field.name, e.target.value, field)}
                       className={`w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground ${field.prefix ? "pl-7" : ""} ${errors[field.name] ? "border-destructive" : "border-border"}`}
                     />
                   </div>
                 ) : field.type === "select" ? (
                   <select
-                    value={form[field.name] || ""}
+                    value={(form[field.name] as string) || ""}
                     onChange={(e) => updateField(field.name, e.target.value, field)}
                     className={`w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground ${errors[field.name] ? "border-destructive" : "border-border"}`}
                   >
@@ -131,7 +146,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({ title, fields, columns, 
                   </select>
                 ) : field.type === "textarea" ? (
                   <textarea
-                    value={form[field.name] || ""}
+                    value={(form[field.name] as string) || ""}
                     onChange={(e) => updateField(field.name, e.target.value, field)}
                     rows={3}
                     className={`w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground ${errors[field.name] ? "border-destructive" : "border-border"}`}
@@ -147,13 +162,13 @@ export const MasterPage: React.FC<MasterPageProps> = ({ title, fields, columns, 
                 ) : field.type === "multiselect" ? (
                   <div className="flex flex-wrap gap-2">
                     {field.options?.map((o) => {
-                      const selected = (form[field.name] as string[] || []).includes(o);
+                      const selected = ((form[field.name] as string[]) || []).includes(o);
                       return (
                         <button
                           key={o}
                           type="button"
                           onClick={() => {
-                            const current = form[field.name] as string[] || [];
+                            const current = (form[field.name] as string[]) || [];
                             const next = selected ? current.filter((x: string) => x !== o) : [...current, o];
                             updateField(field.name, next, field);
                           }}
@@ -198,48 +213,60 @@ export const MasterPage: React.FC<MasterPageProps> = ({ title, fields, columns, 
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-border">
-                <th className="px-4 py-3 text-left text-xs font-heading text-muted-foreground font-semibold">#</th>
                 {columns.map((col) => (
-                  <th key={col.key} className="px-4 py-3 text-left text-xs font-heading text-muted-foreground font-semibold">{col.label}</th>
+                  <th key={col.key} className="px-4 py-3 text-left text-xs font-heading uppercase tracking-wide text-muted-foreground whitespace-nowrap">
+                    {col.label}
+                  </th>
                 ))}
-                <th className="px-4 py-3 text-left text-xs font-heading text-muted-foreground font-semibold">Actions</th>
+                <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-wide text-muted-foreground">Actions</th>
               </tr>
             </thead>
-            <tbody>
-              {filtered.map((row, i) => (
-                <tr key={i} className={`border-b border-border transition-colors hover:bg-muted/50 ${i % 2 === 1 ? "bg-muted/20" : ""}`}>
-                  <td className="px-4 py-3 text-muted-foreground">{i + 1}</td>
-                  {columns.map((col) => (
-                    <td key={col.key} className="px-4 py-3 text-foreground">
-                      {col.key === "status" ? (
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-heading ${row[col.key] ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}>
-                          {row[col.key] ? "Active" : "Inactive"}
-                        </span>
-                      ) : Array.isArray(row[col.key]) ? (
-                        (row[col.key] as string[]).join(", ")
-                      ) : (
-                        String(row[col.key] ?? "")
-                      )}
-                    </td>
-                  ))}
-                  <td className="px-4 py-3">
-                    {deleteConfirm === i ? (
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-muted-foreground">Sure?</span>
-                        <button onClick={() => handleDelete(i)} className="text-destructive hover:bg-destructive/10 p-1 rounded"><Check size={14} /></button>
-                        <button onClick={() => setDeleteConfirm(null)} className="text-muted-foreground hover:bg-muted p-1 rounded"><X size={14} /></button>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-1">
-                        <button onClick={() => handleEdit(i)} className="p-1.5 rounded hover:bg-muted transition-colors text-primary"><Edit2 size={14} /></button>
-                        <button onClick={() => setDeleteConfirm(i)} className="p-1.5 rounded hover:bg-muted transition-colors text-destructive"><Trash2 size={14} /></button>
-                      </div>
-                    )}
+            <tbody className="divide-y divide-border">
+              {filtered.length === 0 ? (
+                <tr>
+                  <td colSpan={columns.length + 1} className="px-4 py-8 text-center text-muted-foreground text-sm">
+                    {search ? "No records match your search." : "No records yet."}
                   </td>
                 </tr>
-              ))}
-              {filtered.length === 0 && (
-                <tr><td colSpan={columns.length + 2} className="px-4 py-8 text-center text-muted-foreground">No records found</td></tr>
+              ) : (
+                filtered.map((row) => (
+                  <tr key={row._id} className="hover:bg-muted/30 transition-colors">
+                    {columns.map((col) => (
+                      <td key={col.key} className="px-4 py-3 text-foreground">
+                        {col.key === "status" ? (
+                          <span className={`px-2 py-0.5 rounded-full text-xs font-heading ${row[col.key] ? "bg-primary/10 text-primary" : "bg-destructive/10 text-destructive"}`}>
+                            {row[col.key] ? "Active" : "Inactive"}
+                          </span>
+                        ) : (
+                          String(row[col.key] ?? "")
+                        )}
+                      </td>
+                    ))}
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-end gap-2">
+                        {deleteConfirmId === row._id ? (
+                          <>
+                            <button onClick={() => handleDelete(row._id)} className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10 transition-colors" title="Confirm delete">
+                              <Check size={14} />
+                            </button>
+                            <button onClick={() => setDeleteConfirmId(null)} className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors" title="Cancel">
+                              <X size={14} />
+                            </button>
+                          </>
+                        ) : (
+                          <>
+                            <button onClick={() => handleEdit(row._id)} className="p-1.5 rounded-lg text-primary hover:bg-primary/10 transition-colors" title="Edit">
+                              <Edit2 size={14} />
+                            </button>
+                            <button onClick={() => setDeleteConfirmId(row._id)} className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10 transition-colors" title="Delete">
+                              <Trash2 size={14} />
+                            </button>
+                          </>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))
               )}
             </tbody>
           </table>
