@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { useToast } from "@/components/ui/use-toast";
+// FIX: Standardised to sonner (was using deprecated shadcn useToast)
+import { toast } from "sonner";
 import * as z from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
@@ -74,7 +75,6 @@ export default function ApprovalSetup() {
   const [openEdit, setOpenEdit] = useState(false);
   const [editingWorkflow, setEditingWorkflow] = useState<Workflow | null>(null);
   const { canDoAction } = useAuth() as any;
-  const { toast } = useToast();
 
   const formSchema = z.object({
     name: z.string().min(1, 'Name is required'),
