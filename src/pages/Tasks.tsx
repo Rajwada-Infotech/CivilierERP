@@ -142,13 +142,13 @@ export default function Tasks() {
       {/* Alert banners */}
       <AnimatePresence>
         {overdueTasks.length > 0 && (
-          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="mb-3 flex items-center gap-3 px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400">
+          <motion.div key="overdue-alert" initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="mb-3 flex items-center gap-3 px-4 py-3 rounded-xl bg-red-500/10 border border-red-500/30 text-red-400">
             <AlertCircle size={16} className="shrink-0" />
             <span className="text-sm font-heading">{overdueTasks.length} task{overdueTasks.length !== 1 ? "s" : ""} overdue</span>
           </motion.div>
         )}
         {dueSoonTasks.length > 0 && (
-          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="mb-3 flex items-center gap-3 px-4 py-3 rounded-xl bg-yellow-500/10 border border-yellow-500/30 text-yellow-400">
+          <motion.div key="due-soon-alert" initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="mb-3 flex items-center gap-3 px-4 py-3 rounded-xl bg-yellow-500/10 border border-yellow-500/30 text-yellow-400">
             <Clock size={16} className="shrink-0" />
             <span className="text-sm font-heading">{dueSoonTasks.length} task{dueSoonTasks.length !== 1 ? "s" : ""} due within 48 hours</span>
           </motion.div>
