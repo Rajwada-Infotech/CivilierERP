@@ -32,7 +32,7 @@ const Users = () => {
         setForm({
           name: user.name,
           email: user.email,
-          phone: (user as any).phone || "", // Temporary until you update AppUser
+          phone: (user as any).phone || "",
           alias: (user as any).alias || "",
           password: "",
           isActive: user.isActive,
@@ -53,12 +53,10 @@ const Users = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-
     if (!form.name.trim() || !form.email.trim()) {
       toast.error("Name and Email are required.");
       return;
     }
-
     if (!editUserId && !form.password.trim()) {
       toast.error("Password is required when adding a new user.");
       return;
@@ -77,19 +75,17 @@ const Users = () => {
         .slice(0, 2)
         .toUpperCase(),
       role: "user" as const,
-      pagePermissions: [], // You can improve this later with permission editor
+      pagePermissions: [],
       isActive: form.isActive,
     };
 
     if (editUserId) {
-      // For editing, we update via toggle + manual update if needed
-      // Since your context doesn't have a full updateUser yet, we use toggle for status
+      // Update status only if changed
       if (
         form.isActive !== allUsers.find((u) => u.id === editUserId)?.isActive
       ) {
         toggleUserStatus(editUserId);
       }
-
       toast.success(`User "${form.name}" updated successfully.`);
       setEditUserId(null);
       resetForm();
@@ -143,7 +139,6 @@ const Users = () => {
   return (
     <AppLayout>
       <Breadcrumbs items={["Dashboard", "Admin", "Users"]} />
-
       <h1 className="text-xl font-heading font-bold text-foreground mb-6">
         User Master
       </h1>
@@ -153,7 +148,6 @@ const Users = () => {
         <h2 className="font-heading font-semibold text-foreground mb-5">
           {editUserId ? "Edit User" : "Add New User"}
         </h2>
-
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5">
             <div>
@@ -168,7 +162,6 @@ const Users = () => {
                 className="w-full h-10 px-3 bg-input/70 border border-border rounded-md focus:ring-1 focus:ring-primary focus:border-primary outline-none"
               />
             </div>
-
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">
                 Alias
@@ -180,7 +173,6 @@ const Users = () => {
                 className="w-full h-10 px-3 bg-input/70 border border-border rounded-md focus:ring-1 focus:ring-primary focus:border-primary outline-none"
               />
             </div>
-
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">
                 Email *
@@ -194,7 +186,6 @@ const Users = () => {
                 className="w-full h-10 px-3 bg-input/70 border border-border rounded-md focus:ring-1 focus:ring-primary focus:border-primary outline-none"
               />
             </div>
-
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">
                 Phone
@@ -207,6 +198,7 @@ const Users = () => {
               />
             </div>
 
+            {/* Password field - only for new users */}
             {!editUserId && (
               <div className="relative">
                 <label className="text-xs text-muted-foreground mb-1 block">
@@ -348,7 +340,7 @@ const Users = () => {
                       className="p-2 rounded hover:bg-muted transition"
                       title={user.isActive ? "Deactivate" : "Activate"}
                     >
-                      {user.isActive ? <EyeOff size={16} /> : <Eye size={16} />}
+                      {user.isActive ? "Deactivate" : "Activate"}
                     </button>
 
                     {deleteConfirmId === user.id ? (
@@ -419,7 +411,6 @@ const Users = () => {
                 </span>
               </p>
             </div>
-
             <button
               onClick={() => setViewUserId(null)}
               className="mt-6 w-full h-10 bg-primary text-primary-foreground rounded-xl hover:opacity-90 transition"
