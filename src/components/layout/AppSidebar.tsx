@@ -11,6 +11,7 @@ import {
   ChevronDown,
   ChevronUp,
   FileText,
+  Receipt,
   Scale,
   Shield,
 } from "lucide-react";
@@ -35,6 +36,15 @@ const NAV_ITEMS: NavItem[] = [
     children: [{ label: "Trial Balance", path: "/transactions" }],
   },
   { label: "Tasks", icon: CheckCircle2, path: "/tasks" },
+  {
+    label: "Transaction",
+    icon: Receipt,
+    children: [
+{ label: "Expense Booking", path: "/transactions/expense-booking" }
+    ],
+  },
+  { label: "Payment", icon: Receipt, path: "/payments" },
+
 ];
 
 // ADMIN NAV (merged properly)

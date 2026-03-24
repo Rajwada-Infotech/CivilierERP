@@ -83,10 +83,12 @@ export const MobileNav: React.FC = () => {
     { label: "Setup", icon: Settings, children: masterItems, disabled: !isModuleActive },
     { label: "Reports", icon: BarChart3, path: "/reports" },
     { label: "Widgets", icon: Puzzle, path: "/widgets" },
-    { label: "Tasks", icon: CheckCircle2, path: "/tasks", count: overdueCount },
-    {
-      label: "Query",
-      icon: Scale,
+{ label: "Tasks", icon: CheckCircle2, path: "/tasks", count: overdueCount },
+  { label: "Payment", icon: Receipt, path: "/payments" },
+  {
+    label: "Query",
+    icon: Scale,
+
       children: [{ label: "Trial Balance", path: "/transactions", icon: FileText }],
     },
   ];
@@ -142,7 +144,7 @@ export const MobileNav: React.FC = () => {
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-border sticky top-0 bg-card z-10">
               <span className="font-heading text-sm font-semibold text-foreground">Menu</span>
-              <button onClick={() => setOpen(false)} className="p-1 rounded-md hover:bg-muted text-muted-foreground">
+              <button onClick={() => setOpen(false)} className="p-1 rounded-md hover:bg-muted text-muted-foreground" aria-label="Close menu">
                 <X size={18} />
               </button>
             </div>
