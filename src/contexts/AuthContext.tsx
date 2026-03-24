@@ -69,6 +69,8 @@ export const PAGE_DEFINITIONS: {
   { key: "master_customers", label: "Customer Master", path: "/masters/customers", group: "Masters", availableActions: ["view", "create", "edit", "delete", "print", "export"] },
   { key: "master_banks", label: "Bank Master", path: "/masters/banks", group: "Masters", availableActions: ["view", "create", "edit", "delete", "print", "export"] },
   { key: "master_expenses", label: "Expenses Master", path: "/masters/expenses", group: "Masters", availableActions: ["view", "create", "edit", "delete", "print", "export"] },
+  { key: "master_items", label: "Item Master", path: "/masters/items", group: "Masters", availableActions: ["view", "create", "edit", "delete", "print", "export"] },
+  { key: "master_item_groups", label: "Item Group Master", path: "/masters/item-groups", group: "Masters", availableActions: ["view", "create", "edit", "delete"] },
 
   // Setup group
   { key: "setup_account_groups", label: "Account Groups", path: "/setup/account-groups", group: "Setup", availableActions: ["view", "create", "edit", "delete"] },
