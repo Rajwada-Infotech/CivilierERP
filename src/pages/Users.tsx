@@ -80,7 +80,6 @@ const Users = () => {
     };
 
     if (editUserId) {
-      // Update status only if changed
       if (
         form.isActive !== allUsers.find((u) => u.id === editUserId)?.isActive
       ) {
@@ -198,7 +197,6 @@ const Users = () => {
               />
             </div>
 
-            {/* Password field - only for new users */}
             {!editUserId && (
               <div className="relative">
                 <label className="text-xs text-muted-foreground mb-1 block">
@@ -311,7 +309,7 @@ const Users = () => {
                     <span
                       className={`inline-block px-3 py-1 text-xs font-medium rounded-full ${
                         user.isActive
-                          ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                          ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400"
                           : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
                       }`}
                     >
@@ -402,9 +400,11 @@ const Users = () => {
               <p>
                 <span className="text-muted-foreground">Status:</span>
                 <span
-                  className={
-                    viewedUser.isActive ? "text-green-500" : "text-red-500"
-                  }
+                  className={`font-medium ${
+                    viewedUser.isActive
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : "text-red-600 dark:text-red-400"
+                  }`}
                 >
                   {" "}
                   {viewedUser.isActive ? "Active" : "Inactive"}
