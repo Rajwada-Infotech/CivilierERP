@@ -18,6 +18,11 @@ interface ItemGroup {
   description: string;
 }
 
+interface HsnCode {
+  code: string;
+  description: string;
+}
+
 interface Item {
   _id: string;
   description: string;
@@ -29,280 +34,6 @@ interface Item {
   belongsTo: string;
   discontinue: "active" | "discontinued";
 }
-
-// ── HSN Codes (construction / ERP relevant) ───────────────────────────────────
-const HSN_CODES: { code: string; description: string }[] = [
-  // Building Materials
-  {
-    code: "2523",
-    description: "Portland cement, aluminous cement, slag cement",
-  },
-  {
-    code: "2515",
-    description: "Marble, travertine and other calcareous stone",
-  },
-  { code: "2516", description: "Granite, porphyry, basalt, sandstone" },
-  { code: "2517", description: "Pebbles, gravel, broken or crushed stone" },
-  { code: "2505", description: "Natural sands of all kinds" },
-  { code: "2520", description: "Gypsum; anhydrite; plasters" },
-  { code: "2522", description: "Quicklime, slaked lime and hydraulic lime" },
-  {
-    code: "6810",
-    description: "Articles of cement, concrete or artificial stone",
-  },
-  { code: "6904", description: "Ceramic building bricks, flooring blocks" },
-  {
-    code: "6907",
-    description: "Ceramic flags, paving, hearth or wall tiles (unglazed)",
-  },
-  {
-    code: "6908",
-    description: "Glazed ceramic flags, paving, hearth or wall tiles",
-  },
-  { code: "6802", description: "Worked monumental or building stone" },
-  { code: "7007", description: "Safety glass (toughened or laminated)" },
-  {
-    code: "7005",
-    description: "Float glass and surface ground or polished glass",
-  },
-  {
-    code: "7016",
-    description: "Paving blocks, slabs, bricks of pressed glass",
-  },
-  // Steel & Metals
-  {
-    code: "7213",
-    description: "Steel bars and rods, hot-rolled in coils (TMT bars)",
-  },
-  {
-    code: "7214",
-    description: "Other bars and rods of iron or non-alloy steel",
-  },
-  { code: "7216", description: "Angles, shapes and sections of iron or steel" },
-  { code: "7217", description: "Wire of iron or non-alloy steel" },
-  {
-    code: "7208",
-    description: "Flat-rolled steel products, width ≥ 600mm (HR coils/sheets)",
-  },
-  {
-    code: "7210",
-    description: "Flat-rolled steel, plated or coated with zinc (GI sheets)",
-  },
-  {
-    code: "7304",
-    description: "Seamless tubes, pipes and hollow profiles of iron or steel",
-  },
-  {
-    code: "7305",
-    description: "Other tubes and pipes (line pipe for oil/gas)",
-  },
-  {
-    code: "7306",
-    description: "Other tubes, pipes and hollow profiles of iron or steel",
-  },
-  { code: "7307", description: "Tube or pipe fittings of iron or steel" },
-  {
-    code: "7308",
-    description: "Structures and parts of structures of iron or steel",
-  },
-  {
-    code: "7312",
-    description: "Stranded wire, ropes, cables, slings of iron or steel",
-  },
-  {
-    code: "7317",
-    description: "Nails, tacks, drawing pins, staples of iron or steel",
-  },
-  { code: "7318", description: "Screws, bolts, nuts of iron or steel" },
-  { code: "7326", description: "Other articles of iron or steel" },
-  { code: "7601", description: "Unwrought aluminium" },
-  { code: "7610", description: "Aluminium structures and parts of structures" },
-  { code: "7604", description: "Aluminium bars, rods and profiles" },
-  { code: "7608", description: "Aluminium tubes and pipes" },
-  // Electrical
-  {
-    code: "8544",
-    description:
-      "Insulated wire, cable and other insulated electric conductors",
-  },
-  {
-    code: "8536",
-    description:
-      "Electrical apparatus for switching or protecting circuits (≤1000V)",
-  },
-  {
-    code: "8537",
-    description:
-      "Boards, panels, consoles for electric control or distribution",
-  },
-  {
-    code: "8535",
-    description:
-      "Electrical apparatus for switching or protecting circuits (>1000V)",
-  },
-  {
-    code: "8539",
-    description: "Electric filament or discharge lamps, LED lamps",
-  },
-  {
-    code: "9405",
-    description:
-      "Lamps and lighting fittings including searchlights and spotlights",
-  },
-  { code: "8501", description: "Electric motors and generators" },
-  {
-    code: "8504",
-    description: "Electrical transformers, static converters and inductors",
-  },
-  { code: "8507", description: "Electric accumulators (batteries)" },
-  {
-    code: "8541",
-    description: "Semiconductor devices; photovoltaic cells (solar panels)",
-  },
-  // Plumbing & Sanitary
-  { code: "3917", description: "Tubes, pipes and hoses of plastics" },
-  {
-    code: "3922",
-    description: "Baths, shower-baths, sinks, wash-basins of plastics",
-  },
-  {
-    code: "6910",
-    description: "Ceramic sinks, wash basins, baths and sanitary fixtures",
-  },
-  {
-    code: "7324",
-    description: "Sanitary ware and parts thereof of iron or steel",
-  },
-  { code: "8481", description: "Taps, cocks, valves and similar appliances" },
-  { code: "7412", description: "Copper tube or pipe fittings" },
-  { code: "7411", description: "Copper tubes and pipes" },
-  // Paints, Adhesives & Chemicals
-  {
-    code: "3208",
-    description: "Paints and varnishes (including enamels and lacquers)",
-  },
-  {
-    code: "3209",
-    description: "Paints and varnishes based on acrylic or vinyl polymers",
-  },
-  {
-    code: "3214",
-    description: "Glaziers putty, grafting putty, caulking compounds, sealants",
-  },
-  { code: "3506", description: "Prepared glues and other prepared adhesives" },
-  {
-    code: "3816",
-    description:
-      "Refractory cements, mortars, concretes and similar compositions",
-  },
-  { code: "3814", description: "Organic composite solvents and thinners" },
-  {
-    code: "3824",
-    description:
-      "Prepared binders for foundry moulds or cores; chemical products",
-  },
-  // Wood & Board
-  {
-    code: "4412",
-    description: "Plywood, veneered panels and similar laminated wood",
-  },
-  { code: "4410", description: "Particle board, oriented strand board (OSB)" },
-  {
-    code: "4411",
-    description: "Fibre board (MDF) of wood or other ligneous materials",
-  },
-  {
-    code: "4418",
-    description:
-      "Builders joinery and carpentry of wood (doors, windows, frames)",
-  },
-  { code: "4407", description: "Wood sawn or chipped lengthwise (timber)" },
-  // Machinery & Equipment
-  {
-    code: "8429",
-    description: "Self-propelled bulldozers, graders, scrapers, excavators",
-  },
-  {
-    code: "8430",
-    description: "Other moving, grading, levelling, excavating machinery",
-  },
-  {
-    code: "8426",
-    description:
-      "Cranes including cable cranes; mobile lifting frames, stacker",
-  },
-  {
-    code: "8427",
-    description: "Fork-lift trucks; other works trucks with lifting equipment",
-  },
-  {
-    code: "8428",
-    description: "Other lifting, handling, loading or unloading machinery",
-  },
-  { code: "8413", description: "Pumps for liquids" },
-  {
-    code: "8414",
-    description: "Air or vacuum pumps, air compressors and fans",
-  },
-  { code: "8415", description: "Air conditioning machines" },
-  {
-    code: "8467",
-    description:
-      "Hand tools, pneumatic, hydraulic or with self-contained motor",
-  },
-  {
-    code: "8474",
-    description: "Machinery for sorting, screening, crushing stone or ores",
-  },
-  { code: "8482", description: "Ball or roller bearings" },
-  {
-    code: "8483",
-    description: "Transmission shafts, cranks, bearing housings",
-  },
-  // Vehicles & Transport
-  {
-    code: "8704",
-    description: "Motor vehicles for the transport of goods (trucks/tippers)",
-  },
-  {
-    code: "8705",
-    description:
-      "Special purpose motor vehicles (mobile cranes, concrete mixers)",
-  },
-  { code: "8701", description: "Tractors" },
-  { code: "8716", description: "Trailers and semi-trailers" },
-  // Safety & PPE
-  { code: "6506", description: "Other headgear (safety helmets)" },
-  {
-    code: "6403",
-    description: "Safety footwear with outer soles of rubber or plastics",
-  },
-  {
-    code: "3926",
-    description: "Other articles of plastics (safety goggles, hard hats)",
-  },
-  { code: "6216", description: "Gloves, mittens and mitts (safety gloves)" },
-  // Services
-  { code: "9954", description: "Construction services" },
-  {
-    code: "9983",
-    description: "Other professional, technical and business services",
-  },
-  {
-    code: "9987",
-    description: "Maintenance, repair and installation services",
-  },
-  {
-    code: "9985",
-    description: "Support services (security, cleaning, pest control)",
-  },
-  {
-    code: "9986",
-    description: "Agriculture, forestry and fishing related services",
-  },
-  { code: "9973", description: "Leasing or rental services without operator" },
-  { code: "9997", description: "Other services not elsewhere classified" },
-];
 
 // ── Static item groups ────────────────────────────────────────────────────────
 const ITEM_GROUPS: ItemGroup[] = [
@@ -326,7 +57,7 @@ const INITIAL_DATA: Item[] = [
     itemCode: "ITM0001",
     shortCode: "CEM",
     itemType: "Goods",
-    hsnCode: "2523",
+    hsnCode: "",
     showTaxCalculated: true,
     belongsTo: "RM",
     discontinue: "active",
@@ -337,7 +68,7 @@ const INITIAL_DATA: Item[] = [
     itemCode: "ITM0002",
     shortCode: "STL",
     itemType: "Goods",
-    hsnCode: "7213",
+    hsnCode: "",
     showTaxCalculated: true,
     belongsTo: "RM",
     discontinue: "active",
@@ -348,7 +79,7 @@ const INITIAL_DATA: Item[] = [
     itemCode: "ITM0003",
     shortCode: "SVY",
     itemType: "Service",
-    hsnCode: "9983",
+    hsnCode: "",
     showTaxCalculated: false,
     belongsTo: "SVC",
     discontinue: "active",
@@ -359,7 +90,7 @@ const INITIAL_DATA: Item[] = [
     itemCode: "ITM0004",
     shortCode: "JCB",
     itemType: "Service",
-    hsnCode: "9987",
+    hsnCode: "",
     showTaxCalculated: false,
     belongsTo: "SVC",
     discontinue: "discontinued",
@@ -380,21 +111,22 @@ const EMPTY_FORM: Omit<Item, "_id" | "itemCode"> = {
 const HsnDropdown: React.FC<{
   value: string;
   onChange: (code: string) => void;
-}> = ({ value, onChange }) => {
+  hsnCodes: HsnCode[];
+}> = ({ value, onChange, hsnCodes }) => {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const selected = HSN_CODES.find((h) => h.code === value);
+  const selected = hsnCodes.find((h) => h.code === value);
 
   const filtered = query.trim()
-    ? HSN_CODES.filter(
+    ? hsnCodes.filter(
         (h) =>
           h.code.includes(query) ||
           h.description.toLowerCase().includes(query.toLowerCase()),
       )
-    : HSN_CODES;
+    : hsnCodes;
 
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -488,7 +220,11 @@ const HsnDropdown: React.FC<{
 
           {/* Options list */}
           <div className="max-h-56 overflow-y-auto">
-            {filtered.length === 0 ? (
+            {hsnCodes.length === 0 ? (
+              <div className="px-4 py-3 text-sm text-muted-foreground text-center">
+                No HSN codes available
+              </div>
+            ) : filtered.length === 0 ? (
               <div className="px-4 py-3 text-sm text-muted-foreground text-center">
                 No HSN codes found
               </div>
@@ -543,7 +279,11 @@ const inputCls = (err?: boolean) =>
   `w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground ${err ? "border-destructive" : "border-border"}`;
 
 // ── Main Component ────────────────────────────────────────────────────────────
-const ItemMaster: React.FC = () => {
+interface ItemMasterProps {
+  hsnCodes?: HsnCode[];
+}
+
+const ItemMaster: React.FC<ItemMasterProps> = ({ hsnCodes = [] }) => {
   const [data, setData] = useState<Item[]>(INITIAL_DATA);
   const [form, setForm] = useState<Omit<Item, "_id">>({
     ...EMPTY_FORM,
@@ -696,11 +436,12 @@ const ItemMaster: React.FC = () => {
             </select>
           </Field>
 
-          {/* HSN Code — searchable dropdown */}
+          {/* HSN Code — fed from HSN Master via prop */}
           <Field label="HSN Code">
             <HsnDropdown
               value={form.hsnCode}
               onChange={(val) => set("hsnCode", val)}
+              hsnCodes={hsnCodes}
             />
           </Field>
 
