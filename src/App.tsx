@@ -21,6 +21,8 @@ import SupplierMaster from "./pages/masters/SupplierMaster";
 import CustomerMaster from "./pages/masters/CustomerMaster";
 import BankMaster from "./pages/masters/BankMaster";
 import ExpensesMaster from "./pages/masters/ExpensesMaster";
+import ItemMaster from "./pages/masters/ItemMaster";
+import ItemGroupMaster from "./pages/masters/ItemGroupMaster";
 import AccountGroupMaster from "./pages/setup/AccountGroupMaster";
 import AccountHeadMaster from "./pages/setup/AccountHeadMaster";
 
@@ -75,6 +77,8 @@ const AppRoutes = () => (
     <Route path="/masters/customers" element={<ProtectedRoute><CustomerMaster /></ProtectedRoute>} />
     <Route path="/masters/banks" element={<ProtectedRoute><BankMaster /></ProtectedRoute>} />
     <Route path="/masters/expenses" element={<ProtectedRoute><ExpensesMaster /></ProtectedRoute>} />
+    <Route path="/masters/items" element={<ProtectedRoute><ItemMaster /></ProtectedRoute>} />
+    <Route path="/masters/item-groups" element={<ProtectedRoute><ItemGroupMaster /></ProtectedRoute>} />
     <Route path="/setup/account-groups" element={<ProtectedRoute><AccountGroupMaster /></ProtectedRoute>} />
     <Route path="/setup/account-heads" element={<ProtectedRoute><AccountHeadMaster /></ProtectedRoute>} />
     <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
