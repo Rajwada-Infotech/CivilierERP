@@ -21,8 +21,6 @@ export type PageKey =
   | "master_expenses"
   | "master_items"
   | "master_item_groups"
-  | "setup_account_groups"
-  | "setup_account_heads"
   | "tasks"
   | "admin_menu_rights"
   | "admin_widgets_rights"
@@ -197,22 +195,6 @@ export const PAGE_DEFINITIONS: {
     label: "Item Group Master",
     path: "/masters/item-groups",
     group: "Masters",
-    availableActions: ["view", "create", "edit", "delete"],
-  },
-
-  // Setup group
-  {
-    key: "setup_account_groups",
-    label: "Account Groups",
-    path: "/setup/account-groups",
-    group: "Setup",
-    availableActions: ["view", "create", "edit", "delete"],
-  },
-  {
-    key: "setup_account_heads",
-    label: "Account Heads",
-    path: "/setup/account-heads",
-    group: "Setup",
     availableActions: ["view", "create", "edit", "delete"],
   },
 ];
