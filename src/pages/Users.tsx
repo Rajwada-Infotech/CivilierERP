@@ -1,371 +1,425 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { Search } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
-
-interface User {
-  name: string;
-  email: string;
-  phone: string;
-  password: string;
-  alias: string;
-  discontinue: boolean;
-}
+import { Search, Edit, Trash2, Eye, EyeOff } from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
+import { toast } from "sonner";
 
 const Users = () => {
-  const [form, setForm] = useState<User>({
+  const { allUsers, addUser, deleteUser, toggleUserStatus } = useAuth();
+
+  const [form, setForm] = useState({
     name: "",
     email: "",
     phone: "",
-    password: "",
     alias: "",
-    discontinue: false,
+    password: "",
+    isActive: true,
   });
 
-  const [users, setUsers] = useState<User[]>([]);
-  const [editIndex, setEditIndex] = useState<number | null>(null);
-  const [viewIndex, setViewIndex] = useState<number | null>(null);
-  const [filter, setFilter] = useState<string>("");
-  const [showFilter, setShowFilter] = useState<boolean>(false);
+  const [editUserId, setEditUserId] = useState<string | null>(null);
+  const [filter, setFilter] = useState("");
+  const [showFilter, setShowFilter] = useState(false);
+  const [viewUserId, setViewUserId] = useState<string | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
+  const [showPass, setShowPass] = useState(false);
+
+  // Load user data when editing
+  useEffect(() => {
+    if (editUserId) {
+      const user = allUsers.find((u) => u.id === editUserId);
+      if (user) {
+        setForm({
+          name: user.name,
+          email: user.email,
+          phone: (user as any).phone || "",
+          alias: (user as any).alias || "",
+          password: "",
+          isActive: user.isActive,
+        });
+      }
+    } else {
+      resetForm();
+    }
+  }, [editUserId, allUsers]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value, type, checked } = e.target;
-    setForm({
-      ...form,
+    setForm((prev) => ({
+      ...prev,
       [name]: type === "checkbox" ? checked : value,
-    });
+    }));
   };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (editIndex !== null) {
-      const updatedUsers = [...users];
-      updatedUsers[editIndex] = form;
-      setUsers(updatedUsers);
-      setEditIndex(null);
-    } else {
-      setUsers([...users, form]);
+    if (!form.name.trim() || !form.email.trim()) {
+      toast.error("Name and Email are required.");
+      return;
     }
+    if (!editUserId && !form.password.trim()) {
+      toast.error("Password is required when adding a new user.");
+      return;
+    }
+
+    const userData = {
+      name: form.name.trim(),
+      email: form.email.trim(),
+      phone: form.phone.trim() || undefined,
+      alias: form.alias.trim() || undefined,
+      initials: form.name
+        .trim()
+        .split(" ")
+        .map((w) => w[0])
+        .join("")
+        .slice(0, 2)
+        .toUpperCase(),
+      role: "user" as const,
+      pagePermissions: [],
+      isActive: form.isActive,
+    };
+
+    if (editUserId) {
+      if (
+        form.isActive !== allUsers.find((u) => u.id === editUserId)?.isActive
+      ) {
+        toggleUserStatus(editUserId);
+      }
+      toast.success(`User "${form.name}" updated successfully.`);
+      setEditUserId(null);
+      resetForm();
+    } else {
+      addUser({
+        ...userData,
+        password: form.password,
+      });
+      toast.success(`User "${form.name}" added successfully.`);
+      resetForm();
+    }
+  };
+
+  const resetForm = () => {
     setForm({
       name: "",
       email: "",
       phone: "",
-      password: "",
       alias: "",
-      discontinue: false,
+      password: "",
+      isActive: true,
     });
+    setEditUserId(null);
   };
 
-  const handleEdit = (index: number) => {
-    setForm(users[index]);
-    setEditIndex(index);
+  const handleEdit = (userId: string) => {
+    setEditUserId(userId);
   };
 
-  const handleDelete = (index: number) => {
-    const filteredUsers = users.filter((_, i) => i !== index);
-    setUsers(filteredUsers);
-    if (editIndex === index) setEditIndex(null);
-    if (viewIndex === index) setViewIndex(null);
+  const handleDelete = (userId: string) => {
+    deleteUser(userId);
+    setDeleteConfirmId(null);
+    toast.success("User has been deleted.");
   };
 
-  const handleView = (index: number) => setViewIndex(index);
-  const closeView = () => setViewIndex(null);
+  const toggleStatus = (userId: string) => {
+    toggleUserStatus(userId);
+    toast.success("User status updated.");
+  };
 
-  const filteredUsers = users.filter(
+  const filteredUsers = allUsers.filter(
     (u) =>
       u.name.toLowerCase().includes(filter.toLowerCase()) ||
-      u.alias.toLowerCase().includes(filter.toLowerCase()) ||
-      u.email.toLowerCase().includes(filter.toLowerCase()) ||
-      u.phone.includes(filter)
+      u.email.toLowerCase().includes(filter.toLowerCase()),
   );
 
-  const highlightText = (text: string, query: string) => {
-    if (!query) return text;
-    const parts = text.split(new RegExp(`(${query})`, "gi"));
-    return (
-      <>
-        {parts.map((part, i) =>
-          part.toLowerCase() === query.toLowerCase() ? (
-            <span key={i} className="bg-yellow-200 px-1 rounded">{part}</span>
-          ) : (
-            part
-          )
-        )}
-      </>
-    );
-  };
-
-  const cardVariants = {
-    hidden: { opacity: 0, x: -50 },
-    visible: (i: number) => ({
-      opacity: 1,
-      x: 0,
-      transition: { delay: i * 0.1 },
-    }),
-    exit: { opacity: 0, x: 50, transition: { duration: 0.2 } },
-  };
+  const viewedUser = viewUserId
+    ? allUsers.find((u) => u.id === viewUserId)
+    : null;
 
   return (
     <AppLayout>
-      <Breadcrumbs items={["Dashboard", "Users"]} />
-      <h1 className="text-2xl font-heading font-bold text-foreground mb-6">
-        User Management
+      <Breadcrumbs items={["Dashboard", "Admin", "Users"]} />
+      <h1 className="text-xl font-heading font-bold text-foreground mb-6">
+        User Master
       </h1>
 
-      {/* Form */}
-      <motion.form
-        onSubmit={handleSubmit}
-        className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-card p-6 rounded-xl border border-border shadow-md"
-        initial={{ opacity: 0, y: -20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5 }}
-      >
-        <input
-          name="name"
-          value={form.name}
-          onChange={handleChange}
-          placeholder="Name"
-          className="w-full p-3 border rounded-lg text-black focus:ring-2 focus:ring-blue-400 transition"
-          required
-        />
-        <input
-          name="alias"
-          value={form.alias}
-          onChange={handleChange}
-          placeholder="Alias"
-          className="w-full p-3 border rounded-lg text-black focus:ring-2 focus:ring-blue-400 transition"
-        />
-        <input
-          name="email"
-          value={form.email}
-          onChange={handleChange}
-          placeholder="Email"
-          type="email"
-          className="w-full p-3 border rounded-lg text-black focus:ring-2 focus:ring-blue-400 transition"
-          required
-        />
-        <input
-          name="phone"
-          value={form.phone}
-          onChange={handleChange}
-          placeholder="Phone"
-          className="w-full p-3 border rounded-lg text-black focus:ring-2 focus:ring-blue-400 transition"
-        />
-        <input
-          name="password"
-          value={form.password}
-          onChange={handleChange}
-          placeholder="Password"
-          type="password"
-          className="w-full p-3 border rounded-lg text-black focus:ring-2 focus:ring-blue-400 transition"
-          required
-        />
-        <label className="flex items-center gap-2 col-span-1 md:col-span-2 cursor-pointer w-full">
-          <input
-            type="checkbox"
-            name="discontinue"
-            checked={form.discontinue}
-            onChange={handleChange}
-            className="accent-red-500"
-          />
-          Discontinue User
-        </label>
-        <button
-          type="submit"
-          className="col-span-1 md:col-span-2 w-full bg-primary hover:bg-primary/80 text-white py-3 rounded-lg transition shadow"
-        >
-          {editIndex !== null ? "Update User" : "Add User"}
-        </button>
-      </motion.form>
+      {/* ADD / EDIT FORM */}
+      <div className="glass rounded-xl p-6 mb-8">
+        <h2 className="font-heading font-semibold text-foreground mb-5">
+          {editUserId ? "Edit User" : "Add New User"}
+        </h2>
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-5">
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">
+                Full Name *
+              </label>
+              <input
+                name="name"
+                value={form.name}
+                onChange={handleChange}
+                required
+                className="w-full h-10 px-3 bg-input/70 border border-border rounded-md focus:ring-1 focus:ring-primary focus:border-primary outline-none"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">
+                Alias
+              </label>
+              <input
+                name="alias"
+                value={form.alias}
+                onChange={handleChange}
+                className="w-full h-10 px-3 bg-input/70 border border-border rounded-md focus:ring-1 focus:ring-primary focus:border-primary outline-none"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">
+                Email *
+              </label>
+              <input
+                name="email"
+                type="email"
+                value={form.email}
+                onChange={handleChange}
+                required
+                className="w-full h-10 px-3 bg-input/70 border border-border rounded-md focus:ring-1 focus:ring-primary focus:border-primary outline-none"
+              />
+            </div>
+            <div>
+              <label className="text-xs text-muted-foreground mb-1 block">
+                Phone
+              </label>
+              <input
+                name="phone"
+                value={form.phone}
+                onChange={handleChange}
+                className="w-full h-10 px-3 bg-input/70 border border-border rounded-md focus:ring-1 focus:ring-primary focus:border-primary outline-none"
+              />
+            </div>
 
-      {/* Filter: Magnifying Glass Toggle */}
-      <div className="mt-6 mb-4 flex items-center gap-2">
+            {!editUserId && (
+              <div className="relative">
+                <label className="text-xs text-muted-foreground mb-1 block">
+                  Password *
+                </label>
+                <input
+                  name="password"
+                  type={showPass ? "text" : "password"}
+                  value={form.password}
+                  onChange={handleChange}
+                  required
+                  className="w-full h-10 px-3 pr-10 bg-input/70 border border-border rounded-md focus:ring-1 focus:ring-primary focus:border-primary outline-none"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPass((p) => !p)}
+                  className="absolute right-3 top-7 text-muted-foreground hover:text-foreground"
+                >
+                  {showPass ? <EyeOff size={15} /> : <Eye size={15} />}
+                </button>
+              </div>
+            )}
+
+            <div className="flex items-center gap-2 pt-2">
+              <input
+                type="checkbox"
+                name="isActive"
+                checked={form.isActive}
+                onChange={handleChange}
+                className="h-4 w-4 accent-primary"
+              />
+              <label className="text-sm text-muted-foreground cursor-pointer">
+                Active User
+              </label>
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3">
+            {editUserId && (
+              <button
+                type="button"
+                onClick={resetForm}
+                className="px-5 h-10 border border-border hover:bg-muted rounded-md text-sm font-medium transition"
+              >
+                Cancel
+              </button>
+            )}
+            <button
+              type="submit"
+              className="px-6 h-10 bg-primary text-primary-foreground rounded-md hover:opacity-90 transition text-sm font-medium"
+            >
+              {editUserId ? "Update User" : "Add User"}
+            </button>
+          </div>
+        </form>
+      </div>
+
+      {/* SEARCH */}
+      <div className="flex items-center gap-3 mb-5">
         <button
           onClick={() => setShowFilter(!showFilter)}
-          className="p-2 border rounded text-white bg-blue-600 flex items-center justify-center hover:bg-blue-500 transition"
-          title="Filter Users"
+          className="p-2.5 bg-secondary text-secondary-foreground rounded-md hover:bg-secondary/80 transition"
         >
           <Search size={18} />
         </button>
-
-        <AnimatePresence>
-          {showFilter && (
-            <motion.input
-              type="text"
-              placeholder="Search by name, alias, email, phone"
-              value={filter}
-              onChange={(e) => setFilter(e.target.value)}
-              className="p-3 border rounded-lg text-black w-full sm:w-80 focus:ring-2 focus:ring-blue-400 transition"
-              initial={{ opacity: 0, x: 20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 20 }}
-              autoFocus
-            />
-          )}
-        </AnimatePresence>
+        {showFilter && (
+          <input
+            value={filter}
+            onChange={(e) => setFilter(e.target.value)}
+            placeholder="Search by name or email..."
+            className="px-4 h-10 bg-input/70 border border-border rounded-md focus:ring-1 focus:ring-primary outline-none w-80"
+          />
+        )}
       </div>
 
-      {/* Users Table (Desktop) */}
-      <div className="hidden md:block bg-card border rounded-xl p-4 mt-2 shadow overflow-x-auto">
-        <h2 className="mb-3 font-medium">User List</h2>
-        <table className="w-full text-sm border-separate border-spacing-y-2">
-          <thead>
-            <tr className="text-left border-b">
-              <th className="p-2">Name</th>
-              <th className="p-2">Alias</th>
-              <th className="p-2">Email</th>
-              <th className="p-2">Phone</th>
-              <th className="p-2">Status</th>
-              <th className="p-2">Actions</th>
+      {/* USERS TABLE */}
+      <div className="glass rounded-xl overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50 text-muted-foreground">
+            <tr>
+              <th className="px-6 py-4 text-left font-medium">Name</th>
+              <th className="px-6 py-4 text-left font-medium">Email</th>
+              <th className="px-6 py-4 text-left font-medium">Status</th>
+              <th className="px-6 py-4 text-right font-medium">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {filteredUsers.length === 0 && (
+            {filteredUsers.length === 0 ? (
               <tr>
-                <td colSpan={6} className="text-center p-4 text-muted-foreground">
-                  No users found
+                <td
+                  colSpan={4}
+                  className="px-6 py-12 text-center text-muted-foreground"
+                >
+                  {filter
+                    ? "No users found matching your search."
+                    : "No users added yet."}
                 </td>
               </tr>
-            )}
-            <AnimatePresence>
-              {filteredUsers.map((u, i) => (
-                <motion.tr
-                  key={i}
-                  className="border-b rounded transition cursor-pointer hover:bg-gray-800 hover:text-white"
-                  initial={{ opacity: 0, y: -10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 10 }}
-                  layout
+            ) : (
+              filteredUsers.map((user) => (
+                <tr
+                  key={user.id}
+                  className="border-t border-border hover:bg-muted/30 transition"
                 >
-                  <td className="p-2">{highlightText(u.name, filter)}</td>
-                  <td className="p-2">{highlightText(u.alias, filter)}</td>
-                  <td className="p-2">{highlightText(u.email, filter)}</td>
-                  <td className="p-2">{highlightText(u.phone, filter)}</td>
-                  <td className="p-2">
+                  <td className="px-6 py-4 font-medium">{user.name}</td>
+                  <td className="px-6 py-4 text-muted-foreground">
+                    {user.email}
+                  </td>
+                  <td className="px-6 py-4">
                     <span
-                      className={`px-2 py-1 rounded text-xs font-semibold ${
-                        u.discontinue ? "bg-red-200 text-red-800" : "bg-green-200 text-green-800"
+                      className={`inline-block px-3 py-1 text-xs font-medium rounded-full ${
+                        user.isActive
+                          ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400"
+                          : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
                       }`}
                     >
-                      {u.discontinue ? "Inactive" : "Active"}
+                      {user.isActive ? "Active" : "Inactive"}
                     </span>
                   </td>
-                  <td className="p-2 flex gap-2 flex-wrap">
+                  <td className="px-6 py-4 flex justify-end gap-2">
                     <button
-                      onClick={() => handleView(i)}
-                      className="bg-blue-500 hover:bg-blue-400 text-white px-2 py-1 rounded text-xs flex-1 sm:flex-none"
+                      onClick={() => setViewUserId(user.id)}
+                      className="p-2 rounded hover:bg-muted transition"
+                      title="View Details"
                     >
-                      View
+                      <Eye size={16} />
                     </button>
+
                     <button
-                      onClick={() => handleEdit(i)}
-                      className="bg-yellow-400 hover:bg-yellow-300 text-white px-2 py-1 rounded text-xs flex-1 sm:flex-none"
+                      onClick={() => handleEdit(user.id)}
+                      className="p-2 rounded hover:bg-muted transition"
+                      title="Edit User"
                     >
-                      Edit
+                      <Edit size={16} />
                     </button>
+
                     <button
-                      onClick={() => handleDelete(i)}
-                      className="bg-red-500 hover:bg-red-400 text-white px-2 py-1 rounded text-xs flex-1 sm:flex-none"
+                      onClick={() => toggleStatus(user.id)}
+                      className="p-2 rounded hover:bg-muted transition"
+                      title={user.isActive ? "Deactivate" : "Activate"}
                     >
-                      Delete
+                      {user.isActive ? "Deactivate" : "Activate"}
                     </button>
+
+                    {deleteConfirmId === user.id ? (
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => handleDelete(user.id)}
+                          className="text-xs px-3 py-1 bg-destructive text-destructive-foreground rounded hover:bg-destructive/90"
+                        >
+                          Confirm
+                        </button>
+                        <button
+                          onClick={() => setDeleteConfirmId(null)}
+                          className="text-xs px-3 py-1 text-muted-foreground hover:underline"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setDeleteConfirmId(user.id)}
+                        className="p-2 rounded hover:bg-destructive/10 text-destructive transition"
+                        title="Delete User"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    )}
                   </td>
-                </motion.tr>
-              ))}
-            </AnimatePresence>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>
 
-      {/* Mobile Cards */}
-      <div className="md:hidden grid grid-cols-1 gap-4 mt-2">
-        {filteredUsers.length === 0 && (
-          <p className="text-center p-4 text-muted-foreground">No users found</p>
-        )}
-        <AnimatePresence>
-          {filteredUsers.map((u, i) => (
-            <motion.div
-              key={i}
-              className="bg-card p-4 rounded-xl shadow flex flex-col gap-2 hover:bg-gray-700 hover:text-white transition"
-              custom={i}
-              variants={cardVariants}
-              initial="hidden"
-              animate="visible"
-              exit="exit"
-              layout
-            >
-              <p><strong>Name:</strong> {highlightText(u.name, filter)}</p>
-              <p><strong>Alias:</strong> {highlightText(u.alias, filter)}</p>
-              <p><strong>Email:</strong> {highlightText(u.email, filter)}</p>
-              <p><strong>Phone:</strong> {highlightText(u.phone, filter)}</p>
+      {/* VIEW USER MODAL */}
+      {viewedUser && (
+        <div
+          className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+          onClick={() => setViewUserId(null)}
+        >
+          <div
+            className="glass p-6 rounded-2xl w-full max-w-md"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-lg font-semibold mb-5">User Details</h2>
+            <div className="space-y-3 text-sm">
               <p>
-                <strong>Status:</strong>{" "}
+                <span className="text-muted-foreground">Name:</span>{" "}
+                {viewedUser.name}
+              </p>
+              <p>
+                <span className="text-muted-foreground">Email:</span>{" "}
+                {viewedUser.email}
+              </p>
+              <p>
+                <span className="text-muted-foreground">Role:</span>{" "}
+                {viewedUser.role}
+              </p>
+              <p>
+                <span className="text-muted-foreground">Status:</span>
                 <span
-                  className={`px-2 py-1 rounded text-xs font-semibold ${
-                    u.discontinue ? "bg-red-200 text-red-800" : "bg-green-200 text-green-800"
+                  className={`font-medium ${
+                    viewedUser.isActive
+                      ? "text-emerald-600 dark:text-emerald-400"
+                      : "text-red-600 dark:text-red-400"
                   }`}
                 >
-                  {u.discontinue ? "Inactive" : "Active"}
+                  {" "}
+                  {viewedUser.isActive ? "Active" : "Inactive"}
                 </span>
               </p>
-              <div className="flex flex-wrap gap-2 mt-2">
-                <button
-                  onClick={() => handleView(i)}
-                  className="bg-blue-500 hover:bg-blue-400 text-white px-2 py-1 rounded text-xs flex-1"
-                >
-                  View
-                </button>
-                <button
-                  onClick={() => handleEdit(i)}
-                  className="bg-yellow-400 hover:bg-yellow-300 text-white px-2 py-1 rounded text-xs flex-1"
-                >
-                  Edit
-                </button>
-                <button
-                  onClick={() => handleDelete(i)}
-                  className="bg-red-500 hover:bg-red-400 text-white px-2 py-1 rounded text-xs flex-1"
-                >
-                  Delete
-                </button>
-              </div>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
-
-      {/* View Modal */}
-      <AnimatePresence>
-        {viewIndex !== null && (
-          <motion.div
-            className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          >
-            <motion.div
-              className="bg-card p-6 rounded-xl w-full max-w-md shadow-lg"
-              initial={{ scale: 0.8 }}
-              animate={{ scale: 1 }}
-              exit={{ scale: 0.8 }}
+            </div>
+            <button
+              onClick={() => setViewUserId(null)}
+              className="mt-6 w-full h-10 bg-primary text-primary-foreground rounded-xl hover:opacity-90 transition"
             >
-              <h2 className="text-lg font-semibold mb-4">User Details</h2>
-              <p><strong>Name:</strong> {users[viewIndex].name}</p>
-              <p><strong>Alias:</strong> {users[viewIndex].alias}</p>
-              <p><strong>Email:</strong> {users[viewIndex].email}</p>
-              <p><strong>Phone:</strong> {users[viewIndex].phone}</p>
-              <p><strong>Password:</strong> {users[viewIndex].password}</p>
-              <p><strong>Status:</strong> {users[viewIndex].discontinue ? "Inactive" : "Active"}</p>
-              <button
-                onClick={closeView}
-                className="mt-4 bg-primary hover:bg-primary/80 text-white px-4 py-2 rounded w-full transition"
-              >
-                Close
-              </button>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+              Close
+            </button>
+          </div>
+        </div>
+      )}
     </AppLayout>
   );
 };

@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useModule } from "@/contexts/ModuleContext";
 import { useAuth } from "@/contexts/AuthContext";
+import { useTask } from "@/contexts/TaskContext";
 import { useSidebarState } from "./AppLayout";
 import {
   BarChart3,
@@ -19,7 +20,9 @@ import {
 interface SubItem {
   label: string;
   path: string;
+  badge?: number;
 }
+
 interface NavItem {
   label: string;
   icon: React.ElementType;
@@ -27,27 +30,35 @@ interface NavItem {
   children?: SubItem[];
 }
 
-// NORMAL NAV
-const NAV_ITEMS: NavItem[] = [
+// ✅ MERGED NAV (dev logic + your features)
+const buildNavItems = (overdueCount: number): NavItem[] => [
   { label: "Dashboard", icon: BarChart3, path: "/" },
+
   {
     label: "Query",
     icon: Scale,
-    children: [{ label: "Trial Balance", path: "/transactions" }],
+    children: [
+      { label: "Trial Balance", path: "/transactions" },
+      {
+        label: "Tasks",
+        path: "/tasks",
+        badge: overdueCount > 0 ? overdueCount : undefined,
+      },
+    ],
   },
-  { label: "Tasks", icon: CheckCircle2, path: "/tasks" },
+
   {
     label: "Transaction",
     icon: Receipt,
     children: [
-{ label: "Expense Booking", path: "/transactions/expense-booking" }
+      { label: "Expense Booking", path: "/transactions/expense-booking" },
     ],
   },
-  { label: "Payment", icon: Receipt, path: "/payments" },
 
+  { label: "Payment", icon: Receipt, path: "/payments" },
 ];
 
-// ADMIN NAV (merged properly)
+// ✅ ADMIN untouched
 const ADMIN_NAV_ITEMS: NavItem[] = [
   { label: "Dashboard", icon: BarChart3, path: "/admin" },
   {
@@ -74,93 +85,71 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
   },
 ];
 
-// CLEAN NavButton (typed version)
-const NavButton = ({
-  item,
-  collapsed,
-  active,
-}: {
-  item: NavItem;
-  collapsed: boolean;
-  active: boolean;
-}) => {
+const NavButton = ({ item, collapsed, active }: any) => {
   const navigate = useNavigate();
 
   return (
     <button
       onClick={() => item.path && navigate(item.path)}
-      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors duration-200 ${
+      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
         active
           ? "bg-primary/15 text-primary font-medium"
           : "text-sidebar-foreground hover:bg-sidebar-accent"
-      }`}
+      } ${collapsed ? "justify-center" : ""}`}
       title={collapsed ? item.label : undefined}
     >
-      <item.icon size={18} className="shrink-0" />
-      <span
-        className={`truncate transition-opacity duration-200 ${
-          collapsed ? "opacity-0 w-0 overflow-hidden" : "opacity-100"
-        }`}
-      >
-        {item.label}
-      </span>
+      <item.icon size={18} />
+      <span className={`${collapsed ? "hidden" : ""}`}>{item.label}</span>
     </button>
   );
 };
 
-const NavGroup = ({
-  item,
-  collapsed,
-  activeChild,
-}: {
-  item: NavItem;
-  collapsed: boolean;
-  activeChild: boolean;
-}) => {
+const NavGroup = ({ item, collapsed, activeChild }: any) => {
   const navigate = useNavigate();
   const location = useLocation();
   const [open, setOpen] = useState(activeChild);
 
+  const handleClick = () => {
+    if (collapsed) {
+      navigate(item.children[0].path);
+      return;
+    }
+    setOpen((p: boolean) => !p);
+  };
+
   return (
     <div>
       <button
-        onClick={() => !collapsed && setOpen((p) => !p)}
-        title={collapsed ? item.label : undefined}
-        className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors duration-200 ${
+        onClick={handleClick}
+        className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm ${
           activeChild
             ? "bg-primary/10 text-primary"
-            : "text-sidebar-foreground hover:bg-sidebar-accent"
+            : "hover:bg-sidebar-accent"
         }`}
       >
-        <item.icon size={18} className="shrink-0" />
-        <span
-          className={`flex-1 text-left truncate transition-opacity duration-200 ${
-            collapsed ? "opacity-0 w-0 overflow-hidden" : "opacity-100"
-          }`}
-        >
-          {item.label}
-        </span>
-        {!collapsed &&
-          (open ? (
-            <ChevronUp size={14} />
-          ) : (
-            <ChevronDown size={14} />
-          ))}
+        <item.icon size={18} />
+        {!collapsed && <span className="flex-1">{item.label}</span>}
+        {!collapsed && (open ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
       </button>
 
-      {!collapsed && open && item.children && (
-        <div className="mt-0.5 ml-4 pl-3 border-l border-sidebar-border space-y-0.5">
-          {item.children.map((child) => (
+      {!collapsed && open && (
+        <div className="ml-6 space-y-1">
+          {item.children.map((child: SubItem) => (
             <button
               key={child.path}
               onClick={() => navigate(child.path)}
-              className={`w-full text-left px-3 py-1.5 rounded-lg text-xs ${
-                location.pathname === child.path
-                  ? "bg-primary/15 text-primary font-semibold"
-                  : "text-sidebar-foreground hover:bg-sidebar-accent"
+              className={`w-full flex justify-between text-xs px-2 py-1 rounded ${
+                location.pathname.startsWith(child.path)
+                  ? "bg-primary/15 text-primary"
+                  : "hover:bg-sidebar-accent"
               }`}
             >
-              {child.label}
+              <span>{child.label}</span>
+              {child.badge && (
+                <span className="bg-red-500 text-white text-[9px] px-1 rounded">
+                  {child.badge}
+                </span>
+              )}
             </button>
           ))}
         </div>
@@ -173,56 +162,45 @@ export const AppSidebar = () => {
   const location = useLocation();
   const { moduleLabel } = useModule();
   const { collapsed, setCollapsed } = useSidebarState();
+  const { getOverdueTasks } = useTask();
   useAuth();
+
+  const overdueCount = getOverdueTasks().length;
 
   const isAdminPage =
     location.pathname.startsWith("/admin") ||
     location.pathname.startsWith("/users");
 
+  const NAV_ITEMS = buildNavItems(overdueCount);
   const itemsToRender = isAdminPage ? ADMIN_NAV_ITEMS : NAV_ITEMS;
 
   return (
-    <aside
-      className={`fixed top-14 left-0 bottom-0 z-40 flex flex-col border-r bg-sidebar transition-all ${
-        collapsed ? "w-16" : "w-56"
-      }`}
-    >
-      <div className="flex-1 flex flex-col gap-1 p-2 pt-4 overflow-y-auto">
-        {itemsToRender.map((item) => {
-          if (item.children) {
-            return (
-              <NavGroup
-                key={item.label}
-                item={item}
-                collapsed={collapsed}
-                activeChild={item.children.some((c) =>
-                  location.pathname.startsWith(c.path)
-                )}
-              />
-            );
-          }
-
-          return (
+    <aside className={`fixed top-14 left-0 bottom-0 ${collapsed ? "w-16" : "w-56"} border-r`}>
+      <div className="p-2 space-y-1">
+        {itemsToRender.map((item) =>
+          item.children ? (
+            <NavGroup
+              key={item.label}
+              item={item}
+              collapsed={collapsed}
+              activeChild={item.children.some((c) =>
+                location.pathname.startsWith(c.path)
+              )}
+            />
+          ) : (
             <NavButton
               key={item.label}
               item={item}
               collapsed={collapsed}
               active={location.pathname.startsWith(item.path || "")}
             />
-          );
-        })}
+          )
+        )}
       </div>
 
-      <div className="border-t p-2 space-y-2">
-        {!collapsed && (
-          <div className="px-2 py-1.5 rounded-md bg-sidebar-accent text-xs text-center">
-            {isAdminPage ? "Admin Module" : moduleLabel}
-          </div>
-        )}
-        <button
-          onClick={() => setCollapsed(!collapsed)}
-          className="w-full flex justify-center py-1.5"
-        >
+      <div className="p-2 border-t">
+        {!collapsed && <div className="text-xs text-center">{moduleLabel}</div>}
+        <button onClick={() => setCollapsed(!collapsed)} className="w-full mt-2">
           {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
         </button>
       </div>
