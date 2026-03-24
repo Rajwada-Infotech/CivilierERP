@@ -30,10 +30,14 @@ import WidgetsRights from "./pages/admin/WidgetsRights";
 import FinYearRights from "./pages/admin/FinYearRights";
 import ApprovalSetup from "./pages/admin/ApprovalSetup";
 import PostApprovalRights from "./pages/admin/PostApprovalRights";
+import ExpenseBooking from "./pages/admin/ExpenseBooking";
+import TransactionExpenseBooking from "./pages/ExpenseBooking";
 import NotFound from "./pages/NotFound";
 import Users from "./pages/Users";
+import Payment from "./pages/Payment";
 
 const queryClient = new QueryClient();
+
 
 const ProtectedRoute = ({ children }: { children: React.ReactNode }) => {
   const { currentUser } = useAuth();
@@ -61,12 +65,15 @@ const AppRoutes = () => (
     <Route path="/login" element={<PublicRoute><LoginPage /></PublicRoute>} />
     <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
     <Route path="/transactions" element={<ProtectedRoute><Transactions /></ProtectedRoute>} />
+    <Route path="/transactions/expense-booking" element={<ProtectedRoute><TransactionExpenseBooking /></ProtectedRoute>} />
     <Route path="/users" element={<ProtectedRoute><Users /></ProtectedRoute>} />
     <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
     <Route path="/widgets" element={<ProtectedRoute><Widgets /></ProtectedRoute>} />
     <Route path="/tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
-    <Route path="/tasks/:id" element={<ProtectedRoute><TaskDetail /></ProtectedRoute>} />
+<Route path="/tasks/:id" element={<ProtectedRoute><TaskDetail /></ProtectedRoute>} />
+    <Route path="/payments" element={<ProtectedRoute><Payment /></ProtectedRoute>} />
     <Route path="/masters/contractors" element={<ProtectedRoute><ContractorMaster /></ProtectedRoute>} />
+
     <Route path="/masters/suppliers" element={<ProtectedRoute><SupplierMaster /></ProtectedRoute>} />
     <Route path="/masters/customers" element={<ProtectedRoute><CustomerMaster /></ProtectedRoute>} />
     <Route path="/masters/banks" element={<ProtectedRoute><BankMaster /></ProtectedRoute>} />
@@ -80,6 +87,7 @@ const AppRoutes = () => (
     <Route path="/admin/rights/fin-year" element={<ProtectedRoute><FinYearRights /></ProtectedRoute>} />
     <Route path="/admin/approval/setup" element={<ProtectedRoute><ApprovalSetup /></ProtectedRoute>} />
     <Route path="/admin/approval/post-rights" element={<ProtectedRoute><PostApprovalRights /></ProtectedRoute>} />
+    <Route path="/admin/transactions/expense-booking" element={<ProtectedRoute><ExpenseBooking /></ProtectedRoute>} />
     <Route path="*" element={<NotFound />} />
   </Routes>
 );

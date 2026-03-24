@@ -20,7 +20,9 @@ export type PageKey =
   | "admin_widgets_rights"
   | "admin_fin_year_rights"
   | "admin_approval_setup"
-  | "admin_post_approval_rights";
+  | "admin_post_approval_rights"
+  | "admin_expense_booking"
+  | "payments";
 
 // Expanded Actions available per page
 export type PageAction = "view" | "create" | "edit" | "delete" | "print" | "preview" | "export" | "approve" | "reject";
@@ -54,14 +56,16 @@ export const PAGE_DEFINITIONS: {
   { key: "admin_widgets_rights", label: "Widgets Rights", path: "/admin/rights/widgets", group: "Admin", availableActions: ["view", "create", "edit", "delete"] },
   { key: "admin_fin_year_rights", label: "Fin Year Rights", path: "/admin/rights/fin-year", group: "Admin", availableActions: ["view", "create", "edit", "delete"] },
   { key: "admin_approval_setup", label: "Approval Setup", path: "/admin/approval/setup", group: "Admin", availableActions: ["view", "create", "edit", "delete"] },
-  { key: "admin_post_approval_rights", label: "Post Approval Rights", path: "/admin/approval/post-rights", group: "Admin", availableActions: ["view", "create", "edit", "delete", "approve", "reject"] },
+{ key: "admin_post_approval_rights", label: "Post Approval Rights", path: "/admin/approval/post-rights", group: "Admin", availableActions: ["view", "create", "edit", "delete", "approve", "reject"] },
+  { key: "admin_expense_booking", label: "Expense Booking", path: "/admin/transactions/expense-booking", group: "Transactions", availableActions: ["view", "create", "edit", "delete"] },
 
   // Main group
   { key: "dashboard", label: "Dashboard", path: "/", group: "Main", availableActions: ["view", "print", "export"] },
   { key: "transactions", label: "Transactions", path: "/transactions", group: "Main", availableActions: ["view", "create", "edit", "delete", "print", "export", "approve", "reject"] },
   { key: "reports", label: "Reports", path: "/reports", group: "Main", availableActions: ["view", "print", "preview", "export"] },
   { key: "widgets", label: "Widgets", path: "/widgets", group: "Main", availableActions: ["view", "print", "export"] },
-  { key: "tasks", label: "Tasks", path: "/tasks", group: "Main", availableActions: ["view", "create", "edit", "delete", "print"] },
+{ key: "tasks", label: "Tasks", path: "/tasks", group: "Main", availableActions: ["view", "create", "edit", "delete", "print"] },
+  { key: "payments", label: "Payments", path: "/payments", group: "Main", availableActions: ["view", "create", "edit", "delete", "print", "export"] },
 
   // Masters group
   { key: "master_contractors", label: "Contractor Master", path: "/masters/contractors", group: "Masters", availableActions: ["view", "create", "edit", "delete", "print", "export"] },

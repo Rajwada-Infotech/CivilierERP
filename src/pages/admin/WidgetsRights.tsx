@@ -183,10 +183,10 @@ export default function WidgetsRights() {
   return (
     <AppLayout>
       <Breadcrumbs items={["Admin", "Rights", "Widgets Rights"]} />
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-foreground flex items-center gap-3">
-            <ShieldCheck className="w-8 h-8 text-primary" />
+      <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between mb-6 gap-4 lg:gap-6 w-full">
+        <div className="flex-1 min-w-0">
+          <h1 className="text-xl sm:text-2xl font-bold text-foreground flex items-center gap-2 sm:gap-3">
+            <ShieldCheck className="w-7 h-7 sm:w-8 sm:h-8 text-primary flex-shrink-0" />
             Widgets Rights
           </h1>
           <p className="text-muted-foreground mt-1">Manage widget access permissions for users</p>
@@ -297,30 +297,34 @@ export default function WidgetsRights() {
       </div>
 
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
+
+        <CardHeader className="flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
           <div>
             <CardTitle>Widgets Permissions</CardTitle>
             <CardDescription>Real-time user widget access control ({filteredData.length} permissions)</CardDescription>
           </div>
-          <div className="relative">
+          <div className="relative w-full md:w-auto">
             <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="Search users, widgets..."
-              className="pl-10 w-64"
+              className="pl-10 w-full md:w-64"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
         </CardHeader>
+
+
         <CardContent>
+          <div className="overflow-x-auto">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>User</TableHead>
-                <TableHead>Widget</TableHead>
-                <TableHead>Actions</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Actions</TableHead>
+                <TableHead className="w-[140px] sm:w-[160px]">User</TableHead>
+                <TableHead className="w-[160px] sm:w-[200px]">Widget</TableHead>
+                <TableHead>Permissions</TableHead>
+                <TableHead className="w-[80px]">Status</TableHead>
+                <TableHead className="w-[160px]">Actions</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -335,73 +339,80 @@ export default function WidgetsRights() {
                   const user = allUsers.find((u) => u.id === row.userId);
                   return (
                     <TableRow key={row.id}>
-                      <TableCell className="font-medium">
-                        {row.name}
-                        <div className="text-xs text-muted-foreground">{row.email}</div>
+                      <TableCell className="font-medium max-w-[140px] truncate">
+                        <div className="truncate">{row.name}</div>
+                        <div className="text-xs text-muted-foreground truncate">{row.email}</div>
                       </TableCell>
-                      <TableCell className="font-medium">{row.pageLabel}</TableCell>
-                      <TableCell>
-                        {row.actions.split(", ").map((actionLabel) => (
-                          <Badge key={actionLabel} variant="secondary" className="mr-1 text-xs">
-                            {actionLabel}
-                          </Badge>
-                        ))}
+                      <TableCell className="font-medium max-w-[160px] sm:max-w-[200px] truncate">{row.pageLabel}</TableCell>
+                      <TableCell className="max-w-[200px] sm:max-w-[250px]">
+                        <div className="flex flex-wrap gap-1">
+                          {row.actions.split(", ").map((actionLabel) => (
+                            <Badge key={actionLabel} variant="secondary" className="text-xs whitespace-nowrap">
+                              {actionLabel}
+                            </Badge>
+                          ))}
+                        </div>
                       </TableCell>
+
                       <TableCell>
                         <Badge variant={row.status === "Active" ? "default" : "destructive"}>
                           {row.status}
                         </Badge>
                       </TableCell>
-                      <TableCell className="space-x-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8"
-                          onClick={() => user && openEditDialog(user)}
-                        >
-                          <Edit3 className="w-4 h-4 mr-1" />
-                          Edit
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8"
-                          onClick={() => handleToggleStatus(row.userId)}
-                        >
-                          <UserCheck className="w-4 h-4 mr-1" />
-                          {row.status === "Active" ? "Deactivate" : "Activate"}
-                        </Button>
-                        <AlertDialog open={deletingUserId === row.userId} onOpenChange={(open) => !open && setDeletingUserId(null)}>
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>Delete User?</AlertDialogTitle>
-                              <AlertDialogDescription>
-                                This will permanently remove {row.name} ({row.email}) and all their permissions.
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-                            <AlertDialogFooter>
-                              <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction className="bg-destructive" onClick={handleDeleteUser}>
-                                Delete User
-                              </AlertDialogAction>
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 text-destructive hover:bg-destructive/5"
-                          onClick={() => setDeletingUserId(row.userId)}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
+  <TableCell className="space-x-1 sm:space-x-2 py-3">
+    <Button
+      variant="ghost"
+      size="sm"
+      className="h-8 w-8 sm:w-auto sm:h-8 p-1 sm:p-2 text-xs sm:text-sm"
+      onClick={() => user && openEditDialog(user)}
+      title="Edit"
+    >
+      <Edit3 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+      <span className="sm:ml-1 hidden sm:inline">Edit</span>
+    </Button>
+    <Button
+      variant="ghost"
+      size="sm"
+      className="h-8 w-8 sm:w-auto sm:h-8 p-1 sm:p-2 text-xs sm:text-sm"
+      onClick={() => handleToggleStatus(row.userId)}
+      title={row.status === "Active" ? "Deactivate" : "Activate"}
+    >
+      <UserCheck className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+      <span className="sm:ml-1 hidden sm:inline">{row.status === "Active" ? "Deactivate" : "Activate"}</span>
+    </Button>
+    <AlertDialog open={deletingUserId === row.userId} onOpenChange={(open) => !open && setDeletingUserId(null)}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Delete User?</AlertDialogTitle>
+          <AlertDialogDescription>
+            This will permanently remove {row.name} ({row.email}) and all their permissions.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction className="bg-destructive" onClick={handleDeleteUser}>
+            Delete User
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    <Button
+      variant="ghost"
+      size="sm"
+      className="h-8 w-8 sm:h-8 p-1 sm:p-0 text-destructive hover:bg-destructive/5"
+      onClick={() => setDeletingUserId(row.userId)}
+      title="Delete"
+    >
+      <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+    </Button>
+  </TableCell>
+</TableRow>
                   );
                 })
               )}
             </TableBody>
           </Table>
+          </div>
         </CardContent>
       </Card>
     </AppLayout>
