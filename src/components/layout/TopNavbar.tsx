@@ -29,7 +29,7 @@ import {
   Layers,
 } from "lucide-react";
 
-// ─── Dropdown ─────────────────────────────────────────────────────────────────
+// ─── Dropdown Component ─────────────────────────────────────────────────────
 const Dropdown = ({
   open,
   onClose,
@@ -42,6 +42,7 @@ const Dropdown = ({
   className?: string;
 }) => {
   const ref = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
@@ -116,6 +117,7 @@ export const TopNavbar = () => {
   const { theme, setTheme } = useTheme();
   const { activeModule, setActiveModule } = useModule();
   const { currentUser, logout } = useAuth();
+
   const [setupOpen, setSetupOpen] = useState(false);
   const [moduleOpen, setModuleOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
@@ -154,7 +156,7 @@ export const TopNavbar = () => {
         <LogoFull />
       </button>
 
-      {/* ── DESKTOP NAV ─────────────────────────────────────────────────── */}
+      {/* DESKTOP NAV */}
       <div className="hidden md:flex items-center gap-1">
         {/* Collapse toggle */}
         <button
@@ -179,7 +181,7 @@ export const TopNavbar = () => {
             pointerEvents: navCollapsed ? "none" : "auto",
           }}
         >
-          {/* Setup */}
+          {/* Setup with Fixed Masters */}
           <div className="relative shrink-0">
             <button
               onClick={handleSetupClick}
@@ -192,15 +194,16 @@ export const TopNavbar = () => {
             >
               <Settings size={16} /> Setup
             </button>
+
             <Dropdown
               open={setupOpen}
               onClose={() => setSetupOpen(false)}
-              className="right-0 w-72 p-3"
+              className="right-0 w-80 p-4"
             >
               <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-3">
                 Masters
               </p>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
                 {masterItems.map(({ icon: Icon, label, path, color }) => (
                   <button
                     key={label}
@@ -208,16 +211,16 @@ export const TopNavbar = () => {
                       navigate(path);
                       setSetupOpen(false);
                     }}
-                    className={`group flex flex-col items-center gap-2 p-3 rounded-xl border transition-all ${
+                    className={`group flex flex-col items-center gap-2 p-4 rounded-2xl border transition-all active:scale-95 ${
                       location.pathname === path
                         ? "border-primary/60 bg-primary/10"
-                        : "border-border/50 hover:border-border hover:bg-muted/60"
+                        : "border-border/50 hover:border-border hover:bg-muted"
                     }`}
                   >
-                    <div className="w-9 h-9 rounded-lg flex items-center justify-center bg-muted/60 group-hover:bg-muted transition-colors">
-                      <Icon size={18} className={color} />
+                    <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-card border border-border/60 group-hover:bg-muted transition-colors">
+                      <Icon size={22} className={color} />
                     </div>
-                    <span className="text-[11px] font-heading text-muted-foreground group-hover:text-foreground transition-colors text-center">
+                    <span className="text-[11px] font-heading text-muted-foreground group-hover:text-foreground transition-colors text-center leading-tight">
                       {label}
                     </span>
                   </button>
@@ -229,7 +232,11 @@ export const TopNavbar = () => {
           {/* Reports */}
           <button
             onClick={() => navigate("/reports")}
-            className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all duration-200 whitespace-nowrap ${location.pathname === "/reports" ? "bg-primary/10 text-primary" : "hover:bg-muted text-foreground"}`}
+            className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all duration-200 whitespace-nowrap ${
+              location.pathname === "/reports"
+                ? "bg-primary/10 text-primary"
+                : "hover:bg-muted text-foreground"
+            }`}
           >
             <BarChart3 size={16} /> Reports
           </button>
@@ -237,12 +244,16 @@ export const TopNavbar = () => {
           {/* Widgets */}
           <button
             onClick={() => navigate("/widgets")}
-            className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all duration-200 whitespace-nowrap ${location.pathname === "/widgets" ? "bg-primary/10 text-primary" : "hover:bg-muted text-foreground"}`}
+            className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all duration-200 whitespace-nowrap ${
+              location.pathname === "/widgets"
+                ? "bg-primary/10 text-primary"
+                : "hover:bg-muted text-foreground"
+            }`}
           >
             <Puzzle size={16} /> Widgets
           </button>
 
-          {/* Module */}
+          {/* Module Selector */}
           <div className="relative shrink-0">
             <button
               onClick={() => {
@@ -255,6 +266,7 @@ export const TopNavbar = () => {
             >
               <LayoutGrid size={16} /> Module
             </button>
+
             <Dropdown
               open={moduleOpen}
               onClose={() => setModuleOpen(false)}
@@ -266,13 +278,18 @@ export const TopNavbar = () => {
               <div
                 className={`grid gap-3 ${isAdmin ? "grid-cols-2" : "grid-cols-1"}`}
               >
+                {/* Finance Module */}
                 <button
                   onClick={() => {
                     setActiveModule("finance");
                     setModuleOpen(false);
                     navigate("/");
                   }}
-                  className={`group flex flex-col items-center gap-2 p-4 rounded-lg border transition-all ${activeModule === "finance" ? "border-primary bg-primary/10" : "border-border hover:border-primary hover:bg-muted"}`}
+                  className={`group flex flex-col items-center gap-2 p-4 rounded-lg border transition-all ${
+                    activeModule === "finance"
+                      ? "border-primary bg-primary/10"
+                      : "border-border hover:border-primary hover:bg-muted"
+                  }`}
                 >
                   <svg width="32" height="32" viewBox="0 0 36 36" fill="none">
                     <circle
@@ -310,18 +327,28 @@ export const TopNavbar = () => {
                     </span>
                   )}
                 </button>
+
+                {/* Admin Module */}
                 {isAdmin && (
                   <button
                     onClick={() => {
                       setModuleOpen(false);
                       navigate("/admin");
                     }}
-                    className={`group flex flex-col items-center gap-2 p-4 rounded-lg border transition-all ${location.pathname.startsWith("/admin") ? "border-primary bg-primary/10" : "border-border hover:border-primary hover:bg-muted"}`}
+                    className={`group flex flex-col items-center gap-2 p-4 rounded-lg border transition-all ${
+                      location.pathname.startsWith("/admin")
+                        ? "border-primary bg-primary/10"
+                        : "border-border hover:border-primary hover:bg-muted"
+                    }`}
                   >
                     <div className="relative">
                       <ShieldCheck
                         size={32}
-                        className={`transition-colors ${location.pathname.startsWith("/admin") ? "text-primary" : "text-muted-foreground group-hover:text-primary"}`}
+                        className={`transition-colors ${
+                          location.pathname.startsWith("/admin")
+                            ? "text-primary"
+                            : "text-muted-foreground group-hover:text-primary"
+                        }`}
                       />
                       {isSuperAdmin && (
                         <span
@@ -346,9 +373,6 @@ export const TopNavbar = () => {
             </Dropdown>
           </div>
         </div>
-        {/* end collapsible */}
-
-        {/* ── Always visible: Theme + User ── */}
 
         {/* Theme */}
         <div className="relative shrink-0">
@@ -364,6 +388,7 @@ export const TopNavbar = () => {
           >
             <Palette size={17} />
           </button>
+
           <Dropdown
             open={themeOpen}
             onClose={() => setThemeOpen(false)}
@@ -384,7 +409,11 @@ export const TopNavbar = () => {
                   setTheme(t);
                   setThemeOpen(false);
                 }}
-                className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-heading transition-all duration-150 ${theme === t ? "bg-primary/10 text-primary" : "text-foreground hover:bg-muted"}`}
+                className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-heading transition-all duration-150 ${
+                  theme === t
+                    ? "bg-primary/10 text-primary"
+                    : "text-foreground hover:bg-muted"
+                }`}
               >
                 <span
                   className="w-3.5 h-3.5 rounded-full shrink-0 border border-border/50"
@@ -420,6 +449,7 @@ export const TopNavbar = () => {
               </span>
             )}
           </button>
+
           <Dropdown
             open={userOpen}
             onClose={() => setUserOpen(false)}
@@ -466,7 +496,10 @@ export const TopNavbar = () => {
               <User size={14} /> Profile
             </button>
             <button
-              onMouseDown={() => { logout(); navigate("/login"); }}
+              onMouseDown={() => {
+                logout();
+                navigate("/login");
+              }}
               className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted transition-colors text-destructive"
             >
               <LogOut size={14} /> Sign Out
@@ -475,14 +508,11 @@ export const TopNavbar = () => {
         </div>
       </div>
 
-      {/* ── MOBILE RIGHT ─────────────────────────────────────────────────── */}
+      {/* MOBILE RIGHT SIDE */}
       <div className="flex md:hidden items-center">
-        {/* User avatar */}
         <div className="relative">
           <button
-            onClick={() => {
-              setUserOpen((p) => !p);
-            }}
+            onClick={() => setUserOpen((p) => !p)}
             className="relative w-8 h-8 rounded-full gradient-accent flex items-center justify-center text-xs font-heading text-primary-foreground font-bold"
           >
             {currentUser?.initials || "?"}
@@ -495,6 +525,7 @@ export const TopNavbar = () => {
               </span>
             )}
           </button>
+
           <Dropdown
             open={userOpen}
             onClose={() => setUserOpen(false)}
@@ -512,7 +543,10 @@ export const TopNavbar = () => {
               <User size={14} /> Profile
             </button>
             <button
-              onMouseDown={() => { logout(); navigate("/login"); }}
+              onMouseDown={() => {
+                logout();
+                navigate("/login");
+              }}
               className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted transition-colors text-destructive"
             >
               <LogOut size={14} /> Sign Out
