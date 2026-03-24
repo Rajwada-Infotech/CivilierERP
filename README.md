@@ -1,49 +1,33 @@
-# CivilierERP
 
-**Enterprise Resource Planning System for Civil Engineering & Construction**
+## Intended Use
 
-CivilierERP is a purpose-built ERP platform designed for civil engineering and construction organizations. It centralizes project execution, resource allocation, financial control, procurement, and reporting — replacing fragmented tools and manual processes with a single, secure, role-based system.
+CivilierERP is developed exclusively for **internal enterprise deployment** by authorized clients of Rajwada Infotech.
 
-The platform delivers real-time visibility, reduces administrative overhead, and improves cross-department coordination on complex infrastructure and building projects.
+**Typical Workflow:**
+1. Secure login (organization credentials / SSO)
+2. Role-based access to relevant modules
+3. Manage projects, resources, finances, and procurement
+4. Monitor performance through dashboards and generate reports
 
-## Core Modules
+## Security
 
-- **Project Management**  
-  Full lifecycle tracking — initiation → planning → execution → closure  
-  Tasks, milestones, Gantt-style progress, centralized updates & delays
+- Strict Role-Based Access Control (RBAC)
+- Audit logging for critical actions
+- Controlled access to sensitive financial and operational data
 
-- **Resource Management**  
-  Manpower allocation & attendance tracking  
-  Equipment scheduling & utilization monitoring  
-  Material assignment across multiple sites/projects
+## About Rajwada Infotech
 
-- **Financial Management**  
-  Project budgeting & cost control  
-  Expense logging & approval workflows  
-  Client billing, RA bills, invoice generation  
-  Basic financial summaries & variance reporting
+Rajwada Infotech is a Kolkata-based software company delivering powerful and user-friendly ERP solutions across PAN India.  
+**CivilierERP** is our flagship product tailored for the construction and infrastructure sector.
 
-- **Procurement & Inventory**  
-  Material requisition & multi-level approval  
-  Vendor database, purchase orders, GRN  
-  Stock tracking, low-stock alerts, site-wise inventory
+- Website: [rajwadainfotech.com](https://rajwadainfotech.com/)
+- Contact: +91 9831406285 | info@rajwadainfotech.com
+- Address: Windsor Greens Apartment, 26, Mahamaya Mandir Road, Mahamayatala, Kolkata - 700084
 
-- **Admin & Security**  
-  User & role management (RBAC)  
-  Module permissions & audit trails  
-  System configuration & master data control
+## License & Restrictions
 
-- **Reporting & Dashboards**  
-  Real-time KPI dashboards (project health, cash flow, resource load)  
-  Custom & scheduled reports  
-  Export to PDF/Excel
+**Proprietary Software – All Rights Reserved**  
+© 2026 Rajwada Infotech  
 
-## Key Capabilities
-
-- Single source of truth for all project-related data
-- Strict role-based access control (RBAC)
-- Modular & extensible architecture
-- Workflow-driven operations with approval chains
-- Designed for multi-project, multi-site construction companies
-
-## Project Structure
+This software is licensed solely for authorized use by Rajwada Infotech clients.  
+Unauthorized copying, modification, distribution, or use is strictly prohibited.
