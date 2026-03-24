@@ -46,7 +46,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { useToast } from "@/components/ui/use-toast";
+// FIX: Standardised to sonner (was using deprecated shadcn useToast)
+import { toast } from "sonner";
 import {
   Collapsible,
   CollapsibleContent,
@@ -91,7 +92,6 @@ interface PermissionRow {
 
 export default function MenuRights() {
   const { allUsers, updateUserPagePermissions, toggleUserStatus, deleteUser } = useAuth();
-  const { toast } = useToast();
 
   const [searchTerm, setSearchTerm] = useState("");
   const [showEditDialog, setShowEditDialog] = useState(false);

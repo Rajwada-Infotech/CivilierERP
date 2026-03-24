@@ -13,22 +13,42 @@ import { motion, AnimatePresence } from "framer-motion";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// FIX: Added all 9 PageAction entries — previously only 4 were defined,
+//      causing TypeScript errors and runtime crashes in the legend renderer.
 const ACTION_LABELS: Record<PageAction, string> = {
-  view: "View", create: "Create", edit: "Edit", delete: "Delete",
+  view:    "View",
+  create:  "Create",
+  edit:    "Edit",
+  delete:  "Delete",
+  print:   "Print",
+  preview: "Preview",
+  export:  "Export",
+  approve: "Approve",
+  reject:  "Reject",
 };
 
 const ACTION_COLORS: Record<PageAction, string> = {
-  view:   "bg-blue-500/15 text-blue-400 border-blue-500/30",
-  create: "bg-green-500/15 text-green-400 border-green-500/30",
-  edit:   "bg-yellow-500/15 text-yellow-400 border-yellow-500/30",
-  delete: "bg-red-500/15 text-red-400 border-red-500/30",
+  view:    "bg-blue-500/15 text-blue-400 border-blue-500/30",
+  create:  "bg-green-500/15 text-green-400 border-green-500/30",
+  edit:    "bg-yellow-500/15 text-yellow-400 border-yellow-500/30",
+  delete:  "bg-red-500/15 text-red-400 border-red-500/30",
+  print:   "bg-sky-500/15 text-sky-400 border-sky-500/30",
+  preview: "bg-indigo-500/15 text-indigo-400 border-indigo-500/30",
+  export:  "bg-teal-500/15 text-teal-400 border-teal-500/30",
+  approve: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
+  reject:  "bg-orange-500/15 text-orange-400 border-orange-500/30",
 };
 
 const ACTION_COLORS_ON: Record<PageAction, string> = {
-  view:   "bg-blue-500 text-white border-blue-500",
-  create: "bg-green-500 text-white border-green-500",
-  edit:   "bg-yellow-500 text-white border-yellow-500",
-  delete: "bg-red-500 text-white border-red-500",
+  view:    "bg-blue-500 text-white border-blue-500",
+  create:  "bg-green-500 text-white border-green-500",
+  edit:    "bg-yellow-500 text-white border-yellow-500",
+  delete:  "bg-red-500 text-white border-red-500",
+  print:   "bg-sky-500 text-white border-sky-500",
+  preview: "bg-indigo-500 text-white border-indigo-500",
+  export:  "bg-teal-500 text-white border-teal-500",
+  approve: "bg-emerald-500 text-white border-emerald-500",
+  reject:  "bg-orange-500 text-white border-orange-500",
 };
 
 // Group pages by their group label

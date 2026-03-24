@@ -192,7 +192,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     return { success: true };
   }, [userStore]);
 
-  const logout = useCallback(() => setCurrentUser(null), []);
+  const logout = useCallback(() => {
+    // FIX: Clear user state — navigation to /login is handled at the call site
+    // (TopNavbar) so the router redirect is immediate, not deferred.
+    setCurrentUser(null);
+  }, []);
 
   const canAccessPage = useCallback((page: PageKey) => {
     if (!currentUser) return false;

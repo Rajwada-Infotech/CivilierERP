@@ -49,7 +49,8 @@ export const FinYearProvider = ({ children }: FinYearProviderProps) => {
 
   const toggleLock = useCallback((id: string) => {
     setFinYears(prev => prev.map(fy => 
-      fy.id === id ? { ...fy, locked: !fy.locked, status: !fy.locked ? 'Active' : 'Closed' } : fy
+      // FIX: Was inverted — locking should set status Closed, unlocking should set Active
+      fy.id === id ? { ...fy, locked: !fy.locked, status: fy.locked ? 'Active' : 'Closed' } : fy
     ));
   }, []);
 

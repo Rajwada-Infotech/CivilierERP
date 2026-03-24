@@ -48,7 +48,8 @@ import {
 } from "@/components/ui/select";
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { Switch } from "@/components/ui/switch";
-import { useToast } from "@/components/ui/use-toast";
+// FIX: Standardised to sonner (was using deprecated shadcn useToast)
+import { toast } from "sonner";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -65,7 +66,6 @@ import { cn } from "@/lib/utils";
 export default function FinYearRights() {
   const { finYears, addFinYear, updateFinYear, toggleLock, deleteFinYear } =
     useFinYear();
-  const { toast } = useToast();
 
   const [searchTerm, setSearchTerm] = useState("");
   const [showDialog, setShowDialog] = useState(false);

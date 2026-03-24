@@ -25,13 +25,13 @@ export interface Task {
   description: string;
   priority: TaskPriority;
   status: TaskStatus;
-  assignedTo: string;       // user id
+  assignedTo: string;
   assignedToName: string;
-  createdBy: string;        // user id
+  createdBy: string;
   createdByName: string;
-  reviewedBy?: string;      // user id
+  reviewedBy?: string;
   reviewedByName?: string;
-  dueDate: string;          // ISO date string
+  dueDate: string;
   qualityCriteria: QualityCriteria[];
   comments: TaskComment[];
   closedAt?: string;
@@ -51,7 +51,7 @@ const DEMO_TASKS: Task[] = [
     assignedToName: "Rajesh Kumar",
     createdBy: "u-admin-1",
     createdByName: "Admin User",
-    dueDate: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString().split("T")[0], // yesterday (overdue)
+    dueDate: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
     qualityCriteria: [
       { id: "qc-1", label: "All GST numbers verified", met: false },
       { id: "qc-2", label: "PAN numbers entered", met: false },
@@ -71,7 +71,7 @@ const DEMO_TASKS: Task[] = [
     assignedToName: "Meena Patel",
     createdBy: "u-admin-1",
     createdByName: "Admin User",
-    dueDate: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split("T")[0], // 2 days from now
+    dueDate: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
     qualityCriteria: [
       { id: "qc-4", label: "HDFC account reconciled", met: true },
       { id: "qc-5", label: "SBI account reconciled", met: false },
@@ -111,7 +111,9 @@ interface TaskContextType {
   addTask: (task: Omit<Task, "id" | "createdAt" | "comments" | "reminderSent">) => void;
   updateTask: (taskId: string, updates: Partial<Task>) => void;
   deleteTask: (taskId: string) => void;
-  closeTask: (taskId: string, userId: string, userName: string) => void;
+  // FIX: Removed unused userId/userName params from closeTask signature.
+  //      The function only sets status/closedAt and never used those params.
+  closeTask: (taskId: string) => void;
   reviewTask: (taskId: string, userId: string, userName: string, approved: boolean) => void;
   addComment: (taskId: string, user: { id: string; name: string; initials: string }, text: string) => void;
   toggleQualityCriteria: (taskId: string, criteriaId: string) => void;
@@ -130,8 +132,6 @@ export const useTask = () => {
 
 export const TaskProvider = ({ children }: { children: React.ReactNode }) => {
   const [tasks, setTasks] = useState<Task[]>(DEMO_TASKS);
-
-
 
   const addTask = useCallback((task: Omit<Task, "id" | "createdAt" | "comments" | "reminderSent">) => {
     const newTask: Task = {
@@ -154,7 +154,8 @@ export const TaskProvider = ({ children }: { children: React.ReactNode }) => {
     toast.success("Task deleted.");
   }, []);
 
-  const closeTask = useCallback((taskId: string, userId: string, userName: string) => {
+  // FIX: Removed unused userId, userName parameters
+  const closeTask = useCallback((taskId: string) => {
     setTasks(prev => prev.map(t => t.id === taskId ? {
       ...t, status: "closed" as TaskStatus, closedAt: new Date().toISOString(),
     } : t));
