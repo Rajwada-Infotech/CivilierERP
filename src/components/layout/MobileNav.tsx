@@ -7,7 +7,6 @@ import {
   X,
   Scale,
   ChevronDown,
-  ChevronUp,
   FileText,
   Palette,
   ShieldCheck,
@@ -46,6 +45,7 @@ interface NavItem {
   disabled?: boolean;
 }
 
+// ✅ MERGED MASTER ITEMS
 const masterItems: NavItemChild[] = [
   { icon: Receipt, label: "Expenses", path: "/masters/expenses" },
   { icon: Truck, label: "Suppliers", path: "/masters/suppliers" },
@@ -96,6 +96,7 @@ export const MobileNav: React.FC = () => {
 
   const overdueCount = getOverdueTasks().length;
   const isAdminPage = location.pathname.startsWith("/admin");
+
   const isSuperAdmin = currentUser?.role === "super_admin";
   const isAdmin = currentUser?.role === "admin" || isSuperAdmin;
   const isModuleActive = activeModule !== null;
@@ -103,16 +104,28 @@ export const MobileNav: React.FC = () => {
   const RoleIcon = isSuperAdmin ? Crown : isAdmin ? ShieldCheck : null;
   const roleColor = isSuperAdmin ? "#7c3aed" : "#2563eb";
 
+  // ✅ MERGED NAV ITEMS
   const NAV_ITEMS: NavItem[] = [
     { label: "Dashboard", icon: BarChart3, path: "/" },
+
     { label: "Setup", icon: Settings, children: masterItems, disabled: !isModuleActive },
+
     { label: "Reports", icon: BarChart3, path: "/reports" },
     { label: "Widgets", icon: Puzzle, path: "/widgets" },
+
+    // ✅ Tasks with badge
     { label: "Tasks", icon: CheckCircle2, path: "/tasks", count: overdueCount },
+
+    // ✅ YOUR FEATURE
+    { label: "Payment", icon: Receipt, path: "/payments" },
+
     {
       label: "Query",
       icon: Scale,
-      children: [{ label: "Trial Balance", path: "/transactions", icon: FileText }],
+      children: [
+        { label: "Trial Balance", path: "/transactions", icon: FileText },
+        { label: "Expense Booking", path: "/transactions/expense-booking", icon: FileText },
+      ],
     },
   ];
 
@@ -132,7 +145,7 @@ export const MobileNav: React.FC = () => {
 
   const isActive = (path?: string, children?: NavItemChild[]) => {
     if (path) return location.pathname === path;
-    if (children) return children.some((child) => location.pathname === child.path);
+    if (children) return children.some((c) => location.pathname === c.path);
     return false;
   };
 
@@ -148,218 +161,88 @@ export const MobileNav: React.FC = () => {
 
   return (
     <>
-      {/* FAB */}
       <button
         onClick={() => setOpen(true)}
         className="fixed bottom-4 right-4 z-50 w-12 h-12 rounded-full gradient-accent text-primary-foreground flex items-center justify-center shadow-lg md:hidden"
-        aria-label="Open menu"
       >
         <Menu size={20} />
       </button>
 
       {open && (
         <div className="fixed inset-0 z-50 md:hidden">
-          {/* Backdrop */}
-          <div
-            className="absolute inset-0 bg-background/80 backdrop-blur-sm"
-            onClick={() => setOpen(false)}
-          />
+          <div className="absolute inset-0 bg-background/80 backdrop-blur-sm" onClick={() => setOpen(false)} />
 
-          {/* Bottom Sheet */}
-          <div className="absolute bottom-0 left-0 right-0 rounded-t-2xl bg-card border-t border-border animate-slide-up max-h-[85vh] overflow-y-auto">
-            {/* Header */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border sticky top-0 bg-card z-10">
-              <span className="font-heading text-sm font-semibold text-foreground">Menu</span>
-              <button
-                onClick={() => setOpen(false)}
-                className="p-1 rounded-md hover:bg-muted text-muted-foreground"
-              >
+          <div className="absolute bottom-0 left-0 right-0 rounded-t-2xl bg-card border-t max-h-[85vh] overflow-y-auto">
+            <div className="flex justify-between px-4 py-3 border-b">
+              <span className="font-semibold text-sm">Menu</span>
+              <button onClick={() => setOpen(false)}>
                 <X size={18} />
               </button>
             </div>
 
-            {/* User Info */}
-            <div className="p-3 border-b border-border">
-              <div className="flex items-center gap-3">
-                <div className="relative w-10 h-10 rounded-full gradient-accent flex items-center justify-center text-sm font-bold text-primary-foreground">
+            {/* USER */}
+            <div className="p-3 border-b">
+              <div className="flex gap-3">
+                <div className="relative w-10 h-10 rounded-full flex items-center justify-center bg-primary text-white">
                   {currentUser?.initials || "?"}
                   {RoleIcon && (
-                    <span
-                      className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full flex items-center justify-center border-2 border-card"
-                      style={{ background: roleColor }}
-                    >
-                      <RoleIcon size={10} className="text-white" />
+                    <span className="absolute -bottom-1 -right-1 w-5 h-5 flex items-center justify-center rounded-full border-2 border-card" style={{ background: roleColor }}>
+                      <RoleIcon size={10} />
                     </span>
                   )}
                 </div>
                 <div>
-                  <p className="font-semibold font-heading text-sm text-foreground">{currentUser?.name}</p>
-                  <p className="text-xs text-muted-foreground">{currentUser?.email}</p>
+                  <p className="text-sm font-semibold">{currentUser?.name}</p>
+                  <p className="text-xs">{currentUser?.email}</p>
                 </div>
               </div>
 
-              <div className="mt-3 grid grid-cols-2 gap-2">
-                <button className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs rounded-md hover:bg-muted transition-colors text-foreground border border-border">
+              <div className="grid grid-cols-2 gap-2 mt-3">
+                <button className="text-xs border p-2 rounded flex justify-center gap-2">
                   <User size={14} /> Profile
                 </button>
-                <button
-                  onClick={() => {
-                    logout();
-                    setOpen(false);
-                  }}
-                  className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs rounded-md hover:bg-destructive/10 transition-colors text-destructive border border-border"
-                >
-                  <LogOut size={14} /> Sign Out
+                <button onClick={() => { logout(); setOpen(false); }} className="text-xs border p-2 rounded flex justify-center gap-2 text-red-500">
+                  <LogOut size={14} /> Logout
                 </button>
               </div>
             </div>
 
-            {/* Navigation Items */}
-            <div className="p-3 space-y-0.5">
+            {/* NAV */}
+            <div className="p-3 space-y-1">
               {itemsToRender.map((item) => {
-                const groupKey = item.label;
-                const isOpen = groupStates[groupKey] ?? false;
+                const openState = groupStates[item.label];
                 const active = isActive(item.path, item.children);
 
                 if (item.children) {
                   return (
-                    <div key={groupKey}>
-                      <button
-                        onClick={() => toggleGroup(groupKey)}
-                        disabled={item.disabled}
-                        className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-heading transition-colors ${
-                          active ? "bg-primary/10 text-primary" : "text-foreground hover:bg-muted"
-                        } ${item.disabled ? "opacity-50 cursor-not-allowed" : ""}`}
-                      >
+                    <div key={item.label}>
+                      <button onClick={() => toggleGroup(item.label)} className={`w-full flex gap-3 px-3 py-2 rounded ${active ? "text-primary" : ""}`}>
                         <item.icon size={18} />
                         <span className="flex-1 text-left">{item.label}</span>
-                        {item.count !== undefined && item.count > 0 && (
-                          <span className="text-xs font-semibold">{item.count}</span>
-                        )}
-                        <ChevronDown
-                          size={14}
-                          className={`text-muted-foreground transition-transform ${isOpen ? "rotate-180" : ""}`}
-                        />
+                        <ChevronDown size={14} className={openState ? "rotate-180" : ""} />
                       </button>
 
-                      <div className={`overflow-hidden transition-all duration-200 ${isOpen ? "max-h-96" : "max-h-0"}`}>
-                        <div className="ml-4 pl-3 border-l border-border py-1 my-1 space-y-1">
-                          {item.children.map((child) => {
-                            const ChildIcon = child.icon || FileText;
-                            return (
-                              <button
-                                key={child.path}
-                                onClick={() => go(child.path)}
-                                className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-heading transition-colors ${
-                                  location.pathname === child.path
-                                    ? "bg-primary/10 text-primary font-semibold"
-                                    : "text-foreground hover:bg-muted"
-                                }`}
-                              >
-                                <ChildIcon size={14} className="text-muted-foreground" />
-                                {child.label}
-                              </button>
-                            );
-                          })}
+                      {openState && (
+                        <div className="ml-5 space-y-1">
+                          {item.children.map((child) => (
+                            <button key={child.path} onClick={() => go(child.path)} className="block w-full text-left text-xs px-2 py-1">
+                              {child.label}
+                            </button>
+                          ))}
                         </div>
-                      </div>
+                      )}
                     </div>
                   );
                 }
 
-                // Simple item (no children)
                 return (
-                  <button
-                    key={item.path}
-                    onClick={() => go(item.path!)}
-                    className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-heading transition-colors ${
-                      active ? "bg-primary/10 text-primary font-semibold" : "text-foreground hover:bg-muted"
-                    }`}
-                  >
+                  <button key={item.path} onClick={() => go(item.path!)} className="w-full flex gap-3 px-3 py-2 rounded">
                     <item.icon size={18} />
                     {item.label}
-                    {item.count !== undefined && item.count > 0 && (
-                      <span className="ml-auto w-5 h-5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
-                        {item.count > 9 ? "9+" : item.count}
-                      </span>
-                    )}
+                    {item.count ? <span className="ml-auto text-xs bg-red-500 text-white px-1 rounded">{item.count}</span> : null}
                   </button>
                 );
               })}
-
-              {/* Module Selector */}
-              <div className="border-t border-border pt-3 mt-3">
-                <button
-                  onClick={() => toggleGroup("Module")}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-heading text-foreground hover:bg-muted transition-colors"
-                >
-                  <LayoutGrid size={18} className="text-primary" />
-                  <span className="flex-1 text-left">Module</span>
-                  <ChevronDown
-                    size={14}
-                    className={`text-muted-foreground transition-transform ${groupStates["Module"] ? "rotate-180" : ""}`}
-                  />
-                </button>
-
-                <div className={`overflow-hidden transition-all duration-200 ${groupStates["Module"] ? "max-h-96" : "max-h-0"}`}>
-                  <div className="ml-4 pl-3 border-l border-border py-1 my-1 space-y-1">
-                    <button
-                      onClick={() => handleModuleChange("finance")}
-                      className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-heading transition-colors ${
-                        activeModule === "finance" && !isAdminPage ? "bg-primary/10 text-primary font-semibold" : "text-foreground hover:bg-muted"
-                      }`}
-                    >
-                      <BarChart3 size={14} className="text-muted-foreground" /> Finance
-                    </button>
-                    {isAdmin && (
-                      <button
-                        onClick={() => handleModuleChange("admin")}
-                        className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs font-heading transition-colors ${
-                          isAdminPage ? "bg-primary/10 text-primary font-semibold" : "text-foreground hover:bg-muted"
-                        }`}
-                      >
-                        <ShieldCheck size={14} className="text-muted-foreground" /> Admin
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Theme Selector */}
-              <div className="border-t border-border pt-3 mt-3">
-                <button
-                  onClick={() => toggleGroup("Theme")}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-heading text-foreground hover:bg-muted transition-colors"
-                >
-                  <Palette size={18} className="text-primary" />
-                  <span className="flex-1 text-left">Theme</span>
-                  <ChevronDown
-                    size={14}
-                    className={`text-muted-foreground transition-transform ${groupStates["Theme"] ? "rotate-180" : ""}`}
-                  />
-                </button>
-
-                <div className={`overflow-hidden transition-all duration-200 ${groupStates["Theme"] ? "max-h-96" : "max-h-0"}`}>
-                  <div className="ml-4 pl-3 border-l border-border py-1 my-1 space-y-1">
-                    {(Object.entries(THEME_DOTS) as [Theme, { bg: string; label: string }][]).map(([t, { bg, label }]) => (
-                      <button
-                        key={t}
-                        onClick={() => setTheme(t)}
-                        className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-xs font-heading transition-colors ${
-                          theme === t ? "bg-primary/10 text-primary" : "text-foreground hover:bg-muted"
-                        }`}
-                      >
-                        <span
-                          className="w-3.5 h-3.5 rounded-full shrink-0 border border-border/50"
-                          style={{ background: bg }}
-                        />
-                        {label}
-                        {theme === t && <span className="ml-auto text-xs">✓</span>}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
             </div>
           </div>
         </div>
