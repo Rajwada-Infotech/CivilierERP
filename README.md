@@ -2,13 +2,16 @@
 
 **Flagship ERP Solution for Civil Engineering & Construction**
 
-CivilierERP is a comprehensive, purpose-built Enterprise Resource Planning (ERP) system developed by **Rajwada Infotech**. It is specifically designed for construction companies, infrastructure developers, and civil engineering organizations.
+CivilierERP is a comprehensive, purpose-built Enterprise Resource Planning (ERP) system being developed by **Rajwada Infotech**. It is specifically designed for construction companies, infrastructure developers, and civil engineering organizations.
 
-The platform integrates all critical business functions into one secure, scalable system — enabling real-time visibility, streamlined workflows, reduced manual effort, and better decision-making across multiple projects and sites.
+The platform aims to integrate all critical business functions — project management, resources, finance, procurement, inventory, HR, and reporting — into one secure, scalable system. It will provide real-time visibility, streamlined workflows, reduced manual effort, and better decision-making across multiple projects and sites.
+
+> **Status**: Under Active Development  
+> This is a work-in-progress project. Features and modules are being built iteratively. Not yet ready for production deployment.
 
 ## About Rajwada Infotech
 
-Rajwada Infotech is a growing software company based in Kolkata, delivering powerful, user-friendly, and fully customizable ERP solutions across PAN India. With 100+ satisfied clients, we specialize in automation, accuracy, real-time data access, and complete business control to help organizations grow faster and smarter.
+Rajwada Infotech is a growing software company based in Kolkata, delivering powerful, user-friendly, and fully customizable ERP solutions across PAN India. We specialize in automation, accuracy, real-time data access, and complete business control to help organizations grow faster and smarter.
 
 **CivilierERP** is our flagship product tailored for the construction and infrastructure sector.
 
@@ -17,34 +20,34 @@ Rajwada Infotech is a growing software company based in Kolkata, delivering powe
 - **Email**: info@rajwadainfotech.com
 - **Address**: Windsor Greens Apartment, 26, Mahamaya Mandir Road, Mahamayatala, Kolkata - 700084, West Bengal, India
 
-## Core Modules
+## Planned Core Modules
 
 - **Project Management**  
-  Complete project lifecycle tracking from initiation to closure, including tasks, milestones, Gantt-style progress monitoring, delays, and centralized updates.
+  End-to-end project lifecycle tracking, tasks, milestones, progress monitoring, and delay alerts.
 
 - **Resource Management**  
-  Manpower allocation, attendance tracking, equipment scheduling, and optimal utilization of resources across multiple sites and projects.
+  Manpower allocation, attendance tracking, equipment scheduling, and resource utilization across sites.
 
 - **Financial Management**  
-  Budget planning & control, expense tracking, RA billing, invoice generation, cost monitoring, variance analysis, and financial reporting.
+  Budget planning & control, expense tracking, RA billing, invoice generation, cost monitoring, and financial reporting.
 
 - **Procurement & Inventory**  
-  Material requisition with multi-level approvals, vendor management, purchase orders, Goods Receipt Note (GRN), site-wise stock tracking, and low-stock alerts.
+  Material requisitions with multi-level approvals, vendor management, purchase orders, GRN, and site-wise stock tracking.
 
 - **HR & Admin**  
-  User and role management with granular permissions, master data control, system configurations, and audit trails.
+  User and role management with granular permissions, master data control, and system configurations.
 
 - **Reporting & Dashboards**  
-  Real-time operational dashboards, KPI tracking (project health, resource utilization, cash flow, etc.), custom reports, and export to PDF/Excel.
+  Real-time operational dashboards, KPI tracking, custom reports, and export to PDF/Excel.
 
-## Key Features
+## Key Features (Planned)
 
 - Single source of truth for all operational and project data
 - Strict Role-Based Access Control (RBAC) with approval hierarchies
 - Workflow automation and multi-level approvals
 - Secure data handling and audit logging
-- Scalable architecture for growing construction businesses
-- Real-time insights for faster and informed decision-making
+- Scalable architecture suitable for growing construction businesses
+- Real-time insights and analytics
 
 ## Project Structure
 
