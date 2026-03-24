@@ -29,6 +29,7 @@ import BankMaster from "./pages/masters/BankMaster";
 import ExpensesMaster from "./pages/masters/ExpensesMaster";
 import ItemMaster from "./pages/masters/ItemMaster";
 import ItemGroupMaster from "./pages/masters/ItemGroupMaster";
+import HsnMaster from "./pages/masters/HsnMaster";
 
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import MenuRights from "./pages/admin/MenuRights";
@@ -184,6 +185,14 @@ const AppRoutes = () => (
       element={
         <ProtectedRoute>
           <ItemGroupMaster />
+        </ProtectedRoute>
+      }
+    />
+    <Route
+      path="/masters/hsn"
+      element={
+        <ProtectedRoute>
+          <HsnMaster />
         </ProtectedRoute>
       }
     />

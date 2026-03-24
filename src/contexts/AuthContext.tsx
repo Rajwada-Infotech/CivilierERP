@@ -21,6 +21,7 @@ export type PageKey =
   | "master_expenses"
   | "master_items"
   | "master_item_groups"
+  | "master_hsn"
   | "tasks"
   | "admin_menu_rights"
   | "admin_widgets_rights"
@@ -197,7 +198,15 @@ export const PAGE_DEFINITIONS: {
     group: "Masters",
     availableActions: ["view", "create", "edit", "delete"],
   },
+  {
+    key: "master_hsn",
+    label: "HSN Master",
+    path: "/masters/hsn",
+    group: "Masters",
+    availableActions: ["view", "create", "edit", "delete", "print", "export"],
+  },
 ];
+
 
 // Full access for Super Admin & Admin
 const FULL_ACCESS: PagePermission[] = PAGE_DEFINITIONS.map((p) => ({

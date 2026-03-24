@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
+  Hash,
   BarChart3,
   CheckCircle2,
   Menu,
@@ -54,7 +55,9 @@ const masterItems: NavItemChild[] = [
   { icon: Landmark, label: "Banks", path: "/masters/banks" },
   { icon: Package, label: "Items", path: "/masters/items" },
   { icon: Layers, label: "Item Groups", path: "/masters/item-groups" },
+  { icon: Hash, label: "HSN", path: "/masters/hsn" },
 ];
+
 
 const ADMIN_NAV_ITEMS: NavItem[] = [
   { label: "Dashboard", icon: BarChart3, path: "/admin" },
