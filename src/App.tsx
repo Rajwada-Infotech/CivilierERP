@@ -23,6 +23,7 @@ import BankMaster from "./pages/masters/BankMaster";
 import ExpensesMaster from "./pages/masters/ExpensesMaster";
 import ItemMaster from "./pages/masters/ItemMaster";
 import ItemGroupMaster from "./pages/masters/ItemGroupMaster";
+import HsnMaster from "./pages/masters/HsnMaster";
 
 // Admin
 import AdminDashboard from "./pages/admin/AdminDashboard";
@@ -39,42 +40,44 @@ import { AuthProvider } from "@/contexts/AuthContext";
 import { ModuleProvider } from "@/contexts/ModuleContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { TaskProvider } from "@/contexts/TaskContext";
-// FIX 1: FinYearProvider was missing — Payment.tsx and ExpenseBooking.tsx both call
-// useFinYear() which throws "useFinYear must be inside FinYearProvider" without this.
 import { FinYearProvider } from "@/contexts/FinYearContext";
 
-// Guards a route — redirects to /login if not authenticated
+/* =========================
+   AUTH GUARD
+========================= */
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { currentUser } = useAuth();
   const location = useLocation();
-  if (!currentUser) return <Navigate to="/login" state={{ from: location }} replace />;
+
+  if (!currentUser) {
+    return <Navigate to="/login" state={{ from: location }} replace />;
+  }
+
   return <>{children}</>;
 }
 
+/* =========================
+   ROUTES
+========================= */
 function AppRoutes() {
   const { currentUser } = useAuth();
 
   return (
-    // FIX 2: Back button showed blank screen because Login was rendered as a
-    // conditional return OUTSIDE of <Routes>. When the browser navigated back
-    // to /login, React Router had no matching <Route> and rendered nothing.
-    // Solution: make /login a proper <Route> inside <Routes> so the router
-    // always has a match, and browser history works correctly.
     <Routes>
-      {/* ================= AUTH ================= */}
+      {/* AUTH */}
       <Route
         path="/login"
         element={currentUser ? <Navigate to="/" replace /> : <Login />}
       />
 
-      {/* ================= PROTECTED ================= */}
+      {/* PROTECTED */}
       <Route
         path="/*"
         element={
           <RequireAuth>
             <AppLayout>
               <Routes>
-                {/* ================= MAIN ================= */}
+                {/* MAIN */}
                 <Route path="/" element={<Dashboard />} />
                 <Route path="/transactions" element={<Transactions />} />
                 <Route path="/transactions/expense-booking" element={<ExpenseBooking />} />
@@ -83,7 +86,7 @@ function AppRoutes() {
                 <Route path="/tasks" element={<Tasks />} />
                 <Route path="/payments" element={<Payment />} />
 
-                {/* ================= MASTERS ================= */}
+                {/* MASTERS */}
                 <Route path="/masters/contractors" element={<ContractorMaster />} />
                 <Route path="/masters/suppliers" element={<SupplierMaster />} />
                 <Route path="/masters/customers" element={<CustomerMaster />} />
@@ -91,8 +94,9 @@ function AppRoutes() {
                 <Route path="/masters/expenses" element={<ExpensesMaster />} />
                 <Route path="/masters/items" element={<ItemMaster />} />
                 <Route path="/masters/item-groups" element={<ItemGroupMaster />} />
+                <Route path="/masters/hsn" element={<HsnMaster />} />
 
-                {/* ================= ADMIN ================= */}
+                {/* ADMIN */}
                 <Route path="/admin" element={<AdminDashboard />} />
                 <Route path="/admin/expense-booking" element={<AdminExpenseBooking />} />
                 <Route path="/users" element={<Users />} />
@@ -102,7 +106,7 @@ function AppRoutes() {
                 <Route path="/admin/approval/setup" element={<ApprovalSetup />} />
                 <Route path="/admin/approval/post-rights" element={<PostApprovalRights />} />
 
-                {/* ================= FALLBACK ================= */}
+                {/* FALLBACK */}
                 <Route path="*" element={<div className="p-4">Page Not Found</div>} />
               </Routes>
             </AppLayout>
@@ -113,12 +117,14 @@ function AppRoutes() {
   );
 }
 
+/* =========================
+   APP ROOT
+========================= */
 function App() {
   return (
     <AuthProvider>
       <ModuleProvider>
         <ThemeProvider>
-          {/* FIX 1: FinYearProvider added here so Payment and ExpenseBooking pages work */}
           <FinYearProvider>
             <TaskProvider>
               <Router>
