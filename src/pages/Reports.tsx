@@ -1,5 +1,4 @@
 import React from "react";
-import { AppLayout } from "@/components/layout/AppLayout";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from "recharts";
 import { TrendingUp, FileText, IndianRupee, PieChart as PieChartIcon } from "lucide-react";
@@ -39,8 +38,8 @@ const topParties = [
 ];
 
 const Reports: React.FC = () => (
-  <AppLayout>
-    <Breadcrumbs items={["Dashboard", "Reports"]} />
+  <>
+      <Breadcrumbs items={["Dashboard", "Reports"]} />
     <h1 className="text-xl font-heading font-bold text-foreground mb-4">Reports</h1>
 
     {/* Summary */}
@@ -147,7 +146,7 @@ const Reports: React.FC = () => (
         </div>
       </div>
     </div>
-  </AppLayout>
+  </>
 );
 
 export default Reports;

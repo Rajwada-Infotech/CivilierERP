@@ -1,6 +1,5 @@
 import React, { useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { AppLayout } from "@/components/layout/AppLayout";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useTask, Task, TaskStatus, TaskPriority } from "@/contexts/TaskContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -123,8 +122,8 @@ export default function Tasks() {
   const dueSoonTasks = tasks.filter(isDueSoon);
 
   return (
-    <AppLayout>
-      <Breadcrumbs items={["Dashboard", "Tasks"]} />
+    <>
+          <Breadcrumbs items={["Dashboard", "Tasks"]} />
 
       <div className="flex items-center justify-between mb-5 gap-3">
         <div>
@@ -191,6 +190,6 @@ export default function Tasks() {
       <AnimatePresence>
         {showForm && <TaskFormModal onClose={() => setShowForm(false)} />}
       </AnimatePresence>
-    </AppLayout>
+    </>
   );
 }

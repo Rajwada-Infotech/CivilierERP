@@ -1,15 +1,9 @@
-import React, {
-  createContext,
-  useContext,
-  useState,
-  useCallback,
-  useMemo,
-} from "react";
+import React, { createContext, useContext, useState, useCallback } from "react";
 
 export type UserRole = "super_admin" | "admin" | "user";
 
 /* =========================
-   PAGE KEYS (FIXED)
+   PAGE KEYS
 ========================= */
 export type PageKey =
   | "dashboard"
@@ -25,6 +19,7 @@ export type PageKey =
   | "master_expenses"
   | "master_items"
   | "master_item_groups"
+  | "master_hsn"
   | "admin_menu_rights"
   | "admin_widgets_rights"
   | "admin_fin_year_rights"
@@ -65,26 +60,150 @@ export interface AppUser {
    PAGE DEFINITIONS
 ========================= */
 export const PAGE_DEFINITIONS = [
-  { key: "dashboard", label: "Dashboard", path: "/", group: "Main", availableActions: ["view", "print", "export"] },
-  { key: "transactions", label: "Transactions", path: "/transactions", group: "Main", availableActions: ["view","create","edit","delete","print","export","approve","reject"] },
-  { key: "reports", label: "Reports", path: "/reports", group: "Main", availableActions: ["view","print","preview","export"] },
-  { key: "widgets", label: "Widgets", path: "/widgets", group: "Main", availableActions: ["view","print","export"] },
-  { key: "tasks", label: "Tasks", path: "/tasks", group: "Main", availableActions: ["view","create","edit","delete","print"] },
-  { key: "payments", label: "Payments", path: "/payments", group: "Main", availableActions: ["view","create","edit","delete","print","export"] },
+  {
+    key: "dashboard",
+    label: "Dashboard",
+    path: "/",
+    group: "Main",
+    availableActions: ["view", "print", "export"],
+  },
+  {
+    key: "transactions",
+    label: "Transactions",
+    path: "/transactions",
+    group: "Main",
+    availableActions: [
+      "view",
+      "create",
+      "edit",
+      "delete",
+      "print",
+      "export",
+      "approve",
+      "reject",
+    ],
+  },
+  {
+    key: "reports",
+    label: "Reports",
+    path: "/reports",
+    group: "Main",
+    availableActions: ["view", "print", "preview", "export"],
+  },
+  {
+    key: "widgets",
+    label: "Widgets",
+    path: "/widgets",
+    group: "Main",
+    availableActions: ["view", "print", "export"],
+  },
+  {
+    key: "tasks",
+    label: "Tasks",
+    path: "/tasks",
+    group: "Main",
+    availableActions: ["view", "create", "edit", "delete", "print"],
+  },
+  {
+    key: "payments",
+    label: "Payments",
+    path: "/payments",
+    group: "Main",
+    availableActions: ["view", "create", "edit", "delete", "print", "export"],
+  },
 
-  { key: "master_contractors", label: "Contractors", path: "/masters/contractors", group: "Masters", availableActions: ["view","create","edit","delete","print","export"] },
-  { key: "master_suppliers", label: "Suppliers", path: "/masters/suppliers", group: "Masters", availableActions: ["view","create","edit","delete","print","export"] },
-  { key: "master_customers", label: "Customers", path: "/masters/customers", group: "Masters", availableActions: ["view","create","edit","delete","print","export"] },
-  { key: "master_banks", label: "Banks", path: "/masters/banks", group: "Masters", availableActions: ["view","create","edit","delete","print","export"] },
-  { key: "master_expenses", label: "Expenses", path: "/masters/expenses", group: "Masters", availableActions: ["view","create","edit","delete","print","export"] },
-  { key: "master_items", label: "Items", path: "/masters/items", group: "Masters", availableActions: ["view","create","edit","delete","print","export"] },
-  { key: "master_item_groups", label: "Item Groups", path: "/masters/item-groups", group: "Masters", availableActions: ["view","create","edit","delete"] },
+  {
+    key: "master_contractors",
+    label: "Contractors",
+    path: "/masters/contractors",
+    group: "Masters",
+    availableActions: ["view", "create", "edit", "delete", "print", "export"],
+  },
+  {
+    key: "master_suppliers",
+    label: "Suppliers",
+    path: "/masters/suppliers",
+    group: "Masters",
+    availableActions: ["view", "create", "edit", "delete", "print", "export"],
+  },
+  {
+    key: "master_customers",
+    label: "Customers",
+    path: "/masters/customers",
+    group: "Masters",
+    availableActions: ["view", "create", "edit", "delete", "print", "export"],
+  },
+  {
+    key: "master_banks",
+    label: "Banks",
+    path: "/masters/banks",
+    group: "Masters",
+    availableActions: ["view", "create", "edit", "delete", "print", "export"],
+  },
+  {
+    key: "master_expenses",
+    label: "Expenses",
+    path: "/masters/expenses",
+    group: "Masters",
+    availableActions: ["view", "create", "edit", "delete", "print", "export"],
+  },
+  {
+    key: "master_items",
+    label: "Items",
+    path: "/masters/items",
+    group: "Masters",
+    availableActions: ["view", "create", "edit", "delete", "print", "export"],
+  },
+  {
+    key: "master_item_groups",
+    label: "Item Groups",
+    path: "/masters/item-groups",
+    group: "Masters",
+    availableActions: ["view", "create", "edit", "delete"],
+  },
+  {
+    key: "master_hsn",
+    label: "HSN",
+    path: "/masters/hsn",
+    group: "Masters",
+    availableActions: ["view", "create", "edit", "delete", "print", "export"],
+  },
 
-  { key: "admin_menu_rights", label: "Menu Rights", path: "/admin/rights/menu", group: "Admin", availableActions: ["view","create","edit","delete"] },
-  { key: "admin_widgets_rights", label: "Widgets Rights", path: "/admin/rights/widgets", group: "Admin", availableActions: ["view","create","edit","delete"] },
-  { key: "admin_fin_year_rights", label: "Fin Year", path: "/admin/rights/fin-year", group: "Admin", availableActions: ["view","create","edit","delete"] },
-  { key: "admin_approval_setup", label: "Approval Setup", path: "/admin/approval/setup", group: "Admin", availableActions: ["view","create","edit","delete"] },
-  { key: "admin_post_approval_rights", label: "Post Approval", path: "/admin/approval/post-rights", group: "Admin", availableActions: ["view","create","edit","delete","approve","reject"] },
+  {
+    key: "admin_menu_rights",
+    label: "Menu Rights",
+    path: "/admin/rights/menu",
+    group: "Admin",
+    availableActions: ["view", "create", "edit", "delete"],
+  },
+  {
+    key: "admin_widgets_rights",
+    label: "Widgets Rights",
+    path: "/admin/rights/widgets",
+    group: "Admin",
+    availableActions: ["view", "create", "edit", "delete"],
+  },
+  {
+    key: "admin_fin_year_rights",
+    label: "Fin Year",
+    path: "/admin/rights/fin-year",
+    group: "Admin",
+    availableActions: ["view", "create", "edit", "delete"],
+  },
+  {
+    key: "admin_approval_setup",
+    label: "Approval Setup",
+    path: "/admin/approval/setup",
+    group: "Admin",
+    availableActions: ["view", "create", "edit", "delete"],
+  },
+  {
+    key: "admin_post_approval_rights",
+    label: "Post Approval",
+    path: "/admin/approval/post-rights",
+    group: "Admin",
+    availableActions: ["view", "create", "edit", "delete", "approve", "reject"],
+  },
 ];
 
 /* =========================
@@ -114,6 +233,46 @@ export const DEMO_USERS = [
     pagePermissions: FULL_ACCESS,
     isActive: true,
   },
+  {
+    id: "u-admin-1",
+    name: "Admin User",
+    email: "admin@civilier.com",
+    password: "admin123",
+    role: "admin",
+    initials: "AU",
+    pagePermissions: FULL_ACCESS,
+    isActive: true,
+  },
+  {
+    id: "u-user-1",
+    name: "Rajesh Kumar",
+    email: "rajesh@civilier.com",
+    password: "user123",
+    role: "user",
+    initials: "RK",
+    pagePermissions: FULL_ACCESS,
+    isActive: true,
+  },
+  {
+    id: "u-user-2",
+    name: "Meena Patel",
+    email: "meena@civilier.com",
+    password: "user123",
+    role: "user",
+    initials: "MP",
+    pagePermissions: DEFAULT_USER_ACCESS,
+    isActive: true,
+  },
+  {
+    id: "u-user-3",
+    name: "Dinesh Sharma",
+    email: "dinesh@civilier.com",
+    password: "user123",
+    role: "user",
+    initials: "DS",
+    pagePermissions: DEFAULT_USER_ACCESS,
+    isActive: false,
+  },
 ];
 
 /* =========================
@@ -123,11 +282,16 @@ interface AuthContextType {
   currentUser: AppUser | null;
   allUsers: AppUser[];
   allAdmins: AppUser[];
-  login: (email: string, password: string) => { success: boolean; error?: string };
+
+  login: (
+    email: string,
+    password: string,
+  ) => { success: boolean; error?: string };
   logout: () => void;
 
   addUser: (user: Omit<AppUser, "id"> & { password: string }) => void;
   deleteUser: (id: string) => void;
+  toggleUserStatus: (id: string) => void;
 
   canAccessPage: (page: PageKey) => boolean;
   canDoAction: (page: PageKey, action: PageAction) => boolean;
@@ -145,20 +309,23 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
   const [users, setUsers] = useState<any[]>(DEMO_USERS);
 
-  const login = useCallback((email: string, password: string) => {
-    const user = users.find(
-      (u) =>
-        u.email.toLowerCase() === email.toLowerCase() &&
-        u.password === password
-    );
+  const login = useCallback(
+    (email: string, password: string) => {
+      const user = users.find(
+        (u) =>
+          u.email.toLowerCase() === email.toLowerCase() &&
+          u.password === password,
+      );
 
-    if (!user) return { success: false, error: "Invalid credentials" };
-    if (!user.isActive) return { success: false, error: "User inactive" };
+      if (!user) return { success: false, error: "Invalid credentials" };
+      if (!user.isActive) return { success: false, error: "User inactive" };
 
-    const { password: _pw, ...safeUser } = user;
-    setCurrentUser(safeUser);
-    return { success: true };
-  }, [users]);
+      const { password: _pw, ...safeUser } = user;
+      setCurrentUser(safeUser);
+      return { success: true };
+    },
+    [users],
+  );
 
   const logout = () => setCurrentUser(null);
 
@@ -167,7 +334,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     if (["admin", "super_admin"].includes(currentUser.role)) return true;
 
     return currentUser.pagePermissions.some(
-      (p) => p.page === page && p.actions.includes("view")
+      (p) => p.page === page && p.actions.includes("view"),
     );
   };
 
@@ -176,7 +343,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     if (["admin", "super_admin"].includes(currentUser.role)) return true;
 
     return currentUser.pagePermissions.some(
-      (p) => p.page === page && p.actions.includes(action)
+      (p) => p.page === page && p.actions.includes(action),
     );
   };
 
@@ -197,6 +364,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setUsers((prev) => prev.filter((u) => u.id !== id));
   };
 
+  const toggleUserStatus = (id: string) => {
+    setUsers((prev) =>
+      prev.map((u) => (u.id === id ? { ...u, isActive: !u.isActive } : u)),
+    );
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -207,6 +380,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         logout,
         addUser,
         deleteUser,
+        toggleUserStatus,
         canAccessPage,
         canDoAction,
       }}

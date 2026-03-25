@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from "react";
-import { AppLayout } from "@/components/layout/AppLayout";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Search, Edit, Trash2, Eye, EyeOff } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
@@ -136,8 +135,8 @@ const Users = () => {
     : null;
 
   return (
-    <AppLayout>
-      <Breadcrumbs items={["Dashboard", "Admin", "Users"]} />
+    <>
+          <Breadcrumbs items={["Dashboard", "Admin", "Users"]} />
       <h1 className="text-xl font-heading font-bold text-foreground mb-6">
         User Master
       </h1>
@@ -420,7 +419,7 @@ const Users = () => {
           </div>
         </div>
       )}
-    </AppLayout>
+    </>
   );
 };
 
