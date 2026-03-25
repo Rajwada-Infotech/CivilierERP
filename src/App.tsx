@@ -2,6 +2,7 @@ import React from "react";
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import Login from "./pages/Login";
+import NotFound from "./pages/NotFound";
 
 // Layout
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -41,6 +42,7 @@ import { ModuleProvider } from "@/contexts/ModuleContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { TaskProvider } from "@/contexts/TaskContext";
 import { FinYearProvider } from "@/contexts/FinYearContext";
+import { HsnProvider } from "@/contexts/HsnContext";
 
 /* =========================
    AUTH GUARD
@@ -106,13 +108,16 @@ function AppRoutes() {
                 <Route path="/admin/approval/setup" element={<ApprovalSetup />} />
                 <Route path="/admin/approval/post-rights" element={<PostApprovalRights />} />
 
-                {/* FALLBACK */}
-                <Route path="*" element={<div className="p-4">Page Not Found</div>} />
+                {/* 404 for authenticated users on unknown routes */}
+                <Route path="*" element={<NotFound />} />
               </Routes>
             </AppLayout>
           </RequireAuth>
         }
       />
+
+      {/* 404 for unauthenticated users on unknown routes — no login redirect */}
+      <Route path="*" element={<NotFound />} />
     </Routes>
   );
 }
@@ -126,11 +131,13 @@ function App() {
       <ModuleProvider>
         <ThemeProvider>
           <FinYearProvider>
-            <TaskProvider>
-              <Router>
-                <AppRoutes />
-              </Router>
-            </TaskProvider>
+            <HsnProvider>
+              <TaskProvider>
+                <Router>
+                  <AppRoutes />
+                </Router>
+              </TaskProvider>
+            </HsnProvider>
           </FinYearProvider>
         </ThemeProvider>
       </ModuleProvider>

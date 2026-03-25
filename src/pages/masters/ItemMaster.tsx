@@ -10,6 +10,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useHsn } from "@/contexts/HsnContext";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface ItemGroup {
@@ -278,11 +279,8 @@ const inputCls = (err?: boolean) =>
   `w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground ${err ? "border-destructive" : "border-border"}`;
 
 // ── Main Component ────────────────────────────────────────────────────────────
-interface ItemMasterProps {
-  hsnCodes?: HsnCode[];
-}
-
-const ItemMaster: React.FC<ItemMasterProps> = ({ hsnCodes = [] }) => {
+const ItemMaster: React.FC = () => {
+  const { activeHsnCodes } = useHsn();
   const [data, setData] = useState<Item[]>(INITIAL_DATA);
   const [form, setForm] = useState<Omit<Item, "_id">>({
     ...EMPTY_FORM,
@@ -435,12 +433,12 @@ const ItemMaster: React.FC<ItemMasterProps> = ({ hsnCodes = [] }) => {
             </select>
           </Field>
 
-          {/* HSN Code — fed from HSN Master via prop */}
+          {/* HSN Code — live from HSN Master via HsnContext */}
           <Field label="HSN Code">
             <HsnDropdown
               value={form.hsnCode}
               onChange={(val) => set("hsnCode", val)}
-              hsnCodes={hsnCodes}
+              hsnCodes={activeHsnCodes}
             />
           </Field>
 

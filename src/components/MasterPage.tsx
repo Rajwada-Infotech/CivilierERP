@@ -17,6 +17,7 @@ export interface FieldDef {
 export interface ColumnDef {
   key: string;
   label: string;
+  hideOnMobile?: boolean;
 }
 
 // FIX: Use a stable unique ID per record instead of array index.
@@ -29,6 +30,7 @@ interface MasterPageProps {
   fields: FieldDef[];
   columns: ColumnDef[];
   initialData: Record<string, unknown>[];
+  onDataChange?: (records: Record<string, unknown>[]) => void;
 }
 
 function getDefaults(f: FieldDef[]): Record<string, unknown> {
@@ -46,7 +48,7 @@ function seedWithIds(rows: Record<string, unknown>[]): RecordWithId[] {
   return rows.map((row, i) => ({ ...row, _id: `seed-${i}-${Date.now()}` }));
 }
 
-export const MasterPage: React.FC<MasterPageProps> = ({ title, fields, columns, initialData }) => {
+export const MasterPage: React.FC<MasterPageProps> = ({ title, fields, columns, initialData, onDataChange }) => {
   const [data, setData] = useState<RecordWithId[]>(() => seedWithIds(initialData));
   const [form, setForm] = useState<Record<string, unknown>>(() => getDefaults(fields));
   // FIX: editingId is now a stable string ID, not a fragile array index
@@ -75,12 +77,20 @@ export const MasterPage: React.FC<MasterPageProps> = ({ title, fields, columns, 
     if (!validate()) return;
     if (editingId !== null) {
       // FIX: Match by stable _id, not by array position
-      setData((prev) => prev.map((row) => row._id === editingId ? { ...form, _id: editingId } : row));
+      setData((prev) => {
+        const next = prev.map((row) => row._id === editingId ? { ...form, _id: editingId } : row);
+        onDataChange?.(next.map(({ _id, ...rest }) => rest));
+        return next;
+      });
       setEditingId(null);
       toast.success("Record updated successfully ✓");
     } else {
       const newRecord: RecordWithId = { ...form, _id: `record-${Date.now()}` };
-      setData((prev) => [...prev, newRecord]);
+      setData((prev) => {
+        const next = [...prev, newRecord];
+        onDataChange?.(next.map(({ _id, ...rest }) => rest));
+        return next;
+      });
       toast.success("Record saved successfully ✓");
     }
     setForm(getDefaults(fields));
@@ -95,7 +105,11 @@ export const MasterPage: React.FC<MasterPageProps> = ({ title, fields, columns, 
   };
 
   const handleDelete = (id: string) => {
-    setData((prev) => prev.filter((r) => r._id !== id));
+    setData((prev) => {
+      const next = prev.filter((r) => r._id !== id);
+      onDataChange?.(next.map(({ _id, ...rest }) => rest));
+      return next;
+    });
     setDeleteConfirmId(null);
     if (editingId === id) { setEditingId(null); setForm(getDefaults(fields)); }
     toast.success("Record deleted");
@@ -214,7 +228,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({ title, fields, columns, 
             <thead>
               <tr className="border-b border-border">
                 {columns.map((col) => (
-                  <th key={col.key} className="px-4 py-3 text-left text-xs font-heading uppercase tracking-wide text-muted-foreground whitespace-nowrap">
+                  <th key={col.key} className={`px-4 py-3 text-left text-xs font-heading uppercase tracking-wide text-muted-foreground whitespace-nowrap${col.hideOnMobile ? " hidden sm:table-cell" : ""}`}>
                     {col.label}
                   </th>
                 ))}
@@ -232,7 +246,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({ title, fields, columns, 
                 filtered.map((row) => (
                   <tr key={row._id} className="hover:bg-muted/30 transition-colors">
                     {columns.map((col) => (
-                      <td key={col.key} className="px-4 py-3 text-foreground">
+                      <td key={col.key} className={`px-4 py-3 text-foreground${col.hideOnMobile ? " hidden sm:table-cell" : ""}`}>
                         {col.key === "status" ? (
                           <span className={`px-2 py-0.5 rounded-full text-xs font-heading ${row[col.key] ? "bg-primary/10 text-primary" : "bg-destructive/10 text-destructive"}`}>
                             {row[col.key] ? "Active" : "Inactive"}
