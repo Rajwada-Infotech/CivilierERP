@@ -5,7 +5,6 @@ import { toast } from "sonner";
 import * as z from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
-import { AppLayout } from "@/components/layout/AppLayout";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CheckCircle, Shield, Users, AlertCircle, Settings, Plus, Edit, Trash2, ChevronDown, Search } from "lucide-react";
 import { PageKey } from "@/contexts/AuthContext";
@@ -199,7 +198,8 @@ export default function ApprovalSetup() {
 
   if (isLoading) {
     // Skeleton
-    return <AppLayout><div>Loading...</div></AppLayout>;
+    return <div>Loading...</div>
+;
   }
 
   const handleQuickEdit = (id: number) => {
@@ -212,8 +212,8 @@ export default function ApprovalSetup() {
   };
 
   return (
-    <AppLayout>
-      <Breadcrumbs items={["Admin", "Approval", "Approval Setup"]} />
+    <>
+          <Breadcrumbs items={["Admin", "Approval", "Approval Setup"]} />
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-heading font-bold text-foreground flex items-center gap-3">
@@ -458,7 +458,7 @@ export default function ApprovalSetup() {
           )}
         </CardContent>
       </Card>
-    </AppLayout>
+    </>
   );
 }
 

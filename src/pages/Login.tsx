@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import { Eye, EyeOff, ShieldCheck } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
@@ -18,12 +19,17 @@ export default function Login() {
   const [error, setError] = useState("");
   const [showHints, setShowHints] = useState(false);
   const { login } = useAuth();
+  const navigate = useNavigate();
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     const result = login(email, password);
-    if (!result.success) setError(result.error || "Login failed.");
+    if (result.success) {
+      navigate("/", { replace: true });
+    } else {
+      setError(result.error || "Login failed.");
+    }
   };
 
   return (
