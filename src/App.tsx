@@ -1,4 +1,5 @@
-import React from "react";
+import React, { useState, useEffect, Suspense } from "react";
+import Loader from "./components/Loader";
 import {
   BrowserRouter as Router,
   Routes,
@@ -26,6 +27,7 @@ import ExpenseBooking from "./pages/ExpenseBooking";
 import ContractorMaster from "./pages/masters/ContractorMaster";
 import SupplierMaster from "./pages/masters/SupplierMaster";
 import CustomerMaster from "./pages/masters/CustomerMaster";
+
 import BankMaster from "./pages/masters/BankMaster";
 import ExpensesMaster from "./pages/masters/ExpensesMaster";
 import ItemMaster from "./pages/masters/ItemMaster";
@@ -289,23 +291,40 @@ function AppRoutes() {
    APP ROOT
 ========================= */
 function App() {
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setLoading(false);
+    }, 500); // Initial splash screen for 1 second
+
+    return () => clearTimeout(timer);
+  }, []);
+
+  if (loading) {
+    return <Loader />;
+  }
+
   return (
-    <AuthProvider>
-      <ModuleProvider>
-        <ThemeProvider>
-          <FinYearProvider>
-            <HsnProvider>
-              <TaskProvider>
-                <Router>
-                  <AppRoutes />
-                </Router>
-              </TaskProvider>
-            </HsnProvider>
-          </FinYearProvider>
-        </ThemeProvider>
-      </ModuleProvider>
-    </AuthProvider>
+    <Suspense fallback={<Loader />}>
+      <AuthProvider>
+        <ModuleProvider>
+          <ThemeProvider>
+            <FinYearProvider>
+              <HsnProvider>
+                <TaskProvider>
+                  <Router>
+                    <AppRoutes />
+                  </Router>
+                </TaskProvider>
+              </HsnProvider>
+            </FinYearProvider>
+          </ThemeProvider>
+        </ModuleProvider>
+      </AuthProvider>
+    </Suspense>
   );
 }
 
 export default App;
+
