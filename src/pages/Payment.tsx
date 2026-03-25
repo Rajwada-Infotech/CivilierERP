@@ -250,7 +250,7 @@ export default function Payment() {
                   control={form.control}
                   name="projectName"
                   render={({ field }) => (
-                    <FormItem className="flex flex-col gap-2 sm:flex-row sm:items-end gap-3 sm:gap-4">
+                    <FormItem className="flex flex-col sm:flex-row sm:items-end gap-3 sm:gap-4">
                       <FormLabel className="text-sm font-medium w-full sm:w-[130px] sm:shrink-0 sm:text-right">Project Name</FormLabel>
                       <div className="flex-1 min-w-0">
                         <Select onValueChange={field.onChange} defaultValue={field.value}>
@@ -276,7 +276,7 @@ export default function Payment() {
                   control={form.control}
                   name="docDate"
                   render={({ field }) => (
-                    <FormItem className="flex flex-col gap-3 sm:flex-row sm:items-end gap-3 sm:gap-4">
+                    <FormItem className="flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-4">
                       <FormLabel className="text-sm font-medium w-full sm:w-[130px] sm:shrink-0 sm:text-right">Date</FormLabel>
                       <div className="flex-1 min-w-0">
                         <Popover>
@@ -317,7 +317,7 @@ export default function Payment() {
                   control={form.control}
                   name="mode"
                   render={({ field }) => (
-                    <FormItem className="flex flex-col gap-3 sm:flex-row sm:items-end gap-3 sm:gap-4">
+                    <FormItem className="flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-4">
                       <FormLabel className="text-sm font-medium w-full sm:w-[130px] sm:shrink-0 sm:text-right">Mode of Payment</FormLabel>
                       <div className="flex-1 min-w-0">
                         <Select onValueChange={(val) => onModeChange(val as "Cash" | "Check" | "UPI" | "Card")} value={field.value}>
@@ -343,7 +343,7 @@ export default function Payment() {
                   control={form.control}
                   name="amount"
                   render={({ field }) => (
-                    <FormItem className="flex flex-col gap-3 sm:flex-row sm:items-end gap-3 sm:gap-4">
+                    <FormItem className="flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-4">
                       <FormLabel className="text-sm font-medium w-full sm:w-[130px] sm:shrink-0 sm:text-right">Amount (₹)</FormLabel>
                       <div className="flex-1 min-w-0">
                         <FormControl>

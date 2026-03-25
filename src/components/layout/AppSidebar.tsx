@@ -1,21 +1,20 @@
 import React, { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useModule } from "@/contexts/ModuleContext";
-import { useAuth } from "@/contexts/AuthContext";
 import { useTask } from "@/contexts/TaskContext";
 import { useSidebarState } from "./AppLayout";
 import {
   BarChart3,
   CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
   ChevronDown,
   ChevronUp,
+  ChevronLeft,
+  ChevronRight,
   FileText,
-  Receipt,
   Scale,
   Shield,
   Landmark,
+  ShieldCheck,
 } from "lucide-react";
 
 interface SubItem {
@@ -31,13 +30,9 @@ interface NavItem {
   children?: SubItem[];
 }
 
-// FINANCE MODULE sidebar
-// - "Dashboard" renamed to "Amendments"
-// - "Transaction" group renamed to "Finance"
-// - "Payment" moved inside "Finance" group (no longer a standalone item)
+// Updated buildNavItems without "More" section
 const buildNavItems = (overdueCount: number): NavItem[] => [
   { label: "Amendments", icon: BarChart3, path: "/" },
-
   {
     label: "Query",
     icon: Scale,
@@ -50,7 +45,6 @@ const buildNavItems = (overdueCount: number): NavItem[] => [
       },
     ],
   },
-
   {
     label: "Finance",
     icon: Landmark,
@@ -61,9 +55,6 @@ const buildNavItems = (overdueCount: number): NavItem[] => [
   },
 ];
 
-// ADMIN MODULE sidebar
-// - "Dashboard" renamed to "Transaction" (points to /admin)
-// - "Transaction" group renamed to "Finance"
 const ADMIN_NAV_ITEMS: NavItem[] = [
   { label: "Transaction", icon: BarChart3, path: "/admin" },
   {
@@ -91,20 +82,17 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
   {
     label: "Finance",
     icon: Landmark,
-    children: [
-      { label: "Expense Booking", path: "/admin/expense-booking" },
-    ],
+    children: [{ label: "Expense Booking", path: "/admin/expense-booking" }],
   },
 ];
 
-const NavButton = ({ item, collapsed, active }: any) => {
+const NavButton = ({ item, collapsed, isActive }: any) => {
   const navigate = useNavigate();
-
   return (
     <button
       onClick={() => item.path && navigate(item.path)}
       className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-        active
+        isActive
           ? "bg-primary/15 text-primary font-medium"
           : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
       } ${collapsed ? "justify-center" : ""}`}
@@ -116,17 +104,17 @@ const NavButton = ({ item, collapsed, active }: any) => {
   );
 };
 
-const NavGroup = ({ item, collapsed, activeChild }: any) => {
+const NavGroup = ({ item, collapsed, hasActiveChild }: any) => {
   const navigate = useNavigate();
   const location = useLocation();
-  const [open, setOpen] = useState(activeChild);
+  const [open, setOpen] = useState(hasActiveChild);
 
   const handleClick = () => {
     if (collapsed) {
       navigate(item.children[0].path);
       return;
     }
-    setOpen((p: boolean) => !p);
+    setOpen((prev) => !prev);
   };
 
   return (
@@ -134,19 +122,22 @@ const NavGroup = ({ item, collapsed, activeChild }: any) => {
       <button
         onClick={handleClick}
         className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-          activeChild
+          hasActiveChild
             ? "bg-primary/10 text-primary"
             : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
         }`}
       >
         <item.icon size={18} className="shrink-0" />
-        {!collapsed && <span className="flex-1 text-left truncate">{item.label}</span>}
-        {!collapsed && (open ? <ChevronUp size={14} className="shrink-0" /> : <ChevronDown size={14} className="shrink-0" />)}
+        {!collapsed && (
+          <span className="flex-1 text-left truncate">{item.label}</span>
+        )}
+        {!collapsed &&
+          (open ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
       </button>
 
       {!collapsed && open && (
         <div className="ml-6 mt-1 space-y-1">
-          {item.children.map((child: SubItem) => (
+          {item.children?.map((child: SubItem) => (
             <button
               key={child.path}
               onClick={() => navigate(child.path)}
@@ -172,13 +163,11 @@ const NavGroup = ({ item, collapsed, activeChild }: any) => {
 
 export const AppSidebar = () => {
   const location = useLocation();
-  const { moduleLabel } = useModule();
+  const { activeModule } = useModule();
   const { collapsed, setCollapsed } = useSidebarState();
   const { getOverdueTasks } = useTask();
-  useAuth();
 
   const overdueCount = getOverdueTasks().length;
-
   const isAdminPage =
     location.pathname.startsWith("/admin") ||
     location.pathname.startsWith("/users");
@@ -186,11 +175,14 @@ export const AppSidebar = () => {
   const NAV_ITEMS = buildNavItems(overdueCount);
   const itemsToRender = isAdminPage ? ADMIN_NAV_ITEMS : NAV_ITEMS;
 
+  const isFinance = !isAdminPage && activeModule === "finance";
+  const isAdmin = isAdminPage;
+
   return (
     <aside
-      className={`fixed top-14 left-0 bottom-0 flex flex-col ${
+      className={`fixed top-14 left-0 bottom-0 flex flex-col border-r border-sidebar-border bg-sidebar transition-[width] duration-300 ease-in-out z-40 ${
         collapsed ? "w-16" : "w-56"
-      } bg-sidebar border-r border-sidebar-border transition-[width] duration-300 ease-in-out z-40`}
+      }`}
     >
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
         {itemsToRender.map((item) =>
@@ -199,8 +191,8 @@ export const AppSidebar = () => {
               key={item.label}
               item={item}
               collapsed={collapsed}
-              activeChild={item.children.some((c) =>
-                location.pathname === c.path
+              hasActiveChild={item.children.some(
+                (c) => location.pathname === c.path,
               )}
             />
           ) : (
@@ -208,22 +200,54 @@ export const AppSidebar = () => {
               key={item.label}
               item={item}
               collapsed={collapsed}
-              active={
+              isActive={
                 item.path === "/"
                   ? location.pathname === "/"
                   : location.pathname.startsWith(item.path || "__never__")
               }
             />
-          )
+          ),
         )}
       </div>
 
-      <div className="shrink-0 p-2 border-t border-sidebar-border">
-        {!collapsed && (
-          <div className="text-xs text-center text-sidebar-foreground/60 mb-2 truncate px-1">
-            {moduleLabel}
+      {/* Bottom Section */}
+      <div className="shrink-0 p-2 border-t border-sidebar-border space-y-2">
+        {/* Module Indicator */}
+        {!collapsed ? (
+          <div
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold ${
+              isAdmin
+                ? "bg-blue-500/10 text-blue-500 border border-blue-500/20"
+                : isFinance
+                  ? "bg-primary/10 text-primary border border-primary/20"
+                  : "bg-muted text-muted-foreground border border-border"
+            }`}
+          >
+            {isAdmin ? (
+              <ShieldCheck size={13} className="shrink-0" />
+            ) : (
+              <Landmark size={13} className="shrink-0" />
+            )}
+            <span className="truncate">
+              {isAdmin ? "Admin" : isFinance ? "Finance" : "No module"}
+            </span>
+          </div>
+        ) : (
+          <div className="flex justify-center">
+            <div
+              className={`w-2 h-2 rounded-full ${
+                isAdmin
+                  ? "bg-blue-500"
+                  : isFinance
+                    ? "bg-primary"
+                    : "bg-muted-foreground/40"
+              }`}
+              title={isAdmin ? "Admin" : isFinance ? "Finance" : "No module"}
+            />
           </div>
         )}
+
+        {/* Sidebar Collapse Button */}
         <button
           onClick={() => setCollapsed(!collapsed)}
           className="w-full flex items-center justify-center p-2 rounded-lg hover:bg-sidebar-accent text-sidebar-foreground transition-colors"
