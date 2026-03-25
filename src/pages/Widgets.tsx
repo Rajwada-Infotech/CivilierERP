@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { AppLayout } from "@/components/layout/AppLayout";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   Puzzle, BarChart2, TrendingUp, PieChart, Hash, Table2, Calendar,
@@ -28,8 +27,8 @@ const Widgets = () => {
   const [selected, setSelected] = useState<string | null>(paramWidget);
 
   return (
-    <AppLayout>
-      <Breadcrumbs items={["Dashboard", selected || "Widgets"]} />
+    <>
+          <Breadcrumbs items={["Dashboard", selected || "Widgets"]} />
 
       {selected ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
@@ -62,7 +61,7 @@ const Widgets = () => {
           </div>
         </>
       )}
-    </AppLayout>
+    </>
   );
 };
 

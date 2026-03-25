@@ -1,5 +1,4 @@
 import React from "react";
-import { AppLayout } from "@/components/layout/AppLayout";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MasterPage, FieldDef, ColumnDef } from "@/components/MasterPage";
 
@@ -34,11 +33,11 @@ const initialData = [
 ];
 
 const CustomerMaster: React.FC = () => (
-  <AppLayout>
-    <Breadcrumbs items={["Dashboard", "Finance Module", "Customer Master"]} />
+  <>
+      <Breadcrumbs items={["Dashboard", "Finance Module", "Customer Master"]} />
     <h1 className="text-xl font-heading font-bold text-foreground mb-4">Customer Master</h1>
     <MasterPage title="Customer" fields={fields} columns={columns} initialData={initialData} />
-  </AppLayout>
+  </>
 );
 
 export default CustomerMaster;

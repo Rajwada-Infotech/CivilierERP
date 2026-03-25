@@ -1,6 +1,5 @@
 import React, { useState, useMemo, useCallback } from "react";
 import { useFinYear, type FinYear } from "@/contexts/FinYearContext";
-import { AppLayout } from "@/components/layout/AppLayout";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   Calendar,
@@ -158,8 +157,8 @@ export default function FinYearRights() {
   }, []);
 
   return (
-    <AppLayout>
-      <Breadcrumbs items={["Admin", "Rights", "Fin Year Rights"]} />
+    <>
+          <Breadcrumbs items={["Admin", "Rights", "Fin Year Rights"]} />
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-foreground flex items-center gap-3">
@@ -355,6 +354,6 @@ export default function FinYearRights() {
           </Table>
         </CardContent>
       </Card>
-    </AppLayout>
+    </>
   );
 }
