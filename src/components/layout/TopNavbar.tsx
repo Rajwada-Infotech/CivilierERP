@@ -6,6 +6,7 @@ import { useModule } from "@/contexts/ModuleContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSidebarState } from "./AppLayout";
 import {
+  Hash,
   Settings,
   BarChart3,
   LogOut,
@@ -108,7 +109,14 @@ const masterItems = [
     path: "/masters/item-groups",
     color: "text-indigo-400",
   },
+  {
+    icon: Hash,
+    label: "HSN",
+    path: "/masters/hsn",
+    color: "text-pink-400",
+  },
 ];
+
 
 export const TopNavbar = () => {
   const navigate = useNavigate();
