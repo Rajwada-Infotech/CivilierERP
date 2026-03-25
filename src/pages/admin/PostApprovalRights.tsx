@@ -7,7 +7,6 @@ import {
   type PagePermission, 
   type AppUser 
 } from "@/contexts/AuthContext";
-import { AppLayout } from "@/components/layout/AppLayout";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { ShieldCheck, Plus, Search, Trash2, Edit3, UserCheck, Eye, PlusCircle, Edit, Trash, Printer, EyeOff, Download, CheckCircle, XCircle } from "lucide-react";
 import {
@@ -181,8 +180,8 @@ export default function PostApprovalRights() {
   }, []);
 
   return (
-    <AppLayout>
-      <Breadcrumbs items={["Admin", "Approval", "Post Approval Rights"]} />
+    <>
+          <Breadcrumbs items={["Admin", "Approval", "Post Approval Rights"]} />
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-foreground flex items-center gap-3">
@@ -404,7 +403,7 @@ export default function PostApprovalRights() {
           </Table>
         </CardContent>
       </Card>
-    </AppLayout>
+    </>
   );
 }
 

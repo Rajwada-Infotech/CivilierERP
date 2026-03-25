@@ -12,14 +12,16 @@ import {
   ChevronDown,
   ChevronUp,
   FileText,
+  Receipt,
   Scale,
   Shield,
+  Landmark,
 } from "lucide-react";
 
 interface SubItem {
   label: string;
   path: string;
-  badge?: number; // for overdue count
+  badge?: number;
 }
 
 interface NavItem {
@@ -29,22 +31,41 @@ interface NavItem {
   children?: SubItem[];
 }
 
-// NORMAL NAV — Tasks moved into Query as submenu alongside Trial Balance
+// FINANCE MODULE sidebar
+// - "Dashboard" renamed to "Amendments"
+// - "Transaction" group renamed to "Finance"
+// - "Payment" moved inside "Finance" group (no longer a standalone item)
 const buildNavItems = (overdueCount: number): NavItem[] => [
-  { label: "Dashboard", icon: BarChart3, path: "/" },
+  { label: "Amendments", icon: BarChart3, path: "/" },
+
   {
     label: "Query",
     icon: Scale,
     children: [
       { label: "Trial Balance", path: "/transactions" },
-      { label: "Tasks", path: "/tasks", badge: overdueCount > 0 ? overdueCount : undefined },
+      {
+        label: "Tasks",
+        path: "/tasks",
+        badge: overdueCount > 0 ? overdueCount : undefined,
+      },
+    ],
+  },
+
+  {
+    label: "Finance",
+    icon: Landmark,
+    children: [
+      { label: "Expense Booking", path: "/transactions/expense-booking" },
+      { label: "Payment", path: "/payments" },
     ],
   },
 ];
 
-// ADMIN NAV
+// ADMIN MODULE sidebar
+// - "Dashboard" renamed to "Transaction" (points to /admin)
+// - "Transaction" group renamed to "Finance"
 const ADMIN_NAV_ITEMS: NavItem[] = [
-  { label: "Dashboard", icon: BarChart3, path: "/admin" },
+  { label: "Transaction", icon: BarChart3, path: "/admin" },
   {
     label: "User Control",
     icon: FileText,
@@ -54,8 +75,8 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
     label: "Rights",
     icon: Shield,
     children: [
-      { label: "Menu",           path: "/admin/rights/menu" },
-      { label: "Widgets",        path: "/admin/rights/widgets" },
+      { label: "Menu", path: "/admin/rights/menu" },
+      { label: "Widgets", path: "/admin/rights/widgets" },
       { label: "Financial Year", path: "/admin/rights/fin-year" },
     ],
   },
@@ -63,111 +84,82 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
     label: "Approval",
     icon: CheckCircle2,
     children: [
-      { label: "Approval Setup",       path: "/admin/approval/setup" },
+      { label: "Approval Setup", path: "/admin/approval/setup" },
       { label: "Post Approval Rights", path: "/admin/approval/post-rights" },
+    ],
+  },
+  {
+    label: "Finance",
+    icon: Landmark,
+    children: [
+      { label: "Expense Booking", path: "/admin/expense-booking" },
     ],
   },
 ];
 
-const NavButton = ({
-  item,
-  collapsed,
-  active,
-}: {
-  item: NavItem;
-  collapsed: boolean;
-  active: boolean;
-}) => {
+const NavButton = ({ item, collapsed, active }: any) => {
   const navigate = useNavigate();
 
   return (
     <button
       onClick={() => item.path && navigate(item.path)}
-      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors duration-200 ${
+      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
         active
           ? "bg-primary/15 text-primary font-medium"
-          : "text-sidebar-foreground hover:bg-sidebar-accent"
-      } ${collapsed ? "justify-center" : "justify-start"}`}
+          : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+      } ${collapsed ? "justify-center" : ""}`}
       title={collapsed ? item.label : undefined}
     >
       <item.icon size={18} className="shrink-0" />
-      <span
-        className={`truncate transition-opacity duration-200 ${
-          collapsed ? "opacity-0 w-0 overflow-hidden" : "opacity-100"
-        }`}
-      >
-        {item.label}
-      </span>
+      {!collapsed && <span className="truncate">{item.label}</span>}
     </button>
   );
 };
 
-const NavGroup = ({
-  item,
-  collapsed,
-  activeChild,
-}: {
-  item: NavItem;
-  collapsed: boolean;
-  activeChild: boolean;
-}) => {
+const NavGroup = ({ item, collapsed, activeChild }: any) => {
   const navigate = useNavigate();
   const location = useLocation();
   const [open, setOpen] = useState(activeChild);
 
-  const handleParentClick = () => {
+  const handleClick = () => {
     if (collapsed) {
-      if (item.children && item.children.length > 0) navigate(item.children[0].path);
+      navigate(item.children[0].path);
       return;
     }
-    setOpen((prev) => !prev);
+    setOpen((p: boolean) => !p);
   };
 
   return (
     <div>
       <button
-        onClick={handleParentClick}
-        title={collapsed ? item.label : undefined}
-        className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors duration-200 ${
+        onClick={handleClick}
+        className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
           activeChild
             ? "bg-primary/10 text-primary"
-            : "text-sidebar-foreground hover:bg-sidebar-accent"
-        } ${collapsed ? "justify-center" : "justify-start"}`}
+            : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+        }`}
       >
         <item.icon size={18} className="shrink-0" />
-        <span
-          className={`flex-1 text-left truncate transition-opacity duration-200 ${
-            collapsed ? "opacity-0 w-0 overflow-hidden" : "opacity-100"
-          }`}
-        >
-          {item.label}
-        </span>
-        {!collapsed &&
-          (open ? (
-            <ChevronUp size={14} className="shrink-0" />
-          ) : (
-            <ChevronDown size={14} className="shrink-0" />
-          ))}
+        {!collapsed && <span className="flex-1 text-left truncate">{item.label}</span>}
+        {!collapsed && (open ? <ChevronUp size={14} className="shrink-0" /> : <ChevronDown size={14} className="shrink-0" />)}
       </button>
 
-      {!collapsed && open && item.children && (
-        <div className="mt-0.5 ml-4 pl-3 border-l border-sidebar-border space-y-0.5">
-          {item.children.map((child) => (
+      {!collapsed && open && (
+        <div className="ml-6 mt-1 space-y-1">
+          {item.children.map((child: SubItem) => (
             <button
               key={child.path}
               onClick={() => navigate(child.path)}
-              className={`w-full text-left px-3 py-1.5 rounded-lg text-xs flex items-center justify-between gap-2 ${
-                location.pathname === child.path ||
-                (child.path === "/tasks" && location.pathname.startsWith("/tasks"))
-                  ? "bg-primary/15 text-primary font-semibold"
-                  : "text-sidebar-foreground hover:bg-sidebar-accent"
+              className={`w-full flex justify-between items-center text-xs px-2 py-1.5 rounded-md transition-colors ${
+                location.pathname === child.path
+                  ? "bg-primary/15 text-primary font-medium"
+                  : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
               }`}
             >
               <span>{child.label}</span>
-              {/* Overdue badge on Tasks submenu item */}
-              {child.badge !== undefined && child.badge > 0 && (
-                <span className="w-4 h-4 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center shrink-0">
-                  {child.badge > 9 ? "9+" : child.badge}
+              {child.badge && (
+                <span className="bg-red-500 text-white text-[9px] px-1.5 py-0.5 rounded-full leading-none">
+                  {child.badge}
                 </span>
               )}
             </button>
@@ -182,10 +174,9 @@ export const AppSidebar = () => {
   const location = useLocation();
   const { moduleLabel } = useModule();
   const { collapsed, setCollapsed } = useSidebarState();
+  const { getOverdueTasks } = useTask();
   useAuth();
 
-  // Get overdue count for Tasks badge in sidebar
-  const { getOverdueTasks } = useTask();
   const overdueCount = getOverdueTasks().length;
 
   const isAdminPage =
@@ -197,26 +188,22 @@ export const AppSidebar = () => {
 
   return (
     <aside
-      className={`fixed top-14 left-0 bottom-0 z-40 flex flex-col border-r bg-sidebar transition-all duration-300 ${
+      className={`fixed top-14 left-0 bottom-0 flex flex-col ${
         collapsed ? "w-16" : "w-56"
-      }`}
+      } bg-sidebar border-r border-sidebar-border transition-[width] duration-300 ease-in-out z-40`}
     >
-      <div className="flex-1 flex flex-col gap-1 p-2 pt-4 overflow-y-auto">
-        {itemsToRender.map((item) => {
-          if (item.children) {
-            return (
-              <NavGroup
-                key={item.label}
-                item={item}
-                collapsed={collapsed}
-                activeChild={item.children.some((c) =>
-                  location.pathname === c.path ||
-                  (c.path === "/tasks" && location.pathname.startsWith("/tasks"))
-                )}
-              />
-            );
-          }
-          return (
+      <div className="flex-1 overflow-y-auto p-2 space-y-1">
+        {itemsToRender.map((item) =>
+          item.children ? (
+            <NavGroup
+              key={item.label}
+              item={item}
+              collapsed={collapsed}
+              activeChild={item.children.some((c) =>
+                location.pathname === c.path
+              )}
+            />
+          ) : (
             <NavButton
               key={item.label}
               item={item}
@@ -224,22 +211,23 @@ export const AppSidebar = () => {
               active={
                 item.path === "/"
                   ? location.pathname === "/"
-                  : location.pathname.startsWith(item.path || "___")
+                  : location.pathname.startsWith(item.path || "__never__")
               }
             />
-          );
-        })}
+          )
+        )}
       </div>
 
-      <div className="border-t p-2 space-y-2">
+      <div className="shrink-0 p-2 border-t border-sidebar-border">
         {!collapsed && (
-          <div className="px-2 py-1.5 rounded-md bg-sidebar-accent text-xs text-center">
-            {isAdminPage ? "Admin Module" : moduleLabel}
+          <div className="text-xs text-center text-sidebar-foreground/60 mb-2 truncate px-1">
+            {moduleLabel}
           </div>
         )}
         <button
           onClick={() => setCollapsed(!collapsed)}
-          className="w-full flex justify-center py-1.5 hover:bg-sidebar-accent rounded-lg transition-colors"
+          className="w-full flex items-center justify-center p-2 rounded-lg hover:bg-sidebar-accent text-sidebar-foreground transition-colors"
+          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
           {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
         </button>

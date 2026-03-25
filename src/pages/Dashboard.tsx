@@ -1,5 +1,4 @@
 import React, { useMemo } from "react";
-import { AppLayout } from "@/components/layout/AppLayout";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   HardHat, ShoppingCart, Landmark, Receipt, TrendingUp, Users,
@@ -78,8 +77,8 @@ const Dashboard = () => {
   const pendingReview = myTasks.filter(t => t.status === "closed");
 
   return (
-    <AppLayout>
-      <Breadcrumbs items={["Dashboard"]} />
+    <>
+          <Breadcrumbs items={["Dashboard"]} />
       <div className="mb-6">
         <h1 className="text-2xl font-heading font-bold text-foreground">Welcome to CivilierERP</h1>
         <p className="text-sm text-muted-foreground mt-1">Your civil ERP command center</p>
@@ -188,7 +187,7 @@ const Dashboard = () => {
           </div>
         )}
       </div>
-    </AppLayout>
+    </>
   );
 };
 

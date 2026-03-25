@@ -1,5 +1,4 @@
 import React from "react";
-import { AppLayout } from "@/components/layout/AppLayout";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { CreditCard, ArrowUpRight, ArrowDownLeft, IndianRupee } from "lucide-react";
 
@@ -24,8 +23,8 @@ const summaryStats = [
 ];
 
 const Transactions: React.FC = () => (
-  <AppLayout>
-    <Breadcrumbs items={["Dashboard", "Transactions"]} />
+  <>
+      <Breadcrumbs items={["Dashboard", "Transactions"]} />
     <h1 className="text-xl font-heading font-bold text-foreground mb-4">Transactions</h1>
 
     {/* Summary Cards */}
@@ -88,7 +87,7 @@ const Transactions: React.FC = () => (
         </table>
       </div>
     </div>
-  </AppLayout>
+  </>
 );
 
 export default Transactions;
