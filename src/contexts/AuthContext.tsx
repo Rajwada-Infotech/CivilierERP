@@ -128,6 +128,9 @@ interface AuthContextType {
 
   addUser: (user: Omit<AppUser, "id"> & { password: string }) => void;
   deleteUser: (id: string) => void;
+  // FIX 3: toggleUserStatus was called by Users.tsx but was missing from the
+  // context interface and implementation — caused a runtime crash on the Users page.
+  toggleUserStatus: (id: string) => void;
 
   canAccessPage: (page: PageKey) => boolean;
   canDoAction: (page: PageKey, action: PageAction) => boolean;
@@ -197,6 +200,12 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setUsers((prev) => prev.filter((u) => u.id !== id));
   };
 
+  const toggleUserStatus = (id: string) => {
+    setUsers((prev) =>
+      prev.map((u) => (u.id === id ? { ...u, isActive: !u.isActive } : u))
+    );
+  };
+
   return (
     <AuthContext.Provider
       value={{
@@ -207,6 +216,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         logout,
         addUser,
         deleteUser,
+        toggleUserStatus,
         canAccessPage,
         canDoAction,
       }}

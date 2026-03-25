@@ -1,5 +1,4 @@
 import React from "react";
-import { AppLayout } from "@/components/layout/AppLayout";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MasterPage, FieldDef, ColumnDef } from "@/components/MasterPage";
 
@@ -23,11 +22,11 @@ const initialData = [
 ];
 
 const ItemGroupMaster: React.FC = () => (
-  <AppLayout>
-    <Breadcrumbs items={["Dashboard", "Finance Module", "Item Group Master"]} />
+  <>
+      <Breadcrumbs items={["Dashboard", "Finance Module", "Item Group Master"]} />
     <h1 className="text-xl font-heading font-bold text-foreground mb-4">Item Group Master</h1>
     <MasterPage title="Item Group" fields={fields} columns={columns} initialData={initialData} />
-  </AppLayout>
+  </>
 );
 
 export default ItemGroupMaster;

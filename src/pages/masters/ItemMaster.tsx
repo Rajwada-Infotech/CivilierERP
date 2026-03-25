@@ -1,5 +1,4 @@
 import React, { useState, useCallback, useRef, useEffect } from "react";
-import { AppLayout } from "@/components/layout/AppLayout";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   Search,
@@ -365,8 +364,8 @@ const ItemMaster: React.FC<ItemMasterProps> = ({ hsnCodes = [] }) => {
   );
 
   return (
-    <AppLayout>
-      <Breadcrumbs items={["Dashboard", "Finance Module", "Item Master"]} />
+    <>
+          <Breadcrumbs items={["Dashboard", "Finance Module", "Item Master"]} />
       <h1 className="text-xl font-heading font-bold text-foreground mb-4">
         Item Master
       </h1>
@@ -669,7 +668,7 @@ const ItemMaster: React.FC<ItemMasterProps> = ({ hsnCodes = [] }) => {
           </table>
         </div>
       </div>
-    </AppLayout>
+    </>
   );
 };
 

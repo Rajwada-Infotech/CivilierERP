@@ -7,7 +7,6 @@ import {
   type PagePermission, 
   type AppUser 
 } from "@/contexts/AuthContext";
-import { AppLayout } from "@/components/layout/AppLayout";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { ShieldCheck, Plus, Search, Trash2, Edit3, UserCheck, Eye, PlusCircle, Edit2, Trash, Printer, EyeOff, Download, CheckCircle, XCircle } from "lucide-react";
 import {
@@ -181,8 +180,8 @@ export default function WidgetsRights() {
   }, []);
 
   return (
-    <AppLayout>
-      <Breadcrumbs items={["Admin", "Rights", "Widgets Rights"]} />
+    <>
+          <Breadcrumbs items={["Admin", "Rights", "Widgets Rights"]} />
       <div className="flex flex-col lg:flex-row items-start lg:items-center justify-between mb-6 gap-4 lg:gap-6 w-full">
         <div className="flex-1 min-w-0">
           <h1 className="text-xl sm:text-2xl font-bold text-foreground flex items-center gap-2 sm:gap-3">
@@ -415,7 +414,7 @@ export default function WidgetsRights() {
           </div>
         </CardContent>
       </Card>
-    </AppLayout>
+    </>
   );
 }
 
