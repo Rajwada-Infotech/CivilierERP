@@ -108,7 +108,12 @@ const masterItems = [
     path: "/masters/item-groups",
     color: "text-indigo-400",
   },
-  { icon: Hash, label: "HSN", path: "/masters/hsn", color: "text-pink-400" },
+  {
+    icon: Hash,
+    label: "HSN",
+    path: "/masters/hsn",
+    color: "text-pink-400",
+  },
 ];
 
 export const TopNavbar = () => {
@@ -127,10 +132,11 @@ export const TopNavbar = () => {
   const isModuleActive = activeModule !== null;
   const isSuperAdmin = currentUser?.role === "super_admin";
   const isAdmin = currentUser?.role === "admin" || isSuperAdmin;
+
   const RoleIcon = isSuperAdmin ? Crown : isAdmin ? Shield : null;
   const roleColor = isSuperAdmin ? "#7c3aed" : "#2563eb";
 
-  // ─── Toggle Handlers (Fixed) ─────────────────────────────────────────────
+  // ─── Toggle Handlers ─────────────────────────────────────────────
   const toggleSetup = useCallback(() => {
     if (!isModuleActive) return;
     setSetupOpen((prev) => !prev);
@@ -160,7 +166,6 @@ export const TopNavbar = () => {
     setThemeOpen(false);
   }, []);
 
-  // Close all dropdowns (useful for outside clicks if needed later)
   const closeAll = useCallback(() => {
     setSetupOpen(false);
     setModuleOpen(false);
@@ -186,11 +191,7 @@ export const TopNavbar = () => {
           title={navCollapsed ? "Expand navigation" : "Collapse navigation"}
           className="p-1.5 rounded-md bg-muted hover:bg-muted/80 text-foreground border border-border transition-all duration-200 shrink-0"
         >
-          {navCollapsed ? (
-            <ChevronsRight size={15} />
-          ) : (
-            <ChevronsLeft size={15} />
-          )}
+          {navCollapsed ? <ChevronsRight size={15} /> : <ChevronsLeft size={15} />}
         </button>
 
         {/* Collapsible Navigation Items */}
@@ -215,11 +216,8 @@ export const TopNavbar = () => {
             >
               <Settings size={16} /> Setup
             </button>
-            <Dropdown
-              open={setupOpen}
-              onClose={() => setSetupOpen(false)}
-              className="right-0 w-80 p-4"
-            >
+
+            <Dropdown open={setupOpen} onClose={() => setSetupOpen(false)} className="right-0 w-80 p-4">
               <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-3">
                 Masters
               </p>
@@ -256,9 +254,7 @@ export const TopNavbar = () => {
               closeAll();
             }}
             className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all whitespace-nowrap ${
-              location.pathname === "/reports"
-                ? "bg-primary/10 text-primary"
-                : "hover:bg-muted text-foreground"
+              location.pathname === "/reports" ? "bg-primary/10 text-primary" : "hover:bg-muted text-foreground"
             }`}
           >
             <BarChart3 size={16} /> Reports
@@ -271,15 +267,13 @@ export const TopNavbar = () => {
               closeAll();
             }}
             className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all whitespace-nowrap ${
-              location.pathname === "/widgets"
-                ? "bg-primary/10 text-primary"
-                : "hover:bg-muted text-foreground"
+              location.pathname === "/widgets" ? "bg-primary/10 text-primary" : "hover:bg-muted text-foreground"
             }`}
           >
             <Puzzle size={16} /> Widgets
           </button>
 
-          {/* Module Selector - FIXED */}
+          {/* Module Selector */}
           <div className="relative shrink-0">
             <button
               onClick={toggleModule}
@@ -287,17 +281,12 @@ export const TopNavbar = () => {
             >
               <LayoutGrid size={16} /> Module
             </button>
-            <Dropdown
-              open={moduleOpen}
-              onClose={() => setModuleOpen(false)}
-              className="right-0 w-80 p-3"
-            >
+
+            <Dropdown open={moduleOpen} onClose={() => setModuleOpen(false)} className="right-0 w-80 p-3">
               <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-3">
                 Select Module
               </p>
-              <div
-                className={`grid gap-3 ${isAdmin ? "grid-cols-2" : "grid-cols-1"}`}
-              >
+              <div className={`grid gap-3 ${isAdmin ? "grid-cols-2" : "grid-cols-1"}`}>
                 {/* Finance */}
                 <button
                   onClick={() => {
@@ -312,40 +301,14 @@ export const TopNavbar = () => {
                   }`}
                 >
                   <svg width="32" height="32" viewBox="0 0 36 36" fill="none">
-                    <circle
-                      cx="12"
-                      cy="22"
-                      r="7"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      className="text-primary"
-                    />
-                    <circle
-                      cx="24"
-                      cy="22"
-                      r="7"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      className="text-secondary"
-                    />
-                    <rect
-                      x="8"
-                      y="6"
-                      width="20"
-                      height="3"
-                      rx="1.5"
-                      fill="currentColor"
-                      className="text-primary"
-                    />
+                    <circle cx="12" cy="22" r="7" stroke="currentColor" strokeWidth="2" className="text-primary" />
+                    <circle cx="24" cy="22" r="7" stroke="currentColor" strokeWidth="2" className="text-secondary" />
+                    <rect x="8" y="6" width="20" height="3" rx="1.5" fill="currentColor" className="text-primary" />
                   </svg>
                   <span className="text-xs font-heading text-muted-foreground group-hover:text-foreground">
                     Finance
                   </span>
-                  {activeModule === "finance" && (
-                    <span className="text-[10px] text-primary font-heading">
-                      Active
-                    </span>
-                  )}
+                  {activeModule === "finance" && <span className="text-[10px] text-primary font-heading">Active</span>}
                 </button>
 
                 {/* Admin */}
@@ -380,9 +343,7 @@ export const TopNavbar = () => {
                       Admin
                     </span>
                     {location.pathname.startsWith("/admin") && (
-                      <span className="text-[10px] text-primary font-heading">
-                        Active
-                      </span>
+                      <span className="text-[10px] text-primary font-heading">Active</span>
                     )}
                   </button>
                 )}
@@ -400,20 +361,11 @@ export const TopNavbar = () => {
           >
             <Palette size={17} />
           </button>
-          <Dropdown
-            open={themeOpen}
-            onClose={() => setThemeOpen(false)}
-            className="right-0 w-48 p-1.5"
-          >
+          <Dropdown open={themeOpen} onClose={() => setThemeOpen(false)} className="right-0 w-48 p-1.5">
             <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading px-2 py-1.5 mb-0.5">
               Appearance
             </p>
-            {(
-              Object.entries(THEME_DOTS) as [
-                Theme,
-                { bg: string; label: string },
-              ][]
-            ).map(([t, { bg, label }]) => (
+            {(Object.entries(THEME_DOTS) as [Theme, { bg: string; label: string }][]).map(([t, { bg, label }]) => (
               <button
                 key={t}
                 onClick={() => {
@@ -421,19 +373,12 @@ export const TopNavbar = () => {
                   setThemeOpen(false);
                 }}
                 className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-heading transition-all ${
-                  theme === t
-                    ? "bg-primary/10 text-primary"
-                    : "text-foreground hover:bg-muted"
+                  theme === t ? "bg-primary/10 text-primary" : "text-foreground hover:bg-muted"
                 }`}
               >
-                <span
-                  className="w-3.5 h-3.5 rounded-full shrink-0 border border-border/50"
-                  style={{ background: bg }}
-                />
+                <span className="w-3.5 h-3.5 rounded-full shrink-0 border border-border/50" style={{ background: bg }} />
                 {label}
-                {theme === t && (
-                  <span className="ml-auto text-primary text-xs">✓</span>
-                )}
+                {theme === t && <span className="ml-auto text-primary text-xs">✓</span>}
               </button>
             ))}
           </Dropdown>
@@ -455,18 +400,11 @@ export const TopNavbar = () => {
               </span>
             )}
           </button>
-          <Dropdown
-            open={userOpen}
-            onClose={() => setUserOpen(false)}
-            className="right-0 w-56 p-1"
-          >
+
+          <Dropdown open={userOpen} onClose={() => setUserOpen(false)} className="right-0 w-56 p-1">
             <div className="px-3 py-2 border-b border-border mb-1">
-              <p className="text-sm font-heading font-semibold text-foreground">
-                {currentUser?.name}
-              </p>
-              <p className="text-xs text-muted-foreground truncate">
-                {currentUser?.email}
-              </p>
+              <p className="text-sm font-heading font-semibold text-foreground">{currentUser?.name}</p>
+              <p className="text-xs text-muted-foreground truncate">{currentUser?.email}</p>
               <div className="mt-1.5">
                 {isSuperAdmin && (
                   <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-violet-500/10 text-violet-600">
@@ -518,18 +456,11 @@ export const TopNavbar = () => {
               </span>
             )}
           </button>
-          <Dropdown
-            open={userOpen}
-            onClose={() => setUserOpen(false)}
-            className="right-0 w-56 p-1"
-          >
+
+          <Dropdown open={userOpen} onClose={() => setUserOpen(false)} className="right-0 w-56 p-1">
             <div className="px-3 py-2 border-b border-border mb-1">
-              <p className="text-sm font-heading font-semibold text-foreground">
-                {currentUser?.name}
-              </p>
-              <p className="text-xs text-muted-foreground truncate">
-                {currentUser?.email}
-              </p>
+              <p className="text-sm font-heading font-semibold text-foreground">{currentUser?.name}</p>
+              <p className="text-xs text-muted-foreground truncate">{currentUser?.email}</p>
             </div>
             <button className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted text-foreground">
               <User size={14} /> Profile
