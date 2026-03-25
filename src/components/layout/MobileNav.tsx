@@ -342,6 +342,7 @@ export const MobileNav: React.FC = () => {
               })}
             </div>
 
+<<<<<<< Updated upstream
             {/* THEME */}
             <div className="p-3 border-t border-border">
               <p className="text-xs font-heading text-muted-foreground mb-2">Theme</p>
@@ -358,6 +359,29 @@ export const MobileNav: React.FC = () => {
               </div>
             </div>
 
+=======
+{/* THEME SWITCH */}
+<div className="p-3 border-t">
+  <p className="text-xs mb-2">Theme</p>
+  <div className="flex gap-2">
+    {Object.values(THEME_DOTS).map((themeDot, index) => {
+      const themeKey = Object.keys(THEME_DOTS)[index];
+      return (
+        <button
+          key={themeKey}
+          onClick={() => setTheme(themeKey as keyof typeof THEME_DOTS)}
+          title={`Switch to ${themeKey} theme`}
+          className={`w-6 h-6 rounded-full border ${
+            theme === themeKey ? "ring-2 ring-offset-2" : ""
+          }`}
+          data-theme={themeKey}
+          style={{ "--theme-bg": themeDot.bg } as React.CSSProperties}
+        />
+      );
+    })}
+  </div>
+</div>
+>>>>>>> Stashed changes
           </div>
         </div>
       )}
