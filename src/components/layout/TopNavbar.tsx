@@ -6,7 +6,7 @@ import { useModule } from "@/contexts/ModuleContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSidebarState } from "./AppLayout";
 import {
-  Hash,
+  FileText,
   Settings,
   BarChart3,
   LogOut,
@@ -110,7 +110,7 @@ const masterItems = [
     color: "text-indigo-400",
   },
   {
-    icon: Hash,
+    icon: FileText,
     label: "HSN",
     path: "/masters/hsn",
     color: "text-pink-400",
