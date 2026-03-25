@@ -4,29 +4,71 @@ import { AppSidebar } from "./AppSidebar";
 import { MobileNav } from "./MobileNav";
 import { useIsMobile } from "@/hooks/use-mobile";
 
-interface SidebarContextType { collapsed: boolean; setCollapsed: (v: boolean) => void }
-const SidebarContext = createContext<SidebarContextType>({ collapsed: false, setCollapsed: () => {} });
+// Sidebar Context
+interface SidebarContextType {
+  collapsed: boolean;
+  setCollapsed: (v: boolean) => void;
+}
+
+const SidebarContext = createContext<SidebarContextType>({
+  collapsed: false,
+  setCollapsed: () => {},
+});
+
 export const useSidebarState = () => useContext(SidebarContext);
 
+// Navbar Collapse Context
+interface NavbarCollapseContextType {
+  navCollapsed: boolean;
+  setNavCollapsed: (v: boolean) => void;
+}
+
+const NavbarCollapseContext = createContext<NavbarCollapseContextType>({
+  navCollapsed: false,
+  setNavCollapsed: () => {},
+});
+
+export const useNavbarCollapse = () => useContext(NavbarCollapseContext);
+
 export const AppLayout = ({ children }: { children: React.ReactNode }) => {
-  const [collapsed, setCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [navCollapsed, setNavCollapsed] = useState(false);
   const isMobile = useIsMobile();
-  const sidebarValue = useMemo(() => ({ collapsed, setCollapsed }), [collapsed]);
+
+  const sidebarValue = useMemo(
+    () => ({
+      collapsed: sidebarCollapsed,
+      setCollapsed: setSidebarCollapsed,
+    }),
+    [sidebarCollapsed]
+  );
+
+  const navbarValue = useMemo(
+    () => ({
+      navCollapsed,
+      setNavCollapsed,
+    }),
+    [navCollapsed]
+  );
 
   return (
     <SidebarContext.Provider value={sidebarValue}>
-      <div className="min-h-screen bg-background">
-        <TopNavbar />
-        {!isMobile && <AppSidebar />}
-        {isMobile && <MobileNav />}
-        <main
-          className={`pt-14 transition-[margin-left] duration-300 ease-in-out min-h-screen ${
-            isMobile ? "ml-0 pb-16" : collapsed ? "ml-16" : "ml-56"
-          }`}
-        >
-          <div className="p-4 md:p-6">{children}</div>
-        </main>
-      </div>
+      <NavbarCollapseContext.Provider value={navbarValue}>
+        <div className="min-h-screen bg-background">
+          <TopNavbar />
+
+          {!isMobile && <AppSidebar />}
+          {isMobile && <MobileNav />}
+
+          <main
+            className={`pt-14 transition-[margin-left] duration-300 ease-in-out min-h-screen ${
+              isMobile ? "ml-0 pb-16" : sidebarCollapsed ? "ml-16" : "ml-56"
+            }`}
+          >
+            <div className="p-4 md:p-6">{children}</div>
+          </main>
+        </div>
+      </NavbarCollapseContext.Provider>
     </SidebarContext.Provider>
   );
 };
