@@ -4,7 +4,6 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { AppLayout } from "@/components/layout/AppLayout";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -140,8 +139,8 @@ export default function Payment() {
   const clearedPayments = payments.filter(p => p.status === "cleared").length;
 
   return (
-    <AppLayout>
-      <Breadcrumbs items={["Payments"]} />
+    <>
+          <Breadcrumbs items={["Payments"]} />
       <div className="space-y-6">
         <div className="flex items-center justify-between">
           <div>
@@ -435,7 +434,7 @@ export default function Payment() {
           </Form>
         </DialogContent>
       </Dialog>
-    </AppLayout>
+    </>
   );
 }
 

@@ -45,7 +45,6 @@ interface NavItem {
   disabled?: boolean;
 }
 
-// ✅ MERGED MASTER ITEMS
 const masterItems: NavItemChild[] = [
   { icon: Receipt, label: "Expenses", path: "/masters/expenses" },
   { icon: Truck, label: "Suppliers", path: "/masters/suppliers" },
@@ -56,8 +55,11 @@ const masterItems: NavItemChild[] = [
   { icon: Layers, label: "Item Groups", path: "/masters/item-groups" },
 ];
 
+// ADMIN MODULE mobile nav
+// - "Dashboard" renamed to "Transaction"
+// - "Transaction" group renamed to "Finance"
 const ADMIN_NAV_ITEMS: NavItem[] = [
-  { label: "Dashboard", icon: BarChart3, path: "/admin" },
+  { label: "Transaction", icon: BarChart3, path: "/admin" },
   {
     label: "User Control",
     icon: Users,
@@ -80,6 +82,13 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
       { label: "Post Approval Rights", path: "/admin/approval/post-rights", icon: FileText },
     ],
   },
+  {
+    label: "Finance",
+    icon: Landmark,
+    children: [
+      { label: "Expense Booking", path: "/admin/expense-booking", icon: FileText },
+    ],
+  },
 ];
 
 export const MobileNav: React.FC = () => {
@@ -95,7 +104,7 @@ export const MobileNav: React.FC = () => {
   const { getOverdueTasks } = useTask();
 
   const overdueCount = getOverdueTasks().length;
-  const isAdminPage = location.pathname.startsWith("/admin");
+  const isAdminPage = location.pathname.startsWith("/admin") || location.pathname.startsWith("/users");
 
   const isSuperAdmin = currentUser?.role === "super_admin";
   const isAdmin = currentUser?.role === "admin" || isSuperAdmin;
@@ -104,27 +113,34 @@ export const MobileNav: React.FC = () => {
   const RoleIcon = isSuperAdmin ? Crown : isAdmin ? ShieldCheck : null;
   const roleColor = isSuperAdmin ? "#7c3aed" : "#2563eb";
 
-  // ✅ MERGED NAV ITEMS
+  // FINANCE MODULE mobile nav
+  // - "Dashboard" renamed to "Amendments"
+  // - "Transaction" group renamed to "Finance"
+  // - "Payment" moved inside "Finance" group
   const NAV_ITEMS: NavItem[] = [
-    { label: "Dashboard", icon: BarChart3, path: "/" },
+    { label: "Amendments", icon: BarChart3, path: "/" },
 
     { label: "Setup", icon: Settings, children: masterItems, disabled: !isModuleActive },
 
     { label: "Reports", icon: BarChart3, path: "/reports" },
     { label: "Widgets", icon: Puzzle, path: "/widgets" },
 
-    // ✅ Tasks with badge
     { label: "Tasks", icon: CheckCircle2, path: "/tasks", count: overdueCount },
-
-    // ✅ YOUR FEATURE
-    { label: "Payment", icon: Receipt, path: "/payments" },
 
     {
       label: "Query",
       icon: Scale,
       children: [
         { label: "Trial Balance", path: "/transactions", icon: FileText },
+      ],
+    },
+
+    {
+      label: "Finance",
+      icon: Landmark,
+      children: [
         { label: "Expense Booking", path: "/transactions/expense-booking", icon: FileText },
+        { label: "Payment", path: "/payments", icon: FileText },
       ],
     },
   ];

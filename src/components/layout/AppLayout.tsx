@@ -19,7 +19,11 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
         <TopNavbar />
         {!isMobile && <AppSidebar />}
         {isMobile && <MobileNav />}
-        <main className={`pt-14 transition-[padding-left] duration-300 ease-in-out min-h-screen ${isMobile ? "pl-0 pb-16" : collapsed ? "pl-16" : "pl-56"}`}>
+        <main
+          className={`pt-14 transition-[margin-left] duration-300 ease-in-out min-h-screen ${
+            isMobile ? "ml-0 pb-16" : collapsed ? "ml-16" : "ml-56"
+          }`}
+        >
           <div className="p-4 md:p-6">{children}</div>
         </main>
       </div>

@@ -4,6 +4,7 @@ import { LogoFull } from "../Logo";
 import { useTheme, THEME_DOTS, Theme } from "@/contexts/ThemeContext";
 import { useModule } from "@/contexts/ModuleContext";
 import { useAuth } from "@/contexts/AuthContext";
+import { useSidebarState } from "./AppLayout";
 import {
   Settings,
   BarChart3,
@@ -16,8 +17,6 @@ import {
   Crown,
   Shield,
   CheckCircle2,
-  Menu,
-  X,
   Receipt,
   Truck,
   Users,
@@ -117,12 +116,12 @@ export const TopNavbar = () => {
   const { theme, setTheme } = useTheme();
   const { activeModule, setActiveModule } = useModule();
   const { currentUser, logout } = useAuth();
+  const { collapsed: navCollapsed, setCollapsed: setNavCollapsed } = useSidebarState();
 
   const [setupOpen, setSetupOpen] = useState(false);
   const [moduleOpen, setModuleOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
-  const [navCollapsed, setNavCollapsed] = useState(false);
 
   const isModuleActive = activeModule !== null;
   const isSuperAdmin = currentUser?.role === "super_admin";
@@ -160,8 +159,8 @@ export const TopNavbar = () => {
       <div className="hidden md:flex items-center gap-1">
         {/* Collapse toggle */}
         <button
-          onClick={() => setNavCollapsed((p) => !p)}
-          title={navCollapsed ? "Expand navigation" : "Collapse navigation"}
+          onClick={() => setNavCollapsed(!navCollapsed)}
+          title={navCollapsed ? "Expand sidebar" : "Collapse sidebar"}
           className="p-1.5 rounded-md bg-muted hover:bg-muted/80 text-foreground border border-border transition-all duration-200 shrink-0"
         >
           {navCollapsed ? (
