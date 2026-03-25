@@ -25,6 +25,7 @@ import {
   Palette,
   ChevronRight,
 } from "lucide-react";
+
 import { useModule } from "@/contexts/ModuleContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme, THEME_DOTS, Theme } from "@/contexts/ThemeContext";
@@ -34,7 +35,7 @@ interface NavItemChild {
   label: string;
   path: string;
   icon?: React.ElementType;
-  count?: number; // Added for Tasks count support
+  count?: number;
 }
 
 interface NavItem {
@@ -50,22 +51,22 @@ interface NavItem {
 export const MobileNav: React.FC = () => {
   const [open, setOpen] = useState(false);
   const [groupStates, setGroupStates] = useState<Record<string, boolean>>({});
+
   const navigate = useNavigate();
   const location = useLocation();
+
   const { theme, setTheme } = useTheme();
   const { currentUser, logout, canAccessPage } = useAuth();
   const { activeModule, setActiveModule } = useModule();
   const { getOverdueTasks } = useTask();
+
   const overdueCount = getOverdueTasks().length;
-
-  const isAdminPage =
-    location.pathname.startsWith("/admin") ||
-    location.pathname.startsWith("/users");
-
+  const isAdminPage = location.pathname.startsWith("/admin") || location.pathname.startsWith("/users");
   const isSuperAdmin = currentUser?.role === "super_admin";
   const isAdmin = currentUser?.role === "admin" || isSuperAdmin;
   const isModuleActive = activeModule !== null && activeModule !== undefined;
 
+  // Master Items with permission check for HSN
   const masterItems: NavItemChild[] = [
     { icon: Receipt, label: "Expenses", path: "/masters/expenses" },
     { icon: Truck, label: "Suppliers", path: "/masters/suppliers" },
@@ -92,46 +93,28 @@ export const MobileNav: React.FC = () => {
       children: [
         { label: "Menu", path: "/admin/rights/menu", icon: FileText },
         { label: "Widgets", path: "/admin/rights/widgets", icon: FileText },
-        {
-          label: "Financial Year",
-          path: "/admin/rights/fin-year",
-          icon: FileText,
-        },
+        { label: "Financial Year", path: "/admin/rights/fin-year", icon: FileText },
       ],
     },
     {
       label: "Approval",
       icon: CheckCircle2,
       children: [
-        {
-          label: "Approval Setup",
-          path: "/admin/approval/setup",
-          icon: FileText,
-        },
-        {
-          label: "Post Approval Rights",
-          path: "/admin/approval/post-rights",
-          icon: FileText,
-        },
+        { label: "Approval Setup", path: "/admin/approval/setup", icon: FileText },
+        { label: "Post Approval Rights", path: "/admin/approval/post-rights", icon: FileText },
       ],
     },
     {
       label: "Finance",
       icon: Landmark,
       children: [
-        {
-          label: "Expense Booking",
-          path: "/admin/expense-booking",
-          icon: FileText,
-        },
+        { label: "Expense Booking", path: "/admin/expense-booking", icon: FileText },
       ],
     },
   ];
 
-  // Updated NAV_ITEMS - "More" is now the LAST item
   const NAV_ITEMS: NavItem[] = [
     { label: "Amendments", icon: BarChart3, path: "/" },
-
     {
       label: "Setup",
       icon: Settings,
@@ -139,35 +122,22 @@ export const MobileNav: React.FC = () => {
       disabled: !isModuleActive,
       isMasters: true,
     },
-
     {
       label: "Query",
       icon: Scale,
       children: [
         { label: "Trial Balance", path: "/transactions", icon: FileText },
-        {
-          label: "Tasks",
-          path: "/tasks",
-          icon: CheckCircle2,
-          count: overdueCount,
-        },
+        { label: "Tasks", path: "/tasks", icon: CheckCircle2, count: overdueCount },
       ],
     },
-
     {
       label: "Finance",
       icon: Landmark,
       children: [
-        {
-          label: "Expense Booking",
-          path: "/transactions/expense-booking",
-          icon: FileText,
-        },
+        { label: "Expense Booking", path: "/transactions/expense-booking", icon: FileText },
         { label: "Payment", path: "/payments", icon: FileText },
       ],
     },
-
-    // "More" is now the last option
     {
       label: "More",
       icon: Layers,
@@ -219,7 +189,7 @@ export const MobileNav: React.FC = () => {
 
   return (
     <>
-      {/* FAB */}
+      {/* Floating Action Button */}
       <button
         onClick={() => setOpen(true)}
         className="fixed bottom-4 right-4 z-50 w-12 h-12 rounded-full gradient-accent text-primary-foreground flex items-center justify-center shadow-lg md:hidden"
@@ -237,11 +207,9 @@ export const MobileNav: React.FC = () => {
 
           {/* Drawer */}
           <div className="absolute bottom-0 left-0 right-0 rounded-t-2xl bg-card border-t border-border max-h-[90vh] flex flex-col">
-            {/* HEADER */}
+            {/* Header */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
-              <span className="font-heading font-semibold text-sm text-foreground">
-                Menu
-              </span>
+              <span className="font-heading font-semibold text-sm text-foreground">Menu</span>
               <button
                 onClick={() => setOpen(false)}
                 className="p-1 rounded-lg hover:bg-muted transition-colors text-muted-foreground"
@@ -250,9 +218,8 @@ export const MobileNav: React.FC = () => {
               </button>
             </div>
 
-            {/* Scrollable content */}
             <div className="overflow-y-auto flex-1">
-              {/* USER SECTION */}
+              {/* User Section */}
               <div className="p-3 border-b border-border">
                 <div className="flex items-center gap-3">
                   <div className="relative w-10 h-10 rounded-full flex items-center justify-center bg-primary text-primary-foreground font-heading font-semibold text-sm flex-shrink-0">
@@ -268,6 +235,7 @@ export const MobileNav: React.FC = () => {
                       </span>
                     )}
                   </div>
+
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-heading font-semibold text-foreground truncate">
                       {currentUser?.name}
@@ -276,6 +244,7 @@ export const MobileNav: React.FC = () => {
                       {currentUser?.email}
                     </p>
                   </div>
+
                   <div className="flex gap-2 flex-shrink-0">
                     <button className="p-2 border border-border rounded-xl flex items-center text-foreground hover:bg-muted transition-colors">
                       <User size={14} />
@@ -293,7 +262,7 @@ export const MobileNav: React.FC = () => {
                 </div>
               </div>
 
-              {/* FINANCE / ADMIN TOGGLE */}
+              {/* Finance / Admin Toggle */}
               {isAdmin && (
                 <div className="px-3 pt-3 pb-2 flex gap-2">
                   <button
@@ -326,29 +295,26 @@ export const MobileNav: React.FC = () => {
                 </div>
               )}
 
-              {/* NAV ITEMS */}
+              {/* Navigation Items */}
               <div className="p-3 space-y-0.5">
                 {itemsToRender.map((item) => {
                   const openState = groupStates[item.label] ?? false;
                   const active = isActive(item.path, item.children);
 
-                  // Masters — special grid layout
+                  // Special Masters Grid
                   if (item.children && item.isMasters) {
                     return (
                       <div key={item.label}>
                         <button
-                          onClick={() =>
-                            !item.disabled && toggleGroup(item.label)
-                          }
+                          onClick={() => !item.disabled && toggleGroup(item.label)}
                           disabled={item.disabled}
-                          className={[
-                            "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-heading transition-colors",
+                          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-heading transition-colors ${
                             item.disabled
                               ? "opacity-40 cursor-not-allowed text-muted-foreground"
                               : active
-                                ? "bg-primary/10 text-primary"
-                                : "text-foreground hover:bg-muted",
-                          ].join(" ")}
+                              ? "bg-primary/10 text-primary"
+                              : "text-foreground hover:bg-muted"
+                          }`}
                         >
                           <item.icon size={17} className="flex-shrink-0" />
                           <span className="flex-1 text-left">{item.label}</span>
@@ -371,40 +337,27 @@ export const MobileNav: React.FC = () => {
                             </p>
                             <div className="grid grid-cols-3 gap-2">
                               {item.children.map((child) => {
-                                const childActive =
-                                  location.pathname === child.path;
+                                const childActive = location.pathname === child.path;
                                 const ChildIcon = child.icon!;
-                                const colorClass =
-                                  masterIconColors[child.label] ??
-                                  "text-primary";
-                                const bgClass =
-                                  masterBgColors[child.label] ??
-                                  "bg-primary/10";
+                                const colorClass = masterIconColors[child.label] ?? "text-primary";
+                                const bgClass = masterBgColors[child.label] ?? "bg-primary/10";
 
                                 return (
                                   <button
                                     key={child.path}
                                     onClick={() => go(child.path)}
-                                    className={[
-                                      "flex flex-col items-center gap-2 py-3 px-2 rounded-2xl border transition-all",
+                                    className={`flex flex-col items-center gap-2 py-3 px-2 rounded-2xl border transition-all ${
                                       childActive
                                         ? "border-primary bg-primary/10 shadow-sm"
-                                        : "border-border bg-card/50 hover:border-primary/40 hover:bg-muted/60 active:scale-95",
-                                    ].join(" ")}
+                                        : "border-border bg-card/50 hover:border-primary/40 hover:bg-muted/60 active:scale-95"
+                                    }`}
                                   >
-                                    <div
-                                      className={`w-11 h-11 rounded-2xl flex items-center justify-center ${bgClass}`}
-                                    >
-                                      <ChildIcon
-                                        size={22}
-                                        className={colorClass}
-                                      />
+                                    <div className={`w-11 h-11 rounded-2xl flex items-center justify-center ${bgClass}`}>
+                                      <ChildIcon size={22} className={colorClass} />
                                     </div>
                                     <span
                                       className={`text-[11px] font-heading leading-tight text-center ${
-                                        childActive
-                                          ? "text-primary font-semibold"
-                                          : "text-muted-foreground"
+                                        childActive ? "text-primary font-semibold" : "text-muted-foreground"
                                       }`}
                                     >
                                       {child.label}
@@ -419,20 +372,15 @@ export const MobileNav: React.FC = () => {
                     );
                   }
 
-                  // Expandable groups (Query, Finance, More, etc.)
+                  // Regular Expandable Groups
                   if (item.children) {
                     return (
                       <div key={item.label}>
                         <button
-                          onClick={() =>
-                            !item.disabled && toggleGroup(item.label)
-                          }
-                          className={[
-                            "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-heading transition-colors",
-                            active
-                              ? "bg-primary/10 text-primary"
-                              : "text-foreground hover:bg-muted",
-                          ].join(" ")}
+                          onClick={() => !item.disabled && toggleGroup(item.label)}
+                          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-heading transition-colors ${
+                            active ? "bg-primary/10 text-primary" : "text-foreground hover:bg-muted"
+                          }`}
                         >
                           <item.icon size={17} className="flex-shrink-0" />
                           <span className="flex-1 text-left">{item.label}</span>
@@ -445,8 +393,7 @@ export const MobileNav: React.FC = () => {
                         {openState && (
                           <div className="ml-4 pl-3 border-l border-border mt-0.5 mb-1 space-y-0.5">
                             {item.children.map((child) => {
-                              const childActive =
-                                location.pathname === child.path;
+                              const childActive = location.pathname === child.path;
                               const ChildIcon = child.icon;
                               const childCount = (child as any).count;
 
@@ -454,29 +401,19 @@ export const MobileNav: React.FC = () => {
                                 <button
                                   key={child.path}
                                   onClick={() => go(child.path)}
-                                  className={[
-                                    "w-full flex items-center gap-2 px-2 py-2 rounded-lg text-sm transition-colors",
+                                  className={`w-full flex items-center gap-2 px-2 py-2 rounded-lg text-sm transition-colors ${
                                     childActive
                                       ? "bg-primary/10 text-primary font-semibold"
-                                      : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                                  ].join(" ")}
+                                      : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                                  }`}
                                 >
-                                  {ChildIcon && (
-                                    <ChildIcon
-                                      size={14}
-                                      className="flex-shrink-0"
-                                    />
-                                  )}
-                                  <span className="flex-1 text-left">
-                                    {child.label}
-                                  </span>
-
+                                  {ChildIcon && <ChildIcon size={14} className="flex-shrink-0" />}
+                                  <span className="flex-1 text-left">{child.label}</span>
                                   {!!childCount && (
                                     <span className="text-[11px] bg-destructive text-destructive-foreground font-semibold px-1.5 py-0.5 rounded-full leading-none">
                                       {childCount}
                                     </span>
                                   )}
-
                                   {childActive && <ChevronRight size={12} />}
                                 </button>
                               );
@@ -487,17 +424,14 @@ export const MobileNav: React.FC = () => {
                     );
                   }
 
-                  // Simple items (Amendments)
+                  // Simple Navigation Items
                   return (
                     <button
                       key={item.path}
                       onClick={() => go(item.path!)}
-                      className={[
-                        "w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-heading transition-colors",
-                        isActive(item.path)
-                          ? "bg-primary/10 text-primary font-semibold"
-                          : "text-foreground hover:bg-muted",
-                      ].join(" ")}
+                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-heading transition-colors ${
+                        isActive(item.path) ? "bg-primary/10 text-primary font-semibold" : "text-foreground hover:bg-muted"
+                      }`}
                     >
                       <item.icon size={17} className="flex-shrink-0" />
                       <span className="flex-1 text-left">{item.label}</span>
@@ -506,7 +440,7 @@ export const MobileNav: React.FC = () => {
                 })}
               </div>
 
-              {/* THEME SELECTOR */}
+              {/* Theme Selector */}
               <div className="px-3 py-4 border-t border-border">
                 <div className="flex items-center gap-2 mb-3 px-1">
                   <Palette size={14} className="text-muted-foreground" />
@@ -515,12 +449,7 @@ export const MobileNav: React.FC = () => {
                   </span>
                 </div>
                 <div className="grid grid-cols-4 gap-2 sm:grid-cols-5">
-                  {(
-                    Object.entries(THEME_DOTS) as [
-                      Theme,
-                      { bg: string; label: string },
-                    ][]
-                  ).map(([t, { bg, label }]) => (
+                  {(Object.entries(THEME_DOTS) as [Theme, { bg: string; label: string }][]).map(([t, { bg, label }]) => (
                     <button
                       key={t}
                       onClick={() => setTheme(t)}
@@ -540,9 +469,7 @@ export const MobileNav: React.FC = () => {
                       </span>
                       {theme === t && (
                         <span className="absolute top-1.5 right-1.5 w-3.5 h-3.5 rounded-full bg-primary flex items-center justify-center">
-                          <span className="text-[8px] text-primary-foreground leading-none font-bold">
-                            ✓
-                          </span>
+                          <span className="text-[8px] text-primary-foreground leading-none font-bold">✓</span>
                         </span>
                       )}
                     </button>

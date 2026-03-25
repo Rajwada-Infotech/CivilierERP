@@ -4,32 +4,35 @@ import { AppSidebar } from "./AppSidebar";
 import { MobileNav } from "./MobileNav";
 import { useIsMobile } from "@/hooks/use-mobile";
 
-// Sidebar context
+// Sidebar Context
 interface SidebarContextType {
   collapsed: boolean;
   setCollapsed: (v: boolean) => void;
 }
+
 const SidebarContext = createContext<SidebarContextType>({
   collapsed: false,
   setCollapsed: () => {},
 });
+
 export const useSidebarState = () => useContext(SidebarContext);
 
-// Navbar collapse context
+// Navbar Collapse Context
 interface NavbarCollapseContextType {
   navCollapsed: boolean;
   setNavCollapsed: (v: boolean) => void;
 }
+
 const NavbarCollapseContext = createContext<NavbarCollapseContextType>({
   navCollapsed: false,
   setNavCollapsed: () => {},
 });
+
 export const useNavbarCollapse = () => useContext(NavbarCollapseContext);
 
 export const AppLayout = ({ children }: { children: React.ReactNode }) => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [navCollapsed, setNavCollapsed] = useState(false);
-
   const isMobile = useIsMobile();
 
   const sidebarValue = useMemo(
@@ -37,7 +40,7 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
       collapsed: sidebarCollapsed,
       setCollapsed: setSidebarCollapsed,
     }),
-    [sidebarCollapsed],
+    [sidebarCollapsed]
   );
 
   const navbarValue = useMemo(
@@ -45,7 +48,7 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
       navCollapsed,
       setNavCollapsed,
     }),
-    [navCollapsed],
+    [navCollapsed]
   );
 
   return (
