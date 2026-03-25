@@ -69,13 +69,13 @@ export const MobileNav: React.FC = () => {
   const isModuleActive = activeModule !== null;
 
   const masterItems: NavItemChild[] = [
-    { icon: Receipt,  label: "Expenses",    path: "/masters/expenses" },
-    { icon: Truck,    label: "Suppliers",   path: "/masters/suppliers" },
-    { icon: Users,    label: "Customers",   path: "/masters/customers" },
-    { icon: HardHat,  label: "Contractors", path: "/masters/contractors" },
-    { icon: Landmark, label: "Banks",       path: "/masters/banks" },
-    { icon: Package,  label: "Items",       path: "/masters/items" },
-    { icon: Layers,   label: "Item Groups", path: "/masters/item-groups" },
+    { icon: Receipt, label: "Expenses", path: "/masters/expenses" },
+    { icon: Truck, label: "Suppliers", path: "/masters/suppliers" },
+    { icon: Users, label: "Customers", path: "/masters/customers" },
+    { icon: HardHat, label: "Contractors", path: "/masters/contractors" },
+    { icon: Landmark, label: "Banks", path: "/masters/banks" },
+    { icon: Package, label: "Items", path: "/masters/items" },
+    { icon: Layers, label: "Item Groups", path: "/masters/item-groups" },
     ...(canAccessPage("master_hsn")
       ? [{ icon: Hash, label: "HSN", path: "/masters/hsn" }]
       : []),
@@ -92,8 +92,8 @@ export const MobileNav: React.FC = () => {
       label: "Rights",
       icon: ShieldCheck,
       children: [
-        { label: "Menu",           path: "/admin/rights/menu",     icon: FileText },
-        { label: "Widgets",        path: "/admin/rights/widgets",  icon: FileText },
+        { label: "Menu", path: "/admin/rights/menu", icon: FileText },
+        { label: "Widgets", path: "/admin/rights/widgets", icon: FileText },
         { label: "Financial Year", path: "/admin/rights/fin-year", icon: FileText },
       ],
     },
@@ -101,7 +101,7 @@ export const MobileNav: React.FC = () => {
       label: "Approval",
       icon: CheckCircle2,
       children: [
-        { label: "Approval Setup",       path: "/admin/approval/setup",       icon: FileText },
+        { label: "Approval Setup", path: "/admin/approval/setup", icon: FileText },
         { label: "Post Approval Rights", path: "/admin/approval/post-rights", icon: FileText },
       ],
     },
@@ -115,11 +115,11 @@ export const MobileNav: React.FC = () => {
   ];
 
   const NAV_ITEMS: NavItem[] = [
-    { label: "Amendments", icon: BarChart3,    path: "/" },
-    { label: "Setup",      icon: Settings,     children: masterItems, disabled: !isModuleActive },
-    { label: "Reports",    icon: BarChart3,    path: "/reports" },
-    { label: "Widgets",    icon: Puzzle,       path: "/widgets" },
-    { label: "Tasks",      icon: CheckCircle2, path: "/tasks", count: overdueCount },
+    { label: "Amendments", icon: BarChart3, path: "/" },
+    { label: "Setup", icon: Settings, children: masterItems, disabled: !isModuleActive },
+    { label: "Reports", icon: BarChart3, path: "/reports" },
+    { label: "Widgets", icon: Puzzle, path: "/widgets" },
+    { label: "Tasks", icon: CheckCircle2, path: "/tasks", count: overdueCount },
     {
       label: "Query",
       icon: Scale,
@@ -132,7 +132,7 @@ export const MobileNav: React.FC = () => {
       icon: Landmark,
       children: [
         { label: "Expense Booking", path: "/transactions/expense-booking", icon: FileText },
-        { label: "Payment",         path: "/payments",                     icon: FileText },
+        { label: "Payment", path: "/payments", icon: FileText },
       ],
     },
   ];
@@ -214,6 +214,7 @@ export const MobileNav: React.FC = () => {
                 </button>
                 <button
                   onClick={() => { logout(); setOpen(false); }}
+                  title="Logout"
                   className="text-xs border border-border p-2 rounded-lg flex items-center justify-center gap-2 text-destructive hover:bg-destructive/10 transition-colors"
                 >
                   <LogOut size={14} /> Logout
@@ -236,6 +237,7 @@ export const MobileNav: React.FC = () => {
                 <div className="mt-2 rounded-lg border border-border bg-card overflow-hidden">
                   <button
                     onClick={() => { setActiveModule("finance"); setShowModulePicker(false); }}
+                    title="Switch to Finance Module"
                     className={`w-full flex items-center gap-3 px-3 py-2.5 text-sm text-left hover:bg-muted transition-colors ${activeModule === "finance" ? "text-primary font-semibold" : "text-foreground"}`}
                   >
                     <Landmark size={15} className="text-green-400 flex-shrink-0" />
@@ -276,13 +278,14 @@ export const MobileNav: React.FC = () => {
                       <button
                         onClick={() => !item.disabled && toggleGroup(item.label)}
                         disabled={item.disabled}
+                        title={item.label}
                         className={[
                           "w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-heading transition-colors",
                           item.disabled
                             ? "opacity-40 cursor-not-allowed text-muted-foreground"
                             : active
-                            ? "bg-primary/10 text-primary"
-                            : "text-foreground hover:bg-muted",
+                              ? "bg-primary/10 text-primary"
+                              : "text-foreground hover:bg-muted",
                         ].join(" ")}
                       >
                         <item.icon size={17} className="flex-shrink-0" />
@@ -342,7 +345,6 @@ export const MobileNav: React.FC = () => {
               })}
             </div>
 
-<<<<<<< Updated upstream
             {/* THEME */}
             <div className="p-3 border-t border-border">
               <p className="text-xs font-heading text-muted-foreground mb-2">Theme</p>
@@ -359,29 +361,6 @@ export const MobileNav: React.FC = () => {
               </div>
             </div>
 
-=======
-{/* THEME SWITCH */}
-<div className="p-3 border-t">
-  <p className="text-xs mb-2">Theme</p>
-  <div className="flex gap-2">
-    {Object.values(THEME_DOTS).map((themeDot, index) => {
-      const themeKey = Object.keys(THEME_DOTS)[index];
-      return (
-        <button
-          key={themeKey}
-          onClick={() => setTheme(themeKey as keyof typeof THEME_DOTS)}
-          title={`Switch to ${themeKey} theme`}
-          className={`w-6 h-6 rounded-full border ${
-            theme === themeKey ? "ring-2 ring-offset-2" : ""
-          }`}
-          data-theme={themeKey}
-          style={{ "--theme-bg": themeDot.bg } as React.CSSProperties}
-        />
-      );
-    })}
-  </div>
-</div>
->>>>>>> Stashed changes
           </div>
         </div>
       )}
