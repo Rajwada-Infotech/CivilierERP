@@ -1,7 +1,14 @@
 import React from "react";
-import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from "react-router-dom";
+import {
+  BrowserRouter as Router,
+  Routes,
+  Route,
+  Navigate,
+  useLocation,
+} from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 import Login from "./pages/Login";
+import NotFound from "./pages/NotFound";
 
 // Layout
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -41,6 +48,7 @@ import { ModuleProvider } from "@/contexts/ModuleContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
 import { TaskProvider } from "@/contexts/TaskContext";
 import { FinYearProvider } from "@/contexts/FinYearContext";
+import { HsnProvider } from "@/contexts/HsnContext";
 
 /* =========================
    AUTH GUARD
@@ -57,6 +65,17 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 }
 
 /* =========================
+   PROTECTED ROUTE WRAPPER
+========================= */
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  return (
+    <RequireAuth>
+      <AppLayout>{children}</AppLayout>
+    </RequireAuth>
+  );
+}
+
+/* =========================
    ROUTES
 ========================= */
 function AppRoutes() {
@@ -70,49 +89,198 @@ function AppRoutes() {
         element={currentUser ? <Navigate to="/" replace /> : <Login />}
       />
 
-      {/* PROTECTED */}
+      {/* MAIN */}
       <Route
-        path="/*"
+        path="/"
         element={
-          <RequireAuth>
-            <AppLayout>
-              <Routes>
-                {/* MAIN */}
-                <Route path="/" element={<Dashboard />} />
-                <Route path="/transactions" element={<Transactions />} />
-                <Route path="/transactions/expense-booking" element={<ExpenseBooking />} />
-                <Route path="/reports" element={<Reports />} />
-                <Route path="/widgets" element={<Widgets />} />
-                <Route path="/tasks" element={<Tasks />} />
-                <Route path="/payments" element={<Payment />} />
-
-                {/* MASTERS */}
-                <Route path="/masters/contractors" element={<ContractorMaster />} />
-                <Route path="/masters/suppliers" element={<SupplierMaster />} />
-                <Route path="/masters/customers" element={<CustomerMaster />} />
-                <Route path="/masters/banks" element={<BankMaster />} />
-                <Route path="/masters/expenses" element={<ExpensesMaster />} />
-                <Route path="/masters/items" element={<ItemMaster />} />
-                <Route path="/masters/item-groups" element={<ItemGroupMaster />} />
-                <Route path="/masters/hsn" element={<HsnMaster />} />
-
-                {/* ADMIN */}
-                <Route path="/admin" element={<AdminDashboard />} />
-                <Route path="/admin/expense-booking" element={<AdminExpenseBooking />} />
-                <Route path="/users" element={<Users />} />
-                <Route path="/admin/rights/menu" element={<MenuRights />} />
-                <Route path="/admin/rights/widgets" element={<WidgetRights />} />
-                <Route path="/admin/rights/fin-year" element={<FinYearRights />} />
-                <Route path="/admin/approval/setup" element={<ApprovalSetup />} />
-                <Route path="/admin/approval/post-rights" element={<PostApprovalRights />} />
-
-                {/* FALLBACK */}
-                <Route path="*" element={<div className="p-4">Page Not Found</div>} />
-              </Routes>
-            </AppLayout>
-          </RequireAuth>
+          <ProtectedRoute>
+            <Dashboard />
+          </ProtectedRoute>
         }
       />
+      <Route
+        path="/transactions"
+        element={
+          <ProtectedRoute>
+            <Transactions />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/transactions/expense-booking"
+        element={
+          <ProtectedRoute>
+            <ExpenseBooking />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/reports"
+        element={
+          <ProtectedRoute>
+            <Reports />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/widgets"
+        element={
+          <ProtectedRoute>
+            <Widgets />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/tasks"
+        element={
+          <ProtectedRoute>
+            <Tasks />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/payments"
+        element={
+          <ProtectedRoute>
+            <Payment />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* MASTERS */}
+      <Route
+        path="/masters/contractors"
+        element={
+          <ProtectedRoute>
+            <ContractorMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/suppliers"
+        element={
+          <ProtectedRoute>
+            <SupplierMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/customers"
+        element={
+          <ProtectedRoute>
+            <CustomerMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/banks"
+        element={
+          <ProtectedRoute>
+            <BankMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/expenses"
+        element={
+          <ProtectedRoute>
+            <ExpensesMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/items"
+        element={
+          <ProtectedRoute>
+            <ItemMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/item-groups"
+        element={
+          <ProtectedRoute>
+            <ItemGroupMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/hsn"
+        element={
+          <ProtectedRoute>
+            <HsnMaster />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* ADMIN */}
+      <Route
+        path="/admin"
+        element={
+          <ProtectedRoute>
+            <AdminDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/expense-booking"
+        element={
+          <ProtectedRoute>
+            <AdminExpenseBooking />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/users"
+        element={
+          <ProtectedRoute>
+            <Users />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/rights/menu"
+        element={
+          <ProtectedRoute>
+            <MenuRights />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/rights/widgets"
+        element={
+          <ProtectedRoute>
+            <WidgetRights />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/rights/fin-year"
+        element={
+          <ProtectedRoute>
+            <FinYearRights />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/approval/setup"
+        element={
+          <ProtectedRoute>
+            <ApprovalSetup />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/approval/post-rights"
+        element={
+          <ProtectedRoute>
+            <PostApprovalRights />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* 404 — always shown, no auth gate */}
+      <Route path="*" element={<NotFound />} />
     </Routes>
   );
 }
@@ -126,11 +294,13 @@ function App() {
       <ModuleProvider>
         <ThemeProvider>
           <FinYearProvider>
-            <TaskProvider>
-              <Router>
-                <AppRoutes />
-              </Router>
-            </TaskProvider>
+            <HsnProvider>
+              <TaskProvider>
+                <Router>
+                  <AppRoutes />
+                </Router>
+              </TaskProvider>
+            </HsnProvider>
           </FinYearProvider>
         </ThemeProvider>
       </ModuleProvider>
