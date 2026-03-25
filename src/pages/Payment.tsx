@@ -251,7 +251,7 @@ export default function Payment() {
                   control={form.control}
                   name="projectName"
                   render={({ field }) => (
-                    <FormItem className="flex flex-col gap-2 sm:flex-row sm:items-end gap-3 sm:gap-4">
+                    <FormItem className="flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-4">
                       <FormLabel className="text-sm font-medium w-full sm:w-[130px] sm:shrink-0 sm:text-right">Project Name</FormLabel>
                       <div className="flex-1 min-w-0">
                         <Select onValueChange={field.onChange} defaultValue={field.value}>

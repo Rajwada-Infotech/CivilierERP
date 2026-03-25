@@ -33,8 +33,8 @@ import ItemMaster from "./pages/masters/ItemMaster";
 import ItemGroupMaster from "./pages/masters/ItemGroupMaster";
 
 // Setup (from feature)
-import AccountGroupMaster from "./pages/setup/AccountGroupMaster";
-import AccountHeadMaster from "./pages/setup/AccountHeadMaster";
+//import AccountGroupMaster from "./pages/setup/AccountGroupMaster";
+//import AccountHeadMaster from "./pages/setup/AccountHeadMaster";
 
 // Admin
 import AdminDashboard from "./pages/admin/AdminDashboard";
@@ -100,12 +100,10 @@ const AppRoutes = () => (
     <Route path="/masters/expenses" element={<ProtectedRoute><ExpensesMaster /></ProtectedRoute>} />
     <Route path="/masters/items" element={<ProtectedRoute><ItemMaster /></ProtectedRoute>} />
     <Route path="/masters/item-groups" element={<ProtectedRoute><ItemGroupMaster /></ProtectedRoute>} />
-
-    {/* Setup */}
+    {/* Setup }
     <Route path="/setup/account-groups" element={<ProtectedRoute><AccountGroupMaster /></ProtectedRoute>} />
     <Route path="/setup/account-heads" element={<ProtectedRoute><AccountHeadMaster /></ProtectedRoute>} />
-
-    {/* Admin */}
+    { Admin */}
     <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
     <Route path="/admin/dashboard" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
     <Route path="/admin/rights/menu" element={<ProtectedRoute><MenuRights /></ProtectedRoute>} />
