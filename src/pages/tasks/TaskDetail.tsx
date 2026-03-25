@@ -1,6 +1,5 @@
 import React, { useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { AppLayout } from "@/components/layout/AppLayout";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useTask } from "@/contexts/TaskContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -43,13 +42,11 @@ export default function TaskDetail() {
 
   if (!task) {
     return (
-      <AppLayout>
-        <div className="flex flex-col items-center justify-center py-32 text-center px-4">
+              <div className="flex flex-col items-center justify-center py-32 text-center px-4">
           <Circle size={48} className="text-muted-foreground mb-4 opacity-30" />
           <h1 className="text-xl font-heading font-bold text-foreground mb-2">Task not found</h1>
           <button onClick={() => navigate("/tasks")} className="text-primary text-sm hover:underline">Back to tasks</button>
         </div>
-      </AppLayout>
     );
   }
 
@@ -75,8 +72,8 @@ export default function TaskDetail() {
   const handleDelete = () => { deleteTask(task.id); navigate("/tasks"); };
 
   return (
-    <AppLayout>
-      <Breadcrumbs items={["Dashboard", "Tasks", task.title]} />
+    <>
+          <Breadcrumbs items={["Dashboard", "Tasks", task.title]} />
 
       {/* Header */}
       <div className="flex items-start justify-between gap-3 mb-6">
@@ -254,6 +251,6 @@ export default function TaskDetail() {
       <AnimatePresence>
         {showEdit && <TaskFormModal editTask={task} onClose={() => setShowEdit(false)} />}
       </AnimatePresence>
-    </AppLayout>
+    </>
   );
 }

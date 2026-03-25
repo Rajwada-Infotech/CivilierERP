@@ -1,19 +1,17 @@
-import React, {
-  createContext,
-  useContext,
-  useState,
-  useCallback,
-  useMemo,
-} from "react";
+import React, { createContext, useContext, useState, useCallback } from "react";
 
 export type UserRole = "super_admin" | "admin" | "user";
 
-// Every controllable page in the app
+/* =========================
+   PAGE KEYS
+========================= */
 export type PageKey =
   | "dashboard"
   | "transactions"
   | "reports"
   | "widgets"
+  | "tasks"
+  | "payments"
   | "master_contractors"
   | "master_suppliers"
   | "master_customers"
@@ -21,14 +19,16 @@ export type PageKey =
   | "master_expenses"
   | "master_items"
   | "master_item_groups"
-  | "tasks"
+  | "master_hsn"
   | "admin_menu_rights"
   | "admin_widgets_rights"
   | "admin_fin_year_rights"
   | "admin_approval_setup"
   | "admin_post_approval_rights";
 
-// Expanded Actions available per page
+/* =========================
+   ACTIONS
+========================= */
 export type PageAction =
   | "view"
   | "create"
@@ -56,52 +56,10 @@ export interface AppUser {
   createdBy?: string;
 }
 
-// Page metadata for display
-export const PAGE_DEFINITIONS: {
-  key: PageKey;
-  label: string;
-  path: string;
-  group: string;
-  availableActions: PageAction[];
-}[] = [
-  // Admin group
-  {
-    key: "admin_menu_rights",
-    label: "Menu Rights",
-    path: "/admin/rights/menu",
-    group: "Admin",
-    availableActions: ["view", "create", "edit", "delete"],
-  },
-  {
-    key: "admin_widgets_rights",
-    label: "Widgets Rights",
-    path: "/admin/rights/widgets",
-    group: "Admin",
-    availableActions: ["view", "create", "edit", "delete"],
-  },
-  {
-    key: "admin_fin_year_rights",
-    label: "Fin Year Rights",
-    path: "/admin/rights/fin-year",
-    group: "Admin",
-    availableActions: ["view", "create", "edit", "delete"],
-  },
-  {
-    key: "admin_approval_setup",
-    label: "Approval Setup",
-    path: "/admin/approval/setup",
-    group: "Admin",
-    availableActions: ["view", "create", "edit", "delete"],
-  },
-  {
-    key: "admin_post_approval_rights",
-    label: "Post Approval Rights",
-    path: "/admin/approval/post-rights",
-    group: "Admin",
-    availableActions: ["view", "create", "edit", "delete", "approve", "reject"],
-  },
-
-  // Main group
+/* =========================
+   PAGE DEFINITIONS
+========================= */
+export const PAGE_DEFINITIONS = [
   {
     key: "dashboard",
     label: "Dashboard",
@@ -146,72 +104,125 @@ export const PAGE_DEFINITIONS: {
     group: "Main",
     availableActions: ["view", "create", "edit", "delete", "print"],
   },
+  {
+    key: "payments",
+    label: "Payments",
+    path: "/payments",
+    group: "Main",
+    availableActions: ["view", "create", "edit", "delete", "print", "export"],
+  },
 
-  // Masters group
   {
     key: "master_contractors",
-    label: "Contractor Master",
+    label: "Contractors",
     path: "/masters/contractors",
     group: "Masters",
     availableActions: ["view", "create", "edit", "delete", "print", "export"],
   },
   {
     key: "master_suppliers",
-    label: "Supplier Master",
+    label: "Suppliers",
     path: "/masters/suppliers",
     group: "Masters",
     availableActions: ["view", "create", "edit", "delete", "print", "export"],
   },
   {
     key: "master_customers",
-    label: "Customer Master",
+    label: "Customers",
     path: "/masters/customers",
     group: "Masters",
     availableActions: ["view", "create", "edit", "delete", "print", "export"],
   },
   {
     key: "master_banks",
-    label: "Bank Master",
+    label: "Banks",
     path: "/masters/banks",
     group: "Masters",
     availableActions: ["view", "create", "edit", "delete", "print", "export"],
   },
   {
     key: "master_expenses",
-    label: "Expenses Master",
+    label: "Expenses",
     path: "/masters/expenses",
     group: "Masters",
     availableActions: ["view", "create", "edit", "delete", "print", "export"],
   },
   {
     key: "master_items",
-    label: "Item Master",
+    label: "Items",
     path: "/masters/items",
     group: "Masters",
     availableActions: ["view", "create", "edit", "delete", "print", "export"],
   },
   {
     key: "master_item_groups",
-    label: "Item Group Master",
+    label: "Item Groups",
     path: "/masters/item-groups",
     group: "Masters",
     availableActions: ["view", "create", "edit", "delete"],
   },
+  {
+    key: "master_hsn",
+    label: "HSN",
+    path: "/masters/hsn",
+    group: "Masters",
+    availableActions: ["view", "create", "edit", "delete", "print", "export"],
+  },
+
+  {
+    key: "admin_menu_rights",
+    label: "Menu Rights",
+    path: "/admin/rights/menu",
+    group: "Admin",
+    availableActions: ["view", "create", "edit", "delete"],
+  },
+  {
+    key: "admin_widgets_rights",
+    label: "Widgets Rights",
+    path: "/admin/rights/widgets",
+    group: "Admin",
+    availableActions: ["view", "create", "edit", "delete"],
+  },
+  {
+    key: "admin_fin_year_rights",
+    label: "Fin Year",
+    path: "/admin/rights/fin-year",
+    group: "Admin",
+    availableActions: ["view", "create", "edit", "delete"],
+  },
+  {
+    key: "admin_approval_setup",
+    label: "Approval Setup",
+    path: "/admin/approval/setup",
+    group: "Admin",
+    availableActions: ["view", "create", "edit", "delete"],
+  },
+  {
+    key: "admin_post_approval_rights",
+    label: "Post Approval",
+    path: "/admin/approval/post-rights",
+    group: "Admin",
+    availableActions: ["view", "create", "edit", "delete", "approve", "reject"],
+  },
 ];
 
-// Full access for Super Admin & Admin
+/* =========================
+   ACCESS HELPERS
+========================= */
 const FULL_ACCESS: PagePermission[] = PAGE_DEFINITIONS.map((p) => ({
-  page: p.key,
+  page: p.key as PageKey,
   actions: [...p.availableActions],
 }));
 
-// Default access for new regular users
 const DEFAULT_USER_ACCESS: PagePermission[] = [
   { page: "dashboard", actions: ["view"] },
   { page: "reports", actions: ["view"] },
 ];
 
-export const DEMO_USERS: (AppUser & { password: string })[] = [
+/* =========================
+   DEMO USERS
+========================= */
+export const DEMO_USERS = [
   {
     id: "u-super-1",
     name: "Super Admin",
@@ -239,13 +250,7 @@ export const DEMO_USERS: (AppUser & { password: string })[] = [
     password: "user123",
     role: "user",
     initials: "RK",
-    pagePermissions: [
-      { page: "dashboard", actions: ["view", "print"] },
-      { page: "transactions", actions: ["view", "create", "print"] },
-      { page: "reports", actions: ["view", "print", "export"] },
-      { page: "master_contractors", actions: ["view", "edit", "print"] },
-      { page: "tasks", actions: ["view", "create", "edit", "print"] },
-    ],
+    pagePermissions: FULL_ACCESS,
     isActive: true,
   },
   {
@@ -255,50 +260,39 @@ export const DEMO_USERS: (AppUser & { password: string })[] = [
     password: "user123",
     role: "user",
     initials: "MP",
-    pagePermissions: [{ page: "dashboard", actions: ["view"] }],
+    pagePermissions: DEFAULT_USER_ACCESS,
     isActive: true,
   },
   {
     id: "u-user-3",
-    name: "Dinesh Rao",
+    name: "Dinesh Sharma",
     email: "dinesh@civilier.com",
     password: "user123",
     role: "user",
-    initials: "DR",
-    pagePermissions: [],
+    initials: "DS",
+    pagePermissions: DEFAULT_USER_ACCESS,
     isActive: false,
   },
 ];
 
+/* =========================
+   CONTEXT
+========================= */
 interface AuthContextType {
   currentUser: AppUser | null;
   allUsers: AppUser[];
   allAdmins: AppUser[];
+
   login: (
     email: string,
     password: string,
   ) => { success: boolean; error?: string };
   logout: () => void;
 
-  // Super Admin only
-  addAdmin: (
-    admin: Omit<AppUser, "id" | "createdBy"> & { password: string },
-  ) => void;
-  deleteAdmin: (adminId: string) => void;
-  toggleAdminStatus: (adminId: string) => void;
+  addUser: (user: Omit<AppUser, "id"> & { password: string }) => void;
+  deleteUser: (id: string) => void;
+  toggleUserStatus: (id: string) => void;
 
-  // Admin functions
-  updateUserPagePermissions: (
-    userId: string,
-    pagePermissions: PagePermission[],
-  ) => void;
-  toggleUserStatus: (userId: string) => void;
-  addUser: (
-    user: Omit<AppUser, "id" | "createdBy"> & { password: string },
-  ) => void;
-  deleteUser: (userId: string) => void;
-
-  // Permission helpers
   canAccessPage: (page: PageKey) => boolean;
   canDoAction: (page: PageKey, action: PageAction) => boolean;
 }
@@ -307,173 +301,91 @@ const AuthContext = createContext<AuthContextType | null>(null);
 
 export const useAuth = () => {
   const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be used inside AuthProvider");
+  if (!ctx) throw new Error("useAuth must be inside provider");
   return ctx;
 };
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
-  const [userStore, setUserStore] =
-    useState<(AppUser & { password: string })[]>(DEMO_USERS);
-
-  const allUsers = useMemo(
-    () => userStore.filter((u) => u.role === "user"),
-    [userStore],
-  );
-
-  const allAdmins = useMemo(
-    () => userStore.filter((u) => u.role === "admin"),
-    [userStore],
-  );
+  const [users, setUsers] = useState<any[]>(DEMO_USERS);
 
   const login = useCallback(
     (email: string, password: string) => {
-      const found = userStore.find(
+      const user = users.find(
         (u) =>
           u.email.toLowerCase() === email.toLowerCase() &&
           u.password === password,
       );
 
-      if (!found)
-        return { success: false, error: "Invalid email or password." };
-      if (!found.isActive)
-        return {
-          success: false,
-          error: "Your account has been deactivated. Contact an administrator.",
-        };
+      if (!user) return { success: false, error: "Invalid credentials" };
+      if (!user.isActive) return { success: false, error: "User inactive" };
 
-      const { password: _pw, ...user } = found;
-      setCurrentUser(user);
+      const { password: _pw, ...safeUser } = user;
+      setCurrentUser(safeUser);
       return { success: true };
     },
-    [userStore],
+    [users],
   );
 
-  const logout = useCallback(() => {
-    setCurrentUser(null);
-  }, []);
+  const logout = () => setCurrentUser(null);
 
-  const canAccessPage = useCallback(
-    (page: PageKey) => {
-      if (!currentUser) return false;
-      if (currentUser.role === "super_admin" || currentUser.role === "admin")
-        return true;
+  const canAccessPage = (page: PageKey) => {
+    if (!currentUser) return false;
+    if (["admin", "super_admin"].includes(currentUser.role)) return true;
 
-      return currentUser.pagePermissions.some(
-        (p) => p.page === page && p.actions.includes("view"),
-      );
-    },
-    [currentUser],
-  );
-
-  const canDoAction = useCallback(
-    (page: PageKey, action: PageAction) => {
-      if (!currentUser) return false;
-      if (currentUser.role === "super_admin" || currentUser.role === "admin")
-        return true;
-
-      return currentUser.pagePermissions.some(
-        (p) => p.page === page && p.actions.includes(action),
-      );
-    },
-    [currentUser],
-  );
-
-  // Super Admin functions
-  const addAdmin = useCallback(
-    (admin: Omit<AppUser, "id" | "createdBy"> & { password: string }) => {
-      setUserStore((prev) => [
-        ...prev,
-        {
-          ...admin,
-          id: `u-admin-${Date.now()}`,
-          role: "admin",
-          createdBy: currentUser?.id,
-        },
-      ]);
-    },
-    [currentUser?.id],
-  );
-
-  const deleteAdmin = useCallback((adminId: string) => {
-    setUserStore((prev) => prev.filter((u) => u.id !== adminId));
-  }, []);
-
-  const toggleAdminStatus = useCallback((adminId: string) => {
-    setUserStore((prev) =>
-      prev.map((u) => (u.id === adminId ? { ...u, isActive: !u.isActive } : u)),
+    return currentUser.pagePermissions.some(
+      (p) => p.page === page && p.actions.includes("view"),
     );
-  }, []);
+  };
 
-  // Admin functions for managing users
-  const updateUserPagePermissions = useCallback(
-    (userId: string, pagePermissions: PagePermission[]) => {
-      setUserStore((prev) =>
-        prev.map((u) => (u.id === userId ? { ...u, pagePermissions } : u)),
-      );
-    },
-    [],
-  );
+  const canDoAction = (page: PageKey, action: PageAction) => {
+    if (!currentUser) return false;
+    if (["admin", "super_admin"].includes(currentUser.role)) return true;
 
-  const toggleUserStatus = useCallback((userId: string) => {
-    setUserStore((prev) =>
-      prev.map((u) => (u.id === userId ? { ...u, isActive: !u.isActive } : u)),
+    return currentUser.pagePermissions.some(
+      (p) => p.page === page && p.actions.includes(action),
     );
-  }, []);
+  };
 
-  const addUser = useCallback(
-    (user: Omit<AppUser, "id" | "createdBy"> & { password: string }) => {
-      setUserStore((prev) => [
-        ...prev,
-        {
-          ...user,
-          id: `u-user-${Date.now()}`,
-          role: "user",
-          createdBy: currentUser?.id,
-        },
-      ]);
-    },
-    [currentUser?.id],
+  const addUser = (user: any) => {
+    setUsers((prev) => [
+      ...prev,
+      {
+        ...user,
+        id: `u-${Date.now()}`,
+        pagePermissions: user.pagePermissions?.length
+          ? user.pagePermissions
+          : DEFAULT_USER_ACCESS,
+      },
+    ]);
+  };
+
+  const deleteUser = (id: string) => {
+    setUsers((prev) => prev.filter((u) => u.id !== id));
+  };
+
+  const toggleUserStatus = (id: string) => {
+    setUsers((prev) =>
+      prev.map((u) => (u.id === id ? { ...u, isActive: !u.isActive } : u)),
+    );
+  };
+
+  return (
+    <AuthContext.Provider
+      value={{
+        currentUser,
+        allUsers: users,
+        allAdmins: users.filter((u) => u.role === "admin"),
+        login,
+        logout,
+        addUser,
+        deleteUser,
+        toggleUserStatus,
+        canAccessPage,
+        canDoAction,
+      }}
+    >
+      {children}
+    </AuthContext.Provider>
   );
-
-  const deleteUser = useCallback((userId: string) => {
-    setUserStore((prev) => prev.filter((u) => u.id !== userId));
-  }, []);
-
-  const value = useMemo(
-    () => ({
-      currentUser,
-      allUsers,
-      allAdmins,
-      login,
-      logout,
-      addAdmin,
-      deleteAdmin,
-      toggleAdminStatus,
-      updateUserPagePermissions,
-      toggleUserStatus,
-      addUser,
-      deleteUser,
-      canAccessPage,
-      canDoAction,
-    }),
-    [
-      currentUser,
-      allUsers,
-      allAdmins,
-      login,
-      logout,
-      addAdmin,
-      deleteAdmin,
-      toggleAdminStatus,
-      updateUserPagePermissions,
-      toggleUserStatus,
-      addUser,
-      deleteUser,
-      canAccessPage,
-      canDoAction,
-    ],
-  );
-
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
