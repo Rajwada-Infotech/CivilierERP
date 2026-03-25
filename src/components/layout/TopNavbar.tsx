@@ -4,7 +4,7 @@ import { LogoFull } from "../Logo";
 import { useTheme, THEME_DOTS, Theme } from "@/contexts/ThemeContext";
 import { useModule } from "@/contexts/ModuleContext";
 import { useAuth } from "@/contexts/AuthContext";
-import { useSidebarState } from "./AppLayout";
+import { useNavbarCollapse } from "./AppLayout";
 import {
   Hash,
   Settings,
@@ -17,7 +17,6 @@ import {
   ShieldCheck,
   Crown,
   Shield,
-  CheckCircle2,
   Receipt,
   Truck,
   Users,
@@ -109,14 +108,8 @@ const masterItems = [
     path: "/masters/item-groups",
     color: "text-indigo-400",
   },
-  {
-    icon: Hash,
-    label: "HSN",
-    path: "/masters/hsn",
-    color: "text-pink-400",
-  },
+  { icon: Hash, label: "HSN", path: "/masters/hsn", color: "text-pink-400" },
 ];
-
 
 export const TopNavbar = () => {
   const navigate = useNavigate();
@@ -124,7 +117,7 @@ export const TopNavbar = () => {
   const { theme, setTheme } = useTheme();
   const { activeModule, setActiveModule } = useModule();
   const { currentUser, logout } = useAuth();
-  const { collapsed: navCollapsed, setCollapsed: setNavCollapsed } = useSidebarState();
+  const { navCollapsed, setNavCollapsed } = useNavbarCollapse();
 
   const [setupOpen, setSetupOpen] = useState(false);
   const [moduleOpen, setModuleOpen] = useState(false);
@@ -134,24 +127,46 @@ export const TopNavbar = () => {
   const isModuleActive = activeModule !== null;
   const isSuperAdmin = currentUser?.role === "super_admin";
   const isAdmin = currentUser?.role === "admin" || isSuperAdmin;
-
   const RoleIcon = isSuperAdmin ? Crown : isAdmin ? Shield : null;
   const roleColor = isSuperAdmin ? "#7c3aed" : "#2563eb";
 
-  const closeAll = () => {
-    setSetupOpen(false);
-    setModuleOpen(false);
-    setUserOpen(false);
-    setThemeOpen(false);
-  };
-
-  const handleSetupClick = useCallback(() => {
+  // ─── Toggle Handlers (Fixed) ─────────────────────────────────────────────
+  const toggleSetup = useCallback(() => {
     if (!isModuleActive) return;
-    setSetupOpen((p) => !p);
+    setSetupOpen((prev) => !prev);
     setModuleOpen(false);
     setUserOpen(false);
     setThemeOpen(false);
   }, [isModuleActive]);
+
+  const toggleModule = useCallback(() => {
+    setModuleOpen((prev) => !prev);
+    setSetupOpen(false);
+    setUserOpen(false);
+    setThemeOpen(false);
+  }, []);
+
+  const toggleTheme = useCallback(() => {
+    setThemeOpen((prev) => !prev);
+    setSetupOpen(false);
+    setModuleOpen(false);
+    setUserOpen(false);
+  }, []);
+
+  const toggleUser = useCallback(() => {
+    setUserOpen((prev) => !prev);
+    setSetupOpen(false);
+    setModuleOpen(false);
+    setThemeOpen(false);
+  }, []);
+
+  // Close all dropdowns (useful for outside clicks if needed later)
+  const closeAll = useCallback(() => {
+    setSetupOpen(false);
+    setModuleOpen(false);
+    setUserOpen(false);
+    setThemeOpen(false);
+  }, []);
 
   return (
     <header className="fixed top-0 left-0 right-0 h-14 z-50 flex items-center justify-between px-4 border-b border-border bg-card/80 backdrop-blur-lg">
@@ -165,10 +180,10 @@ export const TopNavbar = () => {
 
       {/* DESKTOP NAV */}
       <div className="hidden md:flex items-center gap-1">
-        {/* Collapse toggle */}
+        {/* Collapse Toggle */}
         <button
           onClick={() => setNavCollapsed(!navCollapsed)}
-          title={navCollapsed ? "Expand sidebar" : "Collapse sidebar"}
+          title={navCollapsed ? "Expand navigation" : "Collapse navigation"}
           className="p-1.5 rounded-md bg-muted hover:bg-muted/80 text-foreground border border-border transition-all duration-200 shrink-0"
         >
           {navCollapsed ? (
@@ -178,30 +193,28 @@ export const TopNavbar = () => {
           )}
         </button>
 
-        {/* Collapsible block */}
+        {/* Collapsible Navigation Items */}
         <div
           className="flex items-center gap-1 transition-all duration-300 ease-in-out"
           style={{
-            maxWidth: navCollapsed ? 0 : 600,
+            maxWidth: navCollapsed ? 0 : 620,
             opacity: navCollapsed ? 0 : 1,
             overflow: navCollapsed ? "hidden" : "visible",
             pointerEvents: navCollapsed ? "none" : "auto",
           }}
         >
-          {/* Setup with Fixed Masters */}
+          {/* Setup Dropdown */}
           <div className="relative shrink-0">
             <button
-              onClick={handleSetupClick}
+              onClick={toggleSetup}
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all duration-200 whitespace-nowrap ${
                 isModuleActive
                   ? "hover:bg-muted text-foreground"
                   : "text-muted-foreground cursor-not-allowed opacity-40"
               }`}
-              title={isModuleActive ? "Setup" : "Select a module first"}
             >
               <Settings size={16} /> Setup
             </button>
-
             <Dropdown
               open={setupOpen}
               onClose={() => setSetupOpen(false)}
@@ -216,7 +229,7 @@ export const TopNavbar = () => {
                     key={label}
                     onClick={() => {
                       navigate(path);
-                      setSetupOpen(false);
+                      closeAll();
                     }}
                     className={`group flex flex-col items-center gap-2 p-4 rounded-2xl border transition-all active:scale-95 ${
                       location.pathname === path
@@ -227,7 +240,7 @@ export const TopNavbar = () => {
                     <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-card border border-border/60 group-hover:bg-muted transition-colors">
                       <Icon size={22} className={color} />
                     </div>
-                    <span className="text-[11px] font-heading text-muted-foreground group-hover:text-foreground transition-colors text-center leading-tight">
+                    <span className="text-[11px] font-heading text-muted-foreground group-hover:text-foreground text-center leading-tight">
                       {label}
                     </span>
                   </button>
@@ -238,8 +251,11 @@ export const TopNavbar = () => {
 
           {/* Reports */}
           <button
-            onClick={() => navigate("/reports")}
-            className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all duration-200 whitespace-nowrap ${
+            onClick={() => {
+              navigate("/reports");
+              closeAll();
+            }}
+            className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all whitespace-nowrap ${
               location.pathname === "/reports"
                 ? "bg-primary/10 text-primary"
                 : "hover:bg-muted text-foreground"
@@ -250,8 +266,11 @@ export const TopNavbar = () => {
 
           {/* Widgets */}
           <button
-            onClick={() => navigate("/widgets")}
-            className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all duration-200 whitespace-nowrap ${
+            onClick={() => {
+              navigate("/widgets");
+              closeAll();
+            }}
+            className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all whitespace-nowrap ${
               location.pathname === "/widgets"
                 ? "bg-primary/10 text-primary"
                 : "hover:bg-muted text-foreground"
@@ -260,20 +279,14 @@ export const TopNavbar = () => {
             <Puzzle size={16} /> Widgets
           </button>
 
-          {/* Module Selector */}
+          {/* Module Selector - FIXED */}
           <div className="relative shrink-0">
             <button
-              onClick={() => {
-                setModuleOpen((p) => !p);
-                setSetupOpen(false);
-                setUserOpen(false);
-                setThemeOpen(false);
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading hover:bg-muted transition-all duration-200 text-foreground whitespace-nowrap"
+              onClick={toggleModule}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading hover:bg-muted text-foreground whitespace-nowrap"
             >
               <LayoutGrid size={16} /> Module
             </button>
-
             <Dropdown
               open={moduleOpen}
               onClose={() => setModuleOpen(false)}
@@ -285,7 +298,7 @@ export const TopNavbar = () => {
               <div
                 className={`grid gap-3 ${isAdmin ? "grid-cols-2" : "grid-cols-1"}`}
               >
-                {/* Finance Module */}
+                {/* Finance */}
                 <button
                   onClick={() => {
                     setActiveModule("finance");
@@ -325,7 +338,7 @@ export const TopNavbar = () => {
                       className="text-primary"
                     />
                   </svg>
-                  <span className="text-xs font-heading text-muted-foreground group-hover:text-foreground transition-colors">
+                  <span className="text-xs font-heading text-muted-foreground group-hover:text-foreground">
                     Finance
                   </span>
                   {activeModule === "finance" && (
@@ -335,7 +348,7 @@ export const TopNavbar = () => {
                   )}
                 </button>
 
-                {/* Admin Module */}
+                {/* Admin */}
                 {isAdmin && (
                   <button
                     onClick={() => {
@@ -358,15 +371,12 @@ export const TopNavbar = () => {
                         }`}
                       />
                       {isSuperAdmin && (
-                        <span
-                          className="absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center"
-                          style={{ background: "#7c3aed" }}
-                        >
+                        <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center bg-violet-600">
                           <Crown size={8} className="text-white" />
                         </span>
                       )}
                     </div>
-                    <span className="text-xs font-heading text-muted-foreground group-hover:text-foreground transition-colors">
+                    <span className="text-xs font-heading text-muted-foreground group-hover:text-foreground">
                       Admin
                     </span>
                     {location.pathname.startsWith("/admin") && (
@@ -381,21 +391,15 @@ export const TopNavbar = () => {
           </div>
         </div>
 
-        {/* Theme */}
+        {/* Theme Selector */}
         <div className="relative shrink-0">
           <button
-            onClick={() => {
-              setThemeOpen((p) => !p);
-              setSetupOpen(false);
-              setModuleOpen(false);
-              setUserOpen(false);
-            }}
-            className="p-2 rounded-md hover:bg-muted transition-all duration-200 text-foreground"
+            onClick={toggleTheme}
+            className="p-2 rounded-md hover:bg-muted transition-all text-foreground"
             title="Change theme"
           >
             <Palette size={17} />
           </button>
-
           <Dropdown
             open={themeOpen}
             onClose={() => setThemeOpen(false)}
@@ -416,7 +420,7 @@ export const TopNavbar = () => {
                   setTheme(t);
                   setThemeOpen(false);
                 }}
-                className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-heading transition-all duration-150 ${
+                className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-heading transition-all ${
                   theme === t
                     ? "bg-primary/10 text-primary"
                     : "text-foreground hover:bg-muted"
@@ -435,16 +439,11 @@ export const TopNavbar = () => {
           </Dropdown>
         </div>
 
-        {/* User */}
+        {/* User Menu */}
         <div className="relative shrink-0">
           <button
-            onClick={() => {
-              setUserOpen((p) => !p);
-              setModuleOpen(false);
-              setSetupOpen(false);
-              setThemeOpen(false);
-            }}
-            className="relative w-8 h-8 rounded-full gradient-accent flex items-center justify-center text-xs font-heading text-primary-foreground font-bold transition-opacity hover:opacity-90"
+            onClick={toggleUser}
+            className="relative w-8 h-8 rounded-full gradient-accent flex items-center justify-center text-xs font-heading text-primary-foreground font-bold hover:opacity-90"
           >
             {currentUser?.initials || "?"}
             {RoleIcon && (
@@ -456,7 +455,6 @@ export const TopNavbar = () => {
               </span>
             )}
           </button>
-
           <Dropdown
             open={userOpen}
             onClose={() => setUserOpen(false)}
@@ -471,30 +469,18 @@ export const TopNavbar = () => {
               </p>
               <div className="mt-1.5">
                 {isSuperAdmin && (
-                  <span
-                    className="text-[10px] px-2 py-0.5 rounded-full font-heading"
-                    style={{
-                      background: "rgba(124,58,237,0.12)",
-                      color: "#7c3aed",
-                    }}
-                  >
+                  <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-violet-500/10 text-violet-600">
                     Super Admin
                   </span>
                 )}
                 {currentUser?.role === "admin" && (
-                  <span
-                    className="text-[10px] px-2 py-0.5 rounded-full font-heading"
-                    style={{
-                      background: "rgba(37,99,235,0.12)",
-                      color: "#2563eb",
-                    }}
-                  >
+                  <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-blue-500/10 text-blue-600">
                     Admin
                   </span>
                 )}
                 {currentUser?.role === "user" && (
                   <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-muted text-muted-foreground">
-                    User · {currentUser.pagePermissions.length} pages
+                    User · {currentUser.pagePermissions?.length || 0} pages
                   </span>
                 )}
               </div>
@@ -519,7 +505,7 @@ export const TopNavbar = () => {
       <div className="flex md:hidden items-center">
         <div className="relative">
           <button
-            onClick={() => setUserOpen((p) => !p)}
+            onClick={toggleUser}
             className="relative w-8 h-8 rounded-full gradient-accent flex items-center justify-center text-xs font-heading text-primary-foreground font-bold"
           >
             {currentUser?.initials || "?"}
@@ -532,7 +518,6 @@ export const TopNavbar = () => {
               </span>
             )}
           </button>
-
           <Dropdown
             open={userOpen}
             onClose={() => setUserOpen(false)}
@@ -546,7 +531,7 @@ export const TopNavbar = () => {
                 {currentUser?.email}
               </p>
             </div>
-            <button className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted transition-colors text-foreground">
+            <button className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted text-foreground">
               <User size={14} /> Profile
             </button>
             <button
@@ -554,7 +539,7 @@ export const TopNavbar = () => {
                 logout();
                 navigate("/login");
               }}
-              className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted transition-colors text-destructive"
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted text-destructive"
             >
               <LogOut size={14} /> Sign Out
             </button>
