@@ -180,9 +180,12 @@ export const MobileNav: React.FC = () => {
       {/* FAB BUTTON */}
       <button
         onClick={() => setOpen(true)}
-        className="fixed bottom-4 right-4 z-50 w-12 h-12 rounded-full gradient-accent text-primary-foreground flex items-center justify-center shadow-lg md:hidden"
+        title="Open navigation menu"
+        className="fixed bottom-4 right-4 z-50 w-12 h-12 rounded-full gradient-accent text-primary-foreground flex items-center justify-center shadow-lg md:hidden cursor-pointer hover:scale-105 active:scale-95 transition-transform"
       >
-        <Menu size={20} />
+
+<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="lucide lucide-menu"><line x1="4" x2="20" y1="12" y2="12" /><line x1="4" x2="20" y1="6" y2="6" /><line x1="4" x2="20" y1="18" y2="18" /></svg>
+
       </button>
 
       {open && (
@@ -196,7 +199,7 @@ export const MobileNav: React.FC = () => {
             {/* HEADER */}
             <div className="flex justify-between px-4 py-3 border-b">
               <span className="font-semibold text-sm">Menu</span>
-              <button onClick={() => setOpen(false)}>
+              <button onClick={() => setOpen(false)} title="Close navigation menu">
                 <X size={18} />
               </button>
             </div>
@@ -292,22 +295,27 @@ export const MobileNav: React.FC = () => {
               })}
             </div>
 
-            {/* THEME SWITCH */}
-            <div className="p-3 border-t">
-              <p className="text-xs mb-2">Theme</p>
-              <div className="flex gap-2">
-                {THEME_DOTS.map((t) => (
-                  <button
-                    key={t}
-                    onClick={() => setTheme(t)}
-                    className={`w-6 h-6 rounded-full border ${
-                      theme === t ? "ring-2 ring-primary" : ""
-                    }`}
-                    style={{ background: t }}
-                  />
-                ))}
-              </div>
-            </div>
+{/* THEME SWITCH */}
+<div className="p-3 border-t">
+  <p className="text-xs mb-2">Theme</p>
+  <div className="flex gap-2">
+    {Object.values(THEME_DOTS).map((themeDot, index) => {
+      const themeKey = Object.keys(THEME_DOTS)[index];
+      return (
+        <button
+          key={themeKey}
+          onClick={() => setTheme(themeKey as keyof typeof THEME_DOTS)}
+          title={`Switch to ${themeKey} theme`}
+          className={`w-6 h-6 rounded-full border ${
+            theme === themeKey ? "ring-2 ring-offset-2" : ""
+          }`}
+          style={{ backgroundColor: themeDot.bg }}
+          data-theme={themeKey}
+        />
+      );
+    })}
+  </div>
+</div>
           </div>
         </div>
       )}
