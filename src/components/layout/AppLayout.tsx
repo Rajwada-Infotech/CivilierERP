@@ -1,3 +1,4 @@
+
 import React, { createContext, useContext, useState, useMemo } from "react";
 import { TopNavbar } from "./TopNavbar";
 import { AppSidebar } from "./AppSidebar";
@@ -16,6 +17,7 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
   return (
     <SidebarContext.Provider value={sidebarValue}>
       <div className="min-h-screen bg-background">
+
         <TopNavbar />
         {!isMobile && <AppSidebar />}
         {isMobile && <MobileNav />}
