@@ -51,8 +51,10 @@ const buildNavItems = (overdueCount: number): NavItem[] => [
     children: [
       { label: "Expense Booking", path: "/transactions/expense-booking" },
       { label: "Payment", path: "/payments" },
+      { label: "BRS", path: "/brs" },
     ],
   },
+
 ];
 
 const ADMIN_NAV_ITEMS: NavItem[] = [
