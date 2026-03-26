@@ -167,19 +167,21 @@ const HsnDropdown: React.FC<{
       <button
         type="button"
         onClick={handleOpen}
-        className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary transition-all"
+        className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary transition-all min-w-0"
       >
         {selected ? (
-          <span className="flex items-center gap-2 min-w-0">
-            <span className="font-mono text-primary shrink-0">
+          <span className="flex items-center gap-2 min-w-0 overflow-hidden">
+            <span className="font-mono text-primary text-xs shrink-0 whitespace-nowrap">
               {selected.code}
             </span>
-            <span className="text-muted-foreground truncate">
+            <span className="text-muted-foreground text-xs truncate hidden sm:block">
               {selected.description}
             </span>
           </span>
         ) : (
-          <span className="text-muted-foreground">Select HSN code...</span>
+          <span className="text-muted-foreground text-xs sm:text-sm">
+            Select HSN code...
+          </span>
         )}
         <div className="flex items-center gap-1 shrink-0 ml-2">
           {value && (
@@ -234,12 +236,12 @@ const HsnDropdown: React.FC<{
                   key={h.code}
                   type="button"
                   onClick={() => handleSelect(h.code)}
-                  className={`w-full flex items-center gap-3 px-3 py-2 text-left text-sm hover:bg-muted transition-colors ${h.code === value ? "bg-primary/10" : ""}`}
+                  className={`w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-muted transition-colors ${h.code === value ? "bg-primary/10" : ""}`}
                 >
-                  <span className="font-mono text-primary shrink-0 w-12">
+                  <span className="font-mono text-primary shrink-0 text-xs w-[5.5rem]">
                     {h.code}
                   </span>
-                  <span className="text-muted-foreground text-xs truncate">
+                  <span className="text-muted-foreground text-xs truncate min-w-0">
                     {h.description}
                   </span>
                 </button>
@@ -363,7 +365,7 @@ const ItemMaster: React.FC = () => {
 
   return (
     <>
-          <Breadcrumbs items={["Dashboard", "Finance Module", "Item Master"]} />
+      <Breadcrumbs items={["Dashboard", "Finance Module", "Item Master"]} />
       <h1 className="text-xl font-heading font-bold text-foreground mb-4">
         Item Master
       </h1>
@@ -540,7 +542,18 @@ const ItemMaster: React.FC = () => {
           </div>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm min-w-[700px]">
+            <colgroup>
+              <col className="w-[8rem]" /> {/* Item Code */}
+              <col className="w-auto" /> {/* Description */}
+              <col className="w-[6rem]" /> {/* Short Code */}
+              <col className="w-[6rem]" /> {/* Type */}
+              <col className="w-[7rem]" /> {/* HSN */}
+              <col className="w-[8rem]" /> {/* Group */}
+              <col className="w-[4rem]" /> {/* Tax */}
+              <col className="w-[7rem]" /> {/* Status */}
+              <col className="w-[5rem]" /> {/* Actions */}
+            </colgroup>
             <thead>
               <tr className="border-b border-border">
                 {[
@@ -595,7 +608,7 @@ const ItemMaster: React.FC = () => {
                         {row.itemType}
                       </span>
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3 whitespace-nowrap">
                       {row.hsnCode ? (
                         <span className="font-mono text-xs text-primary">
                           {row.hsnCode}

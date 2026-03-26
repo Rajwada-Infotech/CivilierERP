@@ -1,8 +1,11 @@
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useEffect } from "react";
+import { useAuth } from "@/contexts/AuthContext";
 
 const NotFound = () => {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { currentUser } = useAuth();
 
   useEffect(() => {
     console.error(
@@ -10,6 +13,14 @@ const NotFound = () => {
       location.pathname,
     );
   }, [location.pathname]);
+
+  const handleGoBack = () => {
+    if (currentUser) {
+      navigate(-1);
+    } else {
+      navigate("/");
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background flex items-center justify-center overflow-hidden relative">
@@ -39,15 +50,15 @@ const NotFound = () => {
 
         {/* Cool Button */}
         <div className="mt-12">
-          <a
-            href="/"
+          <button
+            onClick={handleGoBack}
             className="group inline-flex items-center gap-3 px-8 py-3.5 bg-primary text-primary-foreground font-semibold rounded-2xl text-lg transition-all duration-300 hover:scale-105 active:scale-95 shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30"
           >
-            Beam me back home
+            {currentUser ? "Take me back" : "Beam me back home"}
             <span className="group-hover:rotate-45 transition-transform duration-300">
               →
             </span>
-          </a>
+          </button>
         </div>
 
         <p className="mt-16 text-xs text-muted-foreground tracking-widest font-mono">
@@ -74,4 +85,3 @@ const NotFound = () => {
 };
 
 export default NotFound;
-
