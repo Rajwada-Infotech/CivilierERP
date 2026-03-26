@@ -7,7 +7,8 @@ import * as z from "zod";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Plus, Receipt, FileText, CheckCircle, CreditCardIcon, Banknote } from 'lucide-react';
+import { Plus, Receipt, FileText, CheckCircle, CreditCardIcon, Banknote, Paperclip } from 'lucide-react';
+import { useRecords } from "@/contexts/RecordsContext";
 import {
   Form,
   FormControl,
@@ -67,6 +68,7 @@ const PAYMENT_MODES = ["Cash", "Check", "UPI", "Card"] as const;
 export default function Payment() {
   const { finYears } = useFinYear();
   const { canDoAction } = useAuth();
+  const { attachFile } = useRecords();
   const [payments, setPayments] = useState<Payment[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [date, setDate] = useState<Date>();
@@ -74,6 +76,21 @@ export default function Payment() {
   const [showCheckDetails, setShowCheckDetails] = useState(false);
   const [showUpiDetails, setShowUpiDetails] = useState(false);
   const [showCardDetails, setShowCardDetails] = useState(false);
+  const fileInputRefs = React.useRef<Record<string, HTMLInputElement | null>>({});
+
+  const handleFileUpload = (paymentId: string, file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      attachFile(paymentId, {
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        dataUrl: reader.result as string,
+        uploadedAt: new Date().toISOString(),
+      });
+    };
+    reader.readAsDataURL(file);
+  };
 
   useEffect(() => {
     const saved = localStorage.getItem('paymentData');
@@ -196,11 +213,28 @@ export default function Payment() {
                         <div className="font-medium truncate max-w-[200px] sm:max-w-none">{payment.projectName}</div>
                         <div className="text-sm text-muted-foreground">{format(payment.docDate!, "PPP")}</div>
                       </div>
-                      <div className="flex sm:text-right gap-2 sm:gap-0 items-end sm:items-center">
+                      <div className="flex sm:text-right gap-2 sm:gap-0 items-center sm:items-center">
                         <div className="font-mono font-bold text-lg sm:text-base">₹{payment.amount.toLocaleString()}</div>
                         <Badge variant={payment.status === "cleared" ? "default" : "secondary"} className="mt-1 whitespace-nowrap">
                           {payment.status.toUpperCase()}
                         </Badge>
+                        <button
+                          onClick={() => fileInputRefs.current[payment.id]?.click()}
+                          className="ml-2 p-1.5 rounded-md border border-dashed border-border text-muted-foreground hover:border-primary hover:text-primary transition-colors"
+                          title="Attach file to this payment"
+                        >
+                          <Paperclip size={13} />
+                        </button>
+                        <input
+                          type="file"
+                          className="hidden"
+                          ref={(el) => { fileInputRefs.current[payment.id] = el; }}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) handleFileUpload(payment.id, file);
+                            e.target.value = "";
+                          }}
+                        />
                       </div>
                     </div>
                   ))}

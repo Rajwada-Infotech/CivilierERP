@@ -1,25 +1,6 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React from "react";
 
-interface LoaderProps {
-  duration?: number;
-  onComplete?: () => void;
-}
-
-export default function Loader({ duration = 1000, onComplete }: LoaderProps) {
-  const [isVisible, setIsVisible] = useState(true);
-
-  const hide = useCallback(() => {
-    setIsVisible(false);
-    onComplete?.();
-  }, [onComplete]);
-
-  useEffect(() => {
-    const timer = setTimeout(hide, duration);
-    return () => clearTimeout(timer);
-  }, [hide, duration]);
-
-  if (!isVisible) return null;
-
+export default function Loader() {
   return (
     <div className="fixed inset-0 flex items-center justify-center backdrop-blur-xl bg-white/5 z-50">
       <img
