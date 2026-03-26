@@ -15,6 +15,7 @@ import {
   Shield,
   Landmark,
   ShieldCheck,
+  FolderArchive,
   MessageSquare,
 } from "lucide-react";
 
@@ -24,14 +25,20 @@ interface SubItem {
   badge?: number;
 }
 
+interface SubSection {
+  label: string;
+  icon: React.ElementType;
+  items: SubItem[];
+}
+
 interface NavItem {
   label: string;
   icon: React.ElementType;
   path?: string;
   children?: SubItem[];
+  sections?: SubSection[];
 }
 
-// Updated nav items without "More" section
 const buildNavItems = (overdueCount: number): NavItem[] => [
   { label: "Amendments", icon: BarChart3, path: "/" },
   {
@@ -52,8 +59,14 @@ const buildNavItems = (overdueCount: number): NavItem[] => [
     children: [
       { label: "Expense Booking", path: "/transactions/expense-booking" },
       { label: "Payment", path: "/payments" },
+      { label: "Received Payment", path: "/received-payments" },
       { label: "BRS", path: "/brs" },
     ],
+  },
+  {
+    label: "Record Management",
+    icon: FolderArchive,
+    children: [{ label: "Records", path: "/records" }],
   },
 ];
 
@@ -99,7 +112,11 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
   { label: "Signature", icon: FileText, path: "/admin/signature" },
 ];
 
-const NavButton = ({ item, collapsed, isActive }: {
+const NavButton = ({
+  item,
+  collapsed,
+  isActive,
+}: {
   item: NavItem;
   collapsed: boolean;
   isActive: boolean;
@@ -122,7 +139,11 @@ const NavButton = ({ item, collapsed, isActive }: {
   );
 };
 
-const NavGroup = ({ item, collapsed, hasActiveChild }: {
+const NavGroup = ({
+  item,
+  collapsed,
+  hasActiveChild,
+}: {
   item: NavItem;
   collapsed: boolean;
   hasActiveChild: boolean;
@@ -131,13 +152,28 @@ const NavGroup = ({ item, collapsed, hasActiveChild }: {
   const location = useLocation();
   const [open, setOpen] = useState(hasActiveChild);
 
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>(
+    () => {
+      const init: Record<string, boolean> = {};
+      (item.sections || []).forEach((s: any) => {
+        init[s.label] = s.items.some(
+          (i: SubItem) => location.pathname === i.path,
+        );
+      });
+      return init;
+    },
+  );
+
   const handleClick = () => {
     if (collapsed && item.children?.length) {
       navigate(item.children[0].path);
       return;
     }
-    setOpen((prev: boolean) => !prev);
+    setOpen((prev) => !prev);
   };
+
+  const toggleSection = (label: string) =>
+    setOpenSections((prev) => ({ ...prev, [label]: !prev[label] }));
 
   return (
     <div>
@@ -157,9 +193,9 @@ const NavGroup = ({ item, collapsed, hasActiveChild }: {
           (open ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
       </button>
 
-      {!collapsed && open && item.children && (
+      {!collapsed && open && (
         <div className="ml-6 mt-1 space-y-1">
-          {item.children.map((child: SubItem) => (
+          {item.children?.map((child: SubItem) => (
             <button
               key={child.path}
               onClick={() => navigate(child.path)}
@@ -171,11 +207,48 @@ const NavGroup = ({ item, collapsed, hasActiveChild }: {
             >
               <span>{child.label}</span>
               {child.badge && (
-                <span className="bg-red-500 text-white text-[9px] px-1.5 py-0.5 rounded-full leading-none">
+                <span className="bg-red-500 text-white text-[9px] px-1.5 py-0.5 rounded-full">
                   {child.badge}
                 </span>
               )}
             </button>
+          ))}
+
+          {item.sections?.map((section: any) => (
+            <div key={section.label}>
+              <button
+                onClick={() => toggleSection(section.label)}
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent"
+              >
+                <section.icon size={13} />
+                <span className="flex-1 text-left truncate font-medium">
+                  {section.label}
+                </span>
+                {openSections[section.label] ? (
+                  <ChevronUp size={11} />
+                ) : (
+                  <ChevronDown size={11} />
+                )}
+              </button>
+
+              {openSections[section.label] && (
+                <div className="ml-4 mt-0.5 space-y-0.5">
+                  {section.items.map((child: SubItem) => (
+                    <button
+                      key={child.path}
+                      onClick={() => navigate(child.path)}
+                      className={`w-full text-xs px-2 py-1.5 rounded-md ${
+                        location.pathname === child.path
+                          ? "bg-primary/15 text-primary font-medium"
+                          : "text-sidebar-foreground/70 hover:bg-sidebar-accent"
+                      }`}
+                    >
+                      {child.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           ))}
         </div>
       )}
@@ -190,6 +263,7 @@ export const AppSidebar = () => {
   const { getOverdueTasks } = useTask();
 
   const overdueCount = getOverdueTasks().length;
+
   const isAdminPage =
     location.pathname.startsWith("/admin") ||
     location.pathname.startsWith("/users");
@@ -208,14 +282,17 @@ export const AppSidebar = () => {
     >
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
         {itemsToRender.map((item) =>
-          item.children ? (
+          item.children || item.sections ? (
             <NavGroup
               key={item.label}
               item={item}
               collapsed={collapsed}
-              hasActiveChild={item.children.some(
-                (c) => location.pathname === c.path,
-              )}
+              hasActiveChild={
+                item.children?.some((c) => location.pathname === c.path) ||
+                item.sections?.some((s: any) =>
+                  s.items.some((i: any) => location.pathname === i.path),
+                )
+              }
             />
           ) : (
             <NavButton
@@ -225,34 +302,26 @@ export const AppSidebar = () => {
               isActive={
                 item.path === "/"
                   ? location.pathname === "/"
-                  : location.pathname.startsWith(item.path || "__never__")
+                  : location.pathname.startsWith(item.path || "")
               }
             />
           ),
         )}
       </div>
 
-      {/* Bottom Section */}
-      <div className="shrink-0 p-2 border-t border-sidebar-border space-y-2">
-        {/* Module Indicator */}
+      <div className="p-2 border-t border-sidebar-border space-y-2">
         {!collapsed ? (
           <div
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold border ${
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold border ${
               isAdmin
                 ? "bg-blue-500/10 text-blue-500 border-blue-500/20"
                 : isFinance
-                  ? "bg-primary/10 text-primary border-primary/20"
-                  : "bg-muted text-muted-foreground border-border"
+                ? "bg-primary/10 text-primary border-primary/20"
+                : "bg-muted text-muted-foreground border-border"
             }`}
           >
-            {isAdmin ? (
-              <ShieldCheck size={13} className="shrink-0" />
-            ) : (
-              <Landmark size={13} className="shrink-0" />
-            )}
-            <span className="truncate">
-              {isAdmin ? "Admin" : isFinance ? "Finance" : "No module"}
-            </span>
+            {isAdmin ? <ShieldCheck size={13} /> : <Landmark size={13} />}
+            <span>{isAdmin ? "Admin" : isFinance ? "Finance" : "No module"}</span>
           </div>
         ) : (
           <div className="flex justify-center">
@@ -261,19 +330,16 @@ export const AppSidebar = () => {
                 isAdmin
                   ? "bg-blue-500"
                   : isFinance
-                    ? "bg-primary"
-                    : "bg-muted-foreground/40"
+                  ? "bg-primary"
+                  : "bg-muted-foreground/40"
               }`}
-              title={isAdmin ? "Admin" : isFinance ? "Finance" : "No module"}
             />
           </div>
         )}
 
-        {/* Sidebar Collapse Button */}
         <button
           onClick={() => setCollapsed(!collapsed)}
-          className="w-full flex items-center justify-center p-2 rounded-lg hover:bg-sidebar-accent text-sidebar-foreground transition-colors"
-          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          className="w-full flex justify-center p-2 rounded-lg hover:bg-sidebar-accent"
         >
           {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
         </button>
