@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   Calendar,
-  Hash,
+  FileText,
   BarChart3,
   CheckCircle2,
   Menu,
@@ -78,7 +78,7 @@ export const MobileNav: React.FC = () => {
     { icon: Package, label: "Items", path: "/masters/items" },
     { icon: Layers, label: "Item Groups", path: "/masters/item-groups" },
     ...(canAccessPage("master_hsn")
-      ? [{ icon: Hash, label: "HSN", path: "/masters/hsn" }]
+      ? [{ icon: FileText, label: "HSN", path: "/masters/hsn" }]
       : []),
     { icon: Calendar, label: "Financial Year", path: "/masters/financial-year" },
   ];
