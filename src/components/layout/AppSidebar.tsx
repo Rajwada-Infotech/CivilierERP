@@ -15,6 +15,7 @@ import {
   Shield,
   Landmark,
   ShieldCheck,
+  MessageSquare,
 } from "lucide-react";
 
 interface SubItem {
@@ -85,9 +86,24 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
     icon: Landmark,
     children: [{ label: "Expense Booking", path: "/admin/expense-booking" }],
   },
+  {
+    label: "Communicator",
+    icon: MessageSquare,
+    children: [
+      { label: "SMS Setup", path: "/admin/communicator/sms-setup" },
+      { label: "Email Setup", path: "/admin/communicator/email-setup" },
+      { label: "WhatsApp Setup", path: "/admin/communicator/whatsapp-setup" },
+    ],
+  },
+  { label: "API Integration", icon: Shield, path: "/admin/api-integration" },
+  { label: "Signature", icon: FileText, path: "/admin/signature" },
 ];
 
-const NavButton = ({ item, collapsed, isActive }: any) => {
+const NavButton = ({ item, collapsed, isActive }: {
+  item: NavItem;
+  collapsed: boolean;
+  isActive: boolean;
+}) => {
   const navigate = useNavigate();
 
   return (
@@ -106,7 +122,11 @@ const NavButton = ({ item, collapsed, isActive }: any) => {
   );
 };
 
-const NavGroup = ({ item, collapsed, hasActiveChild }: any) => {
+const NavGroup = ({ item, collapsed, hasActiveChild }: {
+  item: NavItem;
+  collapsed: boolean;
+  hasActiveChild: boolean;
+}) => {
   const navigate = useNavigate();
   const location = useLocation();
   const [open, setOpen] = useState(hasActiveChild);

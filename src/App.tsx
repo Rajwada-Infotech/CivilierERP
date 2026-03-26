@@ -87,6 +87,8 @@ const ApprovalSetup = lazy(() =>
 const PostApprovalRights = lazy(() =>
   withDelay(() => import("./pages/admin/PostApprovalRights"))
 );
+const ApiIntegrationPage = lazy(() => withDelay(() => import("./pages/admin/ApiIntegration")));
+const SignaturePage = lazy(() => withDelay(() => import("./pages/admin/Signature")));
 
 // Contexts
 import { AuthProvider } from "@/contexts/AuthContext";
@@ -350,6 +352,24 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <PostApprovalRights />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/admin/api-integration"
+        element={
+          <ProtectedRoute>
+            <ApiIntegrationPage />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/admin/signature"
+        element={
+          <ProtectedRoute>
+            <SignaturePage />
           </ProtectedRoute>
         }
       />
