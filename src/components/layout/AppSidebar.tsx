@@ -15,6 +15,7 @@ import {
   Shield,
   Landmark,
   ShieldCheck,
+  FolderArchive,
 } from "lucide-react";
 
 interface SubItem {
@@ -23,11 +24,18 @@ interface SubItem {
   badge?: number;
 }
 
+interface SubSection {
+  label: string;
+  icon: React.ElementType;
+  items: SubItem[];
+}
+
 interface NavItem {
   label: string;
   icon: React.ElementType;
   path?: string;
   children?: SubItem[];
+  sections?: SubSection[];
 }
 
 // Updated nav items without "More" section
@@ -51,7 +59,15 @@ const buildNavItems = (overdueCount: number): NavItem[] => [
     children: [
       { label: "Expense Booking", path: "/transactions/expense-booking" },
       { label: "Payment", path: "/payments" },
+      { label: "Received Payment", path: "/received-payments" },
       { label: "BRS", path: "/brs" },
+    ],
+  },
+  {
+    label: "Record Management",
+    icon: FolderArchive,
+    children: [
+      { label: "Records", path: "/records" },
     ],
   },
 ];
@@ -110,6 +126,13 @@ const NavGroup = ({ item, collapsed, hasActiveChild }: any) => {
   const navigate = useNavigate();
   const location = useLocation();
   const [open, setOpen] = useState(hasActiveChild);
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>(() => {
+    const init: Record<string, boolean> = {};
+    (item.sections || []).forEach((s: any) => {
+      init[s.label] = s.items.some((i: SubItem) => location.pathname === i.path);
+    });
+    return init;
+  });
 
   const handleClick = () => {
     if (collapsed && item.children?.length) {
@@ -118,6 +141,9 @@ const NavGroup = ({ item, collapsed, hasActiveChild }: any) => {
     }
     setOpen((prev: boolean) => !prev);
   };
+
+  const toggleSection = (label: string) =>
+    setOpenSections((prev) => ({ ...prev, [label]: !prev[label] }));
 
   return (
     <div>
@@ -137,9 +163,10 @@ const NavGroup = ({ item, collapsed, hasActiveChild }: any) => {
           (open ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
       </button>
 
-      {!collapsed && open && item.children && (
+      {!collapsed && open && (
         <div className="ml-6 mt-1 space-y-1">
-          {item.children.map((child: SubItem) => (
+          {/* Flat children */}
+          {item.children?.map((child: SubItem) => (
             <button
               key={child.path}
               onClick={() => navigate(child.path)}
@@ -156,6 +183,39 @@ const NavGroup = ({ item, collapsed, hasActiveChild }: any) => {
                 </span>
               )}
             </button>
+          ))}
+
+          {/* Sub-sections */}
+          {item.sections?.map((section: any) => (
+            <div key={section.label}>
+              <button
+                onClick={() => toggleSection(section.label)}
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
+              >
+                <section.icon size={13} className="shrink-0" />
+                <span className="flex-1 text-left truncate font-medium">{section.label}</span>
+                {openSections[section.label]
+                  ? <ChevronUp size={11} />
+                  : <ChevronDown size={11} />}
+              </button>
+              {openSections[section.label] && (
+                <div className="ml-4 mt-0.5 space-y-0.5">
+                  {section.items.map((child: SubItem) => (
+                    <button
+                      key={child.path}
+                      onClick={() => navigate(child.path)}
+                      className={`w-full flex justify-between items-center text-xs px-2 py-1.5 rounded-md transition-colors ${
+                        location.pathname === child.path
+                          ? "bg-primary/15 text-primary font-medium"
+                          : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                      }`}
+                    >
+                      <span>{child.label}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           ))}
         </div>
       )}
@@ -188,14 +248,17 @@ export const AppSidebar = () => {
     >
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
         {itemsToRender.map((item) =>
-          item.children ? (
+          item.children || item.sections ? (
             <NavGroup
               key={item.label}
               item={item}
               collapsed={collapsed}
-              hasActiveChild={item.children.some(
-                (c) => location.pathname === c.path,
-              )}
+              hasActiveChild={
+                (item.children?.some((c) => location.pathname === c.path) ?? false) ||
+                (item.sections?.some((s: any) =>
+                  s.items.some((i: any) => location.pathname === i.path)
+                ) ?? false)
+              }
             />
           ) : (
             <NavButton
