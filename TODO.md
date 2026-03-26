@@ -1,0 +1,1 @@
+1. [x] Create TODO.md&#10;2. [x] Edit Brs.tsx with expanded sampleData (15+ raw transactions added)&#10;3. [x] Verify data in table, filters, export (user to test in browser)&#10;4. [x] Complete task

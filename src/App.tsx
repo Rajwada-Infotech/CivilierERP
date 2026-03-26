@@ -9,47 +9,84 @@ import {
 } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 
-// ✅ Static imports — Suspense will NEVER trigger for these
+// Static imports
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
 
 // Layout
 import { AppLayout } from "@/components/layout/AppLayout";
 
-// ✅ Minimum delay helper — change 800 to any ms value you want
-const withDelay = <T,>(importFn: () => Promise<T>, delay = 800): Promise<T> =>
-  Promise.all([importFn(), new Promise((res) => setTimeout(res, delay))]).then(
-    ([module]) => module
-  );
+// ✅ Delay helper
+const withDelay = <T,>(
+  importFn: () => Promise<T>,
+  delay = 800
+): Promise<T> =>
+  Promise.all([
+    importFn(),
+    new Promise((res) => setTimeout(res, delay)),
+  ]).then(([module]) => module);
 
-// ✅ Lazy imports — Suspense/Loader triggers ONLY for these
+// ✅ Lazy imports
 const Dashboard = lazy(() => withDelay(() => import("./pages/Dashboard")));
 const Reports = lazy(() => withDelay(() => import("./pages/Reports")));
 const Widgets = lazy(() => withDelay(() => import("./pages/Widgets")));
 const Tasks = lazy(() => withDelay(() => import("./pages/Tasks")));
 const Transactions = lazy(() => withDelay(() => import("./pages/Transactions")));
 const Payment = lazy(() => withDelay(() => import("./pages/Payment")));
-const ExpenseBooking = lazy(() => withDelay(() => import("./pages/ExpenseBooking")));
+const ExpenseBooking = lazy(() =>
+  withDelay(() => import("./pages/ExpenseBooking"))
+);
+const Brs = lazy(() => withDelay(() => import("./pages/Brs")));
 
 // Masters
-const ContractorMaster = lazy(() => withDelay(() => import("./pages/masters/ContractorMaster")));
-const SupplierMaster = lazy(() => withDelay(() => import("./pages/masters/SupplierMaster")));
-const CustomerMaster = lazy(() => withDelay(() => import("./pages/masters/CustomerMaster")));
-const BankMaster = lazy(() => withDelay(() => import("./pages/masters/BankMaster")));
-const ExpensesMaster = lazy(() => withDelay(() => import("./pages/masters/ExpensesMaster")));
-const ItemMaster = lazy(() => withDelay(() => import("./pages/masters/ItemMaster")));
-const ItemGroupMaster = lazy(() => withDelay(() => import("./pages/masters/ItemGroupMaster")));
-const HsnMaster = lazy(() => withDelay(() => import("./pages/masters/HsnMaster")));
+const ContractorMaster = lazy(() =>
+  withDelay(() => import("./pages/masters/ContractorMaster"))
+);
+const SupplierMaster = lazy(() =>
+  withDelay(() => import("./pages/masters/SupplierMaster"))
+);
+const CustomerMaster = lazy(() =>
+  withDelay(() => import("./pages/masters/CustomerMaster"))
+);
+const BankMaster = lazy(() =>
+  withDelay(() => import("./pages/masters/BankMaster"))
+);
+const ExpensesMaster = lazy(() =>
+  withDelay(() => import("./pages/masters/ExpensesMaster"))
+);
+const ItemMaster = lazy(() =>
+  withDelay(() => import("./pages/masters/ItemMaster"))
+);
+const ItemGroupMaster = lazy(() =>
+  withDelay(() => import("./pages/masters/ItemGroupMaster"))
+);
+const HsnMaster = lazy(() =>
+  withDelay(() => import("./pages/masters/HsnMaster"))
+);
 
 // Admin
-const AdminDashboard = lazy(() => withDelay(() => import("./pages/admin/AdminDashboard")));
-const AdminExpenseBooking = lazy(() => withDelay(() => import("./pages/admin/ExpenseBooking")));
+const AdminDashboard = lazy(() =>
+  withDelay(() => import("./pages/admin/AdminDashboard"))
+);
+const AdminExpenseBooking = lazy(() =>
+  withDelay(() => import("./pages/admin/ExpenseBooking"))
+);
 const Users = lazy(() => withDelay(() => import("./pages/Users")));
-const MenuRights = lazy(() => withDelay(() => import("./pages/admin/MenuRights")));
-const WidgetRights = lazy(() => withDelay(() => import("./pages/admin/WidgetsRights")));
-const FinYearRights = lazy(() => withDelay(() => import("./pages/admin/FinYearRights")));
-const ApprovalSetup = lazy(() => withDelay(() => import("./pages/admin/ApprovalSetup")));
-const PostApprovalRights = lazy(() => withDelay(() => import("./pages/admin/PostApprovalRights")));
+const MenuRights = lazy(() =>
+  withDelay(() => import("./pages/admin/MenuRights"))
+);
+const WidgetRights = lazy(() =>
+  withDelay(() => import("./pages/admin/WidgetsRights"))
+);
+const FinYearRights = lazy(() =>
+  withDelay(() => import("./pages/admin/FinYearRights"))
+);
+const ApprovalSetup = lazy(() =>
+  withDelay(() => import("./pages/admin/ApprovalSetup"))
+);
+const PostApprovalRights = lazy(() =>
+  withDelay(() => import("./pages/admin/PostApprovalRights"))
+);
 
 // Contexts
 import { AuthProvider } from "@/contexts/AuthContext";
@@ -75,15 +112,12 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 
 /* =========================
    PROTECTED ROUTE WRAPPER
-   Suspense lives here — wraps only lazy pages inside protected routes
 ========================= */
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return (
     <RequireAuth>
       <AppLayout>
-        <Suspense fallback={<Loader />}>
-          {children}
-        </Suspense>
+        <Suspense fallback={<Loader />}>{children}</Suspense>
       </AppLayout>
     </RequireAuth>
   );
@@ -97,14 +131,11 @@ function AppRoutes() {
 
   return (
     <Routes>
-
-      {/* AUTH — static import, no Suspense, no loader */}
       <Route
         path="/login"
         element={currentUser ? <Navigate to="/" replace /> : <Login />}
       />
 
-      {/* MAIN */}
       <Route
         path="/"
         element={
@@ -113,6 +144,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+
       <Route
         path="/transactions"
         element={
@@ -121,6 +153,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+
       <Route
         path="/transactions/expense-booking"
         element={
@@ -129,6 +162,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+
       <Route
         path="/reports"
         element={
@@ -137,6 +171,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+
       <Route
         path="/widgets"
         element={
@@ -145,6 +180,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+
       <Route
         path="/tasks"
         element={
@@ -153,6 +189,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+
       <Route
         path="/payments"
         element={
@@ -162,7 +199,16 @@ function AppRoutes() {
         }
       />
 
-      {/* MASTERS */}
+      <Route
+        path="/brs"
+        element={
+          <ProtectedRoute>
+            <Brs />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Masters */}
       <Route
         path="/masters/contractors"
         element={
@@ -171,6 +217,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+
       <Route
         path="/masters/suppliers"
         element={
@@ -179,6 +226,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+
       <Route
         path="/masters/customers"
         element={
@@ -187,6 +235,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+
       <Route
         path="/masters/banks"
         element={
@@ -195,6 +244,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+
       <Route
         path="/masters/expenses"
         element={
@@ -203,6 +253,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+
       <Route
         path="/masters/items"
         element={
@@ -211,6 +262,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+
       <Route
         path="/masters/item-groups"
         element={
@@ -219,6 +271,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+
       <Route
         path="/masters/hsn"
         element={
@@ -228,7 +281,7 @@ function AppRoutes() {
         }
       />
 
-      {/* ADMIN */}
+      {/* Admin */}
       <Route
         path="/admin"
         element={
@@ -237,6 +290,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+
       <Route
         path="/admin/expense-booking"
         element={
@@ -245,6 +299,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+
       <Route
         path="/users"
         element={
@@ -253,6 +308,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+
       <Route
         path="/admin/rights/menu"
         element={
@@ -261,6 +317,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+
       <Route
         path="/admin/rights/widgets"
         element={
@@ -269,6 +326,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+
       <Route
         path="/admin/rights/fin-year"
         element={
@@ -277,6 +335,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+
       <Route
         path="/admin/approval/setup"
         element={
@@ -285,6 +344,7 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+
       <Route
         path="/admin/approval/post-rights"
         element={
@@ -294,9 +354,7 @@ function AppRoutes() {
         }
       />
 
-      {/* 404 — static import, no Suspense, no loader. Ever. */}
       <Route path="*" element={<NotFound />} />
-
     </Routes>
   );
 }
