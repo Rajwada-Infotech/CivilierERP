@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
+  Calendar,
   Hash,
   BarChart3,
   CheckCircle2,
@@ -78,6 +79,7 @@ export const MobileNav: React.FC = () => {
     ...(canAccessPage("master_hsn")
       ? [{ icon: Hash, label: "HSN", path: "/masters/hsn" }]
       : []),
+    { icon: Calendar, label: "Financial Year", path: "/masters/financial-year" },
   ];
 
   const ADMIN_NAV_ITEMS: NavItem[] = [
@@ -174,6 +176,7 @@ export const MobileNav: React.FC = () => {
     Items: "text-teal-400",
     "Item Groups": "text-indigo-400",
     HSN: "text-pink-500",
+    "Financial Year": "text-amber-500",
   };
 
   const masterBgColors: Record<string, string> = {
@@ -185,6 +188,7 @@ export const MobileNav: React.FC = () => {
     Items: "bg-teal-500/10",
     "Item Groups": "bg-indigo-500/10",
     HSN: "bg-pink-500/10",
+    "Financial Year": "bg-amber-500/10",
   };
 
   return (
@@ -192,6 +196,7 @@ export const MobileNav: React.FC = () => {
       {/* Floating Action Button */}
       <button
         onClick={() => setOpen(true)}
+        aria-label="Open navigation menu"
         className="fixed bottom-4 right-4 z-50 w-12 h-12 rounded-full gradient-accent text-primary-foreground flex items-center justify-center shadow-lg md:hidden"
       >
         <Menu size={20} />
@@ -212,8 +217,9 @@ export const MobileNav: React.FC = () => {
               <span className="font-heading font-semibold text-sm text-foreground">Menu</span>
               <button
                 onClick={() => setOpen(false)}
+                aria-label="Close menu"
                 className="p-1 rounded-lg hover:bg-muted transition-colors text-muted-foreground"
-              >
+                >
                 <X size={18} />
               </button>
             </div>
@@ -246,7 +252,7 @@ export const MobileNav: React.FC = () => {
                   </div>
 
                   <div className="flex gap-2 flex-shrink-0">
-                    <button className="p-2 border border-border rounded-xl flex items-center text-foreground hover:bg-muted transition-colors">
+                    <button aria-label="View user profile" className="p-2 border border-border rounded-xl flex items-center text-foreground hover:bg-muted transition-colors">
                       <User size={14} />
                     </button>
                     <button
@@ -254,6 +260,7 @@ export const MobileNav: React.FC = () => {
                         logout();
                         setOpen(false);
                       }}
+                      aria-label="Log out"
                       className="p-2 border border-border rounded-xl flex items-center text-destructive hover:bg-destructive/10 transition-colors"
                     >
                       <LogOut size={14} />
@@ -271,6 +278,7 @@ export const MobileNav: React.FC = () => {
                       navigate("/");
                       setOpen(false);
                     }}
+                    aria-label="Switch to Finance mode"
                     className={`flex-1 text-xs py-2 rounded-xl border font-heading font-semibold transition-all ${
                       activeModule === "finance" && !isAdminPage
                         ? "bg-primary text-primary-foreground border-primary shadow-sm shadow-primary/20"
@@ -284,6 +292,7 @@ export const MobileNav: React.FC = () => {
                       navigate("/admin");
                       setOpen(false);
                     }}
+                    aria-label="Switch to Admin mode"
                     className={`flex-1 text-xs py-2 rounded-xl border font-heading font-semibold transition-all ${
                       isAdminPage
                         ? "bg-primary text-primary-foreground border-primary shadow-sm shadow-primary/20"
@@ -395,7 +404,7 @@ export const MobileNav: React.FC = () => {
                             {item.children.map((child) => {
                               const childActive = location.pathname === child.path;
                               const ChildIcon = child.icon;
-                              const childCount = (child as any).count;
+                              const childCount = child.count;
 
                               return (
                                 <button
@@ -453,6 +462,7 @@ export const MobileNav: React.FC = () => {
                     <button
                       key={t}
                       onClick={() => setTheme(t)}
+                      aria-label={`${label} theme`}
                       title={label}
                       className={`relative flex flex-col items-center gap-2 py-3 px-1 rounded-2xl border transition-all ${
                         theme === t
@@ -461,8 +471,7 @@ export const MobileNav: React.FC = () => {
                       }`}
                     >
                       <div
-                        className="w-7 h-7 rounded-full shadow-md border-2 border-white/20 ring-2 ring-offset-1 ring-offset-card"
-                        style={{ background: bg }}
+                        className={`w-7 h-7 rounded-full shadow-md border-2 border-white/20 ring-2 ring-offset-1 ring-offset-card bg-[${bg}]`}
                       />
                       <span className="text-[10px] font-heading text-muted-foreground leading-none truncate w-full text-center">
                         {label}

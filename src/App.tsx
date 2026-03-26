@@ -63,6 +63,9 @@ const ItemGroupMaster = lazy(() =>
 const HsnMaster = lazy(() =>
   withDelay(() => import("./pages/masters/HsnMaster"))
 );
+const FinancialYearMaster = lazy(() =>
+  withDelay(() => import("./pages/masters/FinancialYearMaster"))
+);
 
 // Admin
 const AdminDashboard = lazy(() =>
@@ -277,6 +280,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <HsnMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/financial-year"
+        element={
+          <ProtectedRoute>
+            <FinancialYearMaster />
           </ProtectedRoute>
         }
       />
