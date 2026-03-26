@@ -12,8 +12,9 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Plus, Check, FileText, Calendar, MessageSquare, 
-         CheckCircle, Percent, Clock, Table as TableIcon } from "lucide-react";
+import { Plus, Check, FileText, Calendar, MessageSquare,
+         CheckCircle, Percent, Clock, Table as TableIcon, Paperclip } from "lucide-react";
+import { useRecords } from "@/contexts/RecordsContext";
 import {
   Form,
   FormControl,
@@ -76,12 +77,28 @@ const GST_RATE = 0.18; // 18%
 
 export default function ExpenseBooking() {
   const { finYears } = useFinYear();
+  const { attachFile } = useRecords();
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [emiBreakdown, setEmiBreakdown] = useState<Array<{month: number; principal: number; interest: number; tax: number; total: number}>>([]);
   const [date, setDate] = useState<Date>();
   const [showEMI, setShowEMI] = useState(false);
   const [showCustomMonthsDialog, setShowCustomMonthsDialog] = useState(false);
   const [customMonths, setCustomMonths] = useState(12);
+  const fileInputRefs = React.useRef<Record<string, HTMLInputElement | null>>({});
+
+  const handleFileUpload = (expenseId: string, file: File) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      attachFile(expenseId, {
+        name: file.name,
+        type: file.type,
+        size: file.size,
+        dataUrl: reader.result as string,
+        uploadedAt: new Date().toISOString(),
+      });
+    };
+    reader.readAsDataURL(file);
+  };
 
   useEffect(() => {
     // Load from localStorage
@@ -541,6 +558,7 @@ const calculateEMI = useCallback((principal: number, months: number, taxRate: nu
                 <TableHead>Amount</TableHead>
                 <TableHead>Type</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Attach File</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -559,6 +577,26 @@ const calculateEMI = useCallback((principal: number, months: number, taxRate: nu
                     <Badge variant={expense.status === "approved" ? "default" : "secondary"}>
                       {expense.status.toUpperCase()}
                     </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <button
+                      onClick={() => fileInputRefs.current[expense.id]?.click()}
+                      className="flex items-center gap-1.5 px-2 py-1 rounded-md text-xs border border-dashed border-border text-muted-foreground hover:border-primary hover:text-primary transition-colors"
+                      title="Attach file to this expense"
+                    >
+                      <Paperclip size={12} />
+                      Attach
+                    </button>
+                    <input
+                      type="file"
+                      className="hidden"
+                      ref={(el) => { fileInputRefs.current[expense.id] = el; }}
+                      onChange={(e) => {
+                        const file = e.target.files?.[0];
+                        if (file) handleFileUpload(expense.id, file);
+                        e.target.value = "";
+                      }}
+                    />
                   </TableCell>
                 </TableRow>
               ))}
