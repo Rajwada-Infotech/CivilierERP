@@ -21,7 +21,10 @@ import Widgets from "./pages/Widgets";
 import Tasks from "./pages/Tasks";
 import Transactions from "./pages/Transactions";
 import Payment from "./pages/Payment";
+import Brs from "./pages/Brs";
 import ExpenseBooking from "./pages/ExpenseBooking";
+import Records from "./pages/Records";
+import ReceivedPayment from "./pages/ReceivedPayment";
 
 // Masters
 import ContractorMaster from "./pages/masters/ContractorMaster";
@@ -51,6 +54,7 @@ import { ThemeProvider } from "@/contexts/ThemeContext";
 import { TaskProvider } from "@/contexts/TaskContext";
 import { FinYearProvider } from "@/contexts/FinYearContext";
 import { HsnProvider } from "@/contexts/HsnContext";
+import { RecordsProvider } from "@/contexts/RecordsContext";
 
 /* =========================
    AUTH GUARD
@@ -148,6 +152,31 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/received-payments"
+        element={
+          <ProtectedRoute>
+            <ReceivedPayment />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/brs"
+        element={
+          <ProtectedRoute>
+            <Brs />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/records"
+        element={
+          <ProtectedRoute>
+            <Records />
+          </ProtectedRoute>
+        }
+      />
+
 
       {/* MASTERS */}
       <Route
@@ -312,11 +341,13 @@ function App() {
           <ThemeProvider>
             <FinYearProvider>
               <HsnProvider>
+                <RecordsProvider>
                 <TaskProvider>
                   <Router>
                     <AppRoutes />
                   </Router>
                 </TaskProvider>
+                </RecordsProvider>
               </HsnProvider>
             </FinYearProvider>
           </ThemeProvider>
