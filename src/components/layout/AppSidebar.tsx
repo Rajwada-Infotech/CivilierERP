@@ -30,7 +30,7 @@ interface NavItem {
   children?: SubItem[];
 }
 
-// Updated buildNavItems without "More" section
+// Updated nav items without "More" section
 const buildNavItems = (overdueCount: number): NavItem[] => [
   { label: "Amendments", icon: BarChart3, path: "/" },
   {
@@ -54,7 +54,6 @@ const buildNavItems = (overdueCount: number): NavItem[] => [
       { label: "BRS", path: "/brs" },
     ],
   },
-
 ];
 
 const ADMIN_NAV_ITEMS: NavItem[] = [
@@ -90,6 +89,7 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
 
 const NavButton = ({ item, collapsed, isActive }: any) => {
   const navigate = useNavigate();
+
   return (
     <button
       onClick={() => item.path && navigate(item.path)}
@@ -112,11 +112,11 @@ const NavGroup = ({ item, collapsed, hasActiveChild }: any) => {
   const [open, setOpen] = useState(hasActiveChild);
 
   const handleClick = () => {
-    if (collapsed) {
+    if (collapsed && item.children?.length) {
       navigate(item.children[0].path);
       return;
     }
-    setOpen((prev) => !prev);
+    setOpen((prev: boolean) => !prev);
   };
 
   return (
@@ -137,9 +137,9 @@ const NavGroup = ({ item, collapsed, hasActiveChild }: any) => {
           (open ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
       </button>
 
-      {!collapsed && open && (
+      {!collapsed && open && item.children && (
         <div className="ml-6 mt-1 space-y-1">
-          {item.children?.map((child: SubItem) => (
+          {item.children.map((child: SubItem) => (
             <button
               key={child.path}
               onClick={() => navigate(child.path)}
@@ -217,12 +217,12 @@ export const AppSidebar = () => {
         {/* Module Indicator */}
         {!collapsed ? (
           <div
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold ${
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold border ${
               isAdmin
-                ? "bg-blue-500/10 text-blue-500 border border-blue-500/20"
+                ? "bg-blue-500/10 text-blue-500 border-blue-500/20"
                 : isFinance
-                  ? "bg-primary/10 text-primary border border-primary/20"
-                  : "bg-muted text-muted-foreground border border-border"
+                  ? "bg-primary/10 text-primary border-primary/20"
+                  : "bg-muted text-muted-foreground border-border"
             }`}
           >
             {isAdmin ? (
