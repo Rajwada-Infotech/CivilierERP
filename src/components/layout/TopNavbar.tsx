@@ -6,6 +6,7 @@ import { useModule } from "@/contexts/ModuleContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavbarCollapse } from "./AppLayout";
 import {
+  Calendar,
   FileText,
   Settings,
   BarChart3,
@@ -114,6 +115,12 @@ const masterItems = [
     path: "/masters/hsn",
     color: "text-pink-400",
   },
+  {
+    icon: Calendar,
+    label: "Financial Year",
+    path: "/masters/financial-year",
+    color: "text-amber-500",
+  },
 ];
 
 export const TopNavbar = () => {
@@ -134,7 +141,7 @@ export const TopNavbar = () => {
   const isAdmin = currentUser?.role === "admin" || isSuperAdmin;
 
   const RoleIcon = isSuperAdmin ? Crown : isAdmin ? Shield : null;
-  const roleColor = isSuperAdmin ? "#7c3aed" : "#2563eb";
+  const roleBadgeClassName = isSuperAdmin ? "bg-violet-600" : "bg-blue-600";
 
   // ─── Toggle Handlers ─────────────────────────────────────────────
   const toggleSetup = useCallback(() => {
@@ -177,9 +184,13 @@ export const TopNavbar = () => {
     <header className="fixed top-0 left-0 right-0 h-14 z-50 flex items-center justify-between px-4 border-b border-border bg-card/80 backdrop-blur-lg">
       {/* Logo */}
       <button
+        type="button"
         onClick={() => navigate("/")}
+        title="Go to dashboard"
+        aria-label="Go to dashboard"
         className="flex items-center gap-2 hover:opacity-80 transition-opacity shrink-0"
       >
+        <span className="sr-only">Go to dashboard</span>
         <LogoFull />
       </button>
 
@@ -189,6 +200,7 @@ export const TopNavbar = () => {
         <button
           onClick={() => setNavCollapsed(!navCollapsed)}
           title={navCollapsed ? "Expand navigation" : "Collapse navigation"}
+          aria-label={navCollapsed ? "Expand navigation" : "Collapse navigation"}
           className="p-1.5 rounded-md bg-muted hover:bg-muted/80 text-foreground border border-border transition-all duration-200 shrink-0"
         >
           {navCollapsed ? (
@@ -200,13 +212,11 @@ export const TopNavbar = () => {
 
         {/* Collapsible Navigation Items */}
         <div
-          className="flex items-center gap-1 transition-all duration-300 ease-in-out"
-          style={{
-            maxWidth: navCollapsed ? 0 : 620,
-            opacity: navCollapsed ? 0 : 1,
-            overflow: navCollapsed ? "hidden" : "visible",
-            pointerEvents: navCollapsed ? "none" : "auto",
-          }}
+          className={`flex items-center gap-1 transition-all duration-300 ease-in-out max-w-[620px] ${
+            navCollapsed 
+              ? "w-0 opacity-0 invisible pointer-events-none" 
+              : "w-auto opacity-100 visible pointer-events-auto"
+          }`}
         >
           {/* Setup Dropdown */}
           <div className="relative shrink-0">
@@ -434,8 +444,7 @@ export const TopNavbar = () => {
                 }`}
               >
                 <span
-                  className="w-3.5 h-3.5 rounded-full shrink-0 border border-border/50"
-                  style={{ background: bg }}
+                  className={`w-3.5 h-3.5 rounded-full shrink-0 border border-border/50 bg-[${bg}]`}
                 />
                 {label}
                 {theme === t && (
@@ -455,8 +464,7 @@ export const TopNavbar = () => {
             {currentUser?.initials || "?"}
             {RoleIcon && (
               <span
-                className="absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center"
-                style={{ background: roleColor }}
+                className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center ${roleBadgeClassName}`}
               >
                 <RoleIcon size={9} className="text-white" />
               </span>
@@ -519,8 +527,7 @@ export const TopNavbar = () => {
             {currentUser?.initials || "?"}
             {RoleIcon && (
               <span
-                className="absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center"
-                style={{ background: roleColor }}
+                className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center ${roleBadgeClassName}`}
               >
                 <RoleIcon size={9} className="text-white" />
               </span>
