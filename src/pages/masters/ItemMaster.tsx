@@ -31,6 +31,7 @@ interface Item {
   itemType: "Service" | "Goods" | "";
   hsnCode: string;
   showTaxCalculated: boolean;
+  taxRate: number;
   belongsTo: string;
   discontinue: "active" | "discontinued";
 }
@@ -59,6 +60,7 @@ const INITIAL_DATA: Item[] = [
     itemType: "Goods",
     hsnCode: "",
     showTaxCalculated: true,
+    taxRate: 18,
     belongsTo: "RM",
     discontinue: "active",
   },
@@ -70,6 +72,7 @@ const INITIAL_DATA: Item[] = [
     itemType: "Goods",
     hsnCode: "",
     showTaxCalculated: true,
+    taxRate: 18,
     belongsTo: "RM",
     discontinue: "active",
   },
@@ -81,6 +84,7 @@ const INITIAL_DATA: Item[] = [
     itemType: "Service",
     hsnCode: "",
     showTaxCalculated: false,
+    taxRate: 0,
     belongsTo: "SVC",
     discontinue: "active",
   },
@@ -92,6 +96,7 @@ const INITIAL_DATA: Item[] = [
     itemType: "Service",
     hsnCode: "",
     showTaxCalculated: false,
+    taxRate: 0,
     belongsTo: "SVC",
     discontinue: "discontinued",
   },
@@ -103,6 +108,7 @@ const EMPTY_FORM: Omit<Item, "_id" | "itemCode"> = {
   itemType: "",
   hsnCode: "",
   showTaxCalculated: false,
+  taxRate: 0,
   belongsTo: "",
   discontinue: "active",
 };
@@ -282,7 +288,7 @@ const inputCls = (err?: boolean) =>
 
 // ── Main Component ────────────────────────────────────────────────────────────
 const ItemMaster: React.FC = () => {
-  const { activeHsnCodes } = useHsn();
+  const { activeHsnCodes, hsnRecords } = useHsn();
   const [data, setData] = useState<Item[]>(INITIAL_DATA);
   const [form, setForm] = useState<Omit<Item, "_id">>({
     ...EMPTY_FORM,
@@ -295,10 +301,29 @@ const ItemMaster: React.FC = () => {
 
   const set = useCallback(
     (key: keyof Omit<Item, "_id">, val: unknown) => {
-      setForm((p) => ({ ...p, [key]: val }));
+      setForm((p) => {
+        const next = { ...p, [key]: val };
+        // When HSN code changes and tax is enabled, auto-fill the rate
+        if (key === "hsnCode") {
+          const hsn = hsnRecords.find((h) => h.code === val);
+          if (hsn && next.showTaxCalculated) {
+            next.taxRate = hsn.igstRate || hsn.cgstRate + hsn.sgstRate;
+          }
+        }
+        // When toggle turns ON and an HSN is already selected, auto-fill
+        if (key === "showTaxCalculated" && val === true && p.hsnCode) {
+          const hsn = hsnRecords.find((h) => h.code === p.hsnCode);
+          if (hsn) next.taxRate = hsn.igstRate || hsn.cgstRate + hsn.sgstRate;
+        }
+        // When toggle turns OFF, clear taxRate
+        if (key === "showTaxCalculated" && val === false) {
+          next.taxRate = 0;
+        }
+        return next;
+      });
       if (errors[key]) setErrors((p) => ({ ...p, [key]: false }));
     },
-    [errors],
+    [errors, hsnRecords],
   );
 
   const regenerateCode = () => set("itemCode", generateItemCode());
@@ -465,19 +490,70 @@ const ItemMaster: React.FC = () => {
           </Field>
 
           {/* Show Tax Calculated */}
-          <div className="flex items-center gap-3 pt-5">
-            <button
-              type="button"
-              onClick={() => set("showTaxCalculated", !form.showTaxCalculated)}
-              className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${form.showTaxCalculated ? "bg-primary" : "bg-muted"}`}
-            >
-              <span
-                className={`inline-block h-4 w-4 rounded-full bg-primary-foreground transition-transform ${form.showTaxCalculated ? "translate-x-6" : "translate-x-1"}`}
-              />
-            </button>
-            <span className="text-sm font-heading text-foreground">
-              Show Tax Calculated
-            </span>
+          <div className="flex flex-col gap-2 pt-5">
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={() =>
+                  set("showTaxCalculated", !form.showTaxCalculated)
+                }
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${form.showTaxCalculated ? "bg-primary" : "bg-muted"}`}
+              >
+                <span
+                  className={`inline-block h-4 w-4 rounded-full bg-primary-foreground transition-transform ${form.showTaxCalculated ? "translate-x-6" : "translate-x-1"}`}
+                />
+              </button>
+              <span className="text-sm font-heading text-foreground">
+                Show Tax Calculated
+              </span>
+            </div>
+            {form.showTaxCalculated && (
+              <div className="flex items-center gap-2 mt-1">
+                {form.hsnCode ? (
+                  // HSN selected — show auto-filled rate as read-only
+                  <div className="flex items-center gap-2">
+                    <div className="relative">
+                      <input
+                        type="number"
+                        value={form.taxRate}
+                        readOnly
+                        className="w-24 px-3 py-1.5 rounded-lg text-sm font-mono bg-muted/50 border border-border text-primary cursor-not-allowed pr-8"
+                      />
+                      <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground font-heading">
+                        %
+                      </span>
+                    </div>
+                    <span className="text-xs text-muted-foreground">
+                      auto-filled from HSN
+                    </span>
+                  </div>
+                ) : (
+                  // No HSN — manual entry
+                  <div className="flex items-center gap-2">
+                    <div className="relative">
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        step={0.5}
+                        value={form.taxRate === 0 ? "" : form.taxRate}
+                        onChange={(e) =>
+                          set("taxRate", parseFloat(e.target.value) || 0)
+                        }
+                        placeholder="0"
+                        className="w-24 px-3 py-1.5 rounded-lg text-sm font-mono bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary pr-8"
+                      />
+                      <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground font-heading">
+                        %
+                      </span>
+                    </div>
+                    <span className="text-xs text-muted-foreground">
+                      enter tax rate
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* Status */}
@@ -622,11 +698,15 @@ const ItemMaster: React.FC = () => {
                         ?.description ?? row.belongsTo}
                     </td>
                     <td className="px-4 py-3">
-                      <span
-                        className={`px-2 py-0.5 rounded-full text-xs font-heading ${row.showTaxCalculated ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}
-                      >
-                        {row.showTaxCalculated ? "Yes" : "No"}
-                      </span>
+                      {row.showTaxCalculated ? (
+                        <span className="px-2 py-0.5 rounded-full text-xs font-mono bg-primary/10 text-primary whitespace-nowrap">
+                          {row.taxRate}%
+                        </span>
+                      ) : (
+                        <span className="px-2 py-0.5 rounded-full text-xs font-heading bg-muted text-muted-foreground">
+                          No
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <span
