@@ -25,6 +25,7 @@ import {
   Crown,
   Palette,
   ChevronRight,
+  FolderArchive,
 } from "lucide-react";
 
 import { useModule } from "@/contexts/ModuleContext";
@@ -138,6 +139,15 @@ export const MobileNav: React.FC = () => {
       children: [
         { label: "Expense Booking", path: "/transactions/expense-booking", icon: FileText },
         { label: "Payment", path: "/payments", icon: FileText },
+        { label: "Received Payment", path: "/received-payments", icon: FileText },
+        { label: "BRS", path: "/brs", icon: FileText },
+      ],
+    },
+    {
+      label: "Record Management",
+      icon: FolderArchive,
+      children: [
+        { label: "Records", path: "/records", icon: FileText },
       ],
     },
     {
