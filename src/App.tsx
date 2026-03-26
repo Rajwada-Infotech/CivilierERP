@@ -21,6 +21,7 @@ import Widgets from "./pages/Widgets";
 import Tasks from "./pages/Tasks";
 import Transactions from "./pages/Transactions";
 import Payment from "./pages/Payment";
+import Brs from "./pages/Brs";
 import ExpenseBooking from "./pages/ExpenseBooking";
 
 // Masters
@@ -148,6 +149,15 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/brs"
+        element={
+          <ProtectedRoute>
+            <Brs />
+          </ProtectedRoute>
+        }
+      />
+
 
       {/* MASTERS */}
       <Route
