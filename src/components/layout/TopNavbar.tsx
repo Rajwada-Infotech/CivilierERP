@@ -28,6 +28,8 @@ import {
   Package,
   Layers,
   Hash,
+  CreditCard,
+  BookOpen,
 } from "lucide-react";
 
 // ─── Dropdown Component ─────────────────────────────────────────────────────
@@ -121,6 +123,18 @@ const masterItems = [
     label: "Financial Year",
     path: "/masters/financial-year",
     color: "text-amber-500",
+  },
+  {
+    icon: BookOpen,
+    label: "Cheque",
+    path: "/masters/cheque",
+    color: "text-cyan-500",
+  },
+  {
+    icon: CreditCard,
+    label: "Cards",
+    path: "/masters/card",
+    color: "text-rose-500",
   },
 ];
 
