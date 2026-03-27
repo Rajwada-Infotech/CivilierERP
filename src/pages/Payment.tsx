@@ -306,7 +306,7 @@ export default function Payment() {
                   name="projectName"
                   render={({ field }) => (
                     <FormItem className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
-                      <FormLabel className="w-full text-sm font-medium sm:w-[130px] sm:shrink-0 sm:pt-3 sm:text-right">
+                      <FormLabel className="w-full text-sm font-medium sm:w-[130px] sm:shrink-0 sm:pt-[18px] sm:text-right">
                         Project Name
                       </FormLabel>
                       <div className="flex-1 min-w-0">
@@ -334,7 +334,7 @@ export default function Payment() {
                   name="docDate"
                   render={({ field }) => (
                     <FormItem className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
-                      <FormLabel className="w-full text-sm font-medium sm:w-[130px] sm:shrink-0 sm:pt-3 sm:text-right">
+                      <FormLabel className="w-full text-sm font-medium sm:w-[130px] sm:shrink-0 sm:pt-[18px] sm:text-right">
                         Date
                       </FormLabel>
                       <div className="flex-1 min-w-0">
@@ -377,7 +377,7 @@ export default function Payment() {
                   name="mode"
                   render={({ field }) => (
                     <FormItem className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
-                      <FormLabel className="w-full text-sm font-medium sm:w-[130px] sm:shrink-0 sm:pt-3 sm:text-right">
+                      <FormLabel className="w-full text-sm font-medium sm:w-[130px] sm:shrink-0 sm:pt-[18px] sm:text-right">
                         Mode of Payment
                       </FormLabel>
                       <div className="flex-1 min-w-0">
@@ -405,7 +405,7 @@ export default function Payment() {
                   name="amount"
                   render={({ field }) => (
                     <FormItem className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
-                      <FormLabel className="w-full text-sm font-medium sm:w-[130px] sm:shrink-0 sm:pt-3 sm:text-right">
+                      <FormLabel className="w-full text-sm font-medium sm:w-[130px] sm:shrink-0 sm:pt-[18px] sm:text-right">
                         Amount (₹)
                       </FormLabel>
                       <div className="flex-1 min-w-0">
@@ -511,7 +511,7 @@ export default function Payment() {
                 name="tagDOC"
                 render={({ field }) => (
                   <FormItem className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
-                    <FormLabel className="w-full text-sm font-medium sm:w-[130px] sm:shrink-0 sm:pt-3 sm:text-right">
+                    <FormLabel className="w-full text-sm font-medium sm:w-[130px] sm:shrink-0 sm:pt-[18px] sm:text-right">
                       Tag DOC
                     </FormLabel>
                     <div className="flex-1 min-w-0">
