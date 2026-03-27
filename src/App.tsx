@@ -151,43 +151,260 @@ function AppRoutes() {
       />
 
       {/* MAIN */}
-      <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-      <Route path="/transactions" element={<ProtectedRoute><Transactions /></ProtectedRoute>} />
-      <Route path="/transactions/expense-booking" element={<ProtectedRoute><ExpenseBooking /></ProtectedRoute>} />
-      <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
-      <Route path="/widgets" element={<ProtectedRoute><Widgets /></ProtectedRoute>} />
-      <Route path="/tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
-      <Route path="/payments" element={<ProtectedRoute><Payment /></ProtectedRoute>} />
-      <Route path="/received-payments" element={<ProtectedRoute><ReceivedPayment /></ProtectedRoute>} />
-      <Route path="/brs" element={<ProtectedRoute><Brs /></ProtectedRoute>} />
-      <Route path="/records" element={<ProtectedRoute><Records /></ProtectedRoute>} />
+      <Route
+        path="/"
+        element={
+          <ProtectedRoute>
+            <Dashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/transactions"
+        element={
+          <ProtectedRoute>
+            <Transactions />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/transactions/expense-booking"
+        element={
+          <ProtectedRoute>
+            <ExpenseBooking />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/reports"
+        element={
+          <ProtectedRoute>
+            <Reports />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/widgets"
+        element={
+          <ProtectedRoute>
+            <Widgets />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/tasks"
+        element={
+          <ProtectedRoute>
+            <Tasks />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/payments"
+        element={
+          <ProtectedRoute>
+            <Payment />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/received-payments"
+        element={
+          <ProtectedRoute>
+            <ReceivedPayment />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/brs"
+        element={
+          <ProtectedRoute>
+            <Brs />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/records"
+        element={
+          <ProtectedRoute>
+            <Records />
+          </ProtectedRoute>
+        }
+      />
 
       {/* MASTERS */}
-      <Route path="/masters/contractors" element={<ProtectedRoute><ContractorMaster /></ProtectedRoute>} />
-      <Route path="/masters/suppliers" element={<ProtectedRoute><SupplierMaster /></ProtectedRoute>} />
-      <Route path="/masters/customers" element={<ProtectedRoute><CustomerMaster /></ProtectedRoute>} />
-      <Route path="/masters/banks" element={<ProtectedRoute><BankMaster /></ProtectedRoute>} />
-      <Route path="/masters/expenses" element={<ProtectedRoute><ExpensesMaster /></ProtectedRoute>} />
-      <Route path="/masters/items" element={<ProtectedRoute><ItemMaster /></ProtectedRoute>} />
-      <Route path="/masters/item-groups" element={<ProtectedRoute><ItemGroupMaster /></ProtectedRoute>} />
-      <Route path="/masters/hsn" element={<ProtectedRoute><HsnMaster /></ProtectedRoute>} />
-      <Route path="/masters/financial-year" element={<ProtectedRoute><FinancialYearMaster /></ProtectedRoute>} />
-      <Route path="/masters/cheque" element={<ProtectedRoute><ChequeMaster /></ProtectedRoute>} />
-      <Route path="/masters/card" element={<ProtectedRoute><CardMaster /></ProtectedRoute>} />
+      <Route
+        path="/masters/contractors"
+        element={
+          <ProtectedRoute>
+            <ContractorMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/suppliers"
+        element={
+          <ProtectedRoute>
+            <SupplierMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/customers"
+        element={
+          <ProtectedRoute>
+            <CustomerMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/banks"
+        element={
+          <ProtectedRoute>
+            <BankMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/expenses"
+        element={
+          <ProtectedRoute>
+            <ExpensesMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/items"
+        element={
+          <ProtectedRoute>
+            <ItemMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/item-groups"
+        element={
+          <ProtectedRoute>
+            <ItemGroupMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/hsn"
+        element={
+          <ProtectedRoute>
+            <HsnMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/financial-year"
+        element={
+          <ProtectedRoute>
+            <FinancialYearMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/cheque"
+        element={
+          <ProtectedRoute>
+            <ChequeMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/card"
+        element={
+          <ProtectedRoute>
+            <CardMaster />
+          </ProtectedRoute>
+        }
+      />
 
       {/* ADMIN */}
-      <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
-      <Route path="/admin/expense-booking" element={<ProtectedRoute><AdminExpenseBooking /></ProtectedRoute>} />
-      <Route path="/users" element={<ProtectedRoute><Users /></ProtectedRoute>} />
-      <Route path="/admin/rights/menu" element={<ProtectedRoute><MenuRights /></ProtectedRoute>} />
-      <Route path="/admin/rights/widgets" element={<ProtectedRoute><WidgetRights /></ProtectedRoute>} />
-      <Route path="/admin/rights/fin-year" element={<ProtectedRoute><FinYearRights /></ProtectedRoute>} />
-      <Route path="/admin/approval/setup" element={<ProtectedRoute><ApprovalSetup /></ProtectedRoute>} />
-      <Route path="/admin/approval/post-rights" element={<ProtectedRoute><PostApprovalRights /></ProtectedRoute>} />
+      <Route
+        path="/admin"
+        element={
+          <ProtectedRoute>
+            <AdminDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/expense-booking"
+        element={
+          <ProtectedRoute>
+            <AdminExpenseBooking />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/users"
+        element={
+          <ProtectedRoute>
+            <Users />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/rights/menu"
+        element={
+          <ProtectedRoute>
+            <MenuRights />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/rights/widgets"
+        element={
+          <ProtectedRoute>
+            <WidgetRights />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/rights/fin-year"
+        element={
+          <ProtectedRoute>
+            <FinYearRights />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/approval/setup"
+        element={
+          <ProtectedRoute>
+            <ApprovalSetup />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/approval/post-rights"
+        element={
+          <ProtectedRoute>
+            <PostApprovalRights />
+          </ProtectedRoute>
+        }
+      />
 
-      {/* ✅ Merged Routes */}
-      <Route path="/admin/api-integration" element={<ProtectedRoute><ApiIntegrationPage /></ProtectedRoute>} />
-      <Route path="/admin/signature" element={<ProtectedRoute><SignaturePage /></ProtectedRoute>} />
+      {/*  Merged Routes */}
+      <Route
+        path="/admin/api-integration"
+        element={
+          <ProtectedRoute>
+            <ApiIntegrationPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/signature"
+        element={
+          <ProtectedRoute>
+            <SignaturePage />
+          </ProtectedRoute>
+        }
+      />
 
       {/* 404 */}
       <Route path="*" element={<NotFound />} />
