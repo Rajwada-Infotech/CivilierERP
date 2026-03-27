@@ -27,6 +27,7 @@ import {
   ChevronsRight,
   Package,
   Layers,
+  Hash,
 } from "lucide-react";
 
 // ─── Dropdown Component ─────────────────────────────────────────────────────
@@ -69,7 +70,7 @@ const Dropdown = ({
 const masterItems = [
   {
     icon: Receipt,
-    label: "Expenses",
+    label: "General Ledger",
     path: "/masters/expenses",
     color: "text-orange-400",
   },
@@ -110,7 +111,7 @@ const masterItems = [
     color: "text-indigo-400",
   },
   {
-    icon: FileText,
+    icon: Hash,
     label: "HSN",
     path: "/masters/hsn",
     color: "text-pink-400",

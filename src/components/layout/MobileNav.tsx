@@ -9,7 +9,7 @@ import {
   X,
   Scale,
   ChevronDown,
-  FileText,
+  Hash,
   ShieldCheck,
   Receipt,
   Truck,
@@ -25,7 +25,7 @@ import {
   Crown,
   Palette,
   ChevronRight,
-  FolderArchive,
+  Archive,
 } from "lucide-react";
 
 import { useModule } from "@/contexts/ModuleContext";
@@ -70,7 +70,7 @@ export const MobileNav: React.FC = () => {
 
   // Master Items with permission check for HSN
   const masterItems: NavItemChild[] = [
-    { icon: Receipt, label: "Expenses", path: "/masters/expenses" },
+    { icon: Receipt, label: "General Ledger", path: "/masters/expenses" },
     { icon: Truck, label: "Suppliers", path: "/masters/suppliers" },
     { icon: Users, label: "Customers", path: "/masters/customers" },
     { icon: HardHat, label: "Contractors", path: "/masters/contractors" },
@@ -78,7 +78,7 @@ export const MobileNav: React.FC = () => {
     { icon: Package, label: "Items", path: "/masters/items" },
     { icon: Layers, label: "Item Groups", path: "/masters/item-groups" },
     ...(canAccessPage("master_hsn")
-      ? [{ icon: FileText, label: "HSN", path: "/masters/hsn" }]
+      ? [{ icon: Hash, label: "HSN", path: "/masters/hsn" }]
       : []),
     { icon: Calendar, label: "Financial Year", path: "/masters/financial-year" },
   ];
@@ -145,9 +145,9 @@ export const MobileNav: React.FC = () => {
     },
     {
       label: "Record Management",
-      icon: FolderArchive,
+      icon: Archive,
       children: [
-        { label: "Records", path: "/records", icon: FileText },
+        { label: "Records", path: "/records", icon: Archive },
       ],
     },
     {
@@ -178,7 +178,7 @@ export const MobileNav: React.FC = () => {
   };
 
   const masterIconColors: Record<string, string> = {
-    Expenses: "text-orange-400",
+    "General Ledger": "text-orange-400",
     Suppliers: "text-blue-400",
     Customers: "text-violet-400",
     Contractors: "text-yellow-500",
@@ -190,7 +190,7 @@ export const MobileNav: React.FC = () => {
   };
 
   const masterBgColors: Record<string, string> = {
-    Expenses: "bg-orange-500/10",
+    "General Ledger": "bg-orange-500/10",
     Suppliers: "bg-blue-500/10",
     Customers: "bg-violet-500/10",
     Contractors: "bg-yellow-500/10",
@@ -229,7 +229,7 @@ export const MobileNav: React.FC = () => {
                 onClick={() => setOpen(false)}
                 aria-label="Close menu"
                 className="p-1 rounded-lg hover:bg-muted transition-colors text-muted-foreground"
-                >
+              >
                 <X size={18} />
               </button>
             </div>
