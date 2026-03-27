@@ -27,6 +27,9 @@ import {
   ChevronsRight,
   Package,
   Layers,
+  Hash,
+  CreditCard,
+  BookOpen,
 } from "lucide-react";
 
 // ─── Dropdown Component ─────────────────────────────────────────────────────
@@ -69,7 +72,7 @@ const Dropdown = ({
 const masterItems = [
   {
     icon: Receipt,
-    label: "Expenses",
+    label: "General Ledger",
     path: "/masters/expenses",
     color: "text-orange-400",
   },
@@ -110,7 +113,7 @@ const masterItems = [
     color: "text-indigo-400",
   },
   {
-    icon: FileText,
+    icon: Hash,
     label: "HSN",
     path: "/masters/hsn",
     color: "text-pink-400",
@@ -120,6 +123,18 @@ const masterItems = [
     label: "Financial Year",
     path: "/masters/financial-year",
     color: "text-amber-500",
+  },
+  {
+    icon: BookOpen,
+    label: "Cheque",
+    path: "/masters/cheque",
+    color: "text-cyan-500",
+  },
+  {
+    icon: CreditCard,
+    label: "Cards",
+    path: "/masters/card",
+    color: "text-rose-500",
   },
 ];
 

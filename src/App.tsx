@@ -9,20 +9,20 @@ import {
 } from "react-router-dom";
 import { useAuth } from "@/contexts/AuthContext";
 
-// Static imports (fast loading - no lazy needed)
+// Static imports
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
 
 // Layout
 import { AppLayout } from "@/components/layout/AppLayout";
 
-// ✅ Delay helper for better UX (shows loader nicely)
+// Delay helper
 const withDelay = <T,>(importFn: () => Promise<T>, delay = 600): Promise<T> =>
   Promise.all([importFn(), new Promise((res) => setTimeout(res, delay))]).then(
     ([module]) => module,
   );
 
-// ✅ Lazy imports with delay
+// Lazy pages
 const Dashboard = lazy(() => withDelay(() => import("./pages/Dashboard")));
 const Reports = lazy(() => withDelay(() => import("./pages/Reports")));
 const Widgets = lazy(() => withDelay(() => import("./pages/Widgets")));
@@ -66,7 +66,13 @@ const HsnMaster = lazy(() =>
   withDelay(() => import("./pages/masters/HsnMaster")),
 );
 const FinancialYearMaster = lazy(() =>
-  withDelay(() => import("./pages/masters/FinancialYearMaster"))
+  withDelay(() => import("./pages/masters/FinancialYearMaster")),
+);
+const ChequeMaster = lazy(() =>
+  withDelay(() => import("./pages/masters/ChequeMaster")),
+);
+const CardMaster = lazy(() =>
+  withDelay(() => import("./pages/masters/CardMaster")),
 );
 
 // Admin
@@ -93,6 +99,14 @@ const PostApprovalRights = lazy(() =>
   withDelay(() => import("./pages/admin/PostApprovalRights")),
 );
 
+// ✅ Merged from Abc branch
+const ApiIntegrationPage = lazy(() =>
+  withDelay(() => import("./pages/admin/ApiIntegration")),
+);
+const SignaturePage = lazy(() =>
+  withDelay(() => import("./pages/admin/Signature")),
+);
+
 // Contexts
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ModuleProvider } from "@/contexts/ModuleContext";
@@ -102,9 +116,7 @@ import { FinYearProvider } from "@/contexts/FinYearContext";
 import { HsnProvider } from "@/contexts/HsnContext";
 import { RecordsProvider } from "@/contexts/RecordsContext";
 
-/* =========================
-   AUTH GUARD
-========================= */
+/* ========================= AUTH GUARD ========================= */
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { currentUser } = useAuth();
   const location = useLocation();
@@ -115,9 +127,7 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-/* =========================
-   PROTECTED ROUTE WRAPPER
-========================= */
+/* ========================= PROTECTED ROUTE ========================= */
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return (
     <RequireAuth>
@@ -128,9 +138,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   );
 }
 
-/* =========================
-   ROUTES
-========================= */
+/* ========================= ROUTES ========================= */
 function AppRoutes() {
   const { currentUser } = useAuth();
 
@@ -142,227 +150,44 @@ function AppRoutes() {
         element={currentUser ? <Navigate to="/" replace /> : <Login />}
       />
 
-      {/* MAIN ROUTES */}
-      <Route
-        path="/"
-        element={
-          <ProtectedRoute>
-            <Dashboard />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/transactions"
-        element={
-          <ProtectedRoute>
-            <Transactions />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/transactions/expense-booking"
-        element={
-          <ProtectedRoute>
-            <ExpenseBooking />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/reports"
-        element={
-          <ProtectedRoute>
-            <Reports />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/widgets"
-        element={
-          <ProtectedRoute>
-            <Widgets />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/tasks"
-        element={
-          <ProtectedRoute>
-            <Tasks />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/payments"
-        element={
-          <ProtectedRoute>
-            <Payment />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/received-payments"
-        element={
-          <ProtectedRoute>
-            <ReceivedPayment />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/brs"
-        element={
-          <ProtectedRoute>
-            <Brs />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/records"
-        element={
-          <ProtectedRoute>
-            <Records />
-          </ProtectedRoute>
-        }
-      />
+      {/* MAIN */}
+      <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+      <Route path="/transactions" element={<ProtectedRoute><Transactions /></ProtectedRoute>} />
+      <Route path="/transactions/expense-booking" element={<ProtectedRoute><ExpenseBooking /></ProtectedRoute>} />
+      <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
+      <Route path="/widgets" element={<ProtectedRoute><Widgets /></ProtectedRoute>} />
+      <Route path="/tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
+      <Route path="/payments" element={<ProtectedRoute><Payment /></ProtectedRoute>} />
+      <Route path="/received-payments" element={<ProtectedRoute><ReceivedPayment /></ProtectedRoute>} />
+      <Route path="/brs" element={<ProtectedRoute><Brs /></ProtectedRoute>} />
+      <Route path="/records" element={<ProtectedRoute><Records /></ProtectedRoute>} />
 
       {/* MASTERS */}
-      <Route
-        path="/masters/contractors"
-        element={
-          <ProtectedRoute>
-            <ContractorMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/masters/suppliers"
-        element={
-          <ProtectedRoute>
-            <SupplierMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/masters/customers"
-        element={
-          <ProtectedRoute>
-            <CustomerMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/masters/banks"
-        element={
-          <ProtectedRoute>
-            <BankMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/masters/expenses"
-        element={
-          <ProtectedRoute>
-            <ExpensesMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/masters/items"
-        element={
-          <ProtectedRoute>
-            <ItemMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/masters/item-groups"
-        element={
-          <ProtectedRoute>
-            <ItemGroupMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/masters/hsn"
-        element={
-          <ProtectedRoute>
-            <HsnMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/masters/financial-year"
-        element={
-          <ProtectedRoute>
-            <FinancialYearMaster />
-          </ProtectedRoute>
-        }
-      />
+      <Route path="/masters/contractors" element={<ProtectedRoute><ContractorMaster /></ProtectedRoute>} />
+      <Route path="/masters/suppliers" element={<ProtectedRoute><SupplierMaster /></ProtectedRoute>} />
+      <Route path="/masters/customers" element={<ProtectedRoute><CustomerMaster /></ProtectedRoute>} />
+      <Route path="/masters/banks" element={<ProtectedRoute><BankMaster /></ProtectedRoute>} />
+      <Route path="/masters/expenses" element={<ProtectedRoute><ExpensesMaster /></ProtectedRoute>} />
+      <Route path="/masters/items" element={<ProtectedRoute><ItemMaster /></ProtectedRoute>} />
+      <Route path="/masters/item-groups" element={<ProtectedRoute><ItemGroupMaster /></ProtectedRoute>} />
+      <Route path="/masters/hsn" element={<ProtectedRoute><HsnMaster /></ProtectedRoute>} />
+      <Route path="/masters/financial-year" element={<ProtectedRoute><FinancialYearMaster /></ProtectedRoute>} />
+      <Route path="/masters/cheque" element={<ProtectedRoute><ChequeMaster /></ProtectedRoute>} />
+      <Route path="/masters/card" element={<ProtectedRoute><CardMaster /></ProtectedRoute>} />
 
       {/* ADMIN */}
-      <Route
-        path="/admin"
-        element={
-          <ProtectedRoute>
-            <AdminDashboard />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/admin/expense-booking"
-        element={
-          <ProtectedRoute>
-            <AdminExpenseBooking />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/users"
-        element={
-          <ProtectedRoute>
-            <Users />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/admin/rights/menu"
-        element={
-          <ProtectedRoute>
-            <MenuRights />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/admin/rights/widgets"
-        element={
-          <ProtectedRoute>
-            <WidgetRights />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/admin/rights/fin-year"
-        element={
-          <ProtectedRoute>
-            <FinYearRights />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/admin/approval/setup"
-        element={
-          <ProtectedRoute>
-            <ApprovalSetup />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/admin/approval/post-rights"
-        element={
-          <ProtectedRoute>
-            <PostApprovalRights />
-          </ProtectedRoute>
-        }
-      />
+      <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
+      <Route path="/admin/expense-booking" element={<ProtectedRoute><AdminExpenseBooking /></ProtectedRoute>} />
+      <Route path="/users" element={<ProtectedRoute><Users /></ProtectedRoute>} />
+      <Route path="/admin/rights/menu" element={<ProtectedRoute><MenuRights /></ProtectedRoute>} />
+      <Route path="/admin/rights/widgets" element={<ProtectedRoute><WidgetRights /></ProtectedRoute>} />
+      <Route path="/admin/rights/fin-year" element={<ProtectedRoute><FinYearRights /></ProtectedRoute>} />
+      <Route path="/admin/approval/setup" element={<ProtectedRoute><ApprovalSetup /></ProtectedRoute>} />
+      <Route path="/admin/approval/post-rights" element={<ProtectedRoute><PostApprovalRights /></ProtectedRoute>} />
+
+      {/* ✅ Merged Routes */}
+      <Route path="/admin/api-integration" element={<ProtectedRoute><ApiIntegrationPage /></ProtectedRoute>} />
+      <Route path="/admin/signature" element={<ProtectedRoute><SignaturePage /></ProtectedRoute>} />
 
       {/* 404 */}
       <Route path="*" element={<NotFound />} />
@@ -370,23 +195,16 @@ function AppRoutes() {
   );
 }
 
-/* =========================
-   APP ROOT
-========================= */
+/* ========================= APP ROOT ========================= */
 function App() {
   const [initialLoading, setInitialLoading] = useState(true);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      setInitialLoading(false);
-    }, 500); // Initial splash screen
-
+    const timer = setTimeout(() => setInitialLoading(false), 500);
     return () => clearTimeout(timer);
   }, []);
 
-  if (initialLoading) {
-    return <Loader />;
-  }
+  if (initialLoading) return <Loader />;
 
   return (
     <AuthProvider>
