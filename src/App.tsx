@@ -99,7 +99,6 @@ const PostApprovalRights = lazy(() =>
   withDelay(() => import("./pages/admin/PostApprovalRights")),
 );
 
-// ✅ Merged from Abc branch
 const ApiIntegrationPage = lazy(() =>
   withDelay(() => import("./pages/admin/ApiIntegration")),
 );
