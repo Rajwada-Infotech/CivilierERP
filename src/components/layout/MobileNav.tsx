@@ -2,14 +2,14 @@ import React, { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   Calendar,
-  Hash,
+  FileText,
   BarChart3,
   CheckCircle2,
   Menu,
   X,
   Scale,
   ChevronDown,
-  FileText,
+  Hash,
   ShieldCheck,
   Receipt,
   Truck,
@@ -25,7 +25,9 @@ import {
   Crown,
   Palette,
   ChevronRight,
-  FolderArchive,
+  Archive,
+  CreditCard,
+  BookOpen,
 } from "lucide-react";
 
 import { useModule } from "@/contexts/ModuleContext";
@@ -70,7 +72,7 @@ export const MobileNav: React.FC = () => {
 
   // Master Items with permission check for HSN
   const masterItems: NavItemChild[] = [
-    { icon: Receipt, label: "Expenses", path: "/masters/expenses" },
+    { icon: Receipt, label: "General Ledger", path: "/masters/expenses" },
     { icon: Truck, label: "Suppliers", path: "/masters/suppliers" },
     { icon: Users, label: "Customers", path: "/masters/customers" },
     { icon: HardHat, label: "Contractors", path: "/masters/contractors" },
@@ -81,6 +83,8 @@ export const MobileNav: React.FC = () => {
       ? [{ icon: Hash, label: "HSN", path: "/masters/hsn" }]
       : []),
     { icon: Calendar, label: "Financial Year", path: "/masters/financial-year" },
+    { icon: BookOpen, label: "Cheque", path: "/masters/cheque" },
+    { icon: CreditCard, label: "Cards", path: "/masters/card" },
   ];
 
   const ADMIN_NAV_ITEMS: NavItem[] = [
@@ -145,9 +149,9 @@ export const MobileNav: React.FC = () => {
     },
     {
       label: "Record Management",
-      icon: FolderArchive,
+      icon: Archive,
       children: [
-        { label: "Records", path: "/records", icon: FileText },
+        { label: "Records", path: "/records", icon: Archive },
       ],
     },
     {
@@ -178,7 +182,7 @@ export const MobileNav: React.FC = () => {
   };
 
   const masterIconColors: Record<string, string> = {
-    Expenses: "text-orange-400",
+    "General Ledger": "text-orange-400",
     Suppliers: "text-blue-400",
     Customers: "text-violet-400",
     Contractors: "text-yellow-500",
@@ -187,10 +191,12 @@ export const MobileNav: React.FC = () => {
     "Item Groups": "text-indigo-400",
     HSN: "text-pink-500",
     "Financial Year": "text-amber-500",
+    Cheque: "text-cyan-500",
+    Cards: "text-rose-500",
   };
 
   const masterBgColors: Record<string, string> = {
-    Expenses: "bg-orange-500/10",
+    "General Ledger": "bg-orange-500/10",
     Suppliers: "bg-blue-500/10",
     Customers: "bg-violet-500/10",
     Contractors: "bg-yellow-500/10",
@@ -199,6 +205,8 @@ export const MobileNav: React.FC = () => {
     "Item Groups": "bg-indigo-500/10",
     HSN: "bg-pink-500/10",
     "Financial Year": "bg-amber-500/10",
+    Cheque: "bg-cyan-500/10",
+    Cards: "bg-rose-500/10",
   };
 
   return (
@@ -229,7 +237,7 @@ export const MobileNav: React.FC = () => {
                 onClick={() => setOpen(false)}
                 aria-label="Close menu"
                 className="p-1 rounded-lg hover:bg-muted transition-colors text-muted-foreground"
-                >
+              >
                 <X size={18} />
               </button>
             </div>

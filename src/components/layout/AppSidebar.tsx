@@ -15,7 +15,8 @@ import {
   Shield,
   Landmark,
   ShieldCheck,
-  FolderArchive,
+  Archive,
+  MessageSquare,
 } from "lucide-react";
 
 interface SubItem {
@@ -38,7 +39,6 @@ interface NavItem {
   sections?: SubSection[];
 }
 
-// Updated nav items without "More" section
 const buildNavItems = (overdueCount: number): NavItem[] => [
   { label: "Amendments", icon: BarChart3, path: "/" },
   {
@@ -65,10 +65,8 @@ const buildNavItems = (overdueCount: number): NavItem[] => [
   },
   {
     label: "Record Management",
-    icon: FolderArchive,
-    children: [
-      { label: "Records", path: "/records" },
-    ],
+    icon: Archive,
+    children: [{ label: "Records", path: "/records" }],
   },
 ];
 
@@ -101,9 +99,28 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
     icon: Landmark,
     children: [{ label: "Expense Booking", path: "/admin/expense-booking" }],
   },
+  {
+    label: "Communicator",
+    icon: MessageSquare,
+    children: [
+      { label: "SMS Setup", path: "/admin/communicator/sms-setup" },
+      { label: "Email Setup", path: "/admin/communicator/email-setup" },
+      { label: "WhatsApp Setup", path: "/admin/communicator/whatsapp-setup" },
+    ],
+  },
+  { label: "API Integration", icon: Shield, path: "/admin/api-integration" },
+  { label: "Signature", icon: FileText, path: "/admin/signature" },
 ];
 
-const NavButton = ({ item, collapsed, isActive }: any) => {
+const NavButton = ({
+  item,
+  collapsed,
+  isActive,
+}: {
+  item: NavItem;
+  collapsed: boolean;
+  isActive: boolean;
+}) => {
   const navigate = useNavigate();
 
   return (
@@ -122,24 +139,37 @@ const NavButton = ({ item, collapsed, isActive }: any) => {
   );
 };
 
-const NavGroup = ({ item, collapsed, hasActiveChild }: any) => {
+const NavGroup = ({
+  item,
+  collapsed,
+  hasActiveChild,
+}: {
+  item: NavItem;
+  collapsed: boolean;
+  hasActiveChild: boolean;
+}) => {
   const navigate = useNavigate();
   const location = useLocation();
   const [open, setOpen] = useState(hasActiveChild);
-  const [openSections, setOpenSections] = useState<Record<string, boolean>>(() => {
-    const init: Record<string, boolean> = {};
-    (item.sections || []).forEach((s: any) => {
-      init[s.label] = s.items.some((i: SubItem) => location.pathname === i.path);
-    });
-    return init;
-  });
+
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>(
+    () => {
+      const init: Record<string, boolean> = {};
+      (item.sections || []).forEach((s: any) => {
+        init[s.label] = s.items.some(
+          (i: SubItem) => location.pathname === i.path,
+        );
+      });
+      return init;
+    },
+  );
 
   const handleClick = () => {
     if (collapsed && item.children?.length) {
       navigate(item.children[0].path);
       return;
     }
-    setOpen((prev: boolean) => !prev);
+    setOpen((prev) => !prev);
   };
 
   const toggleSection = (label: string) =>
@@ -165,7 +195,6 @@ const NavGroup = ({ item, collapsed, hasActiveChild }: any) => {
 
       {!collapsed && open && (
         <div className="ml-6 mt-1 space-y-1">
-          {/* Flat children */}
           {item.children?.map((child: SubItem) => (
             <button
               key={child.path}
@@ -178,39 +207,43 @@ const NavGroup = ({ item, collapsed, hasActiveChild }: any) => {
             >
               <span>{child.label}</span>
               {child.badge && (
-                <span className="bg-red-500 text-white text-[9px] px-1.5 py-0.5 rounded-full leading-none">
+                <span className="bg-red-500 text-white text-[9px] px-1.5 py-0.5 rounded-full">
                   {child.badge}
                 </span>
               )}
             </button>
           ))}
 
-          {/* Sub-sections */}
           {item.sections?.map((section: any) => (
             <div key={section.label}>
               <button
                 onClick={() => toggleSection(section.label)}
-                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent transition-colors"
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent"
               >
-                <section.icon size={13} className="shrink-0" />
-                <span className="flex-1 text-left truncate font-medium">{section.label}</span>
-                {openSections[section.label]
-                  ? <ChevronUp size={11} />
-                  : <ChevronDown size={11} />}
+                <section.icon size={13} />
+                <span className="flex-1 text-left truncate font-medium">
+                  {section.label}
+                </span>
+                {openSections[section.label] ? (
+                  <ChevronUp size={11} />
+                ) : (
+                  <ChevronDown size={11} />
+                )}
               </button>
+
               {openSections[section.label] && (
                 <div className="ml-4 mt-0.5 space-y-0.5">
                   {section.items.map((child: SubItem) => (
                     <button
                       key={child.path}
                       onClick={() => navigate(child.path)}
-                      className={`w-full flex justify-between items-center text-xs px-2 py-1.5 rounded-md transition-colors ${
+                      className={`w-full text-xs px-2 py-1.5 rounded-md ${
                         location.pathname === child.path
                           ? "bg-primary/15 text-primary font-medium"
-                          : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+                          : "text-sidebar-foreground/70 hover:bg-sidebar-accent"
                       }`}
                     >
-                      <span>{child.label}</span>
+                      {child.label}
                     </button>
                   ))}
                 </div>
@@ -230,6 +263,7 @@ export const AppSidebar = () => {
   const { getOverdueTasks } = useTask();
 
   const overdueCount = getOverdueTasks().length;
+
   const isAdminPage =
     location.pathname.startsWith("/admin") ||
     location.pathname.startsWith("/users");
@@ -254,10 +288,10 @@ export const AppSidebar = () => {
               item={item}
               collapsed={collapsed}
               hasActiveChild={
-                (item.children?.some((c) => location.pathname === c.path) ?? false) ||
-                (item.sections?.some((s: any) =>
-                  s.items.some((i: any) => location.pathname === i.path)
-                ) ?? false)
+                item.children?.some((c) => location.pathname === c.path) ||
+                item.sections?.some((s: any) =>
+                  s.items.some((i: any) => location.pathname === i.path),
+                )
               }
             />
           ) : (
@@ -268,34 +302,26 @@ export const AppSidebar = () => {
               isActive={
                 item.path === "/"
                   ? location.pathname === "/"
-                  : location.pathname.startsWith(item.path || "__never__")
+                  : location.pathname.startsWith(item.path || "")
               }
             />
           ),
         )}
       </div>
 
-      {/* Bottom Section */}
-      <div className="shrink-0 p-2 border-t border-sidebar-border space-y-2">
-        {/* Module Indicator */}
+      <div className="p-2 border-t border-sidebar-border space-y-2">
         {!collapsed ? (
           <div
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold border ${
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold border ${
               isAdmin
                 ? "bg-blue-500/10 text-blue-500 border-blue-500/20"
                 : isFinance
-                  ? "bg-primary/10 text-primary border-primary/20"
-                  : "bg-muted text-muted-foreground border-border"
+                ? "bg-primary/10 text-primary border-primary/20"
+                : "bg-muted text-muted-foreground border-border"
             }`}
           >
-            {isAdmin ? (
-              <ShieldCheck size={13} className="shrink-0" />
-            ) : (
-              <Landmark size={13} className="shrink-0" />
-            )}
-            <span className="truncate">
-              {isAdmin ? "Admin" : isFinance ? "Finance" : "No module"}
-            </span>
+            {isAdmin ? <ShieldCheck size={13} /> : <Landmark size={13} />}
+            <span>{isAdmin ? "Admin" : isFinance ? "Finance" : "No module"}</span>
           </div>
         ) : (
           <div className="flex justify-center">
@@ -304,19 +330,16 @@ export const AppSidebar = () => {
                 isAdmin
                   ? "bg-blue-500"
                   : isFinance
-                    ? "bg-primary"
-                    : "bg-muted-foreground/40"
+                  ? "bg-primary"
+                  : "bg-muted-foreground/40"
               }`}
-              title={isAdmin ? "Admin" : isFinance ? "Finance" : "No module"}
             />
           </div>
         )}
 
-        {/* Sidebar Collapse Button */}
         <button
           onClick={() => setCollapsed(!collapsed)}
-          className="w-full flex items-center justify-center p-2 rounded-lg hover:bg-sidebar-accent text-sidebar-foreground transition-colors"
-          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          className="w-full flex justify-center p-2 rounded-lg hover:bg-sidebar-accent"
         >
           {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
         </button>
