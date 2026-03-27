@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useForm } from "react-hook-form";
@@ -7,7 +7,7 @@ import * as z from "zod";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Plus, Receipt, FileText, CheckCircle, CreditCardIcon, Banknote, Paperclip } from 'lucide-react';
+import { Banknote, FileText, Paperclip, Plus, Receipt } from "lucide-react";
 import { useRecords } from "@/contexts/RecordsContext";
 import {
   Form,
@@ -23,7 +23,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { toast } from "sonner";
 import { format } from "date-fns";
-import { CalendarIcon, CalendarDays } from "lucide-react";
+import { CalendarIcon } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
@@ -35,7 +35,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
 
 // Schema
 const paymentSchema = z.object({
@@ -159,12 +158,19 @@ export default function Payment() {
     <>
           <Breadcrumbs items={["Payments"]} />
       <div className="space-y-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold tracking-tight">Payment Management</h1>
-            <p className="text-muted-foreground mt-2">Manage payments, receipts, and transactions</p>
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">Payment Management</h1>
+            <p className="mt-2 text-sm text-muted-foreground sm:text-base">
+              Manage payments, receipts, and transactions
+            </p>
           </div>
-          <Button size="lg" onClick={() => setIsDialogOpen(true)} disabled={!canDoAction("payments", "create")}>
+          <Button
+            size="lg"
+            className="w-full sm:w-auto"
+            onClick={() => setIsDialogOpen(true)}
+            disabled={!canDoAction("payments", "create")}
+          >
             <Plus className="mr-2 h-4 w-4" />
             New Payment
           </Button>
@@ -207,28 +213,40 @@ export default function Payment() {
               ) : (
                 <div className="space-y-3 sm:space-y-4 max-h-80 sm:max-h-96 overflow-auto overscroll-contain [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-muted/50 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-muted-foreground/60">
                   {payments.slice(0, 5).map((payment) => (
-                    <div key={payment.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-4 border rounded-lg hover:bg-muted gap-3 sm:gap-0">
-                      <div className="truncate">
+                    <div
+                      key={payment.id}
+                      className="flex flex-col gap-3 rounded-lg border p-4 hover:bg-muted sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <div className="min-w-0">
                         <div className="font-mono text-sm text-muted-foreground">{payment.id}</div>
-                        <div className="font-medium truncate max-w-[200px] sm:max-w-none">{payment.projectName}</div>
+                        <div className="truncate font-medium">{payment.projectName}</div>
                         <div className="text-sm text-muted-foreground">{format(payment.docDate!, "PPP")}</div>
                       </div>
-                      <div className="flex sm:text-right gap-2 sm:gap-0 items-center sm:items-center">
-                        <div className="font-mono font-bold text-lg sm:text-base">₹{payment.amount.toLocaleString()}</div>
-                        <Badge variant={payment.status === "cleared" ? "default" : "secondary"} className="mt-1 whitespace-nowrap">
-                          {payment.status.toUpperCase()}
-                        </Badge>
-                        <button
-                          onClick={() => fileInputRefs.current[payment.id]?.click()}
-                          className="ml-2 p-1.5 rounded-md border border-dashed border-border text-muted-foreground hover:border-primary hover:text-primary transition-colors"
-                          title="Attach file to this payment"
-                        >
-                          <Paperclip size={13} />
-                        </button>
+                      <div className="flex flex-col gap-2 sm:items-end">
+                        <div className="font-mono text-lg font-bold sm:text-base">
+                          ₹{payment.amount.toLocaleString()}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+                          <Badge
+                            variant={payment.status === "cleared" ? "default" : "secondary"}
+                            className="whitespace-nowrap"
+                          >
+                            {payment.status.toUpperCase()}
+                          </Badge>
+                          <button
+                            onClick={() => fileInputRefs.current[payment.id]?.click()}
+                            className="rounded-md border border-dashed border-border p-1.5 text-muted-foreground transition-colors hover:border-primary hover:text-primary"
+                            title="Attach file to this payment"
+                          >
+                            <Paperclip size={13} />
+                          </button>
+                        </div>
                         <input
                           type="file"
                           className="hidden"
-                          ref={(el) => { fileInputRefs.current[payment.id] = el; }}
+                          ref={(el) => {
+                            fileInputRefs.current[payment.id] = el;
+                          }}
                           onChange={(e) => {
                             const file = e.target.files?.[0];
                             if (file) handleFileUpload(payment.id, file);
@@ -268,24 +286,29 @@ export default function Payment() {
 
       {/* New Payment Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+        <DialogContent
+          className="max-h-[90vh] w-[calc(100vw-1.5rem)] max-w-4xl overflow-y-auto p-4 sm:p-6"
+          aria-describedby="new-payment-description"
+        >
           <DialogHeader>
             <DialogTitle>New Payment</DialogTitle>
-            <DialogDescription>
+            <DialogDescription id="new-payment-description">
               Create payment with mode-specific details and document tagging.
             </DialogDescription>
           </DialogHeader>
           
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-              <div className="space-y-6">
+              <div className="space-y-5 sm:space-y-6">
                 {/* Project Name */}
                 <FormField
                   control={form.control}
                   name="projectName"
                   render={({ field }) => (
-                    <FormItem className="flex flex-col gap-2 sm:flex-row sm:items-end gap-3 sm:gap-4">
-                      <FormLabel className="text-sm font-medium w-full sm:w-[130px] sm:shrink-0 sm:text-right">Project Name</FormLabel>
+                    <FormItem className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
+                      <FormLabel className="w-full text-sm font-medium sm:w-[130px] sm:shrink-0 sm:pt-3 sm:text-right">
+                        Project Name
+                      </FormLabel>
                       <div className="flex-1 min-w-0">
                         <Select onValueChange={field.onChange} defaultValue={field.value}>
                           <FormControl>
@@ -310,8 +333,10 @@ export default function Payment() {
                   control={form.control}
                   name="docDate"
                   render={({ field }) => (
-                    <FormItem className="flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-4">
-                      <FormLabel className="text-sm font-medium w-full sm:w-[130px] sm:shrink-0 sm:text-right">Date</FormLabel>
+                    <FormItem className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
+                      <FormLabel className="w-full text-sm font-medium sm:w-[130px] sm:shrink-0 sm:pt-3 sm:text-right">
+                        Date
+                      </FormLabel>
                       <div className="flex-1 min-w-0">
                         <Popover>
                           <PopoverTrigger asChild>
@@ -351,8 +376,10 @@ export default function Payment() {
                   control={form.control}
                   name="mode"
                   render={({ field }) => (
-                    <FormItem className="flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-4">
-                      <FormLabel className="text-sm font-medium w-full sm:w-[130px] sm:shrink-0 sm:text-right">Mode of Payment</FormLabel>
+                    <FormItem className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
+                      <FormLabel className="w-full text-sm font-medium sm:w-[130px] sm:shrink-0 sm:pt-3 sm:text-right">
+                        Mode of Payment
+                      </FormLabel>
                       <div className="flex-1 min-w-0">
                         <Select onValueChange={(val) => onModeChange(val as "Cash" | "Check" | "UPI" | "Card")} value={field.value}>
                           <FormControl>
@@ -377,8 +404,10 @@ export default function Payment() {
                   control={form.control}
                   name="amount"
                   render={({ field }) => (
-                    <FormItem className="flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-4">
-                      <FormLabel className="text-sm font-medium w-full sm:w-[130px] sm:shrink-0 sm:text-right">Amount (₹)</FormLabel>
+                    <FormItem className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
+                      <FormLabel className="w-full text-sm font-medium sm:w-[130px] sm:shrink-0 sm:pt-3 sm:text-right">
+                        Amount (₹)
+                      </FormLabel>
                       <div className="flex-1 min-w-0">
                         <FormControl>
                           <div className="relative">
@@ -409,34 +438,69 @@ export default function Payment() {
 
               {/* Conditional Details - abbreviated for dialog */}
               {showCheckDetails && (
-                <div className="border p-4 rounded-lg bg-muted/30">
-                  <h4 className="font-semibold mb-3">Check Details</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <Input placeholder="Check Number" onChange={(e) => setPaymentDetails(p => ({...p, checkNumber: e.target.value}))} />
-                    <Input placeholder="Bank Name" onChange={(e) => setPaymentDetails(p => ({...p, bankName: e.target.value}))} />
-                      <Popover>
-                        <PopoverTrigger asChild><Button variant="outline" className="h-10 w-full sm:w-auto">Check Date</Button></PopoverTrigger>
-                        <PopoverContent className="w-auto p-0" align="start"><CalendarComponent mode="single" onSelect={(d) => setPaymentDetails(p => ({...p, checkDate: d!}))} /></PopoverContent>
-                      </Popover>
+                <div className="rounded-lg border bg-muted/30 p-4">
+                  <h4 className="mb-3 font-semibold">Check Details</h4>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                    <Input
+                      placeholder="Check Number"
+                      onChange={(e) =>
+                        setPaymentDetails((p) => ({ ...p, checkNumber: e.target.value }))
+                      }
+                    />
+                    <Input
+                      placeholder="Bank Name"
+                      onChange={(e) => setPaymentDetails((p) => ({ ...p, bankName: e.target.value }))}
+                    />
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button variant="outline" className="h-10 w-full justify-between">
+                          Check Date
+                          <CalendarIcon className="h-4 w-4 opacity-50" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <CalendarComponent
+                          mode="single"
+                          onSelect={(d) => setPaymentDetails((p) => ({ ...p, checkDate: d! }))}
+                        />
+                      </PopoverContent>
+                    </Popover>
                   </div>
                 </div>
               )}
               {showUpiDetails && (
-                <div className="border p-4 rounded-lg bg-muted/30">
-                  <h4 className="font-semibold mb-3">UPI Details</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <Input placeholder="Transaction ID" onChange={(e) => setPaymentDetails(p => ({...p, transactionId: e.target.value}))} />
-                    <Input placeholder="UPI ID" onChange={(e) => setPaymentDetails(p => ({...p, upiId: e.target.value}))} />
+                <div className="rounded-lg border bg-muted/30 p-4">
+                  <h4 className="mb-3 font-semibold">UPI Details</h4>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <Input
+                      placeholder="Transaction ID"
+                      onChange={(e) =>
+                        setPaymentDetails((p) => ({ ...p, transactionId: e.target.value }))
+                      }
+                    />
+                    <Input
+                      placeholder="UPI ID"
+                      onChange={(e) => setPaymentDetails((p) => ({ ...p, upiId: e.target.value }))}
+                    />
                   </div>
                 </div>
               )}
               {showCardDetails && (
-                <div className="border p-4 rounded-lg bg-muted/30">
-                  <h4 className="font-semibold mb-3">Card Details</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <Input placeholder="**** **** **** 1234" onChange={(e) => setPaymentDetails(p => ({...p, cardNumber: e.target.value}))} />
-                    <Input placeholder="MM/YY" onChange={(e) => setPaymentDetails(p => ({...p, expiry: e.target.value}))} />
-                    <Input placeholder="Bank" onChange={(e) => setPaymentDetails(p => ({...p, cardBank: e.target.value}))} />
+                <div className="rounded-lg border bg-muted/30 p-4">
+                  <h4 className="mb-3 font-semibold">Card Details</h4>
+                  <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                    <Input
+                      placeholder="**** **** **** 1234"
+                      onChange={(e) => setPaymentDetails((p) => ({ ...p, cardNumber: e.target.value }))}
+                    />
+                    <Input
+                      placeholder="MM/YY"
+                      onChange={(e) => setPaymentDetails((p) => ({ ...p, expiry: e.target.value }))}
+                    />
+                    <Input
+                      placeholder="Bank"
+                      onChange={(e) => setPaymentDetails((p) => ({ ...p, cardBank: e.target.value }))}
+                    />
                   </div>
                 </div>
               )}
@@ -446,8 +510,10 @@ export default function Payment() {
                 control={form.control}
                 name="tagDOC"
                 render={({ field }) => (
-                  <FormItem className="flex flex-col sm:flex-row sm:items-start gap-2 sm:gap-4">
-                    <FormLabel className="text-sm font-medium whitespace-nowrap flex-shrink-0 w-[140px] sm:w-[120px]">Tag DOC</FormLabel>
+                  <FormItem className="flex flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
+                    <FormLabel className="w-full text-sm font-medium sm:w-[130px] sm:shrink-0 sm:pt-3 sm:text-right">
+                      Tag DOC
+                    </FormLabel>
                     <div className="flex-1 min-w-0">
                       <FormControl>
                         <Textarea placeholder="Document details..." {...field} rows={3} className="min-h-[80px] resize-vertical" />
@@ -459,7 +525,10 @@ export default function Payment() {
               />
 
               <DialogFooter className="pt-2 sm:pt-4">
-                <Button type="submit" className="w-full h-12 gap-2 text-lg font-medium shadow-lg hover:shadow-xl transition-all duration-200 bg-gradient-to-r from-primary/90 to-primary/100">
+                <Button
+                  type="submit"
+                  className="h-12 w-full gap-2 text-base font-medium shadow-lg transition-all duration-200 hover:shadow-xl sm:text-lg"
+                >
                   <Banknote className="h-5 w-5" />
                   Create Payment
                 </Button>
@@ -471,4 +540,3 @@ export default function Payment() {
     </>
   );
 }
-
