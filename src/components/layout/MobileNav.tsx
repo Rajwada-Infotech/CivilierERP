@@ -26,6 +26,8 @@ import {
   Palette,
   ChevronRight,
   Archive,
+  CreditCard,
+  BookOpen,
 } from "lucide-react";
 
 import { useModule } from "@/contexts/ModuleContext";
@@ -81,6 +83,8 @@ export const MobileNav: React.FC = () => {
       ? [{ icon: Hash, label: "HSN", path: "/masters/hsn" }]
       : []),
     { icon: Calendar, label: "Financial Year", path: "/masters/financial-year" },
+    { icon: BookOpen, label: "Cheque", path: "/masters/cheque" },
+    { icon: CreditCard, label: "Cards", path: "/masters/card" },
   ];
 
   const ADMIN_NAV_ITEMS: NavItem[] = [
@@ -187,6 +191,8 @@ export const MobileNav: React.FC = () => {
     "Item Groups": "text-indigo-400",
     HSN: "text-pink-500",
     "Financial Year": "text-amber-500",
+    Cheque: "text-cyan-500",
+    Cards: "text-rose-500",
   };
 
   const masterBgColors: Record<string, string> = {
@@ -199,6 +205,8 @@ export const MobileNav: React.FC = () => {
     "Item Groups": "bg-indigo-500/10",
     HSN: "bg-pink-500/10",
     "Financial Year": "bg-amber-500/10",
+    Cheque: "bg-cyan-500/10",
+    Cards: "bg-rose-500/10",
   };
 
   return (

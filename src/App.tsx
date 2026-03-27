@@ -68,6 +68,12 @@ const HsnMaster = lazy(() =>
 const FinancialYearMaster = lazy(() =>
   withDelay(() => import("./pages/masters/FinancialYearMaster")),
 );
+const ChequeMaster = lazy(() =>
+  withDelay(() => import("./pages/masters/ChequeMaster")),
+);
+const CardMaster = lazy(() =>
+  withDelay(() => import("./pages/masters/CardMaster")),
+);
 
 // Admin
 const AdminDashboard = lazy(() =>
@@ -166,6 +172,8 @@ function AppRoutes() {
       <Route path="/masters/item-groups" element={<ProtectedRoute><ItemGroupMaster /></ProtectedRoute>} />
       <Route path="/masters/hsn" element={<ProtectedRoute><HsnMaster /></ProtectedRoute>} />
       <Route path="/masters/financial-year" element={<ProtectedRoute><FinancialYearMaster /></ProtectedRoute>} />
+      <Route path="/masters/cheque" element={<ProtectedRoute><ChequeMaster /></ProtectedRoute>} />
+      <Route path="/masters/card" element={<ProtectedRoute><CardMaster /></ProtectedRoute>} />
 
       {/* ADMIN */}
       <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
