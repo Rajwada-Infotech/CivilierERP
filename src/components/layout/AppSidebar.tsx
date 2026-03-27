@@ -15,7 +15,7 @@ import {
   Shield,
   Landmark,
   ShieldCheck,
-  FolderArchive,
+  Archive,
   MessageSquare,
 } from "lucide-react";
 
@@ -65,7 +65,7 @@ const buildNavItems = (overdueCount: number): NavItem[] => [
   },
   {
     label: "Record Management",
-    icon: FolderArchive,
+    icon: Archive,
     children: [{ label: "Records", path: "/records" }],
   },
 ];
