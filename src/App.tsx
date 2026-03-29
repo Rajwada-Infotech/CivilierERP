@@ -75,6 +75,10 @@ const CardMaster = lazy(() =>
   withDelay(() => import("./pages/masters/CardMaster")),
 );
 
+const AccountGroupMaster = lazy(() =>
+  withDelay(() => import("./pages/masters/AccountGroupMaster")),
+);
+
 // Admin
 const AdminDashboard = lazy(() =>
   withDelay(() => import("./pages/admin/AdminDashboard")),
@@ -317,6 +321,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <CardMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/account-group"
+        element={
+          <ProtectedRoute>
+            <AccountGroupMaster />
           </ProtectedRoute>
         }
       />
