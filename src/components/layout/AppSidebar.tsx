@@ -17,6 +17,8 @@ import {
   ShieldCheck,
   Archive,
   MessageSquare,
+  Settings,
+  Puzzle,
 } from "lucide-react";
 
 interface SubItem {
@@ -41,6 +43,28 @@ interface NavItem {
 
 const buildNavItems = (overdueCount: number): NavItem[] => [
   { label: "Amendments", icon: BarChart3, path: "/" },
+  {
+    label: "Setup",
+    icon: Settings,
+    sections: [{
+      label: "Masters",
+      icon: Puzzle,
+      items: [
+        { label: "Account Group", path: "/masters/account-group" },
+        { label: "General Ledger", path: "/masters/expenses" },
+        { label: "Suppliers", path: "/masters/suppliers" },
+        { label: "Customers", path: "/masters/customers" },
+        { label: "Contractors", path: "/masters/contractors" },
+        { label: "Banks", path: "/masters/banks" },
+        { label: "Items", path: "/masters/items" },
+        { label: "Item Groups", path: "/masters/item-groups" },
+        { label: "HSN", path: "/masters/hsn" },
+        { label: "Financial Year", path: "/masters/financial-year" },
+        { label: "Cheque", path: "/masters/cheque" },
+        { label: "Cards", path: "/masters/card" },
+      ]
+    }]
+  },
   {
     label: "Query",
     icon: Scale,

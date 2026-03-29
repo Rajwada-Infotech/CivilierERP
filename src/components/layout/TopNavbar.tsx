@@ -71,6 +71,12 @@ const Dropdown = ({
 
 const masterItems = [
   {
+    icon: Layers,
+    label: "Account Group",
+    path: "/masters/account-group",
+    color: "text-indigo-500",
+  },
+  {
     icon: Receipt,
     label: "General Ledger",
     path: "/masters/expenses",
