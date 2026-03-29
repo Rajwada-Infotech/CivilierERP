@@ -8,6 +8,8 @@ export interface FieldDef {
   type: "text" | "number" | "select" | "textarea" | "toggle" | "multiselect";
   required?: boolean;
   options?: string[];
+  optionsProvider?: (data: RecordWithId[], currentId?: string) => {value: string; label: string}[];
+  asyncOptions?: () => Promise<{value: string; label: string}[]>;
   prefix?: string;
   uppercase?: boolean;
   fullWidth?: boolean;
@@ -20,12 +22,16 @@ export interface ColumnDef {
   hideOnMobile?: boolean;
 }
 
-type RecordWithId = Record<string, unknown> & { _id: string };
+export type RecordWithId = Record<string, unknown> & { _id: string };
 
 interface MasterPageProps {
   title: string;
   fields: FieldDef[];
   columns: ColumnDef[];
+  columnRenderers?: Record<string, (value: unknown, row: RecordWithId, data: RecordWithId[]) => React.ReactNode>;
+  defaultRenderers?: boolean;
+  contextData?: Record<string, unknown>;
+  loading?: boolean;
   initialData: Record<string, unknown>[];
   onDataChange?: (records: Record<string, unknown>[]) => void;
 }
@@ -49,6 +55,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   title,
   fields,
   columns,
+  columnRenderers,
   initialData,
   onDataChange,
 }) => {
@@ -212,11 +219,20 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                       className={`${inputBase} ${errors[field.name] ? "border-destructive" : "border-border"}`}
                     >
                       <option value="">Select...</option>
-                      {field.options?.map((o) => (
-                        <option key={o} value={o}>
-                          {o}
-                        </option>
-                      ))}
+                      {(() => {
+                        let opts: {value: string, label: string}[] = [];
+                        const editingRow = editingId ? data.find(r => r._id === editingId) : undefined;
+                        if (field.optionsProvider) {
+                          opts = field.optionsProvider(data, editingRow?._id);
+                        } else if (field.options) {
+                          opts = field.options.map(o => ({value: o, label: o}));
+                        }
+                        return opts.map((opt) => (
+                          <option key={opt.value} value={opt.value}>
+                            {opt.label}
+                          </option>
+                        ));
+                      })()}
                     </select>
                   ) : field.type === "textarea" ? (
                     <textarea
@@ -363,24 +379,27 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                         key={col.key}
                         className={`px-4 py-3 text-foreground text-sm${col.hideOnMobile ? " hidden sm:table-cell" : ""}`}
                       >
-                        {col.key === "status" ? (
-                          <span
-                            className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${
-                              row[col.key]
-                                ? "bg-primary/10 text-primary border-primary/20"
-                                : "bg-destructive/10 text-destructive border-destructive/20"
-                            }`}
-                          >
-                            <span
-                              className={`w-1.5 h-1.5 rounded-full mr-1.5 ${row[col.key] ? "bg-primary" : "bg-destructive"}`}
-                            />
-                            {row[col.key] ? "Active" : "Inactive"}
-                          </span>
-                        ) : (
-                          <span className="text-foreground">
-                            {String(row[col.key] ?? "")}
-                          </span>
-                        )}
+                        {(columnRenderers && columnRenderers[col.key]) 
+                          ? columnRenderers[col.key](row[col.key], row, data)
+                          : col.key === "status" ? (
+                              <span
+                                className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${
+                                  row[col.key]
+                                    ? "bg-primary/10 text-primary border-primary/20"
+                                    : "bg-destructive/10 text-destructive border-destructive/20"
+                                }`}
+                              >
+                                <span
+                                  className={`w-1.5 h-1.5 rounded-full mr-1.5 ${row[col.key] ? "bg-primary" : "bg-destructive"}`}
+                                />
+                                {row[col.key] ? "Active" : "Inactive"}
+                              </span>
+                            ) : (
+                              <span className="text-foreground">
+                                {String(row[col.key] ?? "")}
+                              </span>
+                            )
+                        }
                       </td>
                     ))}
                     <td className="px-4 py-3">
