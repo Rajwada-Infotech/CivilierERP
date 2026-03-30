@@ -29,6 +29,7 @@ import {
   CreditCard,
   BookOpen,
   Tag,
+  FileType2,
 } from "lucide-react";
 
 import { useModule } from "@/contexts/ModuleContext";
@@ -66,13 +67,15 @@ export const MobileNav: React.FC = () => {
   const { getOverdueTasks } = useTask();
 
   const overdueCount = getOverdueTasks().length;
-  const isAdminPage = location.pathname.startsWith("/admin") || location.pathname.startsWith("/users");
+  const isAdminPage =
+    location.pathname.startsWith("/admin") ||
+    location.pathname.startsWith("/users");
   const isSuperAdmin = currentUser?.role === "super_admin";
   const isAdmin = currentUser?.role === "admin" || isSuperAdmin;
   const isModuleActive = activeModule !== null && activeModule !== undefined;
 
   // Master Items with permission check for HSN
-const masterItems: NavItemChild[] = [
+  const masterItems: NavItemChild[] = [
     { icon: Layers, label: "Account Group", path: "/masters/account-group" },
     { icon: Receipt, label: "General Ledger", path: "/masters/expenses" },
     { icon: Truck, label: "Suppliers", path: "/masters/suppliers" },
@@ -82,10 +85,15 @@ const masterItems: NavItemChild[] = [
     { icon: Package, label: "Items", path: "/masters/items" },
     { icon: Layers, label: "Item Groups", path: "/masters/item-groups" },
     { icon: Hash, label: "HSN", path: "/masters/hsn" },
-    { icon: Calendar, label: "Financial Year", path: "/masters/financial-year" },
+    {
+      icon: Calendar,
+      label: "Financial Year",
+      path: "/masters/financial-year",
+    },
     { icon: BookOpen, label: "Cheque", path: "/masters/cheque" },
     { icon: CreditCard, label: "Cards", path: "/masters/card" },
     { icon: Tag, label: "Named Entry Type", path: "/masters/named-entry-type" },
+    { icon: FileType2, label: "Type of Doc", path: "/masters/type-of-doc" },
   ];
 
   const ADMIN_NAV_ITEMS: NavItem[] = [
@@ -101,22 +109,38 @@ const masterItems: NavItemChild[] = [
       children: [
         { label: "Menu", path: "/admin/rights/menu", icon: FileText },
         { label: "Widgets", path: "/admin/rights/widgets", icon: FileText },
-        { label: "Financial Year", path: "/admin/rights/fin-year", icon: FileText },
+        {
+          label: "Financial Year",
+          path: "/admin/rights/fin-year",
+          icon: FileText,
+        },
       ],
     },
     {
       label: "Approval",
       icon: CheckCircle2,
       children: [
-        { label: "Approval Setup", path: "/admin/approval/setup", icon: FileText },
-        { label: "Post Approval Rights", path: "/admin/approval/post-rights", icon: FileText },
+        {
+          label: "Approval Setup",
+          path: "/admin/approval/setup",
+          icon: FileText,
+        },
+        {
+          label: "Post Approval Rights",
+          path: "/admin/approval/post-rights",
+          icon: FileText,
+        },
       ],
     },
     {
       label: "Finance",
       icon: Landmark,
       children: [
-        { label: "Expense Booking", path: "/admin/expense-booking", icon: FileText },
+        {
+          label: "Expense Booking",
+          path: "/admin/expense-booking",
+          icon: FileText,
+        },
       ],
     },
   ];
@@ -135,25 +159,36 @@ const masterItems: NavItemChild[] = [
       icon: Scale,
       children: [
         { label: "Trial Balance", path: "/transactions", icon: FileText },
-        { label: "Tasks", path: "/tasks", icon: CheckCircle2, count: overdueCount },
+        {
+          label: "Tasks",
+          path: "/tasks",
+          icon: CheckCircle2,
+          count: overdueCount,
+        },
       ],
     },
     {
       label: "Finance",
       icon: Landmark,
       children: [
-        { label: "Expense Booking", path: "/transactions/expense-booking", icon: FileText },
+        {
+          label: "Expense Booking",
+          path: "/transactions/expense-booking",
+          icon: FileText,
+        },
         { label: "Payment", path: "/payments", icon: FileText },
-        { label: "Received Payment", path: "/received-payments", icon: FileText },
+        {
+          label: "Received Payment",
+          path: "/received-payments",
+          icon: FileText,
+        },
         { label: "BRS", path: "/brs", icon: FileText },
       ],
     },
     {
       label: "Record Management",
       icon: Archive,
-      children: [
-        { label: "Records", path: "/records", icon: Archive },
-      ],
+      children: [{ label: "Records", path: "/records", icon: Archive }],
     },
     {
       label: "More",
@@ -196,6 +231,7 @@ const masterItems: NavItemChild[] = [
     Cheque: "text-cyan-500",
     Cards: "text-rose-500",
     "Named Entry Type": "text-purple-400",
+    "Type of Doc": "text-sky-500",
   };
 
   const masterBgColors: Record<string, string> = {
@@ -212,6 +248,7 @@ const masterItems: NavItemChild[] = [
     Cheque: "bg-cyan-500/10",
     Cards: "bg-rose-500/10",
     "Named Entry Type": "bg-purple-500/10",
+    "Type of Doc": "bg-sky-500/10",
   };
 
   return (
@@ -237,7 +274,9 @@ const masterItems: NavItemChild[] = [
           <div className="absolute bottom-0 left-0 right-0 rounded-t-2xl bg-card border-t border-border max-h-[90vh] flex flex-col">
             {/* Header */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
-              <span className="font-heading font-semibold text-sm text-foreground">Menu</span>
+              <span className="font-heading font-semibold text-sm text-foreground">
+                Menu
+              </span>
               <button
                 onClick={() => setOpen(false)}
                 aria-label="Close menu"
@@ -275,7 +314,10 @@ const masterItems: NavItemChild[] = [
                   </div>
 
                   <div className="flex gap-2 flex-shrink-0">
-                    <button aria-label="View user profile" className="p-2 border border-border rounded-xl flex items-center text-foreground hover:bg-muted transition-colors">
+                    <button
+                      aria-label="View user profile"
+                      className="p-2 border border-border rounded-xl flex items-center text-foreground hover:bg-muted transition-colors"
+                    >
                       <User size={14} />
                     </button>
                     <button
@@ -338,14 +380,16 @@ const masterItems: NavItemChild[] = [
                     return (
                       <div key={item.label}>
                         <button
-                          onClick={() => !item.disabled && toggleGroup(item.label)}
+                          onClick={() =>
+                            !item.disabled && toggleGroup(item.label)
+                          }
                           disabled={item.disabled}
                           className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-heading transition-colors ${
                             item.disabled
                               ? "opacity-40 cursor-not-allowed text-muted-foreground"
                               : active
-                              ? "bg-primary/10 text-primary"
-                              : "text-foreground hover:bg-muted"
+                                ? "bg-primary/10 text-primary"
+                                : "text-foreground hover:bg-muted"
                           }`}
                         >
                           <item.icon size={17} className="flex-shrink-0" />
@@ -367,12 +411,17 @@ const masterItems: NavItemChild[] = [
                             <p className="text-[10px] uppercase tracking-widest font-heading text-muted-foreground px-1 mb-2.5">
                               Masters
                             </p>
-                            <div className="grid grid-cols-3 gap-2">
+                            <div className="grid grid-cols-4 gap-2">
                               {item.children.map((child) => {
-                                const childActive = location.pathname === child.path;
+                                const childActive =
+                                  location.pathname === child.path;
                                 const ChildIcon = child.icon!;
-                                const colorClass = masterIconColors[child.label] ?? "text-primary";
-                                const bgClass = masterBgColors[child.label] ?? "bg-primary/10";
+                                const colorClass =
+                                  masterIconColors[child.label] ??
+                                  "text-primary";
+                                const bgClass =
+                                  masterBgColors[child.label] ??
+                                  "bg-primary/10";
 
                                 return (
                                   <button
@@ -384,12 +433,19 @@ const masterItems: NavItemChild[] = [
                                         : "border-border bg-card/50 hover:border-primary/40 hover:bg-muted/60 active:scale-95"
                                     }`}
                                   >
-                                    <div className={`w-11 h-11 rounded-2xl flex items-center justify-center ${bgClass}`}>
-                                      <ChildIcon size={22} className={colorClass} />
+                                    <div
+                                      className={`w-11 h-11 rounded-2xl flex items-center justify-center ${bgClass}`}
+                                    >
+                                      <ChildIcon
+                                        size={22}
+                                        className={colorClass}
+                                      />
                                     </div>
                                     <span
                                       className={`text-[11px] font-heading leading-tight text-center ${
-                                        childActive ? "text-primary font-semibold" : "text-muted-foreground"
+                                        childActive
+                                          ? "text-primary font-semibold"
+                                          : "text-muted-foreground"
                                       }`}
                                     >
                                       {child.label}
@@ -409,9 +465,13 @@ const masterItems: NavItemChild[] = [
                     return (
                       <div key={item.label}>
                         <button
-                          onClick={() => !item.disabled && toggleGroup(item.label)}
+                          onClick={() =>
+                            !item.disabled && toggleGroup(item.label)
+                          }
                           className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-heading transition-colors ${
-                            active ? "bg-primary/10 text-primary" : "text-foreground hover:bg-muted"
+                            active
+                              ? "bg-primary/10 text-primary"
+                              : "text-foreground hover:bg-muted"
                           }`}
                         >
                           <item.icon size={17} className="flex-shrink-0" />
@@ -425,7 +485,8 @@ const masterItems: NavItemChild[] = [
                         {openState && (
                           <div className="ml-4 pl-3 border-l border-border mt-0.5 mb-1 space-y-0.5">
                             {item.children.map((child) => {
-                              const childActive = location.pathname === child.path;
+                              const childActive =
+                                location.pathname === child.path;
                               const ChildIcon = child.icon;
                               const childCount = child.count;
 
@@ -439,8 +500,15 @@ const masterItems: NavItemChild[] = [
                                       : "text-muted-foreground hover:bg-muted hover:text-foreground"
                                   }`}
                                 >
-                                  {ChildIcon && <ChildIcon size={14} className="flex-shrink-0" />}
-                                  <span className="flex-1 text-left">{child.label}</span>
+                                  {ChildIcon && (
+                                    <ChildIcon
+                                      size={14}
+                                      className="flex-shrink-0"
+                                    />
+                                  )}
+                                  <span className="flex-1 text-left">
+                                    {child.label}
+                                  </span>
                                   {!!childCount && (
                                     <span className="text-[11px] bg-destructive text-destructive-foreground font-semibold px-1.5 py-0.5 rounded-full leading-none">
                                       {childCount}
@@ -462,7 +530,9 @@ const masterItems: NavItemChild[] = [
                       key={item.path}
                       onClick={() => go(item.path!)}
                       className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-heading transition-colors ${
-                        isActive(item.path) ? "bg-primary/10 text-primary font-semibold" : "text-foreground hover:bg-muted"
+                        isActive(item.path)
+                          ? "bg-primary/10 text-primary font-semibold"
+                          : "text-foreground hover:bg-muted"
                       }`}
                     >
                       <item.icon size={17} className="flex-shrink-0" />
@@ -481,7 +551,12 @@ const masterItems: NavItemChild[] = [
                   </span>
                 </div>
                 <div className="grid grid-cols-4 gap-2 sm:grid-cols-5">
-                  {(Object.entries(THEME_DOTS) as [Theme, { bg: string; label: string }][]).map(([t, { bg, label }]) => (
+                  {(
+                    Object.entries(THEME_DOTS) as [
+                      Theme,
+                      { bg: string; label: string },
+                    ][]
+                  ).map(([t, { bg, label }]) => (
                     <button
                       key={t}
                       onClick={() => setTheme(t)}
@@ -501,7 +576,9 @@ const masterItems: NavItemChild[] = [
                       </span>
                       {theme === t && (
                         <span className="absolute top-1.5 right-1.5 w-3.5 h-3.5 rounded-full bg-primary flex items-center justify-center">
-                          <span className="text-[8px] text-primary-foreground leading-none font-bold">✓</span>
+                          <span className="text-[8px] text-primary-foreground leading-none font-bold">
+                            ✓
+                          </span>
                         </span>
                       )}
                     </button>
