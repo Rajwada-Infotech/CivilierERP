@@ -82,6 +82,9 @@ const AccountGroupMaster = lazy(() =>
 const NamedEntryTypeMaster = lazy(() =>
   withDelay(() => import("./pages/masters/NamedEntryTypeMaster")),
 );
+const TypeOfDocMaster = lazy(() =>
+  withDelay(() => import("./pages/masters/TypeOfDocMaster")),
+);
 
 // Admin
 const AdminDashboard = lazy(() =>
@@ -341,6 +344,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <NamedEntryTypeMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/type-of-doc"
+        element={
+          <ProtectedRoute>
+            <TypeOfDocMaster />
           </ProtectedRoute>
         }
       />

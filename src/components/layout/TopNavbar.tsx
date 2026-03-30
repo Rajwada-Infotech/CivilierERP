@@ -31,6 +31,7 @@ import {
   CreditCard,
   BookOpen,
   Tag,
+  FileType2,
 } from "lucide-react";
 
 // ─── Dropdown Component ─────────────────────────────────────────────────────
@@ -149,6 +150,12 @@ const masterItems = [
     path: "/masters/named-entry-type",
     color: "text-purple-400",
   },
+  {
+    icon: FileType2,
+    label: "Type of Doc",
+    path: "/masters/type-of-doc",
+    color: "text-sky-500",
+  },
 ];
 
 export const TopNavbar = () => {
@@ -228,7 +235,9 @@ export const TopNavbar = () => {
         <button
           onClick={() => setNavCollapsed(!navCollapsed)}
           title={navCollapsed ? "Expand navigation" : "Collapse navigation"}
-          aria-label={navCollapsed ? "Expand navigation" : "Collapse navigation"}
+          aria-label={
+            navCollapsed ? "Expand navigation" : "Collapse navigation"
+          }
           className="p-1.5 rounded-md bg-muted hover:bg-muted/80 text-foreground border border-border transition-all duration-200 shrink-0"
         >
           {navCollapsed ? (
@@ -241,8 +250,8 @@ export const TopNavbar = () => {
         {/* Collapsible Navigation Items */}
         <div
           className={`flex items-center gap-1 transition-all duration-300 ease-in-out max-w-[620px] ${
-            navCollapsed 
-              ? "w-0 opacity-0 invisible pointer-events-none" 
+            navCollapsed
+              ? "w-0 opacity-0 invisible pointer-events-none"
               : "w-auto opacity-100 visible pointer-events-auto"
           }`}
         >
@@ -267,7 +276,7 @@ export const TopNavbar = () => {
               <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-3">
                 Masters
               </p>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <div className="grid grid-cols-4 gap-3">
                 {masterItems.map(({ icon: Icon, label, path, color }) => (
                   <button
                     key={label}
