@@ -28,6 +28,7 @@ import {
   Archive,
   CreditCard,
   BookOpen,
+  Tag,
 } from "lucide-react";
 
 import { useModule } from "@/contexts/ModuleContext";
@@ -84,6 +85,7 @@ const masterItems: NavItemChild[] = [
     { icon: Calendar, label: "Financial Year", path: "/masters/financial-year" },
     { icon: BookOpen, label: "Cheque", path: "/masters/cheque" },
     { icon: CreditCard, label: "Cards", path: "/masters/card" },
+    { icon: Tag, label: "Named Entry Type", path: "/masters/named-entry-type" },
   ];
 
   const ADMIN_NAV_ITEMS: NavItem[] = [
@@ -193,6 +195,7 @@ const masterItems: NavItemChild[] = [
     "Financial Year": "text-amber-500",
     Cheque: "text-cyan-500",
     Cards: "text-rose-500",
+    "Named Entry Type": "text-purple-400",
   };
 
   const masterBgColors: Record<string, string> = {
@@ -208,6 +211,7 @@ const masterItems: NavItemChild[] = [
     "Financial Year": "bg-amber-500/10",
     Cheque: "bg-cyan-500/10",
     Cards: "bg-rose-500/10",
+    "Named Entry Type": "bg-purple-500/10",
   };
 
   return (

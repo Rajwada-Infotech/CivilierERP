@@ -5,15 +5,22 @@ import { toast } from "sonner";
 export interface FieldDef {
   name: string;
   label: string;
-  type: "text" | "number" | "select" | "textarea" | "toggle" | "multiselect";
+  type: "text" | "number" | "select" | "textarea" | "toggle" | "multiselect" | "custom";
   required?: boolean;
   options?: string[];
-  optionsProvider?: (data: RecordWithId[], currentId?: string) => {value: string; label: string}[];
-  asyncOptions?: () => Promise<{value: string; label: string}[]>;
+  optionsProvider?: (data: RecordWithId[], currentId?: string) => { value: string; label: string }[];
+  asyncOptions?: () => Promise<{ value: string; label: string }[]>;
   prefix?: string;
   uppercase?: boolean;
   fullWidth?: boolean;
   defaultValue?: string | boolean | string[];
+  /** Only used when type === "custom" */
+  render?: (props: {
+    value: unknown;
+    onChange: (v: unknown) => void;
+    error: boolean;
+    field: FieldDef;
+  }) => React.ReactNode;
 }
 
 export interface ColumnDef {
@@ -34,14 +41,31 @@ interface MasterPageProps {
   loading?: boolean;
   initialData: Record<string, unknown>[];
   onDataChange?: (records: Record<string, unknown>[]) => void;
+  /**
+   * Called on every form field change. Use updateForm(patch) to push derived
+   * field values back (e.g. auto-computed documentNumber).
+   */
+  onFormChange?: (
+    form: Record<string, unknown>,
+    updateForm: (patch: Record<string, unknown>) => void,
+    allRecords: Record<string, unknown>[],
+  ) => void;
+  /**
+   * Called just before saving. Return the final record to persist, or null to
+   * abort. Use this to flatten composite fields into individual record fields.
+   */
+  onCustomSave?: (
+    formData: Record<string, unknown>,
+    isEdit: boolean,
+    allRecords: Record<string, unknown>[],
+  ) => Record<string, unknown> | null;
 }
 
 function getDefaults(f: FieldDef[]): Record<string, unknown> {
   const d: Record<string, unknown> = {};
   f.forEach((field) => {
     if (field.type === "toggle") d[field.name] = field.defaultValue ?? true;
-    else if (field.type === "multiselect")
-      d[field.name] = field.defaultValue ?? [];
+    else if (field.type === "multiselect") d[field.name] = field.defaultValue ?? [];
     else d[field.name] = field.defaultValue ?? "";
   });
   return d;
@@ -58,22 +82,42 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   columnRenderers,
   initialData,
   onDataChange,
+  onFormChange,
+  onCustomSave,
 }) => {
-  const [data, setData] = useState<RecordWithId[]>(() =>
-    seedWithIds(initialData),
-  );
-  const [form, setForm] = useState<Record<string, unknown>>(() =>
-    getDefaults(fields),
-  );
+  const [data, setData] = useState<RecordWithId[]>(() => seedWithIds(initialData));
+  const [form, setForm] = useState<Record<string, unknown>>(() => getDefaults(fields));
   const [editingId, setEditingId] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [search, setSearch] = useState("");
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
+  /** Shared patch helper so both updateField and updateCustomField trigger onFormChange */
+  const applyPatch = (next: Record<string, unknown>, currentData: RecordWithId[]) => {
+    if (onFormChange) {
+      onFormChange(next, (patch) => {
+        setForm((current) => ({ ...current, ...patch }));
+      }, currentData);
+    }
+  };
+
   const updateField = (name: string, value: unknown, field: FieldDef) => {
     let v = value;
     if (field.uppercase && typeof v === "string") v = v.toUpperCase();
-    setForm((prev) => ({ ...prev, [name]: v }));
+    setForm((prev) => {
+      const next = { ...prev, [name]: v };
+      applyPatch(next, data);
+      return next;
+    });
+    if (errors[name]) setErrors((prev) => ({ ...prev, [name]: false }));
+  };
+
+  const updateCustomField = (name: string, value: unknown) => {
+    setForm((prev) => {
+      const next = { ...prev, [name]: value };
+      applyPatch(next, data);
+      return next;
+    });
     if (errors[name]) setErrors((prev) => ({ ...prev, [name]: false }));
   };
 
@@ -83,8 +127,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
       if (
         f.required &&
         (!form[f.name] ||
-          (typeof form[f.name] === "string" &&
-            !(form[f.name] as string).trim()))
+          (typeof form[f.name] === "string" && !(form[f.name] as string).trim()))
       )
         errs[f.name] = true;
     });
@@ -94,10 +137,18 @@ export const MasterPage: React.FC<MasterPageProps> = ({
 
   const handleSave = () => {
     if (!validate()) return;
+
+    const finalData: Record<string, unknown> = onCustomSave
+      ? (onCustomSave(form, editingId !== null, data) ?? {})
+      : { ...form };
+
+    // onCustomSave returning null means abort
+    if (onCustomSave && Object.keys(finalData).length === 0) return;
+
     if (editingId !== null) {
       setData((prev) => {
         const next = prev.map((row) =>
-          row._id === editingId ? { ...form, _id: editingId } : row,
+          row._id === editingId ? { ...finalData, _id: editingId } : row,
         );
         onDataChange?.(next.map(({ _id, ...rest }) => rest));
         return next;
@@ -105,7 +156,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
       setEditingId(null);
       toast.success("Record updated successfully ✓");
     } else {
-      const newRecord: RecordWithId = { ...form, _id: `record-${Date.now()}` };
+      const newRecord: RecordWithId = { ...finalData, _id: `record-${Date.now()}` };
       setData((prev) => {
         const next = [...prev, newRecord];
         onDataChange?.(next.map(({ _id, ...rest }) => rest));
@@ -158,7 +209,6 @@ export const MasterPage: React.FC<MasterPageProps> = ({
     <div className="space-y-5">
       {/* ── FORM CARD ── */}
       <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden">
-        {/* Card header — matches TopNavbar style */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-card/60">
           <div>
             <h2 className="font-heading font-semibold text-foreground text-sm">
@@ -177,16 +227,12 @@ export const MasterPage: React.FC<MasterPageProps> = ({
           )}
         </div>
 
-        {/* Fields */}
         <div className="p-5">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {fields.map((field) => {
               const isFullWidth = field.fullWidth || field.type === "textarea";
               return (
-                <div
-                  key={field.name}
-                  className={isFullWidth ? "md:col-span-2" : ""}
-                >
+                <div key={field.name} className={isFullWidth ? "md:col-span-2" : ""}>
                   <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                     {field.label}
                     {field.required && (
@@ -194,7 +240,15 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                     )}
                   </label>
 
-                  {field.type === "text" || field.type === "number" ? (
+                  {/* ── Custom renderer ── */}
+                  {field.type === "custom" && field.render ? (
+                    field.render({
+                      value: form[field.name],
+                      onChange: (v) => updateCustomField(field.name, v),
+                      error: !!errors[field.name],
+                      field,
+                    })
+                  ) : field.type === "text" || field.type === "number" ? (
                     <div className="relative">
                       {field.prefix && (
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-muted-foreground">
@@ -204,28 +258,24 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                       <input
                         type={field.type === "number" ? "number" : "text"}
                         value={(form[field.name] as string) || ""}
-                        onChange={(e) =>
-                          updateField(field.name, e.target.value, field)
-                        }
+                        onChange={(e) => updateField(field.name, e.target.value, field)}
                         className={`${inputBase} ${field.prefix ? "pl-7" : ""} ${errors[field.name] ? "border-destructive" : "border-border"}`}
                       />
                     </div>
                   ) : field.type === "select" ? (
                     <select
                       value={(form[field.name] as string) || ""}
-                      onChange={(e) =>
-                        updateField(field.name, e.target.value, field)
-                      }
+                      onChange={(e) => updateField(field.name, e.target.value, field)}
                       className={`${inputBase} ${errors[field.name] ? "border-destructive" : "border-border"}`}
                     >
                       <option value="">Select...</option>
                       {(() => {
-                        let opts: {value: string, label: string}[] = [];
-                        const editingRow = editingId ? data.find(r => r._id === editingId) : undefined;
+                        let opts: { value: string; label: string }[] = [];
+                        const editingRow = editingId ? data.find((r) => r._id === editingId) : undefined;
                         if (field.optionsProvider) {
                           opts = field.optionsProvider(data, editingRow?._id);
                         } else if (field.options) {
-                          opts = field.options.map(o => ({value: o, label: o}));
+                          opts = field.options.map((o) => ({ value: o, label: o }));
                         }
                         return opts.map((opt) => (
                           <option key={opt.value} value={opt.value}>
@@ -237,18 +287,14 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                   ) : field.type === "textarea" ? (
                     <textarea
                       value={(form[field.name] as string) || ""}
-                      onChange={(e) =>
-                        updateField(field.name, e.target.value, field)
-                      }
+                      onChange={(e) => updateField(field.name, e.target.value, field)}
                       rows={3}
                       className={`${inputBase} ${errors[field.name] ? "border-destructive" : "border-border"}`}
                     />
                   ) : field.type === "toggle" ? (
                     <button
                       type="button"
-                      onClick={() =>
-                        updateField(field.name, !form[field.name], field)
-                      }
+                      onClick={() => updateField(field.name, !form[field.name], field)}
                       className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${form[field.name] ? "bg-primary" : "bg-muted border border-border"}`}
                     >
                       <span
@@ -258,16 +304,13 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                   ) : field.type === "multiselect" ? (
                     <div className="flex flex-wrap gap-2">
                       {field.options?.map((o) => {
-                        const selected = (
-                          (form[field.name] as string[]) || []
-                        ).includes(o);
+                        const selected = ((form[field.name] as string[]) || []).includes(o);
                         return (
                           <button
                             key={o}
                             type="button"
                             onClick={() => {
-                              const current =
-                                (form[field.name] as string[]) || [];
+                              const current = (form[field.name] as string[]) || [];
                               const next = selected
                                 ? current.filter((x) => x !== o)
                                 : [...current, o];
@@ -314,7 +357,6 @@ export const MasterPage: React.FC<MasterPageProps> = ({
 
       {/* ── TABLE CARD ── */}
       <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden">
-        {/* Table header */}
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-card/60">
           <div>
             <h3 className="font-heading font-semibold text-foreground text-sm">
@@ -363,9 +405,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                     colSpan={columns.length + 1}
                     className="px-4 py-10 text-center text-muted-foreground text-sm"
                   >
-                    {search
-                      ? "No records match your search."
-                      : "No records yet. Add one above."}
+                    {search ? "No records match your search." : "No records yet. Add one above."}
                   </td>
                 </tr>
               ) : (
@@ -379,7 +419,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                         key={col.key}
                         className={`px-4 py-3 text-foreground text-sm${col.hideOnMobile ? " hidden sm:table-cell" : ""}`}
                       >
-                        {(columnRenderers && columnRenderers[col.key]) 
+                        {columnRenderers && columnRenderers[col.key]
                           ? columnRenderers[col.key](row[col.key], row, data)
                           : col.key === "status" ? (
                               <span
@@ -395,20 +435,15 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                                 {row[col.key] ? "Active" : "Inactive"}
                               </span>
                             ) : (
-                              <span className="text-foreground">
-                                {String(row[col.key] ?? "")}
-                              </span>
-                            )
-                        }
+                              <span className="text-foreground">{String(row[col.key] ?? "")}</span>
+                            )}
                       </td>
                     ))}
                     <td className="px-4 py-3">
                       <div className="flex items-center justify-end gap-1">
                         {deleteConfirmId === row._id ? (
                           <>
-                            <span className="text-[11px] text-muted-foreground mr-1">
-                              Confirm?
-                            </span>
+                            <span className="text-[11px] text-muted-foreground mr-1">Confirm?</span>
                             <button
                               onClick={() => handleDelete(row._id)}
                               className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"
