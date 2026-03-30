@@ -30,6 +30,7 @@ import {
   Hash,
   CreditCard,
   BookOpen,
+  Tag,
 } from "lucide-react";
 
 // ─── Dropdown Component ─────────────────────────────────────────────────────
@@ -70,6 +71,12 @@ const Dropdown = ({
 };
 
 const masterItems = [
+  {
+    icon: Layers,
+    label: "Account Group",
+    path: "/masters/account-group",
+    color: "text-indigo-500",
+  },
   {
     icon: Receipt,
     label: "General Ledger",
@@ -135,6 +142,12 @@ const masterItems = [
     label: "Cards",
     path: "/masters/card",
     color: "text-rose-500",
+  },
+  {
+    icon: Tag,
+    label: "Named Entry Type",
+    path: "/masters/named-entry-type",
+    color: "text-purple-400",
   },
 ];
 

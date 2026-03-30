@@ -41,6 +41,7 @@ interface NavItem {
 
 const buildNavItems = (overdueCount: number): NavItem[] => [
   { label: "Amendments", icon: BarChart3, path: "/" },
+
   {
     label: "Query",
     icon: Scale,

@@ -28,6 +28,7 @@ import {
   Archive,
   CreditCard,
   BookOpen,
+  Tag,
 } from "lucide-react";
 
 import { useModule } from "@/contexts/ModuleContext";
@@ -71,7 +72,8 @@ export const MobileNav: React.FC = () => {
   const isModuleActive = activeModule !== null && activeModule !== undefined;
 
   // Master Items with permission check for HSN
-  const masterItems: NavItemChild[] = [
+const masterItems: NavItemChild[] = [
+    { icon: Layers, label: "Account Group", path: "/masters/account-group" },
     { icon: Receipt, label: "General Ledger", path: "/masters/expenses" },
     { icon: Truck, label: "Suppliers", path: "/masters/suppliers" },
     { icon: Users, label: "Customers", path: "/masters/customers" },
@@ -79,12 +81,11 @@ export const MobileNav: React.FC = () => {
     { icon: Landmark, label: "Banks", path: "/masters/banks" },
     { icon: Package, label: "Items", path: "/masters/items" },
     { icon: Layers, label: "Item Groups", path: "/masters/item-groups" },
-    ...(canAccessPage("master_hsn")
-      ? [{ icon: Hash, label: "HSN", path: "/masters/hsn" }]
-      : []),
+    { icon: Hash, label: "HSN", path: "/masters/hsn" },
     { icon: Calendar, label: "Financial Year", path: "/masters/financial-year" },
     { icon: BookOpen, label: "Cheque", path: "/masters/cheque" },
     { icon: CreditCard, label: "Cards", path: "/masters/card" },
+    { icon: Tag, label: "Named Entry Type", path: "/masters/named-entry-type" },
   ];
 
   const ADMIN_NAV_ITEMS: NavItem[] = [
@@ -182,6 +183,7 @@ export const MobileNav: React.FC = () => {
   };
 
   const masterIconColors: Record<string, string> = {
+    "Account Group": "text-indigo-500",
     "General Ledger": "text-orange-400",
     Suppliers: "text-blue-400",
     Customers: "text-violet-400",
@@ -193,9 +195,11 @@ export const MobileNav: React.FC = () => {
     "Financial Year": "text-amber-500",
     Cheque: "text-cyan-500",
     Cards: "text-rose-500",
+    "Named Entry Type": "text-purple-400",
   };
 
   const masterBgColors: Record<string, string> = {
+    "Account Group": "bg-indigo-500/10",
     "General Ledger": "bg-orange-500/10",
     Suppliers: "bg-blue-500/10",
     Customers: "bg-violet-500/10",
@@ -207,6 +211,7 @@ export const MobileNav: React.FC = () => {
     "Financial Year": "bg-amber-500/10",
     Cheque: "bg-cyan-500/10",
     Cards: "bg-rose-500/10",
+    "Named Entry Type": "bg-purple-500/10",
   };
 
   return (

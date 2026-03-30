@@ -342,6 +342,7 @@ export default function Payment() {
                       <input
                         type="file"
                         className="hidden"
+                        placeholder="Upload payment document"
                         ref={(el) => (fileInputRefs.current[payment.id] = el)}
                         onChange={(e) => {
                           const file = e.target.files?.[0];
