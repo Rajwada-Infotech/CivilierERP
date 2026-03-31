@@ -21,7 +21,6 @@ import {
   Receipt,
   HardHat,
   CreditCard,
-  Settings,
   Building2,
   FolderKanban,
 } from "lucide-react";
@@ -92,8 +91,8 @@ const buildNavItems = (overdueCount: number): NavItem[] => [
 const ADMIN_NAV_ITEMS: NavItem[] = [
   { label: "Transaction", icon: BarChart3, path: "/admin" },
   {
-    label: "Setup",
-    icon: Settings,
+    label: "Enterprise",
+    icon: Building2,
     children: [
       { label: "Business Unit", path: "/admin/masters/business-unit" },
       { label: "Project", path: "/admin/masters/project" },
@@ -287,16 +286,30 @@ export const AppSidebar = () => {
 
   const overdueCount = getOverdueTasks().length;
 
-  const isAdminPage = location.pathname.startsWith("/admin") || location.pathname.startsWith("/users");
+  const isAdminPage =
+    location.pathname.startsWith("/admin") ||
+    location.pathname.startsWith("/users");
 
   const getModuleNavItems = (): NavItem[] => {
     switch (activeModule) {
       case "material":
         return [
-          { label: "Amendments", icon: BarChart3, path: "/material/amendments" },
-          { label: "Expense Booking", icon: Receipt, path: "/material/expense-booking" },
+          {
+            label: "Amendments",
+            icon: BarChart3,
+            path: "/material/amendments",
+          },
+          {
+            label: "Expense Booking",
+            icon: Receipt,
+            path: "/material/expense-booking",
+          },
           { label: "Work Order", icon: HardHat, path: "/material/work-order" },
-          { label: "Purchase Order", icon: Receipt, path: "/material/purchase-order" },
+          {
+            label: "Purchase Order",
+            icon: Receipt,
+            path: "/material/purchase-order",
+          },
           { label: "Card Master", icon: CreditCard, path: "/masters/card" },
         ];
       case "finance":
@@ -330,9 +343,7 @@ export const AppSidebar = () => {
           },
         ];
       default:
-        return [
-          { label: "Amendments", icon: BarChart3, path: "/" },
-        ];
+        return [{ label: "Amendments", icon: BarChart3, path: "/" }];
     }
   };
 
@@ -384,14 +395,30 @@ export const AppSidebar = () => {
               isAdmin
                 ? "bg-blue-500/10 text-blue-500 border-blue-500/20"
                 : isFinance
-                ? "bg-primary/10 text-primary border-primary/20"
-                : isMaterial
-                ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20"
-                : "bg-muted text-muted-foreground border-border"
+                  ? "bg-primary/10 text-primary border-primary/20"
+                  : isMaterial
+                    ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20"
+                    : "bg-muted text-muted-foreground border-border"
             }`}
           >
-            {isAdmin ? <ShieldCheck size={13} /> : isFinance ? <Landmark size={13} /> : isMaterial ? <Package size={13} /> : <Landmark size={13} />}
-            <span>{isAdmin ? "Admin" : isFinance ? "Finance" : isMaterial ? "Material" : "No module"}</span>
+            {isAdmin ? (
+              <ShieldCheck size={13} />
+            ) : isFinance ? (
+              <Landmark size={13} />
+            ) : isMaterial ? (
+              <Package size={13} />
+            ) : (
+              <Landmark size={13} />
+            )}
+            <span>
+              {isAdmin
+                ? "Admin"
+                : isFinance
+                  ? "Finance"
+                  : isMaterial
+                    ? "Material"
+                    : "No module"}
+            </span>
           </div>
         ) : (
           <div className="flex justify-center">
@@ -400,10 +427,10 @@ export const AppSidebar = () => {
                 isAdmin
                   ? "bg-blue-500"
                   : isFinance
-                  ? "bg-primary"
-                  : isMaterial
-                  ? "bg-emerald-500"
-                  : "bg-muted-foreground/40"
+                    ? "bg-primary"
+                    : isMaterial
+                      ? "bg-emerald-500"
+                      : "bg-muted-foreground/40"
               }`}
             />
           </div>
