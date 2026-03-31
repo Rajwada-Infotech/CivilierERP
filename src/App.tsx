@@ -117,9 +117,6 @@ const BillingTermsMaster = lazy(() =>
 const AdminDashboard = lazy(() =>
   withDelay(() => import("./pages/admin/AdminDashboard")),
 );
-const AdminExpenseBooking = lazy(() =>
-  withDelay(() => import("./pages/admin/ExpenseBooking")),
-);
 const Users = lazy(() => withDelay(() => import("./pages/Users")));
 const MenuRights = lazy(() =>
   withDelay(() => import("./pages/admin/MenuRights")),
@@ -153,6 +150,8 @@ import { FinYearProvider } from "@/contexts/FinYearContext";
 import { HsnProvider } from "@/contexts/HsnContext";
 import { RecordsProvider } from "@/contexts/RecordsContext";
 import { TdsProvider } from "@/contexts/TdsContext";
+import { DebitNoteProvider } from "@/contexts/DebitNoteContext";
+import { BillingTermsProvider } from "@/contexts/BillingTermsContext";
 
 /* ========================= AUTH GUARD ========================= */
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -459,14 +458,6 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/admin/expense-booking"
-        element={
-          <ProtectedRoute>
-            <AdminExpenseBooking />
-          </ProtectedRoute>
-        }
-      />
-      <Route
         path="/users"
         element={
           <ProtectedRoute>
@@ -558,11 +549,15 @@ function App() {
             <HsnProvider>
               <RecordsProvider>
                 <TdsProvider>
-                  <TaskProvider>
-                    <Router>
-                      <AppRoutes />
-                    </Router>
-                  </TaskProvider>
+                  <DebitNoteProvider>
+                    <BillingTermsProvider>
+                    <TaskProvider>
+                      <Router>
+                        <AppRoutes />
+                      </Router>
+                    </TaskProvider>
+                    </BillingTermsProvider>
+                  </DebitNoteProvider>
                 </TdsProvider>
               </RecordsProvider>
             </HsnProvider>
