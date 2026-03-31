@@ -37,7 +37,6 @@ import {
 } from "lucide-react";
 
 // ─── Dropdown Component ──────────────────────────────────────────────────────
-
 const Dropdown = ({
   open,
   onClose,
@@ -75,7 +74,6 @@ const Dropdown = ({
 };
 
 // ─── Master Items ────────────────────────────────────────────────────────────
-
 const masterItems = [
   {
     icon: Layers,
@@ -177,7 +175,6 @@ const masterItems = [
 ];
 
 // ─── TopNavbar ───────────────────────────────────────────────────────────────
-
 export const TopNavbar = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -194,12 +191,10 @@ export const TopNavbar = () => {
   const isModuleActive = activeModule !== null;
   const isSuperAdmin = currentUser?.role === "super_admin";
   const isAdmin = currentUser?.role === "admin" || isSuperAdmin;
-
   const RoleIcon = isSuperAdmin ? Crown : isAdmin ? Shield : null;
   const roleBadgeClassName = isSuperAdmin ? "bg-violet-600" : "bg-blue-600";
 
   // ─── Toggle Handlers ───────────────────────────────────────────────────────
-
   const toggleSetup = useCallback(() => {
     if (!isModuleActive) return;
     setSetupOpen((prev) => !prev);
@@ -475,6 +470,7 @@ export const TopNavbar = () => {
           >
             <Palette size={17} />
           </button>
+
           <Dropdown
             open={themeOpen}
             onClose={() => setThemeOpen(false)}
@@ -559,9 +555,11 @@ export const TopNavbar = () => {
                 )}
               </div>
             </div>
+
             <button className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted transition-colors text-foreground">
               <User size={14} /> Profile
             </button>
+
             <button
               onMouseDown={() => {
                 logout();
@@ -623,3 +621,5 @@ export const TopNavbar = () => {
     </header>
   );
 };
+
+export default TopNavbar;
