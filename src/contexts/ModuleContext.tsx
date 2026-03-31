@@ -5,6 +5,7 @@ type Module = "finance" | "material" | null;
 interface ModuleContextType {
   activeModule: Module;
   setActiveModule: (m: Module) => void;
+  toggleModule: (m: Module) => void;
   moduleLabel: string;
 }
 
@@ -24,8 +25,13 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setActiveModuleState(m);
   }, []);
 
+  // Toggle: if already active, deactivate; otherwise activate
+  const toggleModule = useCallback((m: Module) => {
+    setActiveModuleState((prev) => (prev === m ? null : m));
+  }, []);
+
   return (
-    <ModuleContext.Provider value={{ activeModule, setActiveModule, moduleLabel }}>
+    <ModuleContext.Provider value={{ activeModule, setActiveModule, toggleModule, moduleLabel }}>
       {children}
     </ModuleContext.Provider>
   );
