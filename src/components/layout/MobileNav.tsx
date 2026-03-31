@@ -87,6 +87,7 @@ export const MobileNav: React.FC = () => {
     { icon: Package, label: "Items", path: "/masters/items" },
     { icon: Layers, label: "Item Groups", path: "/masters/item-groups" },
     { icon: Hash, label: "HSN", path: "/masters/hsn" },
+    { icon: FileText, label: "TDS", path: "/masters/tds" },
     {
       icon: Calendar,
       label: "Financial Year",
@@ -238,6 +239,7 @@ export const MobileNav: React.FC = () => {
     "Type of Doc": "text-sky-500",
     "Activity": "text-green-400",
     "Debit Note": "text-orange-500",
+    TDS: "text-emerald-500",
   };
 
   const masterBgColors: Record<string, string> = {
@@ -257,6 +259,15 @@ export const MobileNav: React.FC = () => {
     "Type of Doc": "bg-sky-500/10",
     "Activity": "bg-green-500/10",
     "Debit Note": "bg-orange-500/10",
+    TDS: "bg-emerald-500/10",
+  };
+
+  const themeCheckmarkClasses: Record<Theme, string> = {
+    dark: "text-indigo-400",
+    light: "text-violet-400",
+    midnight: "text-teal-400",
+    sepia: "text-amber-400",
+    crimson: "text-rose-400",
   };
 
   return (
@@ -576,19 +587,10 @@ export const MobileNav: React.FC = () => {
                           : "border-border hover:border-primary/30 hover:bg-muted/50"
                       }`}
                     >
-                      <div
-                        className={`w-7 h-7 rounded-full shadow-md border-2 border-white/20 ring-2 ring-offset-1 ring-offset-card bg-[${bg}]`}
-                      />
-                      <span className="text-[10px] font-heading text-muted-foreground leading-none truncate w-full text-center">
+                      <Palette size={20} className={`shrink-0 transition-all duration-200 ${theme === t ? 'scale-110 ring-2 ring-ring ring-offset-2 ring-offset-background shadow-2xl' : 'hover:scale-105 hover:shadow-md'}`} style={{ color: bg }} />
+                      <span className={`text-[10px] font-heading leading-tight text-center mt-1 px-1 ${theme === t ? 'font-semibold text-foreground' : 'text-muted-foreground hover:text-foreground'}`}>
                         {label}
                       </span>
-                      {theme === t && (
-                        <span className="absolute top-1.5 right-1.5 w-3.5 h-3.5 rounded-full bg-primary flex items-center justify-center">
-                          <span className="text-[8px] text-primary-foreground leading-none font-bold">
-                            ✓
-                          </span>
-                        </span>
-                      )}
                     </button>
                   ))}
                 </div>
