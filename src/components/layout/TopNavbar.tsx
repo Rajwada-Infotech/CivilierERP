@@ -156,6 +156,12 @@ const masterItems = [
     path: "/masters/type-of-doc",
     color: "text-sky-500",
   },
+  {
+    icon: FileText,
+    label: "TDS",
+    path: "/masters/tds",
+    color: "text-emerald-500",
+  },
 ];
 
 export const TopNavbar = () => {
