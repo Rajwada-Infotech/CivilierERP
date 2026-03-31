@@ -17,6 +17,10 @@ import {
   ShieldCheck,
   Archive,
   MessageSquare,
+  Package,
+  Receipt,
+  HardHat,
+  CreditCard,
 } from "lucide-react";
 
 interface SubItem {
@@ -65,6 +69,15 @@ const buildNavItems = (overdueCount: number): NavItem[] => [
     ],
   },
   {
+    label: "Material",
+    icon: Package,
+    children: [
+      { label: "Expense Booking", path: "/material/expense-booking" },
+      { label: "Work Order", path: "/material/work-order" },
+      { label: "Card Master", path: "/masters/card" },
+    ],
+  },
+  {
     label: "Record Management",
     icon: Archive,
     children: [{ label: "Records", path: "/records" }],
@@ -99,6 +112,15 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
     label: "Finance",
     icon: Landmark,
     children: [{ label: "Expense Booking", path: "/admin/expense-booking" }],
+  },
+  {
+    label: "Material",
+    icon: Package,
+    children: [
+      { label: "Expense Booking", path: "/material/expense-booking" },
+      { label: "Work Order", path: "/material/work-order" },
+      { label: "Card Master", path: "/masters/card" },
+    ],
   },
   {
     label: "Communicator",
@@ -156,7 +178,7 @@ const NavGroup = ({
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(
     () => {
       const init: Record<string, boolean> = {};
-      (item.sections || []).forEach((s: any) => {
+      (item.sections || []).forEach((s: SubSection) => {
         init[s.label] = s.items.some(
           (i: SubItem) => location.pathname === i.path,
         );
@@ -215,7 +237,7 @@ const NavGroup = ({
             </button>
           ))}
 
-          {item.sections?.map((section: any) => (
+          {item.sections?.map((section: SubSection) => (
             <div key={section.label}>
               <button
                 onClick={() => toggleSection(section.label)}
@@ -265,14 +287,60 @@ export const AppSidebar = () => {
 
   const overdueCount = getOverdueTasks().length;
 
-  const isAdminPage =
-    location.pathname.startsWith("/admin") ||
-    location.pathname.startsWith("/users");
+  const isAdminPage = location.pathname.startsWith("/admin") || location.pathname.startsWith("/users");
 
-  const NAV_ITEMS = buildNavItems(overdueCount);
-  const itemsToRender = isAdminPage ? ADMIN_NAV_ITEMS : NAV_ITEMS;
+  const getModuleNavItems = (): NavItem[] => {
+    switch (activeModule) {
+      case "material":
+        return [
+          { label: "Amendments", icon: BarChart3, path: "/material/amendments" },
+          { label: "Expense Booking", icon: Receipt, path: "/material/expense-booking" },
+          { label: "Work Order", icon: HardHat, path: "/material/work-order" },
+          { label: "Purchase Order", icon: Receipt, path: "/material/purchase-order" },
+          { label: "Card Master", icon: CreditCard, path: "/masters/card" },
+        ];
+      case "finance":
+        return [
+          { label: "Amendments", icon: BarChart3, path: "/" },
+          {
+            label: "Query",
+            icon: Scale,
+            children: [
+              { label: "Trial Balance", path: "/transactions" },
+              {
+                label: "Tasks",
+                path: "/tasks",
+                badge: overdueCount > 0 ? overdueCount : undefined,
+              },
+            ],
+          },
+          {
+            label: "Finance",
+            icon: Landmark,
+            children: [
+              { label: "Expense Booking", path: "/transactions/expense-booking" },
+              { label: "Payment", path: "/payments" },
+              { label: "Received Payment", path: "/received-payments" },
+              { label: "BRS", path: "/brs" },
+            ],
+          },
+          {
+            label: "Record Management",
+            icon: Archive,
+            children: [{ label: "Records", path: "/records" }],
+          },
+        ];
+      default:
+        return [
+          { label: "Amendments", icon: BarChart3, path: "/" },
+        ];
+    }
+  };
+
+  const itemsToRender = isAdminPage ? ADMIN_NAV_ITEMS : getModuleNavItems();
 
   const isFinance = !isAdminPage && activeModule === "finance";
+  const isMaterial = !isAdminPage && activeModule === "material";
   const isAdmin = isAdminPage;
 
   return (
@@ -290,8 +358,8 @@ export const AppSidebar = () => {
               collapsed={collapsed}
               hasActiveChild={
                 item.children?.some((c) => location.pathname === c.path) ||
-                item.sections?.some((s: any) =>
-                  s.items.some((i: any) => location.pathname === i.path),
+                item.sections?.some((s: SubSection) =>
+                  s.items.some((i: SubItem) => location.pathname === i.path),
                 )
               }
             />
@@ -318,11 +386,13 @@ export const AppSidebar = () => {
                 ? "bg-blue-500/10 text-blue-500 border-blue-500/20"
                 : isFinance
                 ? "bg-primary/10 text-primary border-primary/20"
+                : isMaterial
+                ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20"
                 : "bg-muted text-muted-foreground border-border"
             }`}
           >
-            {isAdmin ? <ShieldCheck size={13} /> : <Landmark size={13} />}
-            <span>{isAdmin ? "Admin" : isFinance ? "Finance" : "No module"}</span>
+            {isAdmin ? <ShieldCheck size={13} /> : isFinance ? <Landmark size={13} /> : isMaterial ? <Package size={13} /> : <Landmark size={13} />}
+            <span>{isAdmin ? "Admin" : isFinance ? "Finance" : isMaterial ? "Material" : "No module"}</span>
           </div>
         ) : (
           <div className="flex justify-center">
@@ -332,6 +402,8 @@ export const AppSidebar = () => {
                   ? "bg-blue-500"
                   : isFinance
                   ? "bg-primary"
+                  : isMaterial
+                  ? "bg-emerald-500"
                   : "bg-muted-foreground/40"
               }`}
             />
