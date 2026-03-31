@@ -74,6 +74,9 @@ const ChequeMaster = lazy(() =>
 const CardMaster = lazy(() =>
   withDelay(() => import("./pages/masters/CardMaster")),
 );
+const TdsMaster = lazy(() =>
+  withDelay(() => import("./pages/masters/TdsMaster")),
+);
 
 const AccountGroupMaster = lazy(() =>
   withDelay(() => import("./pages/masters/AccountGroupMaster")),
@@ -125,6 +128,7 @@ import { TaskProvider } from "@/contexts/TaskContext";
 import { FinYearProvider } from "@/contexts/FinYearContext";
 import { HsnProvider } from "@/contexts/HsnContext";
 import { RecordsProvider } from "@/contexts/RecordsContext";
+import { TdsProvider } from "@/contexts/TdsContext";
 
 /* ========================= AUTH GUARD ========================= */
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -332,6 +336,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/masters/tds"
+        element={
+          <ProtectedRoute>
+            <TdsMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/masters/account-group"
         element={
           <ProtectedRoute>
@@ -464,11 +476,13 @@ function App() {
           <FinYearProvider>
             <HsnProvider>
               <RecordsProvider>
-                <TaskProvider>
-                  <Router>
-                    <AppRoutes />
-                  </Router>
-                </TaskProvider>
+                <TdsProvider>
+                  <TaskProvider>
+                    <Router>
+                      <AppRoutes />
+                    </Router>
+                  </TaskProvider>
+                </TdsProvider>
               </RecordsProvider>
             </HsnProvider>
           </FinYearProvider>
@@ -479,3 +493,4 @@ function App() {
 }
 
 export default App;
+
