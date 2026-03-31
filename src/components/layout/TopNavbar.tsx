@@ -36,7 +36,8 @@ import {
   FileWarning,
 } from "lucide-react";
 
-// ─── Dropdown Component ─────────────────────────────────────────────────────
+// ─── Dropdown Component ──────────────────────────────────────────────────────
+
 const Dropdown = ({
   open,
   onClose,
@@ -73,104 +74,29 @@ const Dropdown = ({
   );
 };
 
+// ─── Master Items ────────────────────────────────────────────────────────────
+
 const masterItems = [
-  {
-    icon: Layers,
-    label: "Account Group",
-    path: "/masters/account-group",
-    color: "text-indigo-500",
-  },
-  {
-    icon: Receipt,
-    label: "General Ledger",
-    path: "/masters/expenses",
-    color: "text-orange-400",
-  },
-  {
-    icon: Truck,
-    label: "Suppliers",
-    path: "/masters/suppliers",
-    color: "text-blue-400",
-  },
-  {
-    icon: Users,
-    label: "Customers",
-    path: "/masters/customers",
-    color: "text-purple-400",
-  },
-  {
-    icon: HardHat,
-    label: "Contractors",
-    path: "/masters/contractors",
-    color: "text-yellow-400",
-  },
-  {
-    icon: Landmark,
-    label: "Banks",
-    path: "/masters/banks",
-    color: "text-green-400",
-  },
-  {
-    icon: Package,
-    label: "Items",
-    path: "/masters/items",
-    color: "text-teal-400",
-  },
-  {
-    icon: Layers,
-    label: "Item Groups",
-    path: "/masters/item-groups",
-    color: "text-indigo-400",
-  },
-  {
-    icon: Hash,
-    label: "HSN",
-    path: "/masters/hsn",
-    color: "text-pink-400",
-  },
-  {
-    icon: Calendar,
-    label: "Financial Year",
-    path: "/masters/financial-year",
-    color: "text-amber-500",
-  },
-  {
-    icon: BookOpen,
-    label: "Cheque",
-    path: "/masters/cheque",
-    color: "text-cyan-500",
-  },
-  {
-    icon: CreditCard,
-    label: "Cards",
-    path: "/masters/card",
-    color: "text-rose-500",
-  },
-  {
-    icon: Tag,
-    label: "Named Entry Type",
-    path: "/masters/named-entry-type",
-    color: "text-purple-400",
-  },
-  {
-    icon: FileType2,
-    label: "Type of Doc",
-    path: "/masters/type-of-doc",
-    color: "text-sky-500",
-  },
-  {
-    icon: Activity,
-    label: "Activity",
-    path: "/masters/activity",
-    color: "text-green-400",
-  },
-  {
-    icon: FileWarning,
-    label: "Debit Note",
-    path: "/masters/debit-note",
-    color: "text-orange-500",
-  },
+  { icon: Layers,      label: "Account Group",    path: "/masters/account-group",    color: "text-indigo-500" },
+  { icon: Receipt,     label: "General Ledger",   path: "/masters/expenses",         color: "text-orange-400" },
+  { icon: Truck,       label: "Suppliers",         path: "/masters/suppliers",        color: "text-blue-400"   },
+  { icon: Users,       label: "Customers",         path: "/masters/customers",        color: "text-purple-400" },
+  { icon: HardHat,     label: "Contractors",       path: "/masters/contractors",      color: "text-yellow-400" },
+  { icon: Landmark,    label: "Banks",             path: "/masters/banks",            color: "text-green-400"  },
+  { icon: Package,     label: "Items",             path: "/masters/items",            color: "text-teal-400"   },
+  { icon: Layers,      label: "Item Groups",       path: "/masters/item-groups",      color: "text-indigo-400" },
+  { icon: Hash,        label: "HSN",               path: "/masters/hsn",              color: "text-pink-400"   },
+  { icon: Calendar,    label: "Financial Year",    path: "/masters/financial-year",   color: "text-amber-500"  },
+  { icon: BookOpen,    label: "Cheque",            path: "/masters/cheque",           color: "text-cyan-500"   },
+  { icon: CreditCard,  label: "Cards",             path: "/masters/card",             color: "text-rose-500"   },
+  { icon: Tag,         label: "Named Entry Type",  path: "/masters/named-entry-type", color: "text-purple-400" },
+  { icon: FileType2,   label: "Type of Doc",       path: "/masters/type-of-doc",      color: "text-sky-500"    },
+  { icon: FileText,    label: "TDS",               path: "/masters/tds",              color: "text-emerald-500"},
+  { icon: Activity,    label: "Activity",          path: "/masters/activity",         color: "text-green-400"  },
+  { icon: FileWarning, label: "Debit Note",        path: "/masters/debit-note",       color: "text-orange-500" },
 ];
+
+// ─── TopNavbar ───────────────────────────────────────────────────────────────
 
 export const TopNavbar = () => {
   const navigate = useNavigate();
@@ -192,7 +118,8 @@ export const TopNavbar = () => {
   const RoleIcon = isSuperAdmin ? Crown : isAdmin ? Shield : null;
   const roleBadgeClassName = isSuperAdmin ? "bg-violet-600" : "bg-blue-600";
 
-  // ─── Toggle Handlers ─────────────────────────────────────────────
+  // ─── Toggle Handlers ───────────────────────────────────────────────────────
+
   const toggleSetup = useCallback(() => {
     if (!isModuleActive) return;
     setSetupOpen((prev) => !prev);
@@ -245,20 +172,15 @@ export const TopNavbar = () => {
 
       {/* DESKTOP NAV */}
       <div className="hidden md:flex items-center gap-1">
+
         {/* Collapse Toggle */}
         <button
           onClick={() => setNavCollapsed(!navCollapsed)}
           title={navCollapsed ? "Expand navigation" : "Collapse navigation"}
-          aria-label={
-            navCollapsed ? "Expand navigation" : "Collapse navigation"
-          }
+          aria-label={navCollapsed ? "Expand navigation" : "Collapse navigation"}
           className="p-1.5 rounded-md bg-muted hover:bg-muted/80 text-foreground border border-border transition-all duration-200 shrink-0"
         >
-          {navCollapsed ? (
-            <ChevronsRight size={15} />
-          ) : (
-            <ChevronsLeft size={15} />
-          )}
+          {navCollapsed ? <ChevronsRight size={15} /> : <ChevronsLeft size={15} />}
         </button>
 
         {/* Collapsible Navigation Items */}
@@ -285,7 +207,7 @@ export const TopNavbar = () => {
             <Dropdown
               open={setupOpen}
               onClose={() => setSetupOpen(false)}
-              className="right-0 w-80 p-4"
+              className="right-0 w-[22rem] p-4"
             >
               <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-3">
                 Masters
@@ -294,20 +216,17 @@ export const TopNavbar = () => {
                 {masterItems.map(({ icon: Icon, label, path, color }) => (
                   <button
                     key={label}
-                    onClick={() => {
-                      navigate(path);
-                      closeAll();
-                    }}
-                    className={`group flex flex-col items-center gap-2 p-4 rounded-2xl border transition-all active:scale-95 ${
+                    onClick={() => { navigate(path); closeAll(); }}
+                    className={`group flex flex-col items-center gap-2 p-3 rounded-2xl border transition-all active:scale-95 ${
                       location.pathname === path
                         ? "border-primary/60 bg-primary/10"
                         : "border-border/50 hover:border-border hover:bg-muted"
                     }`}
                   >
-                    <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-card border border-border/60 group-hover:bg-muted transition-colors">
-                      <Icon size={22} className={color} />
+                    <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-card border border-border/60 group-hover:bg-muted transition-colors">
+                      <Icon size={20} className={color} />
                     </div>
-                    <span className="text-[11px] font-heading text-muted-foreground group-hover:text-foreground text-center leading-tight">
+                    <span className="text-[10px] font-heading text-muted-foreground group-hover:text-foreground text-center leading-tight">
                       {label}
                     </span>
                   </button>
@@ -318,10 +237,7 @@ export const TopNavbar = () => {
 
           {/* Reports */}
           <button
-            onClick={() => {
-              navigate("/reports");
-              closeAll();
-            }}
+            onClick={() => { navigate("/reports"); closeAll(); }}
             className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all whitespace-nowrap ${
               location.pathname === "/reports"
                 ? "bg-primary/10 text-primary"
@@ -333,10 +249,7 @@ export const TopNavbar = () => {
 
           {/* Widgets */}
           <button
-            onClick={() => {
-              navigate("/widgets");
-              closeAll();
-            }}
+            onClick={() => { navigate("/widgets"); closeAll(); }}
             className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all whitespace-nowrap ${
               location.pathname === "/widgets"
                 ? "bg-primary/10 text-primary"
@@ -363,16 +276,11 @@ export const TopNavbar = () => {
               <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-3">
                 Select Module
               </p>
-              <div
-                className={`grid gap-3 ${isAdmin ? "grid-cols-2" : "grid-cols-1"}`}
-              >
+              <div className={`grid gap-3 ${isAdmin ? "grid-cols-2" : "grid-cols-1"}`}>
+
                 {/* Finance */}
                 <button
-                  onClick={() => {
-                    setActiveModule("finance");
-                    setModuleOpen(false);
-                    navigate("/");
-                  }}
+                  onClick={() => { setActiveModule("finance"); setModuleOpen(false); navigate("/"); }}
                   className={`group flex flex-col items-center gap-2 p-4 rounded-lg border transition-all ${
                     activeModule === "finance"
                       ? "border-primary bg-primary/10"
@@ -380,49 +288,22 @@ export const TopNavbar = () => {
                   }`}
                 >
                   <svg width="32" height="32" viewBox="0 0 36 36" fill="none">
-                    <circle
-                      cx="12"
-                      cy="22"
-                      r="7"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      className="text-primary"
-                    />
-                    <circle
-                      cx="24"
-                      cy="22"
-                      r="7"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      className="text-secondary"
-                    />
-                    <rect
-                      x="8"
-                      y="6"
-                      width="20"
-                      height="3"
-                      rx="1.5"
-                      fill="currentColor"
-                      className="text-primary"
-                    />
+                    <circle cx="12" cy="22" r="7" stroke="currentColor" strokeWidth="2" className="text-primary" />
+                    <circle cx="24" cy="22" r="7" stroke="currentColor" strokeWidth="2" className="text-secondary" />
+                    <rect x="8" y="6" width="20" height="3" rx="1.5" fill="currentColor" className="text-primary" />
                   </svg>
                   <span className="text-xs font-heading text-muted-foreground group-hover:text-foreground">
                     Finance
                   </span>
                   {activeModule === "finance" && (
-                    <span className="text-[10px] text-primary font-heading">
-                      Active
-                    </span>
+                    <span className="text-[10px] text-primary font-heading">Active</span>
                   )}
                 </button>
 
                 {/* Admin */}
                 {isAdmin && (
                   <button
-                    onClick={() => {
-                      setModuleOpen(false);
-                      navigate("/admin");
-                    }}
+                    onClick={() => { setModuleOpen(false); navigate("/admin"); }}
                     className={`group flex flex-col items-center gap-2 p-4 rounded-lg border transition-all ${
                       location.pathname.startsWith("/admin")
                         ? "border-primary bg-primary/10"
@@ -448,9 +329,7 @@ export const TopNavbar = () => {
                       Admin
                     </span>
                     {location.pathname.startsWith("/admin") && (
-                      <span className="text-[10px] text-primary font-heading">
-                        Active
-                      </span>
+                      <span className="text-[10px] text-primary font-heading">Active</span>
                     )}
                   </button>
                 )}
@@ -476,33 +355,23 @@ export const TopNavbar = () => {
             <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading px-2 py-1.5 mb-0.5">
               Appearance
             </p>
-            {(
-              Object.entries(THEME_DOTS) as [
-                Theme,
-                { bg: string; label: string },
-              ][]
-            ).map(([t, { bg, label }]) => (
-              <button
-                key={t}
-                onClick={() => {
-                  setTheme(t);
-                  setThemeOpen(false);
-                }}
-                className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-heading transition-all ${
-                  theme === t
-                    ? "bg-primary/10 text-primary"
-                    : "text-foreground hover:bg-muted"
-                }`}
-              >
-                <span
-                  className={`w-3.5 h-3.5 rounded-full shrink-0 border border-border/50 bg-[${bg}]`}
-                />
-                {label}
-                {theme === t && (
-                  <span className="ml-auto text-primary text-xs">✓</span>
-                )}
-              </button>
-            ))}
+            {(Object.entries(THEME_DOTS) as [Theme, { bg: string; label: string }][]).map(
+              ([t, { bg, label }]) => (
+                <button
+                  key={t}
+                  onClick={() => { setTheme(t); setThemeOpen(false); }}
+                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-heading transition-all ${
+                    theme === t
+                      ? "bg-primary/10 text-primary"
+                      : "text-foreground hover:bg-muted"
+                  }`}
+                >
+                  <span className={`w-3.5 h-3.5 rounded-full shrink-0 border border-border/50 bg-[${bg}]`} />
+                  {label}
+                  {theme === t && <span className="ml-auto text-primary text-xs">✓</span>}
+                </button>
+              )
+            )}
           </Dropdown>
         </div>
 
@@ -514,9 +383,7 @@ export const TopNavbar = () => {
           >
             {currentUser?.initials || "?"}
             {RoleIcon && (
-              <span
-                className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center ${roleBadgeClassName}`}
-              >
+              <span className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center ${roleBadgeClassName}`}>
                 <RoleIcon size={9} className="text-white" />
               </span>
             )}
@@ -528,12 +395,8 @@ export const TopNavbar = () => {
             className="right-0 w-56 p-1"
           >
             <div className="px-3 py-2 border-b border-border mb-1">
-              <p className="text-sm font-heading font-semibold text-foreground">
-                {currentUser?.name}
-              </p>
-              <p className="text-xs text-muted-foreground truncate">
-                {currentUser?.email}
-              </p>
+              <p className="text-sm font-heading font-semibold text-foreground">{currentUser?.name}</p>
+              <p className="text-xs text-muted-foreground truncate">{currentUser?.email}</p>
               <div className="mt-1.5">
                 {isSuperAdmin && (
                   <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-violet-500/10 text-violet-600">
@@ -556,10 +419,7 @@ export const TopNavbar = () => {
               <User size={14} /> Profile
             </button>
             <button
-              onMouseDown={() => {
-                logout();
-                navigate("/login");
-              }}
+              onMouseDown={() => { logout(); navigate("/login"); }}
               className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted transition-colors text-destructive"
             >
               <LogOut size={14} /> Sign Out
@@ -577,9 +437,7 @@ export const TopNavbar = () => {
           >
             {currentUser?.initials || "?"}
             {RoleIcon && (
-              <span
-                className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center ${roleBadgeClassName}`}
-              >
+              <span className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center ${roleBadgeClassName}`}>
                 <RoleIcon size={9} className="text-white" />
               </span>
             )}
@@ -591,21 +449,14 @@ export const TopNavbar = () => {
             className="right-0 w-56 p-1"
           >
             <div className="px-3 py-2 border-b border-border mb-1">
-              <p className="text-sm font-heading font-semibold text-foreground">
-                {currentUser?.name}
-              </p>
-              <p className="text-xs text-muted-foreground truncate">
-                {currentUser?.email}
-              </p>
+              <p className="text-sm font-heading font-semibold text-foreground">{currentUser?.name}</p>
+              <p className="text-xs text-muted-foreground truncate">{currentUser?.email}</p>
             </div>
             <button className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted text-foreground">
               <User size={14} /> Profile
             </button>
             <button
-              onMouseDown={() => {
-                logout();
-                navigate("/login");
-              }}
+              onMouseDown={() => { logout(); navigate("/login"); }}
               className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted text-destructive"
             >
               <LogOut size={14} /> Sign Out
