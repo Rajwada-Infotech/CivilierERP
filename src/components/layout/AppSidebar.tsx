@@ -21,6 +21,9 @@ import {
   Receipt,
   HardHat,
   CreditCard,
+  Settings,
+  Building2,
+  FolderKanban,
 } from "lucide-react";
 
 interface SubItem {
@@ -88,6 +91,15 @@ const buildNavItems = (overdueCount: number): NavItem[] => [
 
 const ADMIN_NAV_ITEMS: NavItem[] = [
   { label: "Transaction", icon: BarChart3, path: "/admin" },
+  {
+    label: "Setup",
+    icon: Settings,
+    children: [
+      { label: "Business Unit", path: "/admin/masters/business-unit" },
+      { label: "Project", path: "/admin/masters/project" },
+      { label: "Company", path: "/admin/masters/company" },
+    ],
+  },
   {
     label: "User Control",
     icon: FileText,
