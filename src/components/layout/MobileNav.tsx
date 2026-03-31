@@ -30,6 +30,8 @@ import {
   BookOpen,
   Tag,
   FileType2,
+  Activity,
+  FileWarning,
 } from "lucide-react";
 
 import { useModule } from "@/contexts/ModuleContext";
@@ -94,6 +96,8 @@ export const MobileNav: React.FC = () => {
     { icon: CreditCard, label: "Cards", path: "/masters/card" },
     { icon: Tag, label: "Named Entry Type", path: "/masters/named-entry-type" },
     { icon: FileType2, label: "Type of Doc", path: "/masters/type-of-doc" },
+    { icon: Activity, label: "Activity", path: "/masters/activity" },
+    { icon: FileWarning, label: "Debit Note", path: "/masters/debit-note" },
   ];
 
   const ADMIN_NAV_ITEMS: NavItem[] = [
@@ -248,6 +252,8 @@ export const MobileNav: React.FC = () => {
     Cards: "text-rose-500",
     "Named Entry Type": "text-purple-400",
     "Type of Doc": "text-sky-500",
+    "Activity": "text-green-400",
+    "Debit Note": "text-orange-500",
   };
 
   const masterBgColors: Record<string, string> = {
@@ -265,6 +271,8 @@ export const MobileNav: React.FC = () => {
     Cards: "bg-rose-500/10",
     "Named Entry Type": "bg-purple-500/10",
     "Type of Doc": "bg-sky-500/10",
+    "Activity": "bg-green-500/10",
+    "Debit Note": "bg-orange-500/10",
   };
 
   return (
