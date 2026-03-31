@@ -33,9 +33,11 @@ import {
   BookOpen,
   Tag,
   FileType2,
+  Activity,
+  FileWarning,
 } from "lucide-react";
 
-// ─── Dropdown Component ─────────────────────────────────────────────────────
+// ─── Dropdown Component ──────────────────────────────────────────────────────
 const Dropdown = ({
   open,
   onClose,
@@ -72,6 +74,7 @@ const Dropdown = ({
   );
 };
 
+// ─── Master Items ────────────────────────────────────────────────────────────
 const masterItems = [
   {
     icon: Layers,
@@ -121,12 +124,7 @@ const masterItems = [
     path: "/masters/item-groups",
     color: "text-indigo-400",
   },
-  {
-    icon: Hash,
-    label: "HSN",
-    path: "/masters/hsn",
-    color: "text-pink-400",
-  },
+  { icon: Hash, label: "HSN", path: "/masters/hsn", color: "text-pink-400" },
   {
     icon: Calendar,
     label: "Financial Year",
@@ -157,8 +155,27 @@ const masterItems = [
     path: "/masters/type-of-doc",
     color: "text-sky-500",
   },
+  {
+    icon: FileText,
+    label: "TDS",
+    path: "/masters/tds",
+    color: "text-emerald-500",
+  },
+  {
+    icon: Activity,
+    label: "Activity",
+    path: "/masters/activity",
+    color: "text-green-400",
+  },
+  {
+    icon: FileWarning,
+    label: "Debit Note",
+    path: "/masters/debit-note",
+    color: "text-orange-500",
+  },
 ];
 
+// ─── TopNavbar ───────────────────────────────────────────────────────────────
 export const TopNavbar = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -175,11 +192,10 @@ export const TopNavbar = () => {
   const isModuleActive = activeModule !== null;
   const isSuperAdmin = currentUser?.role === "super_admin";
   const isAdmin = currentUser?.role === "admin" || isSuperAdmin;
-
   const RoleIcon = isSuperAdmin ? Crown : isAdmin ? Shield : null;
   const roleBadgeClassName = isSuperAdmin ? "bg-violet-600" : "bg-blue-600";
 
-  // ─── Toggle Handlers ─────────────────────────────────────────────
+  // ─── Toggle Handlers ───────────────────────────────────────────────────────
   const toggleSetup = useCallback(() => {
     if (!isModuleActive) return;
     setSetupOpen((prev) => !prev);
@@ -272,11 +288,12 @@ export const TopNavbar = () => {
             <Dropdown
               open={setupOpen}
               onClose={() => setSetupOpen(false)}
-              className="right-0 w-80 p-4"
+              className="right-0 w-[22rem] p-4"
             >
               <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-3">
                 Masters
               </p>
+<<<<<<< HEAD
               <ScrollArea className="h-[22rem] pr-4 -mr-4">
                 <div className="grid grid-cols-3 gap-2.5 pb-6 min-h-[22rem] py-2">
                   {masterItems.map(({ icon: Icon, label, path, color }) => (
@@ -287,15 +304,32 @@ export const TopNavbar = () => {
                         closeAll();
                       }}
                       className={`group flex flex-col items-center gap-1.5 p-3 rounded-xl border transition-all active:scale-95 ${
+=======
+              <div className="grid grid-cols-4 gap-3">
+                {masterItems.map(({ icon: Icon, label, path, color }) => (
+                  <button
+                    key={label}
+                    onClick={() => {
+                      navigate(path);
+                      closeAll();
+                    }}
+                    className={`group flex flex-col items-center gap-2 p-3 rounded-2xl border transition-all active:scale-95 ${
+>>>>>>> e26be1e8910ae6e2eb45da12f5b1da30ba1349b9
                       location.pathname === path
                         ? "border-primary/60 bg-primary/10"
                         : "border-border/50 hover:border-border hover:bg-muted"
                     }`}
+<<<<<<< HEAD
                     >
                     <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-card border border-border/60 group-hover:bg-muted transition-colors">
                       <Icon size={22} className={color} />
+=======
+                  >
+                    <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-card border border-border/60 group-hover:bg-muted transition-colors">
+                      <Icon size={20} className={color} />
+>>>>>>> e26be1e8910ae6e2eb45da12f5b1da30ba1349b9
                     </div>
-                    <span className="text-[11px] font-heading text-muted-foreground group-hover:text-foreground text-center leading-tight">
+                    <span className="text-[10px] font-heading text-muted-foreground group-hover:text-foreground text-center leading-tight">
                       {label}
                     </span>
                     </button>
@@ -490,6 +524,7 @@ export const TopNavbar = () => {
           >
             <Palette size={17} />
           </button>
+
           <Dropdown
             open={themeOpen}
             onClose={() => setThemeOpen(false)}
@@ -574,9 +609,11 @@ export const TopNavbar = () => {
                 )}
               </div>
             </div>
+
             <button className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted transition-colors text-foreground">
               <User size={14} /> Profile
             </button>
+
             <button
               onMouseDown={() => {
                 logout();
@@ -637,4 +674,10 @@ export const TopNavbar = () => {
       </div>
     </header>
   );
+<<<<<<< HEAD
 };
+=======
+};
+
+export default TopNavbar;
+>>>>>>> e26be1e8910ae6e2eb45da12f5b1da30ba1349b9
