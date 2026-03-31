@@ -9,7 +9,6 @@ import {
 import { Activity, Layers, Tag } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
 type ActivityType = "Group" | "Activity";
 
 interface ActivityRecord {
@@ -29,7 +28,11 @@ interface ShortDescGroup {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
+/**
+ * Auto-generates a short description from the activity name.
+ * Takes up to 3 words, abbreviates each to its first 3 letters (uppercase),
+ * and joins with "-". E.g. "Site Inspection Visit" → "SIT-INS-VIS"
+ */
 function autoShortDesc(name: string): string {
   if (!name.trim()) return "";
   return name
@@ -47,7 +50,6 @@ function getGroups(allRecords: RecordWithId[]): RecordWithId[] {
 }
 
 // ─── Short Description custom renderer ───────────────────────────────────────
-
 function makeShortDescRenderer(nameRef: React.RefObject<string>) {
   return function ShortDescRenderer({
     value,
@@ -74,6 +76,7 @@ function makeShortDescRenderer(nameRef: React.RefObject<string>) {
 
     return (
       <div>
+        {/* Mode pills */}
         <div className="flex items-center gap-2 mb-2">
           <span className="text-[11px] text-muted-foreground font-heading">
             Mode:
@@ -94,6 +97,7 @@ function makeShortDescRenderer(nameRef: React.RefObject<string>) {
           ))}
         </div>
 
+        {/* Input */}
         <input
           type="text"
           value={resolved}
@@ -130,9 +134,6 @@ function makeShortDescRenderer(nameRef: React.RefObject<string>) {
 }
 
 // ─── "Belongs To" group selector — custom renderer ────────────────────────────
-// Needs live access to all records so it can list only Group-type entries.
-// We get allRecords via a ref that onFormChange keeps updated.
-
 function makeBelongsToRenderer(allRecordsRef: React.RefObject<RecordWithId[]>) {
   return function BelongsToRenderer({
     value,
@@ -169,7 +170,6 @@ function makeBelongsToRenderer(allRecordsRef: React.RefObject<RecordWithId[]>) {
             ))}
           </select>
         </div>
-
         {groups.length === 0 && (
           <p className="text-[11px] text-amber-500 mt-1 flex items-center gap-1">
             <span>⚠</span> No groups yet — add a Group-type record first.
@@ -181,11 +181,8 @@ function makeBelongsToRenderer(allRecordsRef: React.RefObject<RecordWithId[]>) {
 }
 
 // ─── Activity Type selector — custom renderer ─────────────────────────────────
-// Shows Group / Activity toggle pills. When "Activity" is selected it exposes
-// the Belongs To sub-field inline so both feel like one cohesive control.
-
 function makeActivityTypeRenderer(
-  allRecordsRef: React.RefObject<RecordWithId[]>,
+  allRecordsRef: React.RefObject<RecordWithId[]>
 ) {
   return function ActivityTypeRenderer({
     value,
@@ -197,13 +194,11 @@ function makeActivityTypeRenderer(
     error: boolean;
     field: FieldDef;
   }) {
-    const composite = (value as {
-      type: ActivityType;
-      groupId: string;
-    } | null) ?? {
-      type: "Group" as ActivityType,
-      groupId: "",
-    };
+    const composite =
+      (value as { type: ActivityType; groupId: string } | null) ?? {
+        type: "Group" as ActivityType,
+        groupId: "",
+      };
 
     const groups = getGroups(allRecordsRef.current ?? []);
 
@@ -282,11 +277,11 @@ function makeActivityTypeRenderer(
   };
 }
 
-// ─── Column renderers ─────────────────────────────────────────────────────────
-
-function typeColumnRenderer(value: unknown) {
+// ─── Type badge column renderer ───────────────────────────────────────────────
+function typeRenderer(value: unknown) {
   const v = String(value || "");
   const isGroup = v === "Group";
+
   return (
     <span
       className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-heading border ${
@@ -304,7 +299,7 @@ function typeColumnRenderer(value: unknown) {
 function nameColumnRenderer(
   value: unknown,
   row: RecordWithId,
-  data: RecordWithId[],
+  data: RecordWithId[]
 ) {
   const name = String(value || "");
   const isGroup = row.activityType === "Group";
@@ -335,16 +330,16 @@ function nameColumnRenderer(
 }
 
 // ─── Main component ────────────────────────────────────────────────────────────
-
 const ActivityMaster: React.FC = () => {
   const nameRef = React.useRef<string>("");
   const allRecordsRef = React.useRef<RecordWithId[]>([]);
 
   const ShortDescRenderer = React.useRef(
-    makeShortDescRenderer(nameRef),
+    makeShortDescRenderer(nameRef)
   ).current;
+
   const ActivityTypeRenderer = React.useRef(
-    makeActivityTypeRenderer(allRecordsRef),
+    makeActivityTypeRenderer(allRecordsRef)
   ).current;
 
   // ── Field definitions ──────────────────────────────────────────────────────
@@ -363,7 +358,7 @@ const ActivityMaster: React.FC = () => {
       render: ShortDescRenderer as FieldDef["render"],
     },
     {
-      // Single composite field — handles both type pill and Belongs To sub-select
+      // Composite field handling both Activity Type and "Belongs To"
       name: "activityTypeGroup",
       label: "Activity Type",
       type: "custom",
@@ -391,7 +386,7 @@ const ActivityMaster: React.FC = () => {
   const handleFormChange = (
     form: Record<string, unknown>,
     updateForm: (patch: Record<string, unknown>) => void,
-    allRecords: Record<string, unknown>[],
+    allRecords: Record<string, unknown>[]
   ) => {
     // Sync name ref for short-desc auto generation
     const name = (form.activityName as string) || "";
@@ -400,7 +395,7 @@ const ActivityMaster: React.FC = () => {
     // Sync records ref so the type renderer can list live groups
     allRecordsRef.current = allRecords as RecordWithId[];
 
-    // Force re-render when name changes so auto short-desc updates
+    // Force re-render when name changes so auto short-desc updates live
     const sdGroup = form.shortDescGroup as ShortDescGroup | undefined;
     if ((sdGroup?.mode ?? "auto") === "auto") {
       updateForm({ _nameSync: name });
@@ -411,7 +406,7 @@ const ActivityMaster: React.FC = () => {
   const handleCustomSave = (
     formData: Record<string, unknown>,
     _isEdit: boolean,
-    allRecords: Record<string, unknown>[],
+    allRecords: Record<string, unknown>[]
   ): Record<string, unknown> | null => {
     const name = (formData.activityName as string) || "";
     if (!name) return null;
@@ -428,17 +423,19 @@ const ActivityMaster: React.FC = () => {
     const typeGroup = formData.activityTypeGroup as
       | { type: ActivityType; groupId: string }
       | undefined;
+
     const activityType: ActivityType = typeGroup?.type ?? "Group";
     const groupId =
       activityType === "Activity" ? (typeGroup?.groupId ?? "") : "";
 
-    // Activity type must have a group selected
+    // Validation: Activity must have a group selected
     if (activityType === "Activity" && !groupId) return null;
 
     // Resolve group name for display
     const groupRecord = groupId
       ? (allRecords as RecordWithId[]).find((r) => r._id === groupId)
       : null;
+
     const groupName = groupRecord ? (groupRecord.activityName as string) : "";
 
     return {
@@ -458,7 +455,7 @@ const ActivityMaster: React.FC = () => {
     (value: unknown, row: RecordWithId, data: RecordWithId[]) => React.ReactNode
   > = {
     activityName: nameColumnRenderer,
-    activityType: typeColumnRenderer,
+    activityType: typeRenderer,
     shortDesc: (value) => (
       <span className="font-mono text-xs tracking-wide text-muted-foreground">
         {String(value || "—")}
@@ -480,7 +477,6 @@ const ActivityMaster: React.FC = () => {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance Module", "Activity Master"]} />
-
       <div className="flex items-center gap-3 mb-4">
         <Activity className="w-5 h-5 text-primary" />
         <h1 className="text-xl font-heading font-bold text-foreground">
