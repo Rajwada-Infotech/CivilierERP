@@ -141,6 +141,16 @@ const SignaturePage = lazy(() =>
   withDelay(() => import("./pages/admin/Signature")),
 );
 
+const BusinessUnitMaster = lazy(() =>
+  withDelay(() => import("./pages/admin/masters/BusinessUnitMaster")),
+);
+const ProjectMaster = lazy(() =>
+  withDelay(() => import("./pages/admin/masters/ProjectMaster")),
+);
+const CompanyMaster = lazy(() =>
+  withDelay(() => import("./pages/admin/masters/CompanyMaster")),
+);
+
 // Contexts
 import { AuthProvider } from "@/contexts/AuthContext";
 import { ModuleProvider } from "@/contexts/ModuleContext";
@@ -520,6 +530,30 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <SignaturePage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/masters/business-unit"
+        element={
+          <ProtectedRoute>
+            <BusinessUnitMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/masters/project"
+        element={
+          <ProtectedRoute>
+            <ProjectMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/masters/company"
+        element={
+          <ProtectedRoute>
+            <CompanyMaster />
           </ProtectedRoute>
         }
       />

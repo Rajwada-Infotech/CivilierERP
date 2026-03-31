@@ -35,6 +35,8 @@ import {
   FileType2,
   Activity,
   FileWarning,
+  Building2,
+  FolderKanban,
 } from "lucide-react";
 import { BillingIcon } from "@/components/icons/BillingIcon";
 
@@ -75,7 +77,7 @@ const Dropdown = ({
   );
 };
 
-// ─── Master Items ────────────────────────────────────────────────────────────
+// ─── Finance Master Items ─────────────────────────────────────────────────────
 const masterItems = [
   {
     icon: Layers,
@@ -182,24 +184,54 @@ const masterItems = [
   },
 ];
 
-
-
+// ─── Admin Master Items ───────────────────────────────────────────────────────
+const adminMasterItems = [
+  {
+    icon: Building2,
+    label: "Business Unit",
+    path: "/admin/masters/business-unit",
+    color: "text-blue-500",
+  },
+  {
+    icon: FolderKanban,
+    label: "Project",
+    path: "/admin/masters/project",
+    color: "text-violet-500",
+  },
+  {
+    icon: Landmark,
+    label: "Company",
+    path: "/admin/masters/company",
+    color: "text-emerald-500",
+  },
+];
 
 // ─── TopNavbar ───────────────────────────────────────────────────────────────
 export const TopNavbar = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { theme, setTheme } = useTheme();
-  const { activeModule, setActiveModule } = useModule();
+  const {
+    activeModule,
+    setActiveModule,
+    toggleModule: toggleActiveModule,
+  } = useModule();
   const { currentUser, logout } = useAuth();
   const { navCollapsed, setNavCollapsed } = useNavbarCollapse();
 
   const [setupOpen, setSetupOpen] = useState(false);
+  const [adminSetupOpen, setAdminSetupOpen] = useState(false);
   const [moduleOpen, setModuleOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
 
-  const isModuleActive = activeModule !== null;
+  const isAdminPage =
+    location.pathname.startsWith("/admin") ||
+    location.pathname.startsWith("/users");
+
+  // Finance Setup button is ONLY enabled when Finance module is the active module
+  const isFinanceActive = activeModule === "finance";
+
   const isSuperAdmin = currentUser?.role === "super_admin";
   const isAdmin = currentUser?.role === "admin" || isSuperAdmin;
   const RoleIcon = isSuperAdmin ? Crown : isAdmin ? Shield : null;
@@ -207,16 +239,26 @@ export const TopNavbar = () => {
 
   // ─── Toggle Handlers ───────────────────────────────────────────────────────
   const toggleSetup = useCallback(() => {
-    if (!isModuleActive) return;
+    if (!isFinanceActive) return;
     setSetupOpen((prev) => !prev);
+    setAdminSetupOpen(false);
     setModuleOpen(false);
     setUserOpen(false);
     setThemeOpen(false);
-  }, [isModuleActive]);
+  }, [isFinanceActive]);
 
-  const toggleModule = useCallback(() => {
+  const toggleAdminSetup = useCallback(() => {
+    setAdminSetupOpen((prev) => !prev);
+    setSetupOpen(false);
+    setModuleOpen(false);
+    setUserOpen(false);
+    setThemeOpen(false);
+  }, []);
+
+  const toggleModuleDropdown = useCallback(() => {
     setModuleOpen((prev) => !prev);
     setSetupOpen(false);
+    setAdminSetupOpen(false);
     setUserOpen(false);
     setThemeOpen(false);
   }, []);
@@ -224,6 +266,7 @@ export const TopNavbar = () => {
   const toggleTheme = useCallback(() => {
     setThemeOpen((prev) => !prev);
     setSetupOpen(false);
+    setAdminSetupOpen(false);
     setModuleOpen(false);
     setUserOpen(false);
   }, []);
@@ -231,12 +274,14 @@ export const TopNavbar = () => {
   const toggleUser = useCallback(() => {
     setUserOpen((prev) => !prev);
     setSetupOpen(false);
+    setAdminSetupOpen(false);
     setModuleOpen(false);
     setThemeOpen(false);
   }, []);
 
   const closeAll = useCallback(() => {
     setSetupOpen(false);
+    setAdminSetupOpen(false);
     setModuleOpen(false);
     setUserOpen(false);
     setThemeOpen(false);
@@ -276,61 +321,116 @@ export const TopNavbar = () => {
 
         {/* Collapsible Navigation Items */}
         <div
-          className={`flex items-center gap-1 transition-all duration-300 ease-in-out max-w-[620px] ${
+          className={`flex items-center gap-1 transition-all duration-300 ease-in-out max-w-[700px] ${
             navCollapsed
               ? "w-0 opacity-0 invisible pointer-events-none"
               : "w-auto opacity-100 visible pointer-events-auto"
           }`}
         >
-          {/* Setup Dropdown */}
-          <div className="relative shrink-0">
-            <button
-              onClick={toggleSetup}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all duration-200 whitespace-nowrap ${
-                isModuleActive
-                  ? "hover:bg-muted text-foreground"
-                  : "text-muted-foreground cursor-not-allowed opacity-40"
-              }`}
-            >
-              <Settings size={16} /> Setup
-            </button>
+          {/* ── Finance Setup Dropdown (shown when NOT on admin page) ── */}
+          {!isAdminPage && (
+            <div className="relative shrink-0">
+              <button
+                onClick={toggleSetup}
+                title={
+                  !isFinanceActive
+                    ? "Finance module must be active to access Setup"
+                    : ""
+                }
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all duration-200 whitespace-nowrap ${
+                  isFinanceActive
+                    ? "hover:bg-muted text-foreground"
+                    : "text-muted-foreground cursor-not-allowed opacity-40"
+                }`}
+              >
+                <Settings size={16} /> Setup
+              </button>
 
-            <Dropdown
-              open={setupOpen}
-              onClose={() => setSetupOpen(false)}
-              className="right-0 w-[22rem] p-4"
-            >
-              <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-3">
-                Masters
-              </p>
+              <Dropdown
+                open={setupOpen}
+                onClose={() => setSetupOpen(false)}
+                className="right-0 w-[22rem] p-4"
+              >
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-3">
+                  Finance Masters
+                </p>
+                <ScrollArea className="h-[22rem] pr-4 -mr-4">
+                  <div className="grid grid-cols-4 gap-3 pb-6 min-h-[22rem] py-2">
+                    {masterItems.map(({ icon: Icon, label, path, color }) => (
+                      <button
+                        key={label}
+                        onClick={() => {
+                          navigate(path);
+                          closeAll();
+                        }}
+                        className={`group flex flex-col items-center gap-2 p-3 rounded-2xl border transition-all active:scale-95 ${
+                          location.pathname === path
+                            ? "border-primary/60 bg-primary/10"
+                            : "border-border/50 hover:border-border hover:bg-muted"
+                        }`}
+                      >
+                        <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-card border border-border/60 group-hover:bg-muted transition-colors">
+                          <Icon size={20} className={color} />
+                        </div>
+                        <span className="text-[10px] font-heading text-muted-foreground group-hover:text-foreground text-center leading-tight">
+                          {label}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </ScrollArea>
+              </Dropdown>
+            </div>
+          )}
 
-              <ScrollArea className="h-[22rem] pr-4 -mr-4">
-                <div className="grid grid-cols-4 gap-3 pb-6 min-h-[22rem] py-2">
-                  {masterItems.map(({ icon: Icon, label, path, color }) => (
-                    <button
-                      key={label}
-                      onClick={() => {
-                        navigate(path);
-                        closeAll();
-                      }}
-                      className={`group flex flex-col items-center gap-2 p-3 rounded-2xl border transition-all active:scale-95 ${
-                        location.pathname === path
-                          ? "border-primary/60 bg-primary/10"
-                          : "border-border/50 hover:border-border hover:bg-muted"
-                      }`}
-                    >
-                      <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-card border border-border/60 group-hover:bg-muted transition-colors">
-                        <Icon size={20} className={color} />
-                      </div>
-                      <span className="text-[10px] font-heading text-muted-foreground group-hover:text-foreground text-center leading-tight">
-                        {label}
-                      </span>
-                    </button>
-                  ))}
+          {/* ── Admin Setup Dropdown (shown when on admin page) ── */}
+          {isAdminPage && isAdmin && (
+            <div className="relative shrink-0">
+              <button
+                onClick={toggleAdminSetup}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all duration-200 whitespace-nowrap hover:bg-muted text-foreground ${
+                  adminSetupOpen ? "bg-muted" : ""
+                }`}
+              >
+                <Settings size={16} /> Setup
+              </button>
+
+              <Dropdown
+                open={adminSetupOpen}
+                onClose={() => setAdminSetupOpen(false)}
+                className="right-0 w-[18rem] p-4"
+              >
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-3">
+                  Admin Masters
+                </p>
+                <div className="grid grid-cols-3 gap-3">
+                  {adminMasterItems.map(
+                    ({ icon: Icon, label, path, color }) => (
+                      <button
+                        key={label}
+                        onClick={() => {
+                          navigate(path);
+                          closeAll();
+                        }}
+                        className={`group flex flex-col items-center gap-2 p-3 rounded-2xl border transition-all active:scale-95 ${
+                          location.pathname === path
+                            ? "border-primary/60 bg-primary/10"
+                            : "border-border/50 hover:border-border hover:bg-muted"
+                        }`}
+                      >
+                        <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-card border border-border/60 group-hover:bg-muted transition-colors">
+                          <Icon size={20} className={color} />
+                        </div>
+                        <span className="text-[10px] font-heading text-muted-foreground group-hover:text-foreground text-center leading-tight">
+                          {label}
+                        </span>
+                      </button>
+                    ),
+                  )}
                 </div>
-              </ScrollArea>
-            </Dropdown>
-          </div>
+              </Dropdown>
+            </div>
+          )}
 
           {/* Reports */}
           <button
@@ -365,7 +465,7 @@ export const TopNavbar = () => {
           {/* Module Selector */}
           <div className="relative shrink-0">
             <button
-              onClick={toggleModule}
+              onClick={toggleModuleDropdown}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading hover:bg-muted text-foreground whitespace-nowrap"
             >
               <LayoutGrid size={16} /> Module
@@ -380,16 +480,15 @@ export const TopNavbar = () => {
                 Select Module
               </p>
               <div
-                className={`grid gap-3 ${
-                  isAdmin ? "grid-cols-3" : "grid-cols-2"
-                }`}
+                className={`grid gap-3 ${isAdmin ? "grid-cols-3" : "grid-cols-2"}`}
               >
-                {/* Finance */}
+                {/* Finance — TOGGLE behavior */}
                 <button
                   onClick={() => {
-                    setActiveModule("finance");
+                    toggleActiveModule("finance");
                     setModuleOpen(false);
-                    navigate("/");
+                    // If toggling OFF, stay on current page; if toggling ON, navigate to dashboard
+                    if (activeModule !== "finance") navigate("/");
                   }}
                   className={`group flex flex-col items-center gap-2 p-4 rounded-lg border transition-all ${
                     activeModule === "finance"

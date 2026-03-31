@@ -65,7 +65,7 @@ export const MobileNav: React.FC = () => {
   const location = useLocation();
   const { theme, setTheme } = useTheme();
   const { currentUser, logout } = useAuth();
-  const { activeModule, setActiveModule } = useModule();
+  const { activeModule, setActiveModule, toggleModule } = useModule();
   const { getOverdueTasks } = useTask();
 
   const overdueCount = getOverdueTasks().length;
@@ -371,8 +371,8 @@ export const MobileNav: React.FC = () => {
               <div className="px-3 pt-3 pb-2 flex gap-2">
                 <button
                   onClick={() => {
-                    setActiveModule("finance");
-                    navigate("/");
+                    toggleModule("finance");
+                    if (activeModule !== "finance") navigate("/");
                     setOpen(false);
                   }}
                   className={`flex-1 text-xs py-2 rounded-xl border font-heading font-semibold transition-all ${
