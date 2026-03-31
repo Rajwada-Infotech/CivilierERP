@@ -318,7 +318,6 @@ export const AppSidebar = () => {
             label: "Finance",
             icon: Landmark,
             children: [
-              { label: "Expense Booking", path: "/transactions/expense-booking" },
               { label: "Payment", path: "/payments" },
               { label: "Received Payment", path: "/received-payments" },
               { label: "BRS", path: "/brs" },
