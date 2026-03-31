@@ -71,6 +71,18 @@ const FinancialYearMaster = lazy(() =>
 const ChequeMaster = lazy(() =>
   withDelay(() => import("./pages/masters/ChequeMaster")),
 );
+const MaterialExpenseBookingMaster = lazy(() =>
+  withDelay(() => import("./pages/material/MaterialExpenseBooking")),
+);
+const WorkOrderMaster = lazy(() =>
+  withDelay(() => import("./pages/material/WorkOrderMaster")),
+);
+
+const PurchaseOrderMaster = lazy(() =>
+  withDelay(() => import("./pages/material/PurchaseOrderMaster")),
+);
+
+
 const CardMaster = lazy(() =>
   withDelay(() => import("./pages/masters/CardMaster")),
 );
@@ -335,6 +347,39 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/material/expense-booking"
+        element={
+          <ProtectedRoute>
+            <MaterialExpenseBookingMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/material/work-order"
+        element={
+          <ProtectedRoute>
+            <WorkOrderMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/material/amendments"
+        element={
+          <ProtectedRoute>
+            <Dashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/material/purchase-order"
+        element={
+          <ProtectedRoute>
+            <PurchaseOrderMaster />
+          </ProtectedRoute>
+        }
+      />
+
       <Route
         path="/masters/card"
         element={
