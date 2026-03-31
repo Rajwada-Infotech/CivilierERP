@@ -75,8 +75,10 @@ const buildNavItems = (overdueCount: number): NavItem[] => [
       { label: "Expense Booking", path: "/material/expense-booking" },
       { label: "Work Order", path: "/material/work-order" },
       { label: "Card Master", path: "/masters/card" },
+      { label: "Billing Terms", path: "/masters/billing-terms" },
     ],
   },
+
   {
     label: "Record Management",
     icon: Archive,
@@ -120,8 +122,10 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
       { label: "Expense Booking", path: "/material/expense-booking" },
       { label: "Work Order", path: "/material/work-order" },
       { label: "Card Master", path: "/masters/card" },
+      { label: "Billing Terms", path: "/masters/billing-terms" },
     ],
   },
+
   {
     label: "Communicator",
     icon: MessageSquare,

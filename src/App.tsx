@@ -109,6 +109,10 @@ const DebitNoteMaster = lazy(() =>
   withDelay(() => import("./pages/masters/DebitNoteMaster")),
 );
 
+const BillingTermsMaster = lazy(() =>
+  withDelay(() => import("./pages/masters/BillingTermsmaster")),
+);
+
 // Admin
 const AdminDashboard = lazy(() =>
   withDelay(() => import("./pages/admin/AdminDashboard")),
@@ -433,6 +437,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <DebitNoteMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/billing-terms"
+        element={
+          <ProtectedRoute>
+            <BillingTermsMaster />
           </ProtectedRoute>
         }
       />
