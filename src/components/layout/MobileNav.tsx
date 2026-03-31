@@ -138,17 +138,6 @@ export const MobileNav: React.FC = () => {
         },
       ],
     },
-    {
-      label: "Finance",
-      icon: Landmark,
-      children: [
-        {
-          label: "Expense Booking",
-          path: "/admin/expense-booking",
-          icon: FileText,
-        },
-      ],
-    },
   ];
 
   const getModuleNavItems = (): NavItem[] => {
