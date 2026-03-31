@@ -13,6 +13,7 @@ import {
   Receipt,
   CheckCircle2,
 } from "lucide-react";
+import { useDebitNote, DebitNoteRecord } from "@/contexts/DebitNoteContext";
 
 // ─── Static seed data ──────────────────────────────────────────────────────────
 
@@ -378,6 +379,7 @@ function discountSummaryRenderer(value: unknown) {
 // ─── Main component ────────────────────────────────────────────────────────────
 
 const DebitNoteMaster: React.FC = () => {
+  const { setDebitNoteRecords } = useDebitNote();
   const fields: FieldDef[] = [
     {
       name: "company",
@@ -496,6 +498,7 @@ const DebitNoteMaster: React.FC = () => {
         columnRenderers={safeColumnRenderers}
         initialData={[]}
         onCustomSave={handleCustomSave}
+        onDataChange={(records) => setDebitNoteRecords(records as DebitNoteRecord[])}
       />
     </>
   );
