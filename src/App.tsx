@@ -86,6 +86,14 @@ const TypeOfDocMaster = lazy(() =>
   withDelay(() => import("./pages/masters/TypeOfDocMaster")),
 );
 
+const ActivityMaster = lazy(() =>
+  withDelay(() => import("./pages/masters/ActivityMaster")),
+);
+
+const DebitNoteMaster = lazy(() =>
+  withDelay(() => import("./pages/masters/DebitNoteMaster")),
+);
+
 // Admin
 const AdminDashboard = lazy(() =>
   withDelay(() => import("./pages/admin/AdminDashboard")),
@@ -352,6 +360,22 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <TypeOfDocMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/activity"
+        element={
+          <ProtectedRoute>
+            <ActivityMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/debit-note"
+        element={
+          <ProtectedRoute>
+            <DebitNoteMaster />
           </ProtectedRoute>
         }
       />
