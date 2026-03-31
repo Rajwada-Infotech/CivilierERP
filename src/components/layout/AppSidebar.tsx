@@ -109,20 +109,6 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
     ],
   },
   {
-    label: "Finance",
-    icon: Landmark,
-    children: [{ label: "Expense Booking", path: "/admin/expense-booking" }],
-  },
-  {
-    label: "Material",
-    icon: Package,
-    children: [
-      { label: "Expense Booking", path: "/material/expense-booking" },
-      { label: "Work Order", path: "/material/work-order" },
-      { label: "Card Master", path: "/masters/card" },
-    ],
-  },
-  {
     label: "Communicator",
     icon: MessageSquare,
     children: [
