@@ -32,6 +32,8 @@ import {
   BookOpen,
   Tag,
   FileType2,
+  Activity,
+  FileWarning,
 } from "lucide-react";
 
 // ─── Dropdown Component ─────────────────────────────────────────────────────
@@ -155,6 +157,18 @@ const masterItems = [
     label: "Type of Doc",
     path: "/masters/type-of-doc",
     color: "text-sky-500",
+  },
+  {
+    icon: Activity,
+    label: "Activity",
+    path: "/masters/activity",
+    color: "text-green-400",
+  },
+  {
+    icon: FileWarning,
+    label: "Debit Note",
+    path: "/masters/debit-note",
+    color: "text-orange-500",
   },
 ];
 
