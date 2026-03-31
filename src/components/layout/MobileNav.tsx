@@ -62,21 +62,22 @@ export const MobileNav: React.FC = () => {
 
   const navigate = useNavigate();
   const location = useLocation();
-
   const { theme, setTheme } = useTheme();
-  const { currentUser, logout, canAccessPage } = useAuth();
+  const { currentUser, logout } = useAuth();
   const { activeModule, setActiveModule } = useModule();
   const { getOverdueTasks } = useTask();
 
   const overdueCount = getOverdueTasks().length;
+
   const isAdminPage =
     location.pathname.startsWith("/admin") ||
     location.pathname.startsWith("/users");
+
   const isSuperAdmin = currentUser?.role === "super_admin";
   const isAdmin = currentUser?.role === "admin" || isSuperAdmin;
   const isModuleActive = activeModule !== null && activeModule !== undefined;
 
-  // Master Items with permission check for HSN
+  // Master Items
   const masterItems: NavItemChild[] = [
     { icon: Layers, label: "Account Group", path: "/masters/account-group" },
     { icon: Receipt, label: "General Ledger", path: "/masters/expenses" },
@@ -87,6 +88,7 @@ export const MobileNav: React.FC = () => {
     { icon: Package, label: "Items", path: "/masters/items" },
     { icon: Layers, label: "Item Groups", path: "/masters/item-groups" },
     { icon: Hash, label: "HSN", path: "/masters/hsn" },
+    { icon: FileText, label: "TDS", path: "/masters/tds" },
     {
       icon: Calendar,
       label: "Financial Year",
@@ -153,8 +155,16 @@ export const MobileNav: React.FC = () => {
     switch (activeModule) {
       case "material":
         return [
-          { label: "Amendments", icon: BarChart3, path: "/material/amendments" },
-          { label: "Expense Booking", icon: Receipt, path: "/material/expense-booking" },
+          {
+            label: "Amendments",
+            icon: BarChart3,
+            path: "/material/amendments",
+          },
+          {
+            label: "Expense Booking",
+            icon: Receipt,
+            path: "/material/expense-booking",
+          },
           { label: "Work Order", icon: HardHat, path: "/material/work-order" },
           { label: "Card Master", icon: CreditCard, path: "/masters/card" },
         ];
@@ -209,9 +219,7 @@ export const MobileNav: React.FC = () => {
           },
         ];
       default:
-        return [
-          { label: "Amendments", icon: BarChart3, path: "/" },
-        ];
+        return [{ label: "Amendments", icon: BarChart3, path: "/" }];
     }
   };
 
@@ -247,8 +255,9 @@ export const MobileNav: React.FC = () => {
     Cards: "text-rose-500",
     "Named Entry Type": "text-purple-400",
     "Type of Doc": "text-sky-500",
-    "Activity": "text-green-400",
+    Activity: "text-green-400",
     "Debit Note": "text-orange-500",
+    TDS: "text-emerald-500",
   };
 
   const masterBgColors: Record<string, string> = {
@@ -266,8 +275,17 @@ export const MobileNav: React.FC = () => {
     Cards: "bg-rose-500/10",
     "Named Entry Type": "bg-purple-500/10",
     "Type of Doc": "bg-sky-500/10",
-    "Activity": "bg-green-500/10",
+    Activity: "bg-green-500/10",
     "Debit Note": "bg-orange-500/10",
+    TDS: "bg-emerald-500/10",
+  };
+
+  const themeCheckmarkClasses: Record<Theme, string> = {
+    dark: "text-indigo-400",
+    light: "text-violet-400",
+    midnight: "text-teal-400",
+    sepia: "text-amber-400",
+    crimson: "text-rose-400",
   };
 
   return (
@@ -322,7 +340,6 @@ export const MobileNav: React.FC = () => {
                       </span>
                     )}
                   </div>
-
                   <div className="min-w-0 flex-1">
                     <p className="text-sm font-heading font-semibold text-foreground truncate">
                       {currentUser?.name}
@@ -331,7 +348,6 @@ export const MobileNav: React.FC = () => {
                       {currentUser?.email}
                     </p>
                   </div>
-
                   <div className="flex gap-2 flex-shrink-0">
                     <button
                       aria-label="View user profile"
@@ -353,62 +369,53 @@ export const MobileNav: React.FC = () => {
                 </div>
               </div>
 
-
-  {/* Module Toggle */}
-
-  <div className="px-3 pt-3 pb-2 flex gap-2">
-    <button
-      onClick={() => {
-        setActiveModule("finance");
-        navigate("/");
-        setOpen(false);
-      }}
-      aria-label="Switch to Finance mode"
-      className={`flex-1 text-xs py-2 rounded-xl border font-heading font-semibold transition-all ${
-        activeModule === "finance" && !isAdminPage
-          ? "bg-primary text-primary-foreground border-primary shadow-sm shadow-primary/20"
-          : "border-border text-muted-foreground hover:bg-muted"
-      }`}
-    >
-      <Landmark className="w-3 h-3 inline mr-1" />
-      Finance
-    </button>
-
-    <button
-      onClick={() => {
-        setActiveModule("material");
-        navigate("/material/amendments");
-        setOpen(false);
-      }}
-      aria-label="Switch to Material mode"
-      className={`flex-1 text-xs py-2 rounded-xl border font-heading font-semibold transition-all ${
-        activeModule === "material"
-          ? "bg-emerald-500/10 text-emerald-500 border-emerald-500 shadow-sm shadow-emerald-500/20"
-          : "border-border text-muted-foreground hover:bg-muted"
-      }`}
-    >
-      <Package className="w-3 h-3 inline mr-1" />
-      Material
-    </button>
-
-  <button
-    onClick={() => {
-      navigate("/admin");
-      setOpen(false);
-    }}
-    aria-label="Switch to Admin mode"
-    className={`flex-1 text-xs py-2 rounded-xl border font-heading font-semibold transition-all ${
-      isAdminPage
-        ? "bg-blue-500/10 text-blue-500 border-blue-500 shadow-sm shadow-blue-500/20"
-        : "border-border text-muted-foreground hover:bg-muted"
-    }`}
-  >
-    <ShieldCheck className="w-3 h-3 inline mr-1" />
-    Admin
-  </button>
-
-  </div>
-
+              {/* Module Toggle */}
+              <div className="px-3 pt-3 pb-2 flex gap-2">
+                <button
+                  onClick={() => {
+                    setActiveModule("finance");
+                    navigate("/");
+                    setOpen(false);
+                  }}
+                  className={`flex-1 text-xs py-2 rounded-xl border font-heading font-semibold transition-all ${
+                    activeModule === "finance" && !isAdminPage
+                      ? "bg-primary text-primary-foreground border-primary shadow-sm shadow-primary/20"
+                      : "border-border text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  <Landmark className="w-3 h-3 inline mr-1" />
+                  Finance
+                </button>
+                <button
+                  onClick={() => {
+                    setActiveModule("material");
+                    navigate("/material/amendments");
+                    setOpen(false);
+                  }}
+                  className={`flex-1 text-xs py-2 rounded-xl border font-heading font-semibold transition-all ${
+                    activeModule === "material"
+                      ? "bg-emerald-500/10 text-emerald-500 border-emerald-500 shadow-sm shadow-emerald-500/20"
+                      : "border-border text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  <Package className="w-3 h-3 inline mr-1" />
+                  Material
+                </button>
+                <button
+                  onClick={() => {
+                    navigate("/admin");
+                    setOpen(false);
+                  }}
+                  className={`flex-1 text-xs py-2 rounded-xl border font-heading font-semibold transition-all ${
+                    isAdminPage
+                      ? "bg-blue-500/10 text-blue-500 border-blue-500 shadow-sm shadow-blue-500/20"
+                      : "border-border text-muted-foreground hover:bg-muted"
+                  }`}
+                >
+                  <ShieldCheck className="w-3 h-3 inline mr-1" />
+                  Admin
+                </button>
+              </div>
 
               {/* Navigation Items */}
               <div className="p-3 space-y-0.5">
@@ -583,7 +590,7 @@ export const MobileNav: React.FC = () => {
                 })}
               </div>
 
-              {/* Theme Selector */}
+              {/* FIXED THEME SELECTOR - No Square Border */}
               <div className="px-3 py-4 border-t border-border">
                 <div className="flex items-center gap-2 mb-3 px-1">
                   <Palette size={14} className="text-muted-foreground" />
@@ -591,39 +598,58 @@ export const MobileNav: React.FC = () => {
                     Appearance
                   </span>
                 </div>
-                <div className="grid grid-cols-4 gap-2 sm:grid-cols-5">
+
+                <div className="grid grid-cols-4 gap-3 sm:grid-cols-5">
                   {(
                     Object.entries(THEME_DOTS) as [
                       Theme,
                       { bg: string; label: string },
                     ][]
-                  ).map(([t, { bg, label }]) => (
-                    <button
-                      key={t}
-                      onClick={() => setTheme(t)}
-                      aria-label={`${label} theme`}
-                      title={label}
-                      className={`relative flex flex-col items-center gap-2 py-3 px-1 rounded-2xl border transition-all ${
-                        theme === t
-                          ? "bg-primary/10 border-primary shadow-sm"
-                          : "border-border hover:border-primary/30 hover:bg-muted/50"
-                      }`}
-                    >
-                      <div
-                        className={`w-7 h-7 rounded-full shadow-md border-2 border-white/20 ring-2 ring-offset-1 ring-offset-card bg-[${bg}]`}
-                      />
-                      <span className="text-[10px] font-heading text-muted-foreground leading-none truncate w-full text-center">
-                        {label}
-                      </span>
-                      {theme === t && (
-                        <span className="absolute top-1.5 right-1.5 w-3.5 h-3.5 rounded-full bg-primary flex items-center justify-center">
-                          <span className="text-[8px] text-primary-foreground leading-none font-bold">
-                            ✓
-                          </span>
+                  ).map(([t, { bg, label }]) => {
+                    const isSelected = theme === t;
+                    return (
+                      <button
+                        key={t}
+                        onClick={() => setTheme(t)}
+                        aria-label={`${label} theme`}
+                        title={label}
+                        className={`group relative flex flex-col items-center gap-2 py-3 px-2 rounded-2xl transition-all duration-200 ${
+                          isSelected
+                            ? "bg-primary/10 shadow-sm"
+                            : "hover:bg-muted/60 active:scale-[0.96]"
+                        }`}
+                      >
+                        {/* Theme Color Circle */}
+                        <div
+                          className={`w-10 h-10 rounded-2xl flex items-center justify-center transition-all duration-200 border-2 ${
+                            isSelected
+                              ? "border-primary shadow-md scale-110"
+                              : "border-transparent group-hover:border-border"
+                          }`}
+                          style={{ backgroundColor: bg }}
+                        >
+                          {isSelected && (
+                            <CheckCircle2
+                              size={20}
+                              strokeWidth={3.5}
+                              className={`drop-shadow-sm ${themeCheckmarkClasses[t] || "text-white"}`}
+                            />
+                          )}
+                        </div>
+
+                        {/* Theme Label */}
+                        <span
+                          className={`text-[10px] font-heading text-center leading-tight transition-colors ${
+                            isSelected
+                              ? "font-semibold text-foreground"
+                              : "text-muted-foreground group-hover:text-foreground"
+                          }`}
+                        >
+                          {label}
                         </span>
-                      )}
-                    </button>
-                  ))}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             </div>
