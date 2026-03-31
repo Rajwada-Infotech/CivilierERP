@@ -33,6 +33,7 @@ import {
   Activity,
   FileWarning,
 } from "lucide-react";
+import { BillingIcon } from "@/components/icons/BillingIcon";
 
 import { useModule } from "@/contexts/ModuleContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -100,7 +101,12 @@ export const MobileNav: React.FC = () => {
     { icon: FileType2, label: "Type of Doc", path: "/masters/type-of-doc" },
     { icon: Activity, label: "Activity", path: "/masters/activity" },
     { icon: FileWarning, label: "Debit Note", path: "/masters/debit-note" },
+    { icon: BillingIcon, label: "Billing Terms", path: "/masters/billing-terms" },
   ];
+
+
+
+
 
   const ADMIN_NAV_ITEMS: NavItem[] = [
     { label: "Transaction", icon: BarChart3, path: "/admin" },
@@ -247,6 +253,7 @@ export const MobileNav: React.FC = () => {
     Activity: "text-green-400",
     "Debit Note": "text-orange-500",
     TDS: "text-emerald-500",
+    "Billing Terms": "text-lime-500",
   };
 
   const masterBgColors: Record<string, string> = {
@@ -267,7 +274,9 @@ export const MobileNav: React.FC = () => {
     Activity: "bg-green-500/10",
     "Debit Note": "bg-orange-500/10",
     TDS: "bg-emerald-500/10",
+    "Billing Terms": "bg-lime-500/10",
   };
+
 
   const themeCheckmarkClasses: Record<Theme, string> = {
     dark: "text-indigo-400",

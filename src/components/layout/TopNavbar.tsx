@@ -36,6 +36,7 @@ import {
   Activity,
   FileWarning,
 } from "lucide-react";
+import { BillingIcon } from "@/components/icons/BillingIcon";
 
 // ─── Dropdown Component ──────────────────────────────────────────────────────
 const Dropdown = ({
@@ -173,7 +174,16 @@ const masterItems = [
     path: "/masters/debit-note",
     color: "text-orange-500",
   },
+  {
+    icon: BillingIcon,
+    label: "Billing Terms",
+    path: "/masters/billing-terms",
+    color: "text-lime-500",
+  },
 ];
+
+
+
 
 // ─── TopNavbar ───────────────────────────────────────────────────────────────
 export const TopNavbar = () => {
