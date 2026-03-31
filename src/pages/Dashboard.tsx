@@ -1,10 +1,11 @@
 import React, { useMemo } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
-  HardHat, ShoppingCart, Landmark, Receipt, TrendingUp, Users,
+  HardHat, ShoppingCart, Landmark, Receipt, TrendingUp, Users, Package, CreditCard, FileText,
   CheckCircle2, Clock, AlertCircle, ArrowRight, Circle,
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import { useModule } from "@/contexts/ModuleContext";
 import { useTask } from "@/contexts/TaskContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavigate } from "react-router-dom";
@@ -16,21 +17,6 @@ const chartData = [
   { month: "Apr", expenses: 482000 },
   { month: "May", expenses: 395000 },
   { month: "Jun", expenses: 520000 },
-];
-
-const activities = [
-  { text: "New contractor 'Raj Builders' added", time: "2 hours ago" },
-  { text: "Payment of ₹1,25,000 to Sai Suppliers", time: "4 hours ago" },
-  { text: "Bank account 'HDFC Current' updated", time: "Yesterday" },
-  { text: "Expense 'Site Material' created", time: "Yesterday" },
-  { text: "Supplier 'Metro Hardware' marked active", time: "2 days ago" },
-];
-
-const stats = [
-  { label: "Total Contractors", value: "24",        icon: HardHat,      color: "hsl(239, 84%, 67%)" },
-  { label: "Active Suppliers",  value: "18",        icon: ShoppingCart, color: "hsl(263, 70%, 58%)" },
-  { label: "Bank Accounts",     value: "6",         icon: Landmark,     color: "hsl(217, 91%, 60%)" },
-  { label: "Monthly Expenses",  value: "₹4,82,000", icon: Receipt,      color: "hsl(174, 72%, 46%)" },
 ];
 
 const STATUS_DOT: Record<string, string> = {
@@ -61,9 +47,38 @@ const MemoizedChart = React.memo(() => (
 MemoizedChart.displayName = "MemoizedChart";
 
 const Dashboard = () => {
+  const { activeModule } = useModule();
   const { tasks, getOverdueTasks, getDueSoonTasks } = useTask();
   const { currentUser } = useAuth();
   const navigate = useNavigate();
+
+  const activities = useMemo(() => activeModule === "material" 
+    ? [
+        { text: "Work Order WO-024 approved", time: "2 hours ago" },
+        { text: "Material Expense ME-056 booked", time: "4 hours ago" },
+        { text: "Card Master CM-012 updated", time: "Yesterday" },
+        { text: "Work Order WO-023 closed", time: "Yesterday" },
+        { text: "New material supplier approved", time: "2 days ago" },
+      ]
+    : [
+        { text: "New contractor 'Raj Builders' added", time: "2 hours ago" },
+        { text: "Payment of ₹1,25,000 to Sai Suppliers", time: "4 hours ago" },
+        { text: "Bank account 'HDFC Current' updated", time: "Yesterday" },
+        { text: "Expense 'Site Material' created", time: "Yesterday" },
+        { text: "Supplier 'Metro Hardware' marked active", time: "2 days ago" },
+      ], [activeModule]);
+
+  const stats = useMemo(() => activeModule === "material" ? [
+    { label: "Work Orders", value: "12", icon: HardHat, color: "hsl(239, 84%, 67%)" },
+    { label: "Material Expenses", value: "₹2,45,000", icon: Package, color: "hsl(174, 72%, 46%)" },
+    { label: "Card Masters", value: "8", icon: CreditCard, color: "hsl(263, 70%, 58%)" },
+    { label: "Pending Amendments", value: "3", icon: FileText, color: "hsl(217, 91%, 60%)" },
+  ] : [
+    { label: "Total Contractors", value: "24", icon: HardHat, color: "hsl(239, 84%, 67%)" },
+    { label: "Active Suppliers", value: "18", icon: ShoppingCart, color: "hsl(263, 70%, 58%)" },
+    { label: "Bank Accounts", value: "6", icon: Landmark, color: "hsl(217, 91%, 60%)" },
+    { label: "Monthly Expenses", value: "₹4,82,000", icon: Receipt, color: "hsl(174, 72%, 46%)" },
+  ] , [activeModule]);
 
   const myTasks = useMemo(() => {
     if (!currentUser) return [];
@@ -78,10 +93,17 @@ const Dashboard = () => {
 
   return (
     <>
-          <Breadcrumbs items={["Dashboard"]} />
+      <Breadcrumbs items={["Amendments"]} />
       <div className="mb-6">
-        <h1 className="text-2xl font-heading font-bold text-foreground">Welcome to CivilierERP</h1>
-        <p className="text-sm text-muted-foreground mt-1">Your civil ERP command center</p>
+        <h1 className="text-2xl font-heading font-bold text-foreground">
+          {activeModule === "material" ? "Material Amendments" : "Amendments"}
+        </h1>
+        <p className="text-sm text-muted-foreground mt-1">
+          {activeModule === "material" 
+            ? "Recent material expenses, work orders, and card master changes" 
+            : "Your civil ERP command center - recent amendments and overview"
+          }
+        </p>
       </div>
 
       {/* Stat Cards */}
@@ -104,7 +126,7 @@ const Dashboard = () => {
         <div className="lg:col-span-2 rounded-xl bg-card border border-border p-5">
           <div className="flex items-center gap-2 mb-4">
             <TrendingUp size={18} className="text-primary" />
-            <h2 className="font-heading font-semibold text-foreground">Monthly Expenses</h2>
+            <h2 className="font-heading font-semibold text-foreground">{activeModule === "material" ? "Monthly Material Expenses" : "Monthly Expenses"}</h2>
           </div>
           <MemoizedChart />
         </div>

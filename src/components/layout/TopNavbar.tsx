@@ -5,6 +5,7 @@ import { useTheme, THEME_DOTS, Theme } from "@/contexts/ThemeContext";
 import { useModule } from "@/contexts/ModuleContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavbarCollapse } from "./AppLayout";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Calendar,
   FileText,
@@ -292,29 +293,32 @@ export const TopNavbar = () => {
               <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-3">
                 Masters
               </p>
-              <div className="grid grid-cols-4 gap-3">
-                {masterItems.map(({ icon: Icon, label, path, color }) => (
-                  <button
-                    key={label}
-                    onClick={() => {
-                      navigate(path);
-                      closeAll();
-                    }}
-                    className={`group flex flex-col items-center gap-2 p-3 rounded-2xl border transition-all active:scale-95 ${
-                      location.pathname === path
-                        ? "border-primary/60 bg-primary/10"
-                        : "border-border/50 hover:border-border hover:bg-muted"
-                    }`}
-                  >
-                    <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-card border border-border/60 group-hover:bg-muted transition-colors">
-                      <Icon size={20} className={color} />
-                    </div>
-                    <span className="text-[10px] font-heading text-muted-foreground group-hover:text-foreground text-center leading-tight">
-                      {label}
-                    </span>
-                  </button>
-                ))}
-              </div>
+
+              <ScrollArea className="h-[22rem] pr-4 -mr-4">
+                <div className="grid grid-cols-4 gap-3 pb-6 min-h-[22rem] py-2">
+                  {masterItems.map(({ icon: Icon, label, path, color }) => (
+                    <button
+                      key={label}
+                      onClick={() => {
+                        navigate(path);
+                        closeAll();
+                      }}
+                      className={`group flex flex-col items-center gap-2 p-3 rounded-2xl border transition-all active:scale-95 ${
+                        location.pathname === path
+                          ? "border-primary/60 bg-primary/10"
+                          : "border-border/50 hover:border-border hover:bg-muted"
+                      }`}
+                    >
+                      <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-card border border-border/60 group-hover:bg-muted transition-colors">
+                        <Icon size={20} className={color} />
+                      </div>
+                      <span className="text-[10px] font-heading text-muted-foreground group-hover:text-foreground text-center leading-tight">
+                        {label}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </ScrollArea>
             </Dropdown>
           </div>
 
@@ -366,7 +370,9 @@ export const TopNavbar = () => {
                 Select Module
               </p>
               <div
-                className={`grid gap-3 ${isAdmin ? "grid-cols-2" : "grid-cols-1"}`}
+                className={`grid gap-3 ${
+                  isAdmin ? "grid-cols-3" : "grid-cols-2"
+                }`}
               >
                 {/* Finance */}
                 <button
@@ -412,6 +418,37 @@ export const TopNavbar = () => {
                     Finance
                   </span>
                   {activeModule === "finance" && (
+                    <span className="text-[10px] text-primary font-heading">
+                      Active
+                    </span>
+                  )}
+                </button>
+
+                {/* Material */}
+                <button
+                  onClick={() => {
+                    setActiveModule("material");
+                    setModuleOpen(false);
+                    navigate("/material/expense-booking");
+                  }}
+                  className={`group flex flex-col items-center gap-2 p-4 rounded-lg border transition-all ${
+                    activeModule === "material"
+                      ? "border-primary bg-primary/10"
+                      : "border-border hover:border-primary hover:bg-muted"
+                  }`}
+                >
+                  <Package
+                    size={32}
+                    className={`transition-colors ${
+                      activeModule === "material"
+                        ? "text-primary"
+                        : "text-muted-foreground group-hover:text-primary"
+                    }`}
+                  />
+                  <span className="text-xs font-heading text-muted-foreground group-hover:text-foreground">
+                    Material
+                  </span>
+                  {activeModule === "material" && (
                     <span className="text-[10px] text-primary font-heading">
                       Active
                     </span>
@@ -555,11 +592,9 @@ export const TopNavbar = () => {
                 )}
               </div>
             </div>
-
             <button className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted transition-colors text-foreground">
               <User size={14} /> Profile
             </button>
-
             <button
               onMouseDown={() => {
                 logout();

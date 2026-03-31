@@ -149,62 +149,78 @@ export const MobileNav: React.FC = () => {
     },
   ];
 
-  const NAV_ITEMS: NavItem[] = [
-    { label: "Amendments", icon: BarChart3, path: "/" },
-    {
-      label: "Setup",
-      icon: Settings,
-      children: masterItems,
-      disabled: !isModuleActive,
-      isMasters: true,
-    },
-    {
-      label: "Query",
-      icon: Scale,
-      children: [
-        { label: "Trial Balance", path: "/transactions", icon: FileText },
-        {
-          label: "Tasks",
-          path: "/tasks",
-          icon: CheckCircle2,
-          count: overdueCount,
-        },
-      ],
-    },
-    {
-      label: "Finance",
-      icon: Landmark,
-      children: [
-        {
-          label: "Expense Booking",
-          path: "/transactions/expense-booking",
-          icon: FileText,
-        },
-        { label: "Payment", path: "/payments", icon: FileText },
-        {
-          label: "Received Payment",
-          path: "/received-payments",
-          icon: FileText,
-        },
-        { label: "BRS", path: "/brs", icon: FileText },
-      ],
-    },
-    {
-      label: "Record Management",
-      icon: Archive,
-      children: [{ label: "Records", path: "/records", icon: Archive }],
-    },
-    {
-      label: "More",
-      icon: Layers,
-      children: [
-        { label: "Reports", path: "/reports", icon: BarChart3 },
-        { label: "Widgets", path: "/widgets", icon: Puzzle },
-      ],
-    },
-  ];
+  const getModuleNavItems = (): NavItem[] => {
+    switch (activeModule) {
+      case "material":
+        return [
+          { label: "Amendments", icon: BarChart3, path: "/material/amendments" },
+          { label: "Expense Booking", icon: Receipt, path: "/material/expense-booking" },
+          { label: "Work Order", icon: HardHat, path: "/material/work-order" },
+          { label: "Card Master", icon: CreditCard, path: "/masters/card" },
+        ];
+      case "finance":
+        return [
+          { label: "Amendments", icon: BarChart3, path: "/" },
+          {
+            label: "Setup",
+            icon: Settings,
+            children: masterItems,
+            disabled: !isModuleActive,
+            isMasters: true,
+          },
+          {
+            label: "Query",
+            icon: Scale,
+            children: [
+              { label: "Trial Balance", path: "/transactions", icon: FileText },
+              {
+                label: "Tasks",
+                path: "/tasks",
+                icon: CheckCircle2,
+                count: overdueCount,
+              },
+            ],
+          },
+          {
+            label: "Finance",
+            icon: Landmark,
+            children: [
+              {
+                label: "Expense Booking",
+                path: "/transactions/expense-booking",
+                icon: FileText,
+              },
+              { label: "Payment", path: "/payments", icon: FileText },
+              {
+                label: "Received Payment",
+                path: "/received-payments",
+                icon: FileText,
+              },
+              { label: "BRS", path: "/brs", icon: FileText },
+            ],
+          },
+          {
+            label: "Record Management",
+            icon: Archive,
+            children: [{ label: "Records", path: "/records", icon: Archive }],
+          },
+          {
+            label: "More",
+            icon: Layers,
+            children: [
+              { label: "Reports", path: "/reports", icon: BarChart3 },
+              { label: "Widgets", path: "/widgets", icon: Puzzle },
+            ],
+          },
+        ];
+      default:
+        return [
+          { label: "Amendments", icon: BarChart3, path: "/" },
+        ];
+    }
+  };
 
-  const itemsToRender = isAdminPage ? ADMIN_NAV_ITEMS : NAV_ITEMS;
+  const itemsToRender = isAdminPage ? ADMIN_NAV_ITEMS : getModuleNavItems();
 
   const go = (path: string) => {
     navigate(path);
