@@ -353,40 +353,62 @@ export const MobileNav: React.FC = () => {
                 </div>
               </div>
 
-              {/* Finance / Admin Toggle */}
-              {isAdmin && (
-                <div className="px-3 pt-3 pb-2 flex gap-2">
-                  <button
-                    onClick={() => {
-                      setActiveModule("finance");
-                      navigate("/");
-                      setOpen(false);
-                    }}
-                    aria-label="Switch to Finance mode"
-                    className={`flex-1 text-xs py-2 rounded-xl border font-heading font-semibold transition-all ${
-                      activeModule === "finance" && !isAdminPage
-                        ? "bg-primary text-primary-foreground border-primary shadow-sm shadow-primary/20"
-                        : "border-border text-muted-foreground hover:bg-muted"
-                    }`}
-                  >
-                    Finance
-                  </button>
-                  <button
-                    onClick={() => {
-                      navigate("/admin");
-                      setOpen(false);
-                    }}
-                    aria-label="Switch to Admin mode"
-                    className={`flex-1 text-xs py-2 rounded-xl border font-heading font-semibold transition-all ${
-                      isAdminPage
-                        ? "bg-primary text-primary-foreground border-primary shadow-sm shadow-primary/20"
-                        : "border-border text-muted-foreground hover:bg-muted"
-                    }`}
-                  >
-                    Admin
-                  </button>
-                </div>
-              )}
+
+  {/* Module Toggle */}
+
+  <div className="px-3 pt-3 pb-2 flex gap-2">
+    <button
+      onClick={() => {
+        setActiveModule("finance");
+        navigate("/");
+        setOpen(false);
+      }}
+      aria-label="Switch to Finance mode"
+      className={`flex-1 text-xs py-2 rounded-xl border font-heading font-semibold transition-all ${
+        activeModule === "finance" && !isAdminPage
+          ? "bg-primary text-primary-foreground border-primary shadow-sm shadow-primary/20"
+          : "border-border text-muted-foreground hover:bg-muted"
+      }`}
+    >
+      <Landmark className="w-3 h-3 inline mr-1" />
+      Finance
+    </button>
+
+    <button
+      onClick={() => {
+        setActiveModule("material");
+        navigate("/material/amendments");
+        setOpen(false);
+      }}
+      aria-label="Switch to Material mode"
+      className={`flex-1 text-xs py-2 rounded-xl border font-heading font-semibold transition-all ${
+        activeModule === "material"
+          ? "bg-emerald-500/10 text-emerald-500 border-emerald-500 shadow-sm shadow-emerald-500/20"
+          : "border-border text-muted-foreground hover:bg-muted"
+      }`}
+    >
+      <Package className="w-3 h-3 inline mr-1" />
+      Material
+    </button>
+
+  <button
+    onClick={() => {
+      navigate("/admin");
+      setOpen(false);
+    }}
+    aria-label="Switch to Admin mode"
+    className={`flex-1 text-xs py-2 rounded-xl border font-heading font-semibold transition-all ${
+      isAdminPage
+        ? "bg-blue-500/10 text-blue-500 border-blue-500 shadow-sm shadow-blue-500/20"
+        : "border-border text-muted-foreground hover:bg-muted"
+    }`}
+  >
+    <ShieldCheck className="w-3 h-3 inline mr-1" />
+    Admin
+  </button>
+
+  </div>
+
 
               {/* Navigation Items */}
               <div className="p-3 space-y-0.5">
