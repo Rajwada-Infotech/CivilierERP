@@ -12,6 +12,7 @@ import {
   X,
   Search,
   Landmark,
+  Hash,
   ShieldAlert,
   Calendar,
   Bell,
@@ -20,12 +21,17 @@ import {
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
+
 import { toast } from "sonner";
 
 const BANK_OPTIONS = [
-  { bankName: "HDFC Bank", ifsc: "HDFC0001234" },
-  { bankName: "State Bank of India", ifsc: "SBIN0001111" },
-  { bankName: "ICICI Bank", ifsc: "ICIC0002222" },
+  { bankName: "HDFC Bank", accountNo: "50100012345678", ifsc: "HDFC0001234" },
+  { bankName: "State Bank of India", accountNo: "38765432109876", ifsc: "SBIN0001111" },
+  { bankName: "ICICI Bank", accountNo: "12345678901234", ifsc: "ICIC0002222" },
+];
+
+const COMPANY_OPTIONS = [
+  { companyName: "Civilier ERP Pvt. Ltd.", code: "MAIN" },
 ];
 
 const CARD_NETWORKS = ["Visa", "Mastercard", "RuPay", "Amex", "Diners Club"];
@@ -34,7 +40,9 @@ const DEFAULT_REMINDER_DAYS = 30;
 
 interface CardRecord {
   _id: string;
+  companyName: string;
   bankName: string;
+  accountNumber: string;
   cardNumber: string;
   cvc: string;
   expiryDate: string;
@@ -48,6 +56,7 @@ interface CardRecord {
   savedAt: string;
   reminderDismissed: boolean;
 }
+
 
 // Parse "MM/YY" expiry to full Date (last day of month)
 function parseExpiryToDate(expiry: string): Date | null {
@@ -116,7 +125,9 @@ function formatted(num: string) {
 const SEED: CardRecord[] = [
   {
     _id: "card-seed-1",
+    companyName: "Civilier ERP Pvt. Ltd.",
     bankName: "HDFC Bank",
+    accountNumber: "50100012345678",
     cardNumber: "4111111111111234",
     cvc: "123",
     expiryDate: "12/27",
@@ -132,7 +143,9 @@ const SEED: CardRecord[] = [
   },
   {
     _id: "card-seed-2",
+    companyName: "Civilier ERP Pvt. Ltd.",
     bankName: "State Bank of India",
+    accountNumber: "38765432109876",
     cardNumber: "6200000000005678",
     cvc: "456",
     expiryDate: "08/26",
@@ -147,6 +160,7 @@ const SEED: CardRecord[] = [
     reminderDismissed: false,
   },
 ];
+
 
 type FormState = Omit<
   CardRecord,
@@ -321,14 +335,29 @@ const CardMaster: React.FC = () => {
     return calculateReminderDate(form.expiryDate, form.reminderDays);
   }, [form.reminderEnabled, form.reminderDays, form.expiryDate]);
 
+
+  // Auto-fill accountNumber when bank changes (like ChequeMaster)
+  const handleBankChange = (bankName: string) => {
+    const bank = BANK_OPTIONS.find((b) => b.bankName === bankName);
+    setForm((p) => ({
+      ...p,
+      bankName,
+      accountNumber: bank?.accountNo ?? "",
+    }));
+    if (errors.bankName) setErrors((e) => ({ ...e, bankName: false }));
+  };
+
   const setField = (k: keyof FormState, v: unknown) => {
     setForm((p) => ({ ...p, [k]: v }));
     if (errors[k as string]) setErrors((p) => ({ ...p, [k as string]: false }));
   };
 
+
   const validate = () => {
     const e: Record<string, boolean> = {};
+    if (!form.companyName) e.companyName = true;
     if (!form.bankName) e.bankName = true;
+    if (!form.accountNumber?.trim()) e.accountNumber = true;
     if (!form.cardNumber || form.cardNumber.replace(/\D/g, "").length < 13)
       e.cardNumber = true;
     if (!form.cvc || form.cvc.length < 3) e.cvc = true;
@@ -339,6 +368,7 @@ const CardMaster: React.FC = () => {
     setErrors(e);
     return Object.keys(e).length === 0;
   };
+
 
   const handleSave = () => {
     if (!validate()) return;
@@ -575,6 +605,35 @@ const CardMaster: React.FC = () => {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  Company Name <span className="text-destructive">*</span>
+                </label>
+                <div className="relative">
+                  <Landmark
+                    size={14}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                  />
+                  <select
+                    value={form.companyName || ""}
+                    onChange={(e) => setField("companyName", e.target.value)}
+                    className={`${inp} pl-8 ${errors.companyName ? "border-destructive" : ""}`}
+                  >
+                    <option value="">Select Company...</option>
+                    {COMPANY_OPTIONS.map((c) => (
+                      <option key={c.code} value={c.companyName}>
+                        {c.companyName} ({c.code})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {errors.companyName && (
+                  <p className="text-[11px] text-destructive mt-1">
+                    Company is required
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                   Bank Name <span className="text-destructive">*</span>
                 </label>
                 <div className="relative">
@@ -584,7 +643,7 @@ const CardMaster: React.FC = () => {
                   />
                   <select
                     value={form.bankName}
-                    onChange={(e) => setField("bankName", e.target.value)}
+                    onChange={(e) => handleBankChange(e.target.value)}
                     className={`${inp} pl-8 ${errors.bankName ? "border-destructive" : ""}`}
                   >
                     <option value="">Select Bank...</option>
@@ -598,6 +657,35 @@ const CardMaster: React.FC = () => {
                 {errors.bankName && (
                   <p className="text-[11px] text-destructive mt-1">
                     Bank is required
+                  </p>
+                )}
+              </div>
+
+              <div>
+                <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  Account Number <span className="text-destructive">*</span>
+                </label>
+                <div className="relative">
+                  <Hash
+                    size={14}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                  />
+                  <input
+                    type="text"
+                    value={form.accountNumber || ""}
+                    onChange={(e) => setField("accountNumber", e.target.value)}
+                    placeholder="Auto-filled from bank"
+                    className={`${inp} pl-8 font-mono tracking-widest ${errors.accountNumber ? "border-destructive" : ""}`}
+                  />
+                  {form.accountNumber && (
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-heading text-primary bg-primary/10 px-1.5 py-0.5 rounded">
+                      AUTO
+                    </span>
+                  )}
+                </div>
+                {errors.accountNumber && (
+                  <p className="text-[11px] text-destructive mt-1">
+                    Account number is required
                   </p>
                 )}
               </div>
@@ -619,6 +707,7 @@ const CardMaster: React.FC = () => {
                   ))}
                 </select>
               </div>
+
 
               <div>
                 <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
@@ -927,9 +1016,16 @@ const CardMaster: React.FC = () => {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/30">
+<th className="px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
+                    Company
+                  </th>
+                  <th className="px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
+                    Account No.
+                  </th>
                   <th className="px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
                     Bank
                   </th>
+
                   <th className="px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
                     Card Number
                   </th>
@@ -956,10 +1052,11 @@ const CardMaster: React.FC = () => {
               <tbody className="divide-y divide-border">
                 {filtered.length === 0 ? (
                   <tr>
-                    <td
-                      colSpan={8}
+  <td
+                      colSpan={10}
                       className="px-4 py-10 text-center text-muted-foreground text-sm"
                     >
+
                       {search
                         ? "No cards match your search."
                         : "No cards yet. Add one above."}
@@ -987,9 +1084,17 @@ const CardMaster: React.FC = () => {
                         key={row._id}
                         className={`hover:bg-muted/20 transition-colors ${editingId === row._id ? "bg-primary/5 border-l-2 border-l-primary" : ""}`}
                       >
+
+                        <td className="px-4 py-3 text-foreground font-medium text-sm">
+                          {row.companyName}
+                        </td>
+                        <td className="px-4 py-3 font-mono text-foreground text-sm">
+                          {row.accountNumber}
+                        </td>
                         <td className="px-4 py-3 text-foreground font-body text-sm">
                           {row.bankName}
                         </td>
+
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-2">
                             <span className="font-mono text-sm text-foreground tracking-widest">

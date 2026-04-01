@@ -393,7 +393,7 @@ function ReadonlyField({
         className={
           "rounded-lg border px-3 py-2 text-sm font-mono min-h-[38px] flex items-center " +
           (highlight
-            ? "border-primary/30 bg-primary/[0.04] text-primary font-semibold"
+            ? "border-border bg-muted/40 text-foreground font-semibold"
             : "border-border/60 bg-muted/30 text-foreground")
         }
       >
@@ -892,14 +892,14 @@ function BreakdownRow({
     debit: "bg-background",
     tax: "bg-amber-50/40 dark:bg-amber-900/10",
     subtotal: "bg-muted/40",
-    total: "bg-primary/[0.06]",
+    total: "bg-muted/50",
   };
   const vc: Record<BRVariant, string> = {
     neutral: "text-foreground",
     debit: "text-destructive",
     tax: "text-amber-700 dark:text-amber-400",
     subtotal: "text-foreground font-semibold",
-    total: "text-primary font-bold text-sm",
+    total: "text-foreground font-bold text-sm",
   };
   return (
     <div
@@ -981,7 +981,7 @@ function RecordCard({
         </div>
         <div>
           <span className="text-muted-foreground">PO: </span>
-          <span className="font-mono text-primary">{rec.poId || "-"}</span>
+          <span className="font-mono text-foreground/80">{rec.poId || "-"}</span>
         </div>
         <div>
           <span className="text-muted-foreground">Invoice: </span>
@@ -1008,7 +1008,7 @@ function RecordCard({
       <div className="flex items-center justify-between pt-2 border-t border-border">
         <div>
           <p className="text-[10px] text-muted-foreground">Net Payable</p>
-          <p className="text-sm font-mono font-semibold text-primary">
+          <p className="text-sm font-mono font-semibold text-foreground">
             Rs.{fmt(rbd.netAmount)}
           </p>
         </div>
@@ -1315,8 +1315,8 @@ export default function MaterialExpenseBooking() {
                 </Field>
 
                 {form.poId && (
-                  <div className="rounded-xl border border-primary/20 bg-primary/[0.03] p-3 sm:p-4 space-y-3">
-                    <p className="text-[11px] font-heading uppercase tracking-wider text-primary/70">
+                  <div className="rounded-xl border border-border/60 bg-muted/20 p-3 sm:p-4 space-y-3">
+                    <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
                       Auto-filled from PO
                     </p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
@@ -1458,7 +1458,7 @@ export default function MaterialExpenseBooking() {
                             <TableCell className="text-xs">
                               {rec.dueDate || "-"}
                             </TableCell>
-                            <TableCell className="font-mono text-xs text-primary">
+                            <TableCell className="font-mono text-xs text-foreground/80">
                               {rec.poId || "-"}
                             </TableCell>
                             <TableCell className="text-xs max-w-[110px] truncate">
@@ -1484,7 +1484,7 @@ export default function MaterialExpenseBooking() {
                               )}
                             </TableCell>
                             <TableCell className="font-mono text-xs">
-                              <span className="text-primary font-semibold">
+                              <span className="text-foreground font-semibold">
                                 Rs.{fmt(rbd.netAmount)}
                               </span>
                             </TableCell>
