@@ -289,6 +289,10 @@ interface AuthContextType {
   ) => { success: boolean; error?: string };
   logout: () => void;
 
+  // Session recording hooks – provided by ActivityBrowserProvider via App root
+  onLoginSuccess?: (user: AppUser) => void;
+  onLogoutSuccess?: (user: AppUser) => void;
+
   addUser: (user: Omit<AppUser, "id"> & { password: string }) => void;
   deleteUser: (id: string) => void;
   toggleUserStatus: (id: string) => void;
@@ -305,7 +309,15 @@ export const useAuth = () => {
   return ctx;
 };
 
-export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
+export const AuthProvider = ({
+  children,
+  onLoginSuccess,
+  onLogoutSuccess,
+}: {
+  children: React.ReactNode;
+  onLoginSuccess?: (user: AppUser) => void;
+  onLogoutSuccess?: (user: AppUser) => void;
+}) => {
   const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
   const [users, setUsers] = useState<any[]>(DEMO_USERS);
 
@@ -322,12 +334,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
       const { password: _pw, ...safeUser } = user;
       setCurrentUser(safeUser);
+      onLoginSuccess?.(safeUser);
       return { success: true };
     },
-    [users],
+    [users, onLoginSuccess],
   );
 
-  const logout = () => setCurrentUser(null);
+  const logout = () => {
+    if (currentUser) onLogoutSuccess?.(currentUser);
+    setCurrentUser(null);
+  };
 
   const canAccessPage = (page: PageKey) => {
     if (!currentUser) return false;

@@ -78,10 +78,23 @@ const WorkOrderMaster = lazy(() =>
   withDelay(() => import("./pages/material/WorkOrderMaster")),
 );
 
+const TaskDetail = lazy(() =>
+  withDelay(() => import("./pages/tasks/TaskDetail")),
+);
+
+const SmsSetup = lazy(() =>
+  withDelay(() => import("./pages/admin/Communicator/SmsSetup")),
+);
+const EmailSetup = lazy(() =>
+  withDelay(() => import("./pages/admin/Communicator/EmailSetup")),
+);
+const WhatsAppSetup = lazy(() =>
+  withDelay(() => import("./pages/admin/Communicator/WhatsAppSetup")),
+);
+
 const PurchaseOrderMaster = lazy(() =>
   withDelay(() => import("./pages/material/PurchaseOrderMaster")),
 );
-
 
 const CardMaster = lazy(() =>
   withDelay(() => import("./pages/masters/CardMaster")),
@@ -141,6 +154,13 @@ const SignaturePage = lazy(() =>
   withDelay(() => import("./pages/admin/Signature")),
 );
 
+const PasswordResetPage = lazy(() =>
+  withDelay(() => import("./pages/admin/security/PasswordReset")),
+);
+const ActivityBrowserPage = lazy(() =>
+  withDelay(() => import("./pages/admin/ActivityBrowser")),
+);
+
 const BusinessUnitMaster = lazy(() =>
   withDelay(() => import("./pages/admin/masters/BusinessUnitMaster")),
 );
@@ -162,6 +182,10 @@ import { RecordsProvider } from "@/contexts/RecordsContext";
 import { TdsProvider } from "@/contexts/TdsContext";
 import { DebitNoteProvider } from "@/contexts/DebitNoteContext";
 import { BillingTermsProvider } from "@/contexts/BillingTermsContext";
+import {
+  ActivityBrowserProvider,
+  useActivityBrowser,
+} from "@/contexts/ActivityBrowserContext";
 
 /* ========================= AUTH GUARD ========================= */
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -243,6 +267,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <Tasks />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/tasks/:id"
+        element={
+          <ProtectedRoute>
+            <TaskDetail />
           </ProtectedRoute>
         }
       />
@@ -557,10 +589,62 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/admin/security/password-reset"
+        element={
+          <ProtectedRoute>
+            <PasswordResetPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/activity-browser"
+        element={
+          <ProtectedRoute>
+            <ActivityBrowserPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/communicator/sms-setup"
+        element={
+          <ProtectedRoute>
+            <SmsSetup />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/communicator/email-setup"
+        element={
+          <ProtectedRoute>
+            <EmailSetup />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/communicator/whatsapp-setup"
+        element={
+          <ProtectedRoute>
+            <WhatsAppSetup />
+          </ProtectedRoute>
+        }
+      />
 
       {/* 404 */}
       <Route path="*" element={<NotFound />} />
     </Routes>
+  );
+}
+
+/* ========================= AUTH SESSION BRIDGE ========================= */
+// Sits inside ActivityBrowserProvider so it can call useActivityBrowser,
+// then passes the callbacks down into AuthProvider.
+function AuthSessionBridge({ children }: { children: React.ReactNode }) {
+  const { recordLogin, recordLogout } = useActivityBrowser();
+  return (
+    <AuthProvider onLoginSuccess={recordLogin} onLogoutSuccess={recordLogout}>
+      {children}
+    </AuthProvider>
   );
 }
 
@@ -576,31 +660,32 @@ function App() {
   if (initialLoading) return <Loader />;
 
   return (
-    <AuthProvider>
-      <ModuleProvider>
-        <ThemeProvider>
-          <FinYearProvider>
-            <HsnProvider>
-              <RecordsProvider>
-                <TdsProvider>
-                  <DebitNoteProvider>
-                    <BillingTermsProvider>
-                    <TaskProvider>
-                      <Router>
-                        <AppRoutes />
-                      </Router>
-                    </TaskProvider>
-                    </BillingTermsProvider>
-                  </DebitNoteProvider>
-                </TdsProvider>
-              </RecordsProvider>
-            </HsnProvider>
-          </FinYearProvider>
-        </ThemeProvider>
-      </ModuleProvider>
-    </AuthProvider>
+    <ActivityBrowserProvider>
+      <AuthSessionBridge>
+        <ModuleProvider>
+          <ThemeProvider>
+            <FinYearProvider>
+              <HsnProvider>
+                <RecordsProvider>
+                  <TdsProvider>
+                    <DebitNoteProvider>
+                      <BillingTermsProvider>
+                        <TaskProvider>
+                          <Router>
+                            <AppRoutes />
+                          </Router>
+                        </TaskProvider>
+                      </BillingTermsProvider>
+                    </DebitNoteProvider>
+                  </TdsProvider>
+                </RecordsProvider>
+              </HsnProvider>
+            </FinYearProvider>
+          </ThemeProvider>
+        </ModuleProvider>
+      </AuthSessionBridge>
+    </ActivityBrowserProvider>
   );
 }
 
 export default App;
-
