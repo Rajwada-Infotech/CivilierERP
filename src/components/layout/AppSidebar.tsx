@@ -20,9 +20,9 @@ import {
   Package,
   Receipt,
   HardHat,
-  CreditCard,
   Building2,
-  FolderKanban,
+  Users,
+  FileWarning,
 } from "lucide-react";
 
 interface SubItem {
@@ -45,9 +45,10 @@ interface NavItem {
   sections?: SubSection[];
 }
 
-const buildNavItems = (overdueCount: number): NavItem[] => [
-  { label: "Amendments", icon: BarChart3, path: "/" },
+// ── Finance module sidebar ──────────────────────────────────────────────────
 
+const buildFinanceNavItems = (overdueCount: number): NavItem[] => [
+  { label: "Amendments", icon: BarChart3, path: "/" },
   {
     label: "Query",
     icon: Scale,
@@ -61,7 +62,7 @@ const buildNavItems = (overdueCount: number): NavItem[] => [
     ],
   },
   {
-    label: "Finance",
+    label: "Transaction",
     icon: Landmark,
     children: [
       { label: "Expense Booking", path: "/transactions/expense-booking" },
@@ -71,22 +72,37 @@ const buildNavItems = (overdueCount: number): NavItem[] => [
     ],
   },
   {
-    label: "Material",
-    icon: Package,
-    children: [
-      { label: "Expense Booking", path: "/material/expense-booking" },
-      { label: "Work Order", path: "/material/work-order" },
-      { label: "Card Master", path: "/masters/card" },
-      { label: "Billing Terms", path: "/masters/billing-terms" },
-    ],
-  },
-
-  {
     label: "Record Management",
     icon: Archive,
     children: [{ label: "Records", path: "/records" }],
   },
 ];
+
+// ── Material module sidebar ──────────────────────────────────────────────────
+
+const buildMaterialNavItems = (): NavItem[] => [
+  {
+    label: "Amendments",
+    icon: BarChart3,
+    path: "/material/amendments",
+  },
+  {
+    label: "Transaction",
+    icon: Receipt,
+    children: [
+      { label: "Expense Booking", path: "/material/expense-booking" },
+      { label: "Work Order", path: "/material/work-order" },
+      { label: "Purchase Order", path: "/material/purchase-order" },
+    ],
+  },
+  {
+    label: "Debit Note",
+    icon: FileWarning,
+    path: "/masters/debit-note",
+  },
+];
+
+// ── Admin sidebar ──────────────────────────────────────────────────────────
 
 const ADMIN_NAV_ITEMS: NavItem[] = [
   { label: "Transaction", icon: BarChart3, path: "/admin" },
@@ -101,8 +117,11 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
   },
   {
     label: "User Control",
-    icon: FileText,
-    children: [{ label: "Manage Users", path: "/users" }],
+    icon: Users,
+    children: [
+      { label: "Manage Users", path: "/users" },
+      { label: "Activity Browser", path: "/admin/activity-browser" },
+    ],
   },
   {
     label: "Rights",
@@ -119,6 +138,13 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
     children: [
       { label: "Approval Setup", path: "/admin/approval/setup" },
       { label: "Post Approval Rights", path: "/admin/approval/post-rights" },
+    ],
+  },
+  {
+    label: "Security",
+    icon: ShieldCheck,
+    children: [
+      { label: "Password Reset", path: "/admin/security/password-reset" },
     ],
   },
   {
@@ -293,55 +319,9 @@ export const AppSidebar = () => {
   const getModuleNavItems = (): NavItem[] => {
     switch (activeModule) {
       case "material":
-        return [
-          {
-            label: "Amendments",
-            icon: BarChart3,
-            path: "/material/amendments",
-          },
-          {
-            label: "Expense Booking",
-            icon: Receipt,
-            path: "/material/expense-booking",
-          },
-          { label: "Work Order", icon: HardHat, path: "/material/work-order" },
-          {
-            label: "Purchase Order",
-            icon: Receipt,
-            path: "/material/purchase-order",
-          },
-          { label: "Card Master", icon: CreditCard, path: "/masters/card" },
-        ];
+        return buildMaterialNavItems();
       case "finance":
-        return [
-          { label: "Amendments", icon: BarChart3, path: "/" },
-          {
-            label: "Query",
-            icon: Scale,
-            children: [
-              { label: "Trial Balance", path: "/transactions" },
-              {
-                label: "Tasks",
-                path: "/tasks",
-                badge: overdueCount > 0 ? overdueCount : undefined,
-              },
-            ],
-          },
-          {
-            label: "Finance",
-            icon: Landmark,
-            children: [
-              { label: "Payment", path: "/payments" },
-              { label: "Received Payment", path: "/received-payments" },
-              { label: "BRS", path: "/brs" },
-            ],
-          },
-          {
-            label: "Record Management",
-            icon: Archive,
-            children: [{ label: "Records", path: "/records" }],
-          },
-        ];
+        return buildFinanceNavItems(overdueCount);
       default:
         return [{ label: "Amendments", icon: BarChart3, path: "/" }];
     }
@@ -367,9 +347,11 @@ export const AppSidebar = () => {
               item={item}
               collapsed={collapsed}
               hasActiveChild={
-                item.children?.some((c) => location.pathname === c.path) ||
-                item.sections?.some((s: SubSection) =>
-                  s.items.some((i: SubItem) => location.pathname === i.path),
+                !!(
+                  item.children?.some((c) => location.pathname === c.path) ||
+                  item.sections?.some((s: SubSection) =>
+                    s.items.some((i: SubItem) => location.pathname === i.path),
+                  )
                 )
               }
             />

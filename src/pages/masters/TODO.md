@@ -1,6 +1,1 @@
-# TDS Master Implementation Steps
-1. [x] Create TODO.md ✅
-2. [x] Implement TdsMaster.tsx with MasterPage, fields, columns, seed data ✅
-3. [x] Update TODO.md with progress ✅
-4. [x] Test CRUD functionality (manual verification via dev server) ✅
-5. [x] Complete task ✅
+# ChequeMaster Enhancement: Add Account Number and Company Name Fields\n\n## Plan Breakdown\n1. [ ] Update BANK_OPTIONS to include accountNo from BankMaster data.\n2. [ ] Update ChequeRecord interface with new fields.\n3. [ ] Update SEED data with samples.\n4. [ ] Update EMPTY object.\n5. [ ] Enhance handleBankChange for accountNumber auto-fill.\n6. [ ] Add Company Name select field to form.\n7. [ ] Add Account Number input to form (auto-filled, editable text).\n8. [ ] Update validate() for new required fields.\n9. [ ] Update search filter to include new fields.\n10. [ ] Add new columns to table.\n11. [ ] Test form save/edit/search/table.\n\n**Status: Starting implementation...**

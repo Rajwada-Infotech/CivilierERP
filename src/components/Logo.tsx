@@ -15,8 +15,13 @@ export const LogoIcon = ({ size = 32 }: { size?: number }) => (
 export const LogoFull = ({ className }: { className?: string }) => (
   <div className={`flex items-center gap-2 ${className || ""}`}>
     <LogoIcon size={32} />
-    <span className="font-heading font-bold text-lg gradient-text">
-      CivilierERP
-    </span>
+    <div className="flex flex-col leading-none">
+      <span className="font-heading font-bold text-lg gradient-text">
+        CivilierERP
+      </span>
+      <span className="text-[10px] text-muted-foreground/60 font-mono tracking-wider select-none">
+        v2.1.4
+      </span>
+    </div>
   </div>
 );

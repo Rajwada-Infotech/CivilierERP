@@ -5,7 +5,6 @@ import { useTheme, THEME_DOTS, Theme } from "@/contexts/ThemeContext";
 import { useModule } from "@/contexts/ModuleContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavbarCollapse } from "./AppLayout";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Calendar,
   FileText,
@@ -34,7 +33,7 @@ import {
   Tag,
   FileType2,
   Activity,
-  FileWarning,
+  ChevronDown,
 } from "lucide-react";
 import { BillingIcon } from "@/components/icons/BillingIcon";
 
@@ -44,11 +43,13 @@ const Dropdown = ({
   onClose,
   children,
   className,
+  style,
 }: {
   open: boolean;
   onClose: () => void;
   children: React.ReactNode;
   className?: string;
+  style?: React.CSSProperties;
 }) => {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -64,7 +65,8 @@ const Dropdown = ({
   return (
     <div
       ref={ref}
-      className={`absolute top-full mt-2 z-50 rounded-lg border border-border bg-card shadow-xl transition-all duration-200 origin-top-right ${
+      style={style}
+      className={`absolute top-full mt-2 z-50 rounded-xl border border-border bg-card shadow-2xl transition-all duration-200 origin-top-right ${
         open
           ? "opacity-100 scale-100 pointer-events-auto"
           : "opacity-0 scale-95 pointer-events-none"
@@ -75,11 +77,11 @@ const Dropdown = ({
   );
 };
 
-// ─── Finance Master Items ─────────────────────────────────────────────────────
-const masterItems = [
+// ─── Setup Items per Module ───────────────────────────────────────────────────
+const financeSetupItems = [
   {
     icon: Layers,
-    label: "Account Group",
+    label: "AC Group",
     path: "/masters/account-group",
     color: "text-indigo-500",
   },
@@ -96,39 +98,26 @@ const masterItems = [
     color: "text-blue-400",
   },
   {
+    icon: HardHat,
+    label: "Contractors",
+    path: "/masters/contractors",
+    color: "text-yellow-500",
+  },
+  {
     icon: Users,
     label: "Customers",
     path: "/masters/customers",
     color: "text-purple-400",
   },
   {
-    icon: HardHat,
-    label: "Contractors",
-    path: "/masters/contractors",
-    color: "text-yellow-400",
-  },
-  {
     icon: Landmark,
     label: "Banks",
     path: "/masters/banks",
-    color: "text-green-400",
+    color: "text-green-500",
   },
-  {
-    icon: Package,
-    label: "Items",
-    path: "/masters/items",
-    color: "text-teal-400",
-  },
-  {
-    icon: Layers,
-    label: "Item Groups",
-    path: "/masters/item-groups",
-    color: "text-indigo-400",
-  },
-  { icon: Hash, label: "HSN", path: "/masters/hsn", color: "text-pink-400" },
   {
     icon: Calendar,
-    label: "Financial Year",
+    label: "Fin Year",
     path: "/masters/financial-year",
     color: "text-amber-500",
   },
@@ -140,13 +129,50 @@ const masterItems = [
   },
   {
     icon: CreditCard,
-    label: "Cards",
+    label: "Card",
     path: "/masters/card",
     color: "text-rose-500",
   },
   {
+    icon: FileText,
+    label: "TDS",
+    path: "/masters/tds",
+    color: "text-emerald-500",
+  },
+];
+
+const materialSetupItems = [
+  {
+    icon: Package,
+    label: "Items",
+    path: "/masters/items",
+    color: "text-teal-500",
+  },
+  {
+    icon: Layers,
+    label: "Items Group",
+    path: "/masters/item-groups",
+    color: "text-indigo-400",
+  },
+  { icon: Hash, label: "HSN", path: "/masters/hsn", color: "text-pink-400" },
+  {
+    icon: Activity,
+    label: "Activity",
+    path: "/masters/activity",
+    color: "text-green-400",
+  },
+  {
+    icon: BillingIcon,
+    label: "Billing",
+    path: "/masters/billing-terms",
+    color: "text-lime-500",
+  },
+];
+
+const adminSetupItems = [
+  {
     icon: Tag,
-    label: "Named Entry Type",
+    label: "Entry Type",
     path: "/masters/named-entry-type",
     color: "text-purple-400",
   },
@@ -156,42 +182,107 @@ const masterItems = [
     path: "/masters/type-of-doc",
     color: "text-sky-500",
   },
-  {
-    icon: FileText,
-    label: "TDS",
-    path: "/masters/tds",
-    color: "text-emerald-500",
-  },
-  {
-    icon: Activity,
-    label: "Activity",
-    path: "/masters/activity",
-    color: "text-green-400",
-  },
-  {
-    icon: FileWarning,
-    label: "Debit Note",
-    path: "/masters/debit-note",
-    color: "text-orange-500",
-  },
-  {
-    icon: BillingIcon,
-    label: "Billing Terms",
-    path: "/masters/billing-terms",
-    color: "text-lime-500",
-  },
 ];
+
+// ─── Setup Dropdown Panel ─────────────────────────────────────────────────────
+const SetupDropdown = ({
+  open,
+  onClose,
+  items,
+  moduleLabel,
+  moduleColor,
+  navigate,
+  location,
+}: {
+  open: boolean;
+  onClose: () => void;
+  items: {
+    icon: React.ElementType;
+    label: string;
+    path: string;
+    color: string;
+  }[];
+  moduleLabel: string;
+  moduleColor: string;
+  navigate: (path: string) => void;
+  location: { pathname: string };
+}) => {
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open, onClose]);
+
+  return (
+    <div
+      ref={ref}
+      className={`absolute top-full mt-2 z-50 rounded-xl border border-border bg-card shadow-2xl transition-all duration-200 origin-top-left left-0 ${
+        open
+          ? "opacity-100 scale-100 pointer-events-auto"
+          : "opacity-0 scale-95 pointer-events-none"
+      }`}
+      style={{ minWidth: "20rem" }}
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+        <div className="flex items-center gap-2">
+          <Settings size={14} className="text-muted-foreground" />
+          <span className="text-xs font-heading font-semibold text-foreground uppercase tracking-wider">
+            Setup
+          </span>
+        </div>
+        <span
+          className={`text-[10px] font-heading px-2 py-0.5 rounded-full border ${moduleColor}`}
+        >
+          {moduleLabel}
+        </span>
+      </div>
+
+      {/* Grid of items */}
+      <div className="p-3">
+        <div className="grid grid-cols-4 gap-2">
+          {items.map(({ icon: Icon, label, path, color }) => (
+            <button
+              key={path}
+              onClick={() => {
+                navigate(path);
+                onClose();
+              }}
+              className={`group flex flex-col items-center gap-1.5 p-2.5 rounded-xl border transition-all duration-150 active:scale-95 ${
+                location.pathname === path
+                  ? "border-primary/40 bg-primary/[0.06]"
+                  : "border-transparent hover:border-border hover:bg-muted/60"
+              }`}
+            >
+              <div
+                className={`w-8 h-8 rounded-lg flex items-center justify-center bg-muted/50 group-hover:bg-muted transition-colors ${
+                  location.pathname === path ? "bg-primary/10" : ""
+                }`}
+              >
+                <Icon size={16} className={color} />
+              </div>
+              <span className="text-[9px] font-heading text-muted-foreground group-hover:text-foreground text-center leading-tight line-clamp-2">
+                {label}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
 
 // ─── TopNavbar ───────────────────────────────────────────────────────────────
 export const TopNavbar = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { theme, setTheme } = useTheme();
-  const {
-    activeModule,
-    setActiveModule,
-    toggleModule: toggleActiveModule,
-  } = useModule();
+  const { activeModule, setActiveModule } = useModule();
   const { currentUser, logout } = useAuth();
   const { navCollapsed, setNavCollapsed } = useNavbarCollapse();
 
@@ -200,21 +291,49 @@ export const TopNavbar = () => {
   const [userOpen, setUserOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
 
-  const isFinanceActive = activeModule === "finance";
+  const isAdminPage =
+    location.pathname.startsWith("/admin") ||
+    location.pathname.startsWith("/users");
   const isSuperAdmin = currentUser?.role === "super_admin";
   const isAdmin = currentUser?.role === "admin" || isSuperAdmin;
 
   const RoleIcon = isSuperAdmin ? Crown : isAdmin ? Shield : null;
   const roleBadgeClassName = isSuperAdmin ? "bg-violet-600" : "bg-blue-600";
 
+  const getSetupConfig = () => {
+    if (isAdminPage)
+      return {
+        items: adminSetupItems,
+        label: "Admin",
+        color: "bg-blue-500/10 text-blue-600 border-blue-200/60",
+        available: true,
+      };
+    if (activeModule === "material")
+      return {
+        items: materialSetupItems,
+        label: "Material",
+        color: "bg-emerald-500/10 text-emerald-600 border-emerald-200/60",
+        available: true,
+      };
+    if (activeModule === "finance")
+      return {
+        items: financeSetupItems,
+        label: "Finance",
+        color: "bg-primary/10 text-primary border-primary/20",
+        available: true,
+      };
+    return { items: [], label: "No Module", color: "", available: false };
+  };
+  const setupConfig = getSetupConfig();
+
   // ─── Toggle Handlers ───────────────────────────────────────────────────────
   const toggleSetup = useCallback(() => {
-    if (!isFinanceActive) return;
+    if (!setupConfig.available) return;
     setSetupOpen((prev) => !prev);
     setModuleOpen(false);
     setUserOpen(false);
     setThemeOpen(false);
-  }, [isFinanceActive]);
+  }, [setupConfig.available]);
 
   const toggleModuleDropdown = useCallback(() => {
     setModuleOpen((prev) => !prev);
@@ -276,7 +395,7 @@ export const TopNavbar = () => {
           )}
         </button>
 
-        {/* Collapsible Navigation Items */}
+        {/* Collapsible Nav Items */}
         <div
           className={`flex items-center gap-1 transition-all duration-300 ease-in-out max-w-[700px] ${
             navCollapsed
@@ -284,58 +403,39 @@ export const TopNavbar = () => {
               : "w-auto opacity-100 visible pointer-events-auto"
           }`}
         >
-          {/* Finance Setup Dropdown */}
+          {/* Setup Dropdown — module-aware */}
           <div className="relative shrink-0">
             <button
               onClick={toggleSetup}
               title={
-                !isFinanceActive
-                  ? "Finance module must be active to access Setup"
-                  : ""
+                !setupConfig.available ? "Select a module to access Setup" : ""
               }
               className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all duration-200 whitespace-nowrap ${
-                isFinanceActive
-                  ? "hover:bg-muted text-foreground"
-                  : "text-muted-foreground cursor-not-allowed opacity-40"
+                setupOpen
+                  ? "bg-muted text-foreground"
+                  : setupConfig.available
+                    ? "hover:bg-muted text-foreground"
+                    : "text-muted-foreground/40 cursor-not-allowed"
               }`}
             >
-              <Settings size={16} /> Setup
+              <Settings size={15} />
+              <span>Setup</span>
+              {setupConfig.available && (
+                <ChevronDown
+                  size={13}
+                  className={`transition-transform duration-200 ${setupOpen ? "rotate-180" : ""}`}
+                />
+              )}
             </button>
-
-            <Dropdown
+            <SetupDropdown
               open={setupOpen}
               onClose={() => setSetupOpen(false)}
-              className="right-0 w-[22rem] p-4"
-            >
-              <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-3">
-                Finance Masters
-              </p>
-              <ScrollArea className="h-[22rem] pr-4 -mr-4">
-                <div className="grid grid-cols-4 gap-3 pb-6 min-h-[22rem] py-2">
-                  {masterItems.map(({ icon: Icon, label, path, color }) => (
-                    <button
-                      key={label}
-                      onClick={() => {
-                        navigate(path);
-                        closeAll();
-                      }}
-                      className={`group flex flex-col items-center gap-2 p-3 rounded-2xl border transition-all active:scale-95 ${
-                        location.pathname === path
-                          ? "border-primary/60 bg-primary/10"
-                          : "border-border/50 hover:border-border hover:bg-muted"
-                      }`}
-                    >
-                      <div className="w-9 h-9 rounded-xl flex items-center justify-center bg-card border border-border/60 group-hover:bg-muted transition-colors">
-                        <Icon size={20} className={color} />
-                      </div>
-                      <span className="text-[10px] font-heading text-muted-foreground group-hover:text-foreground text-center leading-tight">
-                        {label}
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              </ScrollArea>
-            </Dropdown>
+              items={setupConfig.items}
+              moduleLabel={setupConfig.label}
+              moduleColor={setupConfig.color}
+              navigate={navigate}
+              location={location}
+            />
           </div>
 
           {/* Reports */}
@@ -372,43 +472,57 @@ export const TopNavbar = () => {
           <div className="relative shrink-0">
             <button
               onClick={toggleModuleDropdown}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading hover:bg-muted text-foreground whitespace-nowrap"
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all whitespace-nowrap ${
+                moduleOpen
+                  ? "bg-muted text-foreground"
+                  : "hover:bg-muted text-foreground"
+              }`}
             >
-              <LayoutGrid size={16} /> Module
+              <LayoutGrid size={16} />
+              <span>Module</span>
+              <ChevronDown
+                size={13}
+                className={`transition-transform duration-200 ${moduleOpen ? "rotate-180" : ""}`}
+              />
             </button>
 
             <Dropdown
               open={moduleOpen}
               onClose={() => setModuleOpen(false)}
-              className="right-0 w-80 p-3"
+              className="right-0 p-3"
+              style={{ minWidth: "20rem" }}
             >
-              <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-3">
+              <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-3 px-1">
                 Select Module
               </p>
               <div
-                className={`grid gap-3 ${isAdmin ? "grid-cols-3" : "grid-cols-2"}`}
+                className={`grid gap-2 ${isAdmin ? "grid-cols-3" : "grid-cols-2"}`}
               >
                 {/* Finance */}
                 <button
                   onClick={() => {
-                    toggleActiveModule("finance");
+                    setActiveModule("finance");
                     setModuleOpen(false);
-                    if (activeModule !== "finance") navigate("/");
+                    navigate("/");
                   }}
-                  className={`group flex flex-col items-center gap-2 p-4 rounded-lg border transition-all ${
-                    activeModule === "finance"
-                      ? "border-primary bg-primary/10"
-                      : "border-border hover:border-primary hover:bg-muted"
+                  className={`group flex flex-col items-center gap-1.5 p-2.5 rounded-xl border transition-all ${
+                    activeModule === "finance" && !isAdminPage
+                      ? "border-primary bg-primary/10 shadow-sm"
+                      : "border-border hover:border-primary/40 hover:bg-muted/60"
                   }`}
                 >
-                  <svg width="32" height="32" viewBox="0 0 36 36" fill="none">
+                  <svg width="22" height="22" viewBox="0 0 36 36" fill="none">
                     <circle
                       cx="12"
                       cy="22"
                       r="7"
                       stroke="currentColor"
                       strokeWidth="2"
-                      className="text-primary"
+                      className={
+                        activeModule === "finance" && !isAdminPage
+                          ? "text-primary"
+                          : "text-muted-foreground group-hover:text-primary"
+                      }
                     />
                     <circle
                       cx="24"
@@ -416,7 +530,11 @@ export const TopNavbar = () => {
                       r="7"
                       stroke="currentColor"
                       strokeWidth="2"
-                      className="text-secondary"
+                      className={
+                        activeModule === "finance" && !isAdminPage
+                          ? "text-primary/50"
+                          : "text-muted-foreground/50 group-hover:text-primary/50"
+                      }
                     />
                     <rect
                       x="8"
@@ -425,14 +543,20 @@ export const TopNavbar = () => {
                       height="3"
                       rx="1.5"
                       fill="currentColor"
-                      className="text-primary"
+                      className={
+                        activeModule === "finance" && !isAdminPage
+                          ? "text-primary"
+                          : "text-muted-foreground group-hover:text-primary"
+                      }
                     />
                   </svg>
-                  <span className="text-xs font-heading text-muted-foreground group-hover:text-foreground">
+                  <span
+                    className={`text-xs font-heading ${activeModule === "finance" && !isAdminPage ? "text-primary font-semibold" : "text-muted-foreground group-hover:text-foreground"}`}
+                  >
                     Finance
                   </span>
-                  {activeModule === "finance" && (
-                    <span className="text-[10px] text-primary font-heading">
+                  {activeModule === "finance" && !isAdminPage && (
+                    <span className="text-[9px] font-heading px-1.5 py-0.5 rounded-full bg-primary/15 text-primary">
                       Active
                     </span>
                   )}
@@ -445,25 +569,27 @@ export const TopNavbar = () => {
                     setModuleOpen(false);
                     navigate("/material/expense-booking");
                   }}
-                  className={`group flex flex-col items-center gap-2 p-4 rounded-lg border transition-all ${
-                    activeModule === "material"
-                      ? "border-primary bg-primary/10"
-                      : "border-border hover:border-primary hover:bg-muted"
+                  className={`group flex flex-col items-center gap-1.5 p-2.5 rounded-xl border transition-all ${
+                    activeModule === "material" && !isAdminPage
+                      ? "border-emerald-500/60 bg-emerald-500/10 shadow-sm"
+                      : "border-border hover:border-emerald-500/40 hover:bg-muted/60"
                   }`}
                 >
                   <Package
-                    size={32}
+                    size={22}
                     className={`transition-colors ${
-                      activeModule === "material"
-                        ? "text-primary"
-                        : "text-muted-foreground group-hover:text-primary"
+                      activeModule === "material" && !isAdminPage
+                        ? "text-emerald-500"
+                        : "text-muted-foreground group-hover:text-emerald-500"
                     }`}
                   />
-                  <span className="text-xs font-heading text-muted-foreground group-hover:text-foreground">
+                  <span
+                    className={`text-xs font-heading ${activeModule === "material" && !isAdminPage ? "text-emerald-600 font-semibold" : "text-muted-foreground group-hover:text-foreground"}`}
+                  >
                     Material
                   </span>
-                  {activeModule === "material" && (
-                    <span className="text-[10px] text-primary font-heading">
+                  {activeModule === "material" && !isAdminPage && (
+                    <span className="text-[9px] font-heading px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600">
                       Active
                     </span>
                   )}
@@ -476,19 +602,19 @@ export const TopNavbar = () => {
                       setModuleOpen(false);
                       navigate("/admin");
                     }}
-                    className={`group flex flex-col items-center gap-2 p-4 rounded-lg border transition-all ${
-                      location.pathname.startsWith("/admin")
-                        ? "border-primary bg-primary/10"
-                        : "border-border hover:border-primary hover:bg-muted"
+                    className={`group flex flex-col items-center gap-1.5 p-2.5 rounded-xl border transition-all ${
+                      isAdminPage
+                        ? "border-blue-500/60 bg-blue-500/10 shadow-sm"
+                        : "border-border hover:border-blue-500/40 hover:bg-muted/60"
                     }`}
                   >
                     <div className="relative">
                       <ShieldCheck
-                        size={32}
+                        size={22}
                         className={`transition-colors ${
-                          location.pathname.startsWith("/admin")
-                            ? "text-primary"
-                            : "text-muted-foreground group-hover:text-primary"
+                          isAdminPage
+                            ? "text-blue-500"
+                            : "text-muted-foreground group-hover:text-blue-500"
                         }`}
                       />
                       {isSuperAdmin && (
@@ -497,16 +623,29 @@ export const TopNavbar = () => {
                         </span>
                       )}
                     </div>
-                    <span className="text-xs font-heading text-muted-foreground group-hover:text-foreground">
+                    <span
+                      className={`text-xs font-heading ${isAdminPage ? "text-blue-600 font-semibold" : "text-muted-foreground group-hover:text-foreground"}`}
+                    >
                       Admin
                     </span>
-                    {location.pathname.startsWith("/admin") && (
-                      <span className="text-[10px] text-primary font-heading">
+                    {isAdminPage && (
+                      <span className="text-[9px] font-heading px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-600">
                         Active
                       </span>
                     )}
                   </button>
                 )}
+              </div>
+
+              {/* Active module indicator bar */}
+              <div className="mt-3 pt-3 border-t border-border">
+                <p className="text-[10px] text-muted-foreground font-heading text-center">
+                  {isAdminPage
+                    ? "Currently in Admin"
+                    : activeModule
+                      ? `Currently in ${activeModule.charAt(0).toUpperCase() + activeModule.slice(1)}`
+                      : "No module selected"}
+                </p>
               </div>
             </Dropdown>
           </div>
@@ -606,11 +745,9 @@ export const TopNavbar = () => {
                 )}
               </div>
             </div>
-
             <button className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted transition-colors text-foreground">
               <User size={14} /> Profile
             </button>
-
             <button
               onMouseDown={() => {
                 logout();

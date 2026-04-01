@@ -1,39 +1,30 @@
 import React, { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
-  Calendar,
-  FileText,
   BarChart3,
   CheckCircle2,
   Menu,
   X,
-  Scale,
-  ChevronDown,
-  Hash,
-  ShieldCheck,
-  Receipt,
-  Truck,
-  Users,
-  HardHat,
   Landmark,
-  Package,
-  Layers,
+  Receipt,
+  HardHat,
+  FileText,
+  Archive,
   Puzzle,
-  Settings,
   LogOut,
   User,
   Crown,
   Palette,
-  ChevronRight,
-  Archive,
-  CreditCard,
-  BookOpen,
-  Tag,
-  FileType2,
-  Activity,
+  ShieldCheck,
+  Package,
+  Building2,
+  MessageSquare,
+  Users,
+  ChevronDown,
+  Layers,
+  Scale,
   FileWarning,
 } from "lucide-react";
-import { BillingIcon } from "@/components/icons/BillingIcon";
 
 import { useModule } from "@/contexts/ModuleContext";
 import { useAuth } from "@/contexts/AuthContext";
@@ -65,7 +56,7 @@ export const MobileNav: React.FC = () => {
   const location = useLocation();
   const { theme, setTheme } = useTheme();
   const { currentUser, logout } = useAuth();
-  const { activeModule, setActiveModule, toggleModule } = useModule();
+  const { activeModule, setActiveModule } = useModule();
   const { getOverdueTasks } = useTask();
 
   const overdueCount = getOverdueTasks().length;
@@ -76,44 +67,30 @@ export const MobileNav: React.FC = () => {
 
   const isSuperAdmin = currentUser?.role === "super_admin";
   const isAdmin = currentUser?.role === "admin" || isSuperAdmin;
-  const isModuleActive = activeModule !== null && activeModule !== undefined;
 
-  // Master Items
-  const masterItems: NavItemChild[] = [
-    { icon: Layers, label: "Account Group", path: "/masters/account-group" },
-    { icon: Receipt, label: "General Ledger", path: "/masters/expenses" },
-    { icon: Truck, label: "Suppliers", path: "/masters/suppliers" },
-    { icon: Users, label: "Customers", path: "/masters/customers" },
-    { icon: HardHat, label: "Contractors", path: "/masters/contractors" },
-    { icon: Landmark, label: "Banks", path: "/masters/banks" },
-    { icon: Package, label: "Items", path: "/masters/items" },
-    { icon: Layers, label: "Item Groups", path: "/masters/item-groups" },
-    { icon: Hash, label: "HSN", path: "/masters/hsn" },
-    { icon: FileText, label: "TDS", path: "/masters/tds" },
-    {
-      icon: Calendar,
-      label: "Financial Year",
-      path: "/masters/financial-year",
-    },
-    { icon: BookOpen, label: "Cheque", path: "/masters/cheque" },
-    { icon: CreditCard, label: "Cards", path: "/masters/card" },
-    { icon: Tag, label: "Named Entry Type", path: "/masters/named-entry-type" },
-    { icon: FileType2, label: "Type of Doc", path: "/masters/type-of-doc" },
-    { icon: Activity, label: "Activity", path: "/masters/activity" },
-    { icon: FileWarning, label: "Debit Note", path: "/masters/debit-note" },
-    { icon: BillingIcon, label: "Billing Terms", path: "/masters/billing-terms" },
-  ];
-
-
-
-
-
+  // Admin Navigation Items
   const ADMIN_NAV_ITEMS: NavItem[] = [
     { label: "Transaction", icon: BarChart3, path: "/admin" },
     {
+      label: "Enterprise",
+      icon: Building2,
+      children: [
+        {
+          label: "Business Unit",
+          path: "/admin/masters/business-unit",
+          icon: FileText,
+        },
+        { label: "Project", path: "/admin/masters/project", icon: FileText },
+        { label: "Company", path: "/admin/masters/company", icon: FileText },
+      ],
+    },
+    {
       label: "User Control",
       icon: Users,
-      children: [{ label: "Manage Users", path: "/users", icon: FileText }],
+      children: [
+        { label: "Manage Users", path: "/users", icon: FileText },
+        { label: "Activity Browser", path: "/admin/activity-browser", icon: FileText },
+      ],
     },
     {
       label: "Rights",
@@ -144,8 +121,41 @@ export const MobileNav: React.FC = () => {
         },
       ],
     },
+    {
+      label: "Security",
+      icon: ShieldCheck,
+      children: [
+        {
+          label: "Password Reset",
+          path: "/admin/security/password-reset",
+          icon: FileText,
+        },
+      ],
+    },
+    {
+      label: "Communicator",
+      icon: MessageSquare,
+      children: [
+        {
+          label: "SMS Setup",
+          path: "/admin/communicator/sms-setup",
+          icon: FileText,
+        },
+        {
+          label: "Email Setup",
+          path: "/admin/communicator/email-setup",
+          icon: FileText,
+        },
+        {
+          label: "WhatsApp Setup",
+          path: "/admin/communicator/whatsapp-setup",
+          icon: FileText,
+        },
+      ],
+    },
   ];
 
+  // Module-specific Navigation Items
   const getModuleNavItems = (): NavItem[] => {
     switch (activeModule) {
       case "material":
@@ -156,26 +166,39 @@ export const MobileNav: React.FC = () => {
             path: "/material/amendments",
           },
           {
-            label: "Expense Booking",
+            label: "Transaction",
             icon: Receipt,
-            path: "/material/expense-booking",
+            children: [
+              {
+                label: "Expense Booking",
+                path: "/material/expense-booking",
+                icon: Receipt,
+              },
+              {
+                label: "Work Order",
+                path: "/material/work-order",
+                icon: HardHat,
+              },
+              {
+                label: "Purchase Order",
+                path: "/material/purchase-order",
+                icon: FileText,
+              },
+            ],
           },
-          { label: "Work Order", icon: HardHat, path: "/material/work-order" },
-          { label: "Card Master", icon: CreditCard, path: "/masters/card" },
+          {
+            label: "Debit Note",
+            icon: FileWarning,
+            path: "/masters/debit-note",
+          },
         ];
+
       case "finance":
         return [
           { label: "Amendments", icon: BarChart3, path: "/" },
           {
-            label: "Setup",
-            icon: Settings,
-            children: masterItems,
-            disabled: !isModuleActive,
-            isMasters: true,
-          },
-          {
             label: "Query",
-            icon: Scale,
+            icon: Landmark,
             children: [
               { label: "Trial Balance", path: "/transactions", icon: FileText },
               {
@@ -187,9 +210,14 @@ export const MobileNav: React.FC = () => {
             ],
           },
           {
-            label: "Finance",
+            label: "Transaction",
             icon: Landmark,
             children: [
+              {
+                label: "Expense Booking",
+                path: "/transactions/expense-booking",
+                icon: Receipt,
+              },
               { label: "Payment", path: "/payments", icon: FileText },
               {
                 label: "Received Payment",
@@ -213,6 +241,7 @@ export const MobileNav: React.FC = () => {
             ],
           },
         ];
+
       default:
         return [{ label: "Amendments", icon: BarChart3, path: "/" }];
     }
@@ -234,49 +263,6 @@ export const MobileNav: React.FC = () => {
     if (children) return children.some((c) => location.pathname === c.path);
     return false;
   };
-
-  const masterIconColors: Record<string, string> = {
-    "Account Group": "text-indigo-500",
-    "General Ledger": "text-orange-400",
-    Suppliers: "text-blue-400",
-    Customers: "text-violet-400",
-    Contractors: "text-yellow-500",
-    Banks: "text-emerald-500",
-    Items: "text-teal-400",
-    "Item Groups": "text-indigo-400",
-    HSN: "text-pink-500",
-    "Financial Year": "text-amber-500",
-    Cheque: "text-cyan-500",
-    Cards: "text-rose-500",
-    "Named Entry Type": "text-purple-400",
-    "Type of Doc": "text-sky-500",
-    Activity: "text-green-400",
-    "Debit Note": "text-orange-500",
-    TDS: "text-emerald-500",
-    "Billing Terms": "text-lime-500",
-  };
-
-  const masterBgColors: Record<string, string> = {
-    "Account Group": "bg-indigo-500/10",
-    "General Ledger": "bg-orange-500/10",
-    Suppliers: "bg-blue-500/10",
-    Customers: "bg-violet-500/10",
-    Contractors: "bg-yellow-500/10",
-    Banks: "bg-emerald-500/10",
-    Items: "bg-teal-500/10",
-    "Item Groups": "bg-indigo-500/10",
-    HSN: "bg-pink-500/10",
-    "Financial Year": "bg-amber-500/10",
-    Cheque: "bg-cyan-500/10",
-    Cards: "bg-rose-500/10",
-    "Named Entry Type": "bg-purple-500/10",
-    "Type of Doc": "bg-sky-500/10",
-    Activity: "bg-green-500/10",
-    "Debit Note": "bg-orange-500/10",
-    TDS: "bg-emerald-500/10",
-    "Billing Terms": "bg-lime-500/10",
-  };
-
 
   const themeCheckmarkClasses: Record<Theme, string> = {
     dark: "text-indigo-400",
@@ -306,261 +292,172 @@ export const MobileNav: React.FC = () => {
           />
 
           {/* Drawer */}
-          <div className="absolute bottom-0 left-0 right-0 rounded-t-2xl bg-card border-t border-border max-h-[90vh] flex flex-col">
+          <div className="absolute bottom-0 left-0 right-0 rounded-t-3xl bg-card border-t border-border max-h-[90vh] flex flex-col shadow-xl">
             {/* Header */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border flex-shrink-0">
-              <span className="font-heading font-semibold text-sm text-foreground">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border flex-shrink-0">
+              <span className="font-heading font-semibold text-base text-foreground">
                 Menu
               </span>
               <button
                 onClick={() => setOpen(false)}
                 aria-label="Close menu"
-                className="p-1 rounded-lg hover:bg-muted transition-colors text-muted-foreground"
+                className="p-2 rounded-xl hover:bg-muted transition-colors text-muted-foreground"
               >
-                <X size={18} />
+                <X size={22} />
               </button>
             </div>
 
-            <div className="overflow-y-auto flex-1">
+            <div className="overflow-y-auto flex-1 pb-6">
               {/* User Section */}
-              <div className="p-3 border-b border-border">
-                <div className="flex items-center gap-3">
-                  <div className="relative w-10 h-10 rounded-full flex items-center justify-center bg-primary text-primary-foreground font-heading font-semibold text-sm flex-shrink-0">
+              <div className="p-5 border-b border-border">
+                <div className="flex items-center gap-4">
+                  <div className="relative w-12 h-12 rounded-2xl flex items-center justify-center bg-primary text-primary-foreground font-heading font-semibold text-lg flex-shrink-0">
                     {currentUser?.initials || "?"}
                     {isSuperAdmin && (
-                      <span className="absolute -bottom-1 -right-1 w-5 h-5 flex items-center justify-center rounded-full border-2 border-card bg-violet-600">
-                        <Crown size={10} className="text-white" />
+                      <span className="absolute -bottom-1 -right-1 w-6 h-6 flex items-center justify-center rounded-full border-2 border-card bg-violet-600">
+                        <Crown size={12} className="text-white" />
                       </span>
                     )}
                     {!isSuperAdmin && isAdmin && (
-                      <span className="absolute -bottom-1 -right-1 w-5 h-5 flex items-center justify-center rounded-full border-2 border-card bg-blue-600">
-                        <ShieldCheck size={10} className="text-white" />
+                      <span className="absolute -bottom-1 -right-1 w-6 h-6 flex items-center justify-center rounded-full border-2 border-card bg-blue-600">
+                        <ShieldCheck size={12} className="text-white" />
                       </span>
                     )}
                   </div>
+
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-heading font-semibold text-foreground truncate">
+                    <p className="font-heading font-semibold text-foreground truncate">
                       {currentUser?.name}
                     </p>
-                    <p className="text-xs text-muted-foreground truncate">
+                    <p className="text-sm text-muted-foreground truncate">
                       {currentUser?.email}
                     </p>
                   </div>
-                  <div className="flex gap-2 flex-shrink-0">
-                    <button
-                      aria-label="View user profile"
-                      className="p-2 border border-border rounded-xl flex items-center text-foreground hover:bg-muted transition-colors"
-                    >
-                      <User size={14} />
+
+                  <div className="flex gap-2">
+                    <button className="p-3 border border-border rounded-2xl hover:bg-muted transition-colors">
+                      <User size={18} />
                     </button>
                     <button
                       onClick={() => {
                         logout();
+                        navigate("/login");
                         setOpen(false);
                       }}
-                      aria-label="Log out"
-                      className="p-2 border border-border rounded-xl flex items-center text-destructive hover:bg-destructive/10 transition-colors"
+                      className="p-3 border border-border rounded-2xl hover:bg-destructive/10 text-destructive transition-colors"
                     >
-                      <LogOut size={14} />
+                      <LogOut size={18} />
                     </button>
                   </div>
                 </div>
               </div>
 
-              {/* Module Toggle */}
-              <div className="px-3 pt-3 pb-2 flex gap-2">
-                <button
-                  onClick={() => {
-                    toggleModule("finance");
-                    if (activeModule !== "finance") navigate("/");
-                    setOpen(false);
-                  }}
-                  className={`flex-1 text-xs py-2 rounded-xl border font-heading font-semibold transition-all ${
-                    activeModule === "finance" && !isAdminPage
-                      ? "bg-primary text-primary-foreground border-primary shadow-sm shadow-primary/20"
-                      : "border-border text-muted-foreground hover:bg-muted"
-                  }`}
-                >
-                  <Landmark className="w-3 h-3 inline mr-1" />
-                  Finance
-                </button>
-                <button
-                  onClick={() => {
-                    setActiveModule("material");
-                    navigate("/material/amendments");
-                    setOpen(false);
-                  }}
-                  className={`flex-1 text-xs py-2 rounded-xl border font-heading font-semibold transition-all ${
-                    activeModule === "material"
-                      ? "bg-emerald-500/10 text-emerald-500 border-emerald-500 shadow-sm shadow-emerald-500/20"
-                      : "border-border text-muted-foreground hover:bg-muted"
-                  }`}
-                >
-                  <Package className="w-3 h-3 inline mr-1" />
-                  Material
-                </button>
-                <button
-                  onClick={() => {
-                    navigate("/admin");
-                    setOpen(false);
-                  }}
-                  className={`flex-1 text-xs py-2 rounded-xl border font-heading font-semibold transition-all ${
-                    isAdminPage
-                      ? "bg-blue-500/10 text-blue-500 border-blue-500 shadow-sm shadow-blue-500/20"
-                      : "border-border text-muted-foreground hover:bg-muted"
-                  }`}
-                >
-                  <ShieldCheck className="w-3 h-3 inline mr-1" />
-                  Admin
-                </button>
+              {/* Module Switcher */}
+              <div className="px-5 pt-4 pb-3">
+                <div className="grid grid-cols-3 gap-2">
+                  <button
+                    onClick={() => {
+                      setActiveModule("finance");
+                      if (activeModule !== "finance") navigate("/");
+                      setOpen(false);
+                    }}
+                    className={`py-3 px-4 rounded-2xl border font-medium text-sm transition-all ${
+                      activeModule === "finance" && !isAdminPage
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "border-border hover:bg-muted"
+                    }`}
+                  >
+                    Finance
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setActiveModule("material");
+                      navigate("/material/amendments");
+                      setOpen(false);
+                    }}
+                    className={`py-3 px-4 rounded-2xl border font-medium text-sm transition-all ${
+                      activeModule === "material" && !isAdminPage
+                        ? "bg-emerald-500 text-emerald-50 border-emerald-500"
+                        : "border-border hover:bg-muted"
+                    }`}
+                  >
+                    Material
+                  </button>
+
+                  {isAdmin && (
+                    <button
+                      onClick={() => {
+                        navigate("/admin");
+                        setOpen(false);
+                      }}
+                      className={`py-3 px-4 rounded-2xl border font-medium text-sm transition-all ${
+                        isAdminPage
+                          ? "bg-blue-500 text-white border-blue-500"
+                          : "border-border hover:bg-muted"
+                      }`}
+                    >
+                      Admin
+                    </button>
+                  )}
+                </div>
               </div>
 
               {/* Navigation Items */}
-              <div className="p-3 space-y-0.5">
+              <div className="px-5 space-y-1">
                 {itemsToRender.map((item) => {
                   const openState = groupStates[item.label] ?? false;
                   const active = isActive(item.path, item.children);
 
-                  // Special Masters Grid
-                  if (item.children && item.isMasters) {
-                    return (
-                      <div key={item.label}>
-                        <button
-                          onClick={() =>
-                            !item.disabled && toggleGroup(item.label)
-                          }
-                          disabled={item.disabled}
-                          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-heading transition-colors ${
-                            item.disabled
-                              ? "opacity-40 cursor-not-allowed text-muted-foreground"
-                              : active
-                                ? "bg-primary/10 text-primary"
-                                : "text-foreground hover:bg-muted"
-                          }`}
-                        >
-                          <item.icon size={17} className="flex-shrink-0" />
-                          <span className="flex-1 text-left">{item.label}</span>
-                          {item.disabled ? (
-                            <span className="text-[10px] text-muted-foreground border border-border rounded px-1">
-                              No module
-                            </span>
-                          ) : (
-                            <ChevronDown
-                              size={14}
-                              className={`text-muted-foreground transition-transform ${openState ? "rotate-180" : ""}`}
-                            />
-                          )}
-                        </button>
-
-                        {openState && !item.disabled && (
-                          <div className="mt-2 mb-3 px-1">
-                            <p className="text-[10px] uppercase tracking-widest font-heading text-muted-foreground px-1 mb-2.5">
-                              Masters
-                            </p>
-                            <div className="grid grid-cols-4 gap-2">
-                              {item.children.map((child) => {
-                                const childActive =
-                                  location.pathname === child.path;
-                                const ChildIcon = child.icon!;
-                                const colorClass =
-                                  masterIconColors[child.label] ??
-                                  "text-primary";
-                                const bgClass =
-                                  masterBgColors[child.label] ??
-                                  "bg-primary/10";
-
-                                return (
-                                  <button
-                                    key={child.path}
-                                    onClick={() => go(child.path)}
-                                    className={`flex flex-col items-center gap-2 py-3 px-2 rounded-2xl border transition-all ${
-                                      childActive
-                                        ? "border-primary bg-primary/10 shadow-sm"
-                                        : "border-border bg-card/50 hover:border-primary/40 hover:bg-muted/60 active:scale-95"
-                                    }`}
-                                  >
-                                    <div
-                                      className={`w-11 h-11 rounded-2xl flex items-center justify-center ${bgClass}`}
-                                    >
-                                      <ChildIcon
-                                        size={22}
-                                        className={colorClass}
-                                      />
-                                    </div>
-                                    <span
-                                      className={`text-[11px] font-heading leading-tight text-center ${
-                                        childActive
-                                          ? "text-primary font-semibold"
-                                          : "text-muted-foreground"
-                                      }`}
-                                    >
-                                      {child.label}
-                                    </span>
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  }
-
-                  // Regular Expandable Groups
                   if (item.children) {
                     return (
                       <div key={item.label}>
                         <button
-                          onClick={() =>
-                            !item.disabled && toggleGroup(item.label)
-                          }
-                          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-heading transition-colors ${
+                          onClick={() => toggleGroup(item.label)}
+                          className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-heading transition-all ${
                             active
                               ? "bg-primary/10 text-primary"
-                              : "text-foreground hover:bg-muted"
+                              : "hover:bg-muted text-foreground"
                           }`}
                         >
-                          <item.icon size={17} className="flex-shrink-0" />
+                          <item.icon size={18} className="flex-shrink-0" />
                           <span className="flex-1 text-left">{item.label}</span>
                           <ChevronDown
-                            size={14}
+                            size={16}
                             className={`text-muted-foreground transition-transform ${openState ? "rotate-180" : ""}`}
                           />
                         </button>
 
                         {openState && (
-                          <div className="ml-4 pl-3 border-l border-border mt-0.5 mb-1 space-y-0.5">
+                          <div className="ml-6 pl-4 border-l border-border mt-1 mb-2 space-y-0.5">
                             {item.children.map((child) => {
                               const childActive =
                                 location.pathname === child.path;
                               const ChildIcon = child.icon;
-                              const childCount = child.count;
-
                               return (
                                 <button
                                   key={child.path}
                                   onClick={() => go(child.path)}
-                                  className={`w-full flex items-center gap-2 px-2 py-2 rounded-lg text-sm transition-colors ${
+                                  className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm transition-all ${
                                     childActive
-                                      ? "bg-primary/10 text-primary font-semibold"
+                                      ? "bg-primary/10 text-primary font-medium"
                                       : "text-muted-foreground hover:bg-muted hover:text-foreground"
                                   }`}
                                 >
                                   {ChildIcon && (
                                     <ChildIcon
-                                      size={14}
+                                      size={16}
                                       className="flex-shrink-0"
                                     />
                                   )}
                                   <span className="flex-1 text-left">
                                     {child.label}
                                   </span>
-                                  {!!childCount && (
-                                    <span className="text-[11px] bg-destructive text-destructive-foreground font-semibold px-1.5 py-0.5 rounded-full leading-none">
-                                      {childCount}
+                                  {!!child.count && (
+                                    <span className="text-xs bg-destructive text-destructive-foreground px-2 py-0.5 rounded-full font-medium">
+                                      {child.count}
                                     </span>
                                   )}
-                                  {childActive && <ChevronRight size={12} />}
                                 </button>
                               );
                             })}
@@ -570,34 +467,34 @@ export const MobileNav: React.FC = () => {
                     );
                   }
 
-                  // Simple Navigation Items
+                  // Simple item
                   return (
                     <button
                       key={item.path}
                       onClick={() => go(item.path!)}
-                      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-heading transition-colors ${
+                      className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-heading transition-all ${
                         isActive(item.path)
-                          ? "bg-primary/10 text-primary font-semibold"
-                          : "text-foreground hover:bg-muted"
+                          ? "bg-primary/10 text-primary font-medium"
+                          : "hover:bg-muted text-foreground"
                       }`}
                     >
-                      <item.icon size={17} className="flex-shrink-0" />
+                      <item.icon size={18} className="flex-shrink-0" />
                       <span className="flex-1 text-left">{item.label}</span>
                     </button>
                   );
                 })}
               </div>
 
-              {/* FIXED THEME SELECTOR - No Square Border */}
-              <div className="px-3 py-4 border-t border-border">
-                <div className="flex items-center gap-2 mb-3 px-1">
-                  <Palette size={14} className="text-muted-foreground" />
-                  <span className="text-[11px] uppercase tracking-widest font-heading text-muted-foreground">
+              {/* Theme Selector */}
+              <div className="px-5 pt-8 border-t border-border mt-6">
+                <div className="flex items-center gap-2 mb-4 px-1">
+                  <Palette size={15} className="text-muted-foreground" />
+                  <span className="text-xs uppercase tracking-widest font-heading text-muted-foreground">
                     Appearance
                   </span>
                 </div>
 
-                <div className="grid grid-cols-4 gap-3 sm:grid-cols-5">
+                <div className="grid grid-cols-5 gap-3">
                   {(
                     Object.entries(THEME_DOTS) as [
                       Theme,
@@ -609,39 +506,30 @@ export const MobileNav: React.FC = () => {
                       <button
                         key={t}
                         onClick={() => setTheme(t)}
-                        aria-label={`${label} theme`}
-                        title={label}
-                        className={`group relative flex flex-col items-center gap-2 py-3 px-2 rounded-2xl transition-all duration-200 ${
-                          isSelected
-                            ? "bg-primary/10 shadow-sm"
-                            : "hover:bg-muted/60 active:scale-[0.96]"
+                        className={`group flex flex-col items-center gap-2 py-2 rounded-2xl transition-all ${
+                          isSelected ? "bg-primary/10" : "hover:bg-muted/70"
                         }`}
                       >
-                        {/* Theme Color Circle */}
                         <div
-                          className={`w-10 h-10 rounded-2xl flex items-center justify-center transition-all duration-200 border-2 ${
+                          className={`w-11 h-11 rounded-2xl flex items-center justify-center border-2 transition-all ${
                             isSelected
-                              ? "border-primary shadow-md scale-110"
+                              ? "border-primary scale-110 shadow"
                               : "border-transparent group-hover:border-border"
                           }`}
                           style={{ backgroundColor: bg }}
                         >
                           {isSelected && (
                             <CheckCircle2
-                              size={20}
-                              strokeWidth={3.5}
-                              className={`drop-shadow-sm ${themeCheckmarkClasses[t] || "text-white"}`}
+                              size={22}
+                              strokeWidth={3}
+                              className={
+                                themeCheckmarkClasses[t] || "text-white"
+                              }
                             />
                           )}
                         </div>
-
-                        {/* Theme Label */}
                         <span
-                          className={`text-[10px] font-heading text-center leading-tight transition-colors ${
-                            isSelected
-                              ? "font-semibold text-foreground"
-                              : "text-muted-foreground group-hover:text-foreground"
-                          }`}
+                          className={`text-[10px] font-medium text-center ${isSelected ? "text-foreground" : "text-muted-foreground"}`}
                         >
                           {label}
                         </span>
@@ -657,3 +545,5 @@ export const MobileNav: React.FC = () => {
     </>
   );
 };
+
+export default MobileNav;
