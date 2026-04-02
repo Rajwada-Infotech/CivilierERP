@@ -1,4 +1,5 @@
 import React, { Suspense, lazy, useState, useEffect } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import Loader from "./components/Loader";
 import {
   BrowserRouter as Router,
@@ -7,7 +8,6 @@ import {
   Navigate,
   useLocation,
 } from "react-router-dom";
-import { useAuth } from "@/contexts/AuthContext";
 
 // Static imports
 import Login from "./pages/Login";
@@ -16,13 +16,31 @@ import NotFound from "./pages/NotFound";
 // Layout
 import { AppLayout } from "@/components/layout/AppLayout";
 
-// Delay helper
+// Contexts
+import { AuthProvider } from "@/contexts/AuthContext";
+import { ModuleProvider } from "@/contexts/ModuleContext";
+import { ThemeProvider } from "@/contexts/ThemeContext";
+import { TaskProvider } from "@/contexts/TaskContext";
+import { FinYearProvider } from "@/contexts/FinYearContext";
+import { HsnProvider } from "@/contexts/HsnContext";
+import { RecordsProvider } from "@/contexts/RecordsContext";
+import { TdsProvider } from "@/contexts/TdsContext";
+import { DebitNoteProvider } from "@/contexts/DebitNoteContext";
+import { BillingTermsProvider } from "@/contexts/BillingTermsContext";
+import {
+  ActivityBrowserProvider,
+  useActivityBrowser,
+} from "@/contexts/ActivityBrowserContext";
+
+// ─── Delay Helper ─────────────────────────────────────────────────────────────
 const withDelay = <T,>(importFn: () => Promise<T>, delay = 600): Promise<T> =>
   Promise.all([importFn(), new Promise((res) => setTimeout(res, delay))]).then(
     ([module]) => module,
   );
 
-// Lazy pages
+// ─── Lazy Pages ───────────────────────────────────────────────────────────────
+
+// Main Pages
 const Dashboard = lazy(() => withDelay(() => import("./pages/Dashboard")));
 const Reports = lazy(() => withDelay(() => import("./pages/Reports")));
 const Widgets = lazy(() => withDelay(() => import("./pages/Widgets")));
@@ -38,6 +56,11 @@ const ExpenseBooking = lazy(() =>
 const Records = lazy(() => withDelay(() => import("./pages/Records")));
 const ReceivedPayment = lazy(() =>
   withDelay(() => import("./pages/ReceivedPayment")),
+);
+
+// Task Detail
+const TaskDetail = lazy(() =>
+  withDelay(() => import("./pages/tasks/TaskDetail")),
 );
 
 // Masters
@@ -77,58 +100,40 @@ const MaterialExpenseBookingMaster = lazy(() =>
 const WorkOrderMaster = lazy(() =>
   withDelay(() => import("./pages/material/WorkOrderMaster")),
 );
-
-const TaskDetail = lazy(() =>
-  withDelay(() => import("./pages/tasks/TaskDetail")),
-);
-
-const SmsSetup = lazy(() =>
-  withDelay(() => import("./pages/admin/Communicator/SmsSetup")),
-);
-const EmailSetup = lazy(() =>
-  withDelay(() => import("./pages/admin/Communicator/EmailSetup")),
-);
-const WhatsAppSetup = lazy(() =>
-  withDelay(() => import("./pages/admin/Communicator/WhatsAppSetup")),
-);
-
 const PurchaseOrderMaster = lazy(() =>
   withDelay(() => import("./pages/material/PurchaseOrderMaster")),
 );
-
 const CardMaster = lazy(() =>
   withDelay(() => import("./pages/masters/CardMaster")),
 );
 const TdsMaster = lazy(() =>
   withDelay(() => import("./pages/masters/TdsMaster")),
 );
-
 const AccountGroupMaster = lazy(() =>
   withDelay(() => import("./pages/masters/AccountGroupMaster")),
 );
-
 const NamedEntryTypeMaster = lazy(() =>
   withDelay(() => import("./pages/masters/NamedEntryTypeMaster")),
 );
 const TypeOfDocMaster = lazy(() =>
   withDelay(() => import("./pages/masters/TypeOfDocMaster")),
 );
-
 const ActivityMaster = lazy(() =>
   withDelay(() => import("./pages/masters/ActivityMaster")),
 );
-
 const DebitNoteMaster = lazy(() =>
   withDelay(() => import("./pages/masters/DebitNoteMaster")),
 );
-
 const BillingTermsMaster = lazy(() =>
   withDelay(() => import("./pages/masters/BillingTermsmaster")),
 );
 
-// Admin
+// Admin Pages
 const AdminDashboard = lazy(() =>
   withDelay(() => import("./pages/admin/AdminDashboard")),
+);
+const AdminExpenseBooking = lazy(() =>
+  withDelay(() => import("./pages/admin/ExpenseBooking")),
 );
 const Users = lazy(() => withDelay(() => import("./pages/Users")));
 const MenuRights = lazy(() =>
@@ -146,7 +151,6 @@ const ApprovalSetup = lazy(() =>
 const PostApprovalRights = lazy(() =>
   withDelay(() => import("./pages/admin/PostApprovalRights")),
 );
-
 const ApiIntegrationPage = lazy(() =>
   withDelay(() => import("./pages/admin/ApiIntegration")),
 );
@@ -156,7 +160,6 @@ const SignaturePage = lazy(() =>
 const SuperAdminProfile = lazy(() =>
   withDelay(() => import("./pages/admin/SuperAdminProfile")),
 );
-
 const PasswordResetPage = lazy(() =>
   withDelay(() => import("./pages/admin/security/PasswordReset")),
 );
@@ -164,6 +167,7 @@ const ActivityBrowserPage = lazy(() =>
   withDelay(() => import("./pages/admin/ActivityBrowser")),
 );
 
+// Admin Masters
 const BusinessUnitMaster = lazy(() =>
   withDelay(() => import("./pages/admin/masters/BusinessUnitMaster")),
 );
@@ -174,23 +178,28 @@ const CompanyMaster = lazy(() =>
   withDelay(() => import("./pages/admin/masters/CompanyMaster")),
 );
 
-// Contexts
-import { AuthProvider } from "@/contexts/AuthContext";
-import { ModuleProvider } from "@/contexts/ModuleContext";
-import { ThemeProvider } from "@/contexts/ThemeContext";
-import { TaskProvider } from "@/contexts/TaskContext";
-import { FinYearProvider } from "@/contexts/FinYearContext";
-import { HsnProvider } from "@/contexts/HsnContext";
-import { RecordsProvider } from "@/contexts/RecordsContext";
-import { TdsProvider } from "@/contexts/TdsContext";
-import { DebitNoteProvider } from "@/contexts/DebitNoteContext";
-import { BillingTermsProvider } from "@/contexts/BillingTermsContext";
-import {
-  ActivityBrowserProvider,
-  useActivityBrowser,
-} from "@/contexts/ActivityBrowserContext";
+// Communicator Setup
+const SmsSetup = lazy(() =>
+  withDelay(() => import("./pages/admin/Communicator/SmsSetup")),
+);
+const EmailSetup = lazy(() =>
+  withDelay(() => import("./pages/admin/Communicator/EmailSetup")),
+);
+const WhatsAppSetup = lazy(() =>
+  withDelay(() => import("./pages/admin/Communicator/WhatsAppSetup")),
+);
 
-/* ========================= AUTH GUARD ========================= */
+// ─── Query Client ─────────────────────────────────────────────────────────────
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      refetchOnWindowFocus: false,
+      retry: 1,
+    },
+  },
+});
+
+// ─── Auth Guard ───────────────────────────────────────────────────────────────
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { currentUser } = useAuth();
   const location = useLocation();
@@ -201,7 +210,7 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-/* ========================= PROTECTED ROUTE ========================= */
+// ─── Protected Route ──────────────────────────────────────────────────────────
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return (
     <RequireAuth>
@@ -212,7 +221,17 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   );
 }
 
-/* ========================= ROUTES ========================= */
+// ─── Auth Session Bridge ──────────────────────────────────────────────────────
+function AuthSessionBridge({ children }: { children: React.ReactNode }) {
+  const { recordLogin, recordLogout } = useActivityBrowser();
+  return (
+    <AuthProvider onLoginSuccess={recordLogin} onLogoutSuccess={recordLogout}>
+      {children}
+    </AuthProvider>
+  );
+}
+
+// ─── App Routes ───────────────────────────────────────────────────────────────
 function AppRoutes() {
   const { currentUser } = useAuth();
 
@@ -427,7 +446,6 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
-
       <Route
         path="/masters/card"
         element={
@@ -503,6 +521,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/admin/expense-booking"
+        element={
+          <ProtectedRoute>
+            <AdminExpenseBooking />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/users"
         element={
           <ProtectedRoute>
@@ -550,8 +576,6 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
-
-      {/*  Merged Routes */}
       <Route
         path="/admin/api-integration"
         element={
@@ -647,19 +671,7 @@ function AppRoutes() {
   );
 }
 
-/* ========================= AUTH SESSION BRIDGE ========================= */
-// Sits inside ActivityBrowserProvider so it can call useActivityBrowser,
-// then passes the callbacks down into AuthProvider.
-function AuthSessionBridge({ children }: { children: React.ReactNode }) {
-  const { recordLogin, recordLogout } = useActivityBrowser();
-  return (
-    <AuthProvider onLoginSuccess={recordLogin} onLogoutSuccess={recordLogout}>
-      {children}
-    </AuthProvider>
-  );
-}
-
-/* ========================= APP ROOT ========================= */
+// ─── App Root ─────────────────────────────────────────────────────────────────
 function App() {
   const [initialLoading, setInitialLoading] = useState(true);
 
@@ -671,31 +683,33 @@ function App() {
   if (initialLoading) return <Loader />;
 
   return (
-    <ActivityBrowserProvider>
-      <AuthSessionBridge>
-        <ModuleProvider>
-          <ThemeProvider>
-            <FinYearProvider>
-              <HsnProvider>
-                <RecordsProvider>
-                  <TdsProvider>
-                    <DebitNoteProvider>
-                      <BillingTermsProvider>
-                        <TaskProvider>
-                          <Router>
-                            <AppRoutes />
-                          </Router>
-                        </TaskProvider>
-                      </BillingTermsProvider>
-                    </DebitNoteProvider>
-                  </TdsProvider>
-                </RecordsProvider>
-              </HsnProvider>
-            </FinYearProvider>
-          </ThemeProvider>
-        </ModuleProvider>
-      </AuthSessionBridge>
-    </ActivityBrowserProvider>
+    <QueryClientProvider client={queryClient}>
+      <ActivityBrowserProvider>
+        <AuthSessionBridge>
+          <ModuleProvider>
+            <ThemeProvider>
+              <FinYearProvider>
+                <HsnProvider>
+                  <RecordsProvider>
+                    <TdsProvider>
+                      <DebitNoteProvider>
+                        <BillingTermsProvider>
+                          <TaskProvider>
+                            <Router>
+                              <AppRoutes />
+                            </Router>
+                          </TaskProvider>
+                        </BillingTermsProvider>
+                      </DebitNoteProvider>
+                    </TdsProvider>
+                  </RecordsProvider>
+                </HsnProvider>
+              </FinYearProvider>
+            </ThemeProvider>
+          </ModuleProvider>
+        </AuthSessionBridge>
+      </ActivityBrowserProvider>
+    </QueryClientProvider>
   );
 }
 
