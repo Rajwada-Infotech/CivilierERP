@@ -153,6 +153,9 @@ const ApiIntegrationPage = lazy(() =>
 const SignaturePage = lazy(() =>
   withDelay(() => import("./pages/admin/Signature")),
 );
+const SuperAdminProfile = lazy(() =>
+  withDelay(() => import("./pages/admin/SuperAdminProfile")),
+);
 
 const PasswordResetPage = lazy(() =>
   withDelay(() => import("./pages/admin/security/PasswordReset")),
@@ -562,6 +565,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <SignaturePage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/profile"
+        element={
+          <ProtectedRoute>
+            <SuperAdminProfile />
           </ProtectedRoute>
         }
       />
