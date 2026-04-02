@@ -293,9 +293,17 @@ export const TopNavbar = () => {
   const [userOpen, setUserOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
 
+  // Admin setup items navigate to /masters/* paths that are still part of the
+  // admin module — include them so the Setup dropdown stays in "Admin" config.
+  const ADMIN_SETUP_PATHS = [
+    "/masters/named-entry-type",
+    "/masters/type-of-doc",
+  ];
+
   const isAdminPage =
     location.pathname.startsWith("/admin") ||
-    location.pathname.startsWith("/users");
+    location.pathname.startsWith("/users") ||
+    ADMIN_SETUP_PATHS.some((p) => location.pathname.startsWith(p));
   const isSuperAdmin = currentUser?.role === "super_admin";
   const isAdmin = currentUser?.role === "admin" || isSuperAdmin;
 
@@ -367,467 +375,471 @@ export const TopNavbar = () => {
   return (
     <>
       {moduleSwitching && <Loader />}
-    <header className="fixed top-0 left-0 right-0 h-14 z-50 flex items-center justify-between px-4 border-b border-border bg-card/80 backdrop-blur-lg">
-      {/* Logo */}
-      <button
-        type="button"
-        onClick={() => navigate("/")}
-        title="Go to dashboard"
-        aria-label="Go to dashboard"
-        className="flex items-center gap-2 hover:opacity-80 transition-opacity shrink-0"
-      >
-        <span className="sr-only">Go to dashboard</span>
-        <LogoFull />
-      </button>
-
-      {/* DESKTOP NAV */}
-      <div className="hidden md:flex items-center gap-1">
-        {/* Collapse Toggle */}
+      <header className="fixed top-0 left-0 right-0 h-14 z-50 flex items-center justify-between px-4 border-b border-border bg-card/80 backdrop-blur-lg">
+        {/* Logo */}
         <button
-          onClick={() => setNavCollapsed(!navCollapsed)}
-          title={navCollapsed ? "Expand navigation" : "Collapse navigation"}
-          aria-label={
-            navCollapsed ? "Expand navigation" : "Collapse navigation"
-          }
-          className="p-1.5 rounded-md bg-muted hover:bg-muted/80 text-foreground border border-border transition-all duration-200 shrink-0"
+          type="button"
+          onClick={() => navigate("/")}
+          title="Go to dashboard"
+          aria-label="Go to dashboard"
+          className="flex items-center gap-2 hover:opacity-80 transition-opacity shrink-0"
         >
-          {navCollapsed ? (
-            <ChevronsRight size={15} />
-          ) : (
-            <ChevronsLeft size={15} />
-          )}
+          <span className="sr-only">Go to dashboard</span>
+          <LogoFull />
         </button>
 
-        {/* Collapsible Nav Items */}
-        <div
-          className={`flex items-center gap-1 transition-all duration-300 ease-in-out max-w-[700px] ${
-            navCollapsed
-              ? "w-0 opacity-0 invisible pointer-events-none"
-              : "w-auto opacity-100 visible pointer-events-auto"
-          }`}
-        >
-          {/* Setup Dropdown — module-aware */}
-          <div className="relative shrink-0">
-            <button
-              onClick={toggleSetup}
-              title={
-                !setupConfig.available ? "Select a module to access Setup" : ""
-              }
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all duration-200 whitespace-nowrap ${
-                setupOpen
-                  ? "bg-muted text-foreground"
-                  : setupConfig.available
-                    ? "hover:bg-muted text-foreground"
-                    : "text-muted-foreground/40 cursor-not-allowed"
-              }`}
-            >
-              <Settings size={15} />
-              <span>Setup</span>
-              {setupConfig.available && (
-                <ChevronDown
-                  size={13}
-                  className={`transition-transform duration-200 ${setupOpen ? "rotate-180" : ""}`}
-                />
-              )}
-            </button>
-            <SetupDropdown
-              open={setupOpen}
-              onClose={() => setSetupOpen(false)}
-              items={setupConfig.items}
-              moduleLabel={setupConfig.label}
-              moduleColor={setupConfig.color}
-              navigate={navigate}
-              location={location}
-            />
-          </div>
-
-          {/* Reports */}
+        {/* DESKTOP NAV */}
+        <div className="hidden md:flex items-center gap-1">
+          {/* Collapse Toggle */}
           <button
-            onClick={() => {
-              navigate("/reports");
-              closeAll();
-            }}
-            className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all whitespace-nowrap ${
-              location.pathname === "/reports"
-                ? "bg-primary/10 text-primary"
-                : "hover:bg-muted text-foreground"
-            }`}
+            onClick={() => setNavCollapsed(!navCollapsed)}
+            title={navCollapsed ? "Expand navigation" : "Collapse navigation"}
+            aria-label={
+              navCollapsed ? "Expand navigation" : "Collapse navigation"
+            }
+            className="p-1.5 rounded-md bg-muted hover:bg-muted/80 text-foreground border border-border transition-all duration-200 shrink-0"
           >
-            <BarChart3 size={16} /> Reports
+            {navCollapsed ? (
+              <ChevronsRight size={15} />
+            ) : (
+              <ChevronsLeft size={15} />
+            )}
           </button>
 
-          {/* Widgets */}
-          <button
-            onClick={() => {
-              navigate("/widgets");
-              closeAll();
-            }}
-            className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all whitespace-nowrap ${
-              location.pathname === "/widgets"
-                ? "bg-primary/10 text-primary"
-                : "hover:bg-muted text-foreground"
+          {/* Collapsible Nav Items */}
+          <div
+            className={`flex items-center gap-1 transition-all duration-300 ease-in-out max-w-[700px] ${
+              navCollapsed
+                ? "w-0 opacity-0 invisible pointer-events-none"
+                : "w-auto opacity-100 visible pointer-events-auto"
             }`}
           >
-            <Puzzle size={16} /> Widgets
-          </button>
+            {/* Setup Dropdown — module-aware */}
+            <div className="relative shrink-0">
+              <button
+                onClick={toggleSetup}
+                title={
+                  !setupConfig.available
+                    ? "Select a module to access Setup"
+                    : ""
+                }
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all duration-200 whitespace-nowrap ${
+                  setupOpen
+                    ? "bg-muted text-foreground"
+                    : setupConfig.available
+                      ? "hover:bg-muted text-foreground"
+                      : "text-muted-foreground/40 cursor-not-allowed"
+                }`}
+              >
+                <Settings size={15} />
+                <span>Setup</span>
+                {setupConfig.available && (
+                  <ChevronDown
+                    size={13}
+                    className={`transition-transform duration-200 ${setupOpen ? "rotate-180" : ""}`}
+                  />
+                )}
+              </button>
+              <SetupDropdown
+                open={setupOpen}
+                onClose={() => setSetupOpen(false)}
+                items={setupConfig.items}
+                moduleLabel={setupConfig.label}
+                moduleColor={setupConfig.color}
+                navigate={navigate}
+                location={location}
+              />
+            </div>
 
-          {/* Module Selector */}
-          <div className="relative shrink-0">
+            {/* Reports */}
             <button
-              onClick={toggleModuleDropdown}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all whitespace-nowrap ${
-                moduleOpen
-                  ? "bg-muted text-foreground"
+              onClick={() => {
+                navigate("/reports");
+                closeAll();
+              }}
+              className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all whitespace-nowrap ${
+                location.pathname === "/reports"
+                  ? "bg-primary/10 text-primary"
                   : "hover:bg-muted text-foreground"
               }`}
             >
-              <LayoutGrid size={16} />
-              <span>Module</span>
-              <ChevronDown
-                size={13}
-                className={`transition-transform duration-200 ${moduleOpen ? "rotate-180" : ""}`}
-              />
+              <BarChart3 size={16} /> Reports
             </button>
 
-            <Dropdown
-              open={moduleOpen}
-              onClose={() => setModuleOpen(false)}
-              className="right-0 p-3"
-              style={{ minWidth: "20rem" }}
+            {/* Widgets */}
+            <button
+              onClick={() => {
+                navigate("/widgets");
+                closeAll();
+              }}
+              className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all whitespace-nowrap ${
+                location.pathname === "/widgets"
+                  ? "bg-primary/10 text-primary"
+                  : "hover:bg-muted text-foreground"
+              }`}
             >
-              <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-3 px-1">
-                Select Module
-              </p>
-              <div
-                className={`grid gap-2 ${isAdmin ? "grid-cols-3" : "grid-cols-2"}`}
+              <Puzzle size={16} /> Widgets
+            </button>
+
+            {/* Module Selector */}
+            <div className="relative shrink-0">
+              <button
+                onClick={toggleModuleDropdown}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all whitespace-nowrap ${
+                  moduleOpen
+                    ? "bg-muted text-foreground"
+                    : "hover:bg-muted text-foreground"
+                }`}
               >
-                {/* Finance */}
-                <button
-                  onClick={async () => {
-                    setModuleOpen(false);
-                    if (activeModule === "finance" && !isAdminPage) return;
-                    setModuleSwitching(true);
-                    await new Promise((res) => setTimeout(res, 600));
-                    setActiveModule("finance");
-                    navigate("/");
-                    setModuleSwitching(false);
-                  }}
-                  className={`group flex flex-col items-center gap-1.5 p-2.5 rounded-xl border transition-all ${
-                    activeModule === "finance" && !isAdminPage
-                      ? "border-primary bg-primary/10 shadow-sm"
-                      : "border-border hover:border-primary/40 hover:bg-muted/60"
-                  }`}
-                >
-                  <svg width="22" height="22" viewBox="0 0 36 36" fill="none">
-                    <circle
-                      cx="12"
-                      cy="22"
-                      r="7"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      className={
-                        activeModule === "finance" && !isAdminPage
-                          ? "text-primary"
-                          : "text-muted-foreground group-hover:text-primary"
-                      }
-                    />
-                    <circle
-                      cx="24"
-                      cy="22"
-                      r="7"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      className={
-                        activeModule === "finance" && !isAdminPage
-                          ? "text-primary/50"
-                          : "text-muted-foreground/50 group-hover:text-primary/50"
-                      }
-                    />
-                    <rect
-                      x="8"
-                      y="6"
-                      width="20"
-                      height="3"
-                      rx="1.5"
-                      fill="currentColor"
-                      className={
-                        activeModule === "finance" && !isAdminPage
-                          ? "text-primary"
-                          : "text-muted-foreground group-hover:text-primary"
-                      }
-                    />
-                  </svg>
-                  <span
-                    className={`text-xs font-heading ${activeModule === "finance" && !isAdminPage ? "text-primary font-semibold" : "text-muted-foreground group-hover:text-foreground"}`}
-                  >
-                    Finance
-                  </span>
-                  {activeModule === "finance" && !isAdminPage && (
-                    <span className="text-[9px] font-heading px-1.5 py-0.5 rounded-full bg-primary/15 text-primary">
-                      Active
-                    </span>
-                  )}
-                </button>
+                <LayoutGrid size={16} />
+                <span>Module</span>
+                <ChevronDown
+                  size={13}
+                  className={`transition-transform duration-200 ${moduleOpen ? "rotate-180" : ""}`}
+                />
+              </button>
 
-                {/* Material */}
-                <button
-                  onClick={async () => {
-                    setModuleOpen(false);
-                    if (activeModule === "material" && !isAdminPage) return;
-                    setModuleSwitching(true);
-                    await new Promise((res) => setTimeout(res, 600));
-                    setActiveModule("material");
-                    navigate("/material/expense-booking");
-                    setModuleSwitching(false);
-                  }}
-                  className={`group flex flex-col items-center gap-1.5 p-2.5 rounded-xl border transition-all ${
-                    activeModule === "material" && !isAdminPage
-                      ? "border-emerald-500/60 bg-emerald-500/10 shadow-sm"
-                      : "border-border hover:border-emerald-500/40 hover:bg-muted/60"
-                  }`}
+              <Dropdown
+                open={moduleOpen}
+                onClose={() => setModuleOpen(false)}
+                className="right-0 p-3"
+                style={{ minWidth: "20rem" }}
+              >
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-3 px-1">
+                  Select Module
+                </p>
+                <div
+                  className={`grid gap-2 ${isAdmin ? "grid-cols-3" : "grid-cols-2"}`}
                 >
-                  <Package
-                    size={22}
-                    className={`transition-colors ${
-                      activeModule === "material" && !isAdminPage
-                        ? "text-emerald-500"
-                        : "text-muted-foreground group-hover:text-emerald-500"
-                    }`}
-                  />
-                  <span
-                    className={`text-xs font-heading ${activeModule === "material" && !isAdminPage ? "text-emerald-600 font-semibold" : "text-muted-foreground group-hover:text-foreground"}`}
-                  >
-                    Material
-                  </span>
-                  {activeModule === "material" && !isAdminPage && (
-                    <span className="text-[9px] font-heading px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600">
-                      Active
-                    </span>
-                  )}
-                </button>
-
-                {/* Admin */}
-                {isAdmin && (
+                  {/* Finance */}
                   <button
-                    onClick={() => {
+                    onClick={async () => {
                       setModuleOpen(false);
-                      navigate("/admin");
+                      if (activeModule === "finance" && !isAdminPage) return;
+                      setModuleSwitching(true);
+                      await new Promise((res) => setTimeout(res, 600));
+                      setActiveModule("finance");
+                      navigate("/");
+                      setModuleSwitching(false);
                     }}
                     className={`group flex flex-col items-center gap-1.5 p-2.5 rounded-xl border transition-all ${
-                      isAdminPage
-                        ? "border-blue-500/60 bg-blue-500/10 shadow-sm"
-                        : "border-border hover:border-blue-500/40 hover:bg-muted/60"
+                      activeModule === "finance" && !isAdminPage
+                        ? "border-primary bg-primary/10 shadow-sm"
+                        : "border-border hover:border-primary/40 hover:bg-muted/60"
                     }`}
                   >
-                    <div className="relative">
-                      <ShieldCheck
-                        size={22}
-                        className={`transition-colors ${
-                          isAdminPage
-                            ? "text-blue-500"
-                            : "text-muted-foreground group-hover:text-blue-500"
-                        }`}
+                    <svg width="22" height="22" viewBox="0 0 36 36" fill="none">
+                      <circle
+                        cx="12"
+                        cy="22"
+                        r="7"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        className={
+                          activeModule === "finance" && !isAdminPage
+                            ? "text-primary"
+                            : "text-muted-foreground group-hover:text-primary"
+                        }
                       />
-                      {isSuperAdmin && (
-                        <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center bg-violet-600">
-                          <Crown size={8} className="text-white" />
-                        </span>
-                      )}
-                    </div>
+                      <circle
+                        cx="24"
+                        cy="22"
+                        r="7"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        className={
+                          activeModule === "finance" && !isAdminPage
+                            ? "text-primary/50"
+                            : "text-muted-foreground/50 group-hover:text-primary/50"
+                        }
+                      />
+                      <rect
+                        x="8"
+                        y="6"
+                        width="20"
+                        height="3"
+                        rx="1.5"
+                        fill="currentColor"
+                        className={
+                          activeModule === "finance" && !isAdminPage
+                            ? "text-primary"
+                            : "text-muted-foreground group-hover:text-primary"
+                        }
+                      />
+                    </svg>
                     <span
-                      className={`text-xs font-heading ${isAdminPage ? "text-blue-600 font-semibold" : "text-muted-foreground group-hover:text-foreground"}`}
+                      className={`text-xs font-heading ${activeModule === "finance" && !isAdminPage ? "text-primary font-semibold" : "text-muted-foreground group-hover:text-foreground"}`}
                     >
-                      Admin
+                      Finance
                     </span>
-                    {isAdminPage && (
-                      <span className="text-[9px] font-heading px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-600">
+                    {activeModule === "finance" && !isAdminPage && (
+                      <span className="text-[9px] font-heading px-1.5 py-0.5 rounded-full bg-primary/15 text-primary">
                         Active
                       </span>
                     )}
                   </button>
-                )}
-              </div>
 
-              {/* Active module indicator bar */}
-              <div className="mt-3 pt-3 border-t border-border">
-                <p className="text-[10px] text-muted-foreground font-heading text-center">
-                  {isAdminPage
-                    ? "Currently in Admin"
-                    : activeModule
-                      ? `Currently in ${activeModule.charAt(0).toUpperCase() + activeModule.slice(1)}`
-                      : "No module selected"}
+                  {/* Material */}
+                  <button
+                    onClick={async () => {
+                      setModuleOpen(false);
+                      if (activeModule === "material" && !isAdminPage) return;
+                      setModuleSwitching(true);
+                      await new Promise((res) => setTimeout(res, 600));
+                      setActiveModule("material");
+                      navigate("/material/expense-booking");
+                      setModuleSwitching(false);
+                    }}
+                    className={`group flex flex-col items-center gap-1.5 p-2.5 rounded-xl border transition-all ${
+                      activeModule === "material" && !isAdminPage
+                        ? "border-emerald-500/60 bg-emerald-500/10 shadow-sm"
+                        : "border-border hover:border-emerald-500/40 hover:bg-muted/60"
+                    }`}
+                  >
+                    <Package
+                      size={22}
+                      className={`transition-colors ${
+                        activeModule === "material" && !isAdminPage
+                          ? "text-emerald-500"
+                          : "text-muted-foreground group-hover:text-emerald-500"
+                      }`}
+                    />
+                    <span
+                      className={`text-xs font-heading ${activeModule === "material" && !isAdminPage ? "text-emerald-600 font-semibold" : "text-muted-foreground group-hover:text-foreground"}`}
+                    >
+                      Material
+                    </span>
+                    {activeModule === "material" && !isAdminPage && (
+                      <span className="text-[9px] font-heading px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600">
+                        Active
+                      </span>
+                    )}
+                  </button>
+
+                  {/* Admin */}
+                  {isAdmin && (
+                    <button
+                      onClick={() => {
+                        setModuleOpen(false);
+                        navigate("/admin");
+                      }}
+                      className={`group flex flex-col items-center gap-1.5 p-2.5 rounded-xl border transition-all ${
+                        isAdminPage
+                          ? "border-blue-500/60 bg-blue-500/10 shadow-sm"
+                          : "border-border hover:border-blue-500/40 hover:bg-muted/60"
+                      }`}
+                    >
+                      <div className="relative">
+                        <ShieldCheck
+                          size={22}
+                          className={`transition-colors ${
+                            isAdminPage
+                              ? "text-blue-500"
+                              : "text-muted-foreground group-hover:text-blue-500"
+                          }`}
+                        />
+                        {isSuperAdmin && (
+                          <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center bg-violet-600">
+                            <Crown size={8} className="text-white" />
+                          </span>
+                        )}
+                      </div>
+                      <span
+                        className={`text-xs font-heading ${isAdminPage ? "text-blue-600 font-semibold" : "text-muted-foreground group-hover:text-foreground"}`}
+                      >
+                        Admin
+                      </span>
+                      {isAdminPage && (
+                        <span className="text-[9px] font-heading px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-600">
+                          Active
+                        </span>
+                      )}
+                    </button>
+                  )}
+                </div>
+
+                {/* Active module indicator bar */}
+                <div className="mt-3 pt-3 border-t border-border">
+                  <p className="text-[10px] text-muted-foreground font-heading text-center">
+                    {isAdminPage
+                      ? "Currently in Admin"
+                      : activeModule
+                        ? `Currently in ${activeModule.charAt(0).toUpperCase() + activeModule.slice(1)}`
+                        : "No module selected"}
+                  </p>
+                </div>
+              </Dropdown>
+            </div>
+          </div>
+
+          {/* Theme Selector */}
+          <div className="relative shrink-0">
+            <button
+              onClick={toggleTheme}
+              className="p-2 rounded-md hover:bg-muted transition-all text-foreground"
+              title="Change theme"
+            >
+              <Palette size={17} />
+            </button>
+
+            <Dropdown
+              open={themeOpen}
+              onClose={() => setThemeOpen(false)}
+              className="right-0 w-48 p-1.5"
+            >
+              <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading px-2 py-1.5 mb-0.5">
+                Appearance
+              </p>
+              {(
+                Object.entries(THEME_DOTS) as [
+                  Theme,
+                  { bg: string; label: string },
+                ][]
+              ).map(([t, { bg, label }]) => (
+                <button
+                  key={t}
+                  onClick={() => {
+                    setTheme(t);
+                    setThemeOpen(false);
+                  }}
+                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-heading transition-all ${
+                    theme === t
+                      ? "bg-primary/10 text-primary"
+                      : "text-foreground hover:bg-muted"
+                  }`}
+                >
+                  <span
+                    className={`w-3.5 h-3.5 rounded-full shrink-0 border border-border/50 bg-[${bg}]`}
+                  />
+                  {label}
+                  {theme === t && (
+                    <span className="ml-auto text-primary text-xs">✓</span>
+                  )}
+                </button>
+              ))}
+            </Dropdown>
+          </div>
+
+          {/* User Menu */}
+          <div className="relative shrink-0">
+            <button
+              onClick={toggleUser}
+              className="relative w-8 h-8 rounded-full gradient-accent flex items-center justify-center text-xs font-heading text-primary-foreground font-bold hover:opacity-90"
+            >
+              {currentUser?.initials || "?"}
+              {RoleIcon && (
+                <span
+                  className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center ${roleBadgeClassName}`}
+                >
+                  <RoleIcon size={9} className="text-white" />
+                </span>
+              )}
+            </button>
+
+            <Dropdown
+              open={userOpen}
+              onClose={() => setUserOpen(false)}
+              className="right-0 w-56 p-1"
+            >
+              <div className="px-3 py-2 border-b border-border mb-1">
+                <p className="text-sm font-heading font-semibold text-foreground">
+                  {currentUser?.name}
                 </p>
+                <p className="text-xs text-muted-foreground truncate">
+                  {currentUser?.email}
+                </p>
+                <div className="mt-1.5">
+                  {isSuperAdmin && (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-violet-500/10 text-violet-600">
+                      Super Admin
+                    </span>
+                  )}
+                  {currentUser?.role === "admin" && (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-blue-500/10 text-blue-600">
+                      Admin
+                    </span>
+                  )}
+                  {currentUser?.role === "user" && (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-muted text-muted-foreground">
+                      User · {currentUser.pagePermissions?.length || 0} pages
+                    </span>
+                  )}
+                </div>
               </div>
+              <button
+                onMouseDown={() => {
+                  setUserOpen(false);
+                  navigate(isSuperAdmin ? "/admin/profile" : "/admin");
+                }}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted transition-colors text-foreground"
+              >
+                <User size={14} /> Profile
+              </button>
+              <button
+                onMouseDown={() => {
+                  logout();
+                  navigate("/login");
+                }}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted transition-colors text-destructive"
+              >
+                <LogOut size={14} /> Sign Out
+              </button>
             </Dropdown>
           </div>
         </div>
 
-        {/* Theme Selector */}
-        <div className="relative shrink-0">
-          <button
-            onClick={toggleTheme}
-            className="p-2 rounded-md hover:bg-muted transition-all text-foreground"
-            title="Change theme"
-          >
-            <Palette size={17} />
-          </button>
-
-          <Dropdown
-            open={themeOpen}
-            onClose={() => setThemeOpen(false)}
-            className="right-0 w-48 p-1.5"
-          >
-            <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading px-2 py-1.5 mb-0.5">
-              Appearance
-            </p>
-            {(
-              Object.entries(THEME_DOTS) as [
-                Theme,
-                { bg: string; label: string },
-              ][]
-            ).map(([t, { bg, label }]) => (
-              <button
-                key={t}
-                onClick={() => {
-                  setTheme(t);
-                  setThemeOpen(false);
-                }}
-                className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-heading transition-all ${
-                  theme === t
-                    ? "bg-primary/10 text-primary"
-                    : "text-foreground hover:bg-muted"
-                }`}
-              >
+        {/* MOBILE RIGHT SIDE */}
+        <div className="flex md:hidden items-center">
+          <div className="relative">
+            <button
+              onClick={toggleUser}
+              className="relative w-8 h-8 rounded-full gradient-accent flex items-center justify-center text-xs font-heading text-primary-foreground font-bold"
+            >
+              {currentUser?.initials || "?"}
+              {RoleIcon && (
                 <span
-                  className={`w-3.5 h-3.5 rounded-full shrink-0 border border-border/50 bg-[${bg}]`}
-                />
-                {label}
-                {theme === t && (
-                  <span className="ml-auto text-primary text-xs">✓</span>
-                )}
-              </button>
-            ))}
-          </Dropdown>
-        </div>
+                  className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center ${roleBadgeClassName}`}
+                >
+                  <RoleIcon size={9} className="text-white" />
+                </span>
+              )}
+            </button>
 
-        {/* User Menu */}
-        <div className="relative shrink-0">
-          <button
-            onClick={toggleUser}
-            className="relative w-8 h-8 rounded-full gradient-accent flex items-center justify-center text-xs font-heading text-primary-foreground font-bold hover:opacity-90"
-          >
-            {currentUser?.initials || "?"}
-            {RoleIcon && (
-              <span
-                className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center ${roleBadgeClassName}`}
-              >
-                <RoleIcon size={9} className="text-white" />
-              </span>
-            )}
-          </button>
-
-          <Dropdown
-            open={userOpen}
-            onClose={() => setUserOpen(false)}
-            className="right-0 w-56 p-1"
-          >
-            <div className="px-3 py-2 border-b border-border mb-1">
-              <p className="text-sm font-heading font-semibold text-foreground">
-                {currentUser?.name}
-              </p>
-              <p className="text-xs text-muted-foreground truncate">
-                {currentUser?.email}
-              </p>
-              <div className="mt-1.5">
-                {isSuperAdmin && (
-                  <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-violet-500/10 text-violet-600">
-                    Super Admin
-                  </span>
-                )}
-                {currentUser?.role === "admin" && (
-                  <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-blue-500/10 text-blue-600">
-                    Admin
-                  </span>
-                )}
-                {currentUser?.role === "user" && (
-                  <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-muted text-muted-foreground">
-                    User · {currentUser.pagePermissions?.length || 0} pages
-                  </span>
-                )}
+            <Dropdown
+              open={userOpen}
+              onClose={() => setUserOpen(false)}
+              className="right-0 w-56 p-1"
+            >
+              <div className="px-3 py-2 border-b border-border mb-1">
+                <p className="text-sm font-heading font-semibold text-foreground">
+                  {currentUser?.name}
+                </p>
+                <p className="text-xs text-muted-foreground truncate">
+                  {currentUser?.email}
+                </p>
               </div>
-            </div>
-            <button
-              onMouseDown={() => {
-                setUserOpen(false);
-                navigate(isSuperAdmin ? "/admin/profile" : "/admin");
-              }}
-              className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted transition-colors text-foreground">
-              <User size={14} /> Profile
-            </button>
-            <button
-              onMouseDown={() => {
-                logout();
-                navigate("/login");
-              }}
-              className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted transition-colors text-destructive"
-            >
-              <LogOut size={14} /> Sign Out
-            </button>
-          </Dropdown>
-        </div>
-      </div>
-
-      {/* MOBILE RIGHT SIDE */}
-      <div className="flex md:hidden items-center">
-        <div className="relative">
-          <button
-            onClick={toggleUser}
-            className="relative w-8 h-8 rounded-full gradient-accent flex items-center justify-center text-xs font-heading text-primary-foreground font-bold"
-          >
-            {currentUser?.initials || "?"}
-            {RoleIcon && (
-              <span
-                className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center ${roleBadgeClassName}`}
+              <button
+                onMouseDown={() => {
+                  setUserOpen(false);
+                  navigate(isSuperAdmin ? "/admin/profile" : "/admin");
+                }}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted text-foreground"
               >
-                <RoleIcon size={9} className="text-white" />
-              </span>
-            )}
-          </button>
-
-          <Dropdown
-            open={userOpen}
-            onClose={() => setUserOpen(false)}
-            className="right-0 w-56 p-1"
-          >
-            <div className="px-3 py-2 border-b border-border mb-1">
-              <p className="text-sm font-heading font-semibold text-foreground">
-                {currentUser?.name}
-              </p>
-              <p className="text-xs text-muted-foreground truncate">
-                {currentUser?.email}
-              </p>
-            </div>
-            <button
-              onMouseDown={() => {
-                setUserOpen(false);
-                navigate(isSuperAdmin ? "/admin/profile" : "/admin");
-              }}
-              className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted text-foreground">
-              <User size={14} /> Profile
-            </button>
-            <button
-              onMouseDown={() => {
-                logout();
-                navigate("/login");
-              }}
-              className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted text-destructive"
-            >
-              <LogOut size={14} /> Sign Out
-            </button>
-          </Dropdown>
+                <User size={14} /> Profile
+              </button>
+              <button
+                onMouseDown={() => {
+                  logout();
+                  navigate("/login");
+                }}
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted text-destructive"
+              >
+                <LogOut size={14} /> Sign Out
+              </button>
+            </Dropdown>
+          </div>
         </div>
-      </div>
-    </header>
+      </header>
     </>
   );
 };
