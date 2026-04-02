@@ -8,7 +8,6 @@ import {
   Navigate,
   useLocation,
 } from "react-router-dom";
-import { useAuth } from "@/contexts/AuthContext";
 
 // Static imports
 import Login from "./pages/Login";
@@ -26,14 +25,22 @@ import { FinYearProvider } from "@/contexts/FinYearContext";
 import { HsnProvider } from "@/contexts/HsnContext";
 import { RecordsProvider } from "@/contexts/RecordsContext";
 import { TdsProvider } from "@/contexts/TdsContext";
+import { DebitNoteProvider } from "@/contexts/DebitNoteContext";
+import { BillingTermsProvider } from "@/contexts/BillingTermsContext";
+import {
+  ActivityBrowserProvider,
+  useActivityBrowser,
+} from "@/contexts/ActivityBrowserContext";
 
-// Delay helper
+// ─── Delay Helper ─────────────────────────────────────────────────────────────
 const withDelay = <T,>(importFn: () => Promise<T>, delay = 600): Promise<T> =>
   Promise.all([importFn(), new Promise((res) => setTimeout(res, delay))]).then(
     ([module]) => module,
   );
 
 // ─── Lazy Pages ───────────────────────────────────────────────────────────────
+
+// Main Pages
 const Dashboard = lazy(() => withDelay(() => import("./pages/Dashboard")));
 const Reports = lazy(() => withDelay(() => import("./pages/Reports")));
 const Widgets = lazy(() => withDelay(() => import("./pages/Widgets")));
@@ -44,6 +51,9 @@ const Brs = lazy(() => withDelay(() => import("./pages/Brs")));
 const ExpenseBooking = lazy(() => withDelay(() => import("./pages/ExpenseBooking")));
 const Records = lazy(() => withDelay(() => import("./pages/Records")));
 const ReceivedPayment = lazy(() => withDelay(() => import("./pages/ReceivedPayment")));
+
+// Task Detail
+const TaskDetail = lazy(() => withDelay(() => import("./pages/tasks/TaskDetail")));
 
 // Masters
 const ContractorMaster = lazy(() => withDelay(() => import("./pages/masters/ContractorMaster")));
@@ -66,8 +76,9 @@ const NamedEntryTypeMaster = lazy(() => withDelay(() => import("./pages/masters/
 const TypeOfDocMaster = lazy(() => withDelay(() => import("./pages/masters/TypeOfDocMaster")));
 const ActivityMaster = lazy(() => withDelay(() => import("./pages/masters/ActivityMaster")));
 const DebitNoteMaster = lazy(() => withDelay(() => import("./pages/masters/DebitNoteMaster")));
+const BillingTermsMaster = lazy(() => withDelay(() => import("./pages/masters/BillingTermsmaster")));
 
-// Admin
+// Admin Pages
 const AdminDashboard = lazy(() => withDelay(() => import("./pages/admin/AdminDashboard")));
 const AdminExpenseBooking = lazy(() => withDelay(() => import("./pages/admin/ExpenseBooking")));
 const Users = lazy(() => withDelay(() => import("./pages/Users")));
@@ -78,6 +89,18 @@ const ApprovalSetup = lazy(() => withDelay(() => import("./pages/admin/ApprovalS
 const PostApprovalRights = lazy(() => withDelay(() => import("./pages/admin/PostApprovalRights")));
 const ApiIntegrationPage = lazy(() => withDelay(() => import("./pages/admin/ApiIntegration")));
 const SignaturePage = lazy(() => withDelay(() => import("./pages/admin/Signature")));
+const PasswordResetPage = lazy(() => withDelay(() => import("./pages/admin/security/PasswordReset")));
+const ActivityBrowserPage = lazy(() => withDelay(() => import("./pages/admin/ActivityBrowser")));
+
+// Admin Masters
+const BusinessUnitMaster = lazy(() => withDelay(() => import("./pages/admin/masters/BusinessUnitMaster")));
+const ProjectMaster = lazy(() => withDelay(() => import("./pages/admin/masters/ProjectMaster")));
+const CompanyMaster = lazy(() => withDelay(() => import("./pages/admin/masters/CompanyMaster")));
+
+// Communicator Setup
+const SmsSetup = lazy(() => withDelay(() => import("./pages/admin/Communicator/SmsSetup")));
+const EmailSetup = lazy(() => withDelay(() => import("./pages/admin/Communicator/EmailSetup")));
+const WhatsAppSetup = lazy(() => withDelay(() => import("./pages/admin/Communicator/WhatsAppSetup")));
 
 // ─── Query Client ─────────────────────────────────────────────────────────────
 const queryClient = new QueryClient({
@@ -111,6 +134,16 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   );
 }
 
+// ─── Auth Session Bridge ──────────────────────────────────────────────────────
+function AuthSessionBridge({ children }: { children: React.ReactNode }) {
+  const { recordLogin, recordLogout } = useActivityBrowser();
+  return (
+    <AuthProvider onLoginSuccess={recordLogin} onLogoutSuccess={recordLogout}>
+      {children}
+    </AuthProvider>
+  );
+}
+
 // ─── App Routes ───────────────────────────────────────────────────────────────
 function AppRoutes() {
   const { currentUser } = useAuth();
@@ -124,51 +157,218 @@ function AppRoutes() {
       />
 
       {/* MAIN */}
-      <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-      <Route path="/transactions" element={<ProtectedRoute><Transactions /></ProtectedRoute>} />
-      <Route path="/transactions/expense-booking" element={<ProtectedRoute><ExpenseBooking /></ProtectedRoute>} />
-      <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
-      <Route path="/widgets" element={<ProtectedRoute><Widgets /></ProtectedRoute>} />
-      <Route path="/tasks" element={<ProtectedRoute><Tasks /></ProtectedRoute>} />
-      <Route path="/payments" element={<ProtectedRoute><Payment /></ProtectedRoute>} />
-      <Route path="/received-payments" element={<ProtectedRoute><ReceivedPayment /></ProtectedRoute>} />
-      <Route path="/brs" element={<ProtectedRoute><Brs /></ProtectedRoute>} />
-      <Route path="/records" element={<ProtectedRoute><Records /></ProtectedRoute>} />
+      <Route
+        path="/"
+        element={
+          <ProtectedRoute>
+            <Dashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/transactions"
+        element={<ProtectedRoute><Transactions /></ProtectedRoute>}
+      />
+      <Route
+        path="/transactions/expense-booking"
+        element={<ProtectedRoute><ExpenseBooking /></ProtectedRoute>}
+      />
+      <Route
+        path="/reports"
+        element={<ProtectedRoute><Reports /></ProtectedRoute>}
+      />
+      <Route
+        path="/widgets"
+        element={<ProtectedRoute><Widgets /></ProtectedRoute>}
+      />
+      <Route
+        path="/tasks"
+        element={<ProtectedRoute><Tasks /></ProtectedRoute>}
+      />
+      <Route
+        path="/tasks/:id"
+        element={<ProtectedRoute><TaskDetail /></ProtectedRoute>}
+      />
+      <Route
+        path="/payments"
+        element={<ProtectedRoute><Payment /></ProtectedRoute>}
+      />
+      <Route
+        path="/received-payments"
+        element={<ProtectedRoute><ReceivedPayment /></ProtectedRoute>}
+      />
+      <Route
+        path="/brs"
+        element={<ProtectedRoute><Brs /></ProtectedRoute>}
+      />
+      <Route
+        path="/records"
+        element={<ProtectedRoute><Records /></ProtectedRoute>}
+      />
 
       {/* MASTERS */}
-      <Route path="/masters/contractors" element={<ProtectedRoute><ContractorMaster /></ProtectedRoute>} />
-      <Route path="/masters/suppliers" element={<ProtectedRoute><SupplierMaster /></ProtectedRoute>} />
-      <Route path="/masters/customers" element={<ProtectedRoute><CustomerMaster /></ProtectedRoute>} />
-      <Route path="/masters/banks" element={<ProtectedRoute><BankMaster /></ProtectedRoute>} />
-      <Route path="/masters/expenses" element={<ProtectedRoute><ExpensesMaster /></ProtectedRoute>} />
-      <Route path="/masters/items" element={<ProtectedRoute><ItemMaster /></ProtectedRoute>} />
-      <Route path="/masters/item-groups" element={<ProtectedRoute><ItemGroupMaster /></ProtectedRoute>} />
-      <Route path="/masters/hsn" element={<ProtectedRoute><HsnMaster /></ProtectedRoute>} />
-      <Route path="/masters/financial-year" element={<ProtectedRoute><FinancialYearMaster /></ProtectedRoute>} />
-      <Route path="/masters/cheque" element={<ProtectedRoute><ChequeMaster /></ProtectedRoute>} />
-      <Route path="/material/expense-booking" element={<ProtectedRoute><MaterialExpenseBookingMaster /></ProtectedRoute>} />
-      <Route path="/material/work-order" element={<ProtectedRoute><WorkOrderMaster /></ProtectedRoute>} />
-      <Route path="/material/amendments" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-      <Route path="/material/purchase-order" element={<ProtectedRoute><PurchaseOrderMaster /></ProtectedRoute>} />
-      <Route path="/masters/card" element={<ProtectedRoute><CardMaster /></ProtectedRoute>} />
-      <Route path="/masters/tds" element={<ProtectedRoute><TdsMaster /></ProtectedRoute>} />
-      <Route path="/masters/account-group" element={<ProtectedRoute><AccountGroupMaster /></ProtectedRoute>} />
-      <Route path="/masters/named-entry-type" element={<ProtectedRoute><NamedEntryTypeMaster /></ProtectedRoute>} />
-      <Route path="/masters/type-of-doc" element={<ProtectedRoute><TypeOfDocMaster /></ProtectedRoute>} />
-      <Route path="/masters/activity" element={<ProtectedRoute><ActivityMaster /></ProtectedRoute>} />
-      <Route path="/masters/debit-note" element={<ProtectedRoute><DebitNoteMaster /></ProtectedRoute>} />
+      <Route
+        path="/masters/contractors"
+        element={<ProtectedRoute><ContractorMaster /></ProtectedRoute>}
+      />
+      <Route
+        path="/masters/suppliers"
+        element={<ProtectedRoute><SupplierMaster /></ProtectedRoute>}
+      />
+      <Route
+        path="/masters/customers"
+        element={<ProtectedRoute><CustomerMaster /></ProtectedRoute>}
+      />
+      <Route
+        path="/masters/banks"
+        element={<ProtectedRoute><BankMaster /></ProtectedRoute>}
+      />
+      <Route
+        path="/masters/expenses"
+        element={<ProtectedRoute><ExpensesMaster /></ProtectedRoute>}
+      />
+      <Route
+        path="/masters/items"
+        element={<ProtectedRoute><ItemMaster /></ProtectedRoute>}
+      />
+      <Route
+        path="/masters/item-groups"
+        element={<ProtectedRoute><ItemGroupMaster /></ProtectedRoute>}
+      />
+      <Route
+        path="/masters/hsn"
+        element={<ProtectedRoute><HsnMaster /></ProtectedRoute>}
+      />
+      <Route
+        path="/masters/financial-year"
+        element={<ProtectedRoute><FinancialYearMaster /></ProtectedRoute>}
+      />
+      <Route
+        path="/masters/cheque"
+        element={<ProtectedRoute><ChequeMaster /></ProtectedRoute>}
+      />
+      <Route
+        path="/material/expense-booking"
+        element={<ProtectedRoute><MaterialExpenseBookingMaster /></ProtectedRoute>}
+      />
+      <Route
+        path="/material/work-order"
+        element={<ProtectedRoute><WorkOrderMaster /></ProtectedRoute>}
+      />
+      <Route
+        path="/material/amendments"
+        element={<ProtectedRoute><Dashboard /></ProtectedRoute>}
+      />
+      <Route
+        path="/material/purchase-order"
+        element={<ProtectedRoute><PurchaseOrderMaster /></ProtectedRoute>}
+      />
+      <Route
+        path="/masters/card"
+        element={<ProtectedRoute><CardMaster /></ProtectedRoute>}
+      />
+      <Route
+        path="/masters/tds"
+        element={<ProtectedRoute><TdsMaster /></ProtectedRoute>}
+      />
+      <Route
+        path="/masters/account-group"
+        element={<ProtectedRoute><AccountGroupMaster /></ProtectedRoute>}
+      />
+      <Route
+        path="/masters/named-entry-type"
+        element={<ProtectedRoute><NamedEntryTypeMaster /></ProtectedRoute>}
+      />
+      <Route
+        path="/masters/type-of-doc"
+        element={<ProtectedRoute><TypeOfDocMaster /></ProtectedRoute>}
+      />
+      <Route
+        path="/masters/activity"
+        element={<ProtectedRoute><ActivityMaster /></ProtectedRoute>}
+      />
+      <Route
+        path="/masters/debit-note"
+        element={<ProtectedRoute><DebitNoteMaster /></ProtectedRoute>}
+      />
+      <Route
+        path="/masters/billing-terms"
+        element={<ProtectedRoute><BillingTermsMaster /></ProtectedRoute>}
+      />
 
       {/* ADMIN */}
-      <Route path="/admin" element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>} />
-      <Route path="/admin/expense-booking" element={<ProtectedRoute><AdminExpenseBooking /></ProtectedRoute>} />
-      <Route path="/users" element={<ProtectedRoute><Users /></ProtectedRoute>} />
-      <Route path="/admin/rights/menu" element={<ProtectedRoute><MenuRights /></ProtectedRoute>} />
-      <Route path="/admin/rights/widgets" element={<ProtectedRoute><WidgetRights /></ProtectedRoute>} />
-      <Route path="/admin/rights/fin-year" element={<ProtectedRoute><FinYearRights /></ProtectedRoute>} />
-      <Route path="/admin/approval/setup" element={<ProtectedRoute><ApprovalSetup /></ProtectedRoute>} />
-      <Route path="/admin/approval/post-rights" element={<ProtectedRoute><PostApprovalRights /></ProtectedRoute>} />
-      <Route path="/admin/api-integration" element={<ProtectedRoute><ApiIntegrationPage /></ProtectedRoute>} />
-      <Route path="/admin/signature" element={<ProtectedRoute><SignaturePage /></ProtectedRoute>} />
+      <Route
+        path="/admin"
+        element={<ProtectedRoute><AdminDashboard /></ProtectedRoute>}
+      />
+      <Route
+        path="/admin/expense-booking"
+        element={<ProtectedRoute><AdminExpenseBooking /></ProtectedRoute>}
+      />
+      <Route
+        path="/users"
+        element={<ProtectedRoute><Users /></ProtectedRoute>}
+      />
+      <Route
+        path="/admin/rights/menu"
+        element={<ProtectedRoute><MenuRights /></ProtectedRoute>}
+      />
+      <Route
+        path="/admin/rights/widgets"
+        element={<ProtectedRoute><WidgetRights /></ProtectedRoute>}
+      />
+      <Route
+        path="/admin/rights/fin-year"
+        element={<ProtectedRoute><FinYearRights /></ProtectedRoute>}
+      />
+      <Route
+        path="/admin/approval/setup"
+        element={<ProtectedRoute><ApprovalSetup /></ProtectedRoute>}
+      />
+      <Route
+        path="/admin/approval/post-rights"
+        element={<ProtectedRoute><PostApprovalRights /></ProtectedRoute>}
+      />
+      <Route
+        path="/admin/api-integration"
+        element={<ProtectedRoute><ApiIntegrationPage /></ProtectedRoute>}
+      />
+      <Route
+        path="/admin/signature"
+        element={<ProtectedRoute><SignaturePage /></ProtectedRoute>}
+      />
+      <Route
+        path="/admin/masters/business-unit"
+        element={<ProtectedRoute><BusinessUnitMaster /></ProtectedRoute>}
+      />
+      <Route
+        path="/admin/masters/project"
+        element={<ProtectedRoute><ProjectMaster /></ProtectedRoute>}
+      />
+      <Route
+        path="/admin/masters/company"
+        element={<ProtectedRoute><CompanyMaster /></ProtectedRoute>}
+      />
+      <Route
+        path="/admin/security/password-reset"
+        element={<ProtectedRoute><PasswordResetPage /></ProtectedRoute>}
+      />
+      <Route
+        path="/admin/activity-browser"
+        element={<ProtectedRoute><ActivityBrowserPage /></ProtectedRoute>}
+      />
+      <Route
+        path="/admin/communicator/sms-setup"
+        element={<ProtectedRoute><SmsSetup /></ProtectedRoute>}
+      />
+      <Route
+        path="/admin/communicator/email-setup"
+        element={<ProtectedRoute><EmailSetup /></ProtectedRoute>}
+      />
+      <Route
+        path="/admin/communicator/whatsapp-setup"
+        element={<ProtectedRoute><WhatsAppSetup /></ProtectedRoute>}
+      />
 
       {/* 404 */}
       <Route path="*" element={<NotFound />} />
@@ -189,25 +389,31 @@ function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthProvider>
-        <ModuleProvider>
-          <ThemeProvider>
-            <FinYearProvider>
-              <HsnProvider>
-                <RecordsProvider>
-                  <TdsProvider>
-                    <TaskProvider>
-                      <Router>
-                        <AppRoutes />
-                      </Router>
-                    </TaskProvider>
-                  </TdsProvider>
-                </RecordsProvider>
-              </HsnProvider>
-            </FinYearProvider>
-          </ThemeProvider>
-        </ModuleProvider>
-      </AuthProvider>
+      <ActivityBrowserProvider>
+        <AuthSessionBridge>
+          <ModuleProvider>
+            <ThemeProvider>
+              <FinYearProvider>
+                <HsnProvider>
+                  <RecordsProvider>
+                    <TdsProvider>
+                      <DebitNoteProvider>
+                        <BillingTermsProvider>
+                          <TaskProvider>
+                            <Router>
+                              <AppRoutes />
+                            </Router>
+                          </TaskProvider>
+                        </BillingTermsProvider>
+                      </DebitNoteProvider>
+                    </TdsProvider>
+                  </RecordsProvider>
+                </HsnProvider>
+              </FinYearProvider>
+            </ThemeProvider>
+          </ModuleProvider>
+        </AuthSessionBridge>
+      </ActivityBrowserProvider>
     </QueryClientProvider>
   );
 }
