@@ -155,6 +155,12 @@ const materialSetupItems = [
     path: "/masters/item-groups",
     color: "text-indigo-400",
   },
+  {
+    icon: Hash,
+    label: "Unit of Measurement",
+    path: "/masters/unit-measurement",
+    color: "text-orange-400",
+  },
   { icon: Hash, label: "HSN", path: "/masters/hsn", color: "text-pink-400" },
   {
     icon: Activity,
