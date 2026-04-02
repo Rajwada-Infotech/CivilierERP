@@ -5,6 +5,7 @@ import { useTheme, THEME_DOTS, Theme } from "@/contexts/ThemeContext";
 import { useModule } from "@/contexts/ModuleContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavbarCollapse } from "./AppLayout";
+import Loader from "../Loader";
 import {
   Calendar,
   FileText,
@@ -287,6 +288,7 @@ export const TopNavbar = () => {
   const { navCollapsed, setNavCollapsed } = useNavbarCollapse();
 
   const [setupOpen, setSetupOpen] = useState(false);
+  const [moduleSwitching, setModuleSwitching] = useState(false);
   const [moduleOpen, setModuleOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
@@ -326,7 +328,6 @@ export const TopNavbar = () => {
   };
   const setupConfig = getSetupConfig();
 
-  // ─── Toggle Handlers ───────────────────────────────────────────────────────
   const toggleSetup = useCallback(() => {
     if (!setupConfig.available) return;
     setSetupOpen((prev) => !prev);
@@ -364,6 +365,8 @@ export const TopNavbar = () => {
   }, []);
 
   return (
+    <>
+      {moduleSwitching && <Loader />}
     <header className="fixed top-0 left-0 right-0 h-14 z-50 flex items-center justify-between px-4 border-b border-border bg-card/80 backdrop-blur-lg">
       {/* Logo */}
       <button
@@ -500,10 +503,14 @@ export const TopNavbar = () => {
               >
                 {/* Finance */}
                 <button
-                  onClick={() => {
-                    setActiveModule("finance");
+                  onClick={async () => {
                     setModuleOpen(false);
+                    if (activeModule === "finance" && !isAdminPage) return;
+                    setModuleSwitching(true);
+                    await new Promise((res) => setTimeout(res, 600));
+                    setActiveModule("finance");
                     navigate("/");
+                    setModuleSwitching(false);
                   }}
                   className={`group flex flex-col items-center gap-1.5 p-2.5 rounded-xl border transition-all ${
                     activeModule === "finance" && !isAdminPage
@@ -564,10 +571,14 @@ export const TopNavbar = () => {
 
                 {/* Material */}
                 <button
-                  onClick={() => {
-                    setActiveModule("material");
+                  onClick={async () => {
                     setModuleOpen(false);
+                    if (activeModule === "material" && !isAdminPage) return;
+                    setModuleSwitching(true);
+                    await new Promise((res) => setTimeout(res, 600));
+                    setActiveModule("material");
                     navigate("/material/expense-booking");
+                    setModuleSwitching(false);
                   }}
                   className={`group flex flex-col items-center gap-1.5 p-2.5 rounded-xl border transition-all ${
                     activeModule === "material" && !isAdminPage
@@ -745,7 +756,12 @@ export const TopNavbar = () => {
                 )}
               </div>
             </div>
-            <button className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted transition-colors text-foreground">
+            <button
+              onMouseDown={() => {
+                setUserOpen(false);
+                navigate(isSuperAdmin ? "/admin/profile" : "/admin");
+              }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted transition-colors text-foreground">
               <User size={14} /> Profile
             </button>
             <button
@@ -791,7 +807,12 @@ export const TopNavbar = () => {
                 {currentUser?.email}
               </p>
             </div>
-            <button className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted text-foreground">
+            <button
+              onMouseDown={() => {
+                setUserOpen(false);
+                navigate(isSuperAdmin ? "/admin/profile" : "/admin");
+              }}
+              className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted text-foreground">
               <User size={14} /> Profile
             </button>
             <button
@@ -807,6 +828,7 @@ export const TopNavbar = () => {
         </div>
       </div>
     </header>
+    </>
   );
 };
 
