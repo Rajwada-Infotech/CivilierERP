@@ -1,4 +1,5 @@
-﻿const sql = require("mssql")
+require("dotenv").config();
+const sql = require("mssql");
 
 const config = {
   user: process.env.DB_USER,
@@ -17,16 +18,24 @@ const config = {
   },
   connectionTimeout: 30000,
   requestTimeout: 30000,
-}
+};
+
+let pool = null;
 
 async function connectDB() {
   try {
-    await sql.connect(config)
-    console.log("Connected to SQL Server")
+    pool = await sql.connect(config);
+    console.log("Connected to SQL Server");
+    return pool;
   } catch (err) {
-    console.error("DB Connection Failed:", err.message)
-    throw err
+    console.error("DB Connection Failed:", err.message);
+    throw err;
   }
 }
 
-module.exports = { sql, connectDB }
+function getPool() {
+  if (!pool) throw new Error("DB pool not initialized. Call connectDB() first.");
+  return pool;
+}
+
+module.exports = { sql, connectDB, getPool };

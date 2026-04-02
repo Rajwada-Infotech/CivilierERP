@@ -65,7 +65,6 @@ const buildFinanceNavItems = (overdueCount: number): NavItem[] => [
     label: "Transaction",
     icon: Landmark,
     children: [
-      { label: "Expense Booking", path: "/transactions/expense-booking" },
       { label: "Payment", path: "/payments" },
       { label: "Received Payment", path: "/received-payments" },
       { label: "BRS", path: "/brs" },

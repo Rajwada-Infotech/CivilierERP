@@ -1,6 +1,7 @@
-import React, { Suspense, lazy, useState, useEffect } from "react";
+import React, { Suspense, lazy, useState, useEffect, Component } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import Loader from "./components/Loader";
+import { Toaster } from "sonner";
 import {
   BrowserRouter as Router,
   Routes,
@@ -31,6 +32,7 @@ import {
   ActivityBrowserProvider,
   useActivityBrowser,
 } from "@/contexts/ActivityBrowserContext";
+import { useAuth } from "@/contexts/AuthContext";
 
 // ─── Delay Helper ─────────────────────────────────────────────────────────────
 const withDelay = <T,>(importFn: () => Promise<T>, delay = 600): Promise<T> =>
@@ -132,8 +134,9 @@ const BillingTermsMaster = lazy(() =>
 const AdminDashboard = lazy(() =>
   withDelay(() => import("./pages/admin/AdminDashboard")),
 );
+// FIX: AdminExpenseBooking points to the existing ExpenseBooking page (no admin/ExpenseBooking file exists)
 const AdminExpenseBooking = lazy(() =>
-  withDelay(() => import("./pages/admin/ExpenseBooking")),
+  withDelay(() => import("./pages/ExpenseBooking")),
 );
 const Users = lazy(() => withDelay(() => import("./pages/Users")));
 const MenuRights = lazy(() =>
@@ -189,6 +192,37 @@ const WhatsAppSetup = lazy(() =>
   withDelay(() => import("./pages/admin/Communicator/WhatsAppSetup")),
 );
 
+// ─── Error Boundary ───────────────────────────────────────────────────────────
+class ErrorBoundary extends Component<
+  { children: React.ReactNode },
+  { hasError: boolean; message: string }
+> {
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+    this.state = { hasError: false, message: "" };
+  }
+  static getDerivedStateFromError(error: Error) {
+    return { hasError: true, message: error.message };
+  }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 p-8">
+          <p className="text-destructive font-semibold text-lg">Something went wrong</p>
+          <p className="text-muted-foreground text-sm">{this.state.message}</p>
+          <button
+            className="px-4 py-2 rounded bg-primary text-primary-foreground text-sm"
+            onClick={() => this.setState({ hasError: false, message: "" })}
+          >
+            Try again
+          </button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 // ─── Query Client ─────────────────────────────────────────────────────────────
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -215,7 +249,9 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return (
     <RequireAuth>
       <AppLayout>
-        <Suspense fallback={<Loader />}>{children}</Suspense>
+        <ErrorBoundary>
+          <Suspense fallback={<Loader />}>{children}</Suspense>
+        </ErrorBoundary>
       </AppLayout>
     </RequireAuth>
   );
@@ -684,6 +720,7 @@ function App() {
 
   return (
     <QueryClientProvider client={queryClient}>
+      <Toaster richColors position="top-right" />
       <ActivityBrowserProvider>
         <AuthSessionBridge>
           <ModuleProvider>
