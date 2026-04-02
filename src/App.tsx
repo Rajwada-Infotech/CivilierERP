@@ -191,7 +191,9 @@ const EmailSetup = lazy(() =>
 const WhatsAppSetup = lazy(() =>
   withDelay(() => import("./pages/admin/Communicator/WhatsAppSetup")),
 );
-
+const GeneralLedgerMaster = lazy(() =>
+  withDelay(() => import("./pages/masters/GeneralLedgerMaster")),
+);
 // ─── Error Boundary ───────────────────────────────────────────────────────────
 class ErrorBoundary extends Component<
   { children: React.ReactNode },
@@ -527,6 +529,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <ActivityMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/general-ledger"
+        element={
+          <ProtectedRoute>
+            <GeneralLedgerMaster />
           </ProtectedRoute>
         }
       />

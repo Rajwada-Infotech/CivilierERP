@@ -1,25 +1,23 @@
 import React from 'react'
-import { MasterPage, type RecordWithId } from '@/components/MasterPage'
+import { MasterPage, type DataChangeEvent, type RecordWithId } from '@/components/MasterPage'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import {
-  getAccountGroups,
-  addAccountGroup,
-  updateAccountGroup,
-  deleteAccountGroup,
-} from '@/api/accountApi'
 import { toast } from 'sonner'
+
+// ─── API ──────────────────────────────────────────────────────────────────────
+const BASE = 'http://localhost:5000/api/account-group'
+
+const getAccountGroups  = () => fetch(BASE).then(r => r.json())
+const addAccountGroup    = (data: object) => fetch(BASE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(r => r.json())
+const updateAccountGroup = (id: string, data: object) => fetch(`${BASE}/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(r => r.json())
+const deleteAccountGroup = (id: string) => fetch(`${BASE}/${id}`, { method: 'DELETE' }).then(r => r.json())
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface DbAccountGroup {
-  LHeadId: number
-  LHeadName: string
-  LHeadType: string
-  LHeadPhone: string
-  LHeadEmail: string
-  LHeadStatus: number
-  LGST: string | null
-  LGSTState: string | null
-  LCountry: string | null
+  AGId: number
+  Name: string
+  Code: string | null
+  ParentGroupId: number | null
+  Status: boolean
 }
 
 // ─── Tree Helpers ─────────────────────────────────────────────────────────────
@@ -27,7 +25,7 @@ const getDescendants = (id: string, data: RecordWithId[]): string[] => {
   const descendants: string[] = []
   const findChildren = (parentId: string) => {
     data.forEach(row => {
-      if (row.parentGroup === parentId) {
+      if (String(row.parentGroupId) === parentId) {
         descendants.push(row._id)
         findChildren(row._id)
       }
@@ -37,77 +35,43 @@ const getDescendants = (id: string, data: RecordWithId[]): string[] => {
   return descendants
 }
 
-const getParentOptions = (
-  data: RecordWithId[],
-  currentId?: string
-): { value: string; label: string }[] => {
-  const options = [{ value: '', label: '-- No Parent --' }]
-  const invalidIds = currentId
-    ? [currentId, ...getDescendants(currentId, data)]
-    : []
-  data.forEach(row => {
-    if (!invalidIds.includes(row._id)) {
-      options.push({ value: row._id, label: row.name as string })
-    }
-  })
-  return options
+const getParentOptions = (data: RecordWithId[], currentId?: string) => {
+  const invalid = currentId ? [currentId, ...getDescendants(currentId, data)] : []
+  return [
+    { value: '', label: '-- No Parent --' },
+    ...data
+      .filter(r => !invalid.includes(r._id))
+      .map(r => ({ value: r._id, label: r.name as string })),
+  ]
 }
 
-const getParentGroupName = (
-  parentId: string,
-  data: RecordWithId[]
-): string => {
+const getParentName = (parentId: string, data: RecordWithId[]) => {
   if (!parentId) return '—'
-  const parent = data.find(r => r._id === parentId)
-  return parent ? (parent.name as string) : 'Unknown'
+  return (data.find(r => r._id === parentId)?.name as string) ?? 'Unknown'
 }
 
-const getNameWithIndent = (
-  value: string,
-  row: RecordWithId,
-  data: RecordWithId[]
-): React.ReactNode => {
+const getDepth = (row: RecordWithId, data: RecordWithId[]): number => {
   let depth = 0
-  let currentId = row.parentGroup as string
+  let currentId = row.parentGroupId as string
   while (currentId) {
-    depth += 1
+    depth++
     const parent = data.find(r => r._id === currentId)
     if (!parent) break
-    currentId = parent.parentGroup as string
+    currentId = parent.parentGroupId as string
   }
-  return (
-    <span className="flex items-center">
-      <span className="inline-block" style={{ width: `${depth * 1.5}rem` }} />
-      <span>{value}</span>
-    </span>
-  )
+  return depth
 }
 
-const getParentGroupRenderer = (
-  value: string,
-  _row: RecordWithId,
-  data: RecordWithId[]
-): React.ReactNode => {
-  return getParentGroupName(value, data)
-}
-
-// ─── Payload Builder ──────────────────────────────────────────────────────────
-const toPayload = (record: Record<string, unknown>) => ({
-  LHeadName: record.name as string,
-  LHeadType: record.nature as string,
-  LGST: (record.code as string) || null,
-  LHeadPhone: `phone-${Date.now()}`,        // ← unique like email
-  LHeadEmail: `account-${Date.now()}@civilier.local`,
-  LHeadAddress: 'N/A',
-  LHeadContactPerson: 'N/A',
-  LHeadPaymentTerms: 'N/A',
-  LBranchName: 'Main',
-  LCountry: 'India',
-  LHeadStatus: true,
+// ─── Payload ──────────────────────────────────────────────────────────────────
+const toPayload = (r: Record<string, unknown>) => ({
+  Name:          r.name          as string,
+  Code:          (r.code         as string) || null,
+  ParentGroupId: r.parentGroupId ? Number(r.parentGroupId) : null,
+  Status:        true,
 })
 
 // ─── Component ────────────────────────────────────────────────────────────────
-const AccountGroupMaster = () => {
+const AccountGroupMaster: React.FC = () => {
   const queryClient = useQueryClient()
 
   const { data: dbData, isLoading, error } = useQuery({
@@ -115,127 +79,71 @@ const AccountGroupMaster = () => {
     queryFn: getAccountGroups,
   })
 
-  // Always safe — never crashes if API returns error object
   const dbItems: DbAccountGroup[] = Array.isArray(dbData) ? dbData : []
 
-  if (error) {
-    console.error('API ERROR:', error)
-  }
-
-  // Map DB rows → MasterPage format
   const mappedData: RecordWithId[] = dbItems.map(item => ({
-    _id: String(item.LHeadId),
-    name: item.LHeadName || '',
-    code: item.LGST || '',
-    parentGroup: '',
-    nature: item.LHeadType || '',
+    _id:           String(item.AGId),
+    name:          item.Name  || '',
+    code:          item.Code  || '',
+    parentGroupId: item.ParentGroupId ? String(item.ParentGroupId) : '',
   }))
 
-  const handleDataChange = async (records: RecordWithId[]) => {
-    const dbIds = dbItems.map(item => String(item.LHeadId))
-    const recordIds = records.map(r => r._id)
-
-    // ── ADD ──────────────────────────────────────────────────────────────────
-    const added = records.find(r => !dbIds.includes(r._id))
-    if (added) {
-      const payload = toPayload(added as Record<string, unknown>)
+  const handleDataEvent = async (event: DataChangeEvent) => {
+    if (event.action === 'add') {
       try {
-        await addAccountGroup(payload)
+        await addAccountGroup(toPayload(event.record))
         toast.success('Account group saved!')
         await queryClient.invalidateQueries({ queryKey: ['account-groups'] })
-      } catch (err: any) {
-        toast.error('Save failed: ' + err.message)
-        console.error('ADD ERROR:', err)
-      }
-      return
+      } catch (err: any) { toast.error('Save failed: ' + err.message) }
     }
-
-    // ── DELETE ────────────────────────────────────────────────────────────────
-    const deletedId = dbIds.find(id => !recordIds.includes(id))
-    if (deletedId) {
+    if (event.action === 'update') {
       try {
-        await deleteAccountGroup(deletedId)
-        toast.success('Account group deleted!')
-        await queryClient.invalidateQueries({ queryKey: ['account-groups'] })
-      } catch (err: any) {
-        toast.error('Delete failed: ' + err.message)
-        console.error('DELETE ERROR:', err)
-      }
-      return
-    }
-
-    // ── UPDATE ────────────────────────────────────────────────────────────────
-    const updated = records.find(r => {
-      const dbItem = dbItems.find(d => String(d.LHeadId) === r._id)
-      if (!dbItem) return false
-      return (
-        r.name !== dbItem.LHeadName ||
-        r.nature !== dbItem.LHeadType ||
-        r.code !== (dbItem.LGST || '')
-      )
-    })
-
-    if (updated) {
-      const payload = toPayload(updated as Record<string, unknown>)
-      try {
-        await updateAccountGroup(updated._id, payload)
+        await updateAccountGroup(event.id, toPayload(event.record))
         toast.success('Account group updated!')
         await queryClient.invalidateQueries({ queryKey: ['account-groups'] })
-      } catch (err: any) {
-        toast.error('Update failed: ' + err.message)
-        console.error('UPDATE ERROR:', err)
-      }
+      } catch (err: any) { toast.error('Update failed: ' + err.message) }
+    }
+    if (event.action === 'delete') {
+      try {
+        await deleteAccountGroup(event.id)
+        toast.success('Account group deleted!')
+        await queryClient.invalidateQueries({ queryKey: ['account-groups'] })
+      } catch (err: any) { toast.error('Delete failed: ' + err.message) }
     }
   }
 
-  if (isLoading)
-    return <div className="p-6 text-muted-foreground">Loading...</div>
+  const columnRenderers: Record<string, (value: unknown, row: RecordWithId, data: RecordWithId[]) => React.ReactNode> = {
+    name: (value, row, data) => {
+      const depth = getDepth(row, data)
+      return (
+        <span className="flex items-center">
+          <span style={{ width: `${depth * 1.25}rem`, display: 'inline-block' }} />
+          <span>{value as string}</span>
+        </span>
+      )
+    },
+    parentGroupId: (value, _row, data) => getParentName(value as string, data),
+  }
 
-  if (error)
-    return (
-      <div className="p-6 text-red-500">
-        Failed to load account groups. Please check your backend connection.
-      </div>
-    )
+  if (isLoading) return <div className="p-6 text-muted-foreground">Loading...</div>
+  if (error)     return <div className="p-6 text-red-500">Failed to load account groups.</div>
 
   return (
     <MasterPage
       title="Account Groups"
       fields={[
-        { name: 'name', label: 'Name', type: 'text', required: true },
-        {
-          name: 'code',
-          label: 'Code',
-          type: 'text',
-          uppercase: true,
-          required: true,
-        },
-        {
-          name: 'parentGroup',
-          label: 'Parent Group',
-          type: 'select',
-          optionsProvider: getParentOptions,
-        },
-        {
-          name: 'nature',
-          label: 'Nature',
-          type: 'select',
-          required: true,
-          options: ['Asset', 'Liability', 'Income', 'Expense'],
-        },
+        { name: 'name',          label: 'Group Name',   type: 'text',   required: true },
+        { name: 'code',          label: 'Code',         type: 'text',   uppercase: true },
+        { name: 'parentGroupId', label: 'Parent Group', type: 'select', optionsProvider: getParentOptions },
       ]}
       columns={[
-        { key: 'name', label: 'Name' },
-        { key: 'code', label: 'Code' },
-        { key: 'parentGroup', label: 'Parent Group' },
-        { key: 'nature', label: 'Nature' },
+        { key: 'name',          label: 'Group Name' },
+        { key: 'code',          label: 'Code' },
+        { key: 'parentGroupId', label: 'Parent Group' },
       ]}
-      columnRenderers={{
-        name: getNameWithIndent,
-        parentGroup: getParentGroupRenderer,
-      }}
+      columnRenderers={columnRenderers}
       initialData={mappedData}
-      onDataChange={handleDataChange}
+      onDataEvent={handleDataEvent}
     />
   )
 }
