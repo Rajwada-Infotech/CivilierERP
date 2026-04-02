@@ -24,12 +24,16 @@ import {
   Layers,
 } from "lucide-react";
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
 interface AccountGroup {
   _id: string;
   name: string;
   code: string;
   parentId: string | null;
 }
+
+// ─── Tree Helpers ─────────────────────────────────────────────────────────────
 
 function buildTree(items: AccountGroup[]) {
   const map: Record<string, AccountGroup & { children: any[] }> = {};
@@ -61,7 +65,11 @@ function getParentName(parentId: string | null, items: AccountGroup[]): string {
   return items.find((g) => g._id === parentId)?.name ?? "—";
 }
 
+// ─── Constants ────────────────────────────────────────────────────────────────
+
 const EMPTY_FORM = { name: "", code: "", parentId: "" };
+
+// ─── TreeRow Component ────────────────────────────────────────────────────────
 
 function TreeRow({
   node,
@@ -187,14 +195,12 @@ function TreeRow({
   );
 }
 
+// ─── Main Component ───────────────────────────────────────────────────────────
+
 const AccountGroupMaster: React.FC = () => {
   const queryClient = useQueryClient();
 
-  const {
-    data: dbData,
-    isLoading,
-    error,
-  } = useQuery({
+  const { data: dbData, isLoading, error } = useQuery({
     queryKey: ["account-groups"],
     queryFn: getAccountGroups,
   });
@@ -233,6 +239,7 @@ const AccountGroupMaster: React.FC = () => {
     setForm({ name: g.name, code: g.code, parentId: g.parentId || "" });
     setErrors({});
   };
+
   const resetForm = () => {
     setEditingId(null);
     setForm(EMPTY_FORM);
