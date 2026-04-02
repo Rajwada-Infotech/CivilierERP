@@ -1,370 +1,210 @@
-import React, { useState } from "react";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
+import React from "react"
+import { Breadcrumbs } from "@/components/Breadcrumbs"
+import { MasterPage, type DataChangeEvent, type FieldDef, type RecordWithId } from "@/components/MasterPage"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Plus, Edit, Trash2 } from "lucide-react";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import {
-  Form,
-  FormControl,
-  FormField,
-  FormItem,
-  FormLabel,
-  FormMessage,
-} from "@/components/ui/form";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { Badge } from "@/components/ui/badge";
-import { useForm } from "react-hook-form";
-import { toast } from "sonner";
+  getExpenseBookings,
+  addExpenseBooking,
+  updateExpenseBooking,
+  deleteExpenseBooking,
+} from "@/api/expenseBookingApi"
+import { toast } from "sonner"
 
-// Mock Data
-const MOCK_EXPENSES = [
-  {
-    id: "EXP001",
-    date: "2024-10-15",
-    category: "Travel",
-    amount: 2500.0,
-    vendor: "Ola Cabs",
-    description: "Office travel for meeting",
-    status: "Approved" as const,
-  },
-  {
-    id: "EXP002",
-    date: "2024-10-14",
-    category: "Office Supplies",
-    amount: 450.5,
-    vendor: "Local Stationery",
-    description: "Printer ink and paper",
-    status: "Pending" as const,
-  },
-  {
-    id: "EXP003",
-    date: "2024-10-10",
-    category: "Meals",
-    amount: 1200.0,
-    vendor: "Hotel Grand",
-    description: "Client dinner meeting",
-    status: "Rejected" as const,
-  },
-];
-
-type ExpenseStatus = "Pending" | "Approved" | "Rejected";
-
-interface Expense {
-  id: string;
-  date: string;
-  category: string;
-  amount: number;
-  vendor: string;
-  description: string;
-  status: ExpenseStatus;
+interface DbExpenseBooking {
+  EId: string
+  EProjectName: string | null
+  EDocumentType: string | null
+  EDocDate: string | null
+  EAmount: number | null
+  EDocNo: string | null
+  EEmiPayment: boolean | null
+  EReminder: string | null
+  ERemarks: string | null
+  EStatus: string | null
+  ECompanyName: string | null
 }
 
-interface ExpenseFormData {
-  date: string;
-  category: string;
-  amount: number;
-  vendor: string;
-  description: string;
+type ExpenseStatus = "Pending" | "Approved" | "Rejected"
+
+const toPayload = (r: Record<string, unknown>) => ({
+  EProjectName:  (r.projectName  as string) || null,
+  EDocumentType: (r.documentType as string) || null,
+  EDocDate:      (r.docDate      as string) || null,
+  EAmount:       r.amount ? Number(r.amount) : null,
+  EDocNo:        (r.docNo        as string) || null,
+  EEmiPayment:   r.emiPayment === true,
+  EReminder:     (r.reminder     as string) || null,
+  ERemarks:      (r.remarks      as string) || null,
+  EStatus:       (r.status       as string) || "Pending",
+  ECompanyName:  (r.companyName  as string) || null,
+})
+
+// ── Status badge renderer ──────────────────────────────────────────────────────
+function statusRenderer(value: unknown) {
+  const v = (value as ExpenseStatus) || "Pending"
+  const map: Record<ExpenseStatus, { bg: string; dot: string }> = {
+    Pending:  { bg: "bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400",   dot: "bg-amber-500" },
+    Approved: { bg: "bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400", dot: "bg-emerald-500" },
+    Rejected: { bg: "bg-destructive/10 border-destructive/20 text-destructive",                 dot: "bg-destructive" },
+  }
+  const s = map[v] ?? map["Pending"]
+  return (
+    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${s.bg}`}>
+      <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${s.dot}`} />
+      {v}
+    </span>
+  )
 }
 
-export default function ExpenseBooking() {
-  const [expenses, setExpenses] = useState<Expense[]>(MOCK_EXPENSES);
-  const [isDialogOpen, setIsDialogOpen] = useState(false);
-  const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
+// ── Status radio renderer ──────────────────────────────────────────────────────
+function StatusRadioRenderer({
+  value, onChange, error,
+}: {
+  value: unknown
+  onChange: (v: unknown) => void
+  error: boolean
+  field: FieldDef
+}) {
+  const current = (value as ExpenseStatus) || "Pending"
+  const options: { value: ExpenseStatus; label: string; color: string; dot: string }[] = [
+    { value: "Pending",  label: "Pending",  color: "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400",         dot: "bg-amber-500" },
+    { value: "Approved", label: "Approved", color: "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400", dot: "bg-emerald-500" },
+    { value: "Rejected", label: "Rejected", color: "border-destructive/40 bg-destructive/10 text-destructive",                       dot: "bg-destructive" },
+  ]
+  return (
+    <div className={`flex gap-2 flex-wrap ${error ? "ring-1 ring-destructive rounded-lg p-1" : ""}`}>
+      {options.map(opt => {
+        const isSelected = current === opt.value
+        return (
+          <button key={opt.value} type="button" onClick={() => onChange(opt.value)}
+            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg border text-xs font-heading transition-all
+              ${isSelected ? opt.color + " shadow-sm scale-[1.02]" : "border-border bg-muted text-muted-foreground hover:border-primary/40"}`}
+          >
+            <span className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center
+              ${isSelected ? "border-current" : "border-muted-foreground/40"}`}>
+              {isSelected && <span className={`w-1.5 h-1.5 rounded-full ${opt.dot}`} />}
+            </span>
+            {opt.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
 
-  const form = useForm<ExpenseFormData>({
-    defaultValues: {
-      date: "",
-      category: "",
-      amount: 0,
-      vendor: "",
-      description: "",
-    },
-  });
+// ── Main component ─────────────────────────────────────────────────────────────
+const ExpenseBooking: React.FC = () => {
+  const queryClient = useQueryClient()
 
-  const onSubmit = (data: ExpenseFormData) => {
-    if (editingExpense) {
-      // Update existing expense
-      setExpenses((prev) =>
-        prev.map((exp) =>
-          exp.id === editingExpense.id
-            ? { ...exp, ...data, status: "Pending" }
-            : exp,
-        ),
-      );
-      toast.success("Expense updated successfully");
-    } else {
-      // Create new expense
-      const newExpense: Expense = {
-        id: `EXP${String(expenses.length + 1).padStart(3, "0")}`,
-        ...data,
-        status: "Pending",
-      };
-      setExpenses((prev) => [newExpense, ...prev]);
-      toast.success("Expense booked successfully");
+  const { data: dbData, isLoading, error } = useQuery({
+    queryKey: ["expense-bookings"],
+    queryFn: getExpenseBookings,
+  })
+
+  const dbItems: DbExpenseBooking[] = Array.isArray(dbData) ? dbData : []
+
+  const mappedData = dbItems.map(item => ({
+    _id:          item.EId,
+    projectName:  item.EProjectName  || "",
+    companyName:  item.ECompanyName  || "",
+    documentType: item.EDocumentType || "",
+    docDate:      item.EDocDate?.slice(0, 10) || "",
+    amount:       item.EAmount ?? "",
+    docNo:        item.EDocNo        || "",
+    emiPayment:   item.EEmiPayment   ?? false,
+    reminder:     item.EReminder?.slice(0, 10) || "",
+    remarks:      item.ERemarks      || "",
+    status:       item.EStatus       || "Pending",
+  }))
+
+  const handleDataEvent = async (event: DataChangeEvent) => {
+    if (event.action === "add") {
+      try {
+        await addExpenseBooking(toPayload(event.record))
+        toast.success("Expense booked!")
+        await queryClient.invalidateQueries({ queryKey: ["expense-bookings"] })
+      } catch (err: any) {
+        toast.error("Save failed: " + err.message)
+      }
     }
+    if (event.action === "update") {
+      try {
+        await updateExpenseBooking(event.id, toPayload(event.record))
+        toast.success("Expense updated!")
+        await queryClient.invalidateQueries({ queryKey: ["expense-bookings"] })
+      } catch (err: any) {
+        toast.error("Update failed: " + err.message)
+      }
+    }
+    if (event.action === "delete") {
+      try {
+        await deleteExpenseBooking(event.id)
+        toast.success("Expense deleted!")
+        await queryClient.invalidateQueries({ queryKey: ["expense-bookings"] })
+      } catch (err: any) {
+        toast.error("Delete failed: " + err.message)
+      }
+    }
+  }
 
-    setIsDialogOpen(false);
-    form.reset();
-    setEditingExpense(null);
-  };
+  const columnRenderers: Record<string, (value: unknown, row: RecordWithId, data: RecordWithId[]) => React.ReactNode> = {
+    status: (value) => statusRenderer(value),
+    amount: (value) => (
+      <span className="font-mono text-sm">
+        ₹{Number(value || 0).toLocaleString("en-IN")}
+      </span>
+    ),
+    emiPayment: (value) => (
+      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${
+        value ? "bg-primary/10 border-primary/20 text-primary" : "bg-muted border-border text-muted-foreground"
+      }`}>
+        {value ? "Yes" : "No"}
+      </span>
+    ),
+    remarks: (value) => (
+      <span className="text-muted-foreground text-xs italic truncate max-w-[140px] block">
+        {String(value || "—")}
+      </span>
+    ),
+  }
 
-  const handleEdit = (expense: Expense) => {
-    setEditingExpense(expense);
-    form.reset({
-      date: expense.date,
-      category: expense.category,
-      amount: expense.amount,
-      vendor: expense.vendor,
-      description: expense.description,
-    });
-    setIsDialogOpen(true);
-  };
-
-  const handleDelete = (id: string) => {
-    setExpenses((prev) => prev.filter((exp) => exp.id !== id));
-    toast.success("Expense deleted successfully");
-  };
-
-  const getStatusBadge = (status: ExpenseStatus) => {
-    const styles: Record<ExpenseStatus, string> = {
-      Pending: "bg-yellow-100 text-yellow-800 border-yellow-200",
-      Approved: "bg-green-100 text-green-800 border-green-200",
-      Rejected: "bg-red-100 text-red-800 border-red-200",
-    };
-
-    return (
-      <Badge variant="outline" className={styles[status]}>
-        {status}
-      </Badge>
-    );
-  };
+  if (isLoading) return <div className="p-6 text-muted-foreground">Loading...</div>
+  if (error)     return <div className="p-6 text-red-500">Failed to load expense bookings.</div>
 
   return (
     <>
-      <div className="space-y-6">
-    <Breadcrumbs items={["Admin", "Transactions", "Expense Booking"]} />
-
-    <Card>
-      <CardHeader>
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle className="text-xl font-heading">
-              Expense Booking
-            </CardTitle>
-            <CardDescription>
-              Record and manage employee expenses. Pending expenses await
-              approval.
-            </CardDescription>
-          </div>
-
-          <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
-            <DialogTrigger asChild>
-              <Button className="gradient-accent">
-                <Plus className="mr-2 h-4 w-4" />
-                New Expense
-              </Button>
-            </DialogTrigger>
-
-            <DialogContent className="max-w-2xl sm:max-w-4xl max-h-[90vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle>
-                  {editingExpense ? "Edit Expense" : "Book New Expense"}
-                </DialogTitle>
-                <DialogDescription>
-                  Fill in the expense details below.
-                </DialogDescription>
-              </DialogHeader>
-
-              <Form {...form}>
-                <form
-                  onSubmit={form.handleSubmit(onSubmit)}
-                  className="space-y-4"
-                >
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    <FormField
-                      control={form.control}
-                      name="date"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Date</FormLabel>
-                          <FormControl>
-                            <Input type="date" {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="category"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Category</FormLabel>
-                          <FormControl>
-                            <Input
-                              placeholder="e.g. Travel, Meals"
-                              {...field}
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="amount"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Amount (₹)</FormLabel>
-                          <FormControl>
-                            <Input type="number" step="0.01" {...field} />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                    <FormField
-                      control={form.control}
-                      name="vendor"
-                      render={({ field }) => (
-                        <FormItem>
-                          <FormLabel>Vendor/Party</FormLabel>
-                          <FormControl>
-                            <Input
-                              placeholder="e.g. Ola Cabs, Local Store"
-                              {...field}
-                            />
-                          </FormControl>
-                          <FormMessage />
-                        </FormItem>
-                      )}
-                    />
-                  </div>
-
-                  <FormField
-                    control={form.control}
-                    name="description"
-                    render={({ field }) => (
-                      <FormItem>
-                        <FormLabel>Description</FormLabel>
-                        <FormControl>
-                          <Textarea
-                            placeholder="Brief description of expense..."
-                            {...field}
-                          />
-                        </FormControl>
-                        <FormMessage />
-                      </FormItem>
-                    )}
-                  />
-
-                  <DialogFooter>
-                    <Button type="submit" className="gradient-accent">
-                      {editingExpense ? "Update Expense" : "Book Expense"}
-                    </Button>
-                  </DialogFooter>
-                </form>
-              </Form>
-            </DialogContent>
-          </Dialog>
-        </div>
-      </CardHeader>
-
-      <CardContent>
-        <div className="rounded-md border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>ID</TableHead>
-                <TableHead>Date</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead>Amount</TableHead>
-                <TableHead>Vendor</TableHead>
-                <TableHead>Description</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {expenses.map((expense) => (
-                <TableRow key={expense.id}>
-                  <TableCell className="font-mono text-sm">
-                    {expense.id}
-                  </TableCell>
-                  <TableCell>
-                    {new Date(expense.date).toLocaleDateString("en-IN")}
-                  </TableCell>
-                  <TableCell>{expense.category}</TableCell>
-                  <TableCell className="font-mono">
-                    ₹{expense.amount.toLocaleString("en-IN")}
-                  </TableCell>
-                  <TableCell className="max-w-[150px] truncate">
-                    {expense.vendor}
-                  </TableCell>
-                  <TableCell className="max-w-[200px] truncate">
-                    {expense.description}
-                  </TableCell>
-                  <TableCell>{getStatusBadge(expense.status)}</TableCell>
-                  <TableCell>
-                    <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleEdit(expense)}
-                        className="h-8"
-                      >
-                        <Edit className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="destructive"
-                        size="sm"
-                        onClick={() => handleDelete(expense.id)}
-                        className="h-8"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-
-          {expenses.length === 0 && (
-            <div className="text-center py-12 text-muted-foreground">
-              No expenses recorded yet. Click "New Expense" to book your
-              first one.
-            </div>
-          )}
-        </div>
-      </CardContent>
-    </Card>
-  </div>
+      <Breadcrumbs items={["Dashboard", "Transactions", "Expense Booking"]} />
+      <h1 className="text-xl font-heading font-bold text-foreground mb-4">Expense Booking</h1>
+      <MasterPage
+        title="Expense"
+        fields={[
+          { name: "projectName",  label: "Project Name",   type: "select",  required: true, options: ["Civilier Infrastructure Pvt Ltd", "Apex Constructions Ltd", "SiteCraft Engineers", "Raj Builders & Co", "Metro Rail Project"] },
+          { name: "companyName",  label: "Company Name",   type: "text" },
+          { name: "documentType", label: "Document Type",  type: "select",  required: true, options: ["Invoice", "Bill", "Receipt", "Voucher", "Credit Note", "Debit Note"] },
+          { name: "docNo",        label: "Doc No",         type: "text",    required: true, uppercase: true },
+          { name: "docDate",      label: "Doc Date",       type: "text",    required: true },
+          { name: "amount",       label: "Amount (₹)",     type: "number",  required: true },
+          { name: "emiPayment",   label: "EMI Payment",    type: "toggle",  defaultValue: false },
+          { name: "reminder",     label: "Reminder Date",  type: "text" },
+          { name: "status",       label: "Status",         type: "custom",  required: true, defaultValue: "Pending", render: StatusRadioRenderer as FieldDef["render"] },
+          { name: "remarks",      label: "Remarks",        type: "textarea", fullWidth: true },
+        ]}
+        columns={[
+          { key: "docNo",        label: "Doc No" },
+          { key: "projectName",  label: "Project",       hideOnMobile: true },
+          { key: "documentType", label: "Type",          hideOnMobile: true },
+          { key: "docDate",      label: "Date" },
+          { key: "amount",       label: "Amount" },
+          { key: "emiPayment",   label: "EMI",           hideOnMobile: true },
+          { key: "status",       label: "Status" },
+          { key: "remarks",      label: "Remarks",       hideOnMobile: true },
+        ]}
+        columnRenderers={columnRenderers}
+        initialData={mappedData}
+        onDataEvent={handleDataEvent}
+      />
     </>
-  );
+  )
 }
+
+export default ExpenseBooking
