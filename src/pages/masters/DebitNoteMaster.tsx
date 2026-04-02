@@ -1,4 +1,4 @@
-import React, { useRef } from "react";
+import React from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   MasterPage,
@@ -178,10 +178,6 @@ function BillDiscountRenderer({
             ))}
           </select>
         </div>
-        <p className="text-[10px] text-muted-foreground mt-1">
-          Bill routing from Expense Booking will be connected in a future
-          update.
-        </p>
       </div>
 
       {/* ── Step 2: Bill Amount + Discount ───────────────────────────────── */}
@@ -419,15 +415,6 @@ const DebitNoteMaster: React.FC = () => {
     },
   ];
 
-  const columns: ColumnDef[] = [
-    { key: "company", label: "Company" },
-    { key: "project", label: "Project", hideOnMobile: true },
-    { key: "supplier", label: "Supplier" },
-    { key: "billDiscountGroup", label: "Bill No. / Final" },
-    { key: "billDiscountGroup", label: "Discount" },
-    { key: "status", label: "Status" },
-  ];
-
   // Flatten billDiscountGroup into scalar fields before saving
   const handleCustomSave = (
     formData: Record<string, unknown>,
@@ -448,15 +435,6 @@ const DebitNoteMaster: React.FC = () => {
       finalAmount: g.finalAmount,
       status: formData.status ?? true,
     };
-  };
-
-  // Unique column keys — use index-keyed renderers
-  const columnRenderers: Record<
-    string,
-    (value: unknown, row: RecordWithId, data: RecordWithId[]) => React.ReactNode
-  > = {
-    billDiscountGroup: billDiscountColumnRenderer,
-    discount: discountSummaryRenderer,
   };
 
   // Fix: columns with same key need distinct renderers — override via a wrapper
