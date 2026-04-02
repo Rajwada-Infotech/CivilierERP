@@ -1,151 +1,684 @@
-import React from 'react'
-import { MasterPage, type DataChangeEvent, type RecordWithId } from '@/components/MasterPage'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
-
-// ─── API ──────────────────────────────────────────────────────────────────────
-const BASE = 'http://localhost:5000/api/account-group'
-
-const getAccountGroups  = () => fetch(BASE).then(r => r.json())
-const addAccountGroup    = (data: object) => fetch(BASE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(r => r.json())
-const updateAccountGroup = (id: string, data: object) => fetch(`${BASE}/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(r => r.json())
-const deleteAccountGroup = (id: string) => fetch(`${BASE}/${id}`, { method: 'DELETE' }).then(r => r.json())
+import React, { useState, useMemo } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  getAccountGroups,
+  addAccountGroup,
+  updateAccountGroup,
+  deleteAccountGroup,
+} from "@/api/accountApi";
+import { toast } from "sonner";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
+import {
+  ChevronRight,
+  ChevronDown,
+  Pencil,
+  Trash2,
+  X,
+  Check,
+  FolderOpen,
+  Folder,
+  Hash,
+  RotateCcw,
+  Plus,
+  Search,
+  Layers,
+} from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-interface DbAccountGroup {
-  AGId: number
-  Name: string
-  Code: string | null
-  ParentGroupId: number | null
-  Status: boolean
+
+interface AccountGroup {
+  _id: string;
+  name: string;
+  code: string;
+  parentId: string | null;
 }
 
 // ─── Tree Helpers ─────────────────────────────────────────────────────────────
-const getDescendants = (id: string, data: RecordWithId[]): string[] => {
-  const descendants: string[] = []
-  const findChildren = (parentId: string) => {
-    data.forEach(row => {
-      if (String(row.parentGroupId) === parentId) {
-        descendants.push(row._id)
-        findChildren(row._id)
+
+function buildTree(items: AccountGroup[]) {
+  const map: Record<string, AccountGroup & { children: any[] }> = {};
+  items.forEach((i) => (map[i._id] = { ...i, children: [] }));
+  const roots: (AccountGroup & { children: any[] })[] = [];
+  items.forEach((i) => {
+    if (i.parentId && map[i.parentId])
+      map[i.parentId].children.push(map[i._id]);
+    else roots.push(map[i._id]);
+  });
+  return roots;
+}
+
+function getDescendants(id: string, items: AccountGroup[]): string[] {
+  const out: string[] = [];
+  const visit = (pid: string) =>
+    items.forEach((i) => {
+      if (i.parentId === pid) {
+        out.push(i._id);
+        visit(i._id);
       }
-    })
-  }
-  findChildren(id)
-  return descendants
+    });
+  visit(id);
+  return out;
 }
 
-const getParentOptions = (data: RecordWithId[], currentId?: string) => {
-  const invalid = currentId ? [currentId, ...getDescendants(currentId, data)] : []
-  return [
-    { value: '', label: '-- No Parent --' },
-    ...data
-      .filter(r => !invalid.includes(r._id))
-      .map(r => ({ value: r._id, label: r.name as string })),
-  ]
+function getParentName(parentId: string | null, items: AccountGroup[]): string {
+  if (!parentId) return "—";
+  return items.find((g) => g._id === parentId)?.name ?? "—";
 }
 
-const getParentName = (parentId: string, data: RecordWithId[]) => {
-  if (!parentId) return '—'
-  return (data.find(r => r._id === parentId)?.name as string) ?? 'Unknown'
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const EMPTY_FORM = { name: "", code: "", parentId: "" };
+
+// ─── TreeRow Component ────────────────────────────────────────────────────────
+
+function TreeRow({
+  node,
+  depth,
+  expanded,
+  onToggle,
+  onEdit,
+  onDelete,
+  deleteConfirm,
+  setDeleteConfirm,
+  activeEditId,
+}: {
+  node: AccountGroup & { children: any[] };
+  depth: number;
+  expanded: Set<string>;
+  onToggle: (id: string) => void;
+  onEdit: (g: AccountGroup) => void;
+  onDelete: (id: string) => void;
+  deleteConfirm: string | null;
+  setDeleteConfirm: (id: string | null) => void;
+  activeEditId: string | null;
+}) {
+  const hasChildren = node.children.length > 0;
+  const isExpanded = expanded.has(node._id);
+  return (
+    <>
+      <tr
+        className={`group border-b border-border transition-colors ${activeEditId === node._id ? "bg-primary/5" : "hover:bg-muted/30"}`}
+      >
+        <td className="py-2.5 px-4">
+          <div
+            className="flex items-center gap-2"
+            style={{ paddingLeft: depth * 28 }}
+          >
+            <button
+              onClick={() => hasChildren && onToggle(node._id)}
+              className={`w-5 h-5 flex items-center justify-center rounded text-muted-foreground transition-colors ${hasChildren ? "hover:text-foreground hover:bg-muted cursor-pointer" : "opacity-0 cursor-default"}`}
+            >
+              {isExpanded ? (
+                <ChevronDown size={14} />
+              ) : (
+                <ChevronRight size={14} />
+              )}
+            </button>
+            {depth > 0 && (
+              <span className="text-muted-foreground/30 text-xs">└</span>
+            )}
+            {hasChildren ? (
+              <FolderOpen size={15} className="text-amber-500 shrink-0" />
+            ) : depth === 0 ? (
+              <Layers size={14} className="text-primary/60 shrink-0" />
+            ) : (
+              <Folder size={14} className="text-muted-foreground/40 shrink-0" />
+            )}
+            <span
+              className={`text-sm ${depth === 0 ? "font-semibold text-foreground" : "font-medium text-foreground/80"}`}
+            >
+              {node.name}
+            </span>
+            {hasChildren && (
+              <span className="text-[10px] bg-muted text-muted-foreground rounded-full px-1.5 py-0.5 font-medium">
+                {node.children.length}
+              </span>
+            )}
+          </div>
+        </td>
+        <td className="py-2.5 px-4">
+          <span className="text-xs font-mono text-muted-foreground flex items-center gap-1">
+            <Hash size={10} />
+            {node.code || "—"}
+          </span>
+        </td>
+        <td className="py-2.5 px-4 text-right">
+          <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button
+              onClick={() => onEdit(node)}
+              className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+            >
+              <Pencil size={13} />
+            </button>
+            {deleteConfirm === node._id ? (
+              <>
+                <button
+                  onClick={() => onDelete(node._id)}
+                  className="w-7 h-7 flex items-center justify-center rounded text-red-500 hover:bg-red-50 transition-colors"
+                >
+                  <Check size={13} />
+                </button>
+                <button
+                  onClick={() => setDeleteConfirm(null)}
+                  className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:bg-muted transition-colors"
+                >
+                  <X size={13} />
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={() => setDeleteConfirm(node._id)}
+                className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-red-500 hover:bg-red-50 transition-colors"
+              >
+                <Trash2 size={13} />
+              </button>
+            )}
+          </div>
+        </td>
+      </tr>
+      {isExpanded &&
+        node.children.map((child: any) => (
+          <TreeRow
+            key={child._id}
+            node={child}
+            depth={depth + 1}
+            expanded={expanded}
+            onToggle={onToggle}
+            onEdit={onEdit}
+            onDelete={onDelete}
+            deleteConfirm={deleteConfirm}
+            setDeleteConfirm={setDeleteConfirm}
+            activeEditId={activeEditId}
+          />
+        ))}
+    </>
+  );
 }
 
-const getDepth = (row: RecordWithId, data: RecordWithId[]): number => {
-  let depth = 0
-  let currentId = row.parentGroupId as string
-  while (currentId) {
-    depth++
-    const parent = data.find(r => r._id === currentId)
-    if (!parent) break
-    currentId = parent.parentGroupId as string
-  }
-  return depth
-}
+// ─── Main Component ───────────────────────────────────────────────────────────
 
-// ─── Payload ──────────────────────────────────────────────────────────────────
-const toPayload = (r: Record<string, unknown>) => ({
-  Name:          r.name          as string,
-  Code:          (r.code         as string) || null,
-  ParentGroupId: r.parentGroupId ? Number(r.parentGroupId) : null,
-  Status:        true,
-})
-
-// ─── Component ────────────────────────────────────────────────────────────────
 const AccountGroupMaster: React.FC = () => {
-  const queryClient = useQueryClient()
+  const queryClient = useQueryClient();
 
   const { data: dbData, isLoading, error } = useQuery({
-    queryKey: ['account-groups'],
+    queryKey: ["account-groups"],
     queryFn: getAccountGroups,
-  })
+  });
 
-  const dbItems: DbAccountGroup[] = Array.isArray(dbData) ? dbData : []
+  const allGroups: AccountGroup[] = useMemo(() => {
+    if (!Array.isArray(dbData)) return [];
+    return (dbData as any[]).map((item) => ({
+      _id: String(item.LHeadId),
+      name: item.LHeadName || "",
+      code: item.LGST || "",
+      parentId: item.ParentId ? String(item.ParentId) : null,
+    }));
+  }, [dbData]);
 
-  const mappedData: RecordWithId[] = dbItems.map(item => ({
-    _id:           String(item.AGId),
-    name:          item.Name  || '',
-    code:          item.Code  || '',
-    parentGroupId: item.ParentGroupId ? String(item.ParentGroupId) : '',
-  }))
+  const tree = useMemo(() => buildTree(allGroups), [allGroups]);
 
-  const handleDataEvent = async (event: DataChangeEvent) => {
-    if (event.action === 'add') {
-      try {
-        await addAccountGroup(toPayload(event.record))
-        toast.success('Account group saved!')
-        await queryClient.invalidateQueries({ queryKey: ['account-groups'] })
-      } catch (err: any) { toast.error('Save failed: ' + err.message) }
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState(EMPTY_FORM);
+  const [errors, setErrors] = useState<Record<string, boolean>>({});
+  const [saving, setSaving] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [search, setSearch] = useState("");
+
+  const toggleExpand = (id: string) =>
+    setExpanded((prev) => {
+      const n = new Set(prev);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
+  const expandAll = () => setExpanded(new Set(allGroups.map((g) => g._id)));
+  const collapseAll = () => setExpanded(new Set());
+
+  const startEdit = (g: AccountGroup) => {
+    setEditingId(g._id);
+    setForm({ name: g.name, code: g.code, parentId: g.parentId || "" });
+    setErrors({});
+  };
+
+  const resetForm = () => {
+    setEditingId(null);
+    setForm(EMPTY_FORM);
+    setErrors({});
+  };
+
+  const handleSave = async () => {
+    const e: Record<string, boolean> = {};
+    if (!form.name.trim()) e.name = true;
+    if (!form.code.trim()) e.code = true;
+    if (Object.keys(e).length) {
+      setErrors(e);
+      return;
     }
-    if (event.action === 'update') {
-      try {
-        await updateAccountGroup(event.id, toPayload(event.record))
-        toast.success('Account group updated!')
-        await queryClient.invalidateQueries({ queryKey: ['account-groups'] })
-      } catch (err: any) { toast.error('Update failed: ' + err.message) }
+    setSaving(true);
+    try {
+      const payload = {
+        LHeadName: form.name.trim(),
+        LHeadType: "",
+        LGST: form.code.trim().toUpperCase(),
+        LHeadPhone: `ph-${Date.now()}`,
+        LHeadEmail: `acg-${Date.now()}@civilier.local`,
+        LHeadAddress: "N/A",
+        LHeadContactPerson: "N/A",
+        LHeadPaymentTerms: "N/A",
+        LBranchName: "Main",
+        LCountry: "India",
+        LHeadStatus: true,
+        ParentId: form.parentId || null,
+      };
+      if (editingId) {
+        await updateAccountGroup(editingId, payload);
+        toast.success("Account group updated");
+      } else {
+        await addAccountGroup(payload);
+        toast.success("Account group created");
+      }
+      await queryClient.invalidateQueries({ queryKey: ["account-groups"] });
+      resetForm();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to save");
+    } finally {
+      setSaving(false);
     }
-    if (event.action === 'delete') {
-      try {
-        await deleteAccountGroup(event.id)
-        toast.success('Account group deleted!')
-        await queryClient.invalidateQueries({ queryKey: ['account-groups'] })
-      } catch (err: any) { toast.error('Delete failed: ' + err.message) }
+  };
+
+  const handleDelete = async (id: string) => {
+    if (getDescendants(id, allGroups).length > 0) {
+      toast.error("Remove sub-groups before deleting a parent group");
+      setDeleteConfirm(null);
+      return;
     }
-  }
+    try {
+      await deleteAccountGroup(id);
+      toast.success("Deleted");
+      setDeleteConfirm(null);
+      if (editingId === id) resetForm();
+      await queryClient.invalidateQueries({ queryKey: ["account-groups"] });
+    } catch (err: any) {
+      toast.error(err.message || "Failed to delete");
+    }
+  };
 
-  const columnRenderers: Record<string, (value: unknown, row: RecordWithId, data: RecordWithId[]) => React.ReactNode> = {
-    name: (value, row, data) => {
-      const depth = getDepth(row, data)
-      return (
-        <span className="flex items-center">
-          <span style={{ width: `${depth * 1.25}rem`, display: 'inline-block' }} />
-          <span>{value as string}</span>
-        </span>
-      )
-    },
-    parentGroupId: (value, _row, data) => getParentName(value as string, data),
-  }
+  const invalidParents = editingId
+    ? [editingId, ...getDescendants(editingId, allGroups)]
+    : [];
+  const parentOptions = allGroups.filter(
+    (g) => !invalidParents.includes(g._id),
+  );
 
-  if (isLoading) return <div className="p-6 text-muted-foreground">Loading...</div>
-  if (error)     return <div className="p-6 text-red-500">Failed to load account groups.</div>
+  const filteredFlat = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return null;
+    return allGroups.filter(
+      (g) =>
+        g.name.toLowerCase().includes(q) || g.code.toLowerCase().includes(q),
+    );
+  }, [search, allGroups]);
+
+  const rootCount = allGroups.filter((g) => !g.parentId).length;
+  const subCount = allGroups.filter((g) => g.parentId).length;
 
   return (
-    <MasterPage
-      title="Account Groups"
-      fields={[
-        { name: 'name',          label: 'Group Name',   type: 'text',   required: true },
-        { name: 'code',          label: 'Code',         type: 'text',   uppercase: true },
-        { name: 'parentGroupId', label: 'Parent Group', type: 'select', optionsProvider: getParentOptions },
-      ]}
-      columns={[
-        { key: 'name',          label: 'Group Name' },
-        { key: 'code',          label: 'Code' },
-        { key: 'parentGroupId', label: 'Parent Group' },
-      ]}
-      columnRenderers={columnRenderers}
-      initialData={mappedData}
-      onDataEvent={handleDataEvent}
-    />
-  )
-}
+    <>
+      <Breadcrumbs items={["Masters", "Account Group"]} />
 
-export default AccountGroupMaster
+      {/* ── Page header ── */}
+      <div className="mb-6">
+        <h1 className="text-xl font-heading font-bold text-foreground">
+          Account Group Master
+        </h1>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          Organise accounts into parent groups and sub-groups
+        </p>
+      </div>
+
+      {/* ── Form card ── */}
+      <div className="rounded-xl border border-border bg-card mb-6">
+        <div className="px-5 py-4 border-b border-border flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-foreground">
+            {editingId ? "Edit Group" : "Add Account Group"}
+          </h2>
+          <p className="text-xs text-muted-foreground">
+            {editingId
+              ? "Modify the selected group"
+              : "Fill in the details to create a new group."}
+          </p>
+        </div>
+
+        <div className="p-5">
+          <div className="grid grid-cols-2 gap-x-6 gap-y-5">
+            {/* Group Name */}
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-2">
+                GROUP NAME <span className="text-red-500">*</span>
+              </label>
+              <input
+                value={form.name}
+                onChange={(e) => {
+                  setForm((p) => ({ ...p, name: e.target.value }));
+                  setErrors((p) => ({ ...p, name: false }));
+                }}
+                placeholder="e.g. Office Expenses"
+                className={`w-full text-sm rounded-lg border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition ${errors.name ? "border-red-400" : "border-border"}`}
+              />
+              {errors.name && (
+                <p className="text-xs text-red-500 mt-1">Required</p>
+              )}
+            </div>
+
+            {/* Code */}
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-2">
+                CODE <span className="text-red-500">*</span>
+              </label>
+              <input
+                value={form.code}
+                onChange={(e) => {
+                  setForm((p) => ({
+                    ...p,
+                    code: e.target.value.toUpperCase(),
+                  }));
+                  setErrors((p) => ({ ...p, code: false }));
+                }}
+                placeholder="e.g. EXP-OFF"
+                className={`w-full text-sm rounded-lg border px-3 py-2.5 bg-background text-foreground font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition ${errors.code ? "border-red-400" : "border-border"}`}
+              />
+              {errors.code && (
+                <p className="text-xs text-red-500 mt-1">Required</p>
+              )}
+            </div>
+
+            {/* Parent Group */}
+            <div>
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-2">
+                PARENT GROUP
+              </label>
+              <select
+                value={form.parentId}
+                onChange={(e) =>
+                  setForm((p) => ({ ...p, parentId: e.target.value }))
+                }
+                className="w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+              >
+                <option value="">Select...</option>
+                {parentOptions.map((g) => (
+                  <option key={g._id} value={g._id}>
+                    {g.parentId ? `  └ ${g.name}` : g.name}
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Leave blank to create a top-level group
+              </p>
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="flex items-center gap-3 mt-6 pt-5 border-t border-border">
+            <button
+              onClick={handleSave}
+              disabled={saving}
+              className="px-5 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 disabled:opacity-60 transition-opacity flex items-center gap-2"
+            >
+              {saving ? (
+                <>
+                  <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                  Saving…
+                </>
+              ) : editingId ? (
+                <>
+                  <Check size={14} />
+                  Update Group
+                </>
+              ) : (
+                <>
+                  <Plus size={14} />
+                  Save Group
+                </>
+              )}
+            </button>
+            {editingId && (
+              <button
+                onClick={resetForm}
+                className="px-5 py-2.5 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted transition-colors flex items-center gap-2"
+              >
+                <RotateCcw size={13} />
+                Cancel
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Structure example ── */}
+      <div className="rounded-xl border border-border bg-card mb-6 p-4">
+        <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-3">
+          Structure Example
+        </p>
+        <div className="flex gap-8 text-[12px] text-muted-foreground">
+          <div className="space-y-1">
+            <div className="flex items-center gap-1.5">
+              <Layers size={12} className="text-primary/60" />
+              <span className="font-semibold text-foreground/80">Expenses</span>
+            </div>
+            <div className="flex items-center gap-1.5 pl-4">
+              <span className="text-muted-foreground/40">└</span>
+              <Folder size={11} className="text-muted-foreground/50" />
+              <span>Office Expense</span>
+            </div>
+            <div className="flex items-center gap-1.5 pl-4">
+              <span className="text-muted-foreground/40">└</span>
+              <Folder size={11} className="text-muted-foreground/50" />
+              <span>Civil Expense</span>
+            </div>
+          </div>
+          <div className="space-y-1">
+            <div className="flex items-center gap-1.5">
+              <Layers size={12} className="text-primary/60" />
+              <span className="font-semibold text-foreground/80">Income</span>
+            </div>
+            <div className="flex items-center gap-1.5 pl-4">
+              <span className="text-muted-foreground/40">└</span>
+              <Folder size={11} className="text-muted-foreground/50" />
+              <span>Customer Income</span>
+            </div>
+            <div className="flex items-center gap-1.5 pl-4">
+              <span className="text-muted-foreground/40">└</span>
+              <Folder size={11} className="text-muted-foreground/50" />
+              <span>Others</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* ── Table ── */}
+      <div>
+        <div className="mb-3 flex items-center gap-3">
+          <div className="relative flex-1 max-w-xs">
+            <Search
+              size={14}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+            />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search name or code…"
+              className="w-full text-sm rounded-lg border border-border pl-9 pr-3 py-2 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
+            />
+          </div>
+          {!search && (
+            <div className="flex gap-2">
+              <button
+                onClick={expandAll}
+                className="text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-1.5 hover:bg-muted transition-colors"
+              >
+                Expand All
+              </button>
+              <button
+                onClick={collapseAll}
+                className="text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-1.5 hover:bg-muted transition-colors"
+              >
+                Collapse All
+              </button>
+            </div>
+          )}
+          <div className="ml-auto flex gap-2 text-xs text-muted-foreground">
+            <span className="bg-muted/60 rounded-lg px-3 py-1.5">
+              {rootCount} Parent Groups
+            </span>
+            <span className="bg-muted/60 rounded-lg px-3 py-1.5">
+              {subCount} Sub-Groups
+            </span>
+          </div>
+        </div>
+
+        <div className="rounded-xl border border-border overflow-hidden bg-card">
+          {isLoading ? (
+            <div className="p-10 text-center">
+              <div className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin mx-auto mb-3" />
+              <p className="text-sm text-muted-foreground">Loading groups…</p>
+            </div>
+          ) : error ? (
+            <div className="p-10 text-center">
+              <p className="text-red-500 text-sm">
+                Failed to load. Check backend connection.
+              </p>
+            </div>
+          ) : (
+            <table className="w-full text-left">
+              <thead>
+                <tr className="border-b border-border bg-muted/40">
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wide py-3 px-4">
+                    Group Name
+                  </th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wide py-3 px-4">
+                    Code
+                  </th>
+                  <th className="py-3 px-4 w-24" />
+                </tr>
+              </thead>
+              <tbody>
+                {filteredFlat ? (
+                  filteredFlat.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={3}
+                        className="py-10 text-center text-muted-foreground text-sm"
+                      >
+                        No results for "{search}"
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredFlat.map((g) => (
+                      <tr
+                        key={g._id}
+                        className={`group border-b border-border hover:bg-muted/30 transition-colors ${editingId === g._id ? "bg-primary/5" : ""}`}
+                      >
+                        <td className="py-2.5 px-4">
+                          <div className="flex items-center gap-2">
+                            <Folder
+                              size={14}
+                              className="text-muted-foreground/40"
+                            />
+                            <span className="text-sm font-medium text-foreground">
+                              {g.name}
+                            </span>
+                            {g.parentId && (
+                              <span className="text-[10px] text-muted-foreground bg-muted rounded-full px-1.5 py-0.5">
+                                sub
+                              </span>
+                            )}
+                          </div>
+                          {g.parentId && (
+                            <div className="text-[11px] text-muted-foreground ml-6 mt-0.5">
+                              under {getParentName(g.parentId, allGroups)}
+                            </div>
+                          )}
+                        </td>
+                        <td className="py-2.5 px-4">
+                          <span className="text-xs font-mono text-muted-foreground flex items-center gap-1">
+                            <Hash size={10} />
+                            {g.code || "—"}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-4 text-right">
+                          <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <button
+                              onClick={() => startEdit(g)}
+                              className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                            >
+                              <Pencil size={13} />
+                            </button>
+                            {deleteConfirm === g._id ? (
+                              <>
+                                <button
+                                  onClick={() => handleDelete(g._id)}
+                                  className="w-7 h-7 flex items-center justify-center rounded text-red-500 hover:bg-red-50"
+                                >
+                                  <Check size={13} />
+                                </button>
+                                <button
+                                  onClick={() => setDeleteConfirm(null)}
+                                  className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:bg-muted"
+                                >
+                                  <X size={13} />
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                onClick={() => setDeleteConfirm(g._id)}
+                                className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-red-500 hover:bg-red-50 transition-colors"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )
+                ) : tree.length === 0 ? (
+                  <tr>
+                    <td colSpan={3} className="py-12 text-center">
+                      <Layers
+                        size={28}
+                        className="text-muted-foreground/30 mx-auto mb-3"
+                      />
+                      <p className="text-sm text-muted-foreground">
+                        No account groups yet.
+                      </p>
+                      <p className="text-xs text-muted-foreground/70 mt-1">
+                        Use the form above to create your first group.
+                      </p>
+                    </td>
+                  </tr>
+                ) : (
+                  tree.map((node) => (
+                    <TreeRow
+                      key={node._id}
+                      node={node}
+                      depth={0}
+                      expanded={expanded}
+                      onToggle={toggleExpand}
+                      onEdit={startEdit}
+                      onDelete={handleDelete}
+                      deleteConfirm={deleteConfirm}
+                      setDeleteConfirm={setDeleteConfirm}
+                      activeEditId={editingId}
+                    />
+                  ))
+                )}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </>
+  );
+};
+
+export default AccountGroupMaster;
