@@ -1,24 +1,24 @@
-const express = require("express")
-const router = express.Router()
-const { sql } = require("../db")
+const express = require("express");
+const router = express.Router();
+const { getPool, sql } = require("../db");
 
 // GET all item groups
 router.get("/", async (req, res) => {
   try {
-    const pool = await sql.connect()
+    const pool = getPool();
     const result = await pool.request().query(
       "SELECT M_Id, M_Name, M_Description, M_Type, M_BelongsTo, M_Group, M_IdentityCode, M_HSN, M_CGST, M_IGST, M_SGST, M_CreatedBy, M_CreatedDate, M_ApprovedBy, Parent_Id FROM dbo.Item_Master_Group"
-    )
-    res.json(result.recordset)
+    );
+    res.json(result.recordset);
   } catch (err) {
-    console.error("GET ERROR:", err.message)
-    res.status(500).json({ error: err.message })
+    console.error("GET ERROR:", err.message);
+    res.status(500).json({ error: err.message });
   }
-})
+});
 
 // ADD item group
 router.post("/", async (req, res) => {
-  console.log("POST BODY:", req.body)
+  console.log("POST BODY:", req.body);
   const {
     M_Name,
     M_Description,
@@ -30,12 +30,11 @@ router.post("/", async (req, res) => {
     M_CGST,
     M_IGST,
     M_SGST,
-  } = req.body
+  } = req.body;
 
   try {
-    const pool = await sql.connect()
-    await pool
-      .request()
+    const pool = getPool();
+    await pool.request()
       .input("M_Name", sql.NVarChar, M_Name)
       .input("M_Description", sql.NVarChar, M_Description || null)
       .input("M_Type", sql.NVarChar, M_Type || null)
@@ -57,17 +56,17 @@ router.post("/", async (req, res) => {
           @M_IdentityCode, @M_HSN, @M_CGST, @M_IGST, @M_SGST,
           NEWID(), @M_CreatedDate, NULL
         )
-      `)
-    res.json({ message: "Item group added successfully" })
+      `);
+    res.json({ message: "Item group added successfully" });
   } catch (err) {
-    console.error("INSERT ERROR:", err.message)
-    res.status(500).json({ error: err.message })
+    console.error("INSERT ERROR:", err.message);
+    res.status(500).json({ error: err.message });
   }
-})
+});
 
 // UPDATE item group
 router.put("/:id", async (req, res) => {
-  const { id } = req.params
+  const { id } = req.params;
   const {
     M_Name,
     M_Description,
@@ -80,12 +79,11 @@ router.put("/:id", async (req, res) => {
     M_IGST,
     M_SGST,
     Parent_Id,
-  } = req.body
+  } = req.body;
 
   try {
-    const pool = await sql.connect()
-    await pool
-      .request()
+    const pool = getPool();
+    await pool.request()
       .input("M_Id", sql.UniqueIdentifier, id)
       .input("M_Name", sql.NVarChar, M_Name)
       .input("M_Description", sql.NVarChar, M_Description || null)
@@ -112,28 +110,27 @@ router.put("/:id", async (req, res) => {
           M_SGST        = @M_SGST,
           Parent_Id     = @Parent_Id
         WHERE M_Id = @M_Id
-      `)
-    res.json({ message: "Item group updated successfully" })
+      `);
+    res.json({ message: "Item group updated successfully" });
   } catch (err) {
-    console.error("UPDATE ERROR:", err.message)
-    res.status(500).json({ error: err.message })
+    console.error("UPDATE ERROR:", err.message);
+    res.status(500).json({ error: err.message });
   }
-})
+});
 
 // DELETE item group
 router.delete("/:id", async (req, res) => {
-  const { id } = req.params
+  const { id } = req.params;
   try {
-    const pool = await sql.connect()
-    await pool
-      .request()
+    const pool = getPool();
+    await pool.request()
       .input("M_Id", sql.UniqueIdentifier, id)
-      .query("DELETE FROM dbo.Item_Master_Group WHERE M_Id = @M_Id")
-    res.json({ message: "Item group deleted successfully" })
+      .query("DELETE FROM dbo.Item_Master_Group WHERE M_Id = @M_Id");
+    res.json({ message: "Item group deleted successfully" });
   } catch (err) {
-    console.error("DELETE ERROR:", err.message)
-    res.status(500).json({ error: err.message })
+    console.error("DELETE ERROR:", err.message);
+    res.status(500).json({ error: err.message });
   }
-})
+});
 
-module.exports = router
+module.exports = router;

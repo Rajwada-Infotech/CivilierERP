@@ -1,4 +1,4 @@
-const BASE_URL = "http://localhost:5000/api/account-groups";
+const BASE_URL = "/api/account-groups";
 
 export const getAccountGroups = async () => {
   const res = await fetch(BASE_URL);
