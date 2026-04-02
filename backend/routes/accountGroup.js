@@ -1,114 +1,64 @@
-const express = require("express");
-const router = express.Router();
-const { getPool, sql } = require("../db");
+const express = require("express")
+const router = express.Router()
+const { getPool, sql } = require("../db")
 
-// GET all account heads
 router.get("/", async (req, res) => {
   try {
-    const pool = getPool();
-    const result = await pool.request().query(
-      "SELECT LHeadId, LHeadName, LHeadType, LHeadPhone, LHeadEmail, LHeadStatus, LGST, LGSTState, LCountry FROM dbo.AccountHeadMaster"
-    );
-    res.json(result.recordset);
-  } catch (err) {
-    console.error("GET ERROR:", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
+    const pool = getPool()
+    const result = await pool.request().query("SELECT * FROM dbo.AccountGroup")
+    res.json(result.recordset)
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
 
-// ADD account head
 router.post("/", async (req, res) => {
-  console.log("POST BODY:", req.body);
-  const {
-    LHeadName,
-    LHeadPhone,
-    LHeadEmail,
-    LHeadAddress,
-    LHeadType,
-    LHeadContactPerson,
-    LHeadStatus,
-    LHeadPaymentTerms,
-    LBranchName,
-    LGST,
-    LGSTState,
-    LCountry,
-  } = req.body;
-
+  const { Name, Code, ParentGroupId, Status } = req.body
   try {
-    const pool = getPool();
+    const pool = getPool()
     await pool.request()
-      .input("LHeadName", sql.NVarChar, LHeadName)
-      .input("LHeadPhone", sql.NVarChar, LHeadPhone || "0000000000")
-      .input("LHeadEmail", sql.NVarChar, LHeadEmail)
-      .input("LHeadAddress", sql.NVarChar, LHeadAddress || "N/A")
-      .input("LHeadType", sql.NVarChar, LHeadType)
-      .input("LHeadContactPerson", sql.NVarChar, LHeadContactPerson || "N/A")
-      .input("LHeadStatus", sql.Int, LHeadStatus !== false ? 1 : 0)
-      .input("LHeadPaymentTerms", sql.NVarChar, LHeadPaymentTerms || "N/A")
-      .input("LBranchName", sql.NVarChar, LBranchName || "Main")
-      .input("LGST", sql.NVarChar, LGST)
-      .input("LGSTState", sql.NVarChar, LGSTState)
-      .input("LCountry", sql.NVarChar, LCountry || "India")
+      .input("Name",          sql.NVarChar,  Name || null)
+      .input("Code",          sql.NVarChar,  Code || null)
+      .input("ParentGroupId", sql.Int,       ParentGroupId || null)
+      .input("Status",        sql.Bit,       Status ? 1 : 0)
+      .input("CreatedBy",     sql.Int,       1)
+      .input("CreatedAt",     sql.DateTime2, new Date())
       .query(`
-        INSERT INTO dbo.AccountHeadMaster (
-          LHeadName, LHeadPhone, LHeadEmail, LHeadAddress, LHeadType,
-          LHeadContactPerson, LHeadStatus, LHeadPaymentTerms, LBranchName,
-          CreatedBy, LGST, LGSTState, LCountry
-        ) VALUES (
-          @LHeadName, @LHeadPhone, @LHeadEmail, @LHeadAddress, @LHeadType,
-          @LHeadContactPerson, @LHeadStatus, @LHeadPaymentTerms, @LBranchName,
-          1, @LGST, @LGSTState, @LCountry
-        )
-      `);
-    res.json({ message: "Account head added successfully" });
-  } catch (err) {
-    console.error("INSERT ERROR:", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
+        INSERT INTO dbo.AccountGroup (Name, Code, ParentGroupId, Status, CreatedBy, CreatedAt)
+        VALUES (@Name, @Code, @ParentGroupId, @Status, @CreatedBy, @CreatedAt)
+      `)
+    res.json({ message: "Account group added" })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
 
-// UPDATE account head
 router.put("/:id", async (req, res) => {
-  const { id } = req.params;
-  console.log("PUT ID:", id, "BODY:", req.body);
-
+  const { Name, Code, ParentGroupId, Status } = req.body
   try {
-    const pool = getPool();
+    const pool = getPool()
     await pool.request()
-      .input("id", sql.Int, id)
-      .input("LHeadName", sql.NVarChar, req.body.LHeadName)
-      .input("LHeadType", sql.NVarChar, req.body.LHeadType)
-      .input("LGST", sql.NVarChar, req.body.LGST)
+      .input("AGId",          sql.Int,       req.params.id)
+      .input("Name",          sql.NVarChar,  Name || null)
+      .input("Code",          sql.NVarChar,  Code || null)
+      .input("ParentGroupId", sql.Int,       ParentGroupId || null)
+      .input("Status",        sql.Bit,       Status ? 1 : 0)
+      .input("UpdatedBy",     sql.Int,       1)
+      .input("UpdatedAt",     sql.DateTime2, new Date())
       .query(`
-        UPDATE dbo.AccountHeadMaster SET
-          LHeadName = @LHeadName,
-          LHeadType = @LHeadType,
-          LGST = @LGST,
-          isEdited = 1
-        WHERE LHeadId = @id
-      `);
-    res.json({ message: "Account head updated" });
-  } catch (err) {
-    console.error("UPDATE ERROR:", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
+        UPDATE dbo.AccountGroup SET
+          Name=@Name, Code=@Code, ParentGroupId=@ParentGroupId,
+          Status=@Status, UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt
+        WHERE AGId=@AGId
+      `)
+    res.json({ message: "Account group updated" })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
 
-// DELETE account head
 router.delete("/:id", async (req, res) => {
-  const { id } = req.params;
-  console.log("DELETE ID:", id);
-
   try {
-    const pool = getPool();
+    const pool = getPool()
     await pool.request()
-      .input("id", sql.Int, id)
-      .query("DELETE FROM dbo.AccountHeadMaster WHERE LHeadId = @id");
-    res.json({ message: "Account head deleted" });
-  } catch (err) {
-    console.error("DELETE ERROR:", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
+      .input("AGId", sql.Int, req.params.id)
+      .query("DELETE FROM dbo.AccountGroup WHERE AGId=@AGId")
+    res.json({ message: "Account group deleted" })
+  } catch (err) { res.status(500).json({ error: err.message }) }
+})
 
-module.exports = router;
+module.exports = router
