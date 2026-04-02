@@ -16,17 +16,24 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-// ── Bank seed data (mirrors BankMaster, includes IFSC) ──────────────────────
+// ── Bank seed data (mirrors BankMaster initialData, includes accountNo) ──────
 const BANK_OPTIONS = [
-  { bankName: "HDFC Bank", ifsc: "HDFC0001234", branch: "Andheri West" },
-  { bankName: "State Bank of India", ifsc: "SBIN0001111", branch: "Main Branch" },
-  { bankName: "ICICI Bank", ifsc: "ICIC0002222", branch: "Koregaon Park" },
+  { bankName: "HDFC Bank", accountNo: "50100012345678", ifsc: "HDFC0001234", branch: "Andheri West" },
+  { bankName: "State Bank of India", accountNo: "38765432109876", ifsc: "SBIN0001111", branch: "Main Branch" },
+  { bankName: "ICICI Bank", accountNo: "12345678901234", ifsc: "ICIC0002222", branch: "Koregaon Park" },
+];
+
+// ── Company seed data (from admin/masters/CompanyMaster) ─────────────────────
+const COMPANY_OPTIONS = [
+  { companyName: "Civilier ERP Pvt. Ltd.", code: "MAIN" },
 ];
 
 // ── Types ────────────────────────────────────────────────────────────────────
 interface ChequeRecord {
   _id: string;
+  companyName: string;
   bankName: string;
+  accountNumber: string;
   ifsc: string;
   lotNumber: string;
   chqStart: number | "";
@@ -44,7 +51,9 @@ function calcTotal(start: number | "", end: number | ""): number {
 const SEED: ChequeRecord[] = [
   {
     _id: "chq-seed-1",
+    companyName: "Civilier ERP Pvt. Ltd.",
     bankName: "HDFC Bank",
+    accountNumber: "50100012345678",
     ifsc: "HDFC0001234",
     lotNumber: "LOT-2024-001",
     chqStart: 100001,
@@ -55,7 +64,9 @@ const SEED: ChequeRecord[] = [
   },
   {
     _id: "chq-seed-2",
+    companyName: "Civilier ERP Pvt. Ltd.",
     bankName: "State Bank of India",
+    accountNumber: "38765432109876",
     ifsc: "SBIN0001111",
     lotNumber: "LOT-2024-002",
     chqStart: 200101,
@@ -67,7 +78,9 @@ const SEED: ChequeRecord[] = [
 ];
 
 const EMPTY: Omit<ChequeRecord, "_id"> = {
+  companyName: "",
   bankName: "",
+  accountNumber: "",
   ifsc: "",
   lotNumber: "",
   chqStart: "",
@@ -94,25 +107,29 @@ const ChequeMaster: React.FC = () => {
     setForm((p) => ({ ...p, totalCheques: calcTotal(p.chqStart, p.chqEnd) }));
   }, [form.chqStart, form.chqEnd]);
 
-  // Auto-fill IFSC when bank changes
+  // Auto-fill accountNumber & IFSC when bank changes
   const handleBankChange = (bankName: string) => {
     const bank = BANK_OPTIONS.find((b) => b.bankName === bankName);
     setForm((p) => ({
       ...p,
       bankName,
+      accountNumber: bank?.accountNo ?? "",
       ifsc: bank?.ifsc ?? "",
     }));
     if (errors.bankName) setErrors((e) => ({ ...e, bankName: false }));
   };
 
   const setField = (k: keyof typeof EMPTY, v: unknown) => {
+    // @ts-expect-error - temp to handle new fields until TS understands
     setForm((p) => ({ ...p, [k]: v }));
     if (errors[k as string]) setErrors((e) => ({ ...e, [k as string]: false }));
   };
 
   const validate = () => {
     const e: Record<string, boolean> = {};
+    if (!form.companyName) e.companyName = true;
     if (!form.bankName) e.bankName = true;
+    if (!form.accountNumber.trim()) e.accountNumber = true;
     if (!form.lotNumber.trim()) e.lotNumber = true;
     if (form.chqStart === "" || isNaN(Number(form.chqStart))) e.chqStart = true;
     if (form.chqEnd === "" || isNaN(Number(form.chqEnd))) e.chqEnd = true;
@@ -149,7 +166,8 @@ const ChequeMaster: React.FC = () => {
     const r = data.find((x) => x._id === id);
     if (!r) return;
     const { _id, ...rest } = r;
-    setForm(rest);
+    // Ensure all fields present
+    setForm({ ...EMPTY, ...rest });
     setEditingId(id);
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -171,7 +189,9 @@ const ChequeMaster: React.FC = () => {
     if (!search) return true;
     const q = search.toLowerCase();
     return (
+      r.companyName.toLowerCase().includes(q) ||
       r.bankName.toLowerCase().includes(q) ||
+      r.accountNumber.toLowerCase().includes(q) ||
       r.lotNumber.toLowerCase().includes(q) ||
       r.ifsc.toLowerCase().includes(q) ||
       String(r.chqStart).includes(q) ||
@@ -213,6 +233,27 @@ const ChequeMaster: React.FC = () => {
           <div className="p-5">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
 
+              {/* Company Name dropdown */}
+              <div>
+                <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  Company Name <span className="text-destructive">*</span>
+                </label>
+                <div className="relative">
+                  <Landmark size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <select
+                    value={form.companyName}
+                    onChange={(e) => setField("companyName", e.target.value)}
+                    className={`${inp} pl-8 ${errors.companyName ? "border-destructive" : ""}`}
+                  >
+                    <option value="">Select Company...</option>
+                    {COMPANY_OPTIONS.map((c) => (
+                      <option key={c.companyName} value={c.companyName}>{c.companyName}</option>
+                    ))}
+                  </select>
+                </div>
+                {errors.companyName && <p className="text-[11px] text-destructive mt-1">Company is required</p>}
+              </div>
+
               {/* Bank Name dropdown */}
               <div>
                 <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
@@ -232,6 +273,30 @@ const ChequeMaster: React.FC = () => {
                   </select>
                 </div>
                 {errors.bankName && <p className="text-[11px] text-destructive mt-1">Bank is required</p>}
+              </div>
+
+              {/* Account Number — auto-filled, editable */}
+              <div>
+                <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  Account Number <span className="text-destructive">*</span>
+                  <span className="ml-2 normal-case text-[10px] text-muted-foreground/60">(auto-filled from bank)</span>
+                </label>
+                <div className="relative">
+                  <Hash size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+                  <input
+                    type="text"
+                    value={form.accountNumber}
+                    onChange={(e) => setField("accountNumber", e.target.value)}
+                    placeholder="Auto-filled on bank selection"
+                    className={`${inp} pl-8 font-mono tracking-widest ${errors.accountNumber ? "border-destructive" : ""} ${form.accountNumber ? "bg-muted/30" : ""}`}
+                  />
+                  {form.accountNumber && (
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-heading text-primary bg-primary/10 px-1.5 py-0.5 rounded">
+                      AUTO
+                    </span>
+                  )}
+                </div>
+                {errors.accountNumber && <p className="text-[11px] text-destructive mt-1">Account Number is required</p>}
               </div>
 
               {/* IFSC — auto-filled, read-only with visual indicator */}
@@ -437,7 +502,9 @@ const ChequeMaster: React.FC = () => {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/30">
+                  <th className="px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">Company</th>
                   <th className="px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">Bank</th>
+                  <th className="px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap hidden sm:table-cell">Account No.</th>
                   <th className="px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap hidden sm:table-cell">IFSC</th>
                   <th className="px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap">Lot No.</th>
                   <th className="px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap hidden md:table-cell">Chq Start</th>
@@ -460,14 +527,18 @@ const ChequeMaster: React.FC = () => {
                       key={row._id}
                       className={`hover:bg-muted/20 transition-colors ${editingId === row._id ? "bg-primary/5 border-l-2 border-l-primary" : ""}`}
                     >
+                      <td className="px-4 py-3 text-foreground text-sm font-body truncate max-w-[120px]">{row.companyName}</td>
                       <td className="px-4 py-3 text-foreground text-sm font-body">{row.bankName}</td>
-
+                      <td className="px-4 py-3 text-foreground text-sm font-mono hidden sm:table-cell">
+                        {row.accountNumber ? (
+                          <span className="text-xs bg-muted px-2 py-0.5 rounded font-mono">{row.accountNumber}</span>
+                        ) : "—"}
+                      </td>
                       <td className="px-4 py-3 text-foreground text-sm font-mono hidden sm:table-cell">
                         {row.ifsc ? (
                           <span className="text-xs bg-muted px-2 py-0.5 rounded font-mono">{row.ifsc}</span>
                         ) : "—"}
                       </td>
-
                       <td className="px-4 py-3 text-foreground text-sm font-heading font-medium">{row.lotNumber}</td>
 
                       <td className="px-4 py-3 text-foreground text-sm font-mono hidden md:table-cell">{row.chqStart}</td>

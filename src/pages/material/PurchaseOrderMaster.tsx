@@ -118,11 +118,11 @@ export default function PurchaseOrderMaster() {
     status: (value: unknown) => {
       const status = String(value ?? "");
       const statusClasses: Record<string, string> = {
-        Draft: "bg-slate-100 text-slate-700 border-slate-200",
-        Issued: "bg-blue-100 text-blue-700 border-blue-200",
-        "Partially Received": "bg-amber-100 text-amber-700 border-amber-200",
-        Received: "bg-emerald-100 text-emerald-700 border-emerald-200",
-        Closed: "bg-slate-100 text-slate-700 border-slate-200",
+        Draft: "bg-slate-50 text-slate-500 border-slate-200 dark:bg-slate-800/30 dark:text-slate-400 dark:border-slate-700",
+        Issued: "bg-blue-50/70 text-blue-600/90 border-blue-200/70 dark:bg-blue-900/10 dark:text-blue-400/80 dark:border-blue-800/60",
+        "Partially Received": "bg-amber-50/70 text-amber-600/90 border-amber-200/70 dark:bg-amber-900/10 dark:text-amber-400/80 dark:border-amber-800/60",
+        Received: "bg-green-50/70 text-green-700/80 border-green-200/70 dark:bg-green-900/10 dark:text-green-400/70 dark:border-green-800/60",
+        Closed: "bg-muted/60 text-muted-foreground/70 border-border/60",
       };
       return (
         <span className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-heading ${statusClasses[status] || "bg-muted text-muted-foreground border-border"}`}>
