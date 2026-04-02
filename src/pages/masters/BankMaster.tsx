@@ -1,42 +1,159 @@
-import React from "react";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { MasterPage, FieldDef, ColumnDef } from "@/components/MasterPage";
+import React from 'react'
+import { Breadcrumbs } from '@/components/Breadcrumbs'
+import { MasterPage, type DataChangeEvent, type RecordWithId } from '@/components/MasterPage'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 
-const fields: FieldDef[] = [
-  { name: "bankName", label: "Bank Name", type: "text", required: true },
-  { name: "branch", label: "Branch Name", type: "text" },
-  { name: "accountNo", label: "Account Number", type: "text", required: true },
-  { name: "ifsc", label: "IFSC Code", type: "text", uppercase: true, required: true },
-  { name: "accountType", label: "Account Type", type: "select", options: ["Current", "Savings", "Overdraft (OD)", "Cash Credit"] },
-  { name: "bankType", label: "Bank Type", type: "select", options: ["Nationalized", "Private", "Co-operative", "Foreign", "Regional Rural"] },
-  { name: "holderName", label: "Account Holder Name", type: "text" },
-  { name: "openingBalance", label: "Opening Balance (₹)", type: "number", prefix: "₹" },
-  { name: "address", label: "Address", type: "textarea", fullWidth: true },
-  { name: "status", label: "Status", type: "toggle", defaultValue: true },
-];
+// ─── API ──────────────────────────────────────────────────────────────────────
+const BASE = 'http://localhost:5000/api/bank-master'
 
-const columns: ColumnDef[] = [
-  { key: "bankName", label: "Bank Name" },
-  { key: "branch", label: "Branch" },
-  { key: "accountNo", label: "Account No." },
-  { key: "ifsc", label: "IFSC" },
-  { key: "accountType", label: "Account Type" },
-  { key: "bankType", label: "Bank Type" },
-  { key: "status", label: "Status" },
-];
+const getBanks    = () => fetch(BASE).then(r => r.json())
+const addBank     = (data: object) => fetch(BASE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(r => r.json())
+const updateBank  = (id: string, data: object) => fetch(`${BASE}/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(r => r.json())
+const deleteBank  = (id: string) => fetch(`${BASE}/${id}`, { method: 'DELETE' }).then(r => r.json())
 
-const initialData = [
-  { bankName: "HDFC Bank", branch: "Andheri West", accountNo: "50100012345678", ifsc: "HDFC0001234", accountType: "Current", bankType: "Private", holderName: "Civilier Infra Pvt Ltd", openingBalance: "2500000", address: "Mumbai, MH", status: true },
-  { bankName: "State Bank of India", branch: "Main Branch", accountNo: "38765432109876", ifsc: "SBIN0001111", accountType: "Savings", bankType: "Nationalized", holderName: "Civilier Infra Pvt Ltd", openingBalance: "800000", address: "Pune, MH", status: true },
-  { bankName: "ICICI Bank", branch: "Koregaon Park", accountNo: "12345678901234", ifsc: "ICIC0002222", accountType: "Overdraft (OD)", bankType: "Private", holderName: "Civilier Infra Pvt Ltd", openingBalance: "1200000", address: "Pune, MH", status: true },
-];
+// ─── Types ────────────────────────────────────────────────────────────────────
+interface DbBank {
+  BId: number
+  BName: string | null
+  BBranch: string | null
+  BAccountNumber: string | null
+  BIfscCode: string | null
+  BAccountType: string | null
+  BBankType: string | null
+  BAccountHolderName: string | null
+  BOpeningBalance: number | null
+  BAddress: string | null
+  BStatus: boolean
+}
 
-const BankMaster: React.FC = () => (
-  <>
-      <Breadcrumbs items={["Dashboard", "Finance Module", "Bank Master"]} />
-    <h1 className="text-xl font-heading font-bold text-foreground mb-4">Bank Master</h1>
-    <MasterPage title="Bank" fields={fields} columns={columns} initialData={initialData} />
-  </>
-);
+// ─── Payload ──────────────────────────────────────────────────────────────────
+const toPayload = (r: Record<string, unknown>) => ({
+  BName:              (r.bankName       as string) || null,
+  BBranch:            (r.branch         as string) || null,
+  BAccountNumber:     (r.accountNo      as string) || null,
+  BIfscCode:          (r.ifsc           as string) || null,
+  BAccountType:       (r.accountType    as string) || null,
+  BBankType:          (r.bankType       as string) || null,
+  BAccountHolderName: (r.holderName     as string) || null,
+  BOpeningBalance:    r.openingBalance ? Number(r.openingBalance) : null,
+  BAddress:           (r.address        as string) || null,
+  BStatus:            r.status !== false,
+})
 
-export default BankMaster;
+// ─── Component ────────────────────────────────────────────────────────────────
+const BankMaster: React.FC = () => {
+  const queryClient = useQueryClient()
+
+  const { data: dbData, isLoading, error } = useQuery({
+    queryKey: ['banks'],
+    queryFn: getBanks,
+  })
+
+  const dbItems: DbBank[] = Array.isArray(dbData) ? dbData : []
+
+  const mappedData: RecordWithId[] = dbItems.map(item => ({
+    _id:            String(item.BId),
+    bankName:       item.BName              || '',
+    branch:         item.BBranch            || '',
+    accountNo:      item.BAccountNumber     || '',
+    ifsc:           item.BIfscCode          || '',
+    accountType:    item.BAccountType       || '',
+    bankType:       item.BBankType          || '',
+    holderName:     item.BAccountHolderName || '',
+    openingBalance: item.BOpeningBalance    ?? '',
+    address:        item.BAddress           || '',
+    status:         item.BStatus,
+  }))
+
+  const handleDataEvent = async (event: DataChangeEvent) => {
+    if (event.action === 'add') {
+      try {
+        await addBank(toPayload(event.record))
+        toast.success('Bank saved!')
+        await queryClient.invalidateQueries({ queryKey: ['banks'] })
+      } catch (err: any) { toast.error('Save failed: ' + err.message) }
+    }
+    if (event.action === 'update') {
+      try {
+        await updateBank(event.id, toPayload(event.record))
+        toast.success('Bank updated!')
+        await queryClient.invalidateQueries({ queryKey: ['banks'] })
+      } catch (err: any) { toast.error('Update failed: ' + err.message) }
+    }
+    if (event.action === 'delete') {
+      try {
+        await deleteBank(event.id)
+        toast.success('Bank deleted!')
+        await queryClient.invalidateQueries({ queryKey: ['banks'] })
+      } catch (err: any) { toast.error('Delete failed: ' + err.message) }
+    }
+  }
+
+  const columnRenderers: Record<string, (value: unknown, row: RecordWithId, data: RecordWithId[]) => React.ReactNode> = {
+    status: (value) => (
+      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${value ? 'bg-green-500/10 border-green-500/20 text-green-600' : 'bg-red-500/10 border-red-500/20 text-red-600'}`}>
+        {value ? 'Active' : 'Inactive'}
+      </span>
+    ),
+    bankType: (value) => {
+      const map: Record<string, string> = {
+        'Nationalized':   'bg-blue-500/10 border-blue-500/20 text-blue-600',
+        'Private':        'bg-violet-500/10 border-violet-500/20 text-violet-600',
+        'Co-operative':   'bg-amber-500/10 border-amber-500/20 text-amber-600',
+        'Foreign':        'bg-cyan-500/10 border-cyan-500/20 text-cyan-600',
+        'Regional Rural': 'bg-green-500/10 border-green-500/20 text-green-600',
+      }
+      const cls = map[value as string] ?? 'bg-muted border-border text-muted-foreground'
+      return (
+        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${cls}`}>
+          {(value as string) || '—'}
+        </span>
+      )
+    },
+    openingBalance: (value) => (
+      <span className="font-mono text-sm">₹{Number(value || 0).toLocaleString('en-IN')}</span>
+    ),
+  }
+
+  if (isLoading) return <div className="p-6 text-muted-foreground">Loading...</div>
+  if (error)     return <div className="p-6 text-red-500">Failed to load banks.</div>
+
+  return (
+    <>
+      <Breadcrumbs items={['Dashboard', 'Finance Module', 'Bank Master']} />
+      <h1 className="text-xl font-heading font-bold text-foreground mb-4">Bank Master</h1>
+
+      <MasterPage
+        title="Bank"
+        fields={[
+          { name: 'bankName',       label: 'Bank Name',            type: 'text',     required: true },
+          { name: 'branch',         label: 'Branch Name',          type: 'text' },
+          { name: 'accountNo',      label: 'Account Number',       type: 'text',     required: true },
+          { name: 'ifsc',           label: 'IFSC Code',            type: 'text',     uppercase: true, required: true },
+          { name: 'accountType',    label: 'Account Type',         type: 'select',   options: ['Current', 'Savings', 'Overdraft (OD)', 'Cash Credit'] },
+          { name: 'bankType',       label: 'Bank Type',            type: 'select',   options: ['Nationalized', 'Private', 'Co-operative', 'Foreign', 'Regional Rural'] },
+          { name: 'holderName',     label: 'Account Holder Name',  type: 'text' },
+          { name: 'openingBalance', label: 'Opening Balance (₹)',  type: 'number' },
+          { name: 'address',        label: 'Address',              type: 'textarea', fullWidth: true },
+          { name: 'status',         label: 'Status',               type: 'toggle',   defaultValue: true },
+        ]}
+        columns={[
+          { key: 'bankName',       label: 'Bank Name' },
+          { key: 'branch',         label: 'Branch',        hideOnMobile: true },
+          { key: 'accountNo',      label: 'Account No.' },
+          { key: 'ifsc',           label: 'IFSC',          hideOnMobile: true },
+          { key: 'accountType',    label: 'Account Type',  hideOnMobile: true },
+          { key: 'bankType',       label: 'Bank Type',     hideOnMobile: true },
+          { key: 'openingBalance', label: 'Opening Bal.',  hideOnMobile: true },
+          { key: 'status',         label: 'Status' },
+        ]}
+        columnRenderers={columnRenderers}
+        initialData={mappedData}
+        onDataEvent={handleDataEvent}
+      />
+    </>
+  )
+}
+
+export default BankMaster

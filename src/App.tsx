@@ -130,6 +130,10 @@ const BillingTermsMaster = lazy(() =>
   withDelay(() => import("./pages/masters/BillingTermsmaster")),
 );
 
+const UnitOfMeasurementMaster = lazy(() =>
+  withDelay(() => import("./pages/material/UnitOfMeasurementMaster")),
+);
+
 // Admin Pages
 const AdminDashboard = lazy(() =>
   withDelay(() => import("./pages/admin/AdminDashboard")),
@@ -191,7 +195,9 @@ const EmailSetup = lazy(() =>
 const WhatsAppSetup = lazy(() =>
   withDelay(() => import("./pages/admin/Communicator/WhatsAppSetup")),
 );
-
+const GeneralLedgerMaster = lazy(() =>
+  withDelay(() => import("./pages/masters/GeneralLedgerMaster")),
+);
 // ─── Error Boundary ───────────────────────────────────────────────────────────
 class ErrorBoundary extends Component<
   { children: React.ReactNode },
@@ -531,6 +537,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/masters/general-ledger"
+        element={
+          <ProtectedRoute>
+            <GeneralLedgerMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/masters/debit-note"
         element={
           <ProtectedRoute>
@@ -543,6 +557,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <BillingTermsMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/unit-measurement"
+        element={
+          <ProtectedRoute>
+            <UnitOfMeasurementMaster />
           </ProtectedRoute>
         }
       />

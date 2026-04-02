@@ -1,296 +1,138 @@
-import React, { useRef } from "react";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { MasterPage, FieldDef, RecordWithId } from "@/components/MasterPage";
-import { FileType2 } from "lucide-react";
+import React from 'react'
+import { Breadcrumbs } from '@/components/Breadcrumbs'
+import { MasterPage, type DataChangeEvent, type RecordWithId } from '@/components/MasterPage'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
+
+// ─── API ──────────────────────────────────────────────────────────────────────
+const BASE = 'http://localhost:5000/api/document-type'
+
+const getDocs    = () => fetch(BASE).then(r => r.json())
+const addDoc     = (data: object) => fetch(BASE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(r => r.json())
+const updateDoc  = (id: string, data: object) => fetch(`${BASE}/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(r => r.json())
+const deleteDoc  = (id: string) => fetch(`${BASE}/${id}`, { method: 'DELETE' }).then(r => r.json())
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-type DocStatus = "Active" | "Inactive" | "Draft";
-
-interface TypeOfDocRecord {
-  _id: string;
-  docCode: string;
-  name: string;
-  description: string;
-  status: DocStatus;
-  remarks: string;
+interface DbDoc {
+  id: number
+  code: string | null
+  name: string | null
+  description: string | null
+  module: string | null
+  status: string | null
+  remarks: string | null
 }
 
-// ─── Seed data (pulled from NamedEntryType document numbers) ─────────────────
+// ─── Payload ──────────────────────────────────────────────────────────────────
+const toPayload = (r: Record<string, unknown>) => ({
+  code:        (r.code        as string) || null,
+  name:        (r.name        as string) || null,
+  description: (r.description as string) || null,
+  module:      (r.module      as string) || null,
+  status:      (r.status      as string) || 'Active',
+  remarks:     (r.remarks     as string) || null,
+})
 
-const SEED: Omit<TypeOfDocRecord, "_id">[] = [
-  {
-    docCode: "CIPL/0001/2024-25",
-    name: "Payment Voucher",
-    description: "Standard payment voucher for outgoing transactions",
-    status: "Active",
-    remarks: "",
-  },
-  {
-    docCode: "ACL/0001/2024-25",
-    name: "Receipt Voucher",
-    description: "Standard receipt voucher for incoming transactions",
-    status: "Active",
-    remarks: "",
-  },
-];
-
-// ─── Named Entry Type doc codes pulled from localStorage / context ────────────
-// We read the same seed the NamedEntryTypeMaster uses so doc codes stay in sync.
-// In a real API-backed app this would be a useEffect fetch; here we merge the
-// static seed with any records persisted by the MasterPage in state.
-
-const NAMED_ENTRY_SEED_DOC_NUMBERS = ["CIPL/0001/2024-25", "ACL/0001/2024-25"];
-
-// ─── Status Radio renderer ────────────────────────────────────────────────────
-
-function StatusRadioRenderer({
-  value,
-  onChange,
-  error,
-}: {
-  value: unknown;
-  onChange: (v: unknown) => void;
-  error: boolean;
-  field: FieldDef;
-}) {
-  const current = (value as DocStatus) || "Active";
-  const options: {
-    value: DocStatus;
-    label: string;
-    color: string;
-    dot: string;
-  }[] = [
-    {
-      value: "Active",
-      label: "Active",
-      color:
-        "border-emerald-500/40 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-      dot: "bg-emerald-500",
-    },
-    {
-      value: "Inactive",
-      label: "Inactive",
-      color: "border-destructive/40 bg-destructive/10 text-destructive",
-      dot: "bg-destructive",
-    },
-    {
-      value: "Draft",
-      label: "Draft",
-      color:
-        "border-amber-500/40 bg-amber-500/10 text-amber-600 dark:text-amber-400",
-      dot: "bg-amber-500",
-    },
-  ];
-
-  return (
-    <div
-      className={`flex gap-2 flex-wrap ${error ? "ring-1 ring-destructive rounded-lg p-1" : ""}`}
-    >
-      {options.map((opt) => {
-        const isSelected = current === opt.value;
-        return (
-          <button
-            key={opt.value}
-            type="button"
-            onClick={() => onChange(opt.value)}
-            className={`flex items-center gap-2 px-3.5 py-2 rounded-lg border text-xs font-heading transition-all
-              ${isSelected ? opt.color + " shadow-sm scale-[1.02]" : "border-border bg-muted text-muted-foreground hover:border-primary/40"}`}
-          >
-            {/* Radio circle */}
-            <span
-              className={`w-3.5 h-3.5 rounded-full border-2 flex items-center justify-center transition-all
-                ${isSelected ? "border-current" : "border-muted-foreground/40"}`}
-            >
-              {isSelected && (
-                <span className={`w-1.5 h-1.5 rounded-full ${opt.dot}`} />
-              )}
-            </span>
-            {opt.label}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-// ─── Doc Code select renderer — pulls codes from NamedEntryType ───────────────
-
-function makeDocCodeRenderer(namedEntryCodes: React.RefObject<string[]>) {
-  return function DocCodeRenderer({
-    value,
-    onChange,
-    error,
-  }: {
-    value: unknown;
-    onChange: (v: unknown) => void;
-    error: boolean;
-    field: FieldDef;
-  }) {
-    const codes = namedEntryCodes.current ?? [];
-    const current = (value as string) || "";
-
-    return (
-      <div>
-        <div className="relative">
-          <FileType2
-            size={13}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-          />
-          <select
-            value={current}
-            onChange={(e) => onChange(e.target.value)}
-            className={`w-full pl-8 pr-3 py-2 rounded-lg text-sm font-body bg-muted border transition-all
-              focus:outline-none focus:ring-2 focus:ring-primary text-foreground
-              ${error ? "border-destructive" : "border-border"}`}
-          >
-            <option value="">Select doc code…</option>
-            {codes.map((code) => (
-              <option key={code} value={code}>
-                {code}
-              </option>
-            ))}
-          </select>
-        </div>
-        {codes.length === 0 && (
-          <p className="text-[11px] text-amber-500 mt-1">
-            No document codes found — add records in Named Entry Type Master
-            first.
-          </p>
-        )}
-      </div>
-    );
-  };
-}
-
-// ─── Column renderer for status badge ─────────────────────────────────────────
-
-function statusRenderer(value: unknown) {
-  const v = value as DocStatus;
-  const map: Record<DocStatus, { bg: string; dot: string; text: string }> = {
-    Active: {
-      bg: "bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400",
-      dot: "bg-emerald-500",
-      text: "Active",
-    },
-    Inactive: {
-      bg: "bg-destructive/10 border-destructive/20 text-destructive",
-      dot: "bg-destructive",
-      text: "Inactive",
-    },
-    Draft: {
-      bg: "bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400",
-      dot: "bg-amber-500",
-      text: "Draft",
-    },
-  };
-  const s = map[v] ?? map["Active"];
-  return (
-    <span
-      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${s.bg}`}
-    >
-      <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${s.dot}`} />
-      {s.text}
-    </span>
-  );
-}
-
-// ─── Main component ────────────────────────────────────────────────────────────
-
+// ─── Component ────────────────────────────────────────────────────────────────
 const TypeOfDocMaster: React.FC = () => {
-  // Ref holding the current list of document codes from NamedEntryType Master.
-  // Initialised from the static seed; in a real app this would be fetched/subscribed.
-  const namedEntryCodesRef = useRef<string[]>(NAMED_ENTRY_SEED_DOC_NUMBERS);
+  const queryClient = useQueryClient()
 
-  const DocCodeRenderer = useRef(
-    makeDocCodeRenderer(namedEntryCodesRef),
-  ).current;
+  const { data: dbData, isLoading, error } = useQuery({
+    queryKey: ['document-types'],
+    queryFn: getDocs,
+  })
 
-  // ── Field definitions ──────────────────────────────────────────────────────
-  const fields: FieldDef[] = [
-    {
-      name: "docCode",
-      label: "Doc Code",
-      type: "custom",
-      required: true,
-      render: DocCodeRenderer as FieldDef["render"],
-    },
-    {
-      name: "name",
-      label: "Name",
-      type: "text",
-      required: true,
-      uppercase: false,
-    },
-    {
-      name: "description",
-      label: "Description",
-      type: "textarea",
-      required: false,
-      fullWidth: true,
-    },
-    {
-      name: "status",
-      label: "Status",
-      type: "custom",
-      required: true,
-      defaultValue: "Active",
-      render: StatusRadioRenderer as FieldDef["render"],
-    },
-    {
-      name: "remarks",
-      label: "Remarks",
-      type: "textarea",
-      required: false,
-      fullWidth: true,
-    },
-  ];
+  const dbItems: DbDoc[] = Array.isArray(dbData) ? dbData : []
 
-  const columns = [
-    { key: "docCode", label: "Doc Code" },
-    { key: "name", label: "Name" },
-    { key: "description", label: "Description", hideOnMobile: true },
-    { key: "status", label: "Status" },
-    { key: "remarks", label: "Remarks", hideOnMobile: true },
-  ];
+  const mappedData: RecordWithId[] = dbItems.map(item => ({
+    _id:         String(item.id),
+    code:        item.code        || '',
+    name:        item.name        || '',
+    description: item.description || '',
+    module:      item.module      || '',
+    status:      item.status      || 'Active',
+    remarks:     item.remarks     || '',
+  }))
 
-  // Custom column renderers
-  const columnRenderers: Record<
-    string,
-    (value: unknown, row: RecordWithId, data: RecordWithId[]) => React.ReactNode
-  > = {
-    status: (value) => statusRenderer(value),
-    remarks: (value) => (
-      <span className="text-muted-foreground text-xs italic">
-        {String(value || "—")}
+  const handleDataEvent = async (event: DataChangeEvent) => {
+    if (event.action === 'add') {
+      try {
+        await addDoc(toPayload(event.record))
+        toast.success('Document type saved!')
+        await queryClient.invalidateQueries({ queryKey: ['document-types'] })
+      } catch (err: any) { toast.error('Save failed: ' + err.message) }
+    }
+    if (event.action === 'update') {
+      try {
+        await updateDoc(event.id, toPayload(event.record))
+        toast.success('Document type updated!')
+        await queryClient.invalidateQueries({ queryKey: ['document-types'] })
+      } catch (err: any) { toast.error('Update failed: ' + err.message) }
+    }
+    if (event.action === 'delete') {
+      try {
+        await deleteDoc(event.id)
+        toast.success('Document type deleted!')
+        await queryClient.invalidateQueries({ queryKey: ['document-types'] })
+      } catch (err: any) { toast.error('Delete failed: ' + err.message) }
+    }
+  }
+
+  const columnRenderers: Record<string, (value: unknown) => React.ReactNode> = {
+    status: (value) => {
+      const map: Record<string, string> = {
+        'Active':   'bg-green-500/10 border-green-500/20 text-green-600',
+        'Inactive': 'bg-red-500/10 border-red-500/20 text-red-600',
+        'Draft':    'bg-amber-500/10 border-amber-500/20 text-amber-600',
+      }
+      const cls = map[value as string] ?? map['Active']
+      return (
+        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${cls}`}>
+          <span className="w-1.5 h-1.5 rounded-full mr-1.5 bg-current opacity-70" />
+          {String(value || 'Active')}
+        </span>
+      )
+    },
+    remarks:     (value) => <span className="text-muted-foreground text-xs italic">{String(value || '—')}</span>,
+    description: (value) => <span className="text-muted-foreground text-xs truncate max-w-[180px] block">{String(value || '—')}</span>,
+    module:      (value) => value ? (
+      <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border bg-blue-500/10 border-blue-500/20 text-blue-600">
+        {String(value)}
       </span>
-    ),
-    description: (value) => (
-      <span className="text-muted-foreground text-xs truncate max-w-[180px] block">
-        {String(value || "—")}
-      </span>
-    ),
-  };
+    ) : <span className="text-muted-foreground">—</span>,
+  }
+
+  if (isLoading) return <div className="p-6 text-muted-foreground">Loading...</div>
+  if (error)     return <div className="p-6 text-red-500">Failed to load document types.</div>
 
   return (
     <>
-      <Breadcrumbs
-        items={["Dashboard", "Finance Module", "Type of Doc Master"]}
-      />
-
-      <h1 className="text-xl font-heading font-bold text-foreground mb-4">
-        Type of Doc Master
-      </h1>
-
+      <Breadcrumbs items={['Dashboard', 'Finance Module', 'Type of Doc Master']} />
+      <h1 className="text-xl font-heading font-bold text-foreground mb-4">Type of Doc Master</h1>
       <MasterPage
         title="Type of Doc"
-        fields={fields}
-        columns={columns}
+        fields={[
+          { name: 'code',        label: 'Doc Code',    type: 'text',     required: true, uppercase: true },
+          { name: 'name',        label: 'Name',        type: 'text',     required: true },
+          { name: 'module',      label: 'Module',      type: 'text' },
+          { name: 'status',      label: 'Status',      type: 'select',   options: ['Active', 'Inactive', 'Draft'], defaultValue: 'Active' },
+          { name: 'description', label: 'Description', type: 'textarea', fullWidth: true },
+          { name: 'remarks',     label: 'Remarks',     type: 'textarea', fullWidth: true },
+        ]}
+        columns={[
+          { key: 'code',        label: 'Doc Code' },
+          { key: 'name',        label: 'Name' },
+          { key: 'module',      label: 'Module',      hideOnMobile: true },
+          { key: 'status',      label: 'Status' },
+          { key: 'description', label: 'Description', hideOnMobile: true },
+          { key: 'remarks',     label: 'Remarks',     hideOnMobile: true },
+        ]}
         columnRenderers={columnRenderers}
-        initialData={SEED}
+        initialData={mappedData}
+        onDataEvent={handleDataEvent}
       />
     </>
-  );
-};
+  )
+}
 
-export default TypeOfDocMaster;
+export default TypeOfDocMaster
