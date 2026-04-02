@@ -14,7 +14,6 @@ export interface FieldDef {
   uppercase?: boolean;
   fullWidth?: boolean;
   defaultValue?: string | boolean | string[];
-  /** Only used when type === "custom" */
   render?: (props: {
     value: unknown;
     onChange: (v: unknown) => void;
@@ -31,6 +30,11 @@ export interface ColumnDef {
 
 export type RecordWithId = Record<string, unknown> & { _id: string };
 
+export type DataChangeEvent =
+  | { action: "add"; record: Record<string, unknown>; records: Record<string, unknown>[] }
+  | { action: "update"; id: string; record: Record<string, unknown>; records: Record<string, unknown>[] }
+  | { action: "delete"; id: string; records: Record<string, unknown>[] };
+
 interface MasterPageProps {
   title: string;
   fields: FieldDef[];
@@ -41,19 +45,12 @@ interface MasterPageProps {
   loading?: boolean;
   initialData: Record<string, unknown>[];
   onDataChange?: (records: Record<string, unknown>[]) => void;
-  /**
-   * Called on every form field change. Use updateForm(patch) to push derived
-   * field values back (e.g. auto-computed documentNumber).
-   */
+  onDataEvent?: (event: DataChangeEvent) => void;
   onFormChange?: (
     form: Record<string, unknown>,
     updateForm: (patch: Record<string, unknown>) => void,
     allRecords: Record<string, unknown>[],
   ) => void;
-  /**
-   * Called just before saving. Return the final record to persist, or null to
-   * abort. Use this to flatten composite fields into individual record fields.
-   */
   onCustomSave?: (
     formData: Record<string, unknown>,
     isEdit: boolean,
@@ -72,7 +69,10 @@ function getDefaults(f: FieldDef[]): Record<string, unknown> {
 }
 
 function seedWithIds(rows: Record<string, unknown>[]): RecordWithId[] {
-  return rows.map((row, i) => ({ ...row, _id: `seed-${i}-${Date.now()}` }));
+  return rows.map((row) => ({
+    ...row,
+    _id: (row._id as string) || `seed-${Math.random().toString(36).slice(2)}`,
+  }));
 }
 
 export const MasterPage: React.FC<MasterPageProps> = ({
@@ -82,6 +82,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   columnRenderers,
   initialData,
   onDataChange,
+  onDataEvent,
   onFormChange,
   onCustomSave,
 }) => {
@@ -92,7 +93,19 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   const [search, setSearch] = useState("");
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
-  /** Shared patch helper so both updateField and updateCustomField trigger onFormChange */
+  // keep internal data in sync when initialData changes (e.g. after DB refetch)
+  const prevInitialRef = React.useRef<Record<string, unknown>[]>([]);
+  React.useEffect(() => {
+    const prev = prevInitialRef.current;
+    const same =
+      prev.length === initialData.length &&
+      initialData.every((row, i) => JSON.stringify(row) === JSON.stringify(prev[i]));
+    if (!same) {
+      prevInitialRef.current = initialData;
+      setData(seedWithIds(initialData));
+    }
+  }, [initialData]);
+
   const applyPatch = (next: Record<string, unknown>, currentData: RecordWithId[]) => {
     if (onFormChange) {
       onFormChange(next, (patch) => {
@@ -142,7 +155,6 @@ export const MasterPage: React.FC<MasterPageProps> = ({
       ? (onCustomSave(form, editingId !== null, data) ?? {})
       : { ...form };
 
-    // onCustomSave returning null means abort
     if (onCustomSave && Object.keys(finalData).length === 0) return;
 
     if (editingId !== null) {
@@ -150,16 +162,21 @@ export const MasterPage: React.FC<MasterPageProps> = ({
         const next = prev.map((row) =>
           row._id === editingId ? { ...finalData, _id: editingId } : row,
         );
-        onDataChange?.(next.map(({ _id, ...rest }) => rest));
+        const stripped = next.map(({ _id, ...rest }) => rest);
+        onDataChange?.(stripped);
+        onDataEvent?.({ action: "update", id: editingId, record: finalData, records: stripped });
         return next;
       });
       setEditingId(null);
       toast.success("Record updated successfully ✓");
     } else {
-      const newRecord: RecordWithId = { ...finalData, _id: `record-${Date.now()}` };
+      const newId = `record-${Date.now()}`;
+      const newRecord: RecordWithId = { ...finalData, _id: newId };
       setData((prev) => {
         const next = [...prev, newRecord];
-        onDataChange?.(next.map(({ _id, ...rest }) => rest));
+        const stripped = next.map(({ _id, ...rest }) => rest);
+        onDataChange?.(stripped);
+        onDataEvent?.({ action: "add", record: finalData, records: stripped });
         return next;
       });
       toast.success("Record saved successfully ✓");
@@ -178,7 +195,9 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   const handleDelete = (id: string) => {
     setData((prev) => {
       const next = prev.filter((r) => r._id !== id);
-      onDataChange?.(next.map(({ _id, ...rest }) => rest));
+      const stripped = next.map(({ _id, ...rest }) => rest);
+      onDataChange?.(stripped);
+      onDataEvent?.({ action: "delete", id, records: stripped });
       return next;
     });
     setDeleteConfirmId(null);
@@ -240,7 +259,6 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                     )}
                   </label>
 
-                  {/* ── Custom renderer ── */}
                   {field.type === "custom" && field.render ? (
                     field.render({
                       value: form[field.name],
@@ -335,7 +353,6 @@ export const MasterPage: React.FC<MasterPageProps> = ({
             })}
           </div>
 
-          {/* Actions */}
           <div className="flex items-center gap-2 mt-5 pt-4 border-t border-border">
             <button
               onClick={handleSave}
