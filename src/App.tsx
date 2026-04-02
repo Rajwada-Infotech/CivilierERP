@@ -130,6 +130,10 @@ const BillingTermsMaster = lazy(() =>
   withDelay(() => import("./pages/masters/BillingTermsmaster")),
 );
 
+const UnitOfMeasurementMaster = lazy(() =>
+  withDelay(() => import("./pages/material/UnitOfMeasurementMaster")),
+);
+
 // Admin Pages
 const AdminDashboard = lazy(() =>
   withDelay(() => import("./pages/admin/AdminDashboard")),
@@ -553,6 +557,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <BillingTermsMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/unit-measurement"
+        element={
+          <ProtectedRoute>
+            <UnitOfMeasurementMaster />
           </ProtectedRoute>
         }
       />
