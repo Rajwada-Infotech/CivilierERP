@@ -311,9 +311,18 @@ export const AppSidebar = () => {
 
   const overdueCount = getOverdueTasks().length;
 
+  // Admin setup items (from TopNavbar adminSetupItems) navigate to /masters/* paths
+  // that are still part of the admin module — include them here so the bottom
+  // indicator keeps showing "Admin" when those pages are active.
+  const ADMIN_SETUP_PATHS = [
+    "/masters/named-entry-type",
+    "/masters/type-of-doc",
+  ];
+
   const isAdminPage =
     location.pathname.startsWith("/admin") ||
-    location.pathname.startsWith("/users");
+    location.pathname.startsWith("/users") ||
+    ADMIN_SETUP_PATHS.some((p) => location.pathname.startsWith(p));
 
   const getModuleNavItems = (): NavItem[] => {
     switch (activeModule) {
