@@ -35,6 +35,7 @@ import {
   FileType2,
   Activity,
   ChevronDown,
+  Database,
 } from "lucide-react";
 import { BillingIcon } from "@/components/icons/BillingIcon";
 
@@ -311,10 +312,11 @@ export const TopNavbar = () => {
     location.pathname.startsWith("/users") ||
     ADMIN_SETUP_PATHS.some((p) => location.pathname.startsWith(p));
   const isSuperAdmin = currentUser?.role === "super_admin";
-  const isAdmin = currentUser?.role === "admin" || isSuperAdmin;
+  const isDba = currentUser?.role === "dba";
+  const isAdmin = currentUser?.role === "admin" || isSuperAdmin || isDba;
 
-  const RoleIcon = isSuperAdmin ? Crown : isAdmin ? Shield : null;
-  const roleBadgeClassName = isSuperAdmin ? "bg-violet-600" : "bg-blue-600";
+  const RoleIcon = isSuperAdmin ? Crown : isAdmin ? Shield : isDba ? (Database as any) : null;
+  const roleBadgeClassName = isSuperAdmin ? "bg-violet-600" : isDba ? "bg-emerald-600" : "bg-blue-600";
 
   const getSetupConfig = () => {
     if (isAdminPage)
@@ -765,6 +767,11 @@ export const TopNavbar = () => {
                       Admin
                     </span>
                   )}
+                  {currentUser?.role === "dba" && (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-emerald-500/10 text-emerald-600">
+                      DBA
+                    </span>
+                  )}
                   {currentUser?.role === "user" && (
                     <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-muted text-muted-foreground">
                       User · {currentUser.pagePermissions?.length || 0} pages
@@ -775,7 +782,10 @@ export const TopNavbar = () => {
               <button
                 onMouseDown={() => {
                   setUserOpen(false);
-                  navigate(isSuperAdmin ? "/admin/profile" : "/admin");
+                  if (isSuperAdmin) navigate("/superadmin");
+                  else if (isDba) navigate("/dba");
+                  else if (currentUser?.role === "admin") navigate("/admin/profile");
+                  else navigate("/user/profile");
                 }}
                 className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted transition-colors text-foreground"
               >
@@ -827,7 +837,10 @@ export const TopNavbar = () => {
               <button
                 onMouseDown={() => {
                   setUserOpen(false);
-                  navigate(isSuperAdmin ? "/admin/profile" : "/admin");
+                  if (isSuperAdmin) navigate("/superadmin");
+                  else if (isDba) navigate("/dba");
+                  else if (currentUser?.role === "admin") navigate("/admin/profile");
+                  else navigate("/user/profile");
                 }}
                 className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted text-foreground"
               >

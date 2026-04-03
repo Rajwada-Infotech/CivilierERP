@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useCallback } from "react";
 
-export type UserRole = "super_admin" | "admin" | "user";
+export type UserRole = "super_admin" | "admin" | "user" | "dba";
 
 /* =========================
    PAGE KEYS
@@ -111,7 +111,6 @@ export const PAGE_DEFINITIONS = [
     group: "Main",
     availableActions: ["view", "create", "edit", "delete", "print", "export"],
   },
-
   {
     key: "master_contractors",
     label: "Contractors",
@@ -168,7 +167,6 @@ export const PAGE_DEFINITIONS = [
     group: "Masters",
     availableActions: ["view", "create", "edit", "delete", "print", "export"],
   },
-
   {
     key: "admin_menu_rights",
     label: "Menu Rights",
@@ -220,7 +218,7 @@ const DEFAULT_USER_ACCESS: PagePermission[] = [
 ];
 
 /* =========================
-   DEMO USERS
+   DEMO USERS - Plain text passwords (Development Mode)
 ========================= */
 export const DEMO_USERS = [
   {
@@ -228,7 +226,7 @@ export const DEMO_USERS = [
     name: "Super Admin",
     email: "superadmin@civilier.com",
     password: "super123",
-    role: "super_admin",
+    role: "super_admin" as UserRole,
     initials: "SA",
     pagePermissions: FULL_ACCESS,
     isActive: true,
@@ -238,8 +236,18 @@ export const DEMO_USERS = [
     name: "Admin User",
     email: "admin@civilier.com",
     password: "admin123",
-    role: "admin",
+    role: "admin" as UserRole,
     initials: "AU",
+    pagePermissions: FULL_ACCESS,
+    isActive: true,
+  },
+  {
+    id: "u-dba-1",
+    name: "DB Admin",
+    email: "dba@civilier.com",
+    password: "dba123",
+    role: "dba" as UserRole,
+    initials: "DB",
     pagePermissions: FULL_ACCESS,
     isActive: true,
   },
@@ -248,7 +256,7 @@ export const DEMO_USERS = [
     name: "Rajesh Kumar",
     email: "rajesh@civilier.com",
     password: "user123",
-    role: "user",
+    role: "user" as UserRole,
     initials: "RK",
     pagePermissions: FULL_ACCESS,
     isActive: true,
@@ -258,7 +266,7 @@ export const DEMO_USERS = [
     name: "Meena Patel",
     email: "meena@civilier.com",
     password: "user123",
-    role: "user",
+    role: "user" as UserRole,
     initials: "MP",
     pagePermissions: DEFAULT_USER_ACCESS,
     isActive: true,
@@ -268,7 +276,7 @@ export const DEMO_USERS = [
     name: "Dinesh Sharma",
     email: "dinesh@civilier.com",
     password: "user123",
-    role: "user",
+    role: "user" as UserRole,
     initials: "DS",
     pagePermissions: DEFAULT_USER_ACCESS,
     isActive: false,
@@ -282,21 +290,14 @@ interface AuthContextType {
   currentUser: AppUser | null;
   allUsers: AppUser[];
   allAdmins: AppUser[];
-
   login: (
     email: string,
     password: string,
   ) => { success: boolean; error?: string };
   logout: () => void;
-
-  // Session recording hooks – provided by ActivityBrowserProvider via App root
-  onLoginSuccess?: (user: AppUser) => void;
-  onLogoutSuccess?: (user: AppUser) => void;
-
   addUser: (user: Omit<AppUser, "id"> & { password: string }) => void;
   deleteUser: (id: string) => void;
   toggleUserStatus: (id: string) => void;
-
   canAccessPage: (page: PageKey) => boolean;
   canDoAction: (page: PageKey, action: PageAction) => boolean;
 }
@@ -324,17 +325,21 @@ export const AuthProvider = ({
   const login = useCallback(
     (email: string, password: string) => {
       const user = users.find(
-        (u) =>
-          u.email.toLowerCase() === email.toLowerCase() &&
-          u.password === password,
+        (u) => u.email.toLowerCase() === email.toLowerCase(),
       );
 
       if (!user) return { success: false, error: "Invalid credentials" };
       if (!user.isActive) return { success: false, error: "User inactive" };
 
+      // Plain text comparison - Perfect for development
+      if (user.password !== password) {
+        return { success: false, error: "Invalid credentials" };
+      }
+
       const { password: _pw, ...safeUser } = user;
       setCurrentUser(safeUser);
       onLoginSuccess?.(safeUser);
+
       return { success: true };
     },
     [users, onLoginSuccess],
@@ -345,9 +350,21 @@ export const AuthProvider = ({
     setCurrentUser(null);
   };
 
+  const ADMIN_ONLY_PAGES: PageKey[] = [
+    "admin_menu_rights",
+    "admin_widgets_rights",
+    "admin_fin_year_rights",
+    "admin_approval_setup",
+    "admin_post_approval_rights",
+  ];
+
+  const isPrivilegedRole = (role: string) =>
+    ["super_admin", "admin", "dba"].includes(role);
+
   const canAccessPage = (page: PageKey) => {
     if (!currentUser) return false;
-    if (["admin", "super_admin"].includes(currentUser.role)) return true;
+    if (isPrivilegedRole(currentUser.role)) return true;
+    if (ADMIN_ONLY_PAGES.includes(page)) return false;
 
     return currentUser.pagePermissions.some(
       (p) => p.page === page && p.actions.includes("view"),
@@ -356,7 +373,8 @@ export const AuthProvider = ({
 
   const canDoAction = (page: PageKey, action: PageAction) => {
     if (!currentUser) return false;
-    if (["admin", "super_admin"].includes(currentUser.role)) return true;
+    if (isPrivilegedRole(currentUser.role)) return true;
+    if (ADMIN_ONLY_PAGES.includes(page)) return false;
 
     return currentUser.pagePermissions.some(
       (p) => p.page === page && p.actions.includes(action),
