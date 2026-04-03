@@ -284,7 +284,6 @@ export const DEMO_USERS = [
     isActive: true,
   },
 ];
-
 /* =========================
    CONTEXT
 ========================= */
