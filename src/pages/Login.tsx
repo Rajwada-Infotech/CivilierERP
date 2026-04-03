@@ -4,43 +4,23 @@ import { useAuth } from "@/contexts/AuthContext";
 import { Eye, EyeOff, ShieldCheck } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
+// Demo credentials - For development only. Never commit real secrets.
+const DEMO_CREDENTIALS = {
+  "superadmin@civilier.com": "super123",
+  "admin@civilier.com": "admin123",
+  "dba@civilier.com": "dba123",
+  "rajesh@civilier.com": "user123",
+  "meena@civilier.com": "user123",
+  "dinesh@civilier.com": "user123",
+};
+
 const ROLE_HINTS = [
-  {
-    role: "Super Admin",
-    email: "superadmin@civilier.com",
-    password: "super123",
-    color: "#7c3aed",
-  },
-  {
-    role: "Admin",
-    email: "admin@civilier.com",
-    password: "admin123",
-    color: "#2563eb",
-  },
-  {
-    role: "DBA Admin",
-    email: "dba@civilier.com",
-    password: "dba123",
-    color: "#8b5cf6",
-  },
-  {
-    role: "User (Active)",
-    email: "rajesh@civilier.com",
-    password: "user123",
-    color: "#059669",
-  },
-  {
-    role: "User (Limited)",
-    email: "meena@civilier.com",
-    password: "user123",
-    color: "#d97706",
-  },
-  {
-    role: "User (Inactive)",
-    email: "dinesh@civilier.com",
-    password: "user123",
-    color: "#dc2626",
-  },
+  { role: "Super Admin", email: "superadmin@civilier.com", color: "#7c3aed" },
+  { role: "Admin", email: "admin@civilier.com", color: "#2563eb" },
+  { role: "DBA Admin", email: "dba@civilier.com", color: "#8b5cf6" },
+  { role: "User (Active)", email: "rajesh@civilier.com", color: "#059669" },
+  { role: "User (Limited)", email: "meena@civilier.com", color: "#d97706" },
+  { role: "User (Inactive)", email: "dinesh@civilier.com", color: "#dc2626" },
 ];
 
 export default function Login() {
@@ -56,13 +36,21 @@ export default function Login() {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
-
     const result = login(email, password);
     if (result.success) {
       navigate("/", { replace: true });
     } else {
       setError(result.error || "Login failed.");
     }
+  };
+
+  const fillDemoCredentials = (demoEmail: string) => {
+    const demoPassword =
+      DEMO_CREDENTIALS[demoEmail as keyof typeof DEMO_CREDENTIALS];
+    setEmail(demoEmail);
+    setPassword(demoPassword || "");
+    setShowHints(false);
+    setError("");
   };
 
   return (
@@ -196,7 +184,7 @@ export default function Login() {
             onClick={() => setShowHints(!showHints)}
             className="w-full flex items-center justify-center gap-2 text-xs text-slate-500 hover:text-purple-700 transition-colors"
           >
-            <ShieldCheck size={14} />
+            <ShieldCheck size={14} />{" "}
             {showHints ? "Hide demo credentials" : "Show demo credentials"}
           </button>
 
@@ -212,12 +200,7 @@ export default function Login() {
                   <button
                     key={h.email}
                     type="button"
-                    onClick={() => {
-                      setEmail(h.email);
-                      setPassword(h.password);
-                      setShowHints(false);
-                      setError("");
-                    }}
+                    onClick={() => fillDemoCredentials(h.email)}
                     className="w-full flex items-center gap-3 px-3 py-2 rounded-lg border border-slate-200 bg-white/60 hover:bg-white/90 transition-all text-left"
                   >
                     <span
@@ -232,6 +215,10 @@ export default function Login() {
                     </span>
                   </button>
                 ))}
+
+                <p className="text-[10px] text-amber-600 mt-3 pt-2 border-t border-amber-200">
+                  ⚠️ These are demo credentials only. Do not use in production.
+                </p>
               </motion.div>
             )}
           </AnimatePresence>
