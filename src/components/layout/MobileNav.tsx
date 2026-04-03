@@ -5,7 +5,6 @@ import {
   CheckCircle2,
   Menu,
   X,
-  Landmark,
   Receipt,
   HardHat,
   FileText,
@@ -24,9 +23,21 @@ import {
   Layers,
   Scale,
   FileWarning,
+  Database,
+  Settings,
+  Truck,
+  Calendar,
+  BookOpen,
+  CreditCard,
+  Hash,
+  Tag,
+  FileType2,
+  Activity,
+  Landmark,
 } from "lucide-react";
 
 import { useModule } from "@/contexts/ModuleContext";
+import { BillingIcon } from "@/components/icons/BillingIcon";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme, THEME_DOTS, Theme } from "@/contexts/ThemeContext";
 import { useTask } from "@/contexts/TaskContext";
@@ -51,6 +62,7 @@ interface NavItem {
 export const MobileNav: React.FC = () => {
   const [open, setOpen] = useState(false);
   const [groupStates, setGroupStates] = useState<Record<string, boolean>>({});
+  const [setupOpen, setSetupOpen] = useState(false);
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -63,10 +75,12 @@ export const MobileNav: React.FC = () => {
 
   const isAdminPage =
     location.pathname.startsWith("/admin") ||
-    location.pathname.startsWith("/users");
+    location.pathname.startsWith("/users") ||
+    location.pathname.startsWith("/dba");
 
   const isSuperAdmin = currentUser?.role === "super_admin";
-  const isAdmin = currentUser?.role === "admin" || isSuperAdmin;
+  const isDba = currentUser?.role === "dba";
+  const isAdmin = currentUser?.role === "admin" || isSuperAdmin || isDba;
 
   // Admin Navigation Items
   const ADMIN_NAV_ITEMS: NavItem[] = [
@@ -249,6 +263,40 @@ export const MobileNav: React.FC = () => {
 
   const itemsToRender = isAdminPage ? ADMIN_NAV_ITEMS : getModuleNavItems();
 
+  // ── Setup items (mirrors TopNavbar desktop Setup dropdown) ─────────────────
+  const financeSetupItems = [
+    { icon: Layers,     label: "AC Group",          path: "/masters/account-group",    color: "text-indigo-500" },
+    { icon: Receipt,    label: "General Ledger",     path: "/masters/expenses",         color: "text-orange-400" },
+    { icon: Truck,      label: "Suppliers",          path: "/masters/suppliers",        color: "text-blue-400" },
+    { icon: HardHat,    label: "Contractors",        path: "/masters/contractors",      color: "text-yellow-500" },
+    { icon: Users,      label: "Customers",          path: "/masters/customers",        color: "text-purple-400" },
+    { icon: Landmark,   label: "Banks",              path: "/masters/banks",            color: "text-green-500" },
+    { icon: Calendar,   label: "Fin Year",           path: "/masters/financial-year",   color: "text-amber-500" },
+    { icon: BookOpen,   label: "Cheque",             path: "/masters/cheque",           color: "text-cyan-500" },
+    { icon: CreditCard, label: "Card",               path: "/masters/card",             color: "text-rose-500" },
+    { icon: FileText,   label: "TDS",                path: "/masters/tds",              color: "text-emerald-500" },
+  ];
+  const materialSetupItems = [
+    { icon: Package,     label: "Items",              path: "/masters/items",            color: "text-teal-500" },
+    { icon: Layers,      label: "Items Group",        path: "/masters/item-groups",      color: "text-indigo-400" },
+    { icon: Hash,        label: "Unit of Measurement",path: "/masters/unit-measurement", color: "text-orange-400" },
+    { icon: Hash,        label: "HSN",                path: "/masters/hsn",              color: "text-pink-400" },
+    { icon: Activity,    label: "Activity",           path: "/masters/activity",         color: "text-green-400" },
+    { icon: BillingIcon, label: "Billing",            path: "/masters/billing-terms",    color: "text-lime-500" },
+  ];
+  const adminSetupItems = [
+    { icon: Tag,       label: "Entry Type",  path: "/masters/named-entry-type", color: "text-purple-400" },
+    { icon: FileType2, label: "Type of Doc", path: "/masters/type-of-doc",      color: "text-sky-500" },
+  ];
+
+  const getSetupConfig = () => {
+    if (isAdminPage)       return { items: adminSetupItems,    label: "Admin",    available: true, accent: "text-blue-500",    bg: "bg-blue-500/10",    border: "border-blue-400/40" };
+    if (activeModule === "material") return { items: materialSetupItems, label: "Material", available: true, accent: "text-emerald-500", bg: "bg-emerald-500/10", border: "border-emerald-400/40" };
+    if (activeModule === "finance")  return { items: financeSetupItems,  label: "Finance",  available: true, accent: "text-primary",     bg: "bg-primary/10",     border: "border-primary/40" };
+    return { items: [], label: "", available: false, accent: "", bg: "", border: "" };
+  };
+  const setupConfig = getSetupConfig();
+
   const go = (path: string) => {
     navigate(path);
     setOpen(false);
@@ -318,7 +366,12 @@ export const MobileNav: React.FC = () => {
                         <Crown size={12} className="text-white" />
                       </span>
                     )}
-                    {!isSuperAdmin && isAdmin && (
+                    {!isSuperAdmin && isDba && (
+                      <span className="absolute -bottom-1 -right-1 w-6 h-6 flex items-center justify-center rounded-full border-2 border-card bg-emerald-600">
+                        <Database size={12} className="text-white" />
+                      </span>
+                    )}
+                    {!isSuperAdmin && !isDba && isAdmin && (
                       <span className="absolute -bottom-1 -right-1 w-6 h-6 flex items-center justify-center rounded-full border-2 border-card bg-blue-600">
                         <ShieldCheck size={12} className="text-white" />
                       </span>
@@ -335,7 +388,16 @@ export const MobileNav: React.FC = () => {
                   </div>
 
                   <div className="flex gap-2">
-                    <button className="p-3 border border-border rounded-2xl hover:bg-muted transition-colors">
+                    <button
+                      onClick={() => {
+                        setOpen(false);
+                        if (isSuperAdmin) navigate("/superadmin");
+                        else if (isDba) navigate("/dba");
+                        else if (currentUser?.role === "admin") navigate("/admin/profile");
+                        else navigate("/user/profile");
+                      }}
+                      className="p-3 border border-border rounded-2xl hover:bg-muted transition-colors"
+                    >
                       <User size={18} />
                     </button>
                     <button
@@ -354,7 +416,7 @@ export const MobileNav: React.FC = () => {
 
               {/* Module Switcher */}
               <div className="px-5 pt-4 pb-3">
-                <div className="grid grid-cols-3 gap-2">
+                <div className={`grid gap-2 ${isAdmin ? "grid-cols-3" : "grid-cols-2"}`}>
                   <button
                     onClick={() => {
                       setActiveModule("finance");
@@ -402,6 +464,53 @@ export const MobileNav: React.FC = () => {
                   )}
                 </div>
               </div>
+
+              {/* Setup Section */}
+              {setupConfig.available && (
+                <div className="px-5 pb-1">
+                  <button
+                    onClick={() => setSetupOpen((p) => !p)}
+                    className="w-full flex items-center justify-between px-4 py-3 rounded-2xl border border-border hover:bg-muted transition-all text-sm font-heading text-foreground"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Settings size={16} className="text-muted-foreground" />
+                      <span>Setup</span>
+                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-heading border ${setupConfig.bg} ${setupConfig.accent} ${setupConfig.border}`}>
+                        {setupConfig.label}
+                      </span>
+                    </div>
+                    <ChevronDown
+                      size={15}
+                      className={`text-muted-foreground transition-transform duration-200 ${setupOpen ? "rotate-180" : ""}`}
+                    />
+                  </button>
+
+                  {setupOpen && (
+                    <div className="mt-2 p-3 rounded-2xl border border-border bg-muted/30">
+                      <div className="grid grid-cols-4 gap-2">
+                        {setupConfig.items.map(({ icon: Icon, label, path, color }) => (
+                          <button
+                            key={path}
+                            onClick={() => go(path)}
+                            className={`group flex flex-col items-center gap-1.5 p-2.5 rounded-xl border transition-all active:scale-95 ${
+                              location.pathname === path
+                                ? "border-primary/40 bg-primary/[0.06]"
+                                : "border-transparent hover:border-border hover:bg-muted/60"
+                            }`}
+                          >
+                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center bg-muted/50 group-hover:bg-muted transition-colors ${location.pathname === path ? "bg-primary/10" : ""}`}>
+                              <Icon size={16} className={color} />
+                            </div>
+                            <span className="text-[9px] font-heading text-muted-foreground group-hover:text-foreground text-center leading-tight line-clamp-2">
+                              {label}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Navigation Items */}
               <div className="px-5 space-y-1">
