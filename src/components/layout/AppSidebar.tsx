@@ -2,7 +2,9 @@ import React, { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useModule } from "@/contexts/ModuleContext";
 import { useTask } from "@/contexts/TaskContext";
+import { useAuth } from "@/contexts/AuthContext";
 import { useSidebarState } from "./AppLayout";
+
 import {
   BarChart3,
   CheckCircle2,
@@ -18,11 +20,19 @@ import {
   Archive,
   MessageSquare,
   Package,
-  Receipt,
+  Receipt, // ← only once
   HardHat,
   Building2,
   Users,
   FileWarning,
+  Crown,
+  Database,
+  Globe,
+  User,
+  Key,
+  Terminal,
+  Megaphone,
+  BellRing,
 } from "lucide-react";
 
 interface SubItem {
@@ -46,7 +56,6 @@ interface NavItem {
 }
 
 // ── Finance module sidebar ──────────────────────────────────────────────────
-
 const buildFinanceNavItems = (overdueCount: number): NavItem[] => [
   { label: "Amendments", icon: BarChart3, path: "/" },
   {
@@ -78,13 +87,8 @@ const buildFinanceNavItems = (overdueCount: number): NavItem[] => [
 ];
 
 // ── Material module sidebar ──────────────────────────────────────────────────
-
 const buildMaterialNavItems = (): NavItem[] => [
-  {
-    label: "Amendments",
-    icon: BarChart3,
-    path: "/material/amendments",
-  },
+  { label: "Amendments", icon: BarChart3, path: "/material/amendments" },
   {
     label: "Transaction",
     icon: Receipt,
@@ -102,7 +106,6 @@ const buildMaterialNavItems = (): NavItem[] => [
 ];
 
 // ── Admin sidebar ──────────────────────────────────────────────────────────
-
 const ADMIN_NAV_ITEMS: NavItem[] = [
   { label: "Transaction", icon: BarChart3, path: "/admin" },
   {
@@ -159,6 +162,83 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
   { label: "Signature", icon: FileText, path: "/admin/signature" },
 ];
 
+// ── Super Admin sidebar ────────────────────────────────────────────────────
+const SUPER_ADMIN_NAV_ITEMS: NavItem[] = [
+  { label: "Control Panel", icon: Crown, path: "/superadmin" },
+  {
+    label: "Tenant Management",
+    icon: Building2,
+    children: [
+      { label: "All Tenants", path: "/superadmin" },
+      { label: "Admin Control", path: "/admin/control-panel" },
+    ],
+  },
+  {
+    label: "Admin Tools",
+    icon: ShieldCheck,
+    children: [
+      { label: "Menu Rights", path: "/admin/rights/menu" },
+      { label: "Widgets Rights", path: "/admin/rights/widgets" },
+      { label: "Approval Setup", path: "/admin/approval/setup" },
+      { label: "Activity Browser", path: "/admin/activity-browser" },
+      { label: "Password Reset", path: "/admin/security/password-reset" },
+    ],
+  },
+  {
+    label: "Enterprise",
+    icon: Globe,
+    children: [
+      { label: "Business Unit", path: "/admin/masters/business-unit" },
+      { label: "Project", path: "/admin/masters/project" },
+      { label: "Company", path: "/admin/masters/company" },
+    ],
+  },
+  { label: "API Integration", icon: Shield, path: "/admin/api-integration" },
+];
+
+// ── DBA sidebar ────────────────────────────────────────────────────────────
+const DBA_NAV_ITEMS: NavItem[] = [
+  { label: "DB Console", icon: Database, path: "/dba" },
+  {
+    label: "Database",
+    icon: Terminal,
+    children: [
+      { label: "Overview", path: "/dba" },
+      { label: "Control Panel", path: "/dba/control-panel" },
+    ],
+  },
+  {
+    label: "Ads",
+    icon: Megaphone,
+    children: [{ label: "Campaigns", path: "/dba/ads" }],
+  },
+  {
+    label: "Reminders",
+    icon: BellRing,
+    children: [{ label: "Payment Reminders", path: "/dba/reminders" }],
+  },
+  {
+    label: "Logs",
+    icon: Receipt,
+    children: [{ label: "Payment Logs", path: "/dba/payment-logs" }],
+  },
+  {
+    label: "Admin Tools",
+    icon: ShieldCheck,
+    children: [
+      { label: "Manage Users", path: "/users" },
+      { label: "Activity Browser", path: "/admin/activity-browser" },
+    ],
+  },
+];
+
+// ── User sidebar ───────────────────────────────────────────────────────────
+const USER_NAV_ITEMS: NavItem[] = [
+  { label: "My Profile", icon: User, path: "/user/profile" },
+  { label: "Dashboard", icon: BarChart3, path: "/" },
+];
+
+// NavButton Component
 const NavButton = ({
   item,
   collapsed,
@@ -186,6 +266,7 @@ const NavButton = ({
   );
 };
 
+// NavGroup Component
 const NavGroup = ({
   item,
   collapsed,
@@ -308,12 +389,10 @@ export const AppSidebar = () => {
   const { activeModule } = useModule();
   const { collapsed, setCollapsed } = useSidebarState();
   const { getOverdueTasks } = useTask();
+  const { currentUser } = useAuth();
 
   const overdueCount = getOverdueTasks().length;
 
-  // Admin setup items (from TopNavbar adminSetupItems) navigate to /masters/* paths
-  // that are still part of the admin module — include them here so the bottom
-  // indicator keeps showing "Admin" when those pages are active.
   const ADMIN_SETUP_PATHS = [
     "/masters/named-entry-type",
     "/masters/type-of-doc",
@@ -323,6 +402,10 @@ export const AppSidebar = () => {
     location.pathname.startsWith("/admin") ||
     location.pathname.startsWith("/users") ||
     ADMIN_SETUP_PATHS.some((p) => location.pathname.startsWith(p));
+
+  const isSuperAdminPage = location.pathname.startsWith("/superadmin");
+  const isDbaPage = location.pathname.startsWith("/dba");
+  const isUserProfilePage = location.pathname.startsWith("/user/profile");
 
   const getModuleNavItems = (): NavItem[] => {
     switch (activeModule) {
@@ -335,11 +418,76 @@ export const AppSidebar = () => {
     }
   };
 
-  const itemsToRender = isAdminPage ? ADMIN_NAV_ITEMS : getModuleNavItems();
+  const getNavItems = (): NavItem[] => {
+    if (isSuperAdminPage) return SUPER_ADMIN_NAV_ITEMS;
+    if (isDbaPage) return DBA_NAV_ITEMS;
+    if (isUserProfilePage) return USER_NAV_ITEMS;
+    if (isAdminPage) return ADMIN_NAV_ITEMS;
+    return getModuleNavItems();
+  };
 
-  const isFinance = !isAdminPage && activeModule === "finance";
-  const isMaterial = !isAdminPage && activeModule === "material";
+  const itemsToRender = getNavItems();
+
+  const isFinance =
+    !isAdminPage &&
+    !isSuperAdminPage &&
+    !isDbaPage &&
+    !isUserProfilePage &&
+    activeModule === "finance";
+  const isMaterial =
+    !isAdminPage &&
+    !isSuperAdminPage &&
+    !isDbaPage &&
+    !isUserProfilePage &&
+    activeModule === "material";
   const isAdmin = isAdminPage;
+  const isSuperAdmin = isSuperAdminPage;
+  const isDba = isDbaPage;
+
+  const getModuleLabel = () => {
+    if (isSuperAdmin) return "Super Admin";
+    if (isDba) return "DBA";
+    if (isUserProfilePage) return "User";
+    if (isAdmin) return "Admin";
+    if (isFinance) return "Finance";
+    if (isMaterial) return "Material";
+    return "No module";
+  };
+
+  const getModuleColor = () => {
+    if (isSuperAdmin)
+      return "bg-yellow-500/10 text-yellow-500 border-yellow-500/20";
+    if (isDba)
+      return "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
+    if (isUserProfilePage)
+      return "bg-gray-500/10 text-gray-500 border-gray-500/20";
+    if (isAdmin) return "bg-blue-500/10 text-blue-500 border-blue-500/20";
+    if (isFinance) return "bg-primary/10 text-primary border-primary/20";
+    if (isMaterial)
+      return "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
+    return "bg-muted text-muted-foreground border-border";
+  };
+
+  const getDotColor = () => {
+    if (isSuperAdmin) return "bg-yellow-500";
+    if (isDba) return "bg-emerald-500";
+    if (isAdmin) return "bg-blue-500";
+    if (isFinance) return "bg-primary";
+    if (isMaterial) return "bg-emerald-500";
+    return "bg-muted-foreground/40";
+  };
+
+  const getModuleIcon = () => {
+    if (isSuperAdmin) return Crown;
+    if (isDba) return Database;
+    if (isUserProfilePage) return User;
+    if (isAdmin) return ShieldCheck;
+    if (isFinance) return Landmark;
+    if (isMaterial) return Package;
+    return Landmark;
+  };
+
+  const ModuleIcon = getModuleIcon();
 
   return (
     <aside
@@ -357,8 +505,8 @@ export const AppSidebar = () => {
               hasActiveChild={
                 !!(
                   item.children?.some((c) => location.pathname === c.path) ||
-                  item.sections?.some((s: SubSection) =>
-                    s.items.some((i: SubItem) => location.pathname === i.path),
+                  item.sections?.some((s) =>
+                    s.items.some((i) => location.pathname === i.path),
                   )
                 )
               }
@@ -381,48 +529,14 @@ export const AppSidebar = () => {
       <div className="p-2 border-t border-sidebar-border space-y-2">
         {!collapsed ? (
           <div
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold border ${
-              isAdmin
-                ? "bg-blue-500/10 text-blue-500 border-blue-500/20"
-                : isFinance
-                  ? "bg-primary/10 text-primary border-primary/20"
-                  : isMaterial
-                    ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20"
-                    : "bg-muted text-muted-foreground border-border"
-            }`}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold border ${getModuleColor()}`}
           >
-            {isAdmin ? (
-              <ShieldCheck size={13} />
-            ) : isFinance ? (
-              <Landmark size={13} />
-            ) : isMaterial ? (
-              <Package size={13} />
-            ) : (
-              <Landmark size={13} />
-            )}
-            <span>
-              {isAdmin
-                ? "Admin"
-                : isFinance
-                  ? "Finance"
-                  : isMaterial
-                    ? "Material"
-                    : "No module"}
-            </span>
+            <ModuleIcon size={13} />
+            <span>{getModuleLabel()}</span>
           </div>
         ) : (
           <div className="flex justify-center">
-            <div
-              className={`w-2 h-2 rounded-full ${
-                isAdmin
-                  ? "bg-blue-500"
-                  : isFinance
-                    ? "bg-primary"
-                    : isMaterial
-                      ? "bg-emerald-500"
-                      : "bg-muted-foreground/40"
-              }`}
-            />
+            <div className={`w-2 h-2 rounded-full ${getDotColor()}`} />
           </div>
         )}
 

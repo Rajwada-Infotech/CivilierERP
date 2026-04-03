@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useCallback } from "react";
 
-export type UserRole = "super_admin" | "admin" | "user";
+export type UserRole = "super_admin" | "admin" | "user" | "dba";
 
 /* =========================
    PAGE KEYS
@@ -273,6 +273,16 @@ export const DEMO_USERS = [
     pagePermissions: DEFAULT_USER_ACCESS,
     isActive: false,
   },
+  {
+    id: "u-dba-1",
+    name: "DBA Admin",
+    email: "dba@civilier.com",
+    password: "dba123",
+    role: "dba",
+    initials: "DB",
+    pagePermissions: FULL_ACCESS,
+    isActive: true,
+  },
 ];
 
 /* =========================
@@ -347,7 +357,7 @@ export const AuthProvider = ({
 
   const canAccessPage = (page: PageKey) => {
     if (!currentUser) return false;
-    if (["admin", "super_admin"].includes(currentUser.role)) return true;
+    if (["admin", "super_admin", "dba"].includes(currentUser.role)) return true;
 
     return currentUser.pagePermissions.some(
       (p) => p.page === page && p.actions.includes("view"),
@@ -356,7 +366,7 @@ export const AuthProvider = ({
 
   const canDoAction = (page: PageKey, action: PageAction) => {
     if (!currentUser) return false;
-    if (["admin", "super_admin"].includes(currentUser.role)) return true;
+    if (["admin", "super_admin", "dba"].includes(currentUser.role)) return true;
 
     return currentUser.pagePermissions.some(
       (p) => p.page === page && p.actions.includes(action),

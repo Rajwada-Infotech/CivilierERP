@@ -198,6 +198,32 @@ const WhatsAppSetup = lazy(() =>
 const GeneralLedgerMaster = lazy(() =>
   withDelay(() => import("./pages/masters/GeneralLedgerMaster")),
 );
+
+// New hierarchy pages
+const SuperAdminDashboard = lazy(() =>
+  withDelay(() => import("./pages/superadmin/SuperAdminDashboard")),
+);
+const AdminControlPanel = lazy(() =>
+  withDelay(() => import("./pages/admin/AdminControlPanel")),
+);
+const UserProfilePage = lazy(() =>
+  withDelay(() => import("./pages/user/UserProfile")),
+);
+const DBADashboard = lazy(() =>
+  withDelay(() => import("./pages/dba/DBADashboard")),
+);
+const ControlPanel = lazy(() =>
+  withDelay(() => import("./pages/dba/ControlPanel")),
+);
+const AdsManager = lazy(() =>
+  withDelay(() => import("./pages/dba/AdsManager")),
+);
+const RemindersManager = lazy(() =>
+  withDelay(() => import("./pages/dba/RemindersManager")),
+);
+const PaymentLogs = lazy(() =>
+  withDelay(() => import("./pages/dba/PaymentLogs")),
+);
 // ─── Error Boundary ───────────────────────────────────────────────────────────
 class ErrorBoundary extends Component<
   { children: React.ReactNode },
@@ -719,6 +745,78 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <WhatsAppSetup />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* SUPER ADMIN */}
+      <Route
+        path="/superadmin"
+        element={
+          <ProtectedRoute>
+            <SuperAdminDashboard />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* ADMIN CONTROL PANEL */}
+      <Route
+        path="/admin/control-panel"
+        element={
+          <ProtectedRoute>
+            <AdminControlPanel />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* USER PROFILE */}
+      <Route
+        path="/user/profile"
+        element={
+          <ProtectedRoute>
+            <UserProfilePage />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* DBA CONSOLE */}
+      <Route
+        path="/dba"
+        element={
+          <ProtectedRoute>
+            <DBADashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/dba/control-panel"
+        element={
+          <ProtectedRoute>
+            <ControlPanel />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/dba/ads"
+        element={
+          <ProtectedRoute>
+            <AdsManager />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/dba/reminders"
+        element={
+          <ProtectedRoute>
+            <RemindersManager />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/dba/payment-logs"
+        element={
+          <ProtectedRoute>
+            <PaymentLogs />
           </ProtectedRoute>
         }
       />
