@@ -276,6 +276,41 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+// ─── Role Guard ───────────────────────────────────────────────────────────────
+// Blocks access to routes that require elevated roles (admin / dba / super_admin).
+// Users who don't qualify are redirected to "/" with no error exposed.
+function RequireRole({
+  children,
+  allowed,
+}: {
+  children: React.ReactNode;
+  allowed: string[];
+}) {
+  const { currentUser } = useAuth();
+  if (!currentUser || !allowed.includes(currentUser.role)) {
+    return <Navigate to="/" replace />;
+  }
+  return <>{children}</>;
+}
+
+// ─── Admin Protected Route ────────────────────────────────────────────────────
+// Convenience wrapper: RequireAuth + role check (super_admin | admin | dba) + layout
+const ADMIN_ROLES = ["super_admin", "admin", "dba"] as const;
+
+function AdminRoute({ children }: { children: React.ReactNode }) {
+  return (
+    <RequireAuth>
+      <RequireRole allowed={[...ADMIN_ROLES]}>
+        <AppLayout>
+          <ErrorBoundary>
+            <Suspense fallback={<Loader />}>{children}</Suspense>
+          </ErrorBoundary>
+        </AppLayout>
+      </RequireRole>
+    </RequireAuth>
+  );
+}
+
 // ─── Protected Route ──────────────────────────────────────────────────────────
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return (
@@ -599,153 +634,153 @@ function AppRoutes() {
       <Route
         path="/admin"
         element={
-          <ProtectedRoute>
+          <AdminRoute>
             <AdminDashboard />
-          </ProtectedRoute>
+          </AdminRoute>
         }
       />
       <Route
         path="/admin/expense-booking"
         element={
-          <ProtectedRoute>
+          <AdminRoute>
             <AdminExpenseBooking />
-          </ProtectedRoute>
+          </AdminRoute>
         }
       />
       <Route
         path="/users"
         element={
-          <ProtectedRoute>
+          <AdminRoute>
             <Users />
-          </ProtectedRoute>
+          </AdminRoute>
         }
       />
       <Route
         path="/admin/rights/menu"
         element={
-          <ProtectedRoute>
+          <AdminRoute>
             <MenuRights />
-          </ProtectedRoute>
+          </AdminRoute>
         }
       />
       <Route
         path="/admin/rights/widgets"
         element={
-          <ProtectedRoute>
+          <AdminRoute>
             <WidgetRights />
-          </ProtectedRoute>
+          </AdminRoute>
         }
       />
       <Route
         path="/admin/rights/fin-year"
         element={
-          <ProtectedRoute>
+          <AdminRoute>
             <FinYearRights />
-          </ProtectedRoute>
+          </AdminRoute>
         }
       />
       <Route
         path="/admin/approval/setup"
         element={
-          <ProtectedRoute>
+          <AdminRoute>
             <ApprovalSetup />
-          </ProtectedRoute>
+          </AdminRoute>
         }
       />
       <Route
         path="/admin/approval/post-rights"
         element={
-          <ProtectedRoute>
+          <AdminRoute>
             <PostApprovalRights />
-          </ProtectedRoute>
+          </AdminRoute>
         }
       />
       <Route
         path="/admin/api-integration"
         element={
-          <ProtectedRoute>
+          <AdminRoute>
             <ApiIntegrationPage />
-          </ProtectedRoute>
+          </AdminRoute>
         }
       />
       <Route
         path="/admin/signature"
         element={
-          <ProtectedRoute>
+          <AdminRoute>
             <SignaturePage />
-          </ProtectedRoute>
+          </AdminRoute>
         }
       />
       <Route
         path="/admin/profile"
         element={
-          <ProtectedRoute>
+          <AdminRoute>
             <SuperAdminProfile />
-          </ProtectedRoute>
+          </AdminRoute>
         }
       />
       <Route
         path="/admin/masters/business-unit"
         element={
-          <ProtectedRoute>
+          <AdminRoute>
             <BusinessUnitMaster />
-          </ProtectedRoute>
+          </AdminRoute>
         }
       />
       <Route
         path="/admin/masters/project"
         element={
-          <ProtectedRoute>
+          <AdminRoute>
             <ProjectMaster />
-          </ProtectedRoute>
+          </AdminRoute>
         }
       />
       <Route
         path="/admin/masters/company"
         element={
-          <ProtectedRoute>
+          <AdminRoute>
             <CompanyMaster />
-          </ProtectedRoute>
+          </AdminRoute>
         }
       />
       <Route
         path="/admin/security/password-reset"
         element={
-          <ProtectedRoute>
+          <AdminRoute>
             <PasswordResetPage />
-          </ProtectedRoute>
+          </AdminRoute>
         }
       />
       <Route
         path="/admin/activity-browser"
         element={
-          <ProtectedRoute>
+          <AdminRoute>
             <ActivityBrowserPage />
-          </ProtectedRoute>
+          </AdminRoute>
         }
       />
       <Route
         path="/admin/communicator/sms-setup"
         element={
-          <ProtectedRoute>
+          <AdminRoute>
             <SmsSetup />
-          </ProtectedRoute>
+          </AdminRoute>
         }
       />
       <Route
         path="/admin/communicator/email-setup"
         element={
-          <ProtectedRoute>
+          <AdminRoute>
             <EmailSetup />
-          </ProtectedRoute>
+          </AdminRoute>
         }
       />
       <Route
         path="/admin/communicator/whatsapp-setup"
         element={
-          <ProtectedRoute>
+          <AdminRoute>
             <WhatsAppSetup />
-          </ProtectedRoute>
+          </AdminRoute>
         }
       />
 
@@ -753,9 +788,9 @@ function AppRoutes() {
       <Route
         path="/superadmin"
         element={
-          <ProtectedRoute>
+          <AdminRoute>
             <SuperAdminDashboard />
-          </ProtectedRoute>
+          </AdminRoute>
         }
       />
 
@@ -763,9 +798,9 @@ function AppRoutes() {
       <Route
         path="/admin/control-panel"
         element={
-          <ProtectedRoute>
+          <AdminRoute>
             <AdminControlPanel />
-          </ProtectedRoute>
+          </AdminRoute>
         }
       />
 

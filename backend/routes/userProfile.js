@@ -1,6 +1,9 @@
 const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
+const bcrypt = require("bcrypt");
+
+const SALT_ROUNDS = 12;
 
 // GET user profile by id
 router.get("/:id/profile", async (req, res) => {
@@ -15,14 +18,15 @@ router.get("/:id/profile", async (req, res) => {
         FROM dbo.users
         WHERE id = @id
       `);
-    if (!result.recordset.length) return res.status(404).json({ error: "User not found" });
+    if (!result.recordset.length)
+      return res.status(404).json({ error: "User not found" });
     res.json(result.recordset[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// PATCH - update user profile (self-service: name only)
+// PATCH - update user profile (name only)
 router.patch("/:id/profile", async (req, res) => {
   const { name } = req.body;
   try {
@@ -38,28 +42,34 @@ router.patch("/:id/profile", async (req, res) => {
   }
 });
 
-// POST - change own password
+// POST - change own password (bcrypt verify + hash new)
 router.post("/:id/change-password", async (req, res) => {
   const { current_password, new_password } = req.body;
-  if (!current_password || !new_password) {
+  if (!current_password || !new_password)
     return res.status(400).json({ error: "Both current and new password required" });
-  }
+  if (new_password.length < 8)
+    return res.status(400).json({ error: "New password must be at least 8 characters" });
   try {
     const pool = getPool();
-    // Verify current password
+    // Fetch stored hash
     const check = await pool
       .request()
       .input("id", sql.Int, req.params.id)
-      .input("pwd", sql.NVarChar, current_password)
-      .query("SELECT id FROM dbo.users WHERE id=@id AND password=@pwd");
-    if (!check.recordset.length) {
+      .query("SELECT password FROM dbo.users WHERE id=@id");
+    if (!check.recordset.length)
+      return res.status(404).json({ error: "User not found" });
+
+    const storedHash = check.recordset[0].password;
+    const match = await bcrypt.compare(current_password, storedHash);
+    if (!match)
       return res.status(401).json({ error: "Current password is incorrect" });
-    }
-    // Update password
+
+    // Hash and store new password
+    const newHash = await bcrypt.hash(new_password, SALT_ROUNDS);
     await pool
       .request()
       .input("id", sql.Int, req.params.id)
-      .input("new_pwd", sql.NVarChar, new_password)
+      .input("new_pwd", sql.NVarChar, newHash)
       .query("UPDATE dbo.users SET password=@new_pwd WHERE id=@id");
     res.json({ message: "Password changed successfully" });
   } catch (err) {
@@ -81,7 +91,6 @@ router.get("/:id/permissions", async (req, res) => {
       `);
     res.json(result.recordset);
   } catch (err) {
-    // Graceful fallback if table doesn't exist yet
     res.json([]);
   }
 });

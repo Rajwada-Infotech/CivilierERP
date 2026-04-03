@@ -398,13 +398,21 @@ export const AppSidebar = () => {
     "/masters/type-of-doc",
   ];
 
-  const isAdminPage =
-    location.pathname.startsWith("/admin") ||
-    location.pathname.startsWith("/users") ||
-    ADMIN_SETUP_PATHS.some((p) => location.pathname.startsWith(p));
+  const ADMIN_TIER_ROLES = ["super_admin", "admin", "dba"];
+  const hasAdminRole = ADMIN_TIER_ROLES.includes(currentUser?.role ?? "");
 
-  const isSuperAdminPage = location.pathname.startsWith("/superadmin");
-  const isDbaPage = location.pathname.startsWith("/dba");
+  // isAdminPage is true only when BOTH the URL is an admin URL AND the user
+  // actually has an admin-tier role — prevents "user" role seeing admin sidebar.
+  const isAdminPage =
+    hasAdminRole &&
+    (location.pathname.startsWith("/admin") ||
+      location.pathname.startsWith("/users") ||
+      ADMIN_SETUP_PATHS.some((p) => location.pathname.startsWith(p)));
+
+  const isSuperAdminPage =
+    hasAdminRole && location.pathname.startsWith("/superadmin");
+  const isDbaPage =
+    hasAdminRole && location.pathname.startsWith("/dba");
   const isUserProfilePage = location.pathname.startsWith("/user/profile");
 
   const getModuleNavItems = (): NavItem[] => {

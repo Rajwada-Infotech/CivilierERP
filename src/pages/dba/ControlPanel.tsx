@@ -30,33 +30,26 @@ import {
 import {
   Database,
   ShieldCheck,
-  Clock,
-  Calendar,
   Building2,
   Eye,
-  Edit2,
-  Trash2,
   Plus,
   CheckCircle2,
   XCircle,
   AlertTriangle,
   Lock,
   Unlock,
-  Server,
-  HardDrive,
-  Users,
   Key,
   Timer,
   Zap,
   Star,
   Shield,
+  Edit2, // ← Added back (used in ACCESS_LEVEL_CONFIG)
 } from "lucide-react";
 import { toast } from "sonner";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
-
 type AccessLevel = "read" | "read_write" | "full";
-type AccessStatus = "active" | "suspended" | "expired";
+type AccessStatus = "active" | "suspended" | "expired" | "trial";
 
 interface TenantAccess {
   id: string;
@@ -70,6 +63,8 @@ interface TenantAccess {
   expiresOn: string;
   daysRemaining: number;
   status: AccessStatus;
+  isTrial: boolean;
+  trialEndsOn?: string;
   paidAmount: number;
   plan: "starter" | "growth" | "enterprise";
   maxUsers: number;
@@ -78,11 +73,25 @@ interface TenantAccess {
 }
 
 // ─── Mock Data ───────────────────────────────────────────────────────────────
-
 const FEATURES_BY_PLAN: Record<string, string[]> = {
   starter: ["DB Read Access", "Query Console", "Basic Reporting"],
-  growth: ["DB Read/Write", "Query Console", "Advanced Reports", "API Access", "Backups"],
-  enterprise: ["Full DB Access", "Query Console", "All Reports", "API Access", "Backups", "Multi-Server", "Audit Logs", "Priority Support"],
+  growth: [
+    "DB Read/Write",
+    "Query Console",
+    "Advanced Reports",
+    "API Access",
+    "Backups",
+  ],
+  enterprise: [
+    "Full DB Access",
+    "Query Console",
+    "All Reports",
+    "API Access",
+    "Backups",
+    "Multi-Server",
+    "Audit Logs",
+    "Priority Support",
+  ],
 };
 
 const initialAccesses: TenantAccess[] = [
@@ -98,6 +107,7 @@ const initialAccesses: TenantAccess[] = [
     expiresOn: "2026-12-31",
     daysRemaining: 272,
     status: "active",
+    isTrial: false,
     paidAmount: 84000,
     plan: "enterprise",
     maxUsers: 50,
@@ -116,6 +126,7 @@ const initialAccesses: TenantAccess[] = [
     expiresOn: "2026-05-15",
     daysRemaining: 42,
     status: "active",
+    isTrial: false,
     paidAmount: 18000,
     plan: "growth",
     maxUsers: 20,
@@ -134,6 +145,7 @@ const initialAccesses: TenantAccess[] = [
     expiresOn: "2026-03-01",
     daysRemaining: -33,
     status: "expired",
+    isTrial: false,
     paidAmount: 9000,
     plan: "starter",
     maxUsers: 5,
@@ -152,6 +164,7 @@ const initialAccesses: TenantAccess[] = [
     expiresOn: "2026-06-01",
     daysRemaining: 59,
     status: "active",
+    isTrial: false,
     paidAmount: 18000,
     plan: "growth",
     maxUsers: 20,
@@ -161,33 +174,85 @@ const initialAccesses: TenantAccess[] = [
 ];
 
 const ALL_TENANTS = [
-  { id: "T-001", name: "Civilier Constructions Pvt Ltd", dbName: "civilier_prod", server: "sql-prod-01" },
-  { id: "T-002", name: "Buildtech Infrastructure Ltd", dbName: "buildtech_prod", server: "sql-prod-01" },
-  { id: "T-003", name: "Apex Realty Developers", dbName: "apex_prod", server: "sql-prod-02" },
-  { id: "T-004", name: "Metro Projects Group", dbName: "metro_prod", server: "sql-prod-02" },
-  { id: "T-005", name: "Urban Edge Builders", dbName: "urbanedge_prod", server: "sql-prod-03" },
+  {
+    id: "T-001",
+    name: "Civilier Constructions Pvt Ltd",
+    dbName: "civilier_prod",
+    server: "sql-prod-01",
+  },
+  {
+    id: "T-002",
+    name: "Buildtech Infrastructure Ltd",
+    dbName: "buildtech_prod",
+    server: "sql-prod-01",
+  },
+  {
+    id: "T-003",
+    name: "Apex Realty Developers",
+    dbName: "apex_prod",
+    server: "sql-prod-02",
+  },
+  {
+    id: "T-004",
+    name: "Metro Projects Group",
+    dbName: "metro_prod",
+    server: "sql-prod-02",
+  },
+  {
+    id: "T-005",
+    name: "Urban Edge Builders",
+    dbName: "urbanedge_prod",
+    server: "sql-prod-03",
+  },
 ];
 
 const PLAN_CONFIG = {
-  starter:    { label: "Starter",    color: "bg-slate-500/15 text-slate-600 border-slate-500/30",    price: "₹9,000/qtr",  icon: Zap },
-  growth:     { label: "Growth",     color: "bg-blue-500/15 text-blue-600 border-blue-500/30",       price: "₹18,000/qtr", icon: Star },
-  enterprise: { label: "Enterprise", color: "bg-violet-500/15 text-violet-600 border-violet-500/30", price: "₹84,000/yr",  icon: Shield },
+  starter: {
+    label: "Starter",
+    color: "bg-slate-500/15 text-slate-600 border-slate-500/30",
+    price: "₹9,000/qtr",
+    icon: Zap,
+  },
+  growth: {
+    label: "Growth",
+    color: "bg-blue-500/15 text-blue-600 border-blue-500/30",
+    price: "₹18,000/qtr",
+    icon: Star,
+  },
+  enterprise: {
+    label: "Enterprise",
+    color: "bg-violet-500/15 text-violet-600 border-violet-500/30",
+    price: "₹84,000/yr",
+    icon: Shield,
+  },
 };
 
 const ACCESS_LEVEL_CONFIG = {
-  read:       { label: "Read Only",   color: "bg-yellow-500/15 text-yellow-700 border-yellow-500/30", icon: Eye },
-  read_write: { label: "Read/Write",  color: "bg-blue-500/15 text-blue-600 border-blue-500/30",      icon: Edit2 },
-  full:       { label: "Full Access", color: "bg-green-500/15 text-green-600 border-green-500/30",   icon: Unlock },
+  read: {
+    label: "Read Only",
+    color: "bg-yellow-500/15 text-yellow-700 border-yellow-500/30",
+    icon: Eye,
+  },
+  read_write: {
+    label: "Read/Write",
+    color: "bg-blue-500/15 text-blue-600 border-blue-500/30",
+    icon: Edit2,
+  },
+  full: {
+    label: "Full Access",
+    color: "bg-green-500/15 text-green-600 border-green-500/30",
+    icon: Unlock,
+  },
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
-
 export default function ControlPanel() {
   const [accesses, setAccesses] = useState<TenantAccess[]>(initialAccesses);
-  const [selectedAccess, setSelectedAccess] = useState<TenantAccess | null>(null);
+  const [selectedAccess, setSelectedAccess] = useState<TenantAccess | null>(
+    null,
+  );
   const [detailOpen, setDetailOpen] = useState(false);
   const [grantOpen, setGrantOpen] = useState(false);
-  const [editOpen, setEditOpen] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<TenantAccess | null>(null);
   const [filterStatus, setFilterStatus] = useState<string>("all");
 
@@ -200,14 +265,31 @@ export default function ControlPanel() {
     paidAmount: "",
     maxUsers: "20",
     storageLimit: "20 GB",
+    isTrial: false,
+    trialDays: "14",
   });
 
-  const filtered = accesses.filter(a => filterStatus === "all" || a.status === filterStatus);
+  const filtered = accesses.filter(
+    (a) => filterStatus === "all" || a.status === filterStatus,
+  );
 
   const statusConfig = {
-    active:    { color: "bg-green-500/15 text-green-600 border-green-500/30",   icon: CheckCircle2 },
-    suspended: { color: "bg-orange-500/15 text-orange-600 border-orange-500/30", icon: AlertTriangle },
-    expired:   { color: "bg-red-500/15 text-red-600 border-red-500/30",         icon: XCircle },
+    active: {
+      color: "bg-green-500/15 text-green-600 border-green-500/30",
+      icon: CheckCircle2,
+    },
+    suspended: {
+      color: "bg-orange-500/15 text-orange-600 border-orange-500/30",
+      icon: AlertTriangle,
+    },
+    expired: {
+      color: "bg-red-500/15 text-red-600 border-red-500/30",
+      icon: XCircle,
+    },
+    trial: {
+      color: "bg-violet-500/15 text-violet-600 border-violet-500/30",
+      icon: Timer,
+    },
   };
 
   const getDaysColor = (days: number) => {
@@ -218,14 +300,24 @@ export default function ControlPanel() {
   };
 
   const handleGrant = () => {
-    const tenant = ALL_TENANTS.find(t => t.id === grantForm.tenantId);
-    if (!tenant || !grantForm.paidAmount) {
-      toast.error("Please fill all required fields");
+    const tenant = ALL_TENANTS.find((t) => t.id === grantForm.tenantId);
+    if (!tenant) {
+      toast.error("Please select a tenant");
       return;
     }
+    if (!grantForm.isTrial && !grantForm.paidAmount) {
+      toast.error("Please enter the amount paid");
+      return;
+    }
+
     const now = new Date();
     const expires = new Date(now);
-    expires.setMonth(expires.getMonth() + parseInt(grantForm.durationMonths));
+    if (grantForm.isTrial) {
+      expires.setDate(expires.getDate() + parseInt(grantForm.trialDays));
+    } else {
+      expires.setMonth(expires.getMonth() + parseInt(grantForm.durationMonths));
+    }
+
     const days = Math.floor((expires.getTime() - now.getTime()) / 86400000);
 
     const newAccess: TenantAccess = {
@@ -234,54 +326,98 @@ export default function ControlPanel() {
       tenantName: tenant.name,
       dbName: tenant.dbName,
       server: tenant.server,
-      accessLevel: grantForm.accessLevel,
+      accessLevel: grantForm.isTrial ? "read" : grantForm.accessLevel,
       features: FEATURES_BY_PLAN[grantForm.plan],
       grantedOn: now.toISOString().split("T")[0],
       expiresOn: expires.toISOString().split("T")[0],
       daysRemaining: days,
-      status: "active",
-      paidAmount: parseInt(grantForm.paidAmount),
+      status: grantForm.isTrial ? "trial" : "active",
+      isTrial: grantForm.isTrial,
+      trialEndsOn: grantForm.isTrial
+        ? expires.toISOString().split("T")[0]
+        : undefined,
+      paidAmount: grantForm.isTrial ? 0 : parseInt(grantForm.paidAmount || "0"),
       plan: grantForm.plan,
-      maxUsers: parseInt(grantForm.maxUsers),
-      storageLimit: grantForm.storageLimit,
+      maxUsers: grantForm.isTrial ? 3 : parseInt(grantForm.maxUsers),
+      storageLimit: grantForm.isTrial ? "1 GB" : grantForm.storageLimit,
       storageUsed: "0 GB",
     };
-    setAccesses(prev => [...prev, newAccess]);
+
+    setAccesses((prev) => [...prev, newAccess]);
     setGrantOpen(false);
-    toast.success(`Access granted to ${tenant.name}`);
+
+    toast.success(
+      grantForm.isTrial
+        ? `Trial access granted to ${tenant.name} (${grantForm.trialDays} days)`
+        : `Access granted to ${tenant.name}`,
+    );
+
+    // Reset form
+    setGrantForm({
+      tenantId: "",
+      plan: "growth",
+      accessLevel: "read_write",
+      durationMonths: "3",
+      paidAmount: "",
+      maxUsers: "20",
+      storageLimit: "20 GB",
+      isTrial: false,
+      trialDays: "14",
+    });
   };
 
   const handleRevoke = (access: TenantAccess) => {
-    setAccesses(prev => prev.map(a => a.id === access.id ? { ...a, status: "suspended" } : a));
+    setAccesses((prev) =>
+      prev.map((a) => (a.id === access.id ? { ...a, status: "suspended" } : a)),
+    );
     setRevokeTarget(null);
     toast.success(`Access suspended for ${access.tenantName}`);
   };
 
   const handleReactivate = (access: TenantAccess) => {
-    setAccesses(prev => prev.map(a => a.id === access.id ? { ...a, status: "active" } : a));
+    setAccesses((prev) =>
+      prev.map((a) => (a.id === access.id ? { ...a, status: "active" } : a)),
+    );
     toast.success(`Access reactivated for ${access.tenantName}`);
   };
 
   const stats = {
     total: accesses.length,
-    active: accesses.filter(a => a.status === "active").length,
-    expiringSoon: accesses.filter(a => a.daysRemaining > 0 && a.daysRemaining <= 30).length,
-    expired: accesses.filter(a => a.status === "expired" || a.daysRemaining < 0).length,
+    active: accesses.filter((a) => a.status === "active").length,
+    expiringSoon: accesses.filter(
+      (a) => a.daysRemaining > 0 && a.daysRemaining <= 30,
+    ).length,
+    expired: accesses.filter(
+      (a) => a.status === "expired" || a.daysRemaining < 0,
+    ).length,
     totalRevenue: accesses.reduce((s, a) => s + a.paidAmount, 0),
   };
 
   return (
     <div className="p-4 md:p-6 space-y-5 max-w-[1400px] mx-auto">
-      <Breadcrumbs items={[{ label: "DBA Console" }, { label: "Database" }, { label: "Control Panel" }]} />
+      <Breadcrumbs
+        items={[
+          { label: "DBA Console" },
+          { label: "Database" },
+          { label: "Control Panel" },
+        ]}
+      />
 
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-semibold flex items-center gap-2">
-            <ShieldCheck size={20} className="text-emerald-500" /> DB Access Control Panel
+            <ShieldCheck size={20} className="text-emerald-500" /> DB Access
+            Control Panel
           </h1>
-          <p className="text-xs text-muted-foreground mt-0.5">Manage tenant database access, plans & expiry</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Manage tenant database access, plans & expiry
+          </p>
         </div>
-        <Button size="sm" className="gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700" onClick={() => setGrantOpen(true)}>
+        <Button
+          size="sm"
+          className="gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-700"
+          onClick={() => setGrantOpen(true)}
+        >
           <Plus size={13} /> Grant Access
         </Button>
       </div>
@@ -289,18 +425,45 @@ export default function ControlPanel() {
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
         {[
-          { label: "Total Tenants", value: stats.total, icon: Building2, color: "text-blue-500" },
-          { label: "Active", value: stats.active, icon: CheckCircle2, color: "text-green-500" },
-          { label: "Expiring Soon", value: stats.expiringSoon, icon: AlertTriangle, color: "text-orange-500" },
-          { label: "Expired", value: stats.expired, icon: XCircle, color: "text-red-500" },
-          { label: "Total Revenue", value: `₹${(stats.totalRevenue / 1000).toFixed(0)}K`, icon: Key, color: "text-violet-500" },
+          {
+            label: "Total Tenants",
+            value: stats.total,
+            icon: Building2,
+            color: "text-blue-500",
+          },
+          {
+            label: "Active",
+            value: stats.active,
+            icon: CheckCircle2,
+            color: "text-green-500",
+          },
+          {
+            label: "Expiring Soon",
+            value: stats.expiringSoon,
+            icon: AlertTriangle,
+            color: "text-orange-500",
+          },
+          {
+            label: "Expired",
+            value: stats.expired,
+            icon: XCircle,
+            color: "text-red-500",
+          },
+          {
+            label: "Total Revenue",
+            value: `₹${(stats.totalRevenue / 1000).toFixed(0)}K`,
+            icon: Key,
+            color: "text-violet-500",
+          },
         ].map((s, i) => (
           <Card key={i} className="border">
             <CardContent className="p-3 flex items-center gap-3">
               <s.icon size={18} className={s.color} />
               <div>
                 <div className="text-lg font-bold leading-none">{s.value}</div>
-                <div className="text-[10px] text-muted-foreground mt-0.5">{s.label}</div>
+                <div className="text-[10px] text-muted-foreground mt-0.5">
+                  {s.label}
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -309,7 +472,7 @@ export default function ControlPanel() {
 
       {/* Filter */}
       <div className="flex gap-2 flex-wrap">
-        {["all", "active", "suspended", "expired"].map(f => (
+        {["all", "active", "suspended", "expired"].map((f) => (
           <Button
             key={f}
             size="sm"
@@ -326,7 +489,8 @@ export default function ControlPanel() {
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-sm flex items-center gap-2">
-            <Database size={14} className="text-emerald-500" /> Tenant Access Registry
+            <Database size={14} className="text-emerald-500" /> Tenant Access
+            Registry
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -347,44 +511,70 @@ export default function ControlPanel() {
               </TableHeader>
               <TableBody>
                 {filtered.map((acc) => {
-                  const SC = statusConfig[acc.status];
+                  const SC =
+                    statusConfig[acc.status as keyof typeof statusConfig];
                   const PL = PLAN_CONFIG[acc.plan];
                   const AL = ACCESS_LEVEL_CONFIG[acc.accessLevel];
                   const storagePercent = Math.round(
-                    (parseFloat(acc.storageUsed) / parseFloat(acc.storageLimit)) * 100
+                    (parseFloat(acc.storageUsed) /
+                      parseFloat(acc.storageLimit)) *
+                      100,
                   );
+
                   return (
                     <TableRow key={acc.id} className="text-xs">
                       <TableCell>
-                        <div className="font-medium text-[11px]">{acc.tenantName}</div>
-                        <div className="text-muted-foreground font-mono text-[10px]">{acc.tenantId}</div>
+                        <div className="font-medium text-[11px]">
+                          {acc.tenantName}
+                        </div>
+                        <div className="text-muted-foreground font-mono text-[10px]">
+                          {acc.tenantId}
+                        </div>
                       </TableCell>
                       <TableCell>
-                        <div className="font-mono text-[10px] text-primary">{acc.dbName}</div>
-                        <div className="text-muted-foreground text-[10px]">{acc.server}</div>
+                        <div className="font-mono text-[10px] text-primary">
+                          {acc.dbName}
+                        </div>
+                        <div className="text-muted-foreground text-[10px]">
+                          {acc.server}
+                        </div>
                       </TableCell>
                       <TableCell>
-                        <Badge className={`text-[10px] ${PL.color}`}>{PL.label}</Badge>
+                        <Badge className={`text-[10px] ${PL.color}`}>
+                          {PL.label}
+                        </Badge>
                       </TableCell>
                       <TableCell>
-                        <Badge className={`text-[10px] ${AL.color}`}>{AL.label}</Badge>
+                        <Badge className={`text-[10px] ${AL.color}`}>
+                          {AL.label}
+                        </Badge>
                       </TableCell>
-                      <TableCell className="font-mono text-[10px] text-muted-foreground">{acc.expiresOn}</TableCell>
+                      <TableCell className="font-mono text-[10px] text-muted-foreground">
+                        {acc.expiresOn}
+                      </TableCell>
                       <TableCell>
-                        <span className={`font-bold text-[11px] ${getDaysColor(acc.daysRemaining)}`}>
-                          {acc.daysRemaining < 0 ? `${Math.abs(acc.daysRemaining)}d overdue` : `${acc.daysRemaining}d`}
+                        <span
+                          className={`font-bold text-[11px] ${getDaysColor(acc.daysRemaining)}`}
+                        >
+                          {acc.daysRemaining < 0
+                            ? `${Math.abs(acc.daysRemaining)}d overdue`
+                            : `${acc.daysRemaining}d`}
                         </span>
                         {acc.daysRemaining > 0 && (
                           <div className="w-16 h-1 bg-muted rounded-full mt-1">
                             <div
                               className={`h-1 rounded-full ${acc.daysRemaining > 60 ? "bg-green-500" : acc.daysRemaining > 30 ? "bg-yellow-500" : "bg-red-500"}`}
-                              style={{ width: `${Math.min((acc.daysRemaining / 365) * 100, 100)}%` }}
+                              style={{
+                                width: `${Math.min((acc.daysRemaining / 365) * 100, 100)}%`,
+                              }}
                             />
                           </div>
                         )}
                       </TableCell>
                       <TableCell>
-                        <div className="text-[10px]">{acc.storageUsed} / {acc.storageLimit}</div>
+                        <div className="text-[10px]">
+                          {acc.storageUsed} / {acc.storageLimit}
+                        </div>
                         <div className="w-16 h-1 bg-muted rounded-full mt-1">
                           <div
                             className={`h-1 rounded-full ${storagePercent > 80 ? "bg-red-500" : storagePercent > 60 ? "bg-yellow-500" : "bg-emerald-500"}`}
@@ -393,7 +583,16 @@ export default function ControlPanel() {
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge className={`text-[10px] ${SC.color}`}>{acc.status}</Badge>
+                        <div className="flex flex-col gap-1">
+                          <Badge className={`text-[10px] ${SC.color}`}>
+                            {acc.status}
+                          </Badge>
+                          {acc.isTrial && (
+                            <Badge className="text-[9px] bg-violet-500/10 text-violet-600 border-violet-500/20 w-fit">
+                              Trial
+                            </Badge>
+                          )}
+                        </div>
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center gap-1 justify-end">
@@ -401,7 +600,10 @@ export default function ControlPanel() {
                             variant="ghost"
                             size="sm"
                             className="h-6 w-6 p-0"
-                            onClick={() => { setSelectedAccess(acc); setDetailOpen(true); }}
+                            onClick={() => {
+                              setSelectedAccess(acc);
+                              setDetailOpen(true);
+                            }}
                           >
                             <Eye size={11} />
                           </Button>
@@ -448,67 +650,106 @@ export default function ControlPanel() {
             <div className="space-y-4 py-2">
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Tenant</p>
-                  <p className="text-xs font-medium">{selectedAccess.tenantName}</p>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                    Tenant
+                  </p>
+                  <p className="text-xs font-medium">
+                    {selectedAccess.tenantName}
+                  </p>
                 </div>
                 <div className="space-y-1">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Database</p>
-                  <p className="text-xs font-mono text-primary">{selectedAccess.dbName}</p>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                    Database
+                  </p>
+                  <p className="text-xs font-mono text-primary">
+                    {selectedAccess.dbName}
+                  </p>
                 </div>
                 <div className="space-y-1">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Plan</p>
-                  <Badge className={`text-[10px] ${PLAN_CONFIG[selectedAccess.plan].color}`}>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                    Plan
+                  </p>
+                  <Badge
+                    className={`text-[10px] ${PLAN_CONFIG[selectedAccess.plan].color}`}
+                  >
                     {PLAN_CONFIG[selectedAccess.plan].label}
                   </Badge>
                 </div>
                 <div className="space-y-1">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Access Level</p>
-                  <Badge className={`text-[10px] ${ACCESS_LEVEL_CONFIG[selectedAccess.accessLevel].color}`}>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                    Access Level
+                  </p>
+                  <Badge
+                    className={`text-[10px] ${ACCESS_LEVEL_CONFIG[selectedAccess.accessLevel].color}`}
+                  >
                     {ACCESS_LEVEL_CONFIG[selectedAccess.accessLevel].label}
                   </Badge>
                 </div>
                 <div className="space-y-1">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Granted On</p>
-                  <p className="text-xs font-mono">{selectedAccess.grantedOn}</p>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                    Granted On
+                  </p>
+                  <p className="text-xs font-mono">
+                    {selectedAccess.grantedOn}
+                  </p>
                 </div>
                 <div className="space-y-1">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Expires On</p>
-                  <p className={`text-xs font-mono font-bold ${getDaysColor(selectedAccess.daysRemaining)}`}>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                    Expires On
+                  </p>
+                  <p
+                    className={`text-xs font-mono font-bold ${getDaysColor(selectedAccess.daysRemaining)}`}
+                  >
                     {selectedAccess.expiresOn}
                   </p>
                 </div>
                 <div className="space-y-1">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Max Users</p>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                    Max Users
+                  </p>
                   <p className="text-xs">{selectedAccess.maxUsers} users</p>
                 </div>
                 <div className="space-y-1">
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Amount Paid</p>
-                  <p className="text-xs font-bold text-green-600">₹{selectedAccess.paidAmount.toLocaleString()}</p>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                    Amount Paid
+                  </p>
+                  <p className="text-xs font-bold text-green-600">
+                    ₹{selectedAccess.paidAmount.toLocaleString()}
+                  </p>
                 </div>
               </div>
 
-              {/* Time remaining bar */}
               <div className="space-y-1.5">
                 <div className="flex justify-between text-[10px]">
                   <span className="text-muted-foreground">Access Duration</span>
-                  <span className={`font-bold ${getDaysColor(selectedAccess.daysRemaining)}`}>
-                    {selectedAccess.daysRemaining > 0 ? `${selectedAccess.daysRemaining} days remaining` : `${Math.abs(selectedAccess.daysRemaining)} days overdue`}
+                  <span
+                    className={`font-bold ${getDaysColor(selectedAccess.daysRemaining)}`}
+                  >
+                    {selectedAccess.daysRemaining > 0
+                      ? `${selectedAccess.daysRemaining} days remaining`
+                      : `${Math.abs(selectedAccess.daysRemaining)} days overdue`}
                   </span>
                 </div>
                 <div className="h-2 bg-muted rounded-full overflow-hidden">
                   <div
                     className={`h-full rounded-full transition-all ${selectedAccess.daysRemaining > 60 ? "bg-green-500" : selectedAccess.daysRemaining > 30 ? "bg-yellow-500" : "bg-red-500"}`}
-                    style={{ width: `${Math.max(0, Math.min((selectedAccess.daysRemaining / 365) * 100, 100))}%` }}
+                    style={{
+                      width: `${Math.max(0, Math.min((selectedAccess.daysRemaining / 365) * 100, 100))}%`,
+                    }}
                   />
                 </div>
               </div>
 
-              {/* Features */}
               <div className="space-y-1.5">
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Included Features</p>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                  Included Features
+                </p>
                 <div className="flex flex-wrap gap-1.5">
                   {selectedAccess.features.map((f, i) => (
-                    <span key={i} className="flex items-center gap-1 bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 rounded-full px-2 py-0.5 text-[10px]">
+                    <span
+                      key={i}
+                      className="flex items-center gap-1 bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 rounded-full px-2 py-0.5 text-[10px]"
+                    >
                       <CheckCircle2 size={9} /> {f}
                     </span>
                   ))}
@@ -517,7 +758,14 @@ export default function ControlPanel() {
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" size="sm" className="text-xs" onClick={() => setDetailOpen(false)}>Close</Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs"
+              onClick={() => setDetailOpen(false)}
+            >
+              Close
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -530,15 +778,21 @@ export default function ControlPanel() {
               <Plus size={14} className="text-emerald-500" /> Grant DB Access
             </DialogTitle>
           </DialogHeader>
+
           <div className="space-y-3 py-2">
             <div className="space-y-1">
               <Label className="text-xs">Tenant *</Label>
-              <Select value={grantForm.tenantId} onValueChange={v => setGrantForm(f => ({ ...f, tenantId: v }))}>
+              <Select
+                value={grantForm.tenantId}
+                onValueChange={(v) =>
+                  setGrantForm((f) => ({ ...f, tenantId: v }))
+                }
+              >
                 <SelectTrigger className="text-xs h-8">
                   <SelectValue placeholder="Select tenant..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {ALL_TENANTS.map(t => (
+                  {ALL_TENANTS.map((t) => (
                     <SelectItem key={t.id} value={t.id} className="text-xs">
                       {t.name}
                     </SelectItem>
@@ -546,72 +800,222 @@ export default function ControlPanel() {
                 </SelectContent>
               </Select>
             </div>
+
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1">
                 <Label className="text-xs">Plan *</Label>
-                <Select value={grantForm.plan} onValueChange={v => setGrantForm(f => ({ ...f, plan: v as any }))}>
+                <Select
+                  value={grantForm.plan}
+                  onValueChange={(v) =>
+                    setGrantForm((f) => ({ ...f, plan: v as any }))
+                  }
+                >
                   <SelectTrigger className="text-xs h-8">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="starter" className="text-xs">Starter — ₹9,000/qtr</SelectItem>
-                    <SelectItem value="growth" className="text-xs">Growth — ₹18,000/qtr</SelectItem>
-                    <SelectItem value="enterprise" className="text-xs">Enterprise — ₹84,000/yr</SelectItem>
+                    <SelectItem value="starter" className="text-xs">
+                      Starter — ₹9,000/qtr
+                    </SelectItem>
+                    <SelectItem value="growth" className="text-xs">
+                      Growth — ₹18,000/qtr
+                    </SelectItem>
+                    <SelectItem value="enterprise" className="text-xs">
+                      Enterprise — ₹84,000/yr
+                    </SelectItem>
                   </SelectContent>
                 </Select>
               </div>
               <div className="space-y-1">
                 <Label className="text-xs">Access Level *</Label>
-                <Select value={grantForm.accessLevel} onValueChange={v => setGrantForm(f => ({ ...f, accessLevel: v as any }))}>
+                <Select
+                  value={grantForm.accessLevel}
+                  onValueChange={(v) =>
+                    setGrantForm((f) => ({ ...f, accessLevel: v as any }))
+                  }
+                >
                   <SelectTrigger className="text-xs h-8">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="read" className="text-xs">Read Only</SelectItem>
-                    <SelectItem value="read_write" className="text-xs">Read / Write</SelectItem>
-                    <SelectItem value="full" className="text-xs">Full Access</SelectItem>
+                    <SelectItem value="read" className="text-xs">
+                      Read Only
+                    </SelectItem>
+                    <SelectItem value="read_write" className="text-xs">
+                      Read / Write
+                    </SelectItem>
+                    <SelectItem value="full" className="text-xs">
+                      Full Access
+                    </SelectItem>
                   </SelectContent>
                 </Select>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Duration (months) *</Label>
-                <Select value={grantForm.durationMonths} onValueChange={v => setGrantForm(f => ({ ...f, durationMonths: v }))}>
-                  <SelectTrigger className="text-xs h-8">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="1" className="text-xs">1 Month</SelectItem>
-                    <SelectItem value="3" className="text-xs">3 Months</SelectItem>
-                    <SelectItem value="6" className="text-xs">6 Months</SelectItem>
-                    <SelectItem value="12" className="text-xs">12 Months</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Amount Paid (₹) *</Label>
-                <Input
-                  className="text-xs h-8"
-                  placeholder="e.g. 18000"
-                  value={grantForm.paidAmount}
-                  onChange={e => setGrantForm(f => ({ ...f, paidAmount: e.target.value }))}
-                />
               </div>
             </div>
 
+            {/* Trial Period Toggle - Up to 60 days */}
+            <div
+              className={`rounded-lg border-2 p-3 transition-all ${grantForm.isTrial ? "border-violet-400/60 bg-violet-500/5" : "border-border bg-muted/20"}`}
+            >
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Timer
+                    size={14}
+                    className={
+                      grantForm.isTrial
+                        ? "text-violet-500"
+                        : "text-muted-foreground"
+                    }
+                  />
+                  <div>
+                    <p
+                      className={`text-xs font-semibold ${grantForm.isTrial ? "text-violet-600" : "text-foreground"}`}
+                    >
+                      Trial Period Access
+                    </p>
+                    <p className="text-[10px] text-muted-foreground">
+                      Free limited access — Read Only, max 3 users, 1 GB storage
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setGrantForm((f) => ({
+                      ...f,
+                      isTrial: !f.isTrial,
+                      paidAmount: !f.isTrial ? "" : f.paidAmount,
+                    }))
+                  }
+                  className={`relative w-9 h-5 rounded-full transition-colors focus:outline-none ${grantForm.isTrial ? "bg-violet-500" : "bg-muted"}`}
+                >
+                  <span
+                    className={`absolute top-0.5 left-0.5 w-4 h-4 rounded-full bg-white shadow transition-transform duration-200 ${grantForm.isTrial ? "translate-x-4" : "translate-x-0"}`}
+                  />
+                </button>
+              </div>
+
+              {grantForm.isTrial && (
+                <div className="mt-3 space-y-1">
+                  <Label className="text-xs">
+                    Trial Duration (up to 60 days)
+                  </Label>
+                  <Select
+                    value={grantForm.trialDays}
+                    onValueChange={(v) =>
+                      setGrantForm((f) => ({ ...f, trialDays: v }))
+                    }
+                  >
+                    <SelectTrigger className="text-xs h-8">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="7" className="text-xs">
+                        7 Days
+                      </SelectItem>
+                      <SelectItem value="14" className="text-xs">
+                        14 Days
+                      </SelectItem>
+                      <SelectItem value="30" className="text-xs">
+                        30 Days
+                      </SelectItem>
+                      <SelectItem value="45" className="text-xs">
+                        45 Days
+                      </SelectItem>
+                      <SelectItem value="60" className="text-xs">
+                        60 Days
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[10px] text-violet-500 mt-1 flex items-center gap-1">
+                    <Timer size={9} /> Maximum trial period is 60 days • No
+                    payment required
+                  </p>
+                </div>
+              )}
+            </div>
+
+            {/* Paid fields — hidden during trial */}
+            {!grantForm.isTrial && (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <Label className="text-xs">Duration (months) *</Label>
+                  <Select
+                    value={grantForm.durationMonths}
+                    onValueChange={(v) =>
+                      setGrantForm((f) => ({ ...f, durationMonths: v }))
+                    }
+                  >
+                    <SelectTrigger className="text-xs h-8">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="1" className="text-xs">
+                        1 Month
+                      </SelectItem>
+                      <SelectItem value="3" className="text-xs">
+                        3 Months
+                      </SelectItem>
+                      <SelectItem value="6" className="text-xs">
+                        6 Months
+                      </SelectItem>
+                      <SelectItem value="12" className="text-xs">
+                        12 Months
+                      </SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Amount Paid (₹) *</Label>
+                  <Input
+                    className="text-xs h-8"
+                    placeholder="e.g. 18000"
+                    value={grantForm.paidAmount}
+                    onChange={(e) =>
+                      setGrantForm((f) => ({
+                        ...f,
+                        paidAmount: e.target.value,
+                      }))
+                    }
+                  />
+                </div>
+              </div>
+            )}
+
             {grantForm.plan && (
               <div className="bg-muted/50 rounded-lg p-3 space-y-1.5">
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">Included Features</p>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-medium">
+                  Included Features
+                </p>
                 <div className="flex flex-wrap gap-1">
                   {FEATURES_BY_PLAN[grantForm.plan].map((f, i) => (
-                    <span key={i} className="bg-background border rounded px-1.5 py-0.5 text-[10px]">{f}</span>
+                    <span
+                      key={i}
+                      className="bg-background border rounded px-1.5 py-0.5 text-[10px]"
+                    >
+                      {f}
+                    </span>
                   ))}
                 </div>
               </div>
             )}
           </div>
+
           <DialogFooter>
-            <Button variant="outline" size="sm" className="text-xs" onClick={() => setGrantOpen(false)}>Cancel</Button>
-            <Button size="sm" className="text-xs bg-emerald-600 hover:bg-emerald-700" onClick={handleGrant}>Grant Access</Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs"
+              onClick={() => setGrantOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              className="text-xs bg-emerald-600 hover:bg-emerald-700"
+              onClick={handleGrant}
+            >
+              Grant Access
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -625,11 +1029,28 @@ export default function ControlPanel() {
             </DialogTitle>
           </DialogHeader>
           <p className="text-xs text-muted-foreground py-2">
-            This will immediately suspend <strong>{revokeTarget?.tenantName}</strong>'s access to <span className="font-mono text-primary">{revokeTarget?.dbName}</span>. You can reactivate later.
+            This will immediately suspend{" "}
+            <strong>{revokeTarget?.tenantName}</strong>'s access to{" "}
+            <span className="font-mono text-primary">
+              {revokeTarget?.dbName}
+            </span>
+            . You can reactivate later.
           </p>
           <DialogFooter>
-            <Button variant="outline" size="sm" className="text-xs" onClick={() => setRevokeTarget(null)}>Cancel</Button>
-            <Button variant="destructive" size="sm" className="text-xs" onClick={() => revokeTarget && handleRevoke(revokeTarget)}>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs"
+              onClick={() => setRevokeTarget(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              className="text-xs"
+              onClick={() => revokeTarget && handleRevoke(revokeTarget)}
+            >
               Suspend Access
             </Button>
           </DialogFooter>
