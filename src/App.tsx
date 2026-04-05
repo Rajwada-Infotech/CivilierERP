@@ -129,6 +129,9 @@ const DebitNoteMaster = lazy(() =>
 const BillingTermsMaster = lazy(() =>
   withDelay(() => import("./pages/masters/BillingTermsmaster")),
 );
+const TCMaster = lazy(() => 
+  withDelay(() => import("./pages/material/T&CMaster")),
+);
 
 const UnitOfMeasurementMaster = lazy(() =>
   withDelay(() => import("./pages/material/UnitOfMeasurementMaster")),
@@ -622,6 +625,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/material/t-c-master"
+        element={
+          <ProtectedRoute>
+            <TCMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/masters/unit-measurement"
         element={
           <ProtectedRoute>
@@ -906,3 +917,4 @@ function App() {
 }
 
 export default App;
+
