@@ -175,6 +175,12 @@ const materialSetupItems = [
     path: "/masters/billing-terms",
     color: "text-lime-500",
   },
+  {
+    icon: FileText,
+    label: "T&C",
+    path: "/material/t-c-master",
+    color: "text-purple-500",
+  },
 ];
 
 const adminSetupItems = [
@@ -315,7 +321,7 @@ export const TopNavbar = () => {
   const isDba = currentUser?.role === "dba";
   const isAdmin = currentUser?.role === "admin" || isSuperAdmin || isDba;
 
-  const RoleIcon = isSuperAdmin ? Crown : isAdmin ? Shield : isDba ? (Database as any) : null;
+const RoleIcon = isSuperAdmin ? Crown : isAdmin ? Shield : isDba ? Database : null;
   const roleBadgeClassName = isSuperAdmin ? "bg-violet-600" : isDba ? "bg-emerald-600" : "bg-blue-600";
 
   const getSetupConfig = () => {
