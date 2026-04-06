@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 
 // ─── API ──────────────────────────────────────────────────────────────────────
-const BASE = 'http://localhost:5000/api/hsn'
+const BASE = '/api/hsn'
 
 const getHsn    = () => fetch(BASE).then(r => r.json())
 const addHsn    = (data: object) => fetch(BASE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(r => r.json())

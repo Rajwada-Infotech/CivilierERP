@@ -15,7 +15,7 @@ interface User {
 }
 
 // ─── API calls ────────────────────────────────────────────────────────────────
-const BASE_URL = "http://localhost:5000/api/users";
+const BASE_URL = "/api/users";
 
 const getUsers = async (): Promise<User[]> => {
   const res = await fetch(BASE_URL);

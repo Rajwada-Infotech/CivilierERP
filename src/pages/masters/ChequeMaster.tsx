@@ -8,8 +8,8 @@ import {
 } from 'lucide-react'
 
 // ─── API ──────────────────────────────────────────────────────────────────────
-const BASE       = 'http://localhost:5000/api/cheque-master'
-const BANKS_URL  = 'http://localhost:5000/api/bank-master'
+const BASE       = '/api/cheque-master'
+const BANKS_URL  = '/api/bank-master'
 
 const getCheques    = () => fetch(BASE).then(r => r.json())
 const getBanks      = () => fetch(BANKS_URL).then(r => r.json())

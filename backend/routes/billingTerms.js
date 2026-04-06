@@ -1,10 +1,10 @@
 const express = require("express")
 const router = express.Router()
-const { sql } = require("../db")
+const { getPool, sql } = require("../db")
 
 router.get("/", async (req, res) => {
   try {
-    const pool = await sql.connect()
+    const pool = getPool()
     const result = await pool.request().query("SELECT * FROM dbo.Billing_Terms_Master")
     res.json(result.recordset)
   } catch (err) { res.status(500).json({ error: err.message }) }
@@ -13,7 +13,7 @@ router.get("/", async (req, res) => {
 router.post("/", async (req, res) => {
   const { Name, Description, GST, Type, IsActive } = req.body
   try {
-    const pool = await sql.connect()
+    const pool = getPool()
     await pool.request()
       .input("Name",         sql.NVarChar,  Name || null)
       .input("Description",  sql.NVarChar,  Description || null)
@@ -33,7 +33,7 @@ router.post("/", async (req, res) => {
 router.put("/:id", async (req, res) => {
   const { Name, Description, GST, Type, IsActive } = req.body
   try {
-    const pool = await sql.connect()
+    const pool = getPool()
     await pool.request()
       .input("BillingTermID", sql.Int,       req.params.id)
       .input("Name",          sql.NVarChar,  Name || null)
@@ -55,7 +55,7 @@ router.put("/:id", async (req, res) => {
 
 router.delete("/:id", async (req, res) => {
   try {
-    const pool = await sql.connect()
+    const pool = getPool()
     await pool.request()
       .input("BillingTermID", sql.Int, req.params.id)
       .query("DELETE FROM dbo.Billing_Terms_Master WHERE BillingTermID=@BillingTermID")

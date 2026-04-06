@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import { Calendar as CalendarIcon } from 'lucide-react'
  
 // ─── API ──────────────────────────────────────────────────────────────────────
-const BASE = 'http://localhost:5000/api/fin-year'
+const BASE = '/api/fin-year'
  
 const getFinYears   = () => fetch(BASE).then(r => r.json())
 const addFinYear    = (data: object) => fetch(BASE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(r => r.json())

@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 
 // ─── API ──────────────────────────────────────────────────────────────────────
-const BASE = 'http://localhost:5000/api/bank-master'
+const BASE = '/api/bank-master'
 
 const getBanks    = () => fetch(BASE).then(r => r.json())
 const addBank     = (data: object) => fetch(BASE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(r => r.json())

@@ -283,7 +283,6 @@ export const MobileNav: React.FC = () => {
     { icon: Hash,        label: "HSN",                path: "/masters/hsn",              color: "text-pink-400" },
     { icon: Activity,    label: "Activity",           path: "/masters/activity",         color: "text-green-400" },
     { icon: BillingIcon, label: "Billing",            path: "/masters/billing-terms",    color: "text-lime-500" },
-    { icon: FileText, label: "T&C", path: "/material/t-c-master", color: "text-violet-500" },
   ];
   const adminSetupItems = [
     { icon: Tag,       label: "Entry Type",  path: "/masters/named-entry-type", color: "text-purple-400" },
@@ -657,4 +656,3 @@ export const MobileNav: React.FC = () => {
 };
 
 export default MobileNav;
-

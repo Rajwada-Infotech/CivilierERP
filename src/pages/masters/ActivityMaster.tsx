@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import { Activity, Layers, Tag } from 'lucide-react'
  
 // ─── API ──────────────────────────────────────────────────────────────────────
-const BASE = 'http://localhost:5000/api/activity-master'
+const BASE = '/api/activity-master'
  
 const getActivities    = () => fetch(BASE).then(r => r.json())
 const addActivity      = (data: object) => fetch(BASE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(r => r.json())

@@ -1,4 +1,4 @@
-const BASE = "http://localhost:5000/api/dba";
+const BASE = "/api/dba";
 
 export const getDbTables = async (tenantId?: string) => {
   const url = tenantId ? `${BASE}/tables?tenant_id=${tenantId}` : `${BASE}/tables`;

@@ -1,10 +1,10 @@
 const express = require("express")
 const router = express.Router()
-const { sql } = require("../db")
+const { getPool, sql } = require("../db")
 
 router.get("/", async (req, res) => {
   try {
-    const pool = await sql.connect()
+    const pool = getPool()
     const result = await pool.request().query("SELECT * FROM dbo.TDSMaster")
     res.json(result.recordset)
   } catch (err) { res.status(500).json({ error: err.message }) }
@@ -13,7 +13,7 @@ router.get("/", async (req, res) => {
 router.post("/", async (req, res) => {
   const { Nature, Name, Percentage, Status } = req.body
   try {
-    const pool = await sql.connect()
+    const pool = getPool()
     await pool.request()
       .input("Nature",     sql.NVarChar,      Nature || null)
       .input("Name",       sql.NVarChar,      Name || null)
@@ -31,7 +31,7 @@ router.post("/", async (req, res) => {
 router.put("/:id", async (req, res) => {
   const { Nature, Name, Percentage, Status } = req.body
   try {
-    const pool = await sql.connect()
+    const pool = getPool()
     await pool.request()
       .input("TDSId",      sql.Int,           req.params.id)
       .input("Nature",     sql.NVarChar,      Nature || null)
@@ -51,7 +51,7 @@ router.put("/:id", async (req, res) => {
 
 router.delete("/:id", async (req, res) => {
   try {
-    const pool = await sql.connect()
+    const pool = getPool()
     await pool.request()
       .input("TDSId", sql.Int, req.params.id)
       .query("DELETE FROM dbo.TDSMaster WHERE TDSId=@TDSId")

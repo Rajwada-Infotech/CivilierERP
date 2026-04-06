@@ -1,11 +1,11 @@
 const express = require("express")
 const router = express.Router()
-const { sql } = require("../db")
+const { getPool, sql } = require("../db")
 
 // GET all
 router.get("/", async (req, res) => {
   try {
-    const pool = await sql.connect()
+    const pool = getPool()
     const result = await pool.request().query("SELECT * FROM dbo.NewPayment")
     res.json(result.recordset)
   } catch (err) {
@@ -20,7 +20,7 @@ router.post("/", async (req, res) => {
     PDate, PBankID, PBankName, PProject, PCompany
   } = req.body
   try {
-    const pool = await sql.connect()
+    const pool = getPool()
     await pool.request()
       .input("PPaymentName", sql.VarChar,        PPaymentName || null)
       .input("PMode",        sql.VarChar,        PMode || null)
@@ -59,7 +59,7 @@ router.put("/:id", async (req, res) => {
     PDate, PBankID, PBankName, PProject, PCompany
   } = req.body
   try {
-    const pool = await sql.connect()
+    const pool = getPool()
     await pool.request()
       .input("PPaymentID",   sql.Int,            id)
       .input("PPaymentName", sql.VarChar,        PPaymentName || null)
@@ -89,7 +89,7 @@ router.put("/:id", async (req, res) => {
 router.delete("/:id", async (req, res) => {
   const { id } = req.params
   try {
-    const pool = await sql.connect()
+    const pool = getPool()
     await pool.request()
       .input("PPaymentID", sql.Int, id)
       .query("DELETE FROM dbo.NewPayment WHERE PPaymentID=@PPaymentID")
