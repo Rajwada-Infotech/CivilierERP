@@ -59,7 +59,12 @@ export default function Login() {
 
     const result = login(email, password);
     if (result.success) {
-      navigate("/", { replace: true });
+      const role = result.user?.role;
+      if (role === "dba") {
+        navigate("/dba", { replace: true });
+      } else {
+        navigate("/", { replace: true });
+      }
     } else {
       setError(result.error || "Login failed.");
     }

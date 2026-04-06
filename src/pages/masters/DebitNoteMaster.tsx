@@ -284,19 +284,13 @@ const DebitNoteMaster: React.FC = () => {
     queryFn: () => fetch("/api/account-head/options").then((r) => r.json()),
   });
 
-  const {
-    data: expenseData,
-    refetch: refetchExpenses,
-    error: expenseError,
-  } = useQuery({
+  const { data: expenseData, refetch: refetchExpenses, error: expenseError } = useQuery({
     queryKey: ["expense-booking-options"],
     queryFn: async () => {
       const r = await fetch("/api/expense-booking/options");
       if (!r.ok) {
         const body = await r.json().catch(() => ({}));
-        throw new Error(
-          body.error || `Failed to load expense options (${r.status})`,
-        );
+        throw new Error(body.error || `Failed to load expense options (${r.status})`);
       }
       return r.json();
     },
@@ -497,8 +491,8 @@ const DebitNoteMaster: React.FC = () => {
       />
       {expenseError && (
         <div className="mb-3 px-4 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-500 text-sm">
-          ⚠️ Could not load expense documents: {(expenseError as Error).message}
-          . Bill dropdown will be empty.
+          ⚠️ Could not load expense documents:{" "}
+          {(expenseError as Error).message}. Bill dropdown will be empty.
         </div>
       )}
       <div className="flex items-center gap-3 mb-4">

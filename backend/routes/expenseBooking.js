@@ -59,24 +59,21 @@ router.post("/", async (req, res) => {
     const pool = getPool();
     await pool
       .request()
-      .input("EProjectName", sql.NVarChar(150), EProjectName || null)
-      .input("EDocumentType", sql.NVarChar(50), EDocumentType || null)
-      .input("EDocDate", sql.Date, EDocDate || null)
-      .input("EAmount", sql.Decimal(18, 2), EAmount || null)
-      .input("EDocNo", sql.NVarChar(50), EDocNo || null)
-      .input("EEmiPayment", sql.Bit, EEmiPayment ? 1 : 0)
-      .input("EReminder", sql.Date, EReminder || null)
-      .input("ERemarks", sql.NVarChar(300), ERemarks || null)
-      .input("EStatus", sql.NVarChar(50), EStatus || "Pending")
-      .input("ECreatedAt", sql.DateTime2, new Date())
-      .input("EUpdatedAt", sql.DateTime2, new Date())
-      .input("ECreatedBy", sql.Int, 1)
-      .input("EApprovedBy", sql.Int, null)
-      .input(
-        "ECompanyId",
-        sql.Int,
-        ECompanyId ? parseInt(ECompanyId, 10) : null,
-      ).query(`
+      .input("EProjectName",  sql.NVarChar(150), EProjectName  || null)
+      .input("EDocumentType", sql.NVarChar(50),  EDocumentType || null)
+      .input("EDocDate",      sql.Date,          EDocDate      || null)
+      .input("EAmount",       sql.Decimal(18,2), EAmount       || null)
+      .input("EDocNo",        sql.NVarChar(50),  EDocNo        || null)
+      .input("EEmiPayment",   sql.Bit,           EEmiPayment ? 1 : 0)
+      .input("EReminder",     sql.Date,          EReminder     || null)
+      .input("ERemarks",      sql.NVarChar(300), ERemarks      || null)
+      .input("EStatus",       sql.NVarChar(50),  EStatus       || "Pending")
+      .input("ECreatedAt",    sql.DateTime2,     new Date())
+      .input("EUpdatedAt",    sql.DateTime2,     new Date())
+      .input("ECreatedBy",    sql.Int,           1)
+      .input("EApprovedBy",   sql.Int,           null)
+      .input("ECompanyId",    sql.Int,           ECompanyId ? parseInt(ECompanyId, 10) : null)
+      .query(`
         INSERT INTO dbo.ExpenseBooking (
           EProjectName, EDocumentType, EDocDate, EAmount,
           EDocNo, EEmiPayment, EReminder, ERemarks, EStatus,
@@ -118,22 +115,19 @@ router.put("/:id", async (req, res) => {
     const pool = getPool();
     await pool
       .request()
-      .input("Eid", sql.Int, numericId)
-      .input("EProjectName", sql.NVarChar(150), EProjectName || null)
-      .input("EDocumentType", sql.NVarChar(50), EDocumentType || null)
-      .input("EDocDate", sql.Date, EDocDate || null)
-      .input("EAmount", sql.Decimal(18, 2), EAmount || null)
-      .input("EDocNo", sql.NVarChar(50), EDocNo || null)
-      .input("EEmiPayment", sql.Bit, EEmiPayment ? 1 : 0)
-      .input("EReminder", sql.Date, EReminder || null)
-      .input("ERemarks", sql.NVarChar(300), ERemarks || null)
-      .input("EStatus", sql.NVarChar(50), EStatus || "Pending")
-      .input("EUpdatedAt", sql.DateTime2, new Date())
-      .input(
-        "ECompanyId",
-        sql.Int,
-        ECompanyId ? parseInt(ECompanyId, 10) : null,
-      ).query(`
+      .input("Eid",           sql.Int,           numericId)
+      .input("EProjectName",  sql.NVarChar(150), EProjectName  || null)
+      .input("EDocumentType", sql.NVarChar(50),  EDocumentType || null)
+      .input("EDocDate",      sql.Date,          EDocDate      || null)
+      .input("EAmount",       sql.Decimal(18,2), EAmount       || null)
+      .input("EDocNo",        sql.NVarChar(50),  EDocNo        || null)
+      .input("EEmiPayment",   sql.Bit,           EEmiPayment ? 1 : 0)
+      .input("EReminder",     sql.Date,          EReminder     || null)
+      .input("ERemarks",      sql.NVarChar(300), ERemarks      || null)
+      .input("EStatus",       sql.NVarChar(50),  EStatus       || "Pending")
+      .input("EUpdatedAt",    sql.DateTime2,     new Date())
+      .input("ECompanyId",    sql.Int,           ECompanyId ? parseInt(ECompanyId, 10) : null)
+      .query(`
         UPDATE dbo.ExpenseBooking SET
           EProjectName=@EProjectName, EDocumentType=@EDocumentType,
           EDocDate=@EDocDate, EAmount=@EAmount, EDocNo=@EDocNo,
