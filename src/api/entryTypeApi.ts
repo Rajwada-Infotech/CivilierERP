@@ -1,4 +1,4 @@
-const BASE_URL = "http://localhost:5000/api/entry-type"
+const BASE_URL = "/api/entry-type"
 
 export const getEntryTypes = async () => {
   const res = await fetch(BASE_URL)

@@ -52,7 +52,10 @@ async function startServer() {
     app.use("/api/purchase-orders", require("./routes/purchaseOrders"));
     app.use("/api/tenants", require("./routes/tenants"));
     app.use("/api/dba", require("./routes/dba"));
+    app.use("/api/work-orders", require("./routes/workOrder"));
     app.use("/api/user-profile", require("./routes/userProfile"));
+    app.use("/api/uom-master", require("./routes/uomMaster"));
+    app.use("/api/debit-note", require("./routes/debitNote"));
 
     const PORT = process.env.PORT || 5000;
     app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

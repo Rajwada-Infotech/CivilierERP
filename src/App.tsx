@@ -42,7 +42,6 @@ const withDelay = <T,>(importFn: () => Promise<T>, delay = 600): Promise<T> =>
   );
 
 // ─── Lazy Pages ───────────────────────────────────────────────────────────────
-
 // Main Pages
 const Dashboard = lazy(() => withDelay(() => import("./pages/Dashboard")));
 const Reports = lazy(() => withDelay(() => import("./pages/Reports")));
@@ -130,10 +129,9 @@ const DebitNoteMaster = lazy(() =>
 const BillingTermsMaster = lazy(() =>
   withDelay(() => import("./pages/masters/BillingTermsmaster")),
 );
-const TCMaster = lazy(() => 
+const TCMaster = lazy(() =>
   withDelay(() => import("./pages/material/T&CMaster")),
 );
-
 const UnitOfMeasurementMaster = lazy(() =>
   withDelay(() => import("./pages/material/UnitOfMeasurementMaster")),
 );
@@ -142,7 +140,6 @@ const UnitOfMeasurementMaster = lazy(() =>
 const AdminDashboard = lazy(() =>
   withDelay(() => import("./pages/admin/AdminDashboard")),
 );
-// FIX: AdminExpenseBooking points to the existing ExpenseBooking page (no admin/ExpenseBooking file exists)
 const AdminExpenseBooking = lazy(() =>
   withDelay(() => import("./pages/ExpenseBooking")),
 );
@@ -228,6 +225,7 @@ const RemindersManager = lazy(() =>
 const PaymentLogs = lazy(() =>
   withDelay(() => import("./pages/dba/PaymentLogs")),
 );
+
 // ─── Error Boundary ───────────────────────────────────────────────────────────
 class ErrorBoundary extends Component<
   { children: React.ReactNode },
@@ -237,14 +235,18 @@ class ErrorBoundary extends Component<
     super(props);
     this.state = { hasError: false, message: "" };
   }
+
   static getDerivedStateFromError(error: Error) {
     return { hasError: true, message: error.message };
   }
+
   render() {
     if (this.state.hasError) {
       return (
         <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 p-8">
-          <p className="text-destructive font-semibold text-lg">Something went wrong</p>
+          <p className="text-destructive font-semibold text-lg">
+            Something went wrong
+          </p>
           <p className="text-muted-foreground text-sm">{this.state.message}</p>
           <button
             className="px-4 py-2 rounded bg-primary text-primary-foreground text-sm"
@@ -273,7 +275,6 @@ const queryClient = new QueryClient({
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { currentUser } = useAuth();
   const location = useLocation();
-
   if (!currentUser) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
@@ -281,8 +282,6 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 }
 
 // ─── Role Guard ───────────────────────────────────────────────────────────────
-// Blocks access to routes that require elevated roles (admin / dba / super_admin).
-// Users who don't qualify are redirected to "/" with no error exposed.
 function RequireRole({
   children,
   allowed,
@@ -298,7 +297,6 @@ function RequireRole({
 }
 
 // ─── Admin Protected Route ────────────────────────────────────────────────────
-// Convenience wrapper: RequireAuth + role check (super_admin | admin | dba) + layout
 const ADMIN_ROLES = ["super_admin", "admin", "dba"] as const;
 
 function AdminRoute({ children }: { children: React.ReactNode }) {
@@ -341,7 +339,6 @@ function AuthSessionBridge({ children }: { children: React.ReactNode }) {
 // ─── App Routes ───────────────────────────────────────────────────────────────
 function AppRoutes() {
   const { currentUser } = useAuth();
-
   return (
     <Routes>
       {/* AUTH */}
@@ -902,7 +899,12 @@ function App() {
                       <DebitNoteProvider>
                         <BillingTermsProvider>
                           <TaskProvider>
-                            <Router>
+                            <Router
+                              future={{
+                                v7_startTransition: true,
+                                v7_relativeSplatPath: true,
+                              }}
+                            >
                               <AppRoutes />
                             </Router>
                           </TaskProvider>
@@ -921,4 +923,3 @@ function App() {
 }
 
 export default App;
-

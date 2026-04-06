@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 
 // ─── API ──────────────────────────────────────────────────────────────────────
-const BASE = 'http://localhost:5000/api/tds-master'
+const BASE = '/api/tds-master'
 
 const getTds    = () => fetch(BASE).then(r => r.json())
 const addTds    = (data: object) => fetch(BASE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(r => r.json())

@@ -1,4 +1,4 @@
-const BASE_URL = "http://localhost:5000/api/new-payment"
+const BASE_URL = "/api/new-payment"
 
 export const getPayments = async () => {
   const res = await fetch(BASE_URL)

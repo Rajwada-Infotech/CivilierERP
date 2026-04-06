@@ -1,12 +1,12 @@
-const BASE_URL = "/api/account-group";
+const BASE_URL = "/api/debit-note";
 
-export const getAccountGroups = async () => {
+export const getDebitNotes = async () => {
   const res = await fetch(BASE_URL);
   if (!res.ok) throw new Error(`GET failed: ${res.status}`);
   return res.json();
 };
 
-export const addAccountGroup = async (data: Record<string, unknown>) => {
+export const addDebitNote = async (data: Record<string, unknown>) => {
   const res = await fetch(BASE_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -19,7 +19,7 @@ export const addAccountGroup = async (data: Record<string, unknown>) => {
   return res.json();
 };
 
-export const updateAccountGroup = async (id: string, data: Record<string, unknown>) => {
+export const updateDebitNote = async (id: number, data: Record<string, unknown>) => {
   const res = await fetch(`${BASE_URL}/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -32,7 +32,7 @@ export const updateAccountGroup = async (id: string, data: Record<string, unknow
   return res.json();
 };
 
-export const deleteAccountGroup = async (id: string) => {
+export const deleteDebitNote = async (id: number) => {
   const res = await fetch(`${BASE_URL}/${id}`, {
     method: "DELETE",
   });

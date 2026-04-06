@@ -1,4 +1,4 @@
-const BASE_URL = "http://localhost:5000/api/expense-booking"
+const BASE_URL = "/api/expense-booking"
 
 export const getExpenseBookings = async () => {
   const res = await fetch(BASE_URL)

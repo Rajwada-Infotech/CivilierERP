@@ -208,10 +208,10 @@ const AccountGroupMaster: React.FC = () => {
   const allGroups: AccountGroup[] = useMemo(() => {
     if (!Array.isArray(dbData)) return [];
     return (dbData as any[]).map((item) => ({
-      _id: String(item.LHeadId),
-      name: item.LHeadName || "",
-      code: item.LGST || "",
-      parentId: item.ParentId ? String(item.ParentId) : null,
+      _id: String(item.AGId),
+      name: item.Name || "",
+      code: item.Code || "",
+      parentId: item.ParentGroupId ? String(item.ParentGroupId) : null,
     }));
   }, [dbData]);
 
@@ -257,18 +257,10 @@ const AccountGroupMaster: React.FC = () => {
     setSaving(true);
     try {
       const payload = {
-        LHeadName: form.name.trim(),
-        LHeadType: "",
-        LGST: form.code.trim().toUpperCase(),
-        LHeadPhone: `ph-${Date.now()}`,
-        LHeadEmail: `acg-${Date.now()}@civilier.local`,
-        LHeadAddress: "N/A",
-        LHeadContactPerson: "N/A",
-        LHeadPaymentTerms: "N/A",
-        LBranchName: "Main",
-        LCountry: "India",
-        LHeadStatus: true,
-        ParentId: form.parentId || null,
+        Name: form.name.trim(),
+        Code: form.code.trim().toUpperCase(),
+        ParentGroupId: form.parentId ? Number(form.parentId) : null,
+        Status: true,
       };
       if (editingId) {
         await updateAccountGroup(editingId, payload);

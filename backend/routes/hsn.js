@@ -1,11 +1,11 @@
 const express = require("express")
 const router = express.Router()
-const { sql } = require("../db")
+const { getPool, sql } = require("../db")
 
 // GET all HSN
 router.get("/", async (req, res) => {
   try {
-    const pool = await sql.connect()
+    const pool = getPool()
     const result = await pool.request().query(
       "SELECT HCode, HDescription, HShortDescription, HCGST, HSGST, HIGST, HStatus, HCreatedBy, HCreatedAt, HApprovedBy, HIsEdited FROM dbo.HSN"
     )
@@ -30,7 +30,7 @@ router.post("/", async (req, res) => {
   } = req.body
 
   try {
-    const pool = await sql.connect()
+    const pool = getPool()
     await pool
       .request()
       .input("HCode", sql.VarChar, HCode)
@@ -75,7 +75,7 @@ router.put("/:code", async (req, res) => {
   } = req.body
 
   try {
-    const pool = await sql.connect()
+    const pool = getPool()
     await pool
       .request()
       .input("HCode", sql.VarChar, code)
@@ -108,7 +108,7 @@ router.put("/:code", async (req, res) => {
 router.delete("/:code", async (req, res) => {
   const { code } = req.params
   try {
-    const pool = await sql.connect()
+    const pool = getPool()
     await pool
       .request()
       .input("HCode", sql.VarChar, code)

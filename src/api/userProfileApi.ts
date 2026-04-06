@@ -1,4 +1,4 @@
-const BASE = "http://localhost:5000/api/user-profile";
+const BASE = "/api/user-profile";
 
 export const getUserProfile = async (id: number) => {
   const res = await fetch(`${BASE}/${id}/profile`);

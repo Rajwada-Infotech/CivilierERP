@@ -1,4 +1,4 @@
-const BASE_URL = "http://localhost:5000/api/hsn"
+const BASE_URL = "/api/hsn"
 
 export const getHsn = async () => {
   const res = await fetch(BASE_URL)

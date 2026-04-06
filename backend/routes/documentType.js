@@ -1,11 +1,11 @@
 const express = require("express")
 const router = express.Router()
-const { sql } = require("../db")
+const { getPool, sql } = require("../db")
 
 // GET all
 router.get("/", async (req, res) => {
   try {
-    const pool = await sql.connect()
+    const pool = getPool()
     const result = await pool.request().query("SELECT * FROM dbo.documentType")
     res.json(result.recordset)
   } catch (err) {
@@ -17,7 +17,7 @@ router.get("/", async (req, res) => {
 router.post("/", async (req, res) => {
   const { code, name, description, module, status, remarks } = req.body
   try {
-    const pool = await sql.connect()
+    const pool = getPool()
     await pool.request()
       .input("code",        sql.NVarChar, code || null)
       .input("name",        sql.NVarChar, name || null)
@@ -46,7 +46,7 @@ router.put("/:id", async (req, res) => {
   const { id } = req.params
   const { code, name, description, module, status, remarks } = req.body
   try {
-    const pool = await sql.connect()
+    const pool = getPool()
     await pool.request()
       .input("id",          sql.Int,      id)
       .input("code",        sql.NVarChar, code || null)
@@ -74,7 +74,7 @@ router.put("/:id", async (req, res) => {
 router.delete("/:id", async (req, res) => {
   const { id } = req.params
   try {
-    const pool = await sql.connect()
+    const pool = getPool()
     await pool.request()
       .input("id", sql.Int, id)
       .query("DELETE FROM dbo.documentType WHERE id=@id")

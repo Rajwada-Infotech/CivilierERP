@@ -23,6 +23,9 @@ import {
   Hammer,
   Receipt,
 } from "lucide-react";
+import { toast } from "sonner";
+import { useAuth } from "@/contexts/AuthContext";
+import { createWorkOrder, saveFullWorkOrder } from "@/api/workOrderApi";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -51,42 +54,22 @@ interface ActivityGroup {
 }
 
 interface WorkOrderForm {
-  companyName: string;
-  projectName: string;
+  companyId: string;
+  projectId: string;
   docNumber: string;
   docDate: string;
-  contractor: string;
+  contractorId: string;
   remarks: string;
   termsAndConditions: string;
-  amount: string;
 }
 
-// ─── Static Options ───────────────────────────────────────────────────────────
+// ─── Hardcoded test data (swap for real DB queries once backend is confirmed) ─
 
-const COMPANIES = [
-  "Civilier Infrastructure Pvt. Ltd.",
-  "Metro Constructions Ltd.",
-  "Skyline Builders",
-  "Prime Civil Works Co.",
-];
+const TEST_COMPANIES = [{ id: 1, name: "Test Company" }];
 
-const PROJECTS = [
-  "Riverfront Residency",
-  "Skyline Tower A",
-  "Industrial Shed Phase 2",
-  "Green Valley Villas",
-  "Highway Utility Block",
-];
+const TEST_PROJECTS = [{ id: 1, name: "Test Company" }];
 
-const CONTRACTORS = [
-  "ABC Contractors",
-  "XYZ Builders",
-  "Metro Steel Traders",
-  "Apex Fabricators",
-  "Prime Civil Works",
-];
-
-const UNITS = ["Sq.Ft", "Sq.M", "RMT", "Nos", "Kg", "MT", "CUM", "CFT"];
+const TEST_CONTRACTORS = [{ id: 23, name: "Test Contractor" }];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -107,16 +90,15 @@ const fmt = (n: number) =>
     maximumFractionDigits: 2,
   }).format(n);
 
-const EMPTY_FORM: WorkOrderForm = {
-  companyName: "",
-  projectName: "",
+const EMPTY_FORM = (): WorkOrderForm => ({
+  companyId: "",
+  projectId: "",
   docNumber: generateDocNumber(),
   docDate: new Date().toISOString().slice(0, 10),
-  contractor: "",
+  contractorId: "",
   remarks: "",
   termsAndConditions: "",
-  amount: "",
-};
+});
 
 const EMPTY_MATERIAL = (): MaterialItem => ({
   id: uid(),
@@ -141,6 +123,8 @@ const EMPTY_GROUP = (): ActivityGroup => ({
   activities: [EMPTY_ACTIVITY()],
   expanded: true,
 });
+
+const UNITS = ["Sq.Ft", "Sq.M", "RMT", "Nos", "Kg", "MT", "CUM", "CFT"];
 
 // ─── Shared styles ────────────────────────────────────────────────────────────
 
@@ -222,20 +206,14 @@ const MaterialBreakdownModal: React.FC<{
       {/* Modal */}
       {open && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
-          {/* Backdrop */}
           <div
             className="absolute inset-0 bg-black/50 backdrop-blur-sm"
             onClick={() => setOpen(false)}
           />
-
-          {/* Sheet */}
           <div className="relative z-10 w-full sm:w-[600px] sm:max-w-[calc(100vw-2rem)] bg-card rounded-t-2xl sm:rounded-2xl border border-border shadow-2xl flex flex-col max-h-[88vh]">
-            {/* Mobile drag handle */}
             <div className="flex justify-center pt-2.5 pb-0 sm:hidden shrink-0">
               <div className="w-9 h-1 rounded-full bg-muted-foreground/20" />
             </div>
-
-            {/* Header */}
             <div className="flex items-center justify-between px-4 py-3 border-b border-border shrink-0">
               <div className="flex items-center gap-2 min-w-0">
                 <Package size={14} className="text-primary shrink-0" />
@@ -257,8 +235,6 @@ const MaterialBreakdownModal: React.FC<{
                 <X size={14} />
               </button>
             </div>
-
-            {/* Context strip */}
             <div className="flex items-center gap-4 px-4 py-2 bg-muted/30 border-b border-border text-xs shrink-0 flex-wrap gap-y-1">
               <span className="flex items-center gap-1.5 text-muted-foreground">
                 <Layers size={11} className="shrink-0" />
@@ -284,10 +260,7 @@ const MaterialBreakdownModal: React.FC<{
                 </span>
               )}
             </div>
-
-            {/* Scrollable body */}
             <div className="flex-1 overflow-y-auto p-4 space-y-3">
-              {/* Empty state */}
               {activity.materials.length === 0 && (
                 <div className="flex flex-col items-center justify-center py-10 text-center">
                   <div className="w-12 h-12 rounded-xl bg-muted flex items-center justify-center mb-3">
@@ -301,8 +274,6 @@ const MaterialBreakdownModal: React.FC<{
                   </p>
                 </div>
               )}
-
-              {/* Material input rows */}
               {activity.materials.length > 0 && (
                 <div className="space-y-2">
                   {activity.materials.map((mat, idx) => {
@@ -312,7 +283,6 @@ const MaterialBreakdownModal: React.FC<{
                         key={mat.id}
                         className="rounded-lg border border-border bg-muted/10 p-3 space-y-2.5"
                       >
-                        {/* Name row */}
                         <div className="flex items-center gap-2">
                           <input
                             value={mat.name}
@@ -329,8 +299,6 @@ const MaterialBreakdownModal: React.FC<{
                             <X size={13} />
                           </button>
                         </div>
-
-                        {/* Qty / Unit / Price row */}
                         <div className="grid grid-cols-3 gap-2">
                           <div>
                             <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
@@ -394,8 +362,6 @@ const MaterialBreakdownModal: React.FC<{
                             </div>
                           </div>
                         </div>
-
-                        {/* Line total */}
                         {lineTotal > 0 && (
                           <div className="flex items-center justify-between pt-1 border-t border-border/50">
                             <span className="text-xs text-muted-foreground">
@@ -411,8 +377,6 @@ const MaterialBreakdownModal: React.FC<{
                   })}
                 </div>
               )}
-
-              {/* ── Material breakdown summary ── */}
               {activity.materials.length > 0 && (
                 <div className="rounded-lg border border-border overflow-hidden">
                   <div className="bg-muted/40 px-3 py-2 border-b border-border flex items-center gap-1.5">
@@ -453,8 +417,6 @@ const MaterialBreakdownModal: React.FC<{
                       );
                     })}
                   </div>
-
-                  {/* Three-way totals inside modal */}
                   <div className="border-t border-border bg-muted/20 divide-y divide-border/40">
                     <div className="flex items-center justify-between px-3 py-2">
                       <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -487,8 +449,6 @@ const MaterialBreakdownModal: React.FC<{
                 </div>
               )}
             </div>
-
-            {/* Footer */}
             <div className="px-4 py-3 border-t border-border flex items-center justify-between shrink-0 bg-card">
               <button
                 onClick={addMaterial}
@@ -555,7 +515,6 @@ const ActivityRow: React.FC<{
             <X size={13} />
           </button>
         </div>
-
         <div className="grid grid-cols-2 gap-2">
           <div>
             <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
@@ -587,7 +546,6 @@ const ActivityRow: React.FC<{
             />
           </div>
         </div>
-
         <div className="grid grid-cols-2 gap-2">
           <div>
             <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
@@ -622,8 +580,6 @@ const ActivityRow: React.FC<{
             </div>
           </div>
         </div>
-
-        {/* Mini cost chips on mobile */}
         {(labourTotal > 0 || materialsTotal > 0) && (
           <div className="flex items-center gap-2 flex-wrap">
             {labourTotal > 0 && (
@@ -640,7 +596,6 @@ const ActivityRow: React.FC<{
             )}
           </div>
         )}
-
         <MaterialBreakdownModal
           activity={activity}
           onUpdateMaterials={(mats) =>
@@ -655,14 +610,12 @@ const ActivityRow: React.FC<{
           <div className="text-xs font-mono text-primary font-semibold">
             {label}
           </div>
-
           <input
             value={activity.name}
             onChange={(e) => onUpdate("name", e.target.value)}
             placeholder="Activity name…"
             className={cellInput}
           />
-
           <select
             value={activity.unit}
             onChange={(e) => onUpdate("unit", e.target.value)}
@@ -672,7 +625,6 @@ const ActivityRow: React.FC<{
               <option key={u}>{u}</option>
             ))}
           </select>
-
           <div className="relative">
             <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
               ₹
@@ -688,7 +640,6 @@ const ActivityRow: React.FC<{
               className={`${cellInput} pl-6`}
             />
           </div>
-
           <input
             type="number"
             min={0}
@@ -697,15 +648,12 @@ const ActivityRow: React.FC<{
             placeholder="Area"
             className={cellInput}
           />
-
           <MaterialBreakdownModal
             activity={activity}
             onUpdateMaterials={(mats) =>
               onUpdate("materials", mats as unknown as MaterialItem[])
             }
           />
-
-          {/* Activity total */}
           <div className="text-right">
             <span
               className={`text-sm font-semibold ${activityTotal > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}
@@ -713,7 +661,6 @@ const ActivityRow: React.FC<{
               {activityTotal > 0 ? fmt(activityTotal) : "—"}
             </span>
           </div>
-
           <button
             onClick={onDelete}
             disabled={!canDelete}
@@ -722,8 +669,6 @@ const ActivityRow: React.FC<{
             <X size={13} />
           </button>
         </div>
-
-        {/* Cost breakdown sub-row — only visible when both labour and materials exist */}
         {(labourTotal > 0 || materialsTotal > 0) && (
           <div className="flex items-center gap-3 px-3 py-1.5 bg-muted/10 border-t border-border/40 flex-wrap">
             <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mr-1">
@@ -794,7 +739,6 @@ const ActivityGroupCard: React.FC<{
 
   return (
     <div className="rounded-xl border border-border bg-card overflow-hidden">
-      {/* Group header */}
       <div className="flex items-center gap-2 px-3 sm:px-4 py-3 bg-muted/30 border-b border-border">
         <button
           onClick={toggleExpand}
@@ -806,24 +750,20 @@ const ActivityGroupCard: React.FC<{
             <ChevronRight size={14} />
           )}
         </button>
-
         <span className="text-xs font-mono font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-md shrink-0">
           {index + 1}
         </span>
-
         <input
           value={group.name}
           onChange={(e) => onUpdate({ ...group, name: e.target.value })}
           placeholder={`Group ${index + 1} (e.g. Structure, Finishing…)`}
           className="flex-1 min-w-0 text-sm font-semibold bg-transparent border-none outline-none text-foreground placeholder:text-muted-foreground/40 focus:ring-0"
         />
-
         <span
           className={`text-sm font-bold shrink-0 ${groupTotal > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}
         >
           {groupTotal > 0 ? fmt(groupTotal) : "₹0"}
         </span>
-
         <button
           onClick={onDelete}
           disabled={!canDelete}
@@ -833,10 +773,8 @@ const ActivityGroupCard: React.FC<{
         </button>
       </div>
 
-      {/* Activities */}
       {group.expanded && (
         <div className="p-3 space-y-2">
-          {/* Desktop column headers */}
           {group.activities.length > 0 && (
             <div className="hidden sm:grid grid-cols-[48px_1fr_96px_128px_112px_auto_120px_32px] gap-2 px-3 pb-1">
               {[
@@ -858,7 +796,6 @@ const ActivityGroupCard: React.FC<{
               ))}
             </div>
           )}
-
           {group.activities.map((activity, actIdx) => (
             <ActivityRow
               key={activity.id}
@@ -870,7 +807,6 @@ const ActivityGroupCard: React.FC<{
               canDelete={group.activities.length > 1}
             />
           ))}
-
           <button
             onClick={addActivity}
             className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 px-3 py-2 rounded-lg hover:bg-primary/5 transition-colors font-medium"
@@ -887,12 +823,20 @@ const ActivityGroupCard: React.FC<{
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 const WorkOrderMaster: React.FC = () => {
-  const [form, setForm] = useState<WorkOrderForm>(EMPTY_FORM);
+  const { currentUser } = useAuth();
+
+  const [form, setForm] = useState<WorkOrderForm>(EMPTY_FORM());
   const [groups, setGroups] = useState<ActivityGroup[]>([EMPTY_GROUP()]);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
+  // ── Test data — replace with useQuery calls once backend is confirmed ─────────
+  const companies = TEST_COMPANIES;
+  const projects = TEST_PROJECTS;
+  const contractors = TEST_CONTRACTORS;
+
+  // ── Totals ──────────────────────────────────────────────────────────────────
   const { grandLabourTotal, grandMaterialsTotal, grandTotal } = useMemo(() => {
     let labour = 0;
     let materials = 0;
@@ -921,7 +865,7 @@ const WorkOrderMaster: React.FC = () => {
     setGroups((prev) => prev.filter((_, i) => i !== idx));
 
   const resetAll = () => {
-    setForm({ ...EMPTY_FORM, docNumber: generateDocNumber() });
+    setForm(EMPTY_FORM());
     setGroups([EMPTY_GROUP()]);
     setErrors({});
     setSaved(false);
@@ -929,21 +873,124 @@ const WorkOrderMaster: React.FC = () => {
 
   const validate = () => {
     const e: Record<string, boolean> = {};
-    if (!form.companyName) e.companyName = true;
-    if (!form.projectName) e.projectName = true;
+    if (!form.companyId) e.companyId = true;
+    if (!form.projectId) e.projectId = true;
     if (!form.docDate) e.docDate = true;
-    if (!form.contractor) e.contractor = true;
+    if (!form.contractorId) e.contractorId = true;
     setErrors(e);
     return Object.keys(e).length === 0;
   };
 
+  // ── SAVE — the real implementation ─────────────────────────────────────────
   const handleSave = async () => {
-    if (!validate()) return;
+    if (!validate()) {
+      toast.error("Please fill in all required fields.");
+      return;
+    }
     setSaving(true);
-    await new Promise((r) => setTimeout(r, 900));
-    setSaving(false);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 3000);
+    try {
+      const userId = parseInt(currentUser?.id ?? "1");
+
+      // Step 1: Create the header row → get new Id back
+      const created = await createWorkOrder({
+        CompanyId: parseInt(form.companyId),
+        ProjectId: parseInt(form.projectId),
+        DocumentNumber: form.docNumber,
+        DocumentDate: form.docDate,
+        ContractorId: parseInt(form.contractorId),
+        TotalAmount: grandTotal,
+        Remarks: form.remarks || null,
+        TermsAndConditions: form.termsAndConditions || null,
+        CreatedBy: userId,
+      });
+
+      const newHeaderId: number = created.Id;
+
+      // Step 2: Bulk-save activities + materials under that header
+      const activities = groups.flatMap((g) =>
+        g.activities.map((a) => {
+          const labourAmt = a.ratePerUnit * a.area;
+          const materialAmt = a.materials.reduce(
+            (s, m) => s + m.quantity * m.price,
+            0,
+          );
+          return {
+            // No Id → backend will INSERT
+            ActivityGroupId: null, // wire up if you add group master later
+            ActivityId: null, // wire up if you add activity master later
+            UOMId: null, // wire up UOM master later
+            Rate: a.ratePerUnit || null,
+            Area: a.area || null,
+            LabourAmount: labourAmt || null,
+            MaterialAmount: materialAmt || null,
+            GrandTotal: labourAmt + materialAmt || null,
+            Remarks: a.name || null, // store activity name in Remarks until ActivityId FK is wired
+            materials: a.materials.map((m) => ({
+              // ItemId left null until Item_Master_Group FK is wired
+              UOMId: null,
+              Quantity: m.quantity || null,
+              Rate: m.price || null,
+              Remarks: m.name || null,
+              CreatedBy: userId,
+            })),
+          };
+        }),
+      );
+
+      await saveFullWorkOrder(newHeaderId, {
+        header: {
+          TotalAmount: grandTotal,
+          UpdatedBy: userId,
+        },
+        activities,
+      });
+
+      toast.success("Work order saved successfully!");
+      setSaved(true);
+      setForm((p) => ({ ...p, docNumber: generateDocNumber() }));
+      setTimeout(() => setSaved(false), 3000);
+    } catch (err: any) {
+      const msg: string = err.message || "";
+      let friendly = "Something went wrong. Please try again.";
+
+      if (msg.includes("UNIQUE KEY") || msg.includes("duplicate key"))
+        friendly =
+          "A work order with this document number already exists. Please reset and try again.";
+      else if (msg.includes("FK_WorkOrder_Com") || msg.includes("enterprise"))
+        friendly =
+          "The selected company doesn't exist. Please select a valid company.";
+      else if (msg.includes("FK_WorkOrder_Project"))
+        friendly =
+          "The selected project doesn't exist. Please select a valid project.";
+      else if (
+        msg.includes("FK_WorkOrder_Contr") ||
+        msg.includes("AccountHeadMaster")
+      )
+        friendly =
+          "The selected contractor doesn't exist. Please select a valid contractor.";
+      else if (msg.includes("FK_WOA") || msg.includes("WorkOrderActivities"))
+        friendly =
+          "One or more activities could not be saved. Please check the activity details.";
+      else if (
+        msg.includes("FK_WOAM") ||
+        msg.includes("WorkOrderActivityMaterials")
+      )
+        friendly =
+          "One or more materials could not be saved. Please check the material details.";
+      else if (msg.includes("NOT NULL") || msg.includes("cannot be null"))
+        friendly =
+          "Some required fields are missing. Please fill in all required fields.";
+      else if (msg.includes("FOREIGN KEY"))
+        friendly =
+          "A selected value references data that doesn't exist in the system.";
+      else if (msg.includes("Cannot insert") || msg.includes("INSERT"))
+        friendly =
+          "Could not save the work order. Please check all fields and try again.";
+
+      toast.error(friendly);
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -1008,6 +1055,7 @@ const WorkOrderMaster: React.FC = () => {
 
         <div className="p-4 sm:p-5">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-5 gap-y-4">
+            {/* Company — real data from DB */}
             <div>
               <FieldLabel required>
                 <span className="flex items-center gap-1.5">
@@ -1016,20 +1064,24 @@ const WorkOrderMaster: React.FC = () => {
                 </span>
               </FieldLabel>
               <select
-                value={form.companyName}
-                onChange={(e) => setField("companyName", e.target.value)}
-                className={`${selectCls} ${errors.companyName ? "border-red-400" : ""}`}
+                value={form.companyId}
+                onChange={(e) => setField("companyId", e.target.value)}
+                className={`${selectCls} ${errors.companyId ? "border-red-400" : ""}`}
+                style={{ colorScheme: "light dark" }}
               >
                 <option value="">Select company…</option>
-                {COMPANIES.map((c) => (
-                  <option key={c}>{c}</option>
+                {companies.map((c: any) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
                 ))}
               </select>
-              {errors.companyName && (
+              {errors.companyId && (
                 <p className="text-xs text-red-500 mt-1">Required</p>
               )}
             </div>
 
+            {/* Project — real data from DB */}
             <div>
               <FieldLabel required>
                 <span className="flex items-center gap-1.5">
@@ -1038,20 +1090,24 @@ const WorkOrderMaster: React.FC = () => {
                 </span>
               </FieldLabel>
               <select
-                value={form.projectName}
-                onChange={(e) => setField("projectName", e.target.value)}
-                className={`${selectCls} ${errors.projectName ? "border-red-400" : ""}`}
+                value={form.projectId}
+                onChange={(e) => setField("projectId", e.target.value)}
+                className={`${selectCls} ${errors.projectId ? "border-red-400" : ""}`}
+                style={{ colorScheme: "light dark" }}
               >
                 <option value="">Select project…</option>
-                {PROJECTS.map((p) => (
-                  <option key={p}>{p}</option>
+                {projects.map((p: any) => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}
+                  </option>
                 ))}
               </select>
-              {errors.projectName && (
+              {errors.projectId && (
                 <p className="text-xs text-red-500 mt-1">Required</p>
               )}
             </div>
 
+            {/* Document Number — auto-generated, read-only */}
             <div>
               <FieldLabel>
                 <span className="flex items-center gap-1.5">
@@ -1069,6 +1125,7 @@ const WorkOrderMaster: React.FC = () => {
               </p>
             </div>
 
+            {/* Document Date */}
             <div>
               <FieldLabel required>
                 <span className="flex items-center gap-1.5">
@@ -1084,6 +1141,7 @@ const WorkOrderMaster: React.FC = () => {
               />
             </div>
 
+            {/* Contractor — real data from DB (AccountHeadMaster) */}
             <div>
               <FieldLabel required>
                 <span className="flex items-center gap-1.5">
@@ -1092,25 +1150,29 @@ const WorkOrderMaster: React.FC = () => {
                 </span>
               </FieldLabel>
               <select
-                value={form.contractor}
-                onChange={(e) => setField("contractor", e.target.value)}
-                className={`${selectCls} ${errors.contractor ? "border-red-400" : ""}`}
+                value={form.contractorId}
+                onChange={(e) => setField("contractorId", e.target.value)}
+                className={`${selectCls} ${errors.contractorId ? "border-red-400" : ""}`}
+                style={{ colorScheme: "light dark" }}
               >
                 <option value="">Select contractor…</option>
-                {CONTRACTORS.map((c) => (
-                  <option key={c}>{c}</option>
+                {contractors.map((c: any) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
                 ))}
               </select>
-              {errors.contractor && (
+              {errors.contractorId && (
                 <p className="text-xs text-red-500 mt-1">Required</p>
               )}
             </div>
 
+            {/* Total Amount — computed from activities, read-only */}
             <div>
               <FieldLabel>
                 <span className="flex items-center gap-1.5">
                   <IndianRupee size={11} />
-                  Amount
+                  Total Amount
                 </span>
               </FieldLabel>
               <div className="relative">
@@ -1118,15 +1180,18 @@ const WorkOrderMaster: React.FC = () => {
                   ₹
                 </span>
                 <input
-                  type="number"
-                  value={form.amount}
-                  onChange={(e) => setField("amount", e.target.value)}
-                  placeholder="0.00"
-                  className={`${inputCls} pl-7`}
+                  readOnly
+                  value={grandTotal > 0 ? grandTotal.toFixed(2) : ""}
+                  placeholder="Calculated from activities"
+                  className={`${inputCls} pl-7 bg-muted/50 text-muted-foreground cursor-not-allowed`}
                 />
               </div>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Auto-calculated from activities
+              </p>
             </div>
 
+            {/* Remarks */}
             <div className="col-span-1 sm:col-span-2 lg:col-span-3">
               <FieldLabel>Remarks</FieldLabel>
               <input
@@ -1137,6 +1202,7 @@ const WorkOrderMaster: React.FC = () => {
               />
             </div>
 
+            {/* Terms & Conditions */}
             <div className="col-span-1 sm:col-span-2 lg:col-span-3">
               <FieldLabel>Terms &amp; Conditions</FieldLabel>
               <textarea
@@ -1187,9 +1253,8 @@ const WorkOrderMaster: React.FC = () => {
           ))}
         </div>
 
-        {/* ── Three-way grand total footer ── */}
+        {/* Grand total footer */}
         <div className="border-t border-border bg-muted/10">
-          {/* Sub-totals row */}
           <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-border/50">
             <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3">
               <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">

@@ -5,14 +5,14 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 
 // ─── API ──────────────────────────────────────────────────────────────────────
-const BASE       = 'http://localhost:5000/api/account-head'
-const GROUPS_URL = 'http://localhost:5000/api/account-group'
+const BASE       = '/api/account-head'
+const GROUPS_URL = '/api/account-group'
 
-const getLedgers     = () => fetch(BASE).then(r => r.json())
-const getGroups      = () => fetch(GROUPS_URL).then(r => r.json())
-const addLedger      = (data: object) => fetch(BASE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(r => r.json())
-const updateLedger   = (id: string, data: object) => fetch(`${BASE}/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(r => r.json())
-const deleteLedger   = (id: string) => fetch(`${BASE}/${id}`, { method: 'DELETE' }).then(r => r.json())
+const getLedgers   = () => fetch(BASE).then(r => r.json())
+const getGroups    = () => fetch(GROUPS_URL).then(r => r.json())
+const addLedger    = (data: object) => fetch(BASE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(r => r.json())
+const updateLedger = (id: string, data: object) => fetch(`${BASE}/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(r => r.json())
+const deleteLedger = (id: string) => fetch(`${BASE}/${id}`, { method: 'DELETE' }).then(r => r.json())
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface DbLedger {
@@ -25,7 +25,8 @@ interface DbLedger {
   LGST: string | null
   LGSTState: string | null
   LCountry: string | null
-  LBelongsTo: string | null
+  LBelongsTo: number | null       // FK → dbo.AccountGroup.AGId  (int)
+  GroupName: string | null        // Joined from AccountGroup
   LDescription: string | null
 }
 
@@ -36,41 +37,46 @@ interface DbGroup {
 }
 
 // ─── Payload ──────────────────────────────────────────────────────────────────
-const toPayload = (r: Record<string, unknown>) => ({
-  LHeadName:          r.ledgerName    as string,
-  LHeadType:          (r.accountGroup as string) || null,
-  LHeadPhone:         '0000000000',
-  LHeadEmail:         `ledger-${Date.now()}@civilier.local`,
-  LHeadAddress:       'N/A',
-  LHeadContactPerson: 'N/A',
-  LHeadStatus:        1,
-  LHeadPaymentTerms:  'N/A',
-  LBranchName:        'Main',
-  LGST:               (r.shortCode    as string) || null,
-  LGSTState:          null,
-  LCountry:           'India',
-  LBelongsTo:         (r.accountGroup as string) || null,
-  LDescription:       (r.description  as string) || null,
-})
+// LBelongsTo is an INT FK — must send AGId number, NOT the group name string
+const toPayload = (r: Record<string, unknown>, groups: DbGroup[]) => {
+  const group = groups.find(g => g.Name === (r.accountGroup as string))
+  return {
+    LHeadName:          r.ledgerName    as string,
+    LHeadType:          (r.accountGroup as string) || null,
+    LHeadPhone:         '0000000000',
+    LHeadEmail:         `ledger-${Date.now()}@civilier.local`,
+    LHeadAddress:       'N/A',
+    LHeadContactPerson: 'N/A',
+    LHeadStatus:        1,
+    LHeadPaymentTerms:  'N/A',
+    LBranchName:        'Main',
+    LGST:               (r.shortCode   as string) || null,
+    LGSTState:          null,
+    LCountry:           'India',
+    LBelongsTo:         group ? group.AGId : null,   // ✅ INT FK
+    LDescription:       (r.description as string) || null,
+  }
+}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 const GeneralLedgerMaster: React.FC = () => {
   const queryClient = useQueryClient()
 
-  const { data: dbData,   isLoading: loadingLedgers } = useQuery({ queryKey: ['ledgers'],        queryFn: getLedgers })
-  const { data: grpData,  isLoading: loadingGroups  } = useQuery({ queryKey: ['account-groups'], queryFn: getGroups  })
+  const { data: dbData,  isLoading: loadingLedgers } = useQuery({ queryKey: ['ledgers'],        queryFn: getLedgers })
+  const { data: grpData, isLoading: loadingGroups  } = useQuery({ queryKey: ['account-groups'], queryFn: getGroups  })
 
   const dbItems:  DbLedger[] = Array.isArray(dbData)  ? dbData  : []
   const dbGroups: DbGroup[]  = Array.isArray(grpData) ? grpData : []
 
-  // Build group options for dropdown
+  // Dropdown shows group names; we resolve back to AGId on save
   const groupOptions = dbGroups.map(g => g.Name).filter(Boolean)
 
   const mappedData: RecordWithId[] = dbItems.map(item => ({
     _id:          String(item.LHeadId),
-    ledgerName:   item.LHeadName    || '',
-    shortCode:    item.LGST         || '',
-    accountGroup: item.LBelongsTo   || item.LHeadType || '',
+    ledgerName:   item.LHeadName  || '',
+    shortCode:    item.LGST       || '',
+    // Display the resolved group name from the JOIN
+    accountGroup: item.GroupName  || '',
     description:  item.LDescription || '',
     status:       item.LHeadStatus === 1,
   }))
@@ -78,14 +84,14 @@ const GeneralLedgerMaster: React.FC = () => {
   const handleDataEvent = async (event: DataChangeEvent) => {
     if (event.action === 'add') {
       try {
-        await addLedger(toPayload(event.record))
+        await addLedger(toPayload(event.record, dbGroups))
         toast.success('Ledger saved!')
         await queryClient.invalidateQueries({ queryKey: ['ledgers'] })
       } catch (err: any) { toast.error('Save failed: ' + err.message) }
     }
     if (event.action === 'update') {
       try {
-        await updateLedger(event.id, toPayload(event.record))
+        await updateLedger(event.id, toPayload(event.record, dbGroups))
         toast.success('Ledger updated!')
         await queryClient.invalidateQueries({ queryKey: ['ledgers'] })
       } catch (err: any) { toast.error('Update failed: ' + err.message) }
@@ -123,7 +129,7 @@ const GeneralLedgerMaster: React.FC = () => {
       <MasterPage
         title="Ledger"
         fields={[
-          { name: 'ledgerName',   label: 'Ledger Name',    type: 'text',     required: true },
+          { name: 'ledgerName',   label: 'Ledger Name',   type: 'text',     required: true },
           { name: 'shortCode',    label: 'Short Code',     type: 'text',     uppercase: true, required: true },
           { name: 'accountGroup', label: 'Account Group',  type: 'select',   required: true, options: groupOptions },
           { name: 'description',  label: 'Description',    type: 'textarea', fullWidth: true },

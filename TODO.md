@@ -1,1 +1,12 @@
-# TODO: Add T&amp;C icon to MobileNav.tsx&#10;&#10;## Plan Breakdown&#10;1. [x] Create TODO.md with steps&#10;2. [x] Edit MobileNav.tsx: Add T&amp;C item to materialSetupItems&#10;3. [x] Verify the change (confirmed via read_file: T&amp;C added to materialSetupItems with FileText icon, path "/material/t-c-master")&#10;4. [x] Mark complete and attempt_completion&#10;
+# CivilierERP Task Tracker
+
+## Current Task: Add T&C Icon to Material Module TopNavbar Setup
+✅ **Step 1**: Analyzed TopNavbar.tsx structure and Material setup items.  
+✅ **Step 2**: Created detailed edit plan and got user confirmation.  
+✅ **Step 3**: Edit TopNavbar.tsx to add T&C item to materialSetupItems.  
+✅ **Step 4**: Test in app (switch to Material module, open Setup dropdown).  
+✅ **Step 5**: Created src/pages/material/T&CMaster.tsx with Name/Terms form + details table. Navbar path updated to /material/t-c-master.  
+
+## Next Tasks
+- [ ] Implement T&C master page if required.
+

@@ -1,4 +1,4 @@
-const BASE = "http://localhost:5000/api/tenants";
+const BASE = "/api/tenants";
 
 export const getTenants = async () => {
   const res = await fetch(BASE);

@@ -9,7 +9,7 @@ import {
 } from 'lucide-react'
 
 // ─── API ──────────────────────────────────────────────────────────────────────
-const BASE = 'http://localhost:5000/api/card-master'
+const BASE = '/api/card-master'
 
 const getCards    = () => fetch(BASE).then(r => r.json())
 const addCard     = (data: object) => fetch(BASE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(r => r.json())

@@ -1,10 +1,10 @@
 const express = require("express")
 const router = express.Router()
-const { sql } = require("../db")
+const { getPool, sql } = require("../db")
 
 router.get("/", async (req, res) => {
   try {
-    const pool = await sql.connect()
+    const pool = getPool()
     const result = await pool.request().query("SELECT * FROM dbo.card_master")
     res.json(result.recordset)
   } catch (err) { res.status(500).json({ error: err.message }) }
@@ -18,7 +18,7 @@ router.post("/", async (req, res) => {
     reminder_days, status
   } = req.body
   try {
-    const pool = await sql.connect()
+    const pool = getPool()
     await pool.request()
       .input("company_name",     sql.VarChar,   company_name || null)
       .input("bank_name",        sql.VarChar,   bank_name || null)
@@ -61,7 +61,7 @@ router.put("/:id", async (req, res) => {
     reminder_days, status
   } = req.body
   try {
-    const pool = await sql.connect()
+    const pool = getPool()
     await pool.request()
       .input("id",               sql.Int,       req.params.id)
       .input("company_name",     sql.VarChar,   company_name || null)
@@ -97,7 +97,7 @@ router.put("/:id", async (req, res) => {
 
 router.delete("/:id", async (req, res) => {
   try {
-    const pool = await sql.connect()
+    const pool = getPool()
     await pool.request()
       .input("id", sql.Int, req.params.id)
       .query("DELETE FROM dbo.card_master WHERE id=@id")

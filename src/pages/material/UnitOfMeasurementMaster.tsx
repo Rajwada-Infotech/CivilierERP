@@ -4,9 +4,26 @@ import {
   MasterPage,
   type ColumnDef,
   type FieldDef,
-  type RecordWithId,
+  type DataChangeEvent,
 } from "@/components/MasterPage";
-import { BadgeCheck, Ruler, Hash, ToggleRight, CalendarRange } from "lucide-react";
+import { BadgeCheck, Ruler, Hash } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { getUomList, addUom, updateUom, deleteUom } from "@/api/uomApi";
+import { toast } from "sonner";
+
+interface DbUOM {
+  Id: number;
+  UOMName: string;
+  UOMCode: string;
+  Symbol: string | null;
+  UOMType: string | null;
+  DecimalPlaces: number;
+  ConversionFactor: number | null;
+  IsBaseUnit: boolean;
+  Remarks: string | null;
+  IsActive: boolean;
+  CreatedAt: string | null;
+}
 
 const FIELDS: FieldDef[] = [
   {
@@ -33,11 +50,7 @@ const FIELDS: FieldDef[] = [
     label: "Type",
     type: "select",
     required: true,
-    options: [
-      "Simple",
-      "Compound",
-      "Base",
-    ],
+    options: ["Simple", "Compound", "Base"],
   },
   {
     name: "decimalPlaces",
@@ -82,68 +95,17 @@ const COLUMNS: ColumnDef[] = [
   { key: "status", label: "Status" },
 ];
 
-const INITIAL_DATA: RecordWithId[] = [
-  {
-    id: "kg",
-    code: "KG",
-    name: "Kilogram",
-    symbol: "kg",
-    type: "Base",
-    decimalPlaces: 3,
-    conversionFactor: 1,
-    isBaseUnit: true,
-    remarks: "Standard weight unit for most materials",
-    status: true,
-  },
-  {
-    id: "mt",
-    code: "MT",
-    name: "Metric Ton",
-    symbol: "MT",
-    type: "Compound",
-    decimalPlaces: 0,
-    conversionFactor: 1000,
-    isBaseUnit: false,
-    remarks: "1 MT = 1000 KG",
-    status: true,
-  },
-  {
-    id: "ltr",
-    code: "LTR",
-    name: "Litre",
-    symbol: "L",
-    type: "Base",
-    decimalPlaces: 2,
-    conversionFactor: 1,
-    isBaseUnit: true,
-    remarks: "Volume unit for liquids",
-    status: true,
-  },
-  {
-    id: "m",
-    code: "M",
-    name: "Meter",
-    symbol: "m",
-    type: "Base",
-    decimalPlaces: 2,
-    conversionFactor: 1,
-    isBaseUnit: true,
-    remarks: "Standard length unit",
-    status: true,
-  },
-  {
-    id: "sqm",
-    code: "SQM",
-    name: "Square Meter",
-    symbol: "m²",
-    type: "Compound",
-    decimalPlaces: 2,
-    conversionFactor: 1,
-    isBaseUnit: false,
-    remarks: "Area unit for sheets/plates",
-    status: true,
-  },
-];
+const toPayload = (record: Record<string, unknown>) => ({
+  UOMCode: record.code as string,
+  UOMName: record.name as string,
+  Symbol: record.symbol as string,
+  UOMType: record.type as string,
+  DecimalPlaces: Number(record.decimalPlaces ?? 0),
+  ConversionFactor: record.conversionFactor ? Number(record.conversionFactor) : null,
+  IsBaseUnit: Boolean(record.isBaseUnit),
+  Remarks: (record.remarks as string) || null,
+  IsActive: record.status !== false,
+});
 
 const columnRenderers = {
   code: (value: unknown) => (
@@ -192,15 +154,83 @@ const columnRenderers = {
 };
 
 export default function UnitOfMeasurementMaster() {
+  const queryClient = useQueryClient();
+
+  const { data: dbData, isLoading, error } = useQuery({
+    queryKey: ["uom-master"],
+    queryFn: getUomList,
+  });
+
+  const dbItems: DbUOM[] = Array.isArray(dbData) ? dbData : [];
+
+  const mappedData = dbItems.map((item) => ({
+    _id: String(item.Id),
+    code: item.UOMCode || "",
+    name: item.UOMName || "",
+    symbol: item.Symbol || "",
+    type: item.UOMType || "",
+    decimalPlaces: item.DecimalPlaces ?? 0,
+    conversionFactor: item.ConversionFactor ?? "",
+    isBaseUnit: Boolean(item.IsBaseUnit),
+    remarks: item.Remarks || "",
+    status: Boolean(item.IsActive),
+  }));
+
+  const handleDataEvent = async (event: DataChangeEvent) => {
+    if (event.action === "add") {
+      try {
+        await addUom(toPayload(event.record));
+        toast.success("UOM saved!");
+        await queryClient.invalidateQueries({ queryKey: ["uom-master"] });
+      } catch (err: any) {
+        toast.error("Save failed: " + err.message);
+      }
+    }
+
+    if (event.action === "update") {
+      try {
+        await updateUom(Number(event.id), toPayload(event.record));
+        toast.success("UOM updated!");
+        await queryClient.invalidateQueries({ queryKey: ["uom-master"] });
+      } catch (err: any) {
+        toast.error("Update failed: " + err.message);
+      }
+    }
+
+    if (event.action === "delete") {
+      try {
+        await deleteUom(Number(event.id));
+        toast.success("UOM deleted!");
+        await queryClient.invalidateQueries({ queryKey: ["uom-master"] });
+      } catch (err: any) {
+        toast.error("Delete failed: " + err.message);
+      }
+    }
+  };
+
+  if (isLoading)
+    return <div className="p-6 text-muted-foreground">Loading...</div>;
+
+  if (error)
+    return (
+      <div className="p-6 text-red-500">
+        Failed to load UOM data. Check your backend connection.
+      </div>
+    );
+
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Material Module", "Unit of Measurement"]} />
+      <h1 className="text-xl font-heading font-bold text-foreground mb-4">
+        Unit of Measurement Master
+      </h1>
       <MasterPage
-        title="Unit of Measurement Master"
+        title="Unit of Measurement"
         fields={FIELDS}
         columns={COLUMNS}
-        initialData={INITIAL_DATA}
+        initialData={mappedData}
         columnRenderers={columnRenderers}
+        onDataEvent={handleDataEvent}
       />
     </>
   );
