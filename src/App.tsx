@@ -13,6 +13,7 @@ import {
 // Static imports
 import Login from "./pages/Login";
 import NotFound from "./pages/NotFound";
+import Maintenance from "./pages/Maintenance";
 
 // Layout
 import { AppLayout } from "@/components/layout/AppLayout";
@@ -866,6 +867,9 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+
+      {/* Maintenance */}
+      <Route path="/maintenance" element={<Maintenance />} />
 
       {/* 404 */}
       <Route path="*" element={<NotFound />} />
