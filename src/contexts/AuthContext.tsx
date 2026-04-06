@@ -293,7 +293,7 @@ interface AuthContextType {
   login: (
     email: string,
     password: string,
-  ) => { success: boolean; error?: string };
+  ) => { success: boolean; error?: string; role?: UserRole };
   logout: () => void;
   addUser: (user: Omit<AppUser, "id"> & { password: string }) => void;
   deleteUser: (id: string) => void;
@@ -340,7 +340,7 @@ export const AuthProvider = ({
       setCurrentUser(safeUser);
       onLoginSuccess?.(safeUser);
 
-      return { success: true };
+      return { success: true, role: safeUser.role as UserRole };
     },
     [users, onLoginSuccess],
   );
