@@ -1,4 +1,5 @@
 require("dotenv").config();
+
 const express = require("express");
 const helmet = require("helmet");
 const morgan = require("morgan");
@@ -8,14 +9,14 @@ const authMiddleware = require("./middleware/auth");
 const rateLimit = require("express-rate-limit");
 
 const loginLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10, // max 10 attempts
+  windowMs: 15 * 60 * 1000,
+  max: 10,
   message: { error: "Too many login attempts. Try again later." },
 });
 
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 200, // adjust as needed
+  max: 200,
 });
 
 const ALLOWED_ORIGINS = [
@@ -28,16 +29,18 @@ const ALLOWED_ORIGINS = [
 async function startServer() {
   try {
     await connectDB();
-const app = express();
+
+    const app = express();
     app.disable("x-powered-by");
 
     app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+    app.use(express.urlencoded({ extended: true }));
     app.use(helmet());
     app.use(morgan("dev"));
+
     app.use(
       cors({
-origin: (origin, cb) => {
+        origin: (origin, cb) => {
           if (!origin || ALLOWED_ORIGINS.includes(origin)) {
             cb(null, true);
           } else {
@@ -85,8 +88,11 @@ origin: (origin, cb) => {
     app.use("/api/debit-note", authMiddleware, require("./routes/debitNote"));
     app.use("/api/tc-master", authMiddleware, require("./routes/tcMaster"));
 
+    app.use("/api/user-activity", authMiddleware, allowRoles("admin"), require("./routes/userActivity"));
+
     const PORT = process.env.PORT || 5000;
     app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+
     return app;
   } catch (err) {
     console.error("Failed to start server:", err.message);
@@ -95,6 +101,7 @@ origin: (origin, cb) => {
 }
 
 const appPromise = startServer();
+
 module.exports = async (req, res) => {
   const app = await appPromise;
   return app(req, res);

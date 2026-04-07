@@ -1,5 +1,7 @@
 import React, { createContext, useContext } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useAuth } from "./AuthContext";
+import { fetchWithAuth } from "../lib/fetchWithAuth";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 export interface TdsRecord {
@@ -28,9 +30,11 @@ export const useTds = (): TdsContextType => {
 export const TdsProvider: React.FC<{ children: React.ReactNode }> = ({
   children,
 }) => {
+  const { currentUser } = useAuth();
   const { data: dbData, isLoading } = useQuery({
     queryKey: ["tds"],
-    queryFn: () => fetch("/api/tds-master").then((r) => r.json()),
+    queryFn: () => fetchWithAuth("/api/tds-master").then((r) => r.json()),
+    enabled: !!currentUser,
   });
 
   const tdsRecords: TdsRecord[] = Array.isArray(dbData)
