@@ -4,7 +4,10 @@ import React, {
   useState,
   useCallback,
   useRef,
+  useEffect,
 } from "react";
+
+import { getUserActivityLogs, logUserActivity, subscribeToActivityStream } from "@/api/userActivityApi";
 
 export type SessionEventType = "login" | "logout";
 
@@ -22,6 +25,7 @@ export interface SessionEvent {
 
 interface ActivityBrowserContextType {
   sessions: SessionEvent[];
+  isLoading: boolean;
   recordLogin: (user: {
     id: string;
     name: string;
@@ -88,16 +92,49 @@ function getDeviceInfo(): string {
 export const ActivityBrowserProvider: React.FC<{
   children: React.ReactNode;
 }> = ({ children }) => {
-  const [sessions, setSessions] = useState<SessionEvent[]>([]);
+const [sessions, setSessions] = useState<SessionEvent[]>([]);
+const [isLoading, setIsLoading] = useState(true);
+const sseSourceRef = useRef<EventSource | null>(null);
   // Cache IP so we only fetch once per page load
   const cachedIp = useRef<string | null>(null);
 
-  const getIp = async (): Promise<string> => {
-    if (cachedIp.current !== null) return cachedIp.current;
-    const ip = await fetchIp();
-    cachedIp.current = ip;
-    return ip;
-  };
+  // Load initial logs from API
+  useEffect(() => {
+    const loadLogs = async () => {
+      try {
+        setIsLoading(true)
+        const logs = await getUserActivityLogs()
+        setSessions(logs)
+      } catch (err) {
+        console.error('Failed to load activity logs:', err)
+      } finally {
+        setIsLoading(false)
+      }
+    }
+    loadLogs()
+  }, [])
+
+  // SSE real-time updates
+  useEffect(() => {
+    sseSourceRef.current = subscribeToActivityStream((data) => {
+      if (data.type === 'initial') {
+        setSessions(data.sessions)
+      } else {
+        // Append new event (avoid duplicates by id)
+        setSessions(prev => {
+          if (prev.some(s => s.id === data.id)) return prev
+          return [data, ...prev]
+        })
+      }
+    })
+
+    return () => {
+      if (sseSourceRef.current) {
+        sseSourceRef.current.close()
+        sseSourceRef.current = null
+      }
+    }
+  }, [])
 
   const recordLogin = useCallback(
     async (user: { id: string; name: string; email: string; role: string }) => {
@@ -108,12 +145,31 @@ export const ActivityBrowserProvider: React.FC<{
         userName: user.name,
         userEmail: user.email,
         userRole: user.role,
-        event: "login",
+        event: "login" as const,
         timestamp: new Date().toISOString(),
         ipAddress: ip,
         deviceInfo: getDeviceInfo(),
       };
+
+      // Optimistic UI update
       setSessions((prev) => [entry, ...prev]);
+
+      // Send to backend
+      try {
+        await logUserActivity({
+          userId: user.id,
+          userName: user.name,
+          userEmail: user.email,
+          userRole: user.role,
+          event: "login",
+          ipAddress: ip,
+          deviceInfo: getDeviceInfo(),
+        });
+      } catch (err) {
+        console.error('Failed to log login:', err);
+        // Rollback optimistic update on error
+        setSessions(prev => prev.slice(1));
+      }
     },
     [],
   );
@@ -127,12 +183,30 @@ export const ActivityBrowserProvider: React.FC<{
         userName: user.name,
         userEmail: user.email,
         userRole: user.role,
-        event: "logout",
+        event: "logout" as const,
         timestamp: new Date().toISOString(),
         ipAddress: ip,
         deviceInfo: getDeviceInfo(),
       };
+
+      // Optimistic UI
       setSessions((prev) => [entry, ...prev]);
+
+      // Backend log
+      try {
+        await logUserActivity({
+          userId: user.id,
+          userName: user.name,
+          userEmail: user.email,
+          role: user.role,
+          event_type: "logout",
+          ip_address: ip,
+          device_info: getDeviceInfo(),
+        });
+      } catch (err) {
+        console.error('Failed to log logout:', err);
+        setSessions(prev => prev.slice(1));
+      }
     },
     [],
   );
