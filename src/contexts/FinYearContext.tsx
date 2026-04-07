@@ -12,6 +12,8 @@ import {
   updateFinYear,
   deleteFinYear,
 } from "@/api/finYearApi";
+import { useAuth } from "./AuthContext";
+import { fetchWithAuth } from "../lib/fetchWithAuth";
 
 export interface FinYear {
   id: string;
@@ -42,9 +44,11 @@ export const useFinYear = () => {
 export const FinYearProvider = ({ children }: { children: ReactNode }) => {
   const queryClient = useQueryClient();
 
+  const { currentUser } = useAuth();
   const { data: dbData, isLoading } = useQuery({
     queryKey: ["fin-years"],
     queryFn: getFinYears,
+    enabled: !!currentUser,
   });
 
   const finYears: FinYear[] = Array.isArray(dbData)
