@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback } from "react";
+import React, { createContext, useContext, useState, useCallback, useEffect, useMemo } from "react";
 import { loginUser } from "../api/userApi";
 
 export type UserRole = "super_admin" | "admin" | "user" | "dba";
@@ -259,6 +259,7 @@ export const AuthProvider = ({
   onLoginSuccess?: (user: AppUser) => void;
   onLogoutSuccess?: (user: AppUser) => void;
 }) => {
+  console.log("AuthProvider mounted");
   // Restore user from localStorage on refresh
   const [currentUser, setCurrentUser] = useState<AppUser | null>(() => {
     const stored = localStorage.getItem("user");
@@ -267,20 +268,32 @@ export const AuthProvider = ({
 
   const [users, setUsers] = useState<AppUser[]>([]);
 
-  // Token expiry validation
   useEffect(() => {
-    const token = localStorage.getItem("token");
+    const validateToken = () => {
+      try {
+        const token = localStorage.getItem("token");
 
-    if (!token) return;
+        if (!token) return;
 
-    try {
-      const payload = JSON.parse(atob(token.split(".")[1]));
-      if (payload.exp * 1000 < Date.now()) {
-        logout();
+        const parts = token.split(".");
+        if (parts.length !== 3) {
+          localStorage.clear();
+          return;
+        }
+
+        const payload = JSON.parse(atob(parts[1]));
+
+        if (!payload?.exp || payload.exp * 1000 < Date.now()) {
+          localStorage.clear();
+        }
+
+      } catch (err) {
+        console.error("Safe token check failed:", err);
+        localStorage.clear();
       }
-    } catch {
-      logout();
-    }
+    };
+
+    validateToken();
   }, []);
 
   const login = useCallback(
@@ -359,7 +372,7 @@ export const AuthProvider = ({
     );
   };
 
-  const addUser = (user: any) => {
+  const addUser = (user: Omit<AppUser, "id"> & { password: string }) => {
     setUsers((prev) => [
       ...prev,
       {
@@ -384,7 +397,7 @@ export const AuthProvider = ({
 
   return (
     <AuthContext.Provider
-      value={{
+      value={useMemo(() => ({
         currentUser,
         allUsers: users,
         allAdmins: users.filter((u) => u.role === "admin"),
@@ -395,7 +408,8 @@ export const AuthProvider = ({
         toggleUserStatus,
         canAccessPage,
         canDoAction,
-      }}
+      }), [currentUser, users, login, logout, addUser, deleteUser, toggleUserStatus, canAccessPage, canDoAction])}
+
     >
       {children}
     </AuthContext.Provider>
