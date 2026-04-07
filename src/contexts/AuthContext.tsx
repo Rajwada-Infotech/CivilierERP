@@ -262,8 +262,14 @@ export const AuthProvider = ({
   console.log("AuthProvider mounted");
   // Restore user from localStorage on refresh
   const [currentUser, setCurrentUser] = useState<AppUser | null>(() => {
-    const stored = localStorage.getItem("user");
-    return stored ? JSON.parse(stored) : null;
+    try {
+      const stored = localStorage.getItem("user");
+      return stored ? JSON.parse(stored) : null;
+    } catch (err) {
+      console.error("User parse error:", err);
+      localStorage.removeItem("user");
+      return null;
+    }
   });
 
   const [users, setUsers] = useState<AppUser[]>([]);
