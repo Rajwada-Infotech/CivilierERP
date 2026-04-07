@@ -86,6 +86,7 @@ async function startServer() {
     app.use("/api/user-profile", authMiddleware, require("./routes/userProfile"));
     app.use("/api/uom-master", authMiddleware, require("./routes/uomMaster"));
     app.use("/api/debit-note", authMiddleware, require("./routes/debitNote"));
+    app.use("/api/tc-master", authMiddleware, require("./routes/tcMaster"));
 
     app.use("/api/user-activity", authMiddleware, allowRoles("admin"), require("./routes/userActivity"));
 

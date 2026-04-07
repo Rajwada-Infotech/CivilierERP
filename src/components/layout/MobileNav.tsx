@@ -227,11 +227,6 @@ export const MobileNav: React.FC = () => {
             label: "Transaction",
             icon: Landmark,
             children: [
-              {
-                label: "Expense Booking",
-                path: "/transactions/expense-booking",
-                icon: Receipt,
-              },
               { label: "Payment", path: "/payments", icon: FileText },
               {
                 label: "Received Payment",
