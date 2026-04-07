@@ -129,9 +129,24 @@ export const ActivityBrowserProvider: React.FC<{
 
   const sseSourceRef = useRef<EventSource | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const cachedIp = useRef<string | null>(null);
+
+  const getIp = useCallback(async (): Promise<string> => {
+    if (cachedIp.current) return cachedIp.current;
+    const ip = await fetchIp();
+    cachedIp.current = ip;
+    return ip;
+  }, []);
 
   const fetchActivity = useCallback(
     async (page = 1, filters: ActivityFilters = {}) => {
+      // Conditional: skip if no token (avoid 401s)
+      const token = localStorage.getItem("token");
+      if (!token) {
+        setIsLoading(false);
+        return;
+      }
+
       try {
         abortControllerRef.current?.abort();
         abortControllerRef.current = new AbortController();
@@ -182,13 +197,16 @@ export const ActivityBrowserProvider: React.FC<{
     setActivity(EMPTY_ACTIVITY);
   }, []);
 
-  // Initial load
+  // Initial load (conditional)
   useEffect(() => {
     fetchActivity();
   }, [fetchActivity]);
 
-  // SSE — refresh current page on new data
+  // SSE — refresh current page on new data (conditional)
   useEffect(() => {
+    const token = localStorage.getItem("token");
+    if (!token || sseSourceRef.current) return;
+
     sseSourceRef.current = subscribeToActivityStream(() => {
       fetchActivity(currentPageRef.current, currentFiltersRef.current);
     });
@@ -201,7 +219,7 @@ export const ActivityBrowserProvider: React.FC<{
 
   const recordLogin = useCallback(
     async (user: { id: string; name: string; email: string; role: string }) => {
-      const ip = await fetchIp();
+      const ip = await getIp();
       const entry: SessionEvent = {
         id: `sess-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         userId: user.id,
@@ -231,18 +249,18 @@ export const ActivityBrowserProvider: React.FC<{
           ipAddress: ip,
           deviceInfo: getDeviceInfo(),
         });
-        refresh();
+        // No refresh needed on success (optimistic stays)
       } catch (err) {
         console.error("Failed to log login:", err);
         refresh(); // rollback via refresh
       }
     },
-    [refresh]
+    [getIp, refresh]
   );
 
   const recordLogout = useCallback(
     async (user: { id: string; name: string; email: string; role: string }) => {
-      const ip = await fetchIp();
+      const ip = await getIp();
       const entry: SessionEvent = {
         id: `sess-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         userId: user.id,
@@ -272,13 +290,13 @@ export const ActivityBrowserProvider: React.FC<{
           ipAddress: ip,
           deviceInfo: getDeviceInfo(),
         });
-        refresh();
+        // No refresh needed on success
       } catch (err) {
         console.error("Failed to log logout:", err);
         refresh(); // rollback via refresh
       }
     },
-    [refresh]
+    [getIp, refresh]
   );
 
   return (
