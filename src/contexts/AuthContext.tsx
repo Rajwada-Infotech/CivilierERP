@@ -1,27 +1,45 @@
-import React, { createContext, useContext, useState, useCallback, useEffect, useMemo } from "react";
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useEffect,
+  useMemo,
+} from "react";
 import { loginUser } from "../api/userApi";
+import type {
+  UserRole,
+  PageKey,
+  PageAction,
+  PagePermission,
+  AppUser,
+} from "./types";
+import * as AuthUtils from "./auth.utils";
+import { useActivityBrowser } from "./ActivityBrowserContext";
 
-import type { UserRole, PageKey, PageAction, PagePermission, AppUser } from './types';
-import * as AuthUtils from './auth.utils';
-
-
-/* =========================
-   ACCESS HELPERS
-========================= */
-
-
-/* =========================
-   CONTEXT TYPE
-========================= */
 interface AuthContextType {
   currentUser: AppUser | null;
   allUsers: AppUser[];
   allAdmins: AppUser[];
-  login: (email: string, password: string) => Promise<{ success: boolean; error?: string; role?: UserRole }>;
+
+  login: (
+    email: string,
+    password: string,
+  ) => Promise<{ success: boolean; error?: string; role?: UserRole }>;
+
   logout: () => void;
+
+  // User Management
   addUser: (user: Omit<AppUser, "id"> & { password: string }) => void;
   deleteUser: (id: string) => void;
   toggleUserStatus: (id: string) => void;
+
+  // Permission Management
+  updateUserPagePermissions: (
+    userId: string,
+    permissions: PagePermission[],
+  ) => void;
+
   canAccessPage: (page: PageKey) => boolean;
   canDoAction: (page: PageKey, action: PageAction) => boolean;
 }
@@ -30,11 +48,9 @@ const AuthContext = createContext<AuthContextType | null>(null);
 
 export const useAuth = () => {
   const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be inside provider");
+  if (!ctx) throw new Error("useAuth must be used inside AuthProvider");
   return ctx;
 };
-
-
 
 /* =========================
    PROVIDER
@@ -48,14 +64,11 @@ export const AuthProvider = ({
   onLoginSuccess?: (user: AppUser) => void;
   onLogoutSuccess?: (user: AppUser) => void;
 }) => {
-  console.log("AuthProvider mounted");
-  // Restore user from localStorage on refresh
   const [currentUser, setCurrentUser] = useState<AppUser | null>(() => {
     try {
       const stored = localStorage.getItem("user");
       return stored ? JSON.parse(stored) : null;
-    } catch (err) {
-      console.error("User parse error:", err);
+    } catch {
       localStorage.removeItem("user");
       return null;
     }
@@ -63,63 +76,41 @@ export const AuthProvider = ({
 
   const [users, setUsers] = useState<AppUser[]>([]);
 
+  // Load dummy users (Replace with API call later)
   useEffect(() => {
-    const validateToken = () => {
-      try {
-        const token = localStorage.getItem("token");
-
-        if (!token) return;
-
-        const parts = token.split(".");
-        if (parts.length !== 3) {
-          localStorage.clear();
-          return;
-        }
-
-        const payload = JSON.parse(atob(parts[1]));
-
-        if (!payload?.exp || payload.exp * 1000 < Date.now()) {
-          localStorage.clear();
-        }
-
-      } catch (err) {
-        console.error("Safe token check failed:", err);
-        localStorage.clear();
-      }
-    };
-
-    validateToken();
+    // TODO: Replace with real API call
+    const dummyUsers: AppUser[] = [
+      // Add your dummy users here if needed
+    ];
+    setUsers(dummyUsers);
   }, []);
 
   const login = useCallback(
     async (email: string, password: string) => {
       try {
         const data = await loginUser(email, password);
-
-        if (!data.success) {
+        if (!data.success)
           return { success: false, error: "Invalid credentials" };
-        }
 
         const { token, user } = data;
-
-        // Save token
         localStorage.setItem("token", token);
 
-        // Build AppUser from backend response
         const appUser: AppUser = {
           id: String(user.id),
           name: user.name,
           email: user.email,
           role: user.role as UserRole,
           initials: AuthUtils.getInitials(user.name),
-          pagePermissions: AuthUtils.getPermissionsByRole(user.role as UserRole),
+          pagePermissions: AuthUtils.getPermissionsByRole(
+            user.role as UserRole,
+          ),
           isActive: !user.discontinue,
         };
 
         localStorage.setItem("user", JSON.stringify(appUser));
         setCurrentUser(appUser);
         
-        // Record login activity
+        // Log activity (fire-and-forget, ignore if ActivityBrowser not ready)
         try {
           const { recordLogin } = useActivityBrowser();
           recordLogin({
@@ -128,61 +119,110 @@ export const AuthProvider = ({
             email: appUser.email,
             role: appUser.role,
           });
-        } catch (err) {
-          console.warn('Activity logging failed:', err);
-        }
+        } catch {}
         
         onLoginSuccess?.(appUser);
 
         return { success: true, role: appUser.role };
-      } catch (err: unknown) {
-        const errorMessage = err instanceof Error ? err.message : "Login failed. Check credentials.";
-        return {
-          success: false,
-          error: errorMessage,
-        };
+      } catch (err: any) {
+        return { success: false, error: err.message || "Login failed" };
       }
-
     },
-    [onLoginSuccess]
+    [onLoginSuccess],
   );
 
   const logout = useCallback(() => {
+    // Log activity (fire-and-forget)
+    try {
+      const { recordLogout } = useActivityBrowser();
+      recordLogout({
+        id: currentUser!.id,
+        name: currentUser!.name,
+        email: currentUser!.email,
+        role: currentUser!.role,
+      });
+    } catch {}
+    
     if (currentUser) onLogoutSuccess?.(currentUser);
     localStorage.removeItem("token");
     localStorage.removeItem("user");
     setCurrentUser(null);
   }, [currentUser, onLogoutSuccess]);
 
+  // ====================== PERMISSION UPDATER ======================
+  const updateUserPagePermissions = useCallback(
+    (userId: string, permissions: PagePermission[]) => {
+      setUsers((prevUsers) =>
+        prevUsers.map((user) =>
+          user.id === userId ? { ...user, pagePermissions: permissions } : user,
+        ),
+      );
 
-  // Permission checkers with stable deps
-  const { canAccessPage: rawCanAccessPage, canDoAction: rawCanDoAction } = AuthUtils.createPermissionCheckers(currentUser);
-
-  const canAccessPage = useCallback((page: PageKey) => rawCanAccessPage(page), [rawCanAccessPage]);
-  const canDoAction = useCallback((page: PageKey, action: PageAction) => rawCanDoAction(page, action), [rawCanDoAction]);
-
-  // TODO: Implement backend integration for user management
-  const addUser = useCallback(() => console.warn("addUser: Use backend API"), []);
-  const deleteUser = useCallback(() => console.warn("deleteUser: Use backend API"), []);
-  const toggleUserStatus = useCallback(() => console.warn("toggleUserStatus: Use backend API"), []);
-
-  const value = useMemo(() => ({
-    currentUser,
-    allUsers: users,
-    allAdmins: users.filter((u) => AuthUtils.isPrivilegedRole(u.role)),
-    login,
-    logout,
-    addUser,
-    deleteUser,
-    toggleUserStatus,
-    canAccessPage,
-    canDoAction,
-  }), [currentUser, users, login, logout, addUser, deleteUser, toggleUserStatus, canAccessPage, canDoAction]);
-
-
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
+      // Update current user if they are the one being edited
+      if (currentUser && currentUser.id === userId) {
+        const updatedUser = { ...currentUser, pagePermissions: permissions };
+        setCurrentUser(updatedUser);
+        localStorage.setItem("user", JSON.stringify(updatedUser));
+      }
+    },
+    [currentUser],
   );
+
+  const toggleUserStatus = useCallback((id: string) => {
+    setUsers((prev) =>
+      prev.map((user) =>
+        user.id === id ? { ...user, isActive: !user.isActive } : user,
+      ),
+    );
+  }, []);
+
+  const deleteUser = useCallback((id: string) => {
+    setUsers((prev) => prev.filter((user) => user.id !== id));
+  }, []);
+
+  const addUser = useCallback(() => {
+    console.warn("addUser: Implement API call");
+  }, []);
+
+  const { canAccessPage: rawCanAccessPage, canDoAction: rawCanDoAction } =
+    AuthUtils.createPermissionCheckers(currentUser);
+
+  const canAccessPage = useCallback(
+    (page: PageKey) => rawCanAccessPage(page),
+    [rawCanAccessPage],
+  );
+  const canDoAction = useCallback(
+    (page: PageKey, action: PageAction) => rawCanDoAction(page, action),
+    [rawCanDoAction],
+  );
+
+  const value = useMemo(
+    () => ({
+      currentUser,
+      allUsers: users,
+      allAdmins: users.filter((u) => AuthUtils.isPrivilegedRole(u.role)),
+      login,
+      logout,
+      addUser,
+      deleteUser,
+      toggleUserStatus,
+      updateUserPagePermissions,
+      canAccessPage,
+      canDoAction,
+    }),
+    [
+      currentUser,
+      users,
+      login,
+      logout,
+      addUser,
+      deleteUser,
+      toggleUserStatus,
+      updateUserPagePermissions,
+      canAccessPage,
+      canDoAction,
+    ],
+  );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
