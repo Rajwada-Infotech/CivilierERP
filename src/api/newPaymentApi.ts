@@ -1,5 +1,10 @@
 const BASE_URL = "/api/new-payment"
 
+const getAuthHeaders = () => ({
+  "Content-Type": "application/json",
+  Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
+});
+
 export const getPayments = async () => {
   const res = await fetch(BASE_URL)
   if (!res.ok) throw new Error(`GET failed: ${res.status}`)
@@ -9,7 +14,6 @@ export const getPayments = async () => {
 export const addPayment = async (data: Record<string, unknown>) => {
   const res = await fetch(BASE_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   })
   if (!res.ok) { const err = await res.json(); throw new Error(err.error || "POST failed") }
@@ -19,7 +23,6 @@ export const addPayment = async (data: Record<string, unknown>) => {
 export const updatePayment = async (id: string, data: Record<string, unknown>) => {
   const res = await fetch(`${BASE_URL}/${id}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   })
   if (!res.ok) { const err = await res.json(); throw new Error(err.error || "PUT failed") }

@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
 
 const SALT_ROUNDS = 12;
 
@@ -25,10 +26,33 @@ router.post("/login", async (req, res) => {
     const match = await bcrypt.compare(password, user.password);
     if (!match) return res.status(401).json({ error: "Invalid credentials" });
 
+    // 🔐 REMOVE PASSWORD
     const { password: _pw, ...safeUser } = user;
-    res.json({ success: true, user: safeUser });
+
+    // 🔥 CREATE TOKEN (with better structure)
+    const token = jwt.sign(
+      {
+        userId: user.id,
+        role: user.role,
+        email: user.email
+      },
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" }
+    );
+
+// Audit log
+    console.log(`User ${safeUser.email} logged in at ${new Date().toISOString()} from IP ${req.ip}`);
+
+    // ✅ RESPONSE
+    res.json({
+      success: true,
+      token,
+      user: safeUser
+    });
+
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("Login Error:", err); // ✅ important for debugging
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 

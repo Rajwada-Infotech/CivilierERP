@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useCallback } from "react";
+import { loginUser } from "../api/userApi";
 
 export type UserRole = "super_admin" | "admin" | "user" | "dba";
 
@@ -53,7 +54,6 @@ export interface AppUser {
   initials: string;
   pagePermissions: PagePermission[];
   isActive: boolean;
-  createdBy?: string;
 }
 
 /* =========================
@@ -73,14 +73,7 @@ export const PAGE_DEFINITIONS = [
     path: "/transactions",
     group: "Main",
     availableActions: [
-      "view",
-      "create",
-      "edit",
-      "delete",
-      "print",
-      "export",
-      "approve",
-      "reject",
+      "view", "create", "edit", "delete", "print", "export", "approve", "reject",
     ],
   },
   {
@@ -209,7 +202,7 @@ export const PAGE_DEFINITIONS = [
 ========================= */
 const FULL_ACCESS: PagePermission[] = PAGE_DEFINITIONS.map((p) => ({
   page: p.key as PageKey,
-  actions: [...p.availableActions],
+  actions: [...p.availableActions] as PageAction[],
 }));
 
 const DEFAULT_USER_ACCESS: PagePermission[] = [
@@ -217,83 +210,27 @@ const DEFAULT_USER_ACCESS: PagePermission[] = [
   { page: "reports", actions: ["view"] },
 ];
 
-/* =========================
-   DEMO USERS - Plain text passwords (Development Mode)
-========================= */
-export const DEMO_USERS = [
-  {
-    id: "u-super-1",
-    name: "Super Admin",
-    email: "superadmin@civilier.com",
-    password: "super123",
-    role: "super_admin" as UserRole,
-    initials: "SA",
-    pagePermissions: FULL_ACCESS,
-    isActive: true,
-  },
-  {
-    id: "u-admin-1",
-    name: "Admin User",
-    email: "admin@civilier.com",
-    password: "admin123",
-    role: "admin" as UserRole,
-    initials: "AU",
-    pagePermissions: FULL_ACCESS,
-    isActive: true,
-  },
-  {
-    id: "u-dba-1",
-    name: "DB Admin",
-    email: "dba@civilier.com",
-    password: "dba123",
-    role: "dba" as UserRole,
-    initials: "DB",
-    pagePermissions: FULL_ACCESS,
-    isActive: true,
-  },
-  {
-    id: "u-user-1",
-    name: "Rajesh Kumar",
-    email: "rajesh@civilier.com",
-    password: "user123",
-    role: "user" as UserRole,
-    initials: "RK",
-    pagePermissions: FULL_ACCESS,
-    isActive: true,
-  },
-  {
-    id: "u-user-2",
-    name: "Meena Patel",
-    email: "meena@civilier.com",
-    password: "user123",
-    role: "user" as UserRole,
-    initials: "MP",
-    pagePermissions: DEFAULT_USER_ACCESS,
-    isActive: true,
-  },
-  {
-    id: "u-user-3",
-    name: "Dinesh Sharma",
-    email: "dinesh@civilier.com",
-    password: "user123",
-    role: "user" as UserRole,
-    initials: "DS",
-    pagePermissions: DEFAULT_USER_ACCESS,
-    isActive: false,
-  },
-];
+const getPermissionsByRole = (role: UserRole): PagePermission[] => {
+  if (["super_admin", "admin", "dba"].includes(role)) return FULL_ACCESS;
+  return DEFAULT_USER_ACCESS;
+};
+
+const getInitials = (name: string) =>
+  name
+    .split(" ")
+    .map((n) => n[0])
+    .join("")
+    .toUpperCase()
+    .slice(0, 2);
 
 /* =========================
-   CONTEXT
+   CONTEXT TYPE
 ========================= */
 interface AuthContextType {
   currentUser: AppUser | null;
   allUsers: AppUser[];
   allAdmins: AppUser[];
-  login: (
-    email: string,
-    password: string,
-  ) => { success: boolean; error?: string; role?: UserRole };
+  login: (email: string, password: string) => Promise<{ success: boolean; error?: string; role?: UserRole }>;
   logout: () => void;
   addUser: (user: Omit<AppUser, "id"> & { password: string }) => void;
   deleteUser: (id: string) => void;
@@ -310,6 +247,9 @@ export const useAuth = () => {
   return ctx;
 };
 
+/* =========================
+   PROVIDER
+========================= */
 export const AuthProvider = ({
   children,
   onLoginSuccess,
@@ -319,34 +259,74 @@ export const AuthProvider = ({
   onLoginSuccess?: (user: AppUser) => void;
   onLogoutSuccess?: (user: AppUser) => void;
 }) => {
-  const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
-  const [users, setUsers] = useState<any[]>(DEMO_USERS);
+  // Restore user from localStorage on refresh
+  const [currentUser, setCurrentUser] = useState<AppUser | null>(() => {
+    const stored = localStorage.getItem("user");
+    return stored ? JSON.parse(stored) : null;
+  });
+
+  const [users, setUsers] = useState<AppUser[]>([]);
+
+  // Token expiry validation
+  useEffect(() => {
+    const token = localStorage.getItem("token");
+
+    if (!token) return;
+
+    try {
+      const payload = JSON.parse(atob(token.split(".")[1]));
+      if (payload.exp * 1000 < Date.now()) {
+        logout();
+      }
+    } catch {
+      logout();
+    }
+  }, []);
 
   const login = useCallback(
-    (email: string, password: string) => {
-      const user = users.find(
-        (u) => u.email.toLowerCase() === email.toLowerCase(),
-      );
+    async (email: string, password: string) => {
+      try {
+        const data = await loginUser(email, password);
 
-      if (!user) return { success: false, error: "Invalid credentials" };
-      if (!user.isActive) return { success: false, error: "User inactive" };
+        if (!data.success) {
+          return { success: false, error: "Invalid credentials" };
+        }
 
-      // Plain text comparison - Perfect for development
-      if (user.password !== password) {
-        return { success: false, error: "Invalid credentials" };
+        const { token, user } = data;
+
+        // Save token
+        localStorage.setItem("token", token);
+
+        // Build AppUser from backend response
+        const appUser: AppUser = {
+          id: String(user.id),
+          name: user.name,
+          email: user.email,
+          role: user.role as UserRole,
+          initials: getInitials(user.name),
+          pagePermissions: getPermissionsByRole(user.role as UserRole),
+          isActive: !user.discontinue,
+        };
+
+        localStorage.setItem("user", JSON.stringify(appUser));
+        setCurrentUser(appUser);
+        onLoginSuccess?.(appUser);
+
+        return { success: true, role: appUser.role };
+      } catch (err: any) {
+        return {
+          success: false,
+          error: err?.message || "Login failed. Check credentials.",
+        };
       }
-
-      const { password: _pw, ...safeUser } = user;
-      setCurrentUser(safeUser);
-      onLoginSuccess?.(safeUser);
-
-      return { success: true, role: safeUser.role as UserRole };
     },
-    [users, onLoginSuccess],
+    [onLoginSuccess]
   );
 
   const logout = () => {
     if (currentUser) onLogoutSuccess?.(currentUser);
+    localStorage.removeItem("token");
+    localStorage.removeItem("user");
     setCurrentUser(null);
   };
 
@@ -365,9 +345,8 @@ export const AuthProvider = ({
     if (!currentUser) return false;
     if (isPrivilegedRole(currentUser.role)) return true;
     if (ADMIN_ONLY_PAGES.includes(page)) return false;
-
     return currentUser.pagePermissions.some(
-      (p) => p.page === page && p.actions.includes("view"),
+      (p) => p.page === page && p.actions.includes("view")
     );
   };
 
@@ -375,9 +354,8 @@ export const AuthProvider = ({
     if (!currentUser) return false;
     if (isPrivilegedRole(currentUser.role)) return true;
     if (ADMIN_ONLY_PAGES.includes(page)) return false;
-
     return currentUser.pagePermissions.some(
-      (p) => p.page === page && p.actions.includes(action),
+      (p) => p.page === page && p.actions.includes(action)
     );
   };
 
@@ -400,7 +378,7 @@ export const AuthProvider = ({
 
   const toggleUserStatus = (id: string) => {
     setUsers((prev) =>
-      prev.map((u) => (u.id === id ? { ...u, isActive: !u.isActive } : u)),
+      prev.map((u) => (u.id === id ? { ...u, isActive: !u.isActive } : u))
     );
   };
 

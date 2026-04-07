@@ -1,7 +1,22 @@
 require("dotenv").config();
 const express = require("express");
+const helmet = require("helmet");
+const morgan = require("morgan");
 const cors = require("cors");
 const { connectDB } = require("./db");
+const authMiddleware = require("./middleware/auth");
+const rateLimit = require("express-rate-limit");
+
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 10, // max 10 attempts
+  message: { error: "Too many login attempts. Try again later." },
+});
+
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 200, // adjust as needed
+});
 
 const ALLOWED_ORIGINS = [
   "http://localhost:8080",
@@ -13,54 +28,64 @@ const ALLOWED_ORIGINS = [
 async function startServer() {
   try {
     await connectDB();
+const app = express();
+    app.disable("x-powered-by");
 
-    const app = express();
-
+    app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
+    app.use(helmet());
+    app.use(morgan("dev"));
     app.use(
       cors({
-        origin: (origin, cb) => {
+origin: (origin, cb) => {
           if (!origin || ALLOWED_ORIGINS.includes(origin)) {
             cb(null, true);
           } else {
             cb(new Error("Not allowed by CORS"));
           }
         },
-      }),
+        credentials: true,
+      })
     );
-
-    app.use(express.json());
 
     app.get("/", (req, res) => res.send("CivilierERP API running"));
 
-    // All your routes
+    // Rate limiters
+    app.use("/api/users/login", loginLimiter);
+    app.use("/api", apiLimiter);
+
+    // Public
     app.use("/api/users", require("./routes/users"));
-    app.use("/api/account-group", require("./routes/accountGroup"));
-    app.use("/api/account-head", require("./routes/accountHeadMaster"));
-    app.use("/api/activity-master", require("./routes/activityMaster"));
-    app.use("/api/bank-master", require("./routes/bankMaster"));
-    app.use("/api/billing-terms", require("./routes/billingTerms"));
-    app.use("/api/card-master", require("./routes/cardMaster"));
-    app.use("/api/cheque-master", require("./routes/chequeMaster"));
-    app.use("/api/document-type", require("./routes/documentType"));
-    app.use("/api/fin-year", require("./routes/finYear"));
-    app.use("/api/hsn", require("./routes/hsn"));
-    app.use("/api/item-groups", require("./routes/itemGroup"));
-    app.use("/api/tds-master", require("./routes/tdsMaster"));
-    app.use("/api/enterprises", require("./routes/enterprise"));
-    app.use("/api/entry-type", require("./routes/entryType"));
-    app.use("/api/expense-booking", require("./routes/expenseBooking"));
-    app.use("/api/new-payment", require("./routes/newPayment"));
-    app.use("/api/purchase-orders", require("./routes/purchaseOrders"));
-    app.use("/api/tenants", require("./routes/tenants"));
-    app.use("/api/dba", require("./routes/dba"));
-    app.use("/api/work-orders", require("./routes/workOrder"));
-    app.use("/api/user-profile", require("./routes/userProfile"));
-    app.use("/api/uom-master", require("./routes/uomMaster"));
-    app.use("/api/debit-note", require("./routes/debitNote"));
+
+    // Protected
+    const allowRoles = require("./middleware/role");
+
+    app.use("/api/account-group", authMiddleware, require("./routes/accountGroup"));
+    app.use("/api/account-head", authMiddleware, require("./routes/accountHeadMaster"));
+    app.use("/api/activity-master", authMiddleware, require("./routes/activityMaster"));
+    app.use("/api/bank-master", authMiddleware, require("./routes/bankMaster"));
+    app.use("/api/billing-terms", authMiddleware, require("./routes/billingTerms"));
+    app.use("/api/card-master", authMiddleware, require("./routes/cardMaster"));
+    app.use("/api/cheque-master", authMiddleware, require("./routes/chequeMaster"));
+    app.use("/api/document-type", authMiddleware, require("./routes/documentType"));
+    app.use("/api/fin-year", authMiddleware, require("./routes/finYear"));
+    app.use("/api/hsn", authMiddleware, require("./routes/hsn"));
+    app.use("/api/item-groups", authMiddleware, require("./routes/itemGroup"));
+    app.use("/api/tds-master", authMiddleware, require("./routes/tdsMaster"));
+    app.use("/api/enterprises", authMiddleware, require("./routes/enterprise"));
+    app.use("/api/entry-type", authMiddleware, require("./routes/entryType"));
+    app.use("/api/expense-booking", authMiddleware, require("./routes/expenseBooking"));
+    app.use("/api/new-payment", authMiddleware, require("./routes/newPayment"));
+    app.use("/api/purchase-orders", authMiddleware, require("./routes/purchaseOrders"));
+    app.use("/api/tenants", authMiddleware, require("./routes/tenants"));
+    app.use("/api/dba", authMiddleware, allowRoles("dba", "admin"), require("./routes/dba"));
+    app.use("/api/work-orders", authMiddleware, require("./routes/workOrder"));
+    app.use("/api/user-profile", authMiddleware, require("./routes/userProfile"));
+    app.use("/api/uom-master", authMiddleware, require("./routes/uomMaster"));
+    app.use("/api/debit-note", authMiddleware, require("./routes/debitNote"));
 
     const PORT = process.env.PORT || 5000;
     app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
-
     return app;
   } catch (err) {
     console.error("Failed to start server:", err.message);
@@ -68,11 +93,7 @@ async function startServer() {
   }
 }
 
-// ==================== VERCEL SERVERLESS WRAPPER ====================
-// This part makes Vercel happy while keeping local behavior unchanged
-
 const appPromise = startServer();
-
 module.exports = async (req, res) => {
   const app = await appPromise;
   return app(req, res);
