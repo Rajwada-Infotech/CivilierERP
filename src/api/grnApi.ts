@@ -8,7 +8,7 @@ const getAuthHeaders = () => ({
 export interface Supplier {
   LHeadId: number;
   LHeadName: string;
-  LHeadType?: string; // ← Added this to fix the error
+  LHeadType?: string;
 }
 
 export interface PurchaseOrder {
