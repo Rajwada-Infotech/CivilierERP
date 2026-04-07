@@ -5,8 +5,6 @@ const getAuthHeaders = () => ({
   Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
 });
 
-// ====================== Purchase Order CRUD Operations ======================
-
 export const getPurchaseOrders = async () => {
   const res = await fetch(BASE);
   if (!res.ok) throw new Error(`GET failed: ${res.status}`);
