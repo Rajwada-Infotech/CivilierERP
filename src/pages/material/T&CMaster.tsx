@@ -1,78 +1,82 @@
-import React from "react"
-import { Breadcrumbs } from "@/components/Breadcrumbs"
+import React from "react";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   MasterPage,
   type ColumnDef,
   type FieldDef,
   type DataChangeEvent,
   type RecordWithId,
-} from "@/components/MasterPage"
-import { FileText } from "lucide-react"
-import { useQuery, useQueryClient } from "@tanstack/react-query"
-import { toast } from "sonner"
-import { getTCRecords, addTCRecord, updateTCRecord, deleteTCRecord } from "@/api/tcMasterApi"
+} from "@/components/MasterPage";
+import { FileText } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import {
+  getTCRecords,
+  addTCRecord,
+  updateTCRecord,
+  deleteTCRecord,
+} from "@/api/tcMasterApi";
 
 // ─── DB shape ────────────────────────────────────────────────────────────────
 interface DbTC {
-  Id:                number
-  Name:              string
-  TermsAndCondition: string
-  Remarks:           string | null
-  isActive:          boolean
+  Id: number;
+  Name: string;
+  TermsAndCondition: string;
+  Remarks: string | null;
+  isActive: boolean;
 }
 
 // ─── Map DB → UI row ─────────────────────────────────────────────────────────
 const toRow = (item: DbTC): RecordWithId => ({
-  _id:    item.Id,
-  name:   item.Name              || "",
-  terms:  item.TermsAndCondition || "",
-  remarks:item.Remarks           || "",
+  _id: String(item.Id), // Keep as string for MasterPage
+  name: item.Name || "",
+  terms: item.TermsAndCondition || "",
+  remarks: item.Remarks || "",
   status: item.isActive,
-})
+});
 
 // ─── Map UI row → DB payload ──────────────────────────────────────────────────
 const toPayload = (r: Record<string, unknown>) => ({
-  Name:              (r.name   as string) || null,
-  TermsAndCondition: (r.terms  as string) || null,
-  Remarks:           (r.remarks as string) || null,
-  isActive:          r.status !== false,
-})
+  Name: (r.name as string) || null,
+  TermsAndCondition: (r.terms as string) || null,
+  Remarks: (r.remarks as string) || null,
+  isActive: r.status !== false,
+});
 
 // ─── Field & Column definitions ───────────────────────────────────────────────
 const FIELDS: FieldDef[] = [
   {
-    name:      "name",
-    label:     "Name",
-    type:      "text",
-    required:  true,
-    uppercase: true,
+    name: "name",
+    label: "Name",
+    type: "text",
+    required: true,
   },
   {
-    name:      "terms",
-    label:     "Terms & Condition",
-    type:      "textarea",
+    name: "terms",
+    label: "Terms & Condition",
+    type: "textarea",
     fullWidth: true,
-    required:  true,
+    required: true,
   },
   {
-    name:      "remarks",
-    label:     "Remarks",
-    type:      "textarea",
+    name: "remarks",
+    label: "Remarks",
+    type: "textarea",
     fullWidth: true,
   },
   {
-    name:         "status",
-    label:        "Active",
-    type:         "toggle",
+    name: "status",
+    label: "Active",
+    type: "toggle",
     defaultValue: true,
   },
-]
+];
 
 const COLUMNS: ColumnDef[] = [
-  { key: "name",   label: "Name" },
-  { key: "terms",  label: "Terms Preview" },
+  { key: "name", label: "Name" },
+  { key: "terms", label: "Terms Preview" },
   { key: "status", label: "Status" },
-]
+];
 
 // ─── Column renderers ─────────────────────────────────────────────────────────
 const columnRenderers = {
@@ -81,12 +85,16 @@ const columnRenderers = {
       <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10 text-primary">
         <FileText size={13} />
       </div>
-      <span className="font-heading font-semibold text-sm">{String(value ?? "")}</span>
+      <span className="font-heading font-semibold text-sm">
+        {String(value ?? "")}
+      </span>
     </div>
   ),
   terms: (value: unknown, row: Record<string, unknown>) => (
     <div className="max-w-xs">
-      <p className="text-xs line-clamp-2 text-foreground">{String(value ?? "")}</p>
+      <p className="text-xs line-clamp-2 text-foreground">
+        {String(value ?? "")}
+      </p>
       {row.remarks && (
         <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-1">
           {String(row.remarks)}
@@ -108,53 +116,62 @@ const columnRenderers = {
       {value ? "Active" : "Inactive"}
     </span>
   ),
-}
+};
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function TCMaster() {
-  const queryClient = useQueryClient()
+  const queryClient = useQueryClient();
 
-  const { data: dbData, isLoading, error } = useQuery({
+  const {
+    data: dbData,
+    isLoading,
+    error,
+  } = useQuery({
     queryKey: ["tc-master"],
-    queryFn:  getTCRecords,
-  })
+    queryFn: getTCRecords,
+  });
 
-  const rows: RecordWithId[] = Array.isArray(dbData) ? dbData.map(toRow) : []
+  const rows: RecordWithId[] = Array.isArray(dbData) ? dbData.map(toRow) : [];
 
   const handleDataEvent = async (event: DataChangeEvent) => {
     if (event.action === "add") {
       try {
-        await addTCRecord(toPayload(event.record))
-        toast.success("T&C record saved!")
-        await queryClient.invalidateQueries({ queryKey: ["tc-master"] })
+        await addTCRecord(toPayload(event.record));
+        toast.success("T&C record saved!");
+        await queryClient.invalidateQueries({ queryKey: ["tc-master"] });
       } catch (err: any) {
-        toast.error("Save failed: " + err.message)
+        toast.error("Save failed: " + err.message);
       }
     }
 
     if (event.action === "update") {
       try {
-        await updateTCRecord(Number(event.id), toPayload(event.record))
-        toast.success("T&C record updated!")
-        await queryClient.invalidateQueries({ queryKey: ["tc-master"] })
+        await updateTCRecord(Number(event.id), toPayload(event.record)); // Convert back to number
+        toast.success("T&C record updated!");
+        await queryClient.invalidateQueries({ queryKey: ["tc-master"] });
       } catch (err: any) {
-        toast.error("Update failed: " + err.message)
+        toast.error("Update failed: " + err.message);
       }
     }
 
     if (event.action === "delete") {
       try {
-        await deleteTCRecord(Number(event.id))
-        toast.success("T&C record deleted!")
-        await queryClient.invalidateQueries({ queryKey: ["tc-master"] })
+        await deleteTCRecord(Number(event.id)); // Convert back to number
+        toast.success("T&C record deleted!");
+        await queryClient.invalidateQueries({ queryKey: ["tc-master"] });
       } catch (err: any) {
-        toast.error("Delete failed: " + err.message)
+        toast.error("Delete failed: " + err.message);
       }
     }
-  }
+  };
 
-  if (isLoading) return <div className="p-6 text-muted-foreground">Loading...</div>
-  if (error)     return <div className="p-6 text-red-500">Failed to load T&amp;C records.</div>
+  if (isLoading)
+    return <div className="p-6 text-muted-foreground">Loading...</div>;
+
+  if (error)
+    return (
+      <div className="p-6 text-red-500">Failed to load T&amp;C records.</div>
+    );
 
   return (
     <>
@@ -168,5 +185,5 @@ export default function TCMaster() {
         onDataEvent={handleDataEvent}
       />
     </>
-  )
+  );
 }
