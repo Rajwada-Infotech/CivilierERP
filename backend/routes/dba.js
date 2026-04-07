@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const { getPool } = require("../db");
+const { getPool, sql } = require("../db");
 
 // ======================
 //  DBA ROUTES - SECURED
