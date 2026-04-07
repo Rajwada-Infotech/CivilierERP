@@ -1,23 +1,52 @@
-# Replace ExpensesMaster.tsx with Real GeneralLedgerMaster
+# API Auth Headers Update Plan
 
-## Plan Breakdown & Progress
+## Status: In Progress
 
-**Approved Plan**: Replace `src/pages/masters/ExpensesMaster.tsx` with real API version from GeneralLedgerMaster.tsx (no Short Code, real POST to /api/account-head).
+**Completed:** 4/16 files (Batch 1 ✅)
 
-### Steps:
-- [x] Step 1: Create TODO.md with plan steps
-- [x] Step 2: Replace full contents of `src/pages/masters/ExpensesMaster.tsx` with real GeneralLedgerMaster.tsx code (fixed syntax/ESLint/a11y issues)
-- [x] Step 3: Hard refresh browser complete (Vite HMR recovered)
-- [ ] Step 4: Test Save Account → inspect network tab for `account-head` POST (Headers & Response)
-- [x] Step 5: Mark complete
+**Remaining Files (12 total):**
+5. src/api/grnApi.ts
+6. src/api/purchaseOrdersApi.ts
+7. src/api/newPaymentApi.ts
+8. src/api/itemGroupApi.ts
+9. src/api/uomApi.ts
+10. src/api/tenantApi.ts
+11. src/api/dbaApi.ts
+12. src/api/debitNoteApi.ts
+13. src/api/documentTyoeApi.ts
+14. src/api/userProfileApi.ts
+15. src/api/workOrderApi.ts
 
-**Current Status**: File fixed and compiles cleanly! Backend `/api/account-head` POST ready (expects LHeadName/LHeadType/LBelongsTo, fills defaults for other fields).
+**Batch Progress:**
+- Batch 1 (4 files): Complete ✅
+- Batch 2 (4 files): Pending  
+- Batch 3 (4 files): Pending
+- Batch 4 (3 files): Pending
+5. ✅ src/api/grnApi.ts
+6. ✅ src/api/purchaseOrdersApi.ts
+7. ✅ src/api/newPaymentApi.ts
+8. ✅ src/api/itemGroupApi.ts
+9. ✅ src/api/uomApi.ts
+10. ✅ src/api/tenantApi.ts
+11. ✅ src/api/dbaApi.ts
+12. ✅ src/api/debitNoteApi.ts
+13. ✅ src/api/documentTyoeApi.ts
+14. ✅ src/api/userProfileApi.ts
+15. ✅ src/api/workOrderApi.ts
 
-**Test now**:
-1. Navigate to Expenses page
-2. Fill: Account Name (required), Type, Group (optional)
-3. Click **Save Account**
-4. **Network tab → account-head → Headers/Response**
+**Batch Progress:**
+- Batch 1 (4 files): Pending
+- Batch 2 (4 files): Pending  
+- Batch 3 (4 files): Pending
+- Batch 4 (4 files): Pending
 
-Backend will receive real POST and show response!
+**Next Steps:**
+- Verify no lint errors
+- Test API calls post-update
+- User will provide final login test checklist
+
+**Notes:** 
+- All files get `getAuthHeaders()` helper after BASE_URL
+- Add `headers: getAuthHeaders()` to ALL fetch calls (except userApi.ts login)
+- Preserve exact error handling, types, signatures
 

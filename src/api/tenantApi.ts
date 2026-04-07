@@ -24,7 +24,6 @@ export const createTenant = async (data: {
 }) => {
   const res = await fetch(BASE, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error("Failed to create tenant");
@@ -44,7 +43,6 @@ export const updateTenant = async (id: string, data: Partial<{
 }>) => {
   const res = await fetch(`${BASE}/${id}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error("Failed to update tenant");
@@ -54,7 +52,6 @@ export const updateTenant = async (id: string, data: Partial<{
 export const patchTenantStatus = async (id: string, status: "active" | "suspended") => {
   const res = await fetch(`${BASE}/${id}/status`, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ status }),
   });
   if (!res.ok) throw new Error("Failed to update tenant status");

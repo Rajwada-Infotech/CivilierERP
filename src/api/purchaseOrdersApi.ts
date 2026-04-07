@@ -1,5 +1,10 @@
 const BASE = "/api/purchase-orders";
 
+const getAuthHeaders = () => ({
+  "Content-Type": "application/json",
+  Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
+});
+
 export const getPurchaseOrders = async () => {
   const res = await fetch(BASE);
   if (!res.ok) throw new Error(`GET failed: ${res.status}`);
@@ -9,7 +14,6 @@ export const getPurchaseOrders = async () => {
 export const addPurchaseOrder = async (data: Record<string, unknown>) => {
   const res = await fetch(BASE, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -22,7 +26,6 @@ export const addPurchaseOrder = async (data: Record<string, unknown>) => {
 export const updatePurchaseOrder = async (id: string, data: Record<string, unknown>) => {
   const res = await fetch(`${BASE}/${id}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
   if (!res.ok) {
