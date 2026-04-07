@@ -5,6 +5,8 @@ const getAuthHeaders = () => ({
   Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
 });
 
+// ====================== Purchase Order CRUD Operations ======================
+
 export const getPurchaseOrders = async () => {
   const res = await fetch(BASE);
   if (!res.ok) throw new Error(`GET failed: ${res.status}`);
@@ -14,22 +16,29 @@ export const getPurchaseOrders = async () => {
 export const addPurchaseOrder = async (data: Record<string, unknown>) => {
   const res = await fetch(BASE, {
     method: "POST",
+    headers: getAuthHeaders(),
     body: JSON.stringify(data),
   });
+
   if (!res.ok) {
-    const err = await res.json();
+    const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "POST failed");
   }
   return res.json();
 };
 
-export const updatePurchaseOrder = async (id: string, data: Record<string, unknown>) => {
+export const updatePurchaseOrder = async (
+  id: string,
+  data: Record<string, unknown>,
+) => {
   const res = await fetch(`${BASE}/${id}`, {
     method: "PUT",
+    headers: getAuthHeaders(),
     body: JSON.stringify(data),
   });
+
   if (!res.ok) {
-    const err = await res.json();
+    const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "PUT failed");
   }
   return res.json();
@@ -38,15 +47,18 @@ export const updatePurchaseOrder = async (id: string, data: Record<string, unkno
 export const deletePurchaseOrder = async (id: string) => {
   const res = await fetch(`${BASE}/${id}`, {
     method: "DELETE",
+    headers: getAuthHeaders(),
   });
+
   if (!res.ok) {
-    const err = await res.json();
+    const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "DELETE failed");
   }
   return res.json();
 };
 
-// Helpers for dropdowns
+// ====================== Helper Functions for Dropdowns ======================
+
 export const getSuppliers = async () => {
   const res = await fetch("/api/account-head");
   if (!res.ok) throw new Error("Suppliers fetch failed");
@@ -59,4 +71,3 @@ export const getItems = async () => {
   if (!res.ok) throw new Error("Items fetch failed");
   return res.json();
 };
-
