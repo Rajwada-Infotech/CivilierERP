@@ -1,7 +1,14 @@
 const BASE_URL = "/api/hsn"
 
+const getAuthHeaders = () => ({
+  "Content-Type": "application/json",
+  Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
+});
+
 export const getHsn = async () => {
-  const res = await fetch(BASE_URL)
+  const res = await fetch(BASE_URL, {
+    headers: getAuthHeaders(),
+  })
   if (!res.ok) throw new Error(`GET failed: ${res.status}`)
   return res.json()
 }
@@ -9,7 +16,7 @@ export const getHsn = async () => {
 export const addHsn = async (data: Record<string, unknown>) => {
   const res = await fetch(BASE_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getAuthHeaders(),
     body: JSON.stringify(data),
   })
   if (!res.ok) {
@@ -22,7 +29,7 @@ export const addHsn = async (data: Record<string, unknown>) => {
 export const updateHsn = async (code: string, data: Record<string, unknown>) => {
   const res = await fetch(`${BASE_URL}/${code}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    headers: getAuthHeaders(),
     body: JSON.stringify(data),
   })
   if (!res.ok) {
@@ -35,6 +42,7 @@ export const updateHsn = async (code: string, data: Record<string, unknown>) => 
 export const deleteHsn = async (code: string) => {
   const res = await fetch(`${BASE_URL}/${code}`, {
     method: "DELETE",
+    headers: getAuthHeaders(),
   })
   if (!res.ok) {
     const err = await res.json()

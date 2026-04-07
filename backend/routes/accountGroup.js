@@ -5,7 +5,7 @@ const { getPool, sql } = require("../db")
 router.get("/", async (req, res) => {
   try {
     const pool = getPool()
-    const result = await pool.request().query("SELECT * FROM dbo.AccountGroup")
+    const result = await pool.request().query("SELECT ISNULL(Name, CONCAT('Unnamed-', AGId)) AS Name, AGId, Code, ParentGroupId, Status, CreatedAt, UpdatedAt FROM dbo.AccountGroup ORDER BY Name ASC")
     res.json(result.recordset)
   } catch (err) { res.status(500).json({ error: err.message }) }
 })

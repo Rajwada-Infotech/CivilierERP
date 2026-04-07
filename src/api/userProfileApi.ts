@@ -9,7 +9,6 @@ export const getUserProfile = async (id: number) => {
 export const updateUserProfile = async (id: number, data: { name: string }) => {
   const res = await fetch(`${BASE}/${id}/profile`, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error("Failed to update profile");
@@ -23,7 +22,6 @@ export const changePassword = async (
 ) => {
   const res = await fetch(`${BASE}/${id}/change-password`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ current_password, new_password }),
   });
   if (!res.ok) {
