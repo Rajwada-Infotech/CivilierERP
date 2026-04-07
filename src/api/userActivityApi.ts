@@ -12,8 +12,31 @@ interface UserActivityLog {
   deviceInfo: string
 }
 
-export const getUserActivityLogs = async (): Promise<UserActivityLog[]> => {
-  const response = await fetchWithAuth('/api/user-activity')
+interface PaginatedResponse<T> {
+  data: T[]
+  total: number
+  page: number
+  limit: number
+  pages: number
+}
+
+export const getUserActivityLogs = async (params: {
+  page?: number
+  limit?: number
+  search?: string
+  event?: string
+  role?: string
+  sort?: string
+  order?: 'asc' | 'desc'
+} = {}): Promise<PaginatedResponse<UserActivityLog[]>> => {
+  const url = new URL('/api/user-activity', window.location.origin)
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== '') {
+      url.searchParams.set(key, String(value))
+    }
+  })
+  
+  const response = await fetchWithAuth(url.pathname + url.search)
   if (!response.ok) throw new Error('Failed to fetch activity logs')
   return response.json()
 }

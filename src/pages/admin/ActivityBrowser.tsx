@@ -1,9 +1,18 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   useActivityBrowser,
   SessionEvent,
+  PaginatedActivity,
 } from "@/contexts/ActivityBrowserContext";
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationNext,
+  PaginationPrevious,
+} from "@/components/ui/pagination";
 import {
   LogIn,
   LogOut,
@@ -35,7 +44,6 @@ const EVENT_COLORS = {
     dot: "bg-slate-500",
   },
 };
-
 
 const ROLE_COLORS: Record<string, string> = {
   super_admin: "bg-violet-500/10 text-violet-600 border-violet-500/20",
@@ -70,69 +78,53 @@ type SortKey = "timestamp" | "userName" | "event";
 type SortDir = "asc" | "desc";
 
 const ActivityBrowser: React.FC = () => {
-  const { sessions, clearAll } = useActivityBrowser();
+  const { activity, isLoading, setFilters, setPage, clearAll, refresh } =
+    useActivityBrowser();
 
   const [search, setSearch] = useState("");
-  const [filterEvent, setFilterEvent] = useState<"all" | "login" | "logout">(
-    "all",
-  );
-  const [filterRole, setFilterRole] = useState<
-    "all" | "super_admin" | "admin" | "user"
-  >("all");
+  const [filterEvent, setFilterEvent] = useState<"all" | "login" | "logout">("all");
+  const [filterRole, setFilterRole] = useState<"all" | "super_admin" | "admin" | "user">("all");
   const [sortKey, setSortKey] = useState<SortKey>("timestamp");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [confirmClear, setConfirmClear] = useState(false);
 
-  const filtered = useMemo(() => {
-    let list = [...sessions];
+  // Debounced search & filters (including sort)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setFilters({
+        search: search.trim() || undefined,
+        event: filterEvent === "all" ? undefined : filterEvent,
+        role: filterRole === "all" ? undefined : filterRole,
+        sort: sortKey,
+        order: sortDir,
+      });
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [search, filterEvent, filterRole, sortKey, sortDir, setFilters]);
 
-    if (filterEvent !== "all")
-      list = list.filter((s) => s.event === filterEvent);
-    if (filterRole !== "all")
-      list = list.filter((s) => s.userRole === filterRole);
+  const toggleSort = useCallback(
+    (col: SortKey) => {
+      if (col === sortKey) {
+        setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+      } else {
+        setSortKey(col);
+        setSortDir("desc");
+      }
+    },
+    [sortKey]
+  );
 
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      list = list.filter(
-        (s) =>
-          s.userName.toLowerCase().includes(q) ||
-          s.userEmail.toLowerCase().includes(q) ||
-          s.ipAddress.includes(q) ||
-          s.deviceInfo.toLowerCase().includes(q),
-      );
-    }
-
-    list.sort((a, b) => {
-      let cmp = 0;
-      if (sortKey === "timestamp")
-        cmp = new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
-      else if (sortKey === "userName")
-        cmp = a.userName.localeCompare(b.userName);
-      else if (sortKey === "event") cmp = a.event.localeCompare(b.event);
-      return sortDir === "asc" ? cmp : -cmp;
-    });
-
-    return list;
-  }, [sessions, search, filterEvent, filterRole, sortKey, sortDir]);
-
-  const toggleSort = (key: SortKey) => {
-    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    else {
-      setSortKey(key);
-      setSortDir("desc");
-    }
+  const SortIcon = ({ col }: { col: SortKey }) => {
+    if (col !== sortKey) return <ChevronDown size={12} className="opacity-30" />;
+    return sortDir === "asc" ? <ChevronUp size={12} /> : <ChevronDown size={12} />;
   };
 
-  const SortIcon = ({ col }: { col: SortKey }) =>
-    sortKey === col ? (
-      sortDir === "asc" ? (
-        <ChevronUp size={13} className="text-primary" />
-      ) : (
-        <ChevronDown size={13} className="text-primary" />
-      )
-    ) : (
-      <ChevronDown size={13} className="text-muted-foreground/40" />
-    );
+  const onPageChange = useCallback(
+    (page: number) => {
+      setPage(page);
+    },
+    [setPage]
+  );
 
   return (
     <div className="space-y-6">
@@ -157,9 +149,10 @@ const ActivityBrowser: React.FC = () => {
 
         <div className="flex items-center gap-2">
           <span className="text-xs text-muted-foreground font-heading px-2 py-1 rounded-md bg-muted border border-border">
-            {sessions.length} total event{sessions.length !== 1 ? "s" : ""}
+            {activity.total} total | Page {activity.page} of {Math.max(1, activity.pages)} ({activity.data.length} shown)
           </span>
-          {sessions.length > 0 && (
+
+          {activity.total > 0 && (
             <>
               {confirmClear ? (
                 <div className="flex items-center gap-2">
@@ -196,7 +189,6 @@ const ActivityBrowser: React.FC = () => {
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3 items-center">
-        {/* Search */}
         <div className="relative flex-1 min-w-[180px] max-w-xs">
           <Search
             size={14}
@@ -210,22 +202,22 @@ const ActivityBrowser: React.FC = () => {
           />
         </div>
 
-        {/* Event filter */}
         <select
           value={filterEvent}
-          onChange={(e) => setFilterEvent(e.target.value as typeof filterEvent)}
+          onChange={(e) => setFilterEvent(e.target.value as any)}
           className="text-sm rounded-lg border border-border bg-background px-3 py-2 focus:border-primary outline-none transition-all cursor-pointer"
+          aria-label="Filter by event type"
         >
           <option value="all">All Events</option>
           <option value="login">Login only</option>
           <option value="logout">Logout only</option>
         </select>
 
-        {/* Role filter */}
         <select
           value={filterRole}
-          onChange={(e) => setFilterRole(e.target.value as typeof filterRole)}
+          onChange={(e) => setFilterRole(e.target.value as any)}
           className="text-sm rounded-lg border border-border bg-background px-3 py-2 focus:border-primary outline-none transition-all cursor-pointer"
+          aria-label="Filter by role"
         >
           <option value="all">All Roles</option>
           <option value="super_admin">Super Admin</option>
@@ -234,19 +226,23 @@ const ActivityBrowser: React.FC = () => {
         </select>
       </div>
 
-      {/* Empty state */}
-      {sessions.length === 0 ? (
+      {/* States */}
+      {isLoading ? (
+        <div className="flex flex-col items-center justify-center py-24 gap-4 text-muted-foreground">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+          Loading activity...
+        </div>
+      ) : activity.data.length === 0 && activity.total === 0 ? (
         <div className="flex flex-col items-center justify-center py-24 gap-4 text-muted-foreground border border-dashed border-border rounded-2xl bg-muted/20">
           <Clock size={40} className="opacity-20" />
           <p className="text-base font-heading font-semibold">
             No sessions recorded yet
           </p>
           <p className="text-sm text-center max-w-xs">
-            Activity will appear here whenever a user logs in or out of the
-            application.
+            Activity will appear here whenever a user logs in or out of the application.
           </p>
         </div>
-      ) : filtered.length === 0 ? (
+      ) : activity.data.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
           <Search size={32} className="opacity-20" />
           <p className="text-sm">No results match your filters.</p>
@@ -297,16 +293,17 @@ const ActivityBrowser: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {filtered.map((s, idx) => {
+                {activity.data.map((s, idx) => {
                   const { date, time } = formatDateTime(s.timestamp);
-                  const colors = EVENT_COLORS[s.event ?? "unknown"];
+                  const eventKey = (s.event ?? "unknown") as keyof typeof EVENT_COLORS;
+                  const colors = EVENT_COLORS[eventKey] ?? EVENT_COLORS.unknown;
                   return (
                     <tr
                       key={`${s.id ?? "no-id"}-${s.timestamp}-${idx}`}
                       className="hover:bg-muted/30 transition-colors"
                     >
                       <td className="px-4 py-3 text-xs text-muted-foreground">
-                        {idx + 1}
+                        {(activity.page - 1) * activity.limit + idx + 1}
                       </td>
                       <td className="px-4 py-3">
                         <span
@@ -317,7 +314,7 @@ const ActivityBrowser: React.FC = () => {
                           ) : (
                             <LogOut size={11} />
                           )}
-                          {s.event === "login" ? "Login" : "Logout"}
+                          {s.event === "login" ? "Login" : s.event === "logout" ? "Logout" : s.event ?? "Unknown"}
                         </span>
                       </td>
                       <td className="px-4 py-3">
@@ -330,17 +327,16 @@ const ActivityBrowser: React.FC = () => {
                       </td>
                       <td className="px-4 py-3">
                         <span
-                          className={`text-xs font-heading px-2 py-0.5 rounded-full border ${ROLE_COLORS[s.userRole] || ROLE_COLORS.user}`}
+                          className={`text-xs font-heading px-2 py-0.5 rounded-full border ${
+                            ROLE_COLORS[s.userRole] ?? ROLE_COLORS.user
+                          }`}
                         >
                           {roleLabel(s.userRole)}
                         </span>
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1.5 text-foreground">
-                          <Calendar
-                            size={12}
-                            className="text-muted-foreground shrink-0"
-                          />
+                          <Calendar size={12} className="text-muted-foreground shrink-0" />
                           {date}
                         </div>
                         <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-0.5">
@@ -350,10 +346,7 @@ const ActivityBrowser: React.FC = () => {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1.5 text-foreground font-mono text-xs">
-                          <Wifi
-                            size={12}
-                            className="text-muted-foreground shrink-0"
-                          />
+                          <Wifi size={12} className="text-muted-foreground shrink-0" />
                           {s.ipAddress}
                         </div>
                       </td>
@@ -372,9 +365,10 @@ const ActivityBrowser: React.FC = () => {
 
           {/* Mobile cards */}
           <div className="md:hidden space-y-3">
-            {filtered.map((s, idx) => {
+            {activity.data.map((s, idx) => {
               const { date, time } = formatDateTime(s.timestamp);
-              const colors = EVENT_COLORS[s.event ?? "unknown"];
+              const eventKey = (s.event ?? "unknown") as keyof typeof EVENT_COLORS;
+              const colors = EVENT_COLORS[eventKey] ?? EVENT_COLORS.unknown;
               return (
                 <div
                   key={`${s.id ?? "no-id"}-${s.timestamp}-${idx}`}
@@ -384,15 +378,11 @@ const ActivityBrowser: React.FC = () => {
                     <span
                       className={`inline-flex items-center gap-1.5 text-xs font-heading px-2.5 py-1 rounded-full border ${colors.badge}`}
                     >
-                      {s.event === "login" ? (
-                        <LogIn size={11} />
-                      ) : (
-                        <LogOut size={11} />
-                      )}
-                      {s.event === "login" ? "Login" : "Logout"}
+                      {s.event === "login" ? <LogIn size={11} /> : <LogOut size={11} />}
+                      {s.event === "login" ? "Login" : s.event === "logout" ? "Logout" : s.event ?? "Unknown"}
                     </span>
                     <span className="text-xs text-muted-foreground">
-                      #{idx + 1}
+                      #{(activity.page - 1) * activity.limit + idx + 1}
                     </span>
                   </div>
 
@@ -408,7 +398,9 @@ const ActivityBrowser: React.FC = () => {
                         {s.userEmail}
                       </p>
                       <span
-                        className={`mt-1 inline-block text-[10px] font-heading px-2 py-0.5 rounded-full border ${ROLE_COLORS[s.userRole] || ROLE_COLORS.user}`}
+                        className={`mt-1 inline-block text-[10px] font-heading px-2 py-0.5 rounded-full border ${
+                          ROLE_COLORS[s.userRole] ?? ROLE_COLORS.user
+                        }`}
                       >
                         {roleLabel(s.userRole)}
                       </span>
@@ -438,9 +430,61 @@ const ActivityBrowser: React.FC = () => {
             })}
           </div>
 
-          <p className="text-xs text-muted-foreground text-center">
-            Showing {filtered.length} of {sessions.length} events
-          </p>
+          {/* Pagination */}
+          <div className="flex flex-col sm:flex-row gap-4 items-center justify-center pt-6 border-t border-border">
+            <p className="text-xs text-muted-foreground text-center sm:text-left">
+              Showing{" "}
+              {activity.total === 0
+                ? 0
+                : (activity.page - 1) * activity.limit + 1}{" "}
+              to {Math.min(activity.page * activity.limit, activity.total)} of{" "}
+              {activity.total} events
+            </p>
+
+            {activity.pages > 1 && (
+              <Pagination>
+                <PaginationContent>
+                  <PaginationItem>
+                    <PaginationPrevious
+                      onClick={() => onPageChange(activity.page - 1)}
+                      className={
+                        activity.page === 1
+                          ? "pointer-events-none opacity-50"
+                          : ""
+                      }
+                    />
+                  </PaginationItem>
+
+                  {Array.from(
+                    { length: Math.min(5, activity.pages) },
+                    (_, i) => activity.page - 2 + i
+                  )
+                    .filter((p) => p >= 1 && p <= activity.pages)
+                    .map((p) => (
+                      <PaginationItem key={p}>
+                        <PaginationLink
+                          isActive={p === activity.page}
+                          onClick={() => onPageChange(p)}
+                        >
+                          {p}
+                        </PaginationLink>
+                      </PaginationItem>
+                    ))}
+
+                  <PaginationItem>
+                    <PaginationNext
+                      onClick={() => onPageChange(activity.page + 1)}
+                      className={
+                        activity.page === activity.pages
+                          ? "pointer-events-none opacity-50"
+                          : ""
+                      }
+                    />
+                  </PaginationItem>
+                </PaginationContent>
+              </Pagination>
+            )}
+          </div>
         </>
       )}
     </div>
