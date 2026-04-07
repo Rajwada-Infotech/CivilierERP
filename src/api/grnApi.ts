@@ -8,6 +8,7 @@ const getAuthHeaders = () => ({
 export interface Supplier {
   LHeadId: number;
   LHeadName: string;
+  LHeadType?: string; // ← Added this to fix the error
 }
 
 export interface PurchaseOrder {
@@ -46,6 +47,8 @@ export interface GRNFormDataPayload {
   poNumber?: string;
 }
 
+// ====================== GRN CRUD Operations ======================
+
 export const getGRNs = async (): Promise<any[]> => {
   const res = await fetch(BASE);
   if (!res.ok) throw new Error(`GET failed: ${res.status}`);
@@ -55,13 +58,15 @@ export const getGRNs = async (): Promise<any[]> => {
 export const addGRN = async (data: GRNFormDataPayload) => {
   const res = await fetch(BASE, {
     method: "POST",
+    headers: getAuthHeaders(),
     body: JSON.stringify({
       ...data,
       grnItems: JSON.stringify(data.grnItems),
     }),
   });
+
   if (!res.ok) {
-    const err = await res.json();
+    const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "POST failed");
   }
   return res.json();
@@ -70,13 +75,15 @@ export const addGRN = async (data: GRNFormDataPayload) => {
 export const updateGRN = async (id: string, data: GRNFormDataPayload) => {
   const res = await fetch(`${BASE}/${id}`, {
     method: "PUT",
+    headers: getAuthHeaders(),
     body: JSON.stringify({
       ...data,
       grnItems: JSON.stringify(data.grnItems),
     }),
   });
+
   if (!res.ok) {
-    const err = await res.json();
+    const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "PUT failed");
   }
   return res.json();
@@ -85,20 +92,24 @@ export const updateGRN = async (id: string, data: GRNFormDataPayload) => {
 export const deleteGRN = async (id: string) => {
   const res = await fetch(`${BASE}/${id}`, {
     method: "DELETE",
+    headers: getAuthHeaders(),
   });
+
   if (!res.ok) {
-    const err = await res.json();
+    const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "DELETE failed");
   }
   return res.json();
 };
 
-// Helpers (reuse from PO)
+// ====================== Helper Functions ======================
+
 export const getSuppliers = async (): Promise<Supplier[]> => {
   const res = await fetch("/api/account-head");
   if (!res.ok) throw new Error("Suppliers fetch failed");
+
   const data = await res.json();
-  return data.filter((item: Supplier) => item.LHeadType === "Supplier");
+  return data.filter((item: any) => item.LHeadType === "Supplier"); // Safe filter
 };
 
 export const getPurchaseOrders = async (): Promise<PurchaseOrder[]> => {
