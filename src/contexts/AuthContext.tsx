@@ -1,14 +1,26 @@
-import React, { createContext, useContext, useState, useCallback, useEffect, useMemo } from "react";
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useEffect,
+  useMemo,
+} from "react";
 import { loginUser } from "../api/userApi";
 
-import type { UserRole, PageKey, PageAction, PagePermission, AppUser } from './types';
-import * as AuthUtils from './auth.utils';
+import type {
+  UserRole,
+  PageKey,
+  PageAction,
+  PagePermission,
+  AppUser,
+} from "./types";
+import * as AuthUtils from "./auth.utils";
 
-
-/* =========================
-   ACCESS HELPERS
-========================= */
-
+// NOTE: useActivityBrowser is NOT imported here.
+// Activity logging is handled by AuthSessionBridge in App.tsx which passes
+// recordLogin/recordLogout as onLoginSuccess/onLogoutSuccess props — keeping
+// the hook call at the correct component level.
 
 /* =========================
    CONTEXT TYPE
@@ -17,7 +29,10 @@ interface AuthContextType {
   currentUser: AppUser | null;
   allUsers: AppUser[];
   allAdmins: AppUser[];
-  login: (email: string, password: string) => Promise<{ success: boolean; error?: string; role?: UserRole }>;
+  login: (
+    email: string,
+    password: string,
+  ) => Promise<{ success: boolean; error?: string; role?: UserRole }>;
   logout: () => void;
   addUser: (user: Omit<AppUser, "id"> & { password: string }) => void;
   deleteUser: (id: string) => void;
@@ -34,8 +49,6 @@ export const useAuth = () => {
   return ctx;
 };
 
-
-
 /* =========================
    PROVIDER
 ========================= */
@@ -49,7 +62,7 @@ export const AuthProvider = ({
   onLogoutSuccess?: (user: AppUser) => void;
 }) => {
   console.log("AuthProvider mounted");
-  // Restore user from localStorage on refresh
+
   const [currentUser, setCurrentUser] = useState<AppUser | null>(() => {
     try {
       const stored = localStorage.getItem("user");
@@ -67,27 +80,21 @@ export const AuthProvider = ({
     const validateToken = () => {
       try {
         const token = localStorage.getItem("token");
-
         if (!token) return;
-
         const parts = token.split(".");
         if (parts.length !== 3) {
           localStorage.clear();
           return;
         }
-
         const payload = JSON.parse(atob(parts[1]));
-
         if (!payload?.exp || payload.exp * 1000 < Date.now()) {
           localStorage.clear();
         }
-
       } catch (err) {
         console.error("Safe token check failed:", err);
         localStorage.clear();
       }
     };
-
     validateToken();
   }, []);
 
@@ -95,56 +102,40 @@ export const AuthProvider = ({
     async (email: string, password: string) => {
       try {
         const data = await loginUser(email, password);
-
-        if (!data.success) {
+        if (!data.success)
           return { success: false, error: "Invalid credentials" };
-        }
 
         const { token, user } = data;
-
-        // Save token
         localStorage.setItem("token", token);
 
-        // Build AppUser from backend response
         const appUser: AppUser = {
           id: String(user.id),
           name: user.name,
           email: user.email,
           role: user.role as UserRole,
           initials: AuthUtils.getInitials(user.name),
-          pagePermissions: AuthUtils.getPermissionsByRole(user.role as UserRole),
+          pagePermissions: AuthUtils.getPermissionsByRole(
+            user.role as UserRole,
+          ),
           isActive: !user.discontinue,
         };
 
         localStorage.setItem("user", JSON.stringify(appUser));
         setCurrentUser(appUser);
-        
-        // Record login activity
-        try {
-          const { recordLogin } = useActivityBrowser();
-          recordLogin({
-            id: appUser.id,
-            name: appUser.name,
-            email: appUser.email,
-            role: appUser.role,
-          });
-        } catch (err) {
-          console.warn('Activity logging failed:', err);
-        }
-        
-        onLoginSuccess?.(appUser);
 
+        // FIX: removed illegal hook call `useActivityBrowser()` that was here.
+        // Activity logging is delegated to onLoginSuccess (called by AuthSessionBridge).
+        onLoginSuccess?.(appUser);
         return { success: true, role: appUser.role };
       } catch (err: unknown) {
-        const errorMessage = err instanceof Error ? err.message : "Login failed. Check credentials.";
-        return {
-          success: false,
-          error: errorMessage,
-        };
+        const errorMessage =
+          err instanceof Error
+            ? err.message
+            : "Login failed. Check credentials.";
+        return { success: false, error: errorMessage };
       }
-
     },
-    [onLoginSuccess]
+    [onLoginSuccess],
   );
 
   const logout = useCallback(() => {
@@ -154,35 +145,56 @@ export const AuthProvider = ({
     setCurrentUser(null);
   }, [currentUser, onLogoutSuccess]);
 
+  const { canAccessPage: rawCanAccessPage, canDoAction: rawCanDoAction } =
+    AuthUtils.createPermissionCheckers(currentUser);
 
-  // Permission checkers with stable deps
-  const { canAccessPage: rawCanAccessPage, canDoAction: rawCanDoAction } = AuthUtils.createPermissionCheckers(currentUser);
-
-  const canAccessPage = useCallback((page: PageKey) => rawCanAccessPage(page), [rawCanAccessPage]);
-  const canDoAction = useCallback((page: PageKey, action: PageAction) => rawCanDoAction(page, action), [rawCanDoAction]);
-
-  // TODO: Implement backend integration for user management
-  const addUser = useCallback(() => console.warn("addUser: Use backend API"), []);
-  const deleteUser = useCallback(() => console.warn("deleteUser: Use backend API"), []);
-  const toggleUserStatus = useCallback(() => console.warn("toggleUserStatus: Use backend API"), []);
-
-  const value = useMemo(() => ({
-    currentUser,
-    allUsers: users,
-    allAdmins: users.filter((u) => AuthUtils.isPrivilegedRole(u.role)),
-    login,
-    logout,
-    addUser,
-    deleteUser,
-    toggleUserStatus,
-    canAccessPage,
-    canDoAction,
-  }), [currentUser, users, login, logout, addUser, deleteUser, toggleUserStatus, canAccessPage, canDoAction]);
-
-
-  return (
-    <AuthContext.Provider value={value}>
-      {children}
-    </AuthContext.Provider>
+  const canAccessPage = useCallback(
+    (page: PageKey) => rawCanAccessPage(page),
+    [rawCanAccessPage],
   );
+  const canDoAction = useCallback(
+    (page: PageKey, action: PageAction) => rawCanDoAction(page, action),
+    [rawCanDoAction],
+  );
+
+  const addUser = useCallback(
+    () => console.warn("addUser: Use backend API"),
+    [],
+  );
+  const deleteUser = useCallback(
+    () => console.warn("deleteUser: Use backend API"),
+    [],
+  );
+  const toggleUserStatus = useCallback(
+    () => console.warn("toggleUserStatus: Use backend API"),
+    [],
+  );
+
+  const value = useMemo(
+    () => ({
+      currentUser,
+      allUsers: users,
+      allAdmins: users.filter((u) => AuthUtils.isPrivilegedRole(u.role)),
+      login,
+      logout,
+      addUser,
+      deleteUser,
+      toggleUserStatus,
+      canAccessPage,
+      canDoAction,
+    }),
+    [
+      currentUser,
+      users,
+      login,
+      logout,
+      addUser,
+      deleteUser,
+      toggleUserStatus,
+      canAccessPage,
+      canDoAction,
+    ],
+  );
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
