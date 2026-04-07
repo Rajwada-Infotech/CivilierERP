@@ -88,6 +88,22 @@ router.post("/", async (req, res) => {
   }
 });
 
+// GET id+name for FK dropdowns (used by DebitNote supplier field)
+// IMPORTANT: must be declared before /:id so Express does not treat "options" as a record id
+router.get("/options", async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool
+      .request()
+      .query(
+        "SELECT LHeadId AS id, LHeadName AS label FROM dbo.AccountHeadMaster WHERE LHeadStatus = 1 ORDER BY LHeadName",
+      );
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // UPDATE ledger head
 router.put("/:id", async (req, res) => {
   const {
@@ -161,21 +177,6 @@ router.delete("/:id", async (req, res) => {
     res.json({ message: "Ledger head deleted" });
   } catch (err) {
     console.error("DELETE ERROR:", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// GET id+name for FK dropdowns (used by DebitNote supplier field)
-router.get("/options", async (req, res) => {
-  try {
-    const pool = getPool();
-    const result = await pool
-      .request()
-      .query(
-        "SELECT LHeadId AS id, LHeadName AS label FROM dbo.AccountHeadMaster WHERE LHeadStatus = 1 ORDER BY LHeadName",
-      );
-    res.json(result.recordset);
-  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
