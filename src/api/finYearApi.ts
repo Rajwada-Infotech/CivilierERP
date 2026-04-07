@@ -1,7 +1,9 @@
+import { fetchWithAuth } from "../lib/fetchWithAuth.ts";
+
 const BASE_URL = "/api/fin-year";
 
 export const getFinYears = async () => {
-  const res = await fetch(BASE_URL);
+  const res = await fetchWithAuth(BASE_URL);
   if (!res.ok) throw new Error(`GET failed: ${res.status}`);
   return res.json();
 };

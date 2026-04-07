@@ -29,7 +29,13 @@ const EVENT_COLORS = {
     icon: "text-rose-500",
     dot: "bg-rose-500",
   },
+  unknown: {
+    badge: "bg-slate-500/10 text-slate-600 border-slate-500/20",
+    icon: "text-slate-500",
+    dot: "bg-slate-500",
+  },
 };
+
 
 const ROLE_COLORS: Record<string, string> = {
   super_admin: "bg-violet-500/10 text-violet-600 border-violet-500/20",
@@ -293,10 +299,10 @@ const ActivityBrowser: React.FC = () => {
               <tbody className="divide-y divide-border">
                 {filtered.map((s, idx) => {
                   const { date, time } = formatDateTime(s.timestamp);
-                  const colors = EVENT_COLORS[s.event];
+                  const colors = EVENT_COLORS[s.event ?? "unknown"];
                   return (
                     <tr
-                      key={s.id}
+                      key={`${s.id ?? "no-id"}-${s.timestamp}-${idx}`}
                       className="hover:bg-muted/30 transition-colors"
                     >
                       <td className="px-4 py-3 text-xs text-muted-foreground">
@@ -368,10 +374,10 @@ const ActivityBrowser: React.FC = () => {
           <div className="md:hidden space-y-3">
             {filtered.map((s, idx) => {
               const { date, time } = formatDateTime(s.timestamp);
-              const colors = EVENT_COLORS[s.event];
+              const colors = EVENT_COLORS[s.event ?? "unknown"];
               return (
                 <div
-                  key={s.id}
+                  key={`${s.id ?? "no-id"}-${s.timestamp}-${idx}`}
                   className="rounded-xl border border-border bg-card p-4 space-y-3"
                 >
                   <div className="flex items-center justify-between">
