@@ -140,9 +140,6 @@ const UnitOfMeasurementMaster = lazy(() =>
 const AdminDashboard = lazy(() =>
   withDelay(() => import("./pages/admin/AdminDashboard")),
 );
-const AdminExpenseBooking = lazy(() =>
-  withDelay(() => import("./pages/ExpenseBooking")),
-);
 const Users = lazy(() => withDelay(() => import("./pages/Users")));
 const MenuRights = lazy(() =>
   withDelay(() => import("./pages/admin/MenuRights")),
@@ -645,14 +642,6 @@ function AppRoutes() {
         element={
           <AdminRoute>
             <AdminDashboard />
-          </AdminRoute>
-        }
-      />
-      <Route
-        path="/admin/expense-booking"
-        element={
-          <AdminRoute>
-            <AdminExpenseBooking />
           </AdminRoute>
         }
       />
