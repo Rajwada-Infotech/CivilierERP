@@ -83,6 +83,7 @@ origin: (origin, cb) => {
     app.use("/api/user-profile", authMiddleware, require("./routes/userProfile"));
     app.use("/api/uom-master", authMiddleware, require("./routes/uomMaster"));
     app.use("/api/debit-note", authMiddleware, require("./routes/debitNote"));
+    app.use("/api/tc-master", authMiddleware, require("./routes/tcMaster"));
 
     const PORT = process.env.PORT || 5000;
     app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

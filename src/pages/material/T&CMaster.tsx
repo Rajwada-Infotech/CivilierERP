@@ -1,68 +1,80 @@
-import React from "react";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
+import React from "react"
+import { Breadcrumbs } from "@/components/Breadcrumbs"
 import {
   MasterPage,
   type ColumnDef,
   type FieldDef,
-} from "@/components/MasterPage";
-import { FileText, CalendarRange } from "lucide-react";
+  type DataChangeEvent,
+  type RecordWithId,
+} from "@/components/MasterPage"
+import { FileText } from "lucide-react"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { toast } from "sonner"
+import { getTCRecords, addTCRecord, updateTCRecord, deleteTCRecord } from "@/api/tcMasterApi"
 
+// ─── DB shape ────────────────────────────────────────────────────────────────
+interface DbTC {
+  Id:                number
+  Name:              string
+  TermsAndCondition: string
+  Remarks:           string | null
+  isActive:          boolean
+}
+
+// ─── Map DB → UI row ─────────────────────────────────────────────────────────
+const toRow = (item: DbTC): RecordWithId => ({
+  _id:    item.Id,
+  name:   item.Name              || "",
+  terms:  item.TermsAndCondition || "",
+  remarks:item.Remarks           || "",
+  status: item.isActive,
+})
+
+// ─── Map UI row → DB payload ──────────────────────────────────────────────────
+const toPayload = (r: Record<string, unknown>) => ({
+  Name:              (r.name   as string) || null,
+  TermsAndCondition: (r.terms  as string) || null,
+  Remarks:           (r.remarks as string) || null,
+  isActive:          r.status !== false,
+})
+
+// ─── Field & Column definitions ───────────────────────────────────────────────
 const FIELDS: FieldDef[] = [
   {
-    name: "name",
-    label: "Name",
-    type: "text",
-    required: true,
+    name:      "name",
+    label:     "Name",
+    type:      "text",
+    required:  true,
     uppercase: true,
   },
   {
-    name: "terms",
-    label: "Terms & Condition",
-    type: "textarea",
+    name:      "terms",
+    label:     "Terms & Condition",
+    type:      "textarea",
     fullWidth: true,
-    required: true,
+    required:  true,
   },
   {
-    name: "remarks",
-    label: "Remarks",
-    type: "textarea",
+    name:      "remarks",
+    label:     "Remarks",
+    type:      "textarea",
     fullWidth: true,
   },
   {
-    name: "status",
-    label: "Active",
-    type: "toggle",
+    name:         "status",
+    label:        "Active",
+    type:         "toggle",
     defaultValue: true,
   },
-];
+]
 
 const COLUMNS: ColumnDef[] = [
-  { key: "name", label: "Name" },
-  { key: "terms", label: "Terms Preview", hideOnMobile: false },
+  { key: "name",   label: "Name" },
+  { key: "terms",  label: "Terms Preview" },
   { key: "status", label: "Status" },
-];
+]
 
-const INITIAL_DATA = [
-  {
-    name: "Standard T&C",
-    terms: "Standard terms and conditions for all material supply contracts. Payment within 30 days. No advance without PO. etc.",
-    remarks: "Default T&C for new suppliers",
-    status: true,
-  },
-  {
-    name: "Advance Payment T&C",
-    terms: "25% advance payment required. Balance on delivery. Interest on delayed payment @18% p.a.",
-    remarks: "For high value or custom items",
-    status: true,
-  },
-  {
-    name: "Credit T&C",
-    terms: "Credit period 45 days max. Security deposit required for new parties.",
-    remarks: "Approved credit customers only",
-    status: true,
-  },
-];
-
+// ─── Column renderers ─────────────────────────────────────────────────────────
 const columnRenderers = {
   name: (value: unknown) => (
     <div className="flex items-center gap-2">
@@ -76,7 +88,9 @@ const columnRenderers = {
     <div className="max-w-xs">
       <p className="text-xs line-clamp-2 text-foreground">{String(value ?? "")}</p>
       {row.remarks && (
-        <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-1">{row.remarks}</p>
+        <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-1">
+          {String(row.remarks)}
+        </p>
       )}
     </div>
   ),
@@ -89,16 +103,59 @@ const columnRenderers = {
       }`}
     >
       <span
-        className={`mr-1 h-1.5 w-1.5 rounded-full ${
-          value ? "bg-emerald-500" : "bg-amber-500"
-        }`}
+        className={`mr-1 h-1.5 w-1.5 rounded-full ${value ? "bg-emerald-500" : "bg-amber-500"}`}
       />
       {value ? "Active" : "Inactive"}
     </span>
   ),
-};
+}
 
+// ─── Component ────────────────────────────────────────────────────────────────
 export default function TCMaster() {
+  const queryClient = useQueryClient()
+
+  const { data: dbData, isLoading, error } = useQuery({
+    queryKey: ["tc-master"],
+    queryFn:  getTCRecords,
+  })
+
+  const rows: RecordWithId[] = Array.isArray(dbData) ? dbData.map(toRow) : []
+
+  const handleDataEvent = async (event: DataChangeEvent) => {
+    if (event.action === "add") {
+      try {
+        await addTCRecord(toPayload(event.record))
+        toast.success("T&C record saved!")
+        await queryClient.invalidateQueries({ queryKey: ["tc-master"] })
+      } catch (err: any) {
+        toast.error("Save failed: " + err.message)
+      }
+    }
+
+    if (event.action === "update") {
+      try {
+        await updateTCRecord(Number(event.id), toPayload(event.record))
+        toast.success("T&C record updated!")
+        await queryClient.invalidateQueries({ queryKey: ["tc-master"] })
+      } catch (err: any) {
+        toast.error("Update failed: " + err.message)
+      }
+    }
+
+    if (event.action === "delete") {
+      try {
+        await deleteTCRecord(Number(event.id))
+        toast.success("T&C record deleted!")
+        await queryClient.invalidateQueries({ queryKey: ["tc-master"] })
+      } catch (err: any) {
+        toast.error("Delete failed: " + err.message)
+      }
+    }
+  }
+
+  if (isLoading) return <div className="p-6 text-muted-foreground">Loading...</div>
+  if (error)     return <div className="p-6 text-red-500">Failed to load T&amp;C records.</div>
+
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Material", "T&C"]} />
@@ -106,10 +163,10 @@ export default function TCMaster() {
         title="T&C Master"
         fields={FIELDS}
         columns={COLUMNS}
-        initialData={INITIAL_DATA}
+        initialData={rows}
         columnRenderers={columnRenderers}
+        onDataEvent={handleDataEvent}
       />
     </>
-  );
+  )
 }
-
