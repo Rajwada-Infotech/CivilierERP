@@ -877,38 +877,41 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <Toaster richColors position="top-right" />
-      <ActivityBrowserProvider>
-        <AuthSessionBridge>
-          <ModuleProvider>
-            <ThemeProvider>
-              <FinYearProvider>
-                <HsnProvider>
-                  <RecordsProvider>
-                    <TdsProvider>
-                      <DebitNoteProvider>
-                        <BillingTermsProvider>
-                          <TaskProvider>
-                            <Router
-                              future={{
-                                v7_startTransition: true,
-                                v7_relativeSplatPath: true,
-                              }}
-                            >
-                              <AppRoutes />
-                            </Router>
-                          </TaskProvider>
-                        </BillingTermsProvider>
-                      </DebitNoteProvider>
-                    </TdsProvider>
-                  </RecordsProvider>
-                </HsnProvider>
-              </FinYearProvider>
-            </ThemeProvider>
-          </ModuleProvider>
-        </AuthSessionBridge>
-      </ActivityBrowserProvider>
+      <AuthProvider>
+        <ActivityBrowserProvider>
+          <AuthSessionBridge>
+            <ModuleProvider>
+              <ThemeProvider>
+                <FinYearProvider>
+                  <HsnProvider>
+                    <RecordsProvider>
+                      <TdsProvider>
+                        <DebitNoteProvider>
+                          <BillingTermsProvider>
+                            <TaskProvider>
+                              <Router
+                                future={{
+                                  v7_startTransition: true,
+                                  v7_relativeSplatPath: true,
+                                }}
+                              >
+                                <AppRoutes />
+                              </Router>
+                            </TaskProvider>
+                          </BillingTermsProvider>
+                        </DebitNoteProvider>
+                      </TdsProvider>
+                    </RecordsProvider>
+                  </HsnProvider>
+                </FinYearProvider>
+              </ThemeProvider>
+            </ModuleProvider>
+          </AuthSessionBridge>
+        </ActivityBrowserProvider>
+      </AuthProvider>
     </QueryClientProvider>
   );
+
 }
 
 export default App;
