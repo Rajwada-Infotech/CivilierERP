@@ -53,13 +53,13 @@ export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
 
-    const result = login(email, password);
+    const result = await login(email, password);
     if (result.success) {
-      const role = result.user?.role;
+      const role = result.role;
       if (role === "dba") {
         navigate("/dba", { replace: true });
       } else {

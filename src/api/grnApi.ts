@@ -1,5 +1,10 @@
 const BASE = "/api/grn";
 
+const getAuthHeaders = () => ({
+  "Content-Type": "application/json",
+  Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
+});
+
 export interface Supplier {
   LHeadId: number;
   LHeadName: string;
@@ -50,7 +55,6 @@ export const getGRNs = async (): Promise<any[]> => {
 export const addGRN = async (data: GRNFormDataPayload) => {
   const res = await fetch(BASE, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       ...data,
       grnItems: JSON.stringify(data.grnItems),
@@ -66,7 +70,6 @@ export const addGRN = async (data: GRNFormDataPayload) => {
 export const updateGRN = async (id: string, data: GRNFormDataPayload) => {
   const res = await fetch(`${BASE}/${id}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       ...data,
       grnItems: JSON.stringify(data.grnItems),

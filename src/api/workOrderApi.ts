@@ -17,7 +17,6 @@ export const getWorkOrder = async (id: number) => {
 export const createWorkOrder = async (data: Record<string, unknown>) => {
   const res = await fetch(BASE_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -33,7 +32,6 @@ export const updateWorkOrder = async (
 ) => {
   const res = await fetch(`${BASE_URL}/${id}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -101,7 +99,6 @@ export const saveFullWorkOrder = async (
 ) => {
   const res = await fetch(`${BASE_URL}/${id}/save-full`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   });
   if (!res.ok) {

@@ -1,5 +1,10 @@
 const BASE_URL = "/api/users";
 
+const getAuthHeaders = () => ({
+  "Content-Type": "application/json",
+  Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
+});
+
 export interface User {
   id: number;
   name: string;
@@ -9,8 +14,23 @@ export interface User {
   discontinue: boolean;
 }
 
+export const loginUser = async (email: string, password: string) => {
+  const res = await fetch(`${BASE_URL}/login`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!res.ok) throw new Error("Login failed");
+  return res.json(); // returns { success, token, user }
+
+};
+
 export const getUsers = async (): Promise<User[]> => {
-  const res = await fetch(BASE_URL);
+  const res = await fetch(BASE_URL, {
+    headers: getAuthHeaders(),
+  });
   if (!res.ok) throw new Error("Failed to fetch users");
   return res.json();
 };
@@ -18,7 +38,7 @@ export const getUsers = async (): Promise<User[]> => {
 export const addUser = async (user: { name: string; email: string; role: string; password: string }) => {
   const res = await fetch(BASE_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: getAuthHeaders(),
     body: JSON.stringify(user),
   });
   if (!res.ok) throw new Error("Failed to add user");
@@ -28,7 +48,7 @@ export const addUser = async (user: { name: string; email: string; role: string;
 export const updateUser = async (id: number, user: Partial<User>) => {
   const res = await fetch(`${BASE_URL}/${id}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    headers: getAuthHeaders(),
     body: JSON.stringify(user),
   });
   if (!res.ok) throw new Error("Failed to update user");
@@ -36,7 +56,7 @@ export const updateUser = async (id: number, user: Partial<User>) => {
 };
 
 export const deleteUser = async (id: number) => {
-  const res = await fetch(`${BASE_URL}/${id}`, { method: "DELETE" });
+  const res = await fetch(`${BASE_URL}/${id}`, { method: "DELETE", headers: getAuthHeaders() });
   if (!res.ok) throw new Error("Failed to delete user");
   return res.json();
 };
