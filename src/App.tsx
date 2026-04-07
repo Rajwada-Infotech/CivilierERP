@@ -52,9 +52,6 @@ const Transactions = lazy(() =>
 );
 const Payment = lazy(() => withDelay(() => import("./pages/Payment")));
 const Brs = lazy(() => withDelay(() => import("./pages/Brs")));
-const ExpenseBooking = lazy(() =>
-  withDelay(() => import("./pages/ExpenseBooking")),
-);
 const Records = lazy(() => withDelay(() => import("./pages/Records")));
 const ReceivedPayment = lazy(() =>
   withDelay(() => import("./pages/ReceivedPayment")),
@@ -358,14 +355,6 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <Transactions />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/transactions/expense-booking"
-        element={
-          <ProtectedRoute>
-            <ExpenseBooking />
           </ProtectedRoute>
         }
       />
@@ -877,9 +866,8 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <Toaster richColors position="top-right" />
-      <AuthProvider>
-        <ActivityBrowserProvider>
-          <AuthSessionBridge>
+      <ActivityBrowserProvider>
+        <AuthSessionBridge>
             <ModuleProvider>
               <ThemeProvider>
                 <FinYearProvider>
@@ -906,9 +894,8 @@ function App() {
                 </FinYearProvider>
               </ThemeProvider>
             </ModuleProvider>
-          </AuthSessionBridge>
-        </ActivityBrowserProvider>
-      </AuthProvider>
+        </AuthSessionBridge>
+      </ActivityBrowserProvider>
     </QueryClientProvider>
   );
 
