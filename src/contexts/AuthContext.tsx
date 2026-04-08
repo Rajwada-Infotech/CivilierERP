@@ -109,7 +109,7 @@ export const AuthProvider = ({
 
         localStorage.setItem("user", JSON.stringify(appUser));
         setCurrentUser(appUser);
-        
+
         // Log activity (fire-and-forget, ignore if ActivityBrowser not ready)
         try {
           const { recordLogin } = useActivityBrowser();
@@ -120,7 +120,7 @@ export const AuthProvider = ({
             role: appUser.role,
           });
         } catch {}
-        
+
         onLoginSuccess?.(appUser);
 
         return { success: true, role: appUser.role };
@@ -142,7 +142,7 @@ export const AuthProvider = ({
         role: currentUser!.role,
       });
     } catch {}
-    
+
     if (currentUser) onLogoutSuccess?.(currentUser);
     localStorage.removeItem("token");
     localStorage.removeItem("user");
