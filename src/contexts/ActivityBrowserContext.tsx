@@ -197,9 +197,10 @@ export const ActivityBrowserProvider: React.FC<{
     setActivity(EMPTY_ACTIVITY);
   }, []);
 
-  // Initial load (conditional)
+  // Initial load with 500ms delay (avoid race with other queries)
   useEffect(() => {
-    fetchActivity();
+    const timer = setTimeout(() => fetchActivity(), 500);
+    return () => clearTimeout(timer);
   }, [fetchActivity]);
 
   // SSE — refresh current page on new data (conditional)
