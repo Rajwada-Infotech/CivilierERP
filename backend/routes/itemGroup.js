@@ -2,7 +2,10 @@ const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 
-// GET all item groups
+// Groups are top-level rows: Parent_Id IS NULL
+// Items are child rows: Parent_Id IS NOT NULL (handled by itemMaster route)
+
+// GET all item groups (top-level only)
 router.get("/", async (req, res) => {
   try {
     const pool = getPool();
@@ -13,6 +16,7 @@ router.get("/", async (req, res) => {
         M_HSN, M_CGST, M_IGST, M_SGST,
         M_CreatedBy, M_CreatedDate, M_ApprovedBy, Parent_Id
       FROM dbo.Item_Master_Group
+      WHERE Parent_Id IS NULL
       ORDER BY M_Name
     `);
     res.json(result.recordset);
@@ -35,7 +39,7 @@ router.get("/:id", async (req, res) => {
           M_HSN, M_CGST, M_IGST, M_SGST,
           M_CreatedBy, M_CreatedDate, M_ApprovedBy, Parent_Id
         FROM dbo.Item_Master_Group
-        WHERE M_Id = @M_Id
+        WHERE M_Id = @M_Id AND Parent_Id IS NULL
       `);
     if (!result.recordset.length) {
       return res.status(404).json({ error: "Item group not found" });
@@ -47,9 +51,8 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-// POST - add item group
+// POST — create item group (Parent_Id stays NULL — it IS the group)
 router.post("/", async (req, res) => {
-  console.log("POST /item-groups BODY:", req.body);
   const {
     M_Name,
     M_Description,
@@ -63,16 +66,12 @@ router.post("/", async (req, res) => {
     M_SGST,
   } = req.body;
 
-  if (!M_Name) {
-    return res.status(400).json({ error: "M_Name is required" });
-  }
-  if (!M_Type) {
-    return res.status(400).json({ error: "M_Type is required" });
-  }
+  if (!M_Name) return res.status(400).json({ error: "M_Name is required" });
+  if (!M_Type) return res.status(400).json({ error: "M_Type is required" });
 
   try {
     const pool = getPool();
-    await pool
+    const result = await pool
       .request()
       .input("M_Name", sql.NVarChar(200), M_Name)
       .input("M_Description", sql.NVarChar(500), M_Description || null)
@@ -86,30 +85,32 @@ router.post("/", async (req, res) => {
       .input("M_SGST", sql.Decimal(5, 2), M_SGST != null ? M_SGST : null)
       .input("M_CreatedDate", sql.DateTime2(3), new Date()).query(`
         INSERT INTO dbo.Item_Master_Group (
-          M_Id,
-          M_Name, M_Description, M_Type,
+          M_Id, M_Name, M_Description, M_Type,
           M_BelongsTo, M_Group, M_IdentityCode,
           M_HSN, M_CGST, M_IGST, M_SGST,
-          M_CreatedBy, M_CreatedDate,
-          Parent_Id
-        ) VALUES (
+          M_CreatedBy, M_CreatedDate, Parent_Id
+        )
+        OUTPUT INSERTED.M_Id
+        VALUES (
           NEWID(),
           @M_Name, @M_Description, @M_Type,
           @M_BelongsTo, @M_Group, @M_IdentityCode,
           @M_HSN, @M_CGST, @M_IGST, @M_SGST,
-          NEWID(),
-          @M_CreatedDate,
+          NULL, @M_CreatedDate,
           NULL
         )
       `);
-    res.status(201).json({ message: "Item group added successfully" });
+    res.status(201).json({
+      message: "Item group added successfully",
+      M_Id: result.recordset[0].M_Id,
+    });
   } catch (err) {
     console.error("POST /item-groups ERROR:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// PUT - update item group
+// PUT — update item group
 router.put("/:id", async (req, res) => {
   const { id } = req.params;
   const {
@@ -124,12 +125,9 @@ router.put("/:id", async (req, res) => {
     M_IGST,
     M_SGST,
     M_ApprovedBy,
-    Parent_Id,
   } = req.body;
 
-  if (!M_Name) {
-    return res.status(400).json({ error: "M_Name is required" });
-  }
+  if (!M_Name) return res.status(400).json({ error: "M_Name is required" });
 
   try {
     const pool = getPool();
@@ -146,8 +144,7 @@ router.put("/:id", async (req, res) => {
       .input("M_CGST", sql.Decimal(5, 2), M_CGST != null ? M_CGST : null)
       .input("M_IGST", sql.Decimal(5, 2), M_IGST != null ? M_IGST : null)
       .input("M_SGST", sql.Decimal(5, 2), M_SGST != null ? M_SGST : null)
-      .input("M_ApprovedBy", sql.UniqueIdentifier, M_ApprovedBy || null)
-      .input("Parent_Id", sql.UniqueIdentifier, Parent_Id || null).query(`
+      .input("M_ApprovedBy", sql.UniqueIdentifier, M_ApprovedBy || null).query(`
         UPDATE dbo.Item_Master_Group SET
           M_Name         = @M_Name,
           M_Description  = @M_Description,
@@ -159,11 +156,9 @@ router.put("/:id", async (req, res) => {
           M_CGST         = @M_CGST,
           M_IGST         = @M_IGST,
           M_SGST         = @M_SGST,
-          M_ApprovedBy   = @M_ApprovedBy,
-          Parent_Id      = @Parent_Id
-        WHERE M_Id = @M_Id
+          M_ApprovedBy   = @M_ApprovedBy
+        WHERE M_Id = @M_Id AND Parent_Id IS NULL
       `);
-
     if (result.rowsAffected[0] === 0) {
       return res.status(404).json({ error: "Item group not found" });
     }
@@ -174,16 +169,32 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-// DELETE item group
+// DELETE item group (only if it has no child items)
 router.delete("/:id", async (req, res) => {
   const { id } = req.params;
   try {
     const pool = getPool();
+
+    // Guard: refuse if child items exist
+    const childCheck = await pool
+      .request()
+      .input("Parent_Id", sql.UniqueIdentifier, id)
+      .query(
+        "SELECT COUNT(*) AS cnt FROM dbo.Item_Master_Group WHERE Parent_Id = @Parent_Id",
+      );
+    if (childCheck.recordset[0].cnt > 0) {
+      return res.status(409).json({
+        error:
+          "Cannot delete group — it still has items. Remove all items first.",
+      });
+    }
+
     const result = await pool
       .request()
       .input("M_Id", sql.UniqueIdentifier, id)
-      .query("DELETE FROM dbo.Item_Master_Group WHERE M_Id = @M_Id");
-
+      .query(
+        "DELETE FROM dbo.Item_Master_Group WHERE M_Id = @M_Id AND Parent_Id IS NULL",
+      );
     if (result.rowsAffected[0] === 0) {
       return res.status(404).json({ error: "Item group not found" });
     }
