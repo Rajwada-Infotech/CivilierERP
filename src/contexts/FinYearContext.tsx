@@ -49,6 +49,7 @@ export const FinYearProvider = ({ children }: { children: ReactNode }) => {
     queryKey: ["fin-years"],
     queryFn: getFinYears,
     enabled: !!currentUser,
+    staleTime: 5 * 60 * 1000, // 5 min from global + explicit
   });
 
   const finYears: FinYear[] = Array.isArray(dbData)
