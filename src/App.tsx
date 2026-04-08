@@ -124,7 +124,7 @@ const DebitNoteMaster = lazy(() =>
   withDelay(() => import("./pages/masters/DebitNoteMaster")),
 );
 const BillingTermsMaster = lazy(() =>
-  withDelay(() => import("./pages/masters/BillingTermsmaster")),
+  withDelay(() => import("./pages/masters/BillingTermsMaster")),
 );
 const TCMaster = lazy(() =>
   withDelay(() => import("./pages/material/T&CMaster")),
@@ -256,7 +256,7 @@ class ErrorBoundary extends Component<
 }
 
 // ─── Query Client ─────────────────────────────────────────────────────────────
-import { queryClient } from '@/lib/queryClient';
+import { queryClient } from "@/lib/queryClient";
 
 // ─── Auth Guard ───────────────────────────────────────────────────────────────
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -857,41 +857,40 @@ function App() {
   if (initialLoading) return <Loader />;
 
   return (
-<QueryClientProvider client={queryClient}>
+    <QueryClientProvider client={queryClient}>
       <Toaster richColors position="top-right" />
       <ActivityBrowserProvider>
         <AuthSessionBridge>
-            <ModuleProvider>
-              <ThemeProvider>
-                <FinYearProvider>
-                  <HsnProvider>
-                    <RecordsProvider>
-                      <TdsProvider>
-                        <DebitNoteProvider>
-                          <BillingTermsProvider>
-                            <TaskProvider>
-                              <Router
-                                future={{
-                                  v7_startTransition: true,
-                                  v7_relativeSplatPath: true,
-                                }}
-                              >
-                                <AppRoutes />
-                              </Router>
-                            </TaskProvider>
-                          </BillingTermsProvider>
-                        </DebitNoteProvider>
-                      </TdsProvider>
-                    </RecordsProvider>
-                  </HsnProvider>
-                </FinYearProvider>
-              </ThemeProvider>
-            </ModuleProvider>
+          <ModuleProvider>
+            <ThemeProvider>
+              <FinYearProvider>
+                <HsnProvider>
+                  <RecordsProvider>
+                    <TdsProvider>
+                      <DebitNoteProvider>
+                        <BillingTermsProvider>
+                          <TaskProvider>
+                            <Router
+                              future={{
+                                v7_startTransition: true,
+                                v7_relativeSplatPath: true,
+                              }}
+                            >
+                              <AppRoutes />
+                            </Router>
+                          </TaskProvider>
+                        </BillingTermsProvider>
+                      </DebitNoteProvider>
+                    </TdsProvider>
+                  </RecordsProvider>
+                </HsnProvider>
+              </FinYearProvider>
+            </ThemeProvider>
+          </ModuleProvider>
         </AuthSessionBridge>
       </ActivityBrowserProvider>
     </QueryClientProvider>
   );
-
 }
 
 export default App;
