@@ -256,14 +256,7 @@ class ErrorBoundary extends Component<
 }
 
 // ─── Query Client ─────────────────────────────────────────────────────────────
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      refetchOnWindowFocus: false,
-      retry: 1,
-    },
-  },
-});
+import { queryClient } from '@/lib/queryClient';
 
 // ─── Auth Guard ───────────────────────────────────────────────────────────────
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -864,7 +857,7 @@ function App() {
   if (initialLoading) return <Loader />;
 
   return (
-    <QueryClientProvider client={queryClient}>
+<QueryClientProvider client={queryClient}>
       <Toaster richColors position="top-right" />
       <ActivityBrowserProvider>
         <AuthSessionBridge>
