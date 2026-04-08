@@ -15,6 +15,7 @@ import type {
   AppUser,
 } from "./types";
 import * as AuthUtils from "./auth.utils";
+import { useActivityBrowser } from "./ActivityBrowserContext";
 
 interface AuthContextType {
   currentUser: AppUser | null;
@@ -108,6 +109,18 @@ export const AuthProvider = ({
 
         localStorage.setItem("user", JSON.stringify(appUser));
         setCurrentUser(appUser);
+
+        // Log activity (fire-and-forget, ignore if ActivityBrowser not ready)
+        try {
+          const { recordLogin } = useActivityBrowser();
+          recordLogin({
+            id: appUser.id,
+            name: appUser.name,
+            email: appUser.email,
+            role: appUser.role,
+          });
+        } catch {}
+
         onLoginSuccess?.(appUser);
 
         return { success: true, role: appUser.role };
@@ -119,6 +132,17 @@ export const AuthProvider = ({
   );
 
   const logout = useCallback(() => {
+    // Log activity (fire-and-forget)
+    try {
+      const { recordLogout } = useActivityBrowser();
+      recordLogout({
+        id: currentUser!.id,
+        name: currentUser!.name,
+        email: currentUser!.email,
+        role: currentUser!.role,
+      });
+    } catch {}
+
     if (currentUser) onLogoutSuccess?.(currentUser);
     localStorage.removeItem("token");
     localStorage.removeItem("user");

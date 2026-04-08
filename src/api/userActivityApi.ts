@@ -1,19 +1,23 @@
 import { fetchWithAuth } from '@/lib/fetchWithAuth'
+import type { SessionEvent, PaginatedActivity } from '@/contexts/ActivityBrowserContext';
 
-interface UserActivityLog {
-  id: string
-  userId: string
-  userName: string
-  userEmail: string
-  userRole: string
-  event: 'login' | 'logout'
-  timestamp: string
-  ipAddress: string
-  deviceInfo: string
-}
-
-export const getUserActivityLogs = async (): Promise<UserActivityLog[]> => {
-  const response = await fetchWithAuth('/api/user-activity')
+export const getUserActivityLogs = async (params: {
+  page?: number
+  limit?: number
+  search?: string
+  event?: string
+  role?: string
+  sort?: string
+  order?: 'asc' | 'desc'
+} = {}): Promise<PaginatedActivity> => {
+  const url = new URL('/api/user-activity', window.location.origin)
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== '') {
+      url.searchParams.set(key, String(value))
+    }
+  })
+  
+  const response = await fetchWithAuth(url.pathname + url.search)
   if (!response.ok) throw new Error('Failed to fetch activity logs')
   return response.json()
 }
@@ -65,4 +69,3 @@ export const subscribeToActivityStream = (onMessage: (data: any) => void): Event
 
   return source
 }
-
