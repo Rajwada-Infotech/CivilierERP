@@ -1,28 +1,52 @@
-import axios from "axios";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
-const axiosInstance = axios.create({
-  baseURL: "/api",
-});
+type RequestConfig = {
+  url?: string;
+  method?: string;
+  data?: unknown;
+  headers?: Record<string, string>;
+};
 
-// Auto-attach token to every request
-axiosInstance.interceptors.request.use((config) => {
-  const token = localStorage.getItem("token");
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
+type ResponseLike<T = unknown> = {
+  data: T;
+  status: number;
+};
 
-// Auto-logout if token is expired or invalid
-axiosInstance.interceptors.response.use(
-  (response) => response,
-  (error) => {
-    if (error.response?.status === 401) {
-      localStorage.removeItem("token");
-      window.location.href = "/login";
-    }
-    return Promise.reject(error);
-  }
-);
+async function request<T = unknown>(config: RequestConfig): Promise<ResponseLike<T>> {
+  const response = await fetchWithAuth(config.url || "", {
+    method: config.method || "GET",
+    headers: config.headers,
+    body: config.data !== undefined ? JSON.stringify(config.data) : undefined,
+  });
+
+  const data = (await response.json().catch(() => null)) as T;
+  return {
+    data,
+    status: response.status,
+  };
+}
+
+const axiosInstance = {
+  request,
+  get: <T = unknown>(url: string, config?: Omit<RequestConfig, "url" | "method">) =>
+    request<T>({ ...config, url, method: "GET" }),
+  post: <T = unknown>(
+    url: string,
+    data?: unknown,
+    config?: Omit<RequestConfig, "url" | "method" | "data">,
+  ) => request<T>({ ...config, url, method: "POST", data }),
+  put: <T = unknown>(
+    url: string,
+    data?: unknown,
+    config?: Omit<RequestConfig, "url" | "method" | "data">,
+  ) => request<T>({ ...config, url, method: "PUT", data }),
+  patch: <T = unknown>(
+    url: string,
+    data?: unknown,
+    config?: Omit<RequestConfig, "url" | "method" | "data">,
+  ) => request<T>({ ...config, url, method: "PATCH", data }),
+  delete: <T = unknown>(url: string, config?: Omit<RequestConfig, "url" | "method">) =>
+    request<T>({ ...config, url, method: "DELETE" }),
+};
 
 export default axiosInstance;

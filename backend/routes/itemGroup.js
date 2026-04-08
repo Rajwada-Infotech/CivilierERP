@@ -6,19 +6,50 @@ const { getPool, sql } = require("../db");
 router.get("/", async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query(
-      "SELECT M_Id, M_Name, M_Description, M_Type, M_BelongsTo, M_Group, M_IdentityCode, M_HSN, M_CGST, M_IGST, M_SGST, M_CreatedBy, M_CreatedDate, M_ApprovedBy, Parent_Id FROM dbo.Item_Master_Group"
-    );
+    const result = await pool.request().query(`
+      SELECT
+        M_Id, M_Name, M_Description, M_Type,
+        M_BelongsTo, M_Group, M_IdentityCode,
+        M_HSN, M_CGST, M_IGST, M_SGST,
+        M_CreatedBy, M_CreatedDate, M_ApprovedBy, Parent_Id
+      FROM dbo.Item_Master_Group
+      ORDER BY M_Name
+    `);
     res.json(result.recordset);
   } catch (err) {
-    console.error("GET ERROR:", err.message);
+    console.error("GET /item-groups ERROR:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ADD item group
+// GET single item group by ID
+router.get("/:id", async (req, res) => {
+  const { id } = req.params;
+  try {
+    const pool = getPool();
+    const result = await pool.request().input("M_Id", sql.UniqueIdentifier, id)
+      .query(`
+        SELECT
+          M_Id, M_Name, M_Description, M_Type,
+          M_BelongsTo, M_Group, M_IdentityCode,
+          M_HSN, M_CGST, M_IGST, M_SGST,
+          M_CreatedBy, M_CreatedDate, M_ApprovedBy, Parent_Id
+        FROM dbo.Item_Master_Group
+        WHERE M_Id = @M_Id
+      `);
+    if (!result.recordset.length) {
+      return res.status(404).json({ error: "Item group not found" });
+    }
+    res.json(result.recordset[0]);
+  } catch (err) {
+    console.error("GET /:id /item-groups ERROR:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST - add item group
 router.post("/", async (req, res) => {
-  console.log("POST BODY:", req.body);
+  console.log("POST /item-groups BODY:", req.body);
   const {
     M_Name,
     M_Description,
@@ -32,39 +63,53 @@ router.post("/", async (req, res) => {
     M_SGST,
   } = req.body;
 
+  if (!M_Name) {
+    return res.status(400).json({ error: "M_Name is required" });
+  }
+  if (!M_Type) {
+    return res.status(400).json({ error: "M_Type is required" });
+  }
+
   try {
     const pool = getPool();
-    await pool.request()
-      .input("M_Name", sql.NVarChar, M_Name)
-      .input("M_Description", sql.NVarChar, M_Description || null)
-      .input("M_Type", sql.NVarChar, M_Type || null)
+    await pool
+      .request()
+      .input("M_Name", sql.NVarChar(200), M_Name)
+      .input("M_Description", sql.NVarChar(500), M_Description || null)
+      .input("M_Type", sql.NVarChar(50), M_Type || null)
       .input("M_BelongsTo", sql.UniqueIdentifier, M_BelongsTo || null)
-      .input("M_Group", sql.NVarChar, M_Group || null)
+      .input("M_Group", sql.NVarChar(200), M_Group || null)
       .input("M_IdentityCode", sql.Bit, M_IdentityCode ? 1 : 0)
-      .input("M_HSN", sql.NVarChar, M_HSN || null)
-      .input("M_CGST", sql.Decimal, M_CGST || null)
-      .input("M_IGST", sql.Decimal, M_IGST || null)
-      .input("M_SGST", sql.Decimal, M_SGST || null)
-      .input("M_CreatedDate", sql.DateTime2, new Date())
-      .query(`
+      .input("M_HSN", sql.NVarChar(20), M_HSN || null)
+      .input("M_CGST", sql.Decimal(5, 2), M_CGST != null ? M_CGST : null)
+      .input("M_IGST", sql.Decimal(5, 2), M_IGST != null ? M_IGST : null)
+      .input("M_SGST", sql.Decimal(5, 2), M_SGST != null ? M_SGST : null)
+      .input("M_CreatedDate", sql.DateTime2(3), new Date()).query(`
         INSERT INTO dbo.Item_Master_Group (
-          M_Id, M_Name, M_Description, M_Type, M_BelongsTo, M_Group,
-          M_IdentityCode, M_HSN, M_CGST, M_IGST, M_SGST,
-          M_CreatedBy, M_CreatedDate, Parent_Id
+          M_Id,
+          M_Name, M_Description, M_Type,
+          M_BelongsTo, M_Group, M_IdentityCode,
+          M_HSN, M_CGST, M_IGST, M_SGST,
+          M_CreatedBy, M_CreatedDate,
+          Parent_Id
         ) VALUES (
-          NEWID(), @M_Name, @M_Description, @M_Type, @M_BelongsTo, @M_Group,
-          @M_IdentityCode, @M_HSN, @M_CGST, @M_IGST, @M_SGST,
-          NEWID(), @M_CreatedDate, NULL
+          NEWID(),
+          @M_Name, @M_Description, @M_Type,
+          @M_BelongsTo, @M_Group, @M_IdentityCode,
+          @M_HSN, @M_CGST, @M_IGST, @M_SGST,
+          NEWID(),
+          @M_CreatedDate,
+          NULL
         )
       `);
-    res.json({ message: "Item group added successfully" });
+    res.status(201).json({ message: "Item group added successfully" });
   } catch (err) {
-    console.error("INSERT ERROR:", err.message);
+    console.error("POST /item-groups ERROR:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// UPDATE item group
+// PUT - update item group
 router.put("/:id", async (req, res) => {
   const { id } = req.params;
   const {
@@ -78,42 +123,53 @@ router.put("/:id", async (req, res) => {
     M_CGST,
     M_IGST,
     M_SGST,
+    M_ApprovedBy,
     Parent_Id,
   } = req.body;
 
+  if (!M_Name) {
+    return res.status(400).json({ error: "M_Name is required" });
+  }
+
   try {
     const pool = getPool();
-    await pool.request()
+    const result = await pool
+      .request()
       .input("M_Id", sql.UniqueIdentifier, id)
-      .input("M_Name", sql.NVarChar, M_Name)
-      .input("M_Description", sql.NVarChar, M_Description || null)
-      .input("M_Type", sql.NVarChar, M_Type || null)
+      .input("M_Name", sql.NVarChar(200), M_Name)
+      .input("M_Description", sql.NVarChar(500), M_Description || null)
+      .input("M_Type", sql.NVarChar(50), M_Type || null)
       .input("M_BelongsTo", sql.UniqueIdentifier, M_BelongsTo || null)
-      .input("M_Group", sql.NVarChar, M_Group || null)
+      .input("M_Group", sql.NVarChar(200), M_Group || null)
       .input("M_IdentityCode", sql.Bit, M_IdentityCode ? 1 : 0)
-      .input("M_HSN", sql.NVarChar, M_HSN || null)
-      .input("M_CGST", sql.Decimal, M_CGST || null)
-      .input("M_IGST", sql.Decimal, M_IGST || null)
-      .input("M_SGST", sql.Decimal, M_SGST || null)
-      .input("Parent_Id", sql.UniqueIdentifier, Parent_Id || null)
-      .query(`
+      .input("M_HSN", sql.NVarChar(20), M_HSN || null)
+      .input("M_CGST", sql.Decimal(5, 2), M_CGST != null ? M_CGST : null)
+      .input("M_IGST", sql.Decimal(5, 2), M_IGST != null ? M_IGST : null)
+      .input("M_SGST", sql.Decimal(5, 2), M_SGST != null ? M_SGST : null)
+      .input("M_ApprovedBy", sql.UniqueIdentifier, M_ApprovedBy || null)
+      .input("Parent_Id", sql.UniqueIdentifier, Parent_Id || null).query(`
         UPDATE dbo.Item_Master_Group SET
-          M_Name        = @M_Name,
-          M_Description = @M_Description,
-          M_Type        = @M_Type,
-          M_BelongsTo   = @M_BelongsTo,
-          M_Group       = @M_Group,
-          M_IdentityCode= @M_IdentityCode,
-          M_HSN         = @M_HSN,
-          M_CGST        = @M_CGST,
-          M_IGST        = @M_IGST,
-          M_SGST        = @M_SGST,
-          Parent_Id     = @Parent_Id
+          M_Name         = @M_Name,
+          M_Description  = @M_Description,
+          M_Type         = @M_Type,
+          M_BelongsTo    = @M_BelongsTo,
+          M_Group        = @M_Group,
+          M_IdentityCode = @M_IdentityCode,
+          M_HSN          = @M_HSN,
+          M_CGST         = @M_CGST,
+          M_IGST         = @M_IGST,
+          M_SGST         = @M_SGST,
+          M_ApprovedBy   = @M_ApprovedBy,
+          Parent_Id      = @Parent_Id
         WHERE M_Id = @M_Id
       `);
+
+    if (result.rowsAffected[0] === 0) {
+      return res.status(404).json({ error: "Item group not found" });
+    }
     res.json({ message: "Item group updated successfully" });
   } catch (err) {
-    console.error("UPDATE ERROR:", err.message);
+    console.error("PUT /item-groups ERROR:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -123,12 +179,17 @@ router.delete("/:id", async (req, res) => {
   const { id } = req.params;
   try {
     const pool = getPool();
-    await pool.request()
+    const result = await pool
+      .request()
       .input("M_Id", sql.UniqueIdentifier, id)
       .query("DELETE FROM dbo.Item_Master_Group WHERE M_Id = @M_Id");
+
+    if (result.rowsAffected[0] === 0) {
+      return res.status(404).json({ error: "Item group not found" });
+    }
     res.json({ message: "Item group deleted successfully" });
   } catch (err) {
-    console.error("DELETE ERROR:", err.message);
+    console.error("DELETE /item-groups ERROR:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
