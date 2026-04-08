@@ -21,6 +21,7 @@ const apiLimiter = rateLimit({
 
 const ALLOWED_ORIGINS = [
   "http://localhost:8080",
+  "http://localhost:8081",
   "http://localhost:5173",
   "https://civiliererp.vercel.app",
   "https://civiliererp.in",

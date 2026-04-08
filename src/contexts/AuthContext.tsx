@@ -7,6 +7,7 @@ import React, {
   useMemo,
 } from "react";
 import { loginUser } from "../api/userApi";
+import { useActivityBrowser } from "../contexts/ActivityBrowserContext";
 import type {
   UserRole,
   PageKey,
@@ -15,6 +16,7 @@ import type {
   AppUser,
 } from "./types";
 import * as AuthUtils from "./auth.utils";
+import { PAGE_DEFINITIONS } from "@/constants/pageDefinitions";
 
 interface AuthContextType {
   currentUser: AppUser | null;
@@ -43,6 +45,9 @@ interface AuthContextType {
   canDoAction: (page: PageKey, action: PageAction) => boolean;
 }
 
+export { PAGE_DEFINITIONS };
+export type { PageKey, PageAction };
+
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export const useAuth = () => {
@@ -63,6 +68,8 @@ export const AuthProvider = ({
   onLoginSuccess?: (user: AppUser) => void;
   onLogoutSuccess?: (user: AppUser) => void;
 }) => {
+  const { recordLogin, recordLogout } = useActivityBrowser();
+
   const [currentUser, setCurrentUser] = useState<AppUser | null>(() => {
     try {
       const stored = localStorage.getItem("user");
@@ -84,7 +91,7 @@ export const AuthProvider = ({
     setUsers(dummyUsers);
   }, []);
 
-  const login = useCallback(
+const login = useCallback(
     async (email: string, password: string) => {
       try {
         const data = await loginUser(email, password);
@@ -110,20 +117,50 @@ export const AuthProvider = ({
         setCurrentUser(appUser);
         onLoginSuccess?.(appUser);
 
+        // Record login activity
+        try {
+          await recordLogin({
+            id: appUser.id,
+            name: appUser.name,
+            email: appUser.email,
+            role: appUser.role,
+          });
+        } catch (logErr) {
+          console.warn("Login tracking failed:", logErr);
+        }
+
         return { success: true, role: appUser.role };
-      } catch (err: any) {
-        return { success: false, error: err.message || "Login failed" };
+      } catch (err: unknown) {
+        const errorMessage =
+          err instanceof Error ? err.message : "Login failed";
+        return { success: false, error: errorMessage };
       }
     },
-    [onLoginSuccess],
+    [onLoginSuccess, recordLogin],
   );
 
-  const logout = useCallback(() => {
-    if (currentUser) onLogoutSuccess?.(currentUser);
+  const logout = useCallback(async () => {
+    if (currentUser) {
+      try {
+        await recordLogout({
+          id: currentUser.id,
+          name: currentUser.name,
+          email: currentUser.email,
+          role: currentUser.role,
+        });
+      } catch (logErr) {
+        console.warn("Logout tracking failed:", logErr);
+      }
+      
+      onLogoutSuccess?.(currentUser);
+    }
+    
+    // Clear everything
     localStorage.removeItem("token");
     localStorage.removeItem("user");
+    localStorage.removeItem("currentSessionId");
     setCurrentUser(null);
-  }, [currentUser, onLogoutSuccess]);
+  }, [currentUser, onLogoutSuccess, recordLogout]);
 
   // ====================== PERMISSION UPDATER ======================
   const updateUserPagePermissions = useCallback(
