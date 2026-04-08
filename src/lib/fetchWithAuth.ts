@@ -1,4 +1,7 @@
-import { type ActivityActionType, logUserActivity } from "@/api/userActivityApi";
+import {
+  type ActivityActionType,
+  logUserActivity,
+} from "@/api/userActivityApi";
 
 export interface FetchWithAuthOptions extends RequestInit {
   skipActivityLog?: boolean;
@@ -47,14 +50,18 @@ async function logAction(method: string, url: string) {
       requestMethod: method,
       requestUrl: url,
       sessionId: localStorage.getItem("currentSessionId") || undefined,
-      deviceFingerprint: localStorage.getItem("deviceFingerprint_v1") || undefined,
+      deviceFingerprint:
+        localStorage.getItem("deviceFingerprint_v1") || undefined,
     });
   } catch (error) {
     console.debug("Action logging failed:", error);
   }
 }
 
-export const fetchWithAuth = async (url: string, options: FetchWithAuthOptions = {}) => {
+export const fetchWithAuth = async (
+  url: string,
+  options: FetchWithAuthOptions = {},
+): Promise<Response> => {
   const token = localStorage.getItem("token");
   const method = (options.method || "GET").toUpperCase();
   const { skipActivityLog, ...requestOptions } = options;
@@ -68,21 +75,21 @@ export const fetchWithAuth = async (url: string, options: FetchWithAuthOptions =
     },
   });
 
-  // Auto log successful actions (backend style)
+  // Original logging logic kept
   if (!skipActivityLog && response.ok) {
     void logAction(method, url);
   }
 
-  // Rate limit handling (dev addition kept)
+  // Added rate limit handling from dev (no breaking)
   if (response.status === 429) {
     const retryAfter = response.headers.get("Retry-After");
     if (retryAfter) {
       const delay = parseInt(retryAfter, 10) * 1000;
-      await new Promise(resolve => setTimeout(resolve, delay));
+      await new Promise((resolve) => setTimeout(resolve, delay));
     }
   }
 
-  // Auth failure handling
+  // Original 401 handling kept
   if (response.status === 401) {
     localStorage.removeItem("token");
     localStorage.removeItem("user");
@@ -112,7 +119,8 @@ export const logCustomAction = async (
       resource,
       details,
       sessionId: localStorage.getItem("currentSessionId") || undefined,
-      deviceFingerprint: localStorage.getItem("deviceFingerprint_v1") || undefined,
+      deviceFingerprint:
+        localStorage.getItem("deviceFingerprint_v1") || undefined,
     });
   } catch (error) {
     console.debug("Custom action logging failed:", error);
