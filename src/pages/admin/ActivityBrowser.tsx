@@ -1,41 +1,78 @@
-import React, { useState, useMemo } from "react";
+import React, { useMemo, useState, useEffect } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { useActivityBrowser } from "@/contexts/ActivityBrowserContext";
 import {
-  useActivityBrowser,
-  SessionEvent,
-} from "@/contexts/ActivityBrowserContext";
+  type SessionEvent,
+  ActivityLogFilters,
+  type ActivityActionType,
+} from "@/api/userActivityApi";
 import {
+  Activity,
+  Calendar,
+  Clock,
+  Fingerprint,
   LogIn,
   LogOut,
   Monitor,
   Search,
-  Trash2,
-  Wifi,
-  Calendar,
+  ShieldAlert,
+  Timer,
+  TrendingUp,
   User,
-  ChevronDown,
-  ChevronUp,
-  Clock,
 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Calendar as CalendarComponent } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
+import { format } from "date-fns";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  Legend,
+} from "recharts";
 
-const EVENT_COLORS = {
-  login: {
-    badge: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20",
-    icon: "text-emerald-500",
-    dot: "bg-emerald-500",
-  },
-  logout: {
-    badge: "bg-rose-500/10 text-rose-600 border-rose-500/20",
-    icon: "text-rose-500",
-    dot: "bg-rose-500",
-  },
-  unknown: {
-    badge: "bg-slate-500/10 text-slate-600 border-slate-500/20",
-    icon: "text-slate-500",
-    dot: "bg-slate-500",
-  },
+const ActivityChartTooltip = ({ active, payload, label }: any) => {
+  if (active && payload && payload.length) {
+    return (
+      <div className="rounded-lg border border-border bg-background p-3 shadow-md">
+        <p className="mb-2 text-xs font-bold text-foreground">{label}</p>
+        <div className="space-y-1.5">
+          {payload.map((entry: any) => (
+            <div key={entry.name} className="flex items-center justify-between gap-4 text-[11px]">
+              <div className="flex items-center gap-2">
+                <div className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: entry.color }} />
+                <span className="text-muted-foreground">{entry.name}</span>
+              </div>
+              <span className="font-mono font-bold text-foreground">{entry.value}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  return null;
 };
-
 
 const ROLE_COLORS: Record<string, string> = {
   super_admin: "bg-violet-500/10 text-violet-600 border-violet-500/20",
@@ -43,7 +80,18 @@ const ROLE_COLORS: Record<string, string> = {
   user: "bg-slate-500/10 text-slate-600 border-slate-500/20",
 };
 
-function formatDateTime(iso: string) {
+const ACTION_COLORS: Record<string, string> = {
+  read: "bg-blue-500/10 text-blue-600 border-blue-500/20",
+  create: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20",
+  update: "bg-amber-500/10 text-amber-600 border-amber-500/20",
+  delete: "bg-rose-500/10 text-rose-600 border-rose-500/20",
+  write: "bg-purple-500/10 text-purple-600 border-purple-500/20",
+  export: "bg-cyan-500/10 text-cyan-600 border-cyan-500/20",
+  settings_change: "bg-orange-500/10 text-orange-600 border-orange-500/20",
+};
+
+function formatDateTime(iso?: string) {
+  if (!iso) return { date: "—", time: "—" };
   const d = new Date(iso);
   return {
     date: d.toLocaleDateString("en-IN", {
@@ -54,10 +102,21 @@ function formatDateTime(iso: string) {
     time: d.toLocaleTimeString("en-IN", {
       hour: "2-digit",
       minute: "2-digit",
-      second: "2-digit",
       hour12: true,
     }),
   };
+}
+
+function formatDuration(ms?: number): string {
+  if (!ms || ms <= 0) return "Active";
+  const totalSeconds = Math.floor(ms / 1000);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
 }
 
 function roleLabel(role: string) {
@@ -66,382 +125,745 @@ function roleLabel(role: string) {
   return "User";
 }
 
-type SortKey = "timestamp" | "userName" | "event";
-type SortDir = "asc" | "desc";
+function getActionLabel(event: SessionEvent) {
+  if (event.event === "login") return "login";
+  if (event.event === "logout") return "logout";
+  return event.actionType || "action";
+}
+
+const PRESETS = [
+  { label: "Today", period: "today" as const },
+  { label: "Yesterday", period: "yesterday" as const },
+  { label: "This Week", period: "this-week" as const },
+  { label: "This Month", period: "this-month" as const },
+  { label: "Last Month", period: "last-month" as const },
+  { label: "This Year", period: "this-year" as const },
+] satisfies Array<{ label: string; period: ActivityLogFilters['period'] }>;
+
+const YEARS = [2025, 2024, 2023];
+const MONTHS = [
+  { label: "January", value: 0 },
+  { label: "February", value: 1 },
+  { label: "March", value: 2 },
+  { label: "April", value: 3 },
+  { label: "May", value: 4 },
+  { label: "June", value: 5 },
+  { label: "July", value: 6 },
+  { label: "August", value: 7 },
+  { label: "September", value: 8 },
+  { label: "October", value: 9 },
+  { label: "November", value: 10 },
+  { label: "December", value: 11 },
+];
 
 const ActivityBrowser: React.FC = () => {
-  const { sessions, clearAll } = useActivityBrowser();
-
+  const {
+    groupedSessions,
+    rawSessions,
+    isLoading,
+    dateFilters,
+    setDateFilters,
+    clearDateFilters,
+  } = useActivityBrowser();
+  const [activeTab, setActiveTab] = useState<"sessions" | "actions">("sessions");
   const [search, setSearch] = useState("");
-  const [filterEvent, setFilterEvent] = useState<"all" | "login" | "logout">(
-    "all",
-  );
-  const [filterRole, setFilterRole] = useState<
-    "all" | "super_admin" | "admin" | "user"
-  >("all");
-  const [sortKey, setSortKey] = useState<SortKey>("timestamp");
-  const [sortDir, setSortDir] = useState<SortDir>("desc");
-  const [confirmClear, setConfirmClear] = useState(false);
+  const [filterRole, setFilterRole] = useState<"all" | "super_admin" | "admin" | "user">("all");
+  const [quickFilter, setQuickFilter] = useState<ActivityActionType | null>(null);
+  const [dateRange, setDateRange] = useState<{
+    from: Date | undefined;
+    to: Date | undefined;
+  }>({
+    from: dateFilters.dateFrom ? new Date(dateFilters.dateFrom) : undefined,
+    to: dateFilters.dateTo ? new Date(dateFilters.dateTo) : undefined,
+  });
 
-  const filtered = useMemo(() => {
-    let list = [...sessions];
+  const now = new Date();
+  now.setHours(23, 59, 59, 999);
 
-    if (filterEvent !== "all")
-      list = list.filter((s) => s.event === filterEvent);
-    if (filterRole !== "all")
-      list = list.filter((s) => s.userRole === filterRole);
-
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      list = list.filter(
-        (s) =>
-          s.userName.toLowerCase().includes(q) ||
-          s.userEmail.toLowerCase().includes(q) ||
-          s.ipAddress.includes(q) ||
-          s.deviceInfo.toLowerCase().includes(q),
-      );
-    }
-
-    list.sort((a, b) => {
-      let cmp = 0;
-      if (sortKey === "timestamp")
-        cmp = new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime();
-      else if (sortKey === "userName")
-        cmp = a.userName.localeCompare(b.userName);
-      else if (sortKey === "event") cmp = a.event.localeCompare(b.event);
-      return sortDir === "asc" ? cmp : -cmp;
+  // Update local dateRange when dateFilters change
+  useEffect(() => {
+    setDateRange({
+      from: dateFilters.dateFrom ? new Date(dateFilters.dateFrom + 'T00:00:00') : undefined,
+      to: dateFilters.dateTo ? new Date(dateFilters.dateTo + 'T00:00:00') : undefined,
     });
+  }, [dateFilters]);
 
-    return list;
-  }, [sessions, search, filterEvent, filterRole, sortKey, sortDir]);
+  const handlePresetClick = (period: ActivityLogFilters['period']) => {
+    setDateFilters({ period });
+  };
 
-  const toggleSort = (key: SortKey) => {
-    if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    else {
-      setSortKey(key);
-      setSortDir("desc");
+  const handleDateRangeChange = (range: { from: Date | undefined; to: Date | undefined }) => {
+    setDateRange(range);
+    if (range.from && range.to) {
+      // Use date-fns format to prevent timezone shifts
+      setDateFilters({
+        dateFrom: format(range.from, "yyyy-MM-dd"),
+        dateTo: format(range.to, "yyyy-MM-dd"),
+      });
+    } else if (range.from) {
+      setDateFilters({ dateFrom: format(range.from, "yyyy-MM-dd") });
+    } else {
+      clearDateFilters();
     }
   };
 
-  const SortIcon = ({ col }: { col: SortKey }) =>
-    sortKey === col ? (
-      sortDir === "asc" ? (
-        <ChevronUp size={13} className="text-primary" />
-      ) : (
-        <ChevronDown size={13} className="text-primary" />
-      )
-    ) : (
-      <ChevronDown size={13} className="text-muted-foreground/40" />
-    );
+  const handleYearChange = (yearStr: string) => {
+    if (!yearStr) return;
+    const year = parseInt(yearStr);
+    const from = new Date(year, 0, 1);
+    const to = new Date(year, 11, 31);
+    setDateFilters({
+      dateFrom: format(from, "yyyy-MM-dd"),
+      dateTo: format(to, "yyyy-MM-dd"),
+    });
+  };
+
+  const handleMonthChange = (monthStr: string) => {
+    if (!monthStr) return;
+    const month = parseInt(monthStr);
+    const year = dateRange.from?.getFullYear() || new Date().getFullYear();
+    const from = new Date(year, month, 1);
+    const to = new Date(year, month, new Date(year, month + 1, 0).getDate());
+    setDateFilters({
+      dateFrom: format(from, "yyyy-MM-dd"),
+      dateTo: format(to, "yyyy-MM-dd"),
+    });
+  };
+
+  const handleQuickFilter = (type: ActivityActionType) => {
+    setQuickFilter(prev => prev === type ? null : type);
+  };
+
+  const chartData = useMemo(() => {
+    if (!rawSessions.length && !dateRange.from) return [];
+
+    const dataMap: Record<string, { date: string; actions: number; logins: number; fullDate: string }> = {};
+    
+    // Determine range bounds
+    let start: Date;
+    let end: Date;
+
+    if (dateRange.from) {
+      start = new Date(dateRange.from);
+      end = dateRange.to ? new Date(dateRange.to) : new Date();
+    } else {
+      const timestamps = rawSessions.map(s => new Date(s.timestamp).getTime());
+      start = new Date(Math.min(...timestamps));
+      end = new Date(Math.max(...timestamps));
+    }
+
+    start.setHours(0, 0, 0, 0);
+    end.setHours(0, 0, 0, 0);
+
+    // Pre-fill range buckets
+    const curr = new Date(start);
+    let safety = 0;
+    while (curr <= end && safety < 90) { // Limit to 90 days for chart readability
+      const key = format(curr, "yyyy-MM-dd");
+      dataMap[key] = { 
+        date: format(curr, "dd MMM"), 
+        fullDate: key,
+        actions: 0, 
+        logins: 0 
+      };
+      curr.setDate(curr.getDate() + 1);
+      safety++;
+    }
+
+    // Count events
+    rawSessions.forEach(event => {
+      const dayKey = format(new Date(event.timestamp), "yyyy-MM-dd");
+      if (dataMap[dayKey]) {
+        if (event.event === 'action') dataMap[dayKey].actions++;
+        if (event.event === 'login') dataMap[dayKey].logins++;
+      }
+    });
+
+    return Object.values(dataMap).sort((a, b) => a.fullDate.localeCompare(b.fullDate));
+  }, [rawSessions, dateRange]);
+
+  const analytics = useMemo(() => {
+    const userCounts: Record<string, number> = {};
+    const resourceCounts: Record<string, number> = {};
+
+    rawSessions.forEach(event => {
+      if (event.event === 'action') {
+        userCounts[event.userName] = (userCounts[event.userName] || 0) + 1;
+        const res = event.resource || 'Unknown';
+        resourceCounts[res] = (resourceCounts[res] || 0) + 1;
+      }
+    });
+
+    return {
+      topUsers: Object.entries(userCounts).sort((a, b) => b[1] - a[1]).slice(0, 3),
+      topResources: Object.entries(resourceCounts).sort((a, b) => b[1] - a[1]).slice(0, 3)
+    };
+  }, [rawSessions]);
+
+  const filteredSessions = useMemo(() => {
+    const q = search.trim().toLowerCase();
+
+    return groupedSessions.filter((session) => {
+      const roleMatch = filterRole === "all" || session.userRole === filterRole;
+      const actionTypeMatch = !quickFilter || session.actions.some(a => a.actionType === quickFilter);
+      const searchMatch =
+        !q ||
+        session.userName.toLowerCase().includes(q) ||
+        session.userEmail.toLowerCase().includes(q) ||
+        session.deviceFingerprint.toLowerCase().includes(q) ||
+        session.deviceInfo.toLowerCase().includes(q) ||
+        session.actions.some(
+          (action) =>
+            action.resource?.toLowerCase().includes(q) ||
+            action.requestUrl?.toLowerCase().includes(q) ||
+            action.details?.toLowerCase().includes(q) ||
+            action.actionType?.toLowerCase().includes(q),
+        );
+
+      return roleMatch && searchMatch && actionTypeMatch;
+    });
+  }, [groupedSessions, search, filterRole, quickFilter]);
+
+  const filteredActions = useMemo(() => {
+    const q = search.trim().toLowerCase();
+
+    return rawSessions.filter((event) => {
+      if (event.event !== "action") return false;
+      const roleMatch = filterRole === "all" || event.userRole === filterRole;
+      const actionTypeMatch = !quickFilter || event.actionType === quickFilter;
+      const searchMatch =
+        !q ||
+        event.userName.toLowerCase().includes(q) ||
+        event.userEmail.toLowerCase().includes(q) ||
+        event.resource?.toLowerCase().includes(q) ||
+        event.requestUrl?.toLowerCase().includes(q) ||
+        event.details?.toLowerCase().includes(q) ||
+        event.actionType?.toLowerCase().includes(q);
+
+      return roleMatch && searchMatch && actionTypeMatch;
+    });
+  }, [rawSessions, search, filterRole, quickFilter]);
+
+  const currentPeriodLabel = dateFilters.period 
+    ? PRESETS.find(p => p.period === dateFilters.period)?.label 
+    : dateFilters.dateFrom || dateFilters.dateTo ? 'Custom Range' : 'Last Month';
 
   return (
     <div className="space-y-6">
       <Breadcrumbs
         items={[
           { label: "Admin", path: "/admin" },
-          { label: "User Control" },
-          { label: "Activity Browser" },
+          { label: "Audit", path: "/admin/activity-browser" },
+          { label: "Session Dashboard" },
         ]}
       />
 
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-xl font-heading font-bold text-foreground">
+          <h1 className="text-2xl font-heading font-bold text-foreground">
             Activity Browser
           </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Session logs for all user login and logout events
+          <p className="mt-0.5 text-sm text-muted-foreground">
+            Login, logout, device fingerprint and everything changed during each session.
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-muted-foreground font-heading px-2 py-1 rounded-md bg-muted border border-border">
-            {sessions.length} total event{sessions.length !== 1 ? "s" : ""}
-          </span>
-          {sessions.length > 0 && (
-            <>
-              {confirmClear ? (
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-muted-foreground">Sure?</span>
-                  <button
-                    onClick={() => {
-                      clearAll();
-                      setConfirmClear(false);
-                    }}
-                    className="text-xs px-3 py-1.5 rounded-md bg-destructive text-destructive-foreground font-heading hover:opacity-90 transition-opacity"
-                  >
-                    Yes, clear
-                  </button>
-                  <button
-                    onClick={() => setConfirmClear(false)}
-                    className="text-xs px-3 py-1.5 rounded-md bg-muted border border-border font-heading hover:bg-muted/80 transition-colors"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={() => setConfirmClear(true)}
-                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md bg-muted border border-border text-muted-foreground hover:text-destructive hover:border-destructive/40 transition-colors font-heading"
-                >
-                  <Trash2 size={13} />
-                  Clear All
-                </button>
-              )}
-            </>
-          )}
+        <div className="rounded-md border border-border bg-muted px-3 py-1.5 text-xs text-muted-foreground">
+          {groupedSessions.length} sessions · {rawSessions.filter(e => e.event === 'action').length} actions | {currentPeriodLabel}
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="flex flex-wrap gap-3 items-center">
-        {/* Search */}
-        <div className="relative flex-1 min-w-[180px] max-w-xs">
-          <Search
-            size={14}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-          />
-          <input
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search name, email, IP…"
-            className="w-full pl-8 pr-3 py-2 text-sm rounded-lg border border-border bg-background focus:border-primary focus:ring-1 focus:ring-primary/30 outline-none transition-all"
-          />
-        </div>
-
-        {/* Event filter */}
-        <select
-          value={filterEvent}
-          onChange={(e) => setFilterEvent(e.target.value as typeof filterEvent)}
-          className="text-sm rounded-lg border border-border bg-background px-3 py-2 focus:border-primary outline-none transition-all cursor-pointer"
-        >
-          <option value="all">All Events</option>
-          <option value="login">Login only</option>
-          <option value="logout">Logout only</option>
-        </select>
-
-        {/* Role filter */}
-        <select
-          value={filterRole}
-          onChange={(e) => setFilterRole(e.target.value as typeof filterRole)}
-          className="text-sm rounded-lg border border-border bg-background px-3 py-2 focus:border-primary outline-none transition-all cursor-pointer"
-        >
-          <option value="all">All Roles</option>
-          <option value="super_admin">Super Admin</option>
-          <option value="admin">Admin</option>
-          <option value="user">User</option>
-        </select>
+      <div className="border-b border-border">
+        <nav className="-mb-px flex space-x-8">
+          <button
+            className={`border-b-2 px-1 pb-2 text-sm font-heading ${
+              activeTab === "sessions"
+                ? "border-primary text-foreground"
+                : "border-transparent text-muted-foreground hover:border-primary/50 hover:text-foreground"
+            }`}
+            onClick={() => setActiveTab("sessions")}
+          >
+            Sessions
+          </button>
+          <button
+            className={`border-b-2 px-1 pb-2 text-sm font-heading ${
+              activeTab === "actions"
+                ? "border-primary text-foreground"
+                : "border-transparent text-muted-foreground hover:border-primary/50 hover:text-foreground"
+            }`}
+            onClick={() => setActiveTab("actions")}
+          >
+            Actions
+          </button>
+        </nav>
       </div>
 
-      {/* Empty state */}
-      {sessions.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-24 gap-4 text-muted-foreground border border-dashed border-border rounded-2xl bg-muted/20">
-          <Clock size={40} className="opacity-20" />
-          <p className="text-base font-heading font-semibold">
-            No sessions recorded yet
-          </p>
-          <p className="text-sm text-center max-w-xs">
-            Activity will appear here whenever a user logs in or out of the
-            application.
-          </p>
+      {/* Date Filters */}
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:gap-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <Select
+            value={dateFilters.period || ""}
+            onValueChange={(v) => handlePresetClick(v as ActivityLogFilters["period"])}
+          >
+            <SelectTrigger className="h-8 w-[130px] text-xs">
+              <SelectValue placeholder="Quick Select" />
+            </SelectTrigger>
+            <SelectContent>
+              {PRESETS.map(({ label, period }) => (
+                <SelectItem key={period} value={period} className="text-xs">
+                  {label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select onValueChange={handleYearChange}>
+            <SelectTrigger className="h-8 w-[80px] text-xs">
+              <SelectValue placeholder="Year" />
+            </SelectTrigger>
+            <SelectContent>
+              {YEARS.map((y) => (
+                <SelectItem key={y} value={y.toString()} className="text-xs">
+                  {y}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select onValueChange={handleMonthChange}>
+            <SelectTrigger className="h-8 w-[110px] text-xs">
+              <SelectValue placeholder="Month" />
+            </SelectTrigger>
+            <SelectContent>
+              {MONTHS.map((m) => (
+                <SelectItem key={m.value} value={m.value.toString()} className="text-xs">
+                  {m.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-xs h-8 px-3"
+            onClick={clearDateFilters}
+          >
+            Clear
+          </Button>
+          <div className="flex items-center gap-1 border-l border-border pl-3 ml-1">
+            {(['create', 'update', 'delete'] as ActivityActionType[]).map((act) => (
+              <Button key={act} variant={quickFilter === act ? "default" : "outline"} size="sm" className="h-7 text-[10px] uppercase tracking-wider" onClick={() => handleQuickFilter(act)}>
+                {act}
+              </Button>
+            ))}
+          </div>
         </div>
-      ) : filtered.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 gap-3 text-muted-foreground">
-          <Search size={32} className="opacity-20" />
-          <p className="text-sm">No results match your filters.</p>
+
+        <div className="flex items-center gap-2 min-w-[280px]">
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                id="date"
+                variant={"outline"}
+                className={cn(
+                  "w-[280px] justify-start text-left font-normal text-xs h-10",
+                  !dateRange.from && !dateRange.to && "text-muted-foreground"
+                )}
+              >
+                <Calendar className="mr-2 h-4 w-4" />
+                {dateRange.from ? (
+                  dateRange.to ? (
+                    <>
+                      {dateRange.from.toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' })} -{" "}
+                      {dateRange.to.toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' })}
+                    </>
+                  ) : (
+                    <>{format(dateRange.from, 'PPP')} - Present</>
+                  )
+                ) : (
+                  <span>Pick a date range</span>
+                )}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+              <CalendarComponent
+                initialFocus
+                mode="range"
+                defaultMonth={dateRange.from}
+                selected={dateRange}
+                onSelect={(range) => handleDateRangeChange({ from: range?.from, to: range?.to })}
+                numberOfMonths={2}
+              />
+            </PopoverContent>
+          </Popover>
         </div>
-      ) : (
-        <>
-          {/* Desktop table */}
-          <div className="hidden md:block rounded-xl border border-border overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50 border-b border-border">
-                <tr>
-                  <th className="text-left px-4 py-3 font-heading text-xs uppercase tracking-wider text-muted-foreground w-8">
-                    #
-                  </th>
-                  <th
-                    className="text-left px-4 py-3 font-heading text-xs uppercase tracking-wider text-muted-foreground cursor-pointer hover:text-foreground select-none"
-                    onClick={() => toggleSort("event")}
-                  >
-                    <span className="flex items-center gap-1">
-                      Event <SortIcon col="event" />
-                    </span>
-                  </th>
-                  <th
-                    className="text-left px-4 py-3 font-heading text-xs uppercase tracking-wider text-muted-foreground cursor-pointer hover:text-foreground select-none"
-                    onClick={() => toggleSort("userName")}
-                  >
-                    <span className="flex items-center gap-1">
-                      User <SortIcon col="userName" />
-                    </span>
-                  </th>
-                  <th className="text-left px-4 py-3 font-heading text-xs uppercase tracking-wider text-muted-foreground">
-                    Role
-                  </th>
-                  <th
-                    className="text-left px-4 py-3 font-heading text-xs uppercase tracking-wider text-muted-foreground cursor-pointer hover:text-foreground select-none"
-                    onClick={() => toggleSort("timestamp")}
-                  >
-                    <span className="flex items-center gap-1">
-                      Date & Time <SortIcon col="timestamp" />
-                    </span>
-                  </th>
-                  <th className="text-left px-4 py-3 font-heading text-xs uppercase tracking-wider text-muted-foreground">
-                    IP Address
-                  </th>
-                  <th className="text-left px-4 py-3 font-heading text-xs uppercase tracking-wider text-muted-foreground">
-                    Device / Browser
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {filtered.map((s, idx) => {
-                  const { date, time } = formatDateTime(s.timestamp);
-                  const colors = EVENT_COLORS[s.event ?? "unknown"];
-                  return (
-                    <tr
-                      key={`${s.id ?? "no-id"}-${s.timestamp}-${idx}`}
-                      className="hover:bg-muted/30 transition-colors"
-                    >
-                      <td className="px-4 py-3 text-xs text-muted-foreground">
-                        {idx + 1}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={`inline-flex items-center gap-1.5 text-xs font-heading px-2.5 py-1 rounded-full border ${colors.badge}`}
-                        >
-                          {s.event === "login" ? (
-                            <LogIn size={11} />
-                          ) : (
-                            <LogOut size={11} />
-                          )}
-                          {s.event === "login" ? "Login" : "Logout"}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="font-medium text-foreground">
-                          {s.userName}
-                        </div>
-                        <div className="text-xs text-muted-foreground truncate max-w-[180px]">
-                          {s.userEmail}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={`text-xs font-heading px-2 py-0.5 rounded-full border ${ROLE_COLORS[s.userRole] || ROLE_COLORS.user}`}
-                        >
-                          {roleLabel(s.userRole)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1.5 text-foreground">
-                          <Calendar
-                            size={12}
-                            className="text-muted-foreground shrink-0"
-                          />
-                          {date}
-                        </div>
-                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground mt-0.5">
-                          <Clock size={11} className="shrink-0" />
-                          {time}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1.5 text-foreground font-mono text-xs">
-                          <Wifi
-                            size={12}
-                            className="text-muted-foreground shrink-0"
-                          />
-                          {s.ipAddress}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                          <Monitor size={12} className="shrink-0" />
-                          {s.deviceInfo}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative min-w-[220px] max-w-sm flex-1">
+            <Search
+              size={14}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+            />
+            <Input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search user, fingerprint, resource, URL..."
+              className="w-full py-2 pl-10 pr-4 text-sm"
+            />
           </div>
 
-          {/* Mobile cards */}
-          <div className="md:hidden space-y-3">
-            {filtered.map((s, idx) => {
-              const { date, time } = formatDateTime(s.timestamp);
-              const colors = EVENT_COLORS[s.event ?? "unknown"];
+          <select
+            value={filterRole}
+            onChange={(e) => setFilterRole(e.target.value as typeof filterRole)}
+            className="rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
+          >
+            <option value="all">All Roles</option>
+            <option value="super_admin">Super Admin</option>
+            <option value="admin">Admin</option>
+            <option value="user">User</option>
+          </select>
+        </div>
+      </div>
+
+    {/* Enterprise Analytics Cards */}
+    {!isLoading && (
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <Card className="border-border/40 bg-card/20 backdrop-blur-sm">
+          <CardHeader className="py-3 px-4">
+            <CardTitle className="text-xs font-semibold flex items-center gap-2 uppercase tracking-wider text-muted-foreground">
+              <TrendingUp size={14} className="text-primary" /> Top Power Users
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 pb-4">
+            <div className="space-y-2">
+              {analytics.topUsers.length > 0 ? analytics.topUsers.map(([user, count]) => (
+                <div key={user} className="flex items-center justify-between p-2 rounded-lg bg-muted/40 text-sm">
+                  <span className="font-medium">{user}</span>
+                  <Badge variant="secondary" className="text-[10px]">{count} actions</Badge>
+                </div>
+              )) : <div className="text-xs text-muted-foreground py-2 italic text-center">No action data</div>}
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="border-border/40 bg-card/20 backdrop-blur-sm">
+          <CardHeader className="py-3 px-4">
+            <CardTitle className="text-xs font-semibold flex items-center gap-2 uppercase tracking-wider text-muted-foreground">
+              <ShieldAlert size={14} className="text-amber-500" /> Hot Modules
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="px-4 pb-4">
+            <div className="space-y-2">
+              {analytics.topResources.length > 0 ? analytics.topResources.map(([res, count]) => (
+                <div key={res} className="flex items-center justify-between p-2 rounded-lg bg-muted/40 text-sm">
+                  <span className="font-medium capitalize">{res}</span>
+                  <Badge variant="outline" className="text-[10px] border-amber-500/20 text-amber-600">{count} hits</Badge>
+                </div>
+              )) : <div className="text-xs text-muted-foreground py-2 italic text-center">No resource data</div>}
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    )}
+
+      {/* Activity Chart */}
+      {!isLoading && chartData.length > 0 && (
+        <Card className="border-border/50 bg-card/10 backdrop-blur-sm">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <Activity size={14} className="text-primary" />
+              Activity Volume
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="h-[200px] w-full mt-2">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={chartData} margin={{ top: 0, right: 0, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" opacity={0.4} />
+                  <XAxis 
+                    dataKey="date" 
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+                    dy={10}
+                  />
+                  <YAxis 
+                    axisLine={false}
+                    tickLine={false}
+                    tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
+                  />
+                  <Tooltip 
+                    cursor={{ fill: 'hsl(var(--muted))', opacity: 0.3 }}
+                    content={<ActivityChartTooltip />}
+                  />
+                  <Legend 
+                    verticalAlign="top" 
+                    align="right" 
+                    iconType="circle"
+                    wrapperStyle={{ paddingBottom: 20, fontSize: 11, fontWeight: 500 }}
+                  />
+                  <Bar dataKey="actions" name="Actions" fill="hsl(var(--primary))" radius={[2, 2, 0, 0]} barSize={24} />
+                  <Bar dataKey="logins" name="Logins" fill="#10b981" radius={[2, 2, 0, 0]} barSize={24} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {isLoading ? (
+        <div className="flex justify-center py-14">
+          <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-primary" />
+        </div>
+      ) : activeTab === "sessions" ? (
+        filteredSessions.length === 0 ? (
+          <div className="flex flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed border-border bg-muted/30 py-24 text-muted-foreground">
+            <Activity size={48} className="opacity-20" />
+            <p className="text-lg font-heading font-semibold">No session data found</p>
+            <p className="text-sm">Try adjusting the date range or other filters above.</p>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            {filteredSessions.map((session) => {
+              const loginMeta = formatDateTime(session.loginTime);
+              const logoutMeta = formatDateTime(session.logoutTime);
+
+              const alerts = [];
+              const uniqueIps = new Set(session.actions.map(a => a.ipAddress).filter(Boolean));
+              uniqueIps.add(session.loginEvent.ipAddress);
+              if (session.logoutEvent) uniqueIps.add(session.logoutEvent.ipAddress);
+              
+              if (uniqueIps.size > 1) {
+                alerts.push({ icon: ShieldAlert, label: "Multiple IPs", color: "text-amber-500" });
+              }
+
               return (
                 <div
-                  key={`${s.id ?? "no-id"}-${s.timestamp}-${idx}`}
-                  className="rounded-xl border border-border bg-card p-4 space-y-3"
+                  key={session.sessionId}
+                  className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm"
                 >
-                  <div className="flex items-center justify-between">
-                    <span
-                      className={`inline-flex items-center gap-1.5 text-xs font-heading px-2.5 py-1 rounded-full border ${colors.badge}`}
-                    >
-                      {s.event === "login" ? (
-                        <LogIn size={11} />
-                      ) : (
-                        <LogOut size={11} />
-                      )}
-                      {s.event === "login" ? "Login" : "Logout"}
-                    </span>
-                    <span className="text-xs text-muted-foreground">
-                      #{idx + 1}
-                    </span>
+                  <div className="grid gap-4 border-b border-border bg-muted/30 p-5 lg:grid-cols-[1.3fr_1fr_1fr_1fr]">
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <User size={16} className="text-muted-foreground" />
+                        <span className="font-semibold text-foreground">
+                          {session.userName}
+                        </span>
+                        <span
+                          className={`rounded-full border px-2 py-0.5 text-xs font-heading ${ROLE_COLORS[session.userRole] || ROLE_COLORS.user}`}
+                        >
+                          {roleLabel(session.userRole)}
+                        </span>
+                        <span className={cn(
+                          "rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-tight",
+                          session.logoutTime 
+                            ? "bg-slate-500/10 text-slate-600 border border-slate-500/20"
+                            : "bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 animate-pulse"
+                        )}>
+                          {session.logoutTime ? "Completed" : "Active Now"}
+                        </span>
+                      </div>
+                      <p className="text-sm text-muted-foreground">{session.userEmail}</p>
+                      <div className="flex flex-wrap gap-2 mt-2">
+                        {alerts.map((alert, idx) => (
+                          <div key={idx} className={cn("flex items-center gap-1 text-[10px] font-bold uppercase", alert.color)}>
+                            <alert.icon size={12} />
+                            {alert.label}
+                          </div>
+                        ))}
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <Monitor size={13} />
+                        <span>{session.deviceInfo}</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs font-mono text-muted-foreground">
+                        <Fingerprint size={13} />
+                        <span className="break-all">{session.deviceFingerprint}</span>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                        <LogIn size={14} className="text-emerald-500" />
+                        Login
+                      </div>
+                      <div className="text-sm text-muted-foreground">{loginMeta.date}</div>
+                      <div className="text-sm font-mono">{loginMeta.time}</div>
+                      <div className="text-xs text-muted-foreground">
+                        IP: {session.loginEvent.ipAddress}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                        <LogOut size={14} className="text-rose-500" />
+                        Logout
+                      </div>
+                      <div className="text-sm text-muted-foreground">{logoutMeta.date}</div>
+                      <div className="text-sm font-mono">{logoutMeta.time}</div>
+                      <div className="text-xs text-muted-foreground">
+                        IP: {session.logoutEvent?.ipAddress || "Still active"}
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                        <Timer size={14} className="text-primary" />
+                        Session Summary
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        Duration: {formatDuration(session.durationMs)}
+                      </div>
+                      <div className="text-sm text-muted-foreground">
+                        Actions: {session.actions.length}
+                      </div>
+                      <div className="text-xs font-mono text-muted-foreground">
+                        Session ID: {session.sessionId}
+                      </div>
+                    </div>
                   </div>
 
-                  <div className="flex items-start gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-muted flex items-center justify-center shrink-0">
-                      <User size={16} className="text-muted-foreground" />
+                  <div className="p-5">
+                    <div className="mb-3 flex items-center gap-2">
+                      <Activity size={16} className="text-primary" />
+                      <h3 className="font-heading text-sm font-semibold text-foreground">
+                        What user did in this login session
+                      </h3>
                     </div>
-                    <div className="min-w-0">
-                      <p className="font-heading font-semibold text-sm text-foreground truncate">
-                        {s.userName}
-                      </p>
-                      <p className="text-xs text-muted-foreground truncate">
-                        {s.userEmail}
-                      </p>
-                      <span
-                        className={`mt-1 inline-block text-[10px] font-heading px-2 py-0.5 rounded-full border ${ROLE_COLORS[s.userRole] || ROLE_COLORS.user}`}
-                      >
-                        {roleLabel(s.userRole)}
-                      </span>
-                    </div>
-                  </div>
 
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div className="flex items-center gap-1.5 text-muted-foreground">
-                      <Calendar size={12} className="shrink-0" />
-                      {date}
-                    </div>
-                    <div className="flex items-center gap-1.5 text-muted-foreground">
-                      <Clock size={12} className="shrink-0" />
-                      {time}
-                    </div>
-                    <div className="flex items-center gap-1.5 text-muted-foreground font-mono">
-                      <Wifi size={12} className="shrink-0" />
-                      {s.ipAddress}
-                    </div>
-                    <div className="flex items-center gap-1.5 text-muted-foreground">
-                      <Monitor size={12} className="shrink-0" />
-                      {s.deviceInfo}
-                    </div>
+                    {session.actions.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-border bg-muted/20 p-6 text-center text-sm text-muted-foreground">
+                        No tracked actions inside this session yet.
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                          <thead>
+                            <tr className="border-b border-border text-left text-xs uppercase tracking-wider text-muted-foreground">
+                              <th className="px-3 py-3">Time</th>
+                              <th className="px-3 py-3">Action</th>
+                              <th className="px-3 py-3">Resource</th>
+                              <th className="px-3 py-3">Method</th>
+                              <th className="px-3 py-3">Request</th>
+                              <th className="px-3 py-3">Details</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {session.actions.map((action) => (
+                              <tr key={action.id} className="border-b border-border/60">
+                                <td className="px-3 py-3 font-mono text-xs text-muted-foreground">
+                                  {formatDateTime(action.timestamp).time}
+                                </td>
+                                <td className="px-3 py-3">
+                                  <span
+                                    className={`rounded-full border px-2 py-1 text-xs font-heading ${ACTION_COLORS[action.actionType || "read"]}`}
+                                  >
+                                    {action.actionType || "read"}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-3 capitalize">{action.resource || "—"}</td>
+                                <td className="px-3 py-3 font-mono text-xs">
+                                  {action.requestMethod || "—"}
+                                </td>
+                                <td className="max-w-[260px] px-3 py-3 text-xs text-muted-foreground">
+                                  <div className="truncate">{action.requestUrl || "—"}</div>
+                                </td>
+                                <td className="max-w-[320px] px-3 py-3 text-xs text-muted-foreground">
+                                  <div className="truncate">{action.details || "—"}</div>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                   </div>
                 </div>
               );
             })}
           </div>
+        )
+      ) : rawSessions.filter(e => e.event === 'action').length === 0 ? (
+        <div className="flex flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed border-border bg-muted/30 py-24 text-muted-foreground">
+          <Activity size={48} className="opacity-20" />
+          <p className="text-lg font-heading font-semibold">No actions found</p>
+          <p className="text-sm">Try adjusting the date range or other filters above.</p>
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-2xl border border-border bg-card">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/40">
+              <tr className="text-left text-xs uppercase tracking-wider text-muted-foreground">
+                <th className="px-4 py-3">User</th>
+                <th className="px-4 py-3">Action</th>
+                <th className="px-4 py-3">Resource</th>
+                <th className="px-4 py-3">Time</th>
+                <th className="px-4 py-3">URL</th>
+                <th className="px-4 py-3">Session</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredActions.map((action) => (
+                <tr key={action.id} className="border-t border-border/70">
+                  <td className="px-4 py-3">
+                    <div className="font-medium">{action.userName}</div>
+                    <div className="text-xs text-muted-foreground">{action.userEmail}</div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <span
+                      className={`rounded-full border px-2 py-1 text-xs font-heading ${ACTION_COLORS[action.actionType || "read"]}`}
+                    >
+                      {getActionLabel(action)}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 capitalize">{action.resource || "—"}</td>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Calendar size={12} />
+                      {formatDateTime(action.timestamp).date}
+                    </div>
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <Clock size={12} />
+                      {formatDateTime(action.timestamp).time}
+                    </div>
+                  </td>
+                  <td className="max-w-[280px] px-4 py-3 text-xs text-muted-foreground">
+                    <div className="truncate">{action.requestUrl || "—"}</div>
+                  </td>
+                  <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
+                    {action.sessionId || "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
-          <p className="text-xs text-muted-foreground text-center">
-            Showing {filtered.length} of {sessions.length} events
-          </p>
-        </>
+      {!isLoading && (
+        <div className="grid grid-cols-2 gap-4 border-t border-border pt-6 text-xs md:grid-cols-4">
+          <div className="text-center">
+            <div className="text-lg font-heading text-foreground">{groupedSessions.length}</div>
+            <div className="text-muted-foreground">Total Sessions</div>
+          </div>
+          <div className="text-center">
+            <div className="text-lg font-heading text-foreground">{rawSessions.filter(e => e.event === 'action').length}</div>
+            <div className="text-muted-foreground">Tracked Actions</div>
+          </div>
+          <div className="text-center">
+            <div className="text-lg font-heading text-primary">
+              {groupedSessions.filter((s) => !!s.logoutTime).length}
+            </div>
+            <div className="text-muted-foreground">Completed Sessions</div>
+          </div>
+          <div className="text-center">
+            <div className="text-lg font-heading text-emerald-600 dark:text-emerald-400">
+              {groupedSessions.filter((s) => !s.logoutTime).length}
+            </div>
+            <div className="text-muted-foreground">Active Sessions</div>
+          </div>
+        </div>
       )}
     </div>
   );

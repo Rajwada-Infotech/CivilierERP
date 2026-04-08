@@ -1,60 +1,86 @@
 import React, {
   createContext,
-  useContext,
-  useState,
   useCallback,
-  useRef,
+  useContext,
   useEffect,
+  useMemo,
+  useRef,
+  useState,
 } from "react";
-
 import {
+  ActivityLogFilters,
+  type ActivityActionType,
+  type SessionEvent,
   getUserActivityLogs,
   logUserActivity,
   subscribeToActivityStream,
 } from "@/api/userActivityApi";
+import {
+  getDeviceFingerprint,
+  getDeviceInfo,
+} from "@/utils/deviceFingerprint";
 
-export type SessionEventType = "login" | "logout";
-
-export interface SessionEvent {
-  id: string;
+export interface GroupedSession {
+  sessionId: string;
   userId: string;
   userName: string;
   userEmail: string;
   userRole: string;
-  event: SessionEventType;
-  timestamp: string;
-  ipAddress: string;
+  deviceFingerprint: string;
   deviceInfo: string;
+  loginTime: string;
+  logoutTime?: string;
+  durationMs?: number;
+  actions: SessionEvent[];
+  loginEvent: SessionEvent;
+  logoutEvent?: SessionEvent;
 }
 
 interface ActivityBrowserContextType {
-  sessions: SessionEvent[];
+  rawSessions: SessionEvent[];
+  groupedSessions: GroupedSession[];
   isLoading: boolean;
+  dateFilters: {
+    dateFrom?: string;
+    dateTo?: string;
+    period?: 'today' | 'yesterday' | 'this-week' | 'this-month' | 'last-month' | 'this-year';
+  };
+  setDateFilters: React.Dispatch<React.SetStateAction<ActivityBrowserContextType['dateFilters']>>;
+  clearDateFilters: () => void;
   recordLogin: (user: {
     id: string;
     name: string;
     email: string;
     role: string;
-  }) => void;
+  }) => Promise<void>;
   recordLogout: (user: {
     id: string;
     name: string;
     email: string;
     role: string;
-  }) => void;
+  }) => Promise<void>;
+  recordAction: (action: {
+    method: string;
+    url: string;
+    actionType: ActivityActionType;
+    resource: string;
+    details?: string;
+  }) => Promise<void>;
   clearAll: () => void;
 }
 
-const ActivityBrowserContext = createContext<ActivityBrowserContextType | null>(
-  null,
-);
+const ActivityBrowserContext =
+  createContext<ActivityBrowserContextType | null>(null);
+
+const CURRENT_SESSION_KEY = "currentSessionId";
 
 export const useActivityBrowser = () => {
   const ctx = useContext(ActivityBrowserContext);
-  if (!ctx)
+  if (!ctx) {
     throw new Error(
       "useActivityBrowser must be inside ActivityBrowserProvider",
     );
+  }
   return ctx;
 };
 
@@ -70,37 +96,44 @@ async function fetchIp(): Promise<string> {
   }
 }
 
-function getDeviceInfo(): string {
-  const ua = navigator.userAgent;
-  let browser = "Unknown Browser";
-  let os = "Unknown OS";
+function getStoredUser() {
+  try {
+    return JSON.parse(localStorage.getItem("user") || "{}");
+  } catch {
+    return {};
+  }
+}
 
-  if (/Edg\//.test(ua)) browser = "Edge";
-  else if (/Chrome\//.test(ua) && !/Chromium/.test(ua)) browser = "Chrome";
-  else if (/Firefox\//.test(ua)) browser = "Firefox";
-  else if (/Safari\//.test(ua) && !/Chrome/.test(ua)) browser = "Safari";
-  else if (/OPR\/|Opera\//.test(ua)) browser = "Opera";
+function ensureEventId(event: SessionEvent, index: number) {
+  if (event.id) return String(event.id);
+  return `${event.event}-${event.sessionId || "no-session"}-${event.timestamp}-${index}`;
+}
 
-  if (/Windows NT 10/.test(ua)) os = "Windows 10/11";
-  else if (/Windows NT 6\.1/.test(ua)) os = "Windows 7";
-  else if (/Windows/.test(ua)) os = "Windows";
-  else if (/Mac OS X/.test(ua)) os = "macOS";
-  else if (/Android/.test(ua)) os = "Android";
-  else if (/iPhone|iPad/.test(ua)) os = "iOS";
-  else if (/Linux/.test(ua)) os = "Linux";
-
-  return `${browser} · ${os}`;
+function normalizeEvent(event: SessionEvent, index: number): SessionEvent {
+  return {
+    ...event,
+    id: ensureEventId(event, index),
+    ipAddress: event.ipAddress || "Unavailable",
+    deviceInfo: event.deviceInfo || "Unknown device",
+    deviceFingerprint: event.deviceFingerprint || "Unknown",
+    details: event.details || "",
+    resource: event.resource || "",
+    requestMethod: event.requestMethod || "",
+    requestUrl: event.requestUrl || "",
+  };
 }
 
 export const ActivityBrowserProvider: React.FC<{
   children: React.ReactNode;
 }> = ({ children }) => {
-  const [sessions, setSessions] = useState<SessionEvent[]>([]);
+  const [rawSessions, setRawSessions] = useState<SessionEvent[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [dateFilters, setDateFilters] = useState<ActivityBrowserContextType['dateFilters']>({
+    period: 'last-month' // Default last 30 days
+  });
   const sseSourceRef = useRef<EventSource | null>(null);
   const cachedIp = useRef<string | null>(null);
 
-  // FIX: getIp was never defined — caused a ReferenceError at runtime
   const getIp = useCallback(async (): Promise<string> => {
     if (cachedIp.current) return cachedIp.current;
     const ip = await fetchIp();
@@ -108,79 +141,75 @@ export const ActivityBrowserProvider: React.FC<{
     return ip;
   }, []);
 
-  // FIX: was calling API unconditionally — fires 401s when user is not logged in
-  useEffect(() => {
+  const refreshLogs = useCallback(async () => {
     const token = localStorage.getItem("token");
     if (!token) {
+      setRawSessions([]);
       setIsLoading(false);
       return;
     }
-    const loadLogs = async () => {
-      try {
-        setIsLoading(true);
-        const logs = await getUserActivityLogs();
-        setSessions(logs);
-      } catch (err) {
-        console.error("Failed to load activity logs:", err);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    loadLogs();
-  }, []);
 
-  // FIX: SSE was connecting unconditionally — fires 401s when user is not logged in
+    try {
+      setIsLoading(true);
+      const filters: ActivityLogFilters = { ...dateFilters };
+      const logs = await getUserActivityLogs(filters);
+      setRawSessions(logs.map(normalizeEvent));
+    } catch (err) {
+      console.error("Failed to load activity logs:", err);
+      setRawSessions([]);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [dateFilters]);
+
+  useEffect(() => {
+    void refreshLogs();
+  }, [refreshLogs]);
+
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) return;
 
-    sseSourceRef.current = subscribeToActivityStream((data) => {
-      if (data.type === "initial") {
-        setSessions(data.sessions);
-      } else {
-        setSessions((prev) => {
-          if (prev.some((s) => s.id === data.id)) return prev;
-          return [data, ...prev];
-        });
-      }
+    sseSourceRef.current = subscribeToActivityStream((events) => {
+      setRawSessions(events.map(normalizeEvent));
     });
 
     return () => {
-      if (sseSourceRef.current) {
-        sseSourceRef.current.close();
-        sseSourceRef.current = null;
-      }
+      sseSourceRef.current?.close();
+      sseSourceRef.current = null;
     };
   }, []);
 
   const recordLogin = useCallback(
     async (user: { id: string; name: string; email: string; role: string }) => {
       const ip = await getIp();
-      const entry: SessionEvent = {
-        id: `sess-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        userId: user.id,
-        userName: user.name,
-        userEmail: user.email,
-        userRole: user.role,
-        event: "login" as const,
-        timestamp: new Date().toISOString(),
-        ipAddress: ip,
-        deviceInfo: getDeviceInfo(),
-      };
-      setSessions((prev) => [entry, ...prev]);
-      try {
-        await logUserActivity({
+      const fingerprint = await getDeviceFingerprint();
+      const deviceInfo = getDeviceInfo();
+      const sessionId = crypto.randomUUID();
+      localStorage.setItem(CURRENT_SESSION_KEY, sessionId);
+
+      const entry: SessionEvent = normalizeEvent(
+        {
           userId: user.id,
           userName: user.name,
           userEmail: user.email,
           userRole: user.role,
           event: "login",
+          timestamp: new Date().toISOString(),
           ipAddress: ip,
-          deviceInfo: getDeviceInfo(),
-        });
+          deviceInfo,
+          deviceFingerprint: fingerprint,
+          sessionId,
+        },
+        0,
+      );
+
+      setRawSessions((prev) => [entry, ...prev]);
+
+      try {
+        await logUserActivity(entry);
       } catch (err) {
         console.error("Failed to log login:", err);
-        setSessions((prev) => prev.slice(1));
       }
     },
     [getIp],
@@ -188,45 +217,170 @@ export const ActivityBrowserProvider: React.FC<{
 
   const recordLogout = useCallback(
     async (user: { id: string; name: string; email: string; role: string }) => {
+      const sessionId = localStorage.getItem(CURRENT_SESSION_KEY);
+      if (!sessionId) return;
+
       const ip = await getIp();
-      const entry: SessionEvent = {
-        id: `sess-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        userId: user.id,
-        userName: user.name,
-        userEmail: user.email,
-        userRole: user.role,
-        event: "logout" as const,
-        timestamp: new Date().toISOString(),
-        ipAddress: ip,
-        deviceInfo: getDeviceInfo(),
-      };
-      setSessions((prev) => [entry, ...prev]);
-      try {
-        // FIX: was sending wrong field names — role/event_type/ip_address/device_info
-        // API expects: userRole/event/ipAddress/deviceInfo
-        await logUserActivity({
+      const fingerprint = await getDeviceFingerprint();
+      const deviceInfo = getDeviceInfo();
+
+      const existingLogin = rawSessions.find(
+        (item) => item.sessionId === sessionId && item.event === "login",
+      );
+
+      const logoutTime = new Date().toISOString();
+      const sessionDuration = existingLogin
+        ? Math.max(
+            0,
+            Math.round(
+              (new Date(logoutTime).getTime() -
+                new Date(existingLogin.timestamp).getTime()) /
+                1000,
+            ),
+          )
+        : undefined;
+
+      const entry: SessionEvent = normalizeEvent(
+        {
           userId: user.id,
           userName: user.name,
           userEmail: user.email,
           userRole: user.role,
           event: "logout",
+          timestamp: logoutTime,
           ipAddress: ip,
-          deviceInfo: getDeviceInfo(),
-        });
+          deviceInfo,
+          deviceFingerprint: fingerprint,
+          sessionId,
+          sessionDuration,
+        },
+        0,
+      );
+
+      setRawSessions((prev) => [entry, ...prev]);
+
+      try {
+        await logUserActivity(entry);
       } catch (err) {
         console.error("Failed to log logout:", err);
-        setSessions((prev) => prev.slice(1));
+      } finally {
+        localStorage.removeItem(CURRENT_SESSION_KEY);
+      }
+    },
+    [getIp, rawSessions],
+  );
+
+  const recordAction = useCallback(
+    async (action: {
+      method: string;
+      url: string;
+      actionType: ActivityActionType;
+      resource: string;
+      details?: string;
+    }) => {
+      const sessionId = localStorage.getItem(CURRENT_SESSION_KEY);
+      const user = getStoredUser();
+
+      if (!sessionId || !user.id) return;
+
+      const entry: SessionEvent = normalizeEvent(
+        {
+          userId: user.id,
+          userName: user.name,
+          userEmail: user.email,
+          userRole: user.role,
+          event: "action",
+          timestamp: new Date().toISOString(),
+          ipAddress: await getIp(),
+          deviceInfo: getDeviceInfo(),
+          deviceFingerprint: await getDeviceFingerprint(),
+          sessionId,
+          actionType: action.actionType,
+          resource: action.resource,
+          details: action.details,
+          requestMethod: action.method,
+          requestUrl: action.url,
+        },
+        0,
+      );
+
+      setRawSessions((prev) => [entry, ...prev]);
+
+      try {
+        await logUserActivity(entry);
+      } catch (err) {
+        console.error("Action logging failed:", err);
       }
     },
     [getIp],
   );
 
-  const clearAll = useCallback(() => setSessions([]), []);
+  const groupedSessions = useMemo(() => {
+    const groups: Record<string, GroupedSession> = {};
+
+    rawSessions.forEach((event) => {
+      if (!event.sessionId) return;
+
+      if (!groups[event.sessionId]) {
+        groups[event.sessionId] = {
+          sessionId: event.sessionId,
+          userId: event.userId,
+          userName: event.userName,
+          userEmail: event.userEmail,
+          userRole: event.userRole,
+          deviceFingerprint: event.deviceFingerprint || "Unknown",
+          deviceInfo: event.deviceInfo || "Unknown device",
+          loginTime: event.timestamp,
+          actions: [],
+          loginEvent: event,
+        };
+      }
+
+      const group = groups[event.sessionId];
+
+      if (event.event === "login") {
+        group.loginTime = event.timestamp;
+        group.loginEvent = event;
+      } else if (event.event === "logout") {
+        group.logoutTime = event.timestamp;
+        group.logoutEvent = event;
+        if (typeof event.sessionDuration === "number") {
+          group.durationMs = event.sessionDuration * 1000;
+        } else if (group.loginTime) {
+          group.durationMs =
+            new Date(event.timestamp).getTime() -
+            new Date(group.loginTime).getTime();
+        }
+      } else if (event.event === "action") {
+        group.actions.push(event);
+      }
+    });
+
+    return Object.values(groups).sort((a, b) =>
+      (b.logoutTime || b.loginTime).localeCompare(a.logoutTime || a.loginTime),
+    );
+  }, [rawSessions]);
+
+  const clearAll = useCallback(() => setRawSessions([]), []);
+
+  const clearDateFilters = useCallback(() => {
+    setDateFilters({ period: 'last-month' });
+  }, []);
 
   return (
-    // FIX: isLoading was missing from provider value — context consumers couldn't read loading state
     <ActivityBrowserContext.Provider
-      value={{ sessions, isLoading, recordLogin, recordLogout, clearAll }}
+      value={{
+        rawSessions,
+        groupedSessions,
+        isLoading,
+        dateFilters,
+        setDateFilters,
+        clearDateFilters,
+        recordLogin,
+        recordLogout,
+        recordAction,
+        clearAll,
+      }}
     >
       {children}
     </ActivityBrowserContext.Provider>
