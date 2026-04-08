@@ -27,9 +27,27 @@ export interface SessionEvent {
   deviceInfo: string;
 }
 
+export interface PaginatedActivity {
+  data: SessionEvent[];
+  total: number;
+  page: number;
+  limit: number;
+  pages: number;
+}
+
+interface ActivityFilters {
+  search?: string;
+  event?: string;
+  role?: string;
+  sort?: string;
+  order?: "asc" | "desc";
+}
+
 interface ActivityBrowserContextType {
-  sessions: SessionEvent[];
+  activity: PaginatedActivity;
   isLoading: boolean;
+  setPage: (page: number) => void;
+  setFilters: (filters: ActivityFilters) => void;
   recordLogin: (user: {
     id: string;
     name: string;
@@ -43,18 +61,17 @@ interface ActivityBrowserContextType {
     role: string;
   }) => void;
   clearAll: () => void;
+  refresh: () => void;
 }
 
 const ActivityBrowserContext = createContext<ActivityBrowserContextType | null>(
-  null,
+  null
 );
 
 export const useActivityBrowser = () => {
   const ctx = useContext(ActivityBrowserContext);
   if (!ctx)
-    throw new Error(
-      "useActivityBrowser must be inside ActivityBrowserProvider",
-    );
+    throw new Error("useActivityBrowser must be inside ActivityBrowserProvider");
   return ctx;
 };
 
@@ -92,15 +109,28 @@ function getDeviceInfo(): string {
   return `${browser} · ${os}`;
 }
 
+const EMPTY_ACTIVITY: PaginatedActivity = {
+  data: [],
+  total: 0,
+  page: 1,
+  limit: 20,
+  pages: 0,
+};
+
 export const ActivityBrowserProvider: React.FC<{
   children: React.ReactNode;
 }> = ({ children }) => {
-  const [sessions, setSessions] = useState<SessionEvent[]>([]);
+  const [activity, setActivity] = useState<PaginatedActivity>(EMPTY_ACTIVITY);
   const [isLoading, setIsLoading] = useState(true);
+
+  // Track current page + filters so SSE refresh re-uses them
+  const currentPageRef = useRef(1);
+  const currentFiltersRef = useRef<ActivityFilters>({});
+
   const sseSourceRef = useRef<EventSource | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
   const cachedIp = useRef<string | null>(null);
 
-  // FIX: getIp was never defined — caused a ReferenceError at runtime
   const getIp = useCallback(async (): Promise<string> => {
     if (cachedIp.current) return cachedIp.current;
     const ip = await fetchIp();
@@ -108,50 +138,85 @@ export const ActivityBrowserProvider: React.FC<{
     return ip;
   }, []);
 
-  // FIX: was calling API unconditionally — fires 401s when user is not logged in
-  useEffect(() => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      setIsLoading(false);
-      return;
-    }
-    const loadLogs = async () => {
+  const fetchActivity = useCallback(
+    async (page = 1, filters: ActivityFilters = {}) => {
+      // Conditional: skip if no token (avoid 401s)
+      const token = localStorage.getItem("token");
+      if (!token) {
+        setIsLoading(false);
+        return;
+      }
+
       try {
+        abortControllerRef.current?.abort();
+        abortControllerRef.current = new AbortController();
+
+        currentPageRef.current = page;
+        currentFiltersRef.current = filters;
+
         setIsLoading(true);
-        const logs = await getUserActivityLogs();
-        setSessions(logs);
+        const result = await getUserActivityLogs({
+          page,
+          limit: 20,
+          ...filters,
+          sort: filters.sort ?? "timestamp",
+          order: filters.order ?? "desc",
+        });
+
+        setActivity(result);
       } catch (err) {
-        console.error("Failed to load activity logs:", err);
+        if ((err as Error).name !== "AbortError") {
+          console.error("Failed to load activity logs:", err);
+        }
       } finally {
         setIsLoading(false);
       }
-    };
-    loadLogs();
+    },
+    []
+  );
+
+  const setPage = useCallback(
+    (page: number) => {
+      fetchActivity(page, currentFiltersRef.current);
+    },
+    [fetchActivity]
+  );
+
+  const setFilters = useCallback(
+    (filters: ActivityFilters) => {
+      fetchActivity(1, filters);
+    },
+    [fetchActivity]
+  );
+
+  const refresh = useCallback(() => {
+    fetchActivity(currentPageRef.current, currentFiltersRef.current);
+  }, [fetchActivity]);
+
+  const clearAll = useCallback(() => {
+    setActivity(EMPTY_ACTIVITY);
   }, []);
 
-  // FIX: SSE was connecting unconditionally — fires 401s when user is not logged in
+  // Initial load with 500ms delay (avoid race with other queries)
+  useEffect(() => {
+    const timer = setTimeout(() => fetchActivity(), 500);
+    return () => clearTimeout(timer);
+  }, [fetchActivity]);
+
+  // SSE — refresh current page on new data (conditional)
   useEffect(() => {
     const token = localStorage.getItem("token");
-    if (!token) return;
+    if (!token || sseSourceRef.current) return;
 
-    sseSourceRef.current = subscribeToActivityStream((data) => {
-      if (data.type === "initial") {
-        setSessions(data.sessions);
-      } else {
-        setSessions((prev) => {
-          if (prev.some((s) => s.id === data.id)) return prev;
-          return [data, ...prev];
-        });
-      }
+    sseSourceRef.current = subscribeToActivityStream(() => {
+      fetchActivity(currentPageRef.current, currentFiltersRef.current);
     });
 
     return () => {
-      if (sseSourceRef.current) {
-        sseSourceRef.current.close();
-        sseSourceRef.current = null;
-      }
+      sseSourceRef.current?.close();
+      sseSourceRef.current = null;
     };
-  }, []);
+  }, [fetchActivity]);
 
   const recordLogin = useCallback(
     async (user: { id: string; name: string; email: string; role: string }) => {
@@ -162,12 +227,19 @@ export const ActivityBrowserProvider: React.FC<{
         userName: user.name,
         userEmail: user.email,
         userRole: user.role,
-        event: "login" as const,
+        event: "login",
         timestamp: new Date().toISOString(),
         ipAddress: ip,
         deviceInfo: getDeviceInfo(),
       };
-      setSessions((prev) => [entry, ...prev]);
+
+      // Optimistic: prepend to current page data
+      setActivity((prev) => ({
+        ...prev,
+        data: [entry, ...prev.data.slice(0, prev.limit - 1)],
+        total: prev.total + 1,
+      }));
+
       try {
         await logUserActivity({
           userId: user.id,
@@ -178,12 +250,13 @@ export const ActivityBrowserProvider: React.FC<{
           ipAddress: ip,
           deviceInfo: getDeviceInfo(),
         });
+        // No refresh needed on success (optimistic stays)
       } catch (err) {
         console.error("Failed to log login:", err);
-        setSessions((prev) => prev.slice(1));
+        refresh(); // rollback via refresh
       }
     },
-    [getIp],
+    [getIp, refresh]
   );
 
   const recordLogout = useCallback(
@@ -195,15 +268,20 @@ export const ActivityBrowserProvider: React.FC<{
         userName: user.name,
         userEmail: user.email,
         userRole: user.role,
-        event: "logout" as const,
+        event: "logout",
         timestamp: new Date().toISOString(),
         ipAddress: ip,
         deviceInfo: getDeviceInfo(),
       };
-      setSessions((prev) => [entry, ...prev]);
+
+      // Optimistic: prepend to current page data
+      setActivity((prev) => ({
+        ...prev,
+        data: [entry, ...prev.data.slice(0, prev.limit - 1)],
+        total: prev.total + 1,
+      }));
+
       try {
-        // FIX: was sending wrong field names — role/event_type/ip_address/device_info
-        // API expects: userRole/event/ipAddress/deviceInfo
         await logUserActivity({
           userId: user.id,
           userName: user.name,
@@ -213,20 +291,27 @@ export const ActivityBrowserProvider: React.FC<{
           ipAddress: ip,
           deviceInfo: getDeviceInfo(),
         });
+        // No refresh needed on success
       } catch (err) {
         console.error("Failed to log logout:", err);
-        setSessions((prev) => prev.slice(1));
+        refresh(); // rollback via refresh
       }
     },
-    [getIp],
+    [getIp, refresh]
   );
 
-  const clearAll = useCallback(() => setSessions([]), []);
-
   return (
-    // FIX: isLoading was missing from provider value — context consumers couldn't read loading state
     <ActivityBrowserContext.Provider
-      value={{ sessions, isLoading, recordLogin, recordLogout, clearAll }}
+      value={{
+        activity,
+        isLoading,
+        setPage,
+        setFilters,
+        recordLogin,
+        recordLogout,
+        clearAll,
+        refresh,
+      }}
     >
       {children}
     </ActivityBrowserContext.Provider>
