@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getAccountGroups } from "@/api/accountApi";
+import { getList, addRecord, updateRecord, deleteRecord } from "@/api/accountHeadApi";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
@@ -53,62 +54,15 @@ const EMPTY_FORM: LedgerForm = {
 
 // ─── API helpers ─────────────────────────────────────────────────────────────
 
-const BASE = "/api/account-head";
+// BASE removed - using accountHeadApi
 
-const fetchLedgers = async (): Promise<LedgerHead[]> => {
-  const res = await fetch(BASE);
-  if (!res.ok) throw new Error(`Failed to fetch ledgers: ${res.status}`);
-  return res.json();
-};
+// fetchLedgers replaced by getList()
 
-const createLedger = async (data: LedgerForm) => {
-  const res = await fetch(BASE, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      LHeadName: data.LHeadName.trim(),
-      LHeadType: data.LHeadType || null,
-      LBelongsTo: data.LBelongsTo ? Number(data.LBelongsTo) : null,
-    }),
-  });
-  if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error || "Failed to create");
-  }
-  return res.json();
-};
+// createLedger replaced by addRecord()
 
-const updateLedger = async ({
-  id,
-  data,
-}: {
-  id: number;
-  data: LedgerForm;
-}) => {
-  const res = await fetch(`${BASE}/${id}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      LHeadName: data.LHeadName.trim(),
-      LHeadType: data.LHeadType || null,
-      LBelongsTo: data.LBelongsTo ? Number(data.LBelongsTo) : null,
-    }),
-  });
-  if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error || "Failed to update");
-  }
-  return res.json();
-};
+// updateLedger replaced by updateRecord()
 
-const deleteLedger = async (id: number) => {
-  const res = await fetch(`${BASE}/${id}`, { method: "DELETE" });
-  if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error || "Failed to delete");
-  }
-  return res.json();
-};
+// deleteLedger replaced by deleteRecord()
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
@@ -123,6 +77,8 @@ const ExpensesMaster: React.FC = () => {
   } = useQuery({
     queryKey: ["account-groups"],
     queryFn: getAccountGroups,
+    retry: 1,
+    staleTime: 5 * 60 * 1000, // 5 min
   });
 
   const {
@@ -131,7 +87,9 @@ const ExpensesMaster: React.FC = () => {
     isError: ledgersError,
   } = useQuery({
     queryKey: ["ledger-heads"],
-    queryFn: fetchLedgers,
+    queryFn: () => getList(),
+    retry: 1,
+    staleTime: 5 * 60 * 1000, // 5 min
   });
 
   const accountGroups: AccountGroup[] = useMemo(() => {
@@ -166,7 +124,10 @@ const ExpensesMaster: React.FC = () => {
   const invalidate = () => qc.invalidateQueries({ queryKey: ["ledger-heads"] });
 
   const createMut = useMutation({
-    mutationFn: createLedger,
+    mutationFn: (data: LedgerForm) => addRecord({
+      LHeadName: data.LHeadName.trim(),
+      LBelongsTo: data.LBelongsTo ? Number(data.LBelongsTo) : null,
+    }, data.LHeadType || "Ledger"),
     onSuccess: () => { 
       toast.success("Ledger account created"); 
       invalidate(); 
@@ -176,7 +137,10 @@ const ExpensesMaster: React.FC = () => {
   });
 
   const updateMut = useMutation({
-    mutationFn: updateLedger,
+    mutationFn: ({ id, data }: { id: number; data: LedgerForm }) => updateRecord(id, {
+      LHeadName: data.LHeadName.trim(),
+      LBelongsTo: data.LBelongsTo ? Number(data.LBelongsTo) : null,
+    }, data.LHeadType || "Ledger"),
     onSuccess: () => { 
       toast.success("Ledger account updated"); 
       invalidate(); 
@@ -186,7 +150,7 @@ const ExpensesMaster: React.FC = () => {
   });
 
   const deleteMut = useMutation({
-    mutationFn: deleteLedger,
+    mutationFn: (id: number) => deleteRecord(id),
     onSuccess: () => { 
       toast.success("Ledger account deleted"); 
       invalidate(); 

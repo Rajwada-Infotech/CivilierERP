@@ -90,7 +90,7 @@ const financeSetupItems = [
   {
     icon: Receipt,
     label: "General Ledger",
-    path: "/masters/expenses",
+    path: "/masters/general-ledger",
     color: "text-orange-400",
   },
   {

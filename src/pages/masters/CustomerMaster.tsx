@@ -1,109 +1,148 @@
-import React from 'react'
-import { Breadcrumbs } from '@/components/Breadcrumbs'
-import { MasterPage, type DataChangeEvent, type RecordWithId } from '@/components/MasterPage'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
+import React from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
-  getCustomers,
-  addCustomer,
-  updateCustomer,
-  deleteCustomer,
-} from '@/api/customerApi'
+  MasterPage,
+  type DataChangeEvent,
+  type RecordWithId,
+} from "@/components/MasterPage";
 
+import {
+  getList,
+  addRecord,
+  updateRecord,
+  deleteRecord,
+} from "@/api/accountHeadApi";
+
+const CUSTOMER_TYPE = "A";
+
+/* -------------------- FORM FIELDS (UI Friendly) -------------------- */
 const fields = [
-  { name: 'name', label: 'Customer Name', type: 'text', required: true },
-  { name: 'contact', label: 'Contact Person', type: 'text' },
-  { name: 'phone', label: 'Phone Number', type: 'text' },
-  { name: 'email', label: 'Email Address', type: 'text' },
-  { name: 'gst', label: 'GST Number', type: 'text', uppercase: true },
-  { name: 'pan', label: 'PAN Number', type: 'text', uppercase: true },
-  { name: 'type', label: 'Customer Type', type: 'select', options: ['Individual', 'Company', 'Government', 'NGO', 'Other'] },
-  { name: 'paymentTerms', label: 'Payment Terms', type: 'select', options: ['Advance', '15 Days', '30 Days', '45 Days', '60 Days'] },
-  { name: 'creditLimit', label: 'Credit Limit (₹)', type: 'number', prefix: '₹' },
-  { name: 'address', label: 'Address', type: 'textarea', fullWidth: true },
-  { name: 'status', label: 'Status', type: 'toggle', defaultValue: true },
+  { name: "name", label: "Customer Name", type: "text", required: true },
+  { name: "contact", label: "Contact Person", type: "text" },
+  { name: "phone", label: "Phone Number", type: "text" },
+  { name: "email", label: "Email Address", type: "text" },
+  { name: "gst", label: "GST Number", type: "text", uppercase: true },
+  { name: "pan", label: "PAN Number", type: "text", uppercase: true },
+  {
+    name: "type",
+    label: "Customer Type",
+    type: "select",
+    options: ["Individual", "Company", "Government", "NGO", "Other"],
+  },
+  {
+    name: "paymentTerms",
+    label: "Payment Terms",
+    type: "select",
+    options: ["Advance", "15 Days", "30 Days", "45 Days", "60 Days"],
+  },
+  { name: "address", label: "Address", type: "textarea", fullWidth: true },
+  { name: "status", label: "Status", type: "toggle", defaultValue: true },
 ];
 
+/* -------------------- TABLE COLUMNS -------------------- */
 const columns = [
-  { key: 'name', label: 'Customer Name' },
-  { key: 'contact', label: 'Contact Person' },
-  { key: 'phone', label: 'Phone' },
-  { key: 'gst', label: 'GST No.' },
-  { key: 'type', label: 'Type' },
-  { key: 'paymentTerms', label: 'Payment Terms' },
-  { key: 'status', label: 'Status' },
+  { key: "name", label: "Customer Name" },
+  { key: "contact", label: "Contact Person" },
+  { key: "phone", label: "Phone" },
+  { key: "gst", label: "GST No." },
+  { key: "paymentTerms", label: "Payment Terms" },
+  { key: "status", label: "Status" },
 ];
 
-const CustomerMaster = () => {
-  const queryClient = useQueryClient()
+const CustomerMaster: React.FC = () => {
+  const queryClient = useQueryClient();
 
-  const { data: dbData, isLoading, error } = useQuery({
-    queryKey: ['customers'],
-    queryFn: getCustomers,
-  })
+  /* -------------------- FETCH DATA -------------------- */
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["account-head", CUSTOMER_TYPE],
+    queryFn: () => getList(CUSTOMER_TYPE),
+  });
 
-  const dbItems = Array.isArray(dbData) ? dbData : []
+  /* -------------------- MAP BACKEND → FRONTEND -------------------- */
+  const mappedData: RecordWithId[] = React.useMemo(() => {
+    if (!Array.isArray(data)) return [];
 
-  const mappedData: RecordWithId[] = dbItems.map(item => ({
-    _id: String(item.CustomerId || item.id || item._id),
-    name: item.Name || item.name || '',
-    contact: item.ContactPerson || item.contact || '',
-    phone: item.Phone || item.phone || '',
-    email: item.Email || item.email || '',
-    gst: item.GST || item.gst || '',
-    pan: item.PAN || item.pan || '',
-    type: item.Type || item.type || '',
-    paymentTerms: item.PaymentTerms || item.paymentTerms || '',
-    creditLimit: item.CreditLimit || item.creditLimit || '',
-    address: item.Address || item.address || '',
-    status: item.Status !== false,
-  }))
+    return data.map((item) => ({
+      _id: String(item.LHeadId),
+      name: item.LHeadName || "",
+      contact: item.LHeadContactPerson || "",
+      phone: item.LHeadPhone || "",
+      email: item.LHeadEmail || "",
+      gst: item.LGST || "",
+      pan: item.LDescription || "",
+      type: "Company",
+      paymentTerms: item.LHeadPaymentTerms || "",
+      address: item.LHeadAddress || "",
+      status: Boolean(item.LHeadStatus),
+    }));
+  }, [data]);
 
-  const toPayload = (r: Record<string, unknown>) => ({
-    Name: (r.name as string) || null,
-    ContactPerson: (r.contact as string) || null,
-    Phone: (r.phone as string) || null,
-    Email: (r.email as string) || null,
-    GST: (r.gst as string) || null,
-    PAN: (r.pan as string) || null,
-    Type: (r.type as string) || null,
-    PaymentTerms: (r.paymentTerms as string) || null,
-    CreditLimit: r.creditLimit ? Number(r.creditLimit) : null,
-    Address: (r.address as string) || null,
-    Status: r.status !== false,
-  })
+  /* -------------------- FRONTEND → BACKEND PAYLOAD -------------------- */
+  const toPayload = (r: Record<string, any>) => ({
+    LHeadName: r.name || null,
+    LHeadType: CUSTOMER_TYPE,
+    LHeadContactPerson: r.contact || null,
+    LHeadPhone: r.phone || null,
+    LHeadEmail: r.email || null,
+    LGST: r.gst || null,
+    LDescription: r.pan || null,
+    LHeadPaymentTerms: r.paymentTerms || null,
+    LHeadAddress: r.address || null,
+    LHeadStatus: r.status !== false,
+    LBranchName: "Main",
+    LGSTState: null,
+    LCountry: "India",
+    LBelongsTo: null,
+  });
 
+  /* -------------------- CRUD HANDLER -------------------- */
   const handleDataEvent = async (event: DataChangeEvent) => {
-    if (event.action === 'add') {
-      try {
-        await addCustomer(toPayload(event.record))
-        toast.success('Customer saved!')
-        await queryClient.invalidateQueries({ queryKey: ['customers'] })
-      } catch (err: any) { toast.error('Save failed: ' + err.message) }
-    }
-    if (event.action === 'update') {
-      try {
-        await updateCustomer(event.id, toPayload(event.record))
-        toast.success('Customer updated!')
-        await queryClient.invalidateQueries({ queryKey: ['customers'] })
-      } catch (err: any) { toast.error('Update failed: ' + err.message) }
-    }
-    if (event.action === 'delete') {
-      try {
-        await deleteCustomer(event.id)
-        toast.success('Customer deleted!')
-        await queryClient.invalidateQueries({ queryKey: ['customers'] })
-      } catch (err: any) { toast.error('Delete failed: ' + err.message) }
-    }
-  }
+    try {
+      if (event.action === "delete") {
+        await deleteRecord(Number(event.id));
+        toast.success("Customer deleted!");
+      }
 
-  if (isLoading) return <div className="p-6 text-muted-foreground">Loading customers...</div>
-  if (error) return <div className="p-6 text-destructive">Failed to load customers.</div>
+      if (event.action === "add") {
+        await addRecord(toPayload(event.record), CUSTOMER_TYPE);
+        toast.success("Customer saved!");
+      }
 
+      if (event.action === "update") {
+        await updateRecord(
+          Number(event.id),
+          toPayload(event.record),
+          CUSTOMER_TYPE
+        );
+        toast.success("Customer updated!");
+      }
+
+      await queryClient.invalidateQueries({
+        queryKey: ["account-head", CUSTOMER_TYPE],
+      });
+    } catch (err: any) {
+      toast.error(err.message || "Operation failed");
+    }
+  };
+
+  /* -------------------- UI STATES -------------------- */
+  if (isLoading)
+    return <div className="p-6 text-muted-foreground">Loading customers...</div>;
+
+  if (error)
+    return <div className="p-6 text-red-500">Failed to load customers.</div>;
+
+  /* -------------------- UI -------------------- */
   return (
     <>
-      <Breadcrumbs items={['Dashboard', 'Finance Module', 'Customer Master']} />
-      <h1 className="text-xl font-heading font-bold text-foreground mb-4">Customer Master</h1>
+      <Breadcrumbs items={["Dashboard", "Finance Module", "Customer Master"]} />
+
+      <h1 className="text-xl font-heading font-bold text-foreground mb-4">
+        Customer Master
+      </h1>
+
       <MasterPage
         title="Customer"
         fields={fields}
@@ -112,7 +151,7 @@ const CustomerMaster = () => {
         onDataEvent={handleDataEvent}
       />
     </>
-  )
-}
+  );
+};
 
-export default CustomerMaster
+export default CustomerMaster;
