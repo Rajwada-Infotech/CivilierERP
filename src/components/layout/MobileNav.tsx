@@ -103,7 +103,11 @@ export const MobileNav: React.FC = () => {
       icon: Users,
       children: [
         { label: "Manage Users", path: "/users", icon: FileText },
-        { label: "Activity Browser", path: "/admin/activity-browser", icon: FileText },
+        {
+          label: "Activity Browser",
+          path: "/admin/activity-browser",
+          icon: FileText,
+        },
       ],
     },
     {
@@ -242,11 +246,11 @@ export const MobileNav: React.FC = () => {
             children: [{ label: "Records", path: "/records", icon: Archive }],
           },
           {
-            label: "More",
-            icon: Layers,
+            label: "Widgets",
+            icon: Puzzle,
             children: [
-              { label: "Reports", path: "/reports", icon: BarChart3 },
               { label: "Widgets", path: "/widgets", icon: Puzzle },
+              { label: "Reports", path: "/reports", icon: BarChart3 },
             ],
           },
         ];
@@ -260,35 +264,151 @@ export const MobileNav: React.FC = () => {
 
   // ── Setup items (mirrors TopNavbar desktop Setup dropdown) ─────────────────
   const financeSetupItems = [
-    { icon: Layers,     label: "AC Group",          path: "/masters/account-group",    color: "text-indigo-500" },
-    { icon: Receipt,    label: "General Ledger",     path: "/masters/expenses",         color: "text-orange-400" },
-    { icon: Truck,      label: "Suppliers",          path: "/masters/suppliers",        color: "text-blue-400" },
-    { icon: HardHat,    label: "Contractors",        path: "/masters/contractors",      color: "text-yellow-500" },
-    { icon: Users,      label: "Customers",          path: "/masters/customers",        color: "text-purple-400" },
-    { icon: Landmark,   label: "Banks",              path: "/masters/banks",            color: "text-green-500" },
-    { icon: Calendar,   label: "Fin Year",           path: "/masters/financial-year",   color: "text-amber-500" },
-    { icon: BookOpen,   label: "Cheque",             path: "/masters/cheque",           color: "text-cyan-500" },
-    { icon: CreditCard, label: "Card",               path: "/masters/card",             color: "text-rose-500" },
-    { icon: FileText,   label: "TDS",                path: "/masters/tds",              color: "text-emerald-500" },
+    {
+      icon: Layers,
+      label: "AC Group",
+      path: "/masters/account-group",
+      color: "text-indigo-500",
+    },
+    {
+      icon: Receipt,
+      label: "General Ledger",
+      path: "/masters/expenses",
+      color: "text-orange-400",
+    },
+    {
+      icon: Truck,
+      label: "Suppliers",
+      path: "/masters/suppliers",
+      color: "text-blue-400",
+    },
+    {
+      icon: HardHat,
+      label: "Contractors",
+      path: "/masters/contractors",
+      color: "text-yellow-500",
+    },
+    {
+      icon: Users,
+      label: "Customers",
+      path: "/masters/customers",
+      color: "text-purple-400",
+    },
+    {
+      icon: Landmark,
+      label: "Banks",
+      path: "/masters/banks",
+      color: "text-green-500",
+    },
+    {
+      icon: Calendar,
+      label: "Fin Year",
+      path: "/masters/financial-year",
+      color: "text-amber-500",
+    },
+    {
+      icon: BookOpen,
+      label: "Cheque",
+      path: "/masters/cheque",
+      color: "text-cyan-500",
+    },
+    {
+      icon: CreditCard,
+      label: "Card",
+      path: "/masters/card",
+      color: "text-rose-500",
+    },
+    {
+      icon: FileText,
+      label: "TDS",
+      path: "/masters/tds",
+      color: "text-emerald-500",
+    },
   ];
   const materialSetupItems = [
-    { icon: Package,     label: "Items",              path: "/masters/items",            color: "text-teal-500" },
-    { icon: Layers,      label: "Items Group",        path: "/masters/item-groups",      color: "text-indigo-400" },
-    { icon: Hash,        label: "Unit of Measurement",path: "/masters/unit-measurement", color: "text-orange-400" },
-    { icon: Hash,        label: "HSN",                path: "/masters/hsn",              color: "text-pink-400" },
-    { icon: Activity,    label: "Activity",           path: "/masters/activity",         color: "text-green-400" },
-    { icon: BillingIcon, label: "Billing",            path: "/masters/billing-terms",    color: "text-lime-500" },
+    {
+      icon: Package,
+      label: "Items",
+      path: "/masters/items",
+      color: "text-teal-500",
+    },
+    {
+      icon: Layers,
+      label: "Items Group",
+      path: "/masters/item-groups",
+      color: "text-indigo-400",
+    },
+    {
+      icon: Hash,
+      label: "Unit of Measurement",
+      path: "/masters/unit-measurement",
+      color: "text-orange-400",
+    },
+    { icon: Hash, label: "HSN", path: "/masters/hsn", color: "text-pink-400" },
+    {
+      icon: Activity,
+      label: "Activity",
+      path: "/masters/activity",
+      color: "text-green-400",
+    },
+    {
+      icon: BillingIcon,
+      label: "Billing",
+      path: "/masters/billing-terms",
+      color: "text-lime-500",
+    },
   ];
   const adminSetupItems = [
-    { icon: Tag,       label: "Entry Type",  path: "/masters/named-entry-type", color: "text-purple-400" },
-    { icon: FileType2, label: "Type of Doc", path: "/masters/type-of-doc",      color: "text-sky-500" },
+    {
+      icon: Tag,
+      label: "Entry Type",
+      path: "/masters/named-entry-type",
+      color: "text-purple-400",
+    },
+    {
+      icon: FileType2,
+      label: "Type of Doc",
+      path: "/masters/type-of-doc",
+      color: "text-sky-500",
+    },
   ];
 
   const getSetupConfig = () => {
-    if (isAdminPage)       return { items: adminSetupItems,    label: "Admin",    available: true, accent: "text-blue-500",    bg: "bg-blue-500/10",    border: "border-blue-400/40" };
-    if (activeModule === "material") return { items: materialSetupItems, label: "Material", available: true, accent: "text-emerald-500", bg: "bg-emerald-500/10", border: "border-emerald-400/40" };
-    if (activeModule === "finance")  return { items: financeSetupItems,  label: "Finance",  available: true, accent: "text-primary",     bg: "bg-primary/10",     border: "border-primary/40" };
-    return { items: [], label: "", available: false, accent: "", bg: "", border: "" };
+    if (isAdminPage)
+      return {
+        items: adminSetupItems,
+        label: "Admin",
+        available: true,
+        accent: "text-blue-500",
+        bg: "bg-blue-500/10",
+        border: "border-blue-400/40",
+      };
+    if (activeModule === "material")
+      return {
+        items: materialSetupItems,
+        label: "Material",
+        available: true,
+        accent: "text-emerald-500",
+        bg: "bg-emerald-500/10",
+        border: "border-emerald-400/40",
+      };
+    if (activeModule === "finance")
+      return {
+        items: financeSetupItems,
+        label: "Finance",
+        available: true,
+        accent: "text-primary",
+        bg: "bg-primary/10",
+        border: "border-primary/40",
+      };
+    return {
+      items: [],
+      label: "",
+      available: false,
+      accent: "",
+      bg: "",
+      border: "",
+    };
   };
   const setupConfig = getSetupConfig();
 
@@ -388,7 +508,8 @@ export const MobileNav: React.FC = () => {
                         setOpen(false);
                         if (isSuperAdmin) navigate("/superadmin");
                         else if (isDba) navigate("/dba");
-                        else if (currentUser?.role === "admin") navigate("/admin/profile");
+                        else if (currentUser?.role === "admin")
+                          navigate("/admin/profile");
                         else navigate("/user/profile");
                       }}
                       className="p-3 border border-border rounded-2xl hover:bg-muted transition-colors"
@@ -411,7 +532,9 @@ export const MobileNav: React.FC = () => {
 
               {/* Module Switcher */}
               <div className="px-5 pt-4 pb-3">
-                <div className={`grid gap-2 ${isAdmin ? "grid-cols-3" : "grid-cols-2"}`}>
+                <div
+                  className={`grid gap-2 ${isAdmin ? "grid-cols-3" : "grid-cols-2"}`}
+                >
                   <button
                     onClick={() => {
                       setActiveModule("finance");
@@ -470,7 +593,9 @@ export const MobileNav: React.FC = () => {
                     <div className="flex items-center gap-2">
                       <Settings size={16} className="text-muted-foreground" />
                       <span>Setup</span>
-                      <span className={`text-[10px] px-2 py-0.5 rounded-full font-heading border ${setupConfig.bg} ${setupConfig.accent} ${setupConfig.border}`}>
+                      <span
+                        className={`text-[10px] px-2 py-0.5 rounded-full font-heading border ${setupConfig.bg} ${setupConfig.accent} ${setupConfig.border}`}
+                      >
                         {setupConfig.label}
                       </span>
                     </div>
@@ -483,24 +608,28 @@ export const MobileNav: React.FC = () => {
                   {setupOpen && (
                     <div className="mt-2 p-3 rounded-2xl border border-border bg-muted/30">
                       <div className="grid grid-cols-4 gap-2">
-                        {setupConfig.items.map(({ icon: Icon, label, path, color }) => (
-                          <button
-                            key={path}
-                            onClick={() => go(path)}
-                            className={`group flex flex-col items-center gap-1.5 p-2.5 rounded-xl border transition-all active:scale-95 ${
-                              location.pathname === path
-                                ? "border-primary/40 bg-primary/[0.06]"
-                                : "border-transparent hover:border-border hover:bg-muted/60"
-                            }`}
-                          >
-                            <div className={`w-8 h-8 rounded-lg flex items-center justify-center bg-muted/50 group-hover:bg-muted transition-colors ${location.pathname === path ? "bg-primary/10" : ""}`}>
-                              <Icon size={16} className={color} />
-                            </div>
-                            <span className="text-[9px] font-heading text-muted-foreground group-hover:text-foreground text-center leading-tight line-clamp-2">
-                              {label}
-                            </span>
-                          </button>
-                        ))}
+                        {setupConfig.items.map(
+                          ({ icon: Icon, label, path, color }) => (
+                            <button
+                              key={path}
+                              onClick={() => go(path)}
+                              className={`group flex flex-col items-center gap-1.5 p-2.5 rounded-xl border transition-all active:scale-95 ${
+                                location.pathname === path
+                                  ? "border-primary/40 bg-primary/[0.06]"
+                                  : "border-transparent hover:border-border hover:bg-muted/60"
+                              }`}
+                            >
+                              <div
+                                className={`w-8 h-8 rounded-lg flex items-center justify-center bg-muted/50 group-hover:bg-muted transition-colors ${location.pathname === path ? "bg-primary/10" : ""}`}
+                              >
+                                <Icon size={16} className={color} />
+                              </div>
+                              <span className="text-[9px] font-heading text-muted-foreground group-hover:text-foreground text-center leading-tight line-clamp-2">
+                                {label}
+                              </span>
+                            </button>
+                          ),
+                        )}
                       </div>
                     </div>
                   )}

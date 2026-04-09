@@ -301,7 +301,7 @@ export const TopNavbar = () => {
   const { navCollapsed, setNavCollapsed } = useNavbarCollapse();
 
   const [setupOpen, setSetupOpen] = useState(false);
-  const [moduleSwitching, setModuleSwitching] = useState(false);
+  const [widgetsOpen, setWidgetsOpen] = useState(false);
   const [moduleOpen, setModuleOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
@@ -321,8 +321,18 @@ export const TopNavbar = () => {
   const isDba = currentUser?.role === "dba";
   const isAdmin = currentUser?.role === "admin" || isSuperAdmin || isDba;
 
-const RoleIcon = isSuperAdmin ? Crown : isAdmin ? Shield : isDba ? Database : null;
-  const roleBadgeClassName = isSuperAdmin ? "bg-violet-600" : isDba ? "bg-emerald-600" : "bg-blue-600";
+  const RoleIcon = isSuperAdmin
+    ? Crown
+    : isAdmin
+      ? Shield
+      : isDba
+        ? Database
+        : null;
+  const roleBadgeClassName = isSuperAdmin
+    ? "bg-violet-600"
+    : isDba
+      ? "bg-emerald-600"
+      : "bg-blue-600";
 
   const getSetupConfig = () => {
     if (isAdminPage)
@@ -379,11 +389,20 @@ const RoleIcon = isSuperAdmin ? Crown : isAdmin ? Shield : isDba ? Database : nu
     setThemeOpen(false);
   }, []);
 
+  const toggleWidgets = useCallback(() => {
+    setWidgetsOpen((prev) => !prev);
+    setSetupOpen(false);
+    setModuleOpen(false);
+    setUserOpen(false);
+    setThemeOpen(false);
+  }, []);
+
   const closeAll = useCallback(() => {
     setSetupOpen(false);
     setModuleOpen(false);
     setUserOpen(false);
     setThemeOpen(false);
+    setWidgetsOpen(false);
   }, []);
 
   return (
@@ -465,35 +484,59 @@ const RoleIcon = isSuperAdmin ? Crown : isAdmin ? Shield : isDba ? Database : nu
               />
             </div>
 
-            {/* Reports */}
-            <button
-              onClick={() => {
-                navigate("/reports");
-                closeAll();
-              }}
-              className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all whitespace-nowrap ${
-                location.pathname === "/reports"
-                  ? "bg-primary/10 text-primary"
-                  : "hover:bg-muted text-foreground"
-              }`}
-            >
-              <BarChart3 size={16} /> Reports
-            </button>
-
-            {/* Widgets */}
-            <button
-              onClick={() => {
-                navigate("/widgets");
-                closeAll();
-              }}
-              className={`shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all whitespace-nowrap ${
-                location.pathname === "/widgets"
-                  ? "bg-primary/10 text-primary"
-                  : "hover:bg-muted text-foreground"
-              }`}
-            >
-              <Puzzle size={16} /> Widgets
-            </button>
+            {/* Widgets + Reports dropdown */}
+            <div className="relative shrink-0">
+              <button
+                onClick={toggleWidgets}
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all whitespace-nowrap ${
+                  widgetsOpen ||
+                  location.pathname === "/widgets" ||
+                  location.pathname === "/reports"
+                    ? "bg-muted text-foreground"
+                    : "hover:bg-muted text-foreground"
+                }`}
+              >
+                <Puzzle size={16} />
+                <span>Widgets</span>
+                <ChevronDown
+                  size={13}
+                  className={`transition-transform duration-200 ${widgetsOpen ? "rotate-180" : ""}`}
+                />
+              </button>
+              <Dropdown
+                open={widgetsOpen}
+                onClose={() => setWidgetsOpen(false)}
+                className="left-0 p-1.5"
+                style={{ minWidth: "11rem" }}
+              >
+                <button
+                  onClick={() => {
+                    navigate("/widgets");
+                    closeAll();
+                  }}
+                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm font-heading transition-all ${
+                    location.pathname === "/widgets"
+                      ? "bg-primary/10 text-primary"
+                      : "hover:bg-muted text-foreground"
+                  }`}
+                >
+                  <Puzzle size={14} /> Widgets
+                </button>
+                <button
+                  onClick={() => {
+                    navigate("/reports");
+                    closeAll();
+                  }}
+                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm font-heading transition-all ${
+                    location.pathname === "/reports"
+                      ? "bg-primary/10 text-primary"
+                      : "hover:bg-muted text-foreground"
+                  }`}
+                >
+                  <BarChart3 size={14} /> Reports
+                </button>
+              </Dropdown>
+            </div>
 
             {/* Module Selector */}
             <div className="relative shrink-0">
@@ -790,7 +833,8 @@ const RoleIcon = isSuperAdmin ? Crown : isAdmin ? Shield : isDba ? Database : nu
                   setUserOpen(false);
                   if (isSuperAdmin) navigate("/superadmin");
                   else if (isDba) navigate("/dba");
-                  else if (currentUser?.role === "admin") navigate("/admin/profile");
+                  else if (currentUser?.role === "admin")
+                    navigate("/admin/profile");
                   else navigate("/user/profile");
                 }}
                 className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted transition-colors text-foreground"
@@ -845,7 +889,8 @@ const RoleIcon = isSuperAdmin ? Crown : isAdmin ? Shield : isDba ? Database : nu
                   setUserOpen(false);
                   if (isSuperAdmin) navigate("/superadmin");
                   else if (isDba) navigate("/dba");
-                  else if (currentUser?.role === "admin") navigate("/admin/profile");
+                  else if (currentUser?.role === "admin")
+                    navigate("/admin/profile");
                   else navigate("/user/profile");
                 }}
                 className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted text-foreground"
