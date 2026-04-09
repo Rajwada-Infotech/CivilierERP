@@ -6,16 +6,20 @@ const { getPool, sql } = require("../db");
 router.get("/", async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query(
-      `SELECT
+    let query = `SELECT
         lh.LHeadId, lh.LHeadName, lh.LHeadType, lh.LHeadPhone, lh.LHeadEmail,
         lh.LHeadAddress, lh.LHeadContactPerson, lh.LHeadStatus, lh.LHeadPaymentTerms,
         lh.LBranchName, lh.LGST, lh.LGSTState, lh.LCountry, lh.LBelongsTo,
         lh.LDescription, lh.isEdited,
         ag.Name AS GroupName
        FROM dbo.AccountHeadMaster lh
-       LEFT JOIN dbo.AccountGroup ag ON ag.AGId = lh.LBelongsTo`,
-    );
+       LEFT JOIN dbo.AccountGroup ag ON ag.AGId = lh.LBelongsTo`;
+    const request = pool.request();
+    if (req.query.type) {
+      query += ` WHERE lh.LHeadType = @type`;
+      request.input('type', sql.VarChar(50), req.query.type);
+    }
+    const result = await request.query(query);
     res.json(result.recordset);
   } catch (err) {
     console.error("GET ERROR:", err.message);
@@ -46,12 +50,8 @@ router.post("/", async (req, res) => {
     await pool
       .request()
       .input("LHeadName", sql.NVarChar(200), LHeadName)
-      .input("LHeadPhone", sql.VarChar(15), LHeadPhone || "0000000000")
-      .input(
-        "LHeadEmail",
-        sql.NVarChar(100),
-        LHeadEmail || `ledger-${Date.now()}@civilier.local`,
-      )
+.input("LHeadPhone", sql.VarChar(15), LHeadPhone || null)
+.input("LHeadEmail", sql.NVarChar(100), LHeadEmail || null)
       .input("LHeadAddress", sql.VarChar(300), LHeadAddress || "N/A")
       .input("LHeadType", sql.VarChar(50), LHeadType || null)
       .input(
@@ -93,16 +93,20 @@ router.post("/", async (req, res) => {
 router.get("/options", async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool
-      .request()
-      .query(
-        "SELECT LHeadId AS id, LHeadName AS label FROM dbo.AccountHeadMaster WHERE LHeadStatus = 1 ORDER BY LHeadName",
-      );
+    let query = "SELECT LHeadId AS id, LHeadName AS label FROM dbo.AccountHeadMaster WHERE LHeadStatus = 1";
+    const request = pool.request();
+    if (req.query.type) {
+      query += " AND LHeadType = @type";
+      request.input('type', sql.VarChar(50), req.query.type);
+    }
+    query += " ORDER BY LHeadName";
+    const result = await request.query(query);
     res.json(result.recordset);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
+
 
 // UPDATE ledger head
 router.put("/:id", async (req, res) => {
