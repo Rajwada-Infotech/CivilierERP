@@ -1,5 +1,3 @@
-
-
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -7,28 +5,28 @@ import { getList, addRecord, updateRecord, deleteRecord } from "@/api/accountHea
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MasterPage, type FieldDef, type ColumnDef, type DataChangeEvent } from "@/components/MasterPage";
 
-const CONTRACTOR_TYPE = "C"; // Contractor
+const CONTRACTOR_TYPE = "C";
 
 const fields: FieldDef[] = [
-  { name: "LHeadName", label: "Contractor Name", type: "text", required: true },
-  { name: "LHeadContactPerson", label: "Contact Person", type: "text" },
-  { name: "LHeadPhone", label: "Phone Number", type: "text" },
-  { name: "LHeadEmail", label: "Email Address", type: "text" },
-  { name: "LGST", label: "GST Number", type: "text", uppercase: true },
-  { name: "pan", label: "PAN Number", type: "text", uppercase: true },
-  { name: "contractorType", label: "Contractor Type", type: "select", options: ["Civil", "Electrical", "Mechanical", "Plumbing", "General"] }, // UI only
-  { name: "LHeadPaymentTerms", label: "Payment Terms", type: "text" },
-  { name: "LHeadAddress", label: "Address", type: "textarea", fullWidth: true },
-  { name: "LHeadStatus", label: "Status", type: "toggle", defaultValue: true },
+  { name: "LHeadName",          label: "Contractor Name",  type: "text",     required: true },
+  { name: "LHeadContactPerson", label: "Contact Person",   type: "text" },
+  { name: "LHeadPhone",         label: "Phone Number",     type: "text" },
+  { name: "LHeadEmail",         label: "Email Address",    type: "text" },
+  { name: "LGST",               label: "GST Number",       type: "text",     uppercase: true },
+  { name: "LDescription",       label: "PAN Number",       type: "text",     uppercase: true },
+  { name: "contractorType",     label: "Contractor Type",  type: "select",   options: ["Civil", "Electrical", "Mechanical", "Plumbing", "General"] },
+  { name: "LHeadPaymentTerms",  label: "Payment Terms",    type: "text" },
+  { name: "LHeadAddress",       label: "Address",          type: "textarea", fullWidth: true },
+  { name: "LHeadStatus",        label: "Status",           type: "toggle",   defaultValue: true },
 ];
 
 const columns: ColumnDef[] = [
-  { key: "LHeadName", label: "Contractor Name" },
+  { key: "LHeadName",          label: "Contractor Name" },
   { key: "LHeadContactPerson", label: "Contact Person" },
-  { key: "LHeadPhone", label: "Phone" },
-  { key: "LGST", label: "GST No." },
-  { key: "LHeadPaymentTerms", label: "Payment Terms" },
-  { key: "LHeadStatus", label: "Status" },
+  { key: "LHeadPhone",         label: "Phone" },
+  { key: "LGST",               label: "GST No." },
+  { key: "LHeadPaymentTerms",  label: "Payment Terms" },
+  { key: "LHeadStatus",        label: "Status" },
 ];
 
 const ContractorMaster: React.FC = () => {
@@ -42,39 +40,51 @@ const ContractorMaster: React.FC = () => {
   const mappedData = React.useMemo(() => {
     if (!Array.isArray(data)) return [];
     return data.map((item) => ({
-      _id: String(item.LHeadId),
-      LHeadName: item.LHeadName || "",
+      _id:                String(item.LHeadId),
+      LHeadName:          item.LHeadName          || "",
       LHeadContactPerson: item.LHeadContactPerson || "",
-      LHeadPhone: item.LHeadPhone || "",
-      LHeadEmail: item.LHeadEmail || "",
-      LGST: item.LGST || "",
-      pan: item.pan || "",
-      contractorType: "Civil", // UI static
-      LHeadPaymentTerms: item.LHeadPaymentTerms || "",
-      LHeadAddress: item.LHeadAddress || "",
-      LHeadStatus: Boolean(item.LHeadStatus),
+      LHeadPhone:         item.LHeadPhone         || "",
+      LHeadEmail:         item.LHeadEmail         || "",
+      LGST:               item.LGST               || "",
+      LDescription:       item.LDescription       || "",
+      contractorType:     "Civil",
+      LHeadPaymentTerms:  item.LHeadPaymentTerms  || "",
+      LHeadAddress:       item.LHeadAddress       || "",
+      LHeadStatus:        Boolean(item.LHeadStatus),
     }));
   }, [data]);
 
   const handleDataEvent = async (event: DataChangeEvent) => {
     try {
-      if (event.action === 'delete') {
+      if (event.action === "delete") {
         await deleteRecord(Number(event.id));
         toast.success("Contractor deleted!");
         await queryClient.invalidateQueries({ queryKey: ["account-head", CONTRACTOR_TYPE] });
         return;
       }
 
-      const record = event.records[0];
+      const record = event.record;
+
+      if (!record) {
+        toast.error("No record data found");
+        return;
+      }
+
       const payload = {
-        LHeadName: record.LHeadName,
+        LHeadName:          record.LHeadName,
+        LHeadType:          CONTRACTOR_TYPE,
         LHeadContactPerson: record.LHeadContactPerson,
-        LHeadPhone: record.LHeadPhone,
-        LHeadEmail: record.LHeadEmail,
-        LGST: record.LGST,
-        LHeadPaymentTerms: record.LHeadPaymentTerms,
-        LHeadAddress: record.LHeadAddress,
-        LHeadStatus: record.LHeadStatus,
+        LHeadPhone:         record.LHeadPhone,
+        LHeadEmail:         record.LHeadEmail,
+        LGST:               record.LGST,
+        LDescription:       record.LDescription,
+        LHeadPaymentTerms:  record.LHeadPaymentTerms,
+        LHeadAddress:       record.LHeadAddress,
+        LHeadStatus:        record.LHeadStatus,
+        LBranchName:        "Main",
+        LGSTState:          null,
+        LCountry:           "India",
+        LBelongsTo:         null,
       };
 
       if (event.action === "add") {
@@ -91,9 +101,8 @@ const ContractorMaster: React.FC = () => {
     }
   };
 
-
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading...</div>;
-  if (error) return <div className="p-6 text-red-500">Failed to load contractors.</div>;
+  if (error)     return <div className="p-6 text-red-500">Failed to load contractors.</div>;
 
   return (
     <>
@@ -111,4 +120,3 @@ const ContractorMaster: React.FC = () => {
 };
 
 export default ContractorMaster;
-
