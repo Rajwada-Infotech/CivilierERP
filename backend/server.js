@@ -131,14 +131,34 @@ async function startServer() {
     app.use("/api/debit-note", authMiddleware, require("./routes/debitNote"));
     app.use("/api/tc-master", authMiddleware, require("./routes/tcMaster"));
 
-    // All /api/user-activity routes are restricted to admin, super_admin, and dba.
-    // POST (write) and GET (read) guards are also enforced inside the route file.
-    app.use(
+    // User Activity Routes - Split by access level
+    // Read endpoints (admin only) - GET requests
+    const userActivityRouter = require("./routes/userActivity");
+
+    app.get(
       "/api/user-activity",
       authMiddleware,
       allowRoles("admin", "super_admin", "dba"),
-      require("./routes/userActivity"),
+      userActivityRouter,
     );
+
+    app.get(
+      "/api/user-activity/stream",
+      authMiddleware,
+      allowRoles("admin", "super_admin", "dba"),
+      userActivityRouter,
+    );
+
+    app.get(
+      "/api/user-activity/session/:sessionId",
+      authMiddleware,
+      allowRoles("admin", "super_admin", "dba"),
+      userActivityRouter,
+    );
+
+    // Write endpoint (all authenticated users) - POST requests
+    // Users can log their own activity but only admins can read logs
+    app.post("/api/user-activity", authMiddleware, userActivityRouter);
 
     const PORT = process.env.PORT || 5000;
     app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
