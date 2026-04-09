@@ -51,92 +51,66 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-// ─── Mock Tenant Data ─────────────────────────────────────────────────────────
-const INITIAL_TENANTS = [
-  {
-    id: "T-001",
-    name: "Civilier Constructions Pvt Ltd",
-    domain: "civilier.com",
-    adminEmail: "admin@civilier.com",
-    plan: "Enterprise",
-    status: "active",
-    users: 18,
-    maxUsers: 50,
-    dbName: "civilier_prod",
-    createdAt: "2024-01-15",
-    lastActivity: "2026-04-03",
-  },
-  {
-    id: "T-002",
-    name: "Buildtech Infrastructure Ltd",
-    domain: "buildtech.in",
-    adminEmail: "admin@buildtech.in",
-    plan: "Professional",
-    status: "active",
-    users: 9,
-    maxUsers: 20,
-    dbName: "buildtech_prod",
-    createdAt: "2024-03-22",
-    lastActivity: "2026-04-02",
-  },
-  {
-    id: "T-003",
-    name: "Apex Realty Developers",
-    domain: "apexrealty.com",
-    adminEmail: "admin@apexrealty.com",
-    plan: "Starter",
-    status: "suspended",
-    users: 3,
-    maxUsers: 10,
-    dbName: "apex_prod",
-    createdAt: "2024-06-10",
-    lastActivity: "2026-03-15",
-  },
-  {
-    id: "T-004",
-    name: "Metro Projects Group",
-    domain: "metroproj.co.in",
-    adminEmail: "admin@metroproj.co.in",
-    plan: "Professional",
-    status: "active",
-    users: 14,
-    maxUsers: 20,
-    dbName: "metro_prod",
-    createdAt: "2024-09-01",
-    lastActivity: "2026-04-03",
-  },
-];
+type TenantRecord = {
+  id: string;
+  name: string;
+  domain: string;
+  adminEmail: string;
+  plan: string;
+  status: "active" | "suspended";
+  users: number;
+  maxUsers: number;
+  dbName: string;
+  createdAt: string;
+  lastActivity: string;
+};
 
-const ALL_USERS_ACROSS_TENANTS = [
-  { id: "u1", name: "Rajesh Kumar", email: "rajesh@civilier.com", tenantId: "T-001", role: "user", lastLogin: "2026-04-03 09:12", status: "active" },
-  { id: "u2", name: "Meena Patel", email: "meena@civilier.com", tenantId: "T-001", role: "user", lastLogin: "2026-04-02 14:30", status: "active" },
-  { id: "u3", name: "Admin User", email: "admin@civilier.com", tenantId: "T-001", role: "admin", lastLogin: "2026-04-03 08:00", status: "active" },
-  { id: "u4", name: "Karan Singh", email: "karan@buildtech.in", tenantId: "T-002", role: "user", lastLogin: "2026-04-02 11:45", status: "active" },
-  { id: "u5", name: "Priya Das", email: "priya@apexrealty.com", tenantId: "T-003", role: "admin", lastLogin: "2026-03-14 16:00", status: "suspended" },
-  { id: "u6", name: "Rohit Verma", email: "rohit@metroproj.co.in", tenantId: "T-004", role: "user", lastLogin: "2026-04-03 10:22", status: "active" },
-];
+type TenantUserRecord = {
+  id: string;
+  name: string;
+  email: string;
+  tenantId: string;
+  role: string;
+  lastLogin: string;
+  status: "active" | "suspended";
+};
 
-const AUDIT_LOG = [
-  { time: "2026-04-03 10:14", actor: "superadmin", action: "Tenant T-002 plan upgraded to Professional", severity: "info" },
-  { time: "2026-04-03 09:45", actor: "superadmin", action: "Tenant T-003 suspended due to non-payment", severity: "warning" },
-  { time: "2026-04-02 18:22", actor: "superadmin", action: "New tenant T-004 created: Metro Projects Group", severity: "info" },
-  { time: "2026-04-02 14:10", actor: "superadmin", action: "User priya@apexrealty.com force-logged-out", severity: "warning" },
-  { time: "2026-04-01 11:05", actor: "superadmin", action: "Global DB maintenance window executed", severity: "critical" },
-  { time: "2026-03-31 09:30", actor: "superadmin", action: "Tenant ID T-001 domain updated to civilier.com", severity: "info" },
-];
+type TenantFormState = TenantRecord;
+
+type NewTenantFormState = {
+  name: string;
+  domain: string;
+  adminEmail: string;
+  plan: string;
+  maxUsers: string;
+  dbName: string;
+};
+
+type DashboardTab = "tenants" | "users" | "audit";
+
+type AuditLogRecord = {
+  time: string;
+  actor: string;
+  action: string;
+  severity: "info" | "warning" | "critical";
+};
+
+const INITIAL_TENANTS: TenantRecord[] = [];
+const ALL_USERS_ACROSS_TENANTS: TenantUserRecord[] = [];
+const AUDIT_LOG: AuditLogRecord[] = [];
 
 const PLAN_OPTIONS = ["Starter", "Professional", "Enterprise"];
 
 export default function SuperAdminDashboard() {
   const [tenants, setTenants] = useState(INITIAL_TENANTS);
-  const [selectedTenant, setSelectedTenant] = useState<typeof INITIAL_TENANTS[0] | null>(null);
+  const [selectedTenant, setSelectedTenant] = useState<TenantRecord | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [filterStatus, setFilterStatus] = useState<string>("all");
   const [searchTenant, setSearchTenant] = useState("");
-  const [activeTab, setActiveTab] = useState<"tenants" | "users" | "audit">("tenants");
-  const [editForm, setEditForm] = useState<any>({});
-  const [addForm, setAddForm] = useState({ name: "", domain: "", adminEmail: "", plan: "Starter", maxUsers: "10", dbName: "" });
+  const [activeTab, setActiveTab] = useState<DashboardTab>("tenants");
+  const [editForm, setEditForm] = useState<TenantFormState | null>(null);
+  const [addForm, setAddForm] = useState<NewTenantFormState>({ name: "", domain: "", adminEmail: "", plan: "Starter", maxUsers: "10", dbName: "" });
 
   const stats = [
     { label: "Total Tenants", value: tenants.length, icon: Building2, color: "text-blue-500", bg: "bg-blue-500/10" },
@@ -149,13 +123,14 @@ export default function SuperAdminDashboard() {
     .filter(t => filterStatus === "all" || t.status === filterStatus)
     .filter(t => t.name.toLowerCase().includes(searchTenant.toLowerCase()) || t.id.toLowerCase().includes(searchTenant.toLowerCase()));
 
-  const openEdit = (tenant: typeof INITIAL_TENANTS[0]) => {
+  const openEdit = (tenant: TenantRecord) => {
     setSelectedTenant(tenant);
     setEditForm({ ...tenant });
     setEditOpen(true);
   };
 
   const saveEdit = () => {
+    if (!editForm) return;
     setTenants(prev => prev.map(t => t.id === editForm.id ? { ...editForm } : t));
     setEditOpen(false);
     toast.success(`Tenant ${editForm.id} updated successfully`);
@@ -188,7 +163,7 @@ export default function SuperAdminDashboard() {
     toast.success(`Tenant ${newId} created`);
   };
 
-  const tabs = [
+  const tabs: { key: DashboardTab; label: string; icon: typeof Building2 }[] = [
     { key: "tenants", label: "Tenant Management", icon: Building2 },
     { key: "users", label: "All Users", icon: Users },
     { key: "audit", label: "Audit Log", icon: Activity },
@@ -234,7 +209,7 @@ export default function SuperAdminDashboard() {
         {tabs.map(tab => (
           <button
             key={tab.key}
-            onClick={() => setActiveTab(tab.key as any)}
+            onClick={() => setActiveTab(tab.key)}
             className={`flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
               activeTab === tab.key
                 ? "border-primary text-primary"
@@ -296,7 +271,13 @@ export default function SuperAdminDashboard() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredTenants.map(tenant => (
+                  {filteredTenants.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={9} className="text-center text-sm text-muted-foreground py-10">
+                        No tenants available.
+                      </TableCell>
+                    </TableRow>
+                  ) : filteredTenants.map(tenant => (
                     <TableRow key={tenant.id} className="text-xs">
                       <TableCell>
                         <span className="font-mono bg-muted px-1.5 py-0.5 rounded text-primary font-semibold">
@@ -381,7 +362,13 @@ export default function SuperAdminDashboard() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {ALL_USERS_ACROSS_TENANTS.map(user => (
+                  {ALL_USERS_ACROSS_TENANTS.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={6} className="text-center text-sm text-muted-foreground py-10">
+                        No users available.
+                      </TableCell>
+                    </TableRow>
+                  ) : ALL_USERS_ACROSS_TENANTS.map(user => (
                     <TableRow key={user.id} className="text-xs">
                       <TableCell className="font-medium">{user.name}</TableCell>
                       <TableCell className="text-muted-foreground">{user.email}</TableCell>
@@ -429,7 +416,13 @@ export default function SuperAdminDashboard() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {AUDIT_LOG.map((log, i) => (
+                  {AUDIT_LOG.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={4} className="text-center text-sm text-muted-foreground py-10">
+                        No audit logs available.
+                      </TableCell>
+                    </TableRow>
+                  ) : AUDIT_LOG.map((log, i) => (
                     <TableRow key={i} className="text-xs">
                       <TableCell className="font-mono text-muted-foreground">{log.time}</TableCell>
                       <TableCell>
@@ -462,38 +455,38 @@ export default function SuperAdminDashboard() {
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 text-base">
               <Key size={16} className="text-primary" />
-              Edit Tenant · <span className="font-mono text-primary">{editForm.id}</span>
+              Edit Tenant · <span className="font-mono text-primary">{editForm?.id}</span>
             </DialogTitle>
           </DialogHeader>
           <div className="grid grid-cols-2 gap-4 py-2">
             <div className="col-span-2 space-y-1">
               <Label className="text-xs">Tenant ID</Label>
               <Input
-                value={editForm.id || ""}
-                onChange={e => setEditForm((f: any) => ({ ...f, id: e.target.value }))}
+                value={editForm?.id || ""}
+                onChange={e => setEditForm(f => (f ? { ...f, id: e.target.value } : f))}
                 className="font-mono text-xs"
               />
               <p className="text-[10px] text-orange-500 flex items-center gap-1"><AlertTriangle size={10} />Changing Tenant ID affects all references. Proceed with caution.</p>
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Company Name</Label>
-              <Input value={editForm.name || ""} onChange={e => setEditForm((f: any) => ({ ...f, name: e.target.value }))} className="text-xs" />
+              <Input value={editForm?.name || ""} onChange={e => setEditForm(f => (f ? { ...f, name: e.target.value } : f))} className="text-xs" />
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Domain</Label>
-              <Input value={editForm.domain || ""} onChange={e => setEditForm((f: any) => ({ ...f, domain: e.target.value }))} className="text-xs" />
+              <Input value={editForm?.domain || ""} onChange={e => setEditForm(f => (f ? { ...f, domain: e.target.value } : f))} className="text-xs" />
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Admin Email</Label>
-              <Input value={editForm.adminEmail || ""} onChange={e => setEditForm((f: any) => ({ ...f, adminEmail: e.target.value }))} className="text-xs" />
+              <Input value={editForm?.adminEmail || ""} onChange={e => setEditForm(f => (f ? { ...f, adminEmail: e.target.value } : f))} className="text-xs" />
             </div>
             <div className="space-y-1">
               <Label className="text-xs">DB Name</Label>
-              <Input value={editForm.dbName || ""} onChange={e => setEditForm((f: any) => ({ ...f, dbName: e.target.value }))} className="font-mono text-xs" />
+              <Input value={editForm?.dbName || ""} onChange={e => setEditForm(f => (f ? { ...f, dbName: e.target.value } : f))} className="font-mono text-xs" />
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Plan</Label>
-              <Select value={editForm.plan} onValueChange={v => setEditForm((f: any) => ({ ...f, plan: v }))}>
+              <Select value={editForm?.plan} onValueChange={v => setEditForm(f => (f ? { ...f, plan: v } : f))}>
                 <SelectTrigger className="text-xs h-8"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {PLAN_OPTIONS.map(p => <SelectItem key={p} value={p}>{p}</SelectItem>)}
@@ -502,15 +495,15 @@ export default function SuperAdminDashboard() {
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Max Users</Label>
-              <Input type="number" value={editForm.maxUsers || ""} onChange={e => setEditForm((f: any) => ({ ...f, maxUsers: parseInt(e.target.value) }))} className="text-xs" />
+              <Input type="number" value={editForm?.maxUsers || ""} onChange={e => setEditForm(f => (f ? { ...f, maxUsers: parseInt(e.target.value) || 0 } : f))} className="text-xs" />
             </div>
             <div className="col-span-2 flex items-center justify-between">
               <Label className="text-xs">Status</Label>
               <div className="flex items-center gap-2">
-                <span className="text-xs text-muted-foreground">{editForm.status === "active" ? "Active" : "Suspended"}</span>
+                <span className="text-xs text-muted-foreground">{editForm?.status === "active" ? "Active" : "Suspended"}</span>
                 <Switch
-                  checked={editForm.status === "active"}
-                  onCheckedChange={v => setEditForm((f: any) => ({ ...f, status: v ? "active" : "suspended" }))}
+                  checked={editForm?.status === "active"}
+                  onCheckedChange={v => setEditForm(f => (f ? { ...f, status: v ? "active" : "suspended" } : f))}
                 />
               </div>
             </div>

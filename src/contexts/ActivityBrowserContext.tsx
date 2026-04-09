@@ -7,6 +7,7 @@ import React, {
   useMemo,
   useRef,
 } from "react";
+
 import {
   type ActivityActionType,
   type SessionEvent,
@@ -14,9 +15,10 @@ import {
   logUserActivity,
   subscribeToActivityStream,
 } from "@/api/userActivityApi";
+
 import { getDeviceFingerprint, getDeviceInfo } from "@/utils/deviceFingerprint";
 
-// ── Public types ──────────────────────────────────────────────────────────────
+// ── TYPES ─────────────────────────────────────────────────────────────────────
 
 export interface GroupedSession {
   sessionId: string;
@@ -93,7 +95,7 @@ interface ActivityBrowserContextType {
   refresh: () => void;
 }
 
-// ── Context ───────────────────────────────────────────────────────────────────
+// ── CONTEXT ───────────────────────────────────────────────────────────────────
 
 const ActivityBrowserContext = createContext<ActivityBrowserContextType | null>(
   null,
@@ -109,7 +111,7 @@ export const useActivityBrowser = () => {
   return ctx;
 };
 
-// ── Utilities ─────────────────────────────────────────────────────────────────
+// ── HELPERS ───────────────────────────────────────────────────────────────────
 
 async function fetchIp(): Promise<string> {
   try {
@@ -155,16 +157,16 @@ const EMPTY_ACTIVITY: PaginatedActivity = {
   pages: 0,
 };
 
-// ── Provider ──────────────────────────────────────────────────────────────────
+// ── PROVIDER ──────────────────────────────────────────────────────────────────
 
 export const ActivityBrowserProvider: React.FC<{
   children: React.ReactNode;
 }> = ({ children }) => {
   const [rawSessions, setRawSessions] = useState<SessionEvent[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [dateFilters, setDateFilters] = useState<
-    ActivityBrowserContextType["dateFilters"]
-  >({ period: "last-month" });
+  const [dateFilters, setDateFilters] = useState({
+    period: "last-month" as const,
+  });
   const [activity, setActivity] = useState<PaginatedActivity>(EMPTY_ACTIVITY);
 
   const currentPageRef = useRef(1);
@@ -172,20 +174,15 @@ export const ActivityBrowserProvider: React.FC<{
   const sseSourceRef = useRef<EventSource | null>(null);
   const cachedIp = useRef<string | null>(null);
 
-  const getIp = useCallback(async (): Promise<string> => {
+  const getIp = useCallback(async () => {
     if (cachedIp.current) return cachedIp.current;
     const ip = await fetchIp();
     cachedIp.current = ip;
     return ip;
   }, []);
 
-  // ── Core fetch (single source of truth — replaces the old dual-fetch) ──────
-  // FIX: The original code ran two parallel fetches on mount:
-  //   1. refreshLogs() → called getUserActivityLogsLegacy() which expected
-  //      a plain SessionEvent[] but the backend now always returns
-  //      { data, total, page, limit, pages } — so it broke silently.
-  //   2. fetchActivity() → correctly handled the paginated shape.
-  // We now use a single fetch via getUserActivityLogs() for everything.
+  // ── FETCH ──────────────────────────────────────────────────────────────────
+
   const fetchActivity = useCallback(
     async (page = 1, filters: ActivityFilters = {}) => {
       const token = localStorage.getItem("token");
@@ -194,8 +191,10 @@ export const ActivityBrowserProvider: React.FC<{
         setIsLoading(false);
         return;
       }
+
       try {
         setIsLoading(true);
+
         currentPageRef.current = page;
         currentFiltersRef.current = filters;
 
@@ -211,7 +210,7 @@ export const ActivityBrowserProvider: React.FC<{
         setActivity(result);
         setRawSessions(result.data.map((e, i) => normalizeEvent(e, i)));
       } catch (err) {
-        console.error("Failed to load activity logs:", err);
+        console.error("Failed to fetch activity:", err);
       } finally {
         setIsLoading(false);
       }
@@ -234,37 +233,36 @@ export const ActivityBrowserProvider: React.FC<{
     [fetchActivity],
   );
 
-  const clearAll = useCallback(() => {
+  const clearAll = () => {
     setRawSessions([]);
     setActivity(EMPTY_ACTIVITY);
-  }, []);
+  };
 
-  const clearDateFilters = useCallback(() => {
+  const clearDateFilters = () => {
     setDateFilters({ period: "last-month" });
-  }, []);
+  };
 
-  // Initial load + re-fetch on dateFilter change
   useEffect(() => {
     void fetchActivity();
   }, [fetchActivity]);
 
-  // SSE live updates
+  // ── SSE ────────────────────────────────────────────────────────────────────
+
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) return;
 
     sseSourceRef.current = subscribeToActivityStream((events) => {
-      setRawSessions(events.map(normalizeEvent));
+      setRawSessions(events.map((e, i) => normalizeEvent(e, i)));
       refresh();
     });
 
     return () => {
       sseSourceRef.current?.close();
-      sseSourceRef.current = null;
     };
   }, [refresh]);
 
-  // ── Session recording ─────────────────────────────────────────────────────
+  // ── RECORDING ──────────────────────────────────────────────────────────────
 
   const recordLogin = useCallback(
     async (user: { id: string; name: string; email: string; role: string }) => {
@@ -272,6 +270,7 @@ export const ActivityBrowserProvider: React.FC<{
       const fingerprint = await getDeviceFingerprint();
       const deviceInfo = getDeviceInfo();
       const sessionId = crypto.randomUUID();
+
       localStorage.setItem("currentSessionId", sessionId);
 
       const entry: SessionEvent = {
@@ -288,10 +287,11 @@ export const ActivityBrowserProvider: React.FC<{
       };
 
       setRawSessions((prev) => [normalizeEvent(entry, 0), ...prev]);
+
       try {
         await logUserActivity(entry);
       } catch (err) {
-        console.error("Failed to log login:", err);
+        console.error("Login log failed:", err);
       }
     },
     [getIp],
@@ -318,10 +318,11 @@ export const ActivityBrowserProvider: React.FC<{
       };
 
       setRawSessions((prev) => [normalizeEvent(entry, 0), ...prev]);
+
       try {
         await logUserActivity(entry);
       } catch (err) {
-        console.error("Failed to log logout:", err);
+        console.error("Logout log failed:", err);
       } finally {
         localStorage.removeItem("currentSessionId");
       }
@@ -364,34 +365,35 @@ export const ActivityBrowserProvider: React.FC<{
       };
 
       setRawSessions((prev) => [normalizeEvent(entry, 0), ...prev]);
+
       try {
         await logUserActivity(entry);
       } catch (err) {
-        console.error("Action logging failed:", err);
+        console.error("Action log failed:", err);
       }
     },
     [getIp],
   );
 
-  // ── Group raw events into sessions ────────────────────────────────────────
+  // ── GROUPING ───────────────────────────────────────────────────────────────
 
   const groupedSessions = useMemo(() => {
     const groups: Record<string, GroupedSession> = {};
 
     rawSessions.forEach((event) => {
-      // CRITICAL FIX: Create implicit sessionId for events without one
-      // This handles cases where actions are logged but sessionId is missing
       const sessionId =
         event.sessionId ||
-        `implicit-${event.userId}-${new Date(event.timestamp).toISOString().split("T")[0]}`;
+        `implicit-${event.userId}-${
+          new Date(event.timestamp).toISOString().split("T")[0]
+        }`;
 
       if (!groups[sessionId]) {
         groups[sessionId] = {
-          sessionId: sessionId,
+          sessionId,
           userId: event.userId,
           userName: event.userName,
-          userEmail: event.userEmail,
-          userRole: event.userRole,
+          userEmail: event.userEmail || "",
+          userRole: event.userRole || "",
           deviceFingerprint: event.deviceFingerprint || "Unknown",
           deviceInfo: event.deviceInfo || "Unknown device",
           ipAddress: event.ipAddress || "Unavailable",
@@ -406,7 +408,6 @@ export const ActivityBrowserProvider: React.FC<{
       if (event.event === "login") {
         group.loginTime = event.timestamp;
         group.loginEvent = event;
-        // Update device info from login event as it's authoritative
         group.deviceFingerprint =
           event.deviceFingerprint || group.deviceFingerprint;
         group.deviceInfo = event.deviceInfo || group.deviceInfo;
@@ -414,22 +415,12 @@ export const ActivityBrowserProvider: React.FC<{
       } else if (event.event === "logout") {
         group.logoutTime = event.timestamp;
         group.logoutEvent = event;
-        if (typeof event.sessionDuration === "number") {
-          group.durationMs = event.sessionDuration * 1000;
-        } else if (group.loginTime) {
-          group.durationMs =
-            new Date(event.timestamp).getTime() -
-            new Date(group.loginTime).getTime();
-        }
-      } else if (event.event === "action") {
+
+        group.durationMs =
+          new Date(event.timestamp).getTime() -
+          new Date(group.loginTime).getTime();
+      } else {
         group.actions.push(event);
-        // For implicit sessions, use earliest action as login time
-        if (!group.loginEvent || group.loginEvent.event !== "login") {
-          if (new Date(event.timestamp) < new Date(group.loginTime)) {
-            group.loginTime = event.timestamp;
-            group.loginEvent = event;
-          }
-        }
       }
     });
 

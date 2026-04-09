@@ -37,6 +37,7 @@ const toPayload = (r: Record<string, unknown>) => ({
   phone_number: (r.phone as string) || null,
   status: r.status === true ? "Active" : "Inactive",
   description: `Contractor: ${r.contact || ""}, GST: ${r.gst || ""}, Terms: ${r.paymentTerms || ""}`,
+  // other fields null
 });
 
 const ContractorMaster = () => {
@@ -49,6 +50,7 @@ const ContractorMaster = () => {
 
   const dbItems = Array.isArray(dbData) ? dbData : []
 
+  // Filter/map for contractors (e.g. business_type Company/Firm or name has Builders)
   const contractorData = dbItems
     .filter(item => 
       (item.business_type?.toLowerCase().includes("firm") || 

@@ -361,13 +361,8 @@ const NamedEntryTypeMaster: React.FC = () => {
             label: "Project Name",
             type: "select",
             required: true,
-            options: [
-              "Civilier Infrastructure Pvt Ltd",
-              "Apex Constructions Ltd",
-              "SiteCraft Engineers",
-              "Raj Builders & Co",
-              "Metro Rail Project",
-            ],
+options: ["Loading from /api/enterprises..."], // TODO: Dynamic API fetch in MasterPage wrapper
+
           },
           {
             name: "entryType",
