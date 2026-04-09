@@ -314,10 +314,13 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 // ─── Auth Session Bridge ──────────────────────────────────────────────────────
+// Sits inside ActivityBrowserProvider so it can read recordLogin/recordLogout
+// and pass them down as props to AuthProvider — breaking the circular dependency
+// that previously caused AuthContext to import useActivityBrowser directly.
 function AuthSessionBridge({ children }: { children: React.ReactNode }) {
   const { recordLogin, recordLogout } = useActivityBrowser();
   return (
-    <AuthProvider onLoginSuccess={recordLogin} onLogoutSuccess={recordLogout}>
+    <AuthProvider recordLogin={recordLogin} recordLogout={recordLogout}>
       {children}
     </AuthProvider>
   );
