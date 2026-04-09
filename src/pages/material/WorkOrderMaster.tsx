@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   Plus,
@@ -25,7 +25,10 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { createWorkOrder, saveFullWorkOrder } from "@/api/workOrderApi";
+import { toast } from "sonner";
+import { useEffect } from "react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -63,13 +66,11 @@ interface WorkOrderForm {
   termsAndConditions: string;
 }
 
-// ─── Hardcoded test data (swap for real DB queries once backend is confirmed) ─
+// ─── Real API data loaded above ─
 
-const TEST_COMPANIES = [{ id: 1, name: "Test Company" }];
 
-const TEST_PROJECTS = [{ id: 1, name: "Test Company" }];
 
-const TEST_CONTRACTORS = [{ id: 23, name: "Test Contractor" }];
+
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -831,10 +832,34 @@ const WorkOrderMaster: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
-  // ── Test data — replace with useQuery calls once backend is confirmed ─────────
-  const companies = TEST_COMPANIES;
-  const projects = TEST_PROJECTS;
-  const contractors = TEST_CONTRACTORS;
+// ── Real API data ─────────
+  const [companies, setCompanies] = useState([]);
+  const [projects, setProjects] = useState([]);
+  const [contractors, setContractors] = useState([]);
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const [entRes, contrRes] = await Promise.all([
+          fetchWithAuth("/api/enterprises"),
+          fetchWithAuth("/api/accountHeadMaster/options")
+        ]);
+        if (entRes.ok) {
+          const enterprises = await entRes.json();
+          setCompanies(enterprises.map((e: any) => ({ id: e.Id, name: e.Name || e.CompanyName })));
+          setProjects(enterprises.map((e: any) => ({ id: e.Id, name: e.ProjectName || e.Name })));
+        }
+        if (contrRes.ok) {
+          const contractorsData = await contrRes.json();
+          setContractors(contractorsData.map((c: any) => ({ id: c.id, name: c.label })));
+        }
+      } catch (err) {
+        console.error("Failed to fetch dropdown data:", err);
+        toast.error("Failed to load dropdown data");
+      }
+    };
+    fetchData();
+  }, []);
 
   // ── Totals ──────────────────────────────────────────────────────────────────
   const { grandLabourTotal, grandMaterialsTotal, grandTotal } = useMemo(() => {

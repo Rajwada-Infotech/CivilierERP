@@ -1,5 +1,7 @@
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
+// ==================== TYPES ====================
+
 export type ActivityEventType = "login" | "logout" | "action";
 
 export type ActivityActionType =
@@ -58,58 +60,60 @@ export interface PaginatedActivity {
   pages: number;
 }
 
-// ==================== MAIN API FUNCTIONS ====================
+// ==================== HELPERS ====================
 
-// Recommended - Paginated logs
+const buildQuery = (params: Record<string, any>) => {
+  const searchParams = new URLSearchParams();
+
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") {
+      searchParams.set(key, String(value));
+    }
+  });
+
+  return searchParams.toString();
+};
+
+// ==================== MAIN ====================
+
 export const getUserActivityLogs = async (
   params: {
     page?: number;
     limit?: number;
     search?: string;
+    event?: string;
     role?: string;
+    sort?: string;
+    order?: "asc" | "desc";
     dateFrom?: string;
     dateTo?: string;
     period?: ActivityLogFilters["period"];
   } = {},
 ): Promise<PaginatedActivity> => {
-  const url = new URL("/api/user-activity", window.location.origin);
+  const query = buildQuery(params);
+  const url = `/api/user-activity${query ? `?${query}` : ""}`;
 
-  Object.entries(params).forEach(([key, value]) => {
-    if (value !== undefined && value !== null && value !== "") {
-      url.searchParams.set(key, String(value));
-    }
-  });
-
-  const response = await fetchWithAuth(url.toString());
+  const response = await fetchWithAuth(url);
   if (!response.ok) throw new Error("Failed to fetch activity logs");
+
   return response.json();
 };
 
-// Legacy version (kept for compatibility)
+// ==================== LEGACY ====================
+
 export const getUserActivityLogsLegacy = async (
   filters?: ActivityLogFilters,
 ): Promise<SessionEvent[]> => {
-  const params = new URLSearchParams();
-
-  if (filters?.limit !== undefined)
-    params.append("limit", String(filters.limit));
-  if (filters?.offset !== undefined)
-    params.append("offset", String(filters.offset));
-  if (filters?.event) params.append("event", filters.event);
-  if (filters?.actionType) params.append("actionType", filters.actionType);
-  if (filters?.resource) params.append("resource", filters.resource);
-  if (filters?.sessionId) params.append("sessionId", filters.sessionId);
-  if (filters?.userId) params.append("userId", filters.userId);
-  if (filters?.dateFrom) params.append("dateFrom", filters.dateFrom);
-  if (filters?.dateTo) params.append("dateTo", filters.dateTo);
-  if (filters?.period) params.append("period", filters.period);
-
-  const url = `/api/user-activity${params.toString() ? `?${params.toString()}` : ""}`;
+  const query = buildQuery(filters || {});
+  const url = `/api/user-activity${query ? `?${query}` : ""}`;
 
   const response = await fetchWithAuth(url, { skipActivityLog: true });
   if (!response.ok) throw new Error("Failed to fetch activity logs");
+
   return response.json();
 };
+
+// ==================== SESSION ====================
 
 export const getSessionActivity = async (
   sessionId: string,
@@ -118,18 +122,20 @@ export const getSessionActivity = async (
     `/api/user-activity/session/${sessionId}`,
     { skipActivityLog: true },
   );
+
   if (!response.ok) throw new Error("Failed to fetch session activity");
   return response.json();
 };
 
-// FIXED: logUserActivity - Prevents identity column error
+// ==================== LOGGING ====================
+
 export const logUserActivity = async (
   data: Omit<SessionEvent, "id">,
 ): Promise<{ message: string }> => {
   const response = await fetchWithAuth("/api/user-activity", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data), // Never send 'id'
+    body: JSON.stringify(data),
     skipActivityLog: true,
   });
 
@@ -143,10 +149,13 @@ export const logUserActivity = async (
   return response.json();
 };
 
+// ==================== SSE ====================
+
 export const subscribeToActivityStream = (
   onMessage: (data: SessionEvent[]) => void,
 ): EventSource => {
   const token = localStorage.getItem("token");
+
   const url = token
     ? `/api/user-activity/stream?token=${encodeURIComponent(token)}`
     : "/api/user-activity/stream";
@@ -154,15 +163,13 @@ export const subscribeToActivityStream = (
   const source = new EventSource(url);
 
   source.onmessage = (event) => {
-    try {
-      const data = JSON.parse(event.data) as SessionEvent[];
-      onMessage(data);
-    } catch (err) {
-      console.error("Failed to parse SSE data:", err);
-    }
+    const data = JSON.parse(event.data) as SessionEvent[];
+    onMessage(data);
   };
 
-  source.addEventListener("ping", () => console.log("SSE ping received"));
+  source.addEventListener("ping", () => {
+    console.log("SSE ping received");
+  });
 
   source.onerror = (err) => {
     console.error("SSE connection error:", err);

@@ -137,7 +137,7 @@ function formatDuration(ms?: number): string {
 
 function roleLabel(role: string) {
   if (role === "super_admin") return "Super Admin";
-  if (role === "admin") return "Admin User";
+  if (role === "admin") return "Admin";
   return "User";
 }
 
@@ -154,7 +154,7 @@ const PRESETS = [
   { label: "This Month", period: "this-month" as const },
   { label: "Last Month", period: "last-month" as const },
   { label: "This Year", period: "this-year" as const },
-];
+] satisfies Array<{ label: string; period: ActivityLogFilters["period"] }>;
 
 const YEARS = [2026, 2025, 2024, 2023];
 
@@ -196,12 +196,13 @@ const ActivityBrowser: React.FC = () => {
   const [quickFilter, setQuickFilter] = useState<ActivityActionType | null>(
     null,
   );
+
   const [dateRange, setDateRange] = useState<{
     from: Date | undefined;
     to: Date | undefined;
   }>({
-    from: undefined,
-    to: undefined,
+    from: dateFilters.dateFrom ? new Date(dateFilters.dateFrom) : undefined,
+    to: dateFilters.dateTo ? new Date(dateFilters.dateTo) : undefined,
   });
 
   useEffect(() => {
@@ -229,15 +230,8 @@ const ActivityBrowser: React.FC = () => {
     setDateFilters({ period });
   };
 
-  const handleDateRangeChange = (
-    range: { from?: Date; to?: Date } | undefined,
-  ) => {
-    if (!range) {
-      setDateRange({ from: undefined, to: undefined });
-      clearDateFilters();
-      return;
-    }
-    setDateRange(range);
+  const handleDateRangeChange = (range: { from?: Date; to?: Date }) => {
+    setDateRange(range as any);
     if (range.from && range.to) {
       setDateFilters({
         dateFrom: format(range.from, "yyyy-MM-dd"),
@@ -278,11 +272,13 @@ const ActivityBrowser: React.FC = () => {
   };
 
   const chartData = useMemo(() => {
-    if (!rawSessions.length) return [];
+    if (!rawSessions.length && !dateRange.from) return [];
+
     const dataMap: Record<
       string,
       { date: string; actions: number; logins: number; fullDate: string }
     > = {};
+
     let start: Date;
     let end: Date;
 
@@ -301,7 +297,8 @@ const ActivityBrowser: React.FC = () => {
     end.setHours(0, 0, 0, 0);
 
     let curr = new Date(start);
-    while (curr <= end) {
+    let safety = 0;
+    while (curr <= end && safety < 90) {
       const key = format(curr, "yyyy-MM-dd");
       dataMap[key] = {
         date: format(curr, "dd MMM"),
@@ -310,6 +307,7 @@ const ActivityBrowser: React.FC = () => {
         logins: 0,
       };
       curr.setDate(curr.getDate() + 1);
+      safety++;
     }
 
     rawSessions.forEach((event) => {
@@ -328,16 +326,15 @@ const ActivityBrowser: React.FC = () => {
   const analytics = useMemo(() => {
     const userCounts: Record<string, number> = {};
     const resourceCounts: Record<string, number> = {};
+
     rawSessions.forEach((event) => {
       if (event.event === "action") {
         userCounts[event.userName] = (userCounts[event.userName] || 0) + 1;
-        const res = event.resource
-          ? event.resource.charAt(0).toUpperCase() +
-            event.resource.slice(1).toLowerCase()
-          : "General";
+        const res = event.resource || "Unknown";
         resourceCounts[res] = (resourceCounts[res] || 0) + 1;
       }
     });
+
     return {
       topUsers: Object.entries(userCounts)
         .sort((a, b) => b[1] - a[1])
@@ -361,14 +358,14 @@ const ActivityBrowser: React.FC = () => {
         session.userEmail.toLowerCase().includes(q) ||
         session.deviceFingerprint.toLowerCase().includes(q) ||
         session.deviceInfo.toLowerCase().includes(q) ||
-        session.actions.some((action) =>
-          [
-            action.resource,
-            action.requestUrl,
-            action.details,
-            action.actionType,
-          ].some((field) => field?.toLowerCase().includes(q)),
+        session.actions.some(
+          (action) =>
+            action.resource?.toLowerCase().includes(q) ||
+            action.requestUrl?.toLowerCase().includes(q) ||
+            action.details?.toLowerCase().includes(q) ||
+            action.actionType?.toLowerCase().includes(q),
         );
+
       return roleMatch && searchMatch && actionTypeMatch;
     });
   }, [groupedSessions, search, filterRole, quickFilter]);
@@ -376,11 +373,9 @@ const ActivityBrowser: React.FC = () => {
   const filteredActions = useMemo(() => {
     const q = search.trim().toLowerCase();
     return rawSessions.filter((event) => {
+      if (event.event !== "action") return false;
       const roleMatch = filterRole === "all" || event.userRole === filterRole;
-      const actionTypeMatch =
-        !quickFilter ||
-        event.actionType === quickFilter ||
-        event.event === quickFilter;
+      const actionTypeMatch = !quickFilter || event.actionType === quickFilter;
       const searchMatch =
         !q ||
         event.userName.toLowerCase().includes(q) ||
@@ -389,6 +384,7 @@ const ActivityBrowser: React.FC = () => {
         event.requestUrl?.toLowerCase().includes(q) ||
         event.details?.toLowerCase().includes(q) ||
         event.actionType?.toLowerCase().includes(q);
+
       return roleMatch && searchMatch && actionTypeMatch;
     });
   }, [rawSessions, search, filterRole, quickFilter]);
@@ -432,7 +428,7 @@ const ActivityBrowser: React.FC = () => {
             className={`border-b-2 px-1 pb-2 text-sm font-heading ${
               activeTab === "sessions"
                 ? "border-primary text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground"
+                : "border-transparent text-muted-foreground hover:border-primary/50 hover:text-foreground"
             }`}
             onClick={() => setActiveTab("sessions")}
           >
@@ -442,7 +438,7 @@ const ActivityBrowser: React.FC = () => {
             className={`border-b-2 px-1 pb-2 text-sm font-heading ${
               activeTab === "actions"
                 ? "border-primary text-foreground"
-                : "border-transparent text-muted-foreground hover:text-foreground"
+                : "border-transparent text-muted-foreground hover:border-primary/50 hover:text-foreground"
             }`}
             onClick={() => setActiveTab("actions")}
           >
@@ -463,7 +459,7 @@ const ActivityBrowser: React.FC = () => {
             </SelectTrigger>
             <SelectContent>
               {PRESETS.map(({ label, period }) => (
-                <SelectItem key={period} value={period}>
+                <SelectItem key={period} value={period} className="text-xs">
                   {label}
                 </SelectItem>
               ))}
@@ -476,7 +472,7 @@ const ActivityBrowser: React.FC = () => {
             </SelectTrigger>
             <SelectContent>
               {YEARS.map((y) => (
-                <SelectItem key={y} value={y.toString()}>
+                <SelectItem key={y} value={y.toString()} className="text-xs">
                   {y}
                 </SelectItem>
               ))}
@@ -489,7 +485,11 @@ const ActivityBrowser: React.FC = () => {
             </SelectTrigger>
             <SelectContent>
               {MONTHS.map((m) => (
-                <SelectItem key={m.value} value={m.value.toString()}>
+                <SelectItem
+                  key={m.value}
+                  value={m.value.toString()}
+                  className="text-xs"
+                >
                   {m.label}
                 </SelectItem>
               ))}
@@ -504,12 +504,29 @@ const ActivityBrowser: React.FC = () => {
           >
             Clear
           </Button>
+
+          <div className="flex items-center gap-1 border-l border-border pl-3 ml-1">
+            {(["create", "update", "delete"] as ActivityActionType[]).map(
+              (act) => (
+                <Button
+                  key={act}
+                  variant={quickFilter === act ? "default" : "outline"}
+                  size="sm"
+                  className="h-7 text-[10px] uppercase tracking-wider"
+                  onClick={() => handleQuickFilter(act)}
+                >
+                  {act}
+                </Button>
+              ),
+            )}
+          </div>
         </div>
 
         <div className="flex items-center gap-2 min-w-[280px]">
           <Popover>
             <PopoverTrigger asChild>
               <Button
+                id="date"
                 variant="outline"
                 className={cn(
                   "w-[280px] justify-start text-left font-normal text-xs h-10",
@@ -544,16 +561,19 @@ const ActivityBrowser: React.FC = () => {
               <CalendarComponent
                 initialFocus
                 mode="range"
+                defaultMonth={dateRange.from}
                 selected={dateRange}
-                onSelect={handleDateRangeChange}
+                onSelect={(range) =>
+                  handleDateRangeChange({ from: range?.from, to: range?.to })
+                }
                 numberOfMonths={2}
               />
             </PopoverContent>
           </Popover>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 flex-1">
-          <div className="relative min-w-[220px] flex-1">
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="relative min-w-[220px] max-w-sm flex-1">
             <Search
               size={14}
               className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
@@ -562,7 +582,7 @@ const ActivityBrowser: React.FC = () => {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search user, fingerprint, resource, URL..."
-              className="py-2 pl-10 pr-4 text-sm"
+              className="w-full py-2 pl-10 pr-4 text-sm"
             />
           </div>
           <select
@@ -589,23 +609,25 @@ const ActivityBrowser: React.FC = () => {
               </CardTitle>
             </CardHeader>
             <CardContent className="px-4 pb-4">
-              {analytics.topUsers.length > 0 ? (
-                analytics.topUsers.map(([user, count]) => (
-                  <div
-                    key={user}
-                    className="flex items-center justify-between p-2 rounded-lg bg-muted/40 text-sm mb-1 last:mb-0"
-                  >
-                    <span className="font-medium">{user}</span>
-                    <Badge variant="secondary" className="text-[10px]">
-                      {count} actions
-                    </Badge>
+              <div className="space-y-2">
+                {analytics.topUsers.length > 0 ? (
+                  analytics.topUsers.map(([user, count]) => (
+                    <div
+                      key={user}
+                      className="flex items-center justify-between p-2 rounded-lg bg-muted/40 text-sm"
+                    >
+                      <span className="font-medium">{user}</span>
+                      <Badge variant="secondary" className="text-[10px]">
+                        {count} actions
+                      </Badge>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-xs text-muted-foreground py-2 italic text-center">
+                    No action data
                   </div>
-                ))
-              ) : (
-                <div className="text-xs text-muted-foreground py-2 italic text-center">
-                  No action data
-                </div>
-              )}
+                )}
+              </div>
             </CardContent>
           </Card>
 
@@ -616,26 +638,28 @@ const ActivityBrowser: React.FC = () => {
               </CardTitle>
             </CardHeader>
             <CardContent className="px-4 pb-4">
-              {analytics.topResources.length > 0 ? (
-                analytics.topResources.map(([res, count]) => (
-                  <div
-                    key={res}
-                    className="flex items-center justify-between p-2 rounded-lg bg-muted/40 text-sm mb-1 last:mb-0"
-                  >
-                    <span className="font-medium capitalize">{res}</span>
-                    <Badge
-                      variant="outline"
-                      className="text-[10px] border-amber-500/20 text-amber-600"
+              <div className="space-y-2">
+                {analytics.topResources.length > 0 ? (
+                  analytics.topResources.map(([res, count]) => (
+                    <div
+                      key={res}
+                      className="flex items-center justify-between p-2 rounded-lg bg-muted/40 text-sm"
                     >
-                      {count} hits
-                    </Badge>
+                      <span className="font-medium capitalize">{res}</span>
+                      <Badge
+                        variant="outline"
+                        className="text-[10px] border-amber-500/20 text-amber-600"
+                      >
+                        {count} hits
+                      </Badge>
+                    </div>
+                  ))
+                ) : (
+                  <div className="text-xs text-muted-foreground py-2 italic text-center">
+                    No resource data
                   </div>
-                ))
-              ) : (
-                <div className="text-xs text-muted-foreground py-2 italic text-center">
-                  No resource data
-                </div>
-              )}
+                )}
+              </div>
             </CardContent>
           </Card>
         </div>
@@ -667,13 +691,19 @@ const ActivityBrowser: React.FC = () => {
                     dataKey="date"
                     axisLine={false}
                     tickLine={false}
-                    tick={{ fontSize: 10 }}
+                    tick={{
+                      fontSize: 10,
+                      fill: "hsl(var(--muted-foreground))",
+                    }}
                     dy={10}
                   />
                   <YAxis
                     axisLine={false}
                     tickLine={false}
-                    tick={{ fontSize: 10 }}
+                    tick={{
+                      fontSize: 10,
+                      fill: "hsl(var(--muted-foreground))",
+                    }}
                   />
                   <Tooltip
                     cursor={{ fill: "hsl(var(--muted))", opacity: 0.3 }}
@@ -690,16 +720,16 @@ const ActivityBrowser: React.FC = () => {
                     }}
                   />
                   <Bar
-                    dataKey="logins"
-                    name="Logins"
-                    fill="#3b82f6"
+                    dataKey="actions"
+                    name="Actions"
+                    fill="hsl(var(--primary))"
                     radius={[2, 2, 0, 0]}
                     barSize={24}
                   />
                   <Bar
-                    dataKey="actions"
-                    name="Actions"
-                    fill="#8b5cf6"
+                    dataKey="logins"
+                    name="Logins"
+                    fill="#10b981"
                     radius={[2, 2, 0, 0]}
                     barSize={24}
                   />
@@ -720,9 +750,10 @@ const ActivityBrowser: React.FC = () => {
           <div className="flex flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed border-border bg-muted/30 py-24 text-muted-foreground">
             <Activity size={48} className="opacity-20" />
             <p className="text-lg font-heading font-semibold">
-              {groupedSessions.length === 0
-                ? "No sessions recorded yet"
-                : "No sessions match your filters"}
+              No sessions match your filters
+            </p>
+            <p className="text-sm">
+              Try adjusting the date range or other filters above.
             </p>
             <Button
               variant="outline"
@@ -742,12 +773,22 @@ const ActivityBrowser: React.FC = () => {
             {filteredSessions.map((session) => {
               const loginMeta = formatDateTime(session.loginTime);
               const logoutMeta = formatDateTime(session.logoutTime);
+
+              const uniqueIps = new Set(
+                [
+                  session.loginEvent?.ipAddress,
+                  session.logoutEvent?.ipAddress,
+                  ...session.actions.map((a) => a.ipAddress).filter(Boolean),
+                ].filter(Boolean),
+              );
+
               return (
                 <div
                   key={session.sessionId}
                   className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm"
                 >
                   <div className="grid gap-4 border-b border-border bg-muted/30 p-5 lg:grid-cols-[1.3fr_1fr_1fr_1fr]">
+                    {/* 1. User Info */}
                     <div className="flex items-start gap-3">
                       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10">
                         <User size={16} className="text-primary" />
@@ -760,20 +801,21 @@ const ActivityBrowser: React.FC = () => {
                           {session.userEmail}
                         </p>
                         <span
-                          className={`mt-1 inline-block rounded-full border px-2 py-0.5 text-[10px] font-heading uppercase tracking-wider ${ROLE_COLORS[session.userRole] ?? "bg-slate-500/10 text-slate-600 border-slate-500/20"}`}
+                          className={`mt-1 inline-block rounded-full border px-2 py-0.5 text-[10px] font-heading uppercase tracking-wider ${ROLE_COLORS[session.userRole]}`}
                         >
                           {roleLabel(session.userRole)}
                         </span>
                       </div>
                     </div>
 
+                    {/* 2. Device & IP */}
                     <div className="space-y-1.5">
                       <div className="flex items-center gap-2 text-xs">
                         <Monitor
                           size={12}
                           className="shrink-0 text-muted-foreground"
                         />
-                        <span className="truncate text-muted-foreground">
+                        <span className="truncate">
                           {session.ipAddress || "unknown"}
                         </span>
                       </div>
@@ -788,8 +830,15 @@ const ActivityBrowser: React.FC = () => {
                             : "unknown"}
                         </span>
                       </div>
+                      {uniqueIps.size > 1 && (
+                        <div className="flex items-center gap-1 text-amber-600 text-xs">
+                          <ShieldAlert size={12} />
+                          Multiple IPs detected
+                        </div>
+                      )}
                     </div>
 
+                    {/* 3. Login / Logout Time */}
                     <div className="space-y-2">
                       <div className="flex items-center gap-2 text-xs">
                         <LogIn
@@ -824,6 +873,7 @@ const ActivityBrowser: React.FC = () => {
                       )}
                     </div>
 
+                    {/* 4. Duration & Actions */}
                     <div className="flex flex-col items-end justify-between gap-2 text-right">
                       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                         <Timer size={12} />
@@ -839,58 +889,61 @@ const ActivityBrowser: React.FC = () => {
             })}
           </div>
         )
+      ) : filteredActions.length === 0 ? (
+        <div className="flex flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed border-border bg-muted/30 py-24 text-muted-foreground">
+          <Activity size={48} className="opacity-20" />
+          <p className="text-lg font-heading font-semibold">No actions found</p>
+          <p className="text-sm">
+            Try adjusting the date range or other filters above.
+          </p>
+        </div>
       ) : (
         <div className="overflow-hidden rounded-2xl border border-border bg-card">
           <table className="w-full text-sm">
             <thead className="bg-muted/40">
               <tr className="text-left text-xs uppercase tracking-wider text-muted-foreground">
                 <th className="px-4 py-3">User</th>
-                <th className="px-4 py-3">Event</th>
+                <th className="px-4 py-3">Action</th>
                 <th className="px-4 py-3">Resource</th>
                 <th className="px-4 py-3">Time</th>
-                <th className="px-4 py-3">IP Address</th>
-                <th className="px-4 py-3">Device</th>
+                <th className="px-4 py-3">URL</th>
+                <th className="px-4 py-3">Session</th>
               </tr>
             </thead>
             <tbody>
-              {filteredActions.map((event) => (
-                <tr key={event.id} className="border-t border-border/70">
+              {filteredActions.map((action) => (
+                <tr key={action.id} className="border-t border-border/70">
                   <td className="px-4 py-3">
-                    <div className="font-medium">{event.userName}</div>
+                    <div className="font-medium">{action.userName}</div>
                     <div className="text-xs text-muted-foreground">
-                      {event.userEmail}
+                      {action.userEmail}
                     </div>
                   </td>
                   <td className="px-4 py-3">
                     <span
-                      className={`rounded-full border px-2 py-1 text-xs font-heading ${ACTION_COLORS[event.event as keyof typeof ACTION_COLORS] || ACTION_COLORS.read}`}
+                      className={`rounded-full border px-2 py-1 text-xs font-heading ${ACTION_COLORS[action.actionType || "read"]}`}
                     >
-                      {getActionLabel(event)}
+                      {getActionLabel(action)}
                     </span>
                   </td>
                   <td className="px-4 py-3 capitalize">
-                    {event.resource || "—"}
+                    {action.resource || "—"}
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                       <Calendar size={12} />
-                      {formatDateTime(event.timestamp).date}
+                      {formatDateTime(action.timestamp).date}
                     </div>
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                       <Clock size={12} />
-                      {formatDateTime(event.timestamp).time}
+                      {formatDateTime(action.timestamp).time}
                     </div>
                   </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-1.5 text-xs">
-                      <Wifi size={11} className="text-muted-foreground" />
-                      <span className="font-mono">
-                        {event.ipAddress || "unknown"}
-                      </span>
-                    </div>
+                  <td className="max-w-[280px] px-4 py-3 text-xs text-muted-foreground">
+                    <div className="truncate">{action.requestUrl || "—"}</div>
                   </td>
-                  <td className="px-4 py-3 text-xs text-muted-foreground">
-                    {event.deviceInfo || "—"}
+                  <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
+                    {action.sessionId || "—"}
                   </td>
                 </tr>
               ))}

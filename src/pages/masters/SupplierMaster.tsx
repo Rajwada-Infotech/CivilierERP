@@ -1,8 +1,11 @@
-import React from "react";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { MasterPage, FieldDef, ColumnDef } from "@/components/MasterPage";
+import React from "react"
+import { Breadcrumbs } from "@/components/Breadcrumbs"
+import { MasterPage, type DataChangeEvent } from "@/components/MasterPage"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { getEnterprises, addEnterprise, updateEnterprise, deleteEnterprise } from "@/api/enterpriseApi"
+import { toast } from "sonner"
 
-const fields: FieldDef[] = [
+const fields = [
   { name: "name", label: "Supplier Name", type: "text", required: true },
   { name: "contact", label: "Contact Person", type: "text" },
   { name: "phone", label: "Phone Number", type: "text" },
@@ -16,7 +19,7 @@ const fields: FieldDef[] = [
   { name: "status", label: "Status", type: "toggle", defaultValue: true },
 ];
 
-const columns: ColumnDef[] = [
+const columns = [
   { key: "name", label: "Supplier Name" },
   { key: "contact", label: "Contact Person" },
   { key: "phone", label: "Phone" },
@@ -26,18 +29,86 @@ const columns: ColumnDef[] = [
   { key: "status", label: "Status" },
 ];
 
-const initialData = [
-  { name: "Metro Hardware", contact: "Amit Shah", phone: "9876000111", email: "amit@metro.com", gst: "27AABCM1111F1Z1", pan: "AABCM1111F", category: "Material", paymentTerms: "30 Days", creditLimit: "500000", address: "Pune, MH", status: true },
-  { name: "Bharat Steel Traders", contact: "Ravi Jain", phone: "9876000222", email: "ravi@bharatsteel.in", gst: "24BBDCB2222G2Z2", pan: "BBDCB2222G", category: "Material", paymentTerms: "45 Days", creditLimit: "800000", address: "Surat, GJ", status: true },
-  { name: "Quick Transport Co", contact: "Dinesh Rao", phone: "9876000333", email: "dinesh@quicktrans.co", gst: "29CDEQT3333H3Z3", pan: "CDEQT3333H", category: "Transport", paymentTerms: "15 Days", creditLimit: "200000", address: "Bangalore, KA", status: true },
-];
+const toPayload = (r: Record<string, unknown>) => ({
+  name: r.name as string,
+  business_type: (r.category as string) || "Supplier",
+  pan: (r.pan as string) || null,
+  address: (r.address as string) || null,
+  email: (r.email as string) || null,
+  phone_number: (r.phone as string) || null,
+  status: r.status === true ? "Active" : "Inactive",
+  tds_limit: r.creditLimit ? Number(r.creditLimit) : null,
+  description: `Supplier: ${r.contact || ""}, GST: ${r.gst || ""}, Terms: ${r.paymentTerms || ""}, Limit: ${r.creditLimit || 0}`,
+});
 
-const SupplierMaster: React.FC = () => (
-  <>
+const SupplierMaster = () => {
+  const queryClient = useQueryClient()
+
+  const { data: dbData, isLoading, error } = useQuery({
+    queryKey: ["suppliers"],
+    queryFn: getEnterprises,
+  })
+
+  const dbItems = Array.isArray(dbData) ? dbData : []
+
+  const supplierData = dbItems
+    .filter(item => 
+      item.name?.toLowerCase().includes("hardware") ||
+      item.name?.toLowerCase().includes("material") ||
+      item.name?.toLowerCase().includes("steel") ||
+      item.name?.toLowerCase().includes("transport") ||
+      item.business_type?.toLowerCase().includes("supplier")
+    )
+    .map(item => ({
+      _id: String(item.id),
+      name: item.name || "",
+      contact: item.contact || "",
+      phone: item.phone_number || "",
+      email: item.email || "",
+      gst: item.gst || "",
+      pan: item.pan || "",
+      category: item.business_type || "Material",
+      paymentTerms: item.payment_terms || "30 Days",
+      creditLimit: item.tds_limit || 0,
+      address: item.address || "",
+      status: item.status !== "Inactive",
+    }))
+
+  const handleDataEvent = async (event: DataChangeEvent) => {
+    try {
+      if (event.action === "add") {
+        await addEnterprise(toPayload(event.record))
+        toast.success("Supplier saved!")
+      } else if (event.action === "update") {
+        await updateEnterprise(event.id, toPayload(event.record))
+        toast.success("Supplier updated!")
+      } else if (event.action === "delete") {
+        await deleteEnterprise(event.id)
+        toast.success("Supplier deleted!")
+      }
+      await queryClient.invalidateQueries({ queryKey: ["suppliers", "enterprises"] })
+    } catch (err: any) {
+      toast.error(err.message || "Operation failed")
+    }
+  }
+
+  if (isLoading) return <div className="p-6 text-muted-foreground">Loading suppliers...</div>
+  if (error) return <div className="p-6 text-destructive">Failed to load suppliers.</div>
+
+  return (
+    <>
       <Breadcrumbs items={["Dashboard", "Finance Module", "Supplier Master"]} />
-    <h1 className="text-xl font-heading font-bold text-foreground mb-4">Supplier Master</h1>
-    <MasterPage title="Supplier" fields={fields} columns={columns} initialData={initialData} />
-  </>
-);
+      <h1 className="text-xl font-heading font-bold text-foreground mb-4">Supplier Master</h1>
+      <MasterPage 
+        title="Supplier" 
+        fields={fields} 
+        columns={columns} 
+        initialData={supplierData}
+        onDataEvent={handleDataEvent}
+      />
+    </>
+  )
+}
 
-export default SupplierMaster;
+export default SupplierMaster
+
