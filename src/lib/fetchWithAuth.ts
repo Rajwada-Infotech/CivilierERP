@@ -50,8 +50,15 @@ function extractResource(url: string) {
 async function logAction(method: string, url: string) {
   try {
     const user = getStoredUser();
-    if (!user.id) return;
-    if (url.includes("/user-activity") || url.includes("/login")) return;
+    if (!user.id) {
+      console.debug("No user ID found, skipping activity log");
+      return;
+    }
+
+    // Don't log activity for user-activity or login endpoints to avoid recursion
+    if (url.includes("/user-activity") || url.includes("/login")) {
+      return;
+    }
 
     await logUserActivity({
       userId: user.id,
@@ -59,6 +66,7 @@ async function logAction(method: string, url: string) {
       userEmail: user.email || "",
       userRole: user.role || "",
       event: "action",
+      timestamp: new Date().toISOString(),
       actionType: ACTION_MAP[method] || "read",
       resource: extractResource(url),
       requestMethod: method,
@@ -68,7 +76,9 @@ async function logAction(method: string, url: string) {
         localStorage.getItem("deviceFingerprint_v1") || undefined,
     });
   } catch (error) {
-    console.debug("Action logging failed:", error);
+    // Don't throw - activity logging is non-critical
+    // Failures here shouldn't break the user's actual request
+    console.debug("Activity logging failed (non-critical):", error);
   }
 }
 
