@@ -302,6 +302,7 @@ export const TopNavbar = () => {
 
   const [setupOpen, setSetupOpen] = useState(false);
   const [widgetsOpen, setWidgetsOpen] = useState(false);
+  const [moduleSwitching, setModuleSwitching] = useState(false);
   const [moduleOpen, setModuleOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
