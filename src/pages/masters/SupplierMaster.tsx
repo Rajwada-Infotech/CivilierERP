@@ -1,5 +1,3 @@
-
-
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -7,29 +5,28 @@ import { getList, addRecord, updateRecord, deleteRecord } from "@/api/accountHea
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MasterPage, type FieldDef, type ColumnDef, type DataChangeEvent } from "@/components/MasterPage";
 
-const SUPPLIER_TYPE = "S"; // Supplier
+const SUPPLIER_TYPE = "S";
 
 const fields: FieldDef[] = [
-  { name: "LHeadName", label: "Supplier Name", type: "text", required: true },
-  { name: "LHeadContactPerson", label: "Contact Person", type: "text" },
-  { name: "LHeadPhone", label: "Phone Number", type: "text" },
-  { name: "LHeadEmail", label: "Email Address", type: "text" },
-  { name: "LGST", label: "GST Number", type: "text", uppercase: true },
-  { name: "pan", label: "PAN Number", type: "text", uppercase: true },
-  { name: "supplierCategory", label: "Supplier Category", type: "select", options: ["Material", "Equipment", "Labour", "Services", "Transport"] }, // UI only
-  { name: "LHeadPaymentTerms", label: "Payment Terms", type: "text" },
-  { name: "creditLimit", label: "Credit Limit (₹)", type: "number", prefix: "₹" }, // Map custom
-  { name: "LHeadAddress", label: "Address", type: "textarea", fullWidth: true },
-  { name: "LHeadStatus", label: "Status", type: "toggle", defaultValue: true },
+  { name: "LHeadName",          label: "Supplier Name",     type: "text",     required: true },
+  { name: "LHeadContactPerson", label: "Contact Person",    type: "text" },
+  { name: "LHeadPhone",         label: "Phone Number",      type: "text" },
+  { name: "LHeadEmail",         label: "Email Address",     type: "text" },
+  { name: "LGST",               label: "GST Number",        type: "text",     uppercase: true },
+  { name: "LDescription",       label: "PAN Number",        type: "text",     uppercase: true },
+  { name: "supplierCategory",   label: "Supplier Category", type: "select",   options: ["Material", "Equipment", "Labour", "Services", "Transport"] },
+  { name: "LHeadPaymentTerms",  label: "Payment Terms",     type: "text" },
+  { name: "LHeadAddress",       label: "Address",           type: "textarea", fullWidth: true },
+  { name: "LHeadStatus",        label: "Status",            type: "toggle",   defaultValue: true },
 ];
 
 const columns: ColumnDef[] = [
-  { key: "LHeadName", label: "Supplier Name" },
+  { key: "LHeadName",          label: "Supplier Name" },
   { key: "LHeadContactPerson", label: "Contact Person" },
-  { key: "LHeadPhone", label: "Phone" },
-  { key: "LGST", label: "GST No." },
-  { key: "LHeadPaymentTerms", label: "Payment Terms" },
-  { key: "LHeadStatus", label: "Status" },
+  { key: "LHeadPhone",         label: "Phone" },
+  { key: "LGST",               label: "GST No." },
+  { key: "LHeadPaymentTerms",  label: "Payment Terms" },
+  { key: "LHeadStatus",        label: "Status" },
 ];
 
 const SupplierMaster: React.FC = () => {
@@ -43,40 +40,51 @@ const SupplierMaster: React.FC = () => {
   const mappedData = React.useMemo(() => {
     if (!Array.isArray(data)) return [];
     return data.map((item) => ({
-      _id: String(item.LHeadId),
-      LHeadName: item.LHeadName || "",
+      _id:                String(item.LHeadId),
+      LHeadName:          item.LHeadName          || "",
       LHeadContactPerson: item.LHeadContactPerson || "",
-      LHeadPhone: item.LHeadPhone || "",
-      LHeadEmail: item.LHeadEmail || "",
-      LGST: item.LGST || "",
-      pan: item.pan || "",
-      supplierCategory: "Material", // UI static
-      LHeadPaymentTerms: item.LHeadPaymentTerms || "",
-      creditLimit: item.creditLimit || 0,
-      LHeadAddress: item.LHeadAddress || "",
-      LHeadStatus: Boolean(item.LHeadStatus),
+      LHeadPhone:         item.LHeadPhone         || "",
+      LHeadEmail:         item.LHeadEmail         || "",
+      LGST:               item.LGST               || "",
+      LDescription:       item.LDescription       || "",
+      supplierCategory:   "Material",
+      LHeadPaymentTerms:  item.LHeadPaymentTerms  || "",
+      LHeadAddress:       item.LHeadAddress       || "",
+      LHeadStatus:        Boolean(item.LHeadStatus),
     }));
   }, [data]);
 
   const handleDataEvent = async (event: DataChangeEvent) => {
     try {
-      if (event.action === 'delete') {
+      if (event.action === "delete") {
         await deleteRecord(Number(event.id));
         toast.success("Supplier deleted!");
         await queryClient.invalidateQueries({ queryKey: ["account-head", SUPPLIER_TYPE] });
         return;
       }
 
-      const record = event.records[0];
+      const record = event.record;
+
+      if (!record) {
+        toast.error("No record data found");
+        return;
+      }
+
       const payload = {
-        LHeadName: record.LHeadName,
+        LHeadName:          record.LHeadName,
+        LHeadType:          SUPPLIER_TYPE,
         LHeadContactPerson: record.LHeadContactPerson,
-        LHeadPhone: record.LHeadPhone,
-        LHeadEmail: record.LHeadEmail,
-        LGST: record.LGST,
-        LHeadPaymentTerms: record.LHeadPaymentTerms,
-        LHeadAddress: record.LHeadAddress,
-        LHeadStatus: record.LHeadStatus,
+        LHeadPhone:         record.LHeadPhone,
+        LHeadEmail:         record.LHeadEmail,
+        LGST:               record.LGST,
+        LDescription:       record.LDescription,
+        LHeadPaymentTerms:  record.LHeadPaymentTerms,
+        LHeadAddress:       record.LHeadAddress,
+        LHeadStatus:        record.LHeadStatus,
+        LBranchName:        "Main",
+        LGSTState:          null,
+        LCountry:           "India",
+        LBelongsTo:         null,
       };
 
       if (event.action === "add") {
@@ -93,9 +101,8 @@ const SupplierMaster: React.FC = () => {
     }
   };
 
-
   if (isLoading) return <div className="p-6 text-muted-foreground">Loading...</div>;
-  if (error) return <div className="p-6 text-red-500">Failed to load suppliers.</div>;
+  if (error)     return <div className="p-6 text-red-500">Failed to load suppliers.</div>;
 
   return (
     <>
@@ -113,4 +120,3 @@ const SupplierMaster: React.FC = () => {
 };
 
 export default SupplierMaster;
-
