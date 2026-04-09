@@ -9,12 +9,14 @@ import React, {
 } from "react";
 import {
   type ActivityActionType,
+  type SessionEvent,
   getUserActivityLogs,
-  getUserActivityLogsLegacy,
   logUserActivity,
   subscribeToActivityStream,
 } from "@/api/userActivityApi";
 import { getDeviceFingerprint, getDeviceInfo } from "@/utils/deviceFingerprint";
+
+// ── Public types ──────────────────────────────────────────────────────────────
 
 export interface GroupedSession {
   sessionId: string;
@@ -64,12 +66,9 @@ interface ActivityBrowserContextType {
     React.SetStateAction<ActivityBrowserContextType["dateFilters"]>
   >;
   clearDateFilters: () => void;
-
-  // Added pagination support
   activity: PaginatedActivity;
   setPage: (page: number) => void;
   setFilters: (filters: ActivityFilters) => void;
-
   recordLogin: (user: {
     id: string;
     name: string;
@@ -93,6 +92,8 @@ interface ActivityBrowserContextType {
   refresh: () => void;
 }
 
+// ── Context ───────────────────────────────────────────────────────────────────
+
 const ActivityBrowserContext = createContext<ActivityBrowserContextType | null>(
   null,
 );
@@ -106,6 +107,8 @@ export const useActivityBrowser = () => {
   }
   return ctx;
 };
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
 
 async function fetchIp(): Promise<string> {
   try {
@@ -151,6 +154,8 @@ const EMPTY_ACTIVITY: PaginatedActivity = {
   pages: 0,
 };
 
+// ── Provider ──────────────────────────────────────────────────────────────────
+
 export const ActivityBrowserProvider: React.FC<{
   children: React.ReactNode;
 }> = ({ children }) => {
@@ -158,11 +163,7 @@ export const ActivityBrowserProvider: React.FC<{
   const [isLoading, setIsLoading] = useState(true);
   const [dateFilters, setDateFilters] = useState<
     ActivityBrowserContextType["dateFilters"]
-  >({
-    period: "last-month",
-  });
-
-  // New pagination state
+  >({ period: "last-month" });
   const [activity, setActivity] = useState<PaginatedActivity>(EMPTY_ACTIVITY);
 
   const currentPageRef = useRef(1);
@@ -177,12 +178,21 @@ export const ActivityBrowserProvider: React.FC<{
     return ip;
   }, []);
 
-  // New fetch for pagination
+  // ── Core fetch (single source of truth — replaces the old dual-fetch) ──────
+  // FIX: The original code ran two parallel fetches on mount:
+  //   1. refreshLogs() → called getUserActivityLogsLegacy() which expected
+  //      a plain SessionEvent[] but the backend now always returns
+  //      { data, total, page, limit, pages } — so it broke silently.
+  //   2. fetchActivity() → correctly handled the paginated shape.
+  // We now use a single fetch via getUserActivityLogs() for everything.
   const fetchActivity = useCallback(
     async (page = 1, filters: ActivityFilters = {}) => {
       const token = localStorage.getItem("token");
-      if (!token) return;
-
+      if (!token) {
+        setRawSessions([]);
+        setIsLoading(false);
+        return;
+      }
       try {
         setIsLoading(true);
         currentPageRef.current = page;
@@ -209,22 +219,19 @@ export const ActivityBrowserProvider: React.FC<{
   );
 
   const setPage = useCallback(
-    (page: number) => {
-      fetchActivity(page, currentFiltersRef.current);
-    },
+    (page: number) => fetchActivity(page, currentFiltersRef.current),
     [fetchActivity],
   );
 
   const setFilters = useCallback(
-    (filters: ActivityFilters) => {
-      fetchActivity(1, filters);
-    },
+    (filters: ActivityFilters) => fetchActivity(1, filters),
     [fetchActivity],
   );
 
-  const refresh = useCallback(() => {
-    fetchActivity(currentPageRef.current, currentFiltersRef.current);
-  }, [fetchActivity]);
+  const refresh = useCallback(
+    () => fetchActivity(currentPageRef.current, currentFiltersRef.current),
+    [fetchActivity],
+  );
 
   const clearAll = useCallback(() => {
     setRawSessions([]);
@@ -235,34 +242,12 @@ export const ActivityBrowserProvider: React.FC<{
     setDateFilters({ period: "last-month" });
   }, []);
 
-  // Original refreshLogs (kept)
-  const refreshLogs = useCallback(async () => {
-    const token = localStorage.getItem("token");
-    if (!token) {
-      setRawSessions([]);
-      setIsLoading(false);
-      return;
-    }
-    try {
-      setIsLoading(true);
-      const logs = await getUserActivityLogsLegacy({ ...dateFilters });
-      setRawSessions(logs.map(normalizeEvent));
-    } catch (err) {
-      console.error("Failed to load activity logs:", err);
-      setRawSessions([]);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [dateFilters]);
-
-  // Initial load
+  // Initial load + re-fetch on dateFilter change
   useEffect(() => {
-    void refreshLogs();
-    const timer = setTimeout(() => fetchActivity(), 300);
-    return () => clearTimeout(timer);
-  }, [refreshLogs, fetchActivity]);
+    void fetchActivity();
+  }, [fetchActivity]);
 
-  // SSE (kept + refresh pagination)
+  // SSE live updates
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) return;
@@ -278,7 +263,8 @@ export const ActivityBrowserProvider: React.FC<{
     };
   }, [refresh]);
 
-  // recordLogin, recordLogout, recordAction (kept as original from backend)
+  // ── Session recording ─────────────────────────────────────────────────────
+
   const recordLogin = useCallback(
     async (user: { id: string; name: string; email: string; role: string }) => {
       const ip = await getIp();
@@ -386,10 +372,14 @@ export const ActivityBrowserProvider: React.FC<{
     [getIp],
   );
 
+  // ── Group raw events into sessions ────────────────────────────────────────
+
   const groupedSessions = useMemo(() => {
     const groups: Record<string, GroupedSession> = {};
+
     rawSessions.forEach((event) => {
       if (!event.sessionId) return;
+
       if (!groups[event.sessionId]) {
         groups[event.sessionId] = {
           sessionId: event.sessionId,
@@ -404,7 +394,9 @@ export const ActivityBrowserProvider: React.FC<{
           loginEvent: event,
         };
       }
+
       const group = groups[event.sessionId];
+
       if (event.event === "login") {
         group.loginTime = event.timestamp;
         group.loginEvent = event;
@@ -422,6 +414,7 @@ export const ActivityBrowserProvider: React.FC<{
         group.actions.push(event);
       }
     });
+
     return Object.values(groups).sort((a, b) =>
       (b.logoutTime || b.loginTime).localeCompare(a.logoutTime || a.loginTime),
     );
