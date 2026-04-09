@@ -27,9 +27,23 @@ function extractResource(url: string) {
   try {
     const pathname = new URL(url, window.location.origin).pathname;
     const parts = pathname.split("/").filter(Boolean);
-    return parts[1] || parts[0] || "unknown";
+
+    // Skip 'api' prefix if present
+    const startIndex = parts[0] === "api" ? 1 : 0;
+
+    // Get the main resource (e.g., 'employees', 'expenses', 'masters')
+    let resource = parts[startIndex] || "general";
+
+    // Handle hyphenated resources by converting to readable format
+    // e.g., "tds-masters" -> "TDS Masters", "user-activity" -> "User Activity"
+    resource = resource
+      .split("-")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+
+    return resource;
   } catch {
-    return "unknown";
+    return "General";
   }
 }
 

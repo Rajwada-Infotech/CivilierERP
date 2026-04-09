@@ -26,6 +26,7 @@ export interface GroupedSession {
   userRole: string;
   deviceFingerprint: string;
   deviceInfo: string;
+  ipAddress: string;
   loginTime: string;
   logoutTime?: string;
   durationMs?: number;
@@ -378,28 +379,38 @@ export const ActivityBrowserProvider: React.FC<{
     const groups: Record<string, GroupedSession> = {};
 
     rawSessions.forEach((event) => {
-      if (!event.sessionId) return;
+      // CRITICAL FIX: Create implicit sessionId for events without one
+      // This handles cases where actions are logged but sessionId is missing
+      const sessionId =
+        event.sessionId ||
+        `implicit-${event.userId}-${new Date(event.timestamp).toISOString().split("T")[0]}`;
 
-      if (!groups[event.sessionId]) {
-        groups[event.sessionId] = {
-          sessionId: event.sessionId,
+      if (!groups[sessionId]) {
+        groups[sessionId] = {
+          sessionId: sessionId,
           userId: event.userId,
           userName: event.userName,
           userEmail: event.userEmail,
           userRole: event.userRole,
           deviceFingerprint: event.deviceFingerprint || "Unknown",
           deviceInfo: event.deviceInfo || "Unknown device",
+          ipAddress: event.ipAddress || "Unavailable",
           loginTime: event.timestamp,
           actions: [],
           loginEvent: event,
         };
       }
 
-      const group = groups[event.sessionId];
+      const group = groups[sessionId];
 
       if (event.event === "login") {
         group.loginTime = event.timestamp;
         group.loginEvent = event;
+        // Update device info from login event as it's authoritative
+        group.deviceFingerprint =
+          event.deviceFingerprint || group.deviceFingerprint;
+        group.deviceInfo = event.deviceInfo || group.deviceInfo;
+        group.ipAddress = event.ipAddress || group.ipAddress;
       } else if (event.event === "logout") {
         group.logoutTime = event.timestamp;
         group.logoutEvent = event;
@@ -412,6 +423,13 @@ export const ActivityBrowserProvider: React.FC<{
         }
       } else if (event.event === "action") {
         group.actions.push(event);
+        // For implicit sessions, use earliest action as login time
+        if (!group.loginEvent || group.loginEvent.event !== "login") {
+          if (new Date(event.timestamp) < new Date(group.loginTime)) {
+            group.loginTime = event.timestamp;
+            group.loginEvent = event;
+          }
+        }
       }
     });
 

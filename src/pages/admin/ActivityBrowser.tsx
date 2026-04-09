@@ -19,6 +19,7 @@ import {
   Timer,
   TrendingUp,
   User,
+  Wifi,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -36,7 +37,6 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -96,6 +96,8 @@ const ROLE_COLORS: Record<string, string> = {
 };
 
 const ACTION_COLORS: Record<string, string> = {
+  login: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20",
+  logout: "bg-rose-500/10 text-rose-600 border-rose-500/20",
   read: "bg-blue-500/10 text-blue-600 border-blue-500/20",
   create: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20",
   update: "bg-amber-500/10 text-amber-600 border-amber-500/20",
@@ -135,14 +137,14 @@ function formatDuration(ms?: number): string {
 
 function roleLabel(role: string) {
   if (role === "super_admin") return "Super Admin";
-  if (role === "admin") return "Admin";
+  if (role === "admin") return "Admin User";
   return "User";
 }
 
 function getActionLabel(event: SessionEvent) {
-  if (event.event === "login") return "login";
-  if (event.event === "logout") return "logout";
-  return event.actionType || "action";
+  if (event.event === "login") return "LOGIN";
+  if (event.event === "logout") return "LOGOUT";
+  return (event.actionType || "action").toUpperCase();
 }
 
 const PRESETS = [
@@ -152,9 +154,10 @@ const PRESETS = [
   { label: "This Month", period: "this-month" as const },
   { label: "Last Month", period: "last-month" as const },
   { label: "This Year", period: "this-year" as const },
-] satisfies Array<{ label: string; period: ActivityLogFilters["period"] }>;
+];
 
-const YEARS = [2025, 2024, 2023];
+const YEARS = [2026, 2025, 2024, 2023];
+
 const MONTHS = [
   { label: "January", value: 0 },
   { label: "February", value: 1 },
@@ -178,7 +181,6 @@ const ActivityBrowser: React.FC = () => {
     dateFilters,
     setDateFilters,
     clearDateFilters,
-    // Added from dev branch (pagination support)
     activity,
     setPage,
     setFilters,
@@ -194,16 +196,14 @@ const ActivityBrowser: React.FC = () => {
   const [quickFilter, setQuickFilter] = useState<ActivityActionType | null>(
     null,
   );
-
   const [dateRange, setDateRange] = useState<{
     from: Date | undefined;
     to: Date | undefined;
   }>({
-    from: dateFilters.dateFrom ? new Date(dateFilters.dateFrom) : undefined,
-    to: dateFilters.dateTo ? new Date(dateFilters.dateTo) : undefined,
+    from: undefined,
+    to: undefined,
   });
 
-  // Original date sync
   useEffect(() => {
     setDateRange({
       from: dateFilters.dateFrom
@@ -213,9 +213,8 @@ const ActivityBrowser: React.FC = () => {
         ? new Date(dateFilters.dateTo + "T00:00:00")
         : undefined,
     });
-  }, [dateFilters]);
+  }, [dateFilters.dateFrom, dateFilters.dateTo]);
 
-  // New: Sync search + role filter with backend API (pagination ready)
   useEffect(() => {
     const timer = setTimeout(() => {
       setFilters({
@@ -230,10 +229,14 @@ const ActivityBrowser: React.FC = () => {
     setDateFilters({ period });
   };
 
-  const handleDateRangeChange = (range: {
-    from: Date | undefined;
-    to: Date | undefined;
-  }) => {
+  const handleDateRangeChange = (
+    range: { from?: Date; to?: Date } | undefined,
+  ) => {
+    if (!range) {
+      setDateRange({ from: undefined, to: undefined });
+      clearDateFilters();
+      return;
+    }
     setDateRange(range);
     if (range.from && range.to) {
       setDateFilters({
@@ -263,7 +266,7 @@ const ActivityBrowser: React.FC = () => {
     const month = parseInt(monthStr);
     const year = dateRange.from?.getFullYear() || new Date().getFullYear();
     const from = new Date(year, month, 1);
-    const to = new Date(year, month, new Date(year, month + 1, 0).getDate());
+    const to = new Date(year, month + 1, 0);
     setDateFilters({
       dateFrom: format(from, "yyyy-MM-dd"),
       dateTo: format(to, "yyyy-MM-dd"),
@@ -274,15 +277,15 @@ const ActivityBrowser: React.FC = () => {
     setQuickFilter((prev) => (prev === type ? null : type));
   };
 
-  // All your original computed values (kept 100%)
   const chartData = useMemo(() => {
-    if (!rawSessions.length && !dateRange.from) return [];
+    if (!rawSessions.length) return [];
     const dataMap: Record<
       string,
       { date: string; actions: number; logins: number; fullDate: string }
     > = {};
     let start: Date;
     let end: Date;
+
     if (dateRange.from) {
       start = new Date(dateRange.from);
       end = dateRange.to ? new Date(dateRange.to) : new Date();
@@ -293,11 +296,12 @@ const ActivityBrowser: React.FC = () => {
       start = new Date(Math.min(...timestamps));
       end = new Date(Math.max(...timestamps));
     }
+
     start.setHours(0, 0, 0, 0);
     end.setHours(0, 0, 0, 0);
-    const curr = new Date(start);
-    let safety = 0;
-    while (curr <= end && safety < 90) {
+
+    let curr = new Date(start);
+    while (curr <= end) {
       const key = format(curr, "yyyy-MM-dd");
       dataMap[key] = {
         date: format(curr, "dd MMM"),
@@ -306,8 +310,8 @@ const ActivityBrowser: React.FC = () => {
         logins: 0,
       };
       curr.setDate(curr.getDate() + 1);
-      safety++;
     }
+
     rawSessions.forEach((event) => {
       const dayKey = format(new Date(event.timestamp), "yyyy-MM-dd");
       if (dataMap[dayKey]) {
@@ -315,6 +319,7 @@ const ActivityBrowser: React.FC = () => {
         if (event.event === "login") dataMap[dayKey].logins++;
       }
     });
+
     return Object.values(dataMap).sort((a, b) =>
       a.fullDate.localeCompare(b.fullDate),
     );
@@ -326,7 +331,10 @@ const ActivityBrowser: React.FC = () => {
     rawSessions.forEach((event) => {
       if (event.event === "action") {
         userCounts[event.userName] = (userCounts[event.userName] || 0) + 1;
-        const res = event.resource || "Unknown";
+        const res = event.resource
+          ? event.resource.charAt(0).toUpperCase() +
+            event.resource.slice(1).toLowerCase()
+          : "General";
         resourceCounts[res] = (resourceCounts[res] || 0) + 1;
       }
     });
@@ -353,12 +361,13 @@ const ActivityBrowser: React.FC = () => {
         session.userEmail.toLowerCase().includes(q) ||
         session.deviceFingerprint.toLowerCase().includes(q) ||
         session.deviceInfo.toLowerCase().includes(q) ||
-        session.actions.some(
-          (action) =>
-            action.resource?.toLowerCase().includes(q) ||
-            action.requestUrl?.toLowerCase().includes(q) ||
-            action.details?.toLowerCase().includes(q) ||
-            action.actionType?.toLowerCase().includes(q),
+        session.actions.some((action) =>
+          [
+            action.resource,
+            action.requestUrl,
+            action.details,
+            action.actionType,
+          ].some((field) => field?.toLowerCase().includes(q)),
         );
       return roleMatch && searchMatch && actionTypeMatch;
     });
@@ -367,9 +376,11 @@ const ActivityBrowser: React.FC = () => {
   const filteredActions = useMemo(() => {
     const q = search.trim().toLowerCase();
     return rawSessions.filter((event) => {
-      if (event.event !== "action") return false;
       const roleMatch = filterRole === "all" || event.userRole === filterRole;
-      const actionTypeMatch = !quickFilter || event.actionType === quickFilter;
+      const actionTypeMatch =
+        !quickFilter ||
+        event.actionType === quickFilter ||
+        event.event === quickFilter;
       const searchMatch =
         !q ||
         event.userName.toLowerCase().includes(q) ||
@@ -421,7 +432,7 @@ const ActivityBrowser: React.FC = () => {
             className={`border-b-2 px-1 pb-2 text-sm font-heading ${
               activeTab === "sessions"
                 ? "border-primary text-foreground"
-                : "border-transparent text-muted-foreground hover:border-primary/50 hover:text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground"
             }`}
             onClick={() => setActiveTab("sessions")}
           >
@@ -431,7 +442,7 @@ const ActivityBrowser: React.FC = () => {
             className={`border-b-2 px-1 pb-2 text-sm font-heading ${
               activeTab === "actions"
                 ? "border-primary text-foreground"
-                : "border-transparent text-muted-foreground hover:border-primary/50 hover:text-foreground"
+                : "border-transparent text-muted-foreground hover:text-foreground"
             }`}
             onClick={() => setActiveTab("actions")}
           >
@@ -440,21 +451,19 @@ const ActivityBrowser: React.FC = () => {
         </nav>
       </div>
 
-      {/* Date Filters - Your original code unchanged */}
+      {/* Filters */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <Select
             value={dateFilters.period || ""}
-            onValueChange={(v) =>
-              handlePresetClick(v as ActivityLogFilters["period"])
-            }
+            onValueChange={handlePresetClick}
           >
             <SelectTrigger className="h-8 w-[130px] text-xs">
               <SelectValue placeholder="Quick Select" />
             </SelectTrigger>
             <SelectContent>
               {PRESETS.map(({ label, period }) => (
-                <SelectItem key={period} value={period} className="text-xs">
+                <SelectItem key={period} value={period}>
                   {label}
                 </SelectItem>
               ))}
@@ -467,7 +476,7 @@ const ActivityBrowser: React.FC = () => {
             </SelectTrigger>
             <SelectContent>
               {YEARS.map((y) => (
-                <SelectItem key={y} value={y.toString()} className="text-xs">
+                <SelectItem key={y} value={y.toString()}>
                   {y}
                 </SelectItem>
               ))}
@@ -480,11 +489,7 @@ const ActivityBrowser: React.FC = () => {
             </SelectTrigger>
             <SelectContent>
               {MONTHS.map((m) => (
-                <SelectItem
-                  key={m.value}
-                  value={m.value.toString()}
-                  className="text-xs"
-                >
+                <SelectItem key={m.value} value={m.value.toString()}>
                   {m.label}
                 </SelectItem>
               ))}
@@ -494,35 +499,18 @@ const ActivityBrowser: React.FC = () => {
           <Button
             variant="ghost"
             size="sm"
-            className="text-xs h-8 px-3"
+            className="h-8 px-3 text-xs"
             onClick={clearDateFilters}
           >
             Clear
           </Button>
-
-          <div className="flex items-center gap-1 border-l border-border pl-3 ml-1">
-            {(["create", "update", "delete"] as ActivityActionType[]).map(
-              (act) => (
-                <Button
-                  key={act}
-                  variant={quickFilter === act ? "default" : "outline"}
-                  size="sm"
-                  className="h-7 text-[10px] uppercase tracking-wider"
-                  onClick={() => handleQuickFilter(act)}
-                >
-                  {act}
-                </Button>
-              ),
-            )}
-          </div>
         </div>
 
         <div className="flex items-center gap-2 min-w-[280px]">
           <Popover>
             <PopoverTrigger asChild>
               <Button
-                id="date"
-                variant={"outline"}
+                variant="outline"
                 className={cn(
                   "w-[280px] justify-start text-left font-normal text-xs h-10",
                   !dateRange.from && !dateRange.to && "text-muted-foreground",
@@ -556,19 +544,16 @@ const ActivityBrowser: React.FC = () => {
               <CalendarComponent
                 initialFocus
                 mode="range"
-                defaultMonth={dateRange.from}
                 selected={dateRange}
-                onSelect={(range) =>
-                  handleDateRangeChange({ from: range?.from, to: range?.to })
-                }
+                onSelect={handleDateRangeChange}
                 numberOfMonths={2}
               />
             </PopoverContent>
           </Popover>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="relative min-w-[220px] max-w-sm flex-1">
+        <div className="flex flex-wrap items-center gap-3 flex-1">
+          <div className="relative min-w-[220px] flex-1">
             <Search
               size={14}
               className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
@@ -577,7 +562,7 @@ const ActivityBrowser: React.FC = () => {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search user, fingerprint, resource, URL..."
-              className="w-full py-2 pl-10 pr-4 text-sm"
+              className="py-2 pl-10 pr-4 text-sm"
             />
           </div>
           <select
@@ -593,7 +578,7 @@ const ActivityBrowser: React.FC = () => {
         </div>
       </div>
 
-      {/* Analytics Cards - unchanged */}
+      {/* Analytics Cards */}
       {!isLoading && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <Card className="border-border/40 bg-card/20 backdrop-blur-sm">
@@ -604,25 +589,23 @@ const ActivityBrowser: React.FC = () => {
               </CardTitle>
             </CardHeader>
             <CardContent className="px-4 pb-4">
-              <div className="space-y-2">
-                {analytics.topUsers.length > 0 ? (
-                  analytics.topUsers.map(([user, count]) => (
-                    <div
-                      key={user}
-                      className="flex items-center justify-between p-2 rounded-lg bg-muted/40 text-sm"
-                    >
-                      <span className="font-medium">{user}</span>
-                      <Badge variant="secondary" className="text-[10px]">
-                        {count} actions
-                      </Badge>
-                    </div>
-                  ))
-                ) : (
-                  <div className="text-xs text-muted-foreground py-2 italic text-center">
-                    No action data
+              {analytics.topUsers.length > 0 ? (
+                analytics.topUsers.map(([user, count]) => (
+                  <div
+                    key={user}
+                    className="flex items-center justify-between p-2 rounded-lg bg-muted/40 text-sm mb-1 last:mb-0"
+                  >
+                    <span className="font-medium">{user}</span>
+                    <Badge variant="secondary" className="text-[10px]">
+                      {count} actions
+                    </Badge>
                   </div>
-                )}
-              </div>
+                ))
+              ) : (
+                <div className="text-xs text-muted-foreground py-2 italic text-center">
+                  No action data
+                </div>
+              )}
             </CardContent>
           </Card>
 
@@ -633,34 +616,32 @@ const ActivityBrowser: React.FC = () => {
               </CardTitle>
             </CardHeader>
             <CardContent className="px-4 pb-4">
-              <div className="space-y-2">
-                {analytics.topResources.length > 0 ? (
-                  analytics.topResources.map(([res, count]) => (
-                    <div
-                      key={res}
-                      className="flex items-center justify-between p-2 rounded-lg bg-muted/40 text-sm"
+              {analytics.topResources.length > 0 ? (
+                analytics.topResources.map(([res, count]) => (
+                  <div
+                    key={res}
+                    className="flex items-center justify-between p-2 rounded-lg bg-muted/40 text-sm mb-1 last:mb-0"
+                  >
+                    <span className="font-medium capitalize">{res}</span>
+                    <Badge
+                      variant="outline"
+                      className="text-[10px] border-amber-500/20 text-amber-600"
                     >
-                      <span className="font-medium capitalize">{res}</span>
-                      <Badge
-                        variant="outline"
-                        className="text-[10px] border-amber-500/20 text-amber-600"
-                      >
-                        {count} hits
-                      </Badge>
-                    </div>
-                  ))
-                ) : (
-                  <div className="text-xs text-muted-foreground py-2 italic text-center">
-                    No resource data
+                      {count} hits
+                    </Badge>
                   </div>
-                )}
-              </div>
+                ))
+              ) : (
+                <div className="text-xs text-muted-foreground py-2 italic text-center">
+                  No resource data
+                </div>
+              )}
             </CardContent>
           </Card>
         </div>
       )}
 
-      {/* Activity Chart - unchanged */}
+      {/* Activity Chart */}
       {!isLoading && chartData.length > 0 && (
         <Card className="border-border/50 bg-card/10 backdrop-blur-sm">
           <CardHeader className="pb-2">
@@ -686,19 +667,13 @@ const ActivityBrowser: React.FC = () => {
                     dataKey="date"
                     axisLine={false}
                     tickLine={false}
-                    tick={{
-                      fontSize: 10,
-                      fill: "hsl(var(--muted-foreground))",
-                    }}
+                    tick={{ fontSize: 10 }}
                     dy={10}
                   />
                   <YAxis
                     axisLine={false}
                     tickLine={false}
-                    tick={{
-                      fontSize: 10,
-                      fill: "hsl(var(--muted-foreground))",
-                    }}
+                    tick={{ fontSize: 10 }}
                   />
                   <Tooltip
                     cursor={{ fill: "hsl(var(--muted))", opacity: 0.3 }}
@@ -715,16 +690,16 @@ const ActivityBrowser: React.FC = () => {
                     }}
                   />
                   <Bar
-                    dataKey="actions"
-                    name="Actions"
-                    fill="hsl(var(--primary))"
+                    dataKey="logins"
+                    name="Logins"
+                    fill="#3b82f6"
                     radius={[2, 2, 0, 0]}
                     barSize={24}
                   />
                   <Bar
-                    dataKey="logins"
-                    name="Logins"
-                    fill="#10b981"
+                    dataKey="actions"
+                    name="Actions"
+                    fill="#8b5cf6"
                     radius={[2, 2, 0, 0]}
                     barSize={24}
                   />
@@ -735,6 +710,7 @@ const ActivityBrowser: React.FC = () => {
         </Card>
       )}
 
+      {/* Main Content */}
       {isLoading ? (
         <div className="flex justify-center py-14">
           <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-primary" />
@@ -744,41 +720,34 @@ const ActivityBrowser: React.FC = () => {
           <div className="flex flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed border-border bg-muted/30 py-24 text-muted-foreground">
             <Activity size={48} className="opacity-20" />
             <p className="text-lg font-heading font-semibold">
-              No session data found
+              {groupedSessions.length === 0
+                ? "No sessions recorded yet"
+                : "No sessions match your filters"}
             </p>
-            <p className="text-sm">
-              Try adjusting the date range or other filters above.
-            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setSearch("");
+                setFilterRole("all");
+                setQuickFilter(null);
+                clearDateFilters();
+              }}
+            >
+              Clear All Filters
+            </Button>
           </div>
         ) : (
           <div className="space-y-4">
             {filteredSessions.map((session) => {
               const loginMeta = formatDateTime(session.loginTime);
               const logoutMeta = formatDateTime(session.logoutTime);
-              const alerts = [];
-              const uniqueIps = new Set(
-                session.actions.map((a) => a.ipAddress).filter(Boolean),
-              );
-              uniqueIps.add(session.loginEvent.ipAddress);
-              if (session.logoutEvent)
-                uniqueIps.add(session.logoutEvent.ipAddress);
-
-              if (uniqueIps.size > 1) {
-                alerts.push({
-                  icon: ShieldAlert,
-                  label: "Multiple IPs",
-                  color: "text-amber-500",
-                });
-              }
-
               return (
                 <div
                   key={session.sessionId}
                   className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm"
                 >
-                  {/* ── Session header row ── */}
                   <div className="grid gap-4 border-b border-border bg-muted/30 p-5 lg:grid-cols-[1.3fr_1fr_1fr_1fr]">
-                    {/* User */}
                     <div className="flex items-start gap-3">
                       <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10">
                         <User size={16} className="text-primary" />
@@ -795,19 +764,9 @@ const ActivityBrowser: React.FC = () => {
                         >
                           {roleLabel(session.userRole)}
                         </span>
-                        {alerts.map((a) => (
-                          <span
-                            key={a.label}
-                            className={`ml-1 inline-flex items-center gap-1 text-[10px] font-medium ${a.color}`}
-                          >
-                            <a.icon size={10} />
-                            {a.label}
-                          </span>
-                        ))}
                       </div>
                     </div>
 
-                    {/* IP + Device */}
                     <div className="space-y-1.5">
                       <div className="flex items-center gap-2 text-xs">
                         <Monitor
@@ -815,7 +774,7 @@ const ActivityBrowser: React.FC = () => {
                           className="shrink-0 text-muted-foreground"
                         />
                         <span className="truncate text-muted-foreground">
-                          {session.loginEvent.ipAddress || "—"}
+                          {session.ipAddress || "unknown"}
                         </span>
                       </div>
                       <div className="flex items-center gap-2 text-xs">
@@ -826,15 +785,11 @@ const ActivityBrowser: React.FC = () => {
                         <span className="truncate font-mono text-[10px] text-muted-foreground">
                           {session.deviceFingerprint !== "Unknown"
                             ? session.deviceFingerprint.slice(0, 16) + "…"
-                            : "Unknown"}
+                            : "unknown"}
                         </span>
-                      </div>
-                      <div className="truncate text-[11px] text-muted-foreground">
-                        {session.deviceInfo}
                       </div>
                     </div>
 
-                    {/* Login / Logout times */}
                     <div className="space-y-2">
                       <div className="flex items-center gap-2 text-xs">
                         <LogIn
@@ -869,124 +824,73 @@ const ActivityBrowser: React.FC = () => {
                       )}
                     </div>
 
-                    {/* Duration + action count */}
                     <div className="flex flex-col items-end justify-between gap-2 text-right">
                       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                         <Timer size={12} />
-                        {session.durationMs
-                          ? formatDuration(session.durationMs)
-                          : "—"}
+                        {formatDuration(session.durationMs)}
                       </div>
                       <Badge variant="secondary" className="text-[10px]">
-                        {session.actions.length} action
-                        {session.actions.length !== 1 ? "s" : ""}
+                        {session.actions.length} actions
                       </Badge>
                     </div>
                   </div>
-
-                  {/* ── Action list (collapsible rows) ── */}
-                  {session.actions.length > 0 && (
-                    <div className="divide-y divide-border/50">
-                      {session.actions.slice(0, 5).map((action) => {
-                        const { date, time } = formatDateTime(action.timestamp);
-                        return (
-                          <div
-                            key={action.id}
-                            className="flex flex-wrap items-center gap-3 px-5 py-2.5 text-xs text-muted-foreground hover:bg-muted/20"
-                          >
-                            <span
-                              className={`rounded-full border px-2 py-0.5 font-heading text-[10px] uppercase tracking-wider ${ACTION_COLORS[action.actionType || "read"]}`}
-                            >
-                              {action.actionType || "action"}
-                            </span>
-                            <span className="font-medium capitalize text-foreground">
-                              {action.resource || "—"}
-                            </span>
-                            <span className="flex items-center gap-1">
-                              <Clock size={10} />
-                              {date} {time}
-                            </span>
-                            {action.requestMethod && (
-                              <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px]">
-                                {action.requestMethod}
-                              </span>
-                            )}
-                            {action.requestUrl && (
-                              <span className="max-w-[260px] truncate font-mono text-[10px]">
-                                {action.requestUrl}
-                              </span>
-                            )}
-                          </div>
-                        );
-                      })}
-                      {session.actions.length > 5 && (
-                        <div className="px-5 py-2 text-[11px] italic text-muted-foreground">
-                          +{session.actions.length - 5} more action
-                          {session.actions.length - 5 !== 1 ? "s" : ""}
-                        </div>
-                      )}
-                    </div>
-                  )}
                 </div>
               );
             })}
           </div>
         )
-      ) : rawSessions.filter((e) => e.event === "action").length === 0 ? (
-        <div className="flex flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed border-border bg-muted/30 py-24 text-muted-foreground">
-          <Activity size={48} className="opacity-20" />
-          <p className="text-lg font-heading font-semibold">No actions found</p>
-          <p className="text-sm">
-            Try adjusting the date range or other filters above.
-          </p>
-        </div>
       ) : (
         <div className="overflow-hidden rounded-2xl border border-border bg-card">
           <table className="w-full text-sm">
             <thead className="bg-muted/40">
               <tr className="text-left text-xs uppercase tracking-wider text-muted-foreground">
                 <th className="px-4 py-3">User</th>
-                <th className="px-4 py-3">Action</th>
+                <th className="px-4 py-3">Event</th>
                 <th className="px-4 py-3">Resource</th>
                 <th className="px-4 py-3">Time</th>
-                <th className="px-4 py-3">URL</th>
-                <th className="px-4 py-3">Session</th>
+                <th className="px-4 py-3">IP Address</th>
+                <th className="px-4 py-3">Device</th>
               </tr>
             </thead>
             <tbody>
-              {filteredActions.map((action) => (
-                <tr key={action.id} className="border-t border-border/70">
+              {filteredActions.map((event) => (
+                <tr key={event.id} className="border-t border-border/70">
                   <td className="px-4 py-3">
-                    <div className="font-medium">{action.userName}</div>
+                    <div className="font-medium">{event.userName}</div>
                     <div className="text-xs text-muted-foreground">
-                      {action.userEmail}
+                      {event.userEmail}
                     </div>
                   </td>
                   <td className="px-4 py-3">
                     <span
-                      className={`rounded-full border px-2 py-1 text-xs font-heading ${ACTION_COLORS[action.actionType || "read"]}`}
+                      className={`rounded-full border px-2 py-1 text-xs font-heading ${ACTION_COLORS[event.event as keyof typeof ACTION_COLORS] || ACTION_COLORS.read}`}
                     >
-                      {getActionLabel(action)}
+                      {getActionLabel(event)}
                     </span>
                   </td>
                   <td className="px-4 py-3 capitalize">
-                    {action.resource || "—"}
+                    {event.resource || "—"}
                   </td>
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                       <Calendar size={12} />
-                      {formatDateTime(action.timestamp).date}
+                      {formatDateTime(event.timestamp).date}
                     </div>
                     <div className="flex items-center gap-2 text-xs text-muted-foreground">
                       <Clock size={12} />
-                      {formatDateTime(action.timestamp).time}
+                      {formatDateTime(event.timestamp).time}
                     </div>
                   </td>
-                  <td className="max-w-[280px] px-4 py-3 text-xs text-muted-foreground">
-                    <div className="truncate">{action.requestUrl || "—"}</div>
+                  <td className="px-4 py-3">
+                    <div className="flex items-center gap-1.5 text-xs">
+                      <Wifi size={11} className="text-muted-foreground" />
+                      <span className="font-mono">
+                        {event.ipAddress || "unknown"}
+                      </span>
+                    </div>
                   </td>
-                  <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                    {action.sessionId || "—"}
+                  <td className="px-4 py-3 text-xs text-muted-foreground">
+                    {event.deviceInfo || "—"}
                   </td>
                 </tr>
               ))}
@@ -995,14 +899,14 @@ const ActivityBrowser: React.FC = () => {
         </div>
       )}
 
-      {/* New Pagination Controls (added) */}
-      {!isLoading && activity.pages > 1 && (
+      {/* Pagination */}
+      {!isLoading && activity?.pages && activity.pages > 1 && (
         <div className="flex justify-center pt-8">
           <Pagination>
             <PaginationContent>
               <PaginationItem>
                 <PaginationPrevious
-                  onClick={() => setPage(activity.page - 1)}
+                  onClick={() => setPage(Math.max(1, activity.page - 1))}
                   className={
                     activity.page === 1 ? "pointer-events-none opacity-50" : ""
                   }
@@ -1025,7 +929,9 @@ const ActivityBrowser: React.FC = () => {
                 ))}
               <PaginationItem>
                 <PaginationNext
-                  onClick={() => setPage(activity.page + 1)}
+                  onClick={() =>
+                    setPage(Math.min(activity.pages, activity.page + 1))
+                  }
                   className={
                     activity.page === activity.pages
                       ? "pointer-events-none opacity-50"
@@ -1038,7 +944,7 @@ const ActivityBrowser: React.FC = () => {
         </div>
       )}
 
-      {/* Original Summary Stats - unchanged */}
+      {/* Summary Stats */}
       {!isLoading && (
         <div className="grid grid-cols-2 gap-4 border-t border-border pt-6 text-xs md:grid-cols-4">
           <div className="text-center">
