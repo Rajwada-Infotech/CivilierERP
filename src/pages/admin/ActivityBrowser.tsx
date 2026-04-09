@@ -19,6 +19,7 @@ import {
   Timer,
   TrendingUp,
   User,
+  Wifi,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -36,7 +37,6 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -96,6 +96,8 @@ const ROLE_COLORS: Record<string, string> = {
 };
 
 const ACTION_COLORS: Record<string, string> = {
+  login: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20",
+  logout: "bg-rose-500/10 text-rose-600 border-rose-500/20",
   read: "bg-blue-500/10 text-blue-600 border-blue-500/20",
   create: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20",
   update: "bg-amber-500/10 text-amber-600 border-amber-500/20",
@@ -140,9 +142,9 @@ function roleLabel(role: string) {
 }
 
 function getActionLabel(event: SessionEvent) {
-  if (event.event === "login") return "login";
-  if (event.event === "logout") return "logout";
-  return event.actionType || "action";
+  if (event.event === "login") return "LOGIN";
+  if (event.event === "logout") return "LOGOUT";
+  return (event.actionType || "action").toUpperCase();
 }
 
 const PRESETS = [
@@ -154,7 +156,8 @@ const PRESETS = [
   { label: "This Year", period: "this-year" as const },
 ] satisfies Array<{ label: string; period: ActivityLogFilters["period"] }>;
 
-const YEARS = [2025, 2024, 2023];
+const YEARS = [2026, 2025, 2024, 2023];
+
 const MONTHS = [
   { label: "January", value: 0 },
   { label: "February", value: 1 },
@@ -178,7 +181,6 @@ const ActivityBrowser: React.FC = () => {
     dateFilters,
     setDateFilters,
     clearDateFilters,
-    // Added from dev branch (pagination support)
     activity,
     setPage,
     setFilters,
@@ -203,7 +205,6 @@ const ActivityBrowser: React.FC = () => {
     to: dateFilters.dateTo ? new Date(dateFilters.dateTo) : undefined,
   });
 
-  // Original date sync
   useEffect(() => {
     setDateRange({
       from: dateFilters.dateFrom
@@ -213,9 +214,8 @@ const ActivityBrowser: React.FC = () => {
         ? new Date(dateFilters.dateTo + "T00:00:00")
         : undefined,
     });
-  }, [dateFilters]);
+  }, [dateFilters.dateFrom, dateFilters.dateTo]);
 
-  // New: Sync search + role filter with backend API (pagination ready)
   useEffect(() => {
     const timer = setTimeout(() => {
       setFilters({
@@ -230,11 +230,8 @@ const ActivityBrowser: React.FC = () => {
     setDateFilters({ period });
   };
 
-  const handleDateRangeChange = (range: {
-    from: Date | undefined;
-    to: Date | undefined;
-  }) => {
-    setDateRange(range);
+  const handleDateRangeChange = (range: { from?: Date; to?: Date }) => {
+    setDateRange(range as any);
     if (range.from && range.to) {
       setDateFilters({
         dateFrom: format(range.from, "yyyy-MM-dd"),
@@ -263,7 +260,7 @@ const ActivityBrowser: React.FC = () => {
     const month = parseInt(monthStr);
     const year = dateRange.from?.getFullYear() || new Date().getFullYear();
     const from = new Date(year, month, 1);
-    const to = new Date(year, month, new Date(year, month + 1, 0).getDate());
+    const to = new Date(year, month + 1, 0);
     setDateFilters({
       dateFrom: format(from, "yyyy-MM-dd"),
       dateTo: format(to, "yyyy-MM-dd"),
@@ -274,15 +271,17 @@ const ActivityBrowser: React.FC = () => {
     setQuickFilter((prev) => (prev === type ? null : type));
   };
 
-  // All your original computed values (kept 100%)
   const chartData = useMemo(() => {
     if (!rawSessions.length && !dateRange.from) return [];
+
     const dataMap: Record<
       string,
       { date: string; actions: number; logins: number; fullDate: string }
     > = {};
+
     let start: Date;
     let end: Date;
+
     if (dateRange.from) {
       start = new Date(dateRange.from);
       end = dateRange.to ? new Date(dateRange.to) : new Date();
@@ -293,9 +292,11 @@ const ActivityBrowser: React.FC = () => {
       start = new Date(Math.min(...timestamps));
       end = new Date(Math.max(...timestamps));
     }
+
     start.setHours(0, 0, 0, 0);
     end.setHours(0, 0, 0, 0);
-    const curr = new Date(start);
+
+    let curr = new Date(start);
     let safety = 0;
     while (curr <= end && safety < 90) {
       const key = format(curr, "yyyy-MM-dd");
@@ -308,6 +309,7 @@ const ActivityBrowser: React.FC = () => {
       curr.setDate(curr.getDate() + 1);
       safety++;
     }
+
     rawSessions.forEach((event) => {
       const dayKey = format(new Date(event.timestamp), "yyyy-MM-dd");
       if (dataMap[dayKey]) {
@@ -315,6 +317,7 @@ const ActivityBrowser: React.FC = () => {
         if (event.event === "login") dataMap[dayKey].logins++;
       }
     });
+
     return Object.values(dataMap).sort((a, b) =>
       a.fullDate.localeCompare(b.fullDate),
     );
@@ -323,6 +326,7 @@ const ActivityBrowser: React.FC = () => {
   const analytics = useMemo(() => {
     const userCounts: Record<string, number> = {};
     const resourceCounts: Record<string, number> = {};
+
     rawSessions.forEach((event) => {
       if (event.event === "action") {
         userCounts[event.userName] = (userCounts[event.userName] || 0) + 1;
@@ -330,6 +334,7 @@ const ActivityBrowser: React.FC = () => {
         resourceCounts[res] = (resourceCounts[res] || 0) + 1;
       }
     });
+
     return {
       topUsers: Object.entries(userCounts)
         .sort((a, b) => b[1] - a[1])
@@ -360,6 +365,7 @@ const ActivityBrowser: React.FC = () => {
             action.details?.toLowerCase().includes(q) ||
             action.actionType?.toLowerCase().includes(q),
         );
+
       return roleMatch && searchMatch && actionTypeMatch;
     });
   }, [groupedSessions, search, filterRole, quickFilter]);
@@ -378,6 +384,7 @@ const ActivityBrowser: React.FC = () => {
         event.requestUrl?.toLowerCase().includes(q) ||
         event.details?.toLowerCase().includes(q) ||
         event.actionType?.toLowerCase().includes(q);
+
       return roleMatch && searchMatch && actionTypeMatch;
     });
   }, [rawSessions, search, filterRole, quickFilter]);
@@ -440,14 +447,12 @@ const ActivityBrowser: React.FC = () => {
         </nav>
       </div>
 
-      {/* Date Filters - Your original code unchanged */}
+      {/* Filters */}
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:gap-3">
         <div className="flex flex-wrap items-center gap-2">
           <Select
             value={dateFilters.period || ""}
-            onValueChange={(v) =>
-              handlePresetClick(v as ActivityLogFilters["period"])
-            }
+            onValueChange={handlePresetClick}
           >
             <SelectTrigger className="h-8 w-[130px] text-xs">
               <SelectValue placeholder="Quick Select" />
@@ -494,7 +499,7 @@ const ActivityBrowser: React.FC = () => {
           <Button
             variant="ghost"
             size="sm"
-            className="text-xs h-8 px-3"
+            className="h-8 px-3 text-xs"
             onClick={clearDateFilters}
           >
             Clear
@@ -522,7 +527,7 @@ const ActivityBrowser: React.FC = () => {
             <PopoverTrigger asChild>
               <Button
                 id="date"
-                variant={"outline"}
+                variant="outline"
                 className={cn(
                   "w-[280px] justify-start text-left font-normal text-xs h-10",
                   !dateRange.from && !dateRange.to && "text-muted-foreground",
@@ -593,7 +598,7 @@ const ActivityBrowser: React.FC = () => {
         </div>
       </div>
 
-      {/* Analytics Cards - unchanged */}
+      {/* Analytics Cards */}
       {!isLoading && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <Card className="border-border/40 bg-card/20 backdrop-blur-sm">
@@ -660,7 +665,7 @@ const ActivityBrowser: React.FC = () => {
         </div>
       )}
 
-      {/* Activity Chart - unchanged */}
+      {/* Activity Chart */}
       {!isLoading && chartData.length > 0 && (
         <Card className="border-border/50 bg-card/10 backdrop-blur-sm">
           <CardHeader className="pb-2">
@@ -735,6 +740,7 @@ const ActivityBrowser: React.FC = () => {
         </Card>
       )}
 
+      {/* Main Content */}
       {isLoading ? (
         <div className="flex justify-center py-14">
           <div className="h-8 w-8 animate-spin rounded-full border-b-2 border-primary" />
@@ -744,49 +750,146 @@ const ActivityBrowser: React.FC = () => {
           <div className="flex flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed border-border bg-muted/30 py-24 text-muted-foreground">
             <Activity size={48} className="opacity-20" />
             <p className="text-lg font-heading font-semibold">
-              No session data found
+              No sessions match your filters
             </p>
             <p className="text-sm">
               Try adjusting the date range or other filters above.
             </p>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setSearch("");
+                setFilterRole("all");
+                setQuickFilter(null);
+                clearDateFilters();
+              }}
+            >
+              Clear All Filters
+            </Button>
           </div>
         ) : (
           <div className="space-y-4">
             {filteredSessions.map((session) => {
               const loginMeta = formatDateTime(session.loginTime);
               const logoutMeta = formatDateTime(session.logoutTime);
-              const alerts = [];
-              const uniqueIps = new Set(
-                session.actions.map((a) => a.ipAddress).filter(Boolean),
-              );
-              uniqueIps.add(session.loginEvent.ipAddress);
-              if (session.logoutEvent)
-                uniqueIps.add(session.logoutEvent.ipAddress);
 
-              if (uniqueIps.size > 1) {
-                alerts.push({
-                  icon: ShieldAlert,
-                  label: "Multiple IPs",
-                  color: "text-amber-500",
-                });
-              }
+              const uniqueIps = new Set(
+                [
+                  session.loginEvent?.ipAddress,
+                  session.logoutEvent?.ipAddress,
+                  ...session.actions.map((a) => a.ipAddress).filter(Boolean),
+                ].filter(Boolean),
+              );
 
               return (
                 <div
                   key={session.sessionId}
                   className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm"
                 >
-                  {/* Your full grouped session card - completely unchanged */}
                   <div className="grid gap-4 border-b border-border bg-muted/30 p-5 lg:grid-cols-[1.3fr_1fr_1fr_1fr]">
-                    {/* ... all your session card JSX remains exactly as you had it ... */}
-                    {/* (I kept the entire block you provided) */}
+                    {/* 1. User Info */}
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                        <User size={16} className="text-primary" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold text-foreground">
+                          {session.userName}
+                        </p>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {session.userEmail}
+                        </p>
+                        <span
+                          className={`mt-1 inline-block rounded-full border px-2 py-0.5 text-[10px] font-heading uppercase tracking-wider ${ROLE_COLORS[session.userRole]}`}
+                        >
+                          {roleLabel(session.userRole)}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* 2. Device & IP */}
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-2 text-xs">
+                        <Monitor
+                          size={12}
+                          className="shrink-0 text-muted-foreground"
+                        />
+                        <span className="truncate">
+                          {session.ipAddress || "unknown"}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs">
+                        <Fingerprint
+                          size={12}
+                          className="shrink-0 text-muted-foreground"
+                        />
+                        <span className="truncate font-mono text-[10px] text-muted-foreground">
+                          {session.deviceFingerprint !== "Unknown"
+                            ? session.deviceFingerprint.slice(0, 16) + "…"
+                            : "unknown"}
+                        </span>
+                      </div>
+                      {uniqueIps.size > 1 && (
+                        <div className="flex items-center gap-1 text-amber-600 text-xs">
+                          <ShieldAlert size={12} />
+                          Multiple IPs detected
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 3. Login / Logout Time */}
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 text-xs">
+                        <LogIn
+                          size={12}
+                          className="shrink-0 text-emerald-500"
+                        />
+                        <span className="text-muted-foreground">
+                          {loginMeta.date}{" "}
+                          <span className="font-medium text-foreground">
+                            {loginMeta.time}
+                          </span>
+                        </span>
+                      </div>
+                      {session.logoutTime ? (
+                        <div className="flex items-center gap-2 text-xs">
+                          <LogOut
+                            size={12}
+                            className="shrink-0 text-rose-400"
+                          />
+                          <span className="text-muted-foreground">
+                            {logoutMeta.date}{" "}
+                            <span className="font-medium text-foreground">
+                              {logoutMeta.time}
+                            </span>
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 text-xs text-emerald-500">
+                          <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
+                          Active session
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 4. Duration & Actions */}
+                    <div className="flex flex-col items-end justify-between gap-2 text-right">
+                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <Timer size={12} />
+                        {formatDuration(session.durationMs)}
+                      </div>
+                      <Badge variant="secondary" className="text-[10px]">
+                        {session.actions.length} actions
+                      </Badge>
+                    </div>
                   </div>
                 </div>
               );
             })}
           </div>
         )
-      ) : rawSessions.filter((e) => e.event === "action").length === 0 ? (
+      ) : filteredActions.length === 0 ? (
         <div className="flex flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed border-border bg-muted/30 py-24 text-muted-foreground">
           <Activity size={48} className="opacity-20" />
           <p className="text-lg font-heading font-semibold">No actions found</p>
@@ -849,14 +952,14 @@ const ActivityBrowser: React.FC = () => {
         </div>
       )}
 
-      {/* New Pagination Controls (added) */}
-      {!isLoading && activity.pages > 1 && (
+      {/* Pagination */}
+      {!isLoading && activity?.pages && activity.pages > 1 && (
         <div className="flex justify-center pt-8">
           <Pagination>
             <PaginationContent>
               <PaginationItem>
                 <PaginationPrevious
-                  onClick={() => setPage(activity.page - 1)}
+                  onClick={() => setPage(Math.max(1, activity.page - 1))}
                   className={
                     activity.page === 1 ? "pointer-events-none opacity-50" : ""
                   }
@@ -879,7 +982,9 @@ const ActivityBrowser: React.FC = () => {
                 ))}
               <PaginationItem>
                 <PaginationNext
-                  onClick={() => setPage(activity.page + 1)}
+                  onClick={() =>
+                    setPage(Math.min(activity.pages, activity.page + 1))
+                  }
                   className={
                     activity.page === activity.pages
                       ? "pointer-events-none opacity-50"
@@ -892,7 +997,7 @@ const ActivityBrowser: React.FC = () => {
         </div>
       )}
 
-      {/* Original Summary Stats - unchanged */}
+      {/* Summary Stats */}
       {!isLoading && (
         <div className="grid grid-cols-2 gap-4 border-t border-border pt-6 text-xs md:grid-cols-4">
           <div className="text-center">
