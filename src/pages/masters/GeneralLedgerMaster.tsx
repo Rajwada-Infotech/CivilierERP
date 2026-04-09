@@ -48,62 +48,10 @@ const EMPTY_FORM: LedgerForm = {
 
 // ─── API helpers ─────────────────────────────────────────────────────────────
 
-const BASE = "/api/account-head";
+import { getList, addRecord, updateRecord, deleteRecord } from "@/api/accountHeadApi";
 
-const fetchLedgers = async (): Promise<LedgerHead[]> => {
-  const res = await fetch(BASE);
-  if (!res.ok) throw new Error(`Failed to fetch ledgers: ${res.status}`);
-  return res.json();
-};
+const GL_TYPE = "GL";
 
-const createLedger = async (data: LedgerForm) => {
-  const res = await fetch(BASE, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      LHeadName: data.LHeadName.trim(),
-      LHeadType: data.LHeadType || null,
-      LBelongsTo: data.LBelongsTo ? Number(data.LBelongsTo) : null,
-    }),
-  });
-  if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error || "Failed to create");
-  }
-  return res.json();
-};
-
-const updateLedger = async ({
-  id,
-  data,
-}: {
-  id: number;
-  data: LedgerForm;
-}) => {
-  const res = await fetch(`${BASE}/${id}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      LHeadName: data.LHeadName.trim(),
-      LHeadType: data.LHeadType || null,
-      LBelongsTo: data.LBelongsTo ? Number(data.LBelongsTo) : null,
-    }),
-  });
-  if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error || "Failed to update");
-  }
-  return res.json();
-};
-
-const deleteLedger = async (id: number) => {
-  const res = await fetch(`${BASE}/${id}`, { method: "DELETE" });
-  if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error || "Failed to delete");
-  }
-  return res.json();
-};
 
 // ─── Component ───────────────────────────────────────────────────────────────
 
@@ -125,9 +73,10 @@ const GeneralLedgerMaster: React.FC = () => {
     isLoading: ledgersLoading,
     isError: ledgersError,
   } = useQuery({
-    queryKey: ["ledger-heads"],
-    queryFn: fetchLedgers,
+    queryKey: ["account-head", GL_TYPE],
+    queryFn: () => getList(GL_TYPE),
   });
+
 
   const accountGroups: AccountGroup[] = useMemo(() => {
     if (!Array.isArray(groupsData)) return [];
@@ -157,25 +106,35 @@ const GeneralLedgerMaster: React.FC = () => {
 
   // ── Mutations ──────────────────────────────────────────────────────────────
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: ["ledger-heads"] });
+  const invalidate = () => qc.invalidateQueries({ queryKey: ["account-head", GL_TYPE] });
+
 
   const createMut = useMutation({
-    mutationFn: createLedger,
+    mutationFn: (data: LedgerForm) => addRecord({
+      LHeadName: data.LHeadName.trim(),
+      LBelongsTo: data.LBelongsTo ? Number(data.LBelongsTo) : null,
+    }, GL_TYPE),
     onSuccess: () => { toast.success("Ledger account created"); invalidate(); resetForm(); },
     onError: (e: Error) => toast.error(e.message),
   });
 
+
   const updateMut = useMutation({
-    mutationFn: updateLedger,
+    mutationFn: ({ id, data }: { id: number; data: LedgerForm }) => updateRecord(id, {
+      LHeadName: data.LHeadName.trim(),
+      LBelongsTo: data.LBelongsTo ? Number(data.LBelongsTo) : null,
+    }, GL_TYPE),
     onSuccess: () => { toast.success("Ledger account updated"); invalidate(); resetForm(); },
     onError: (e: Error) => toast.error(e.message),
   });
 
+
   const deleteMut = useMutation({
-    mutationFn: deleteLedger,
+    mutationFn: (id: number) => deleteRecord(id),
     onSuccess: () => { toast.success("Ledger account deleted"); invalidate(); setDeleteConfirm(null); },
     onError: (e: Error) => toast.error(e.message),
   });
+
 
   const saving = createMut.isPending || updateMut.isPending;
 

@@ -7,7 +7,6 @@ import React, {
   useMemo,
 } from "react";
 import { loginUser } from "../api/userApi";
-import { useActivityBrowser } from "../contexts/ActivityBrowserContext";
 
 import type {
   UserRole,
@@ -55,13 +54,25 @@ export const AuthProvider = ({
   children,
   onLoginSuccess,
   onLogoutSuccess,
+  recordLogin,
+  recordLogout,
 }: {
   children: React.ReactNode;
   onLoginSuccess?: (user: AppUser) => void;
   onLogoutSuccess?: (user: AppUser) => void;
+  recordLogin?: (user: {
+    id: string;
+    name: string;
+    email: string;
+    role: string;
+  }) => Promise<void>;
+  recordLogout?: (user: {
+    id: string;
+    name: string;
+    email: string;
+    role: string;
+  }) => Promise<void>;
 }) => {
-  const { recordLogin, recordLogout } = useActivityBrowser();
-
   const [currentUser, setCurrentUser] = useState<AppUser | null>(() => {
     try {
       const stored = localStorage.getItem("user");
@@ -107,7 +118,7 @@ export const AuthProvider = ({
         setCurrentUser(appUser);
 
         try {
-          await recordLogin({
+          await recordLogin?.({
             id: appUser.id,
             name: appUser.name,
             email: appUser.email,
@@ -131,7 +142,7 @@ export const AuthProvider = ({
   const logout = useCallback(async () => {
     if (currentUser) {
       try {
-        await recordLogout({
+        await recordLogout?.({
           id: currentUser.id,
           name: currentUser.name,
           email: currentUser.email,
