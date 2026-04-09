@@ -1,175 +1,93 @@
-import React from "react";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
+import React from 'react'
+import { Breadcrumbs } from '@/components/Breadcrumbs'
+import { MasterPage, type DataChangeEvent, type RecordWithId } from '@/components/MasterPage'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
+import { BadgeCheck, CalendarRange, FileBadge2, ShieldCheck } from "lucide-react"
 import {
-  MasterPage,
-  type ColumnDef,
-  type FieldDef,
-  type RecordWithId,
-} from "@/components/MasterPage";
-import { BadgeCheck, CalendarRange, FileBadge2, ShieldCheck } from "lucide-react";
+  getCardMasters,
+  addCardMaster,
+  updateCardMaster,
+  deleteCardMaster,
+} from '@/api/cardMasterApi'
 
-const FIELDS: FieldDef[] = [
-  {
-    name: "cardNumber",
-    label: "Card Number",
-    type: "text",
-    required: true,
-    uppercase: true,
-  },
-  {
-    name: "cardType",
-    label: "Card Type",
-    type: "select",
-    required: true,
-    options: [
-      "Material Issue Card",
-      "Vehicle Entry Pass",
-      "Contractor ID Card",
-      "Site Access Card",
-      "Temporary Gate Pass",
-    ],
-  },
-  {
-    name: "holderName",
-    label: "Holder Name",
-    type: "text",
-    required: true,
-  },
-  {
-    name: "issuedFor",
-    label: "Issued For",
-    type: "select",
-    required: true,
-    options: ["Employee", "Contractor", "Driver", "Vendor", "Visitor", "Vehicle"],
-  },
-  {
-    name: "vendorContractor",
-    label: "Vendor / Contractor",
-    type: "text",
-    required: true,
-  },
-  {
-    name: "siteProject",
-    label: "Site / Project",
-    type: "select",
-    required: true,
-    options: [
-      "Metro Line Extension",
-      "Riverfront Retaining Wall",
-      "Industrial Shed Phase 2",
-      "Highway Package A1",
-      "Cement Yard Central Depot",
-    ],
-  },
-  {
-    name: "materialCategory",
-    label: "Material Category",
-    type: "select",
-    required: true,
-    options: [
-      "Steel",
-      "Cement",
-      "Aggregates",
-      "Electrical",
-      "Mechanical",
-      "General Consumables",
-      "Vehicle Movement",
-    ],
-  },
-  {
-    name: "validity",
-    label: "Validity Period",
-    type: "select",
-    required: true,
-    options: ["Daily", "Weekly", "Monthly", "Quarterly", "Annual", "Project Based"],
-  },
-  {
-    name: "accessLevel",
-    label: "Access Level",
-    type: "select",
-    required: true,
-    options: ["Gate Only", "Store", "Yard", "Site Zone", "All Material Areas"],
-  },
-  {
-    name: "remarks",
-    label: "Remarks",
-    type: "textarea",
-    fullWidth: true,
-  },
-  {
-    name: "status",
-    label: "Active",
-    type: "toggle",
-    defaultValue: true,
-  },
+
+
+const columns = [
+  { key: 'cardNumber', label: 'Card No.' },
+  { key: 'holderName', label: 'Holder' },
+  { key: 'cardType', label: 'Card Type', hideOnMobile: true },
+  { key: 'siteProject', label: 'Site / Project', hideOnMobile: true },
+  { key: 'accessLevel', label: 'Access', hideOnMobile: true },
+  { key: 'validity', label: 'Validity', hideOnMobile: true },
+  { key: 'status', label: 'Status' },
 ];
 
-const COLUMNS: ColumnDef[] = [
-  { key: "cardNumber", label: "Card No." },
-  { key: "holderName", label: "Holder" },
-  { key: "cardType", label: "Card Type", hideOnMobile: true },
-  { key: "siteProject", label: "Site / Project", hideOnMobile: true },
-  { key: "accessLevel", label: "Access", hideOnMobile: true },
-  { key: "validity", label: "Validity", hideOnMobile: true },
-  { key: "status", label: "Status" },
-];
 
-const INITIAL_DATA = [
-  {
-    cardNumber: "MAT-CP-001",
-    cardType: "Material Issue Card",
-    holderName: "Rakesh Yadav",
-    issuedFor: "Contractor",
-    vendorContractor: "Shiv Shakti Infratech",
-    siteProject: "Metro Line Extension",
-    materialCategory: "Steel",
-    validity: "Monthly",
-    accessLevel: "Store",
-    remarks: "Authorized for rebar issue and inward verification during day shift.",
-    status: true,
-  },
-  {
-    cardNumber: "VEH-GP-014",
-    cardType: "Vehicle Entry Pass",
-    holderName: "RJ14-GD-9087",
-    issuedFor: "Vehicle",
-    vendorContractor: "Maa Transport Co.",
-    siteProject: "Highway Package A1",
-    materialCategory: "Aggregates",
-    validity: "Daily",
-    accessLevel: "Yard",
-    remarks: "Tipper access approved for aggregate unloading up to 8 PM.",
-    status: true,
-  },
-  {
-    cardNumber: "CON-ID-027",
-    cardType: "Contractor ID Card",
-    holderName: "Imran Khan",
-    issuedFor: "Contractor",
-    vendorContractor: "Prime Build Services",
-    siteProject: "Industrial Shed Phase 2",
-    materialCategory: "Mechanical",
-    validity: "Project Based",
-    accessLevel: "Site Zone",
-    remarks: "Mechanical installation supervisor with controlled workshop entry.",
-    status: true,
-  },
-  {
-    cardNumber: "TMP-GP-009",
-    cardType: "Temporary Gate Pass",
-    holderName: "Suresh Patel",
-    issuedFor: "Visitor",
-    vendorContractor: "Cementech Supplies",
-    siteProject: "Cement Yard Central Depot",
-    materialCategory: "Cement",
-    validity: "Weekly",
-    accessLevel: "Gate Only",
-    remarks: "Inspection pass for supplier representative; escort mandatory.",
-    status: false,
-  },
-];
 
-export default function CardMaster() {
+const CardMaster = () => {
+  const queryClient = useQueryClient()
+
+  const { data: dbData, isLoading, error } = useQuery({
+    queryKey: ['card-masters'],
+    queryFn: getCardMasters,
+  })
+
+  const dbItems = Array.isArray(dbData) ? dbData : []
+
+  const mappedData: RecordWithId[] = dbItems.map(item => ({
+    _id: String(item.CardId || item.id || item._id),
+    cardNumber: item.CardNumber || item.cardNumber || '',
+    cardType: item.CardType || item.cardType || '',
+    holderName: item.HolderName || item.holderName || '',
+    issuedFor: item.IssuedFor || item.issuedFor || '',
+    vendorContractor: item.VendorContractor || item.vendorContractor || '',
+    siteProject: item.SiteProject || item.siteProject || '',
+    materialCategory: item.MaterialCategory || item.materialCategory || '',
+    validity: item.Validity || item.validity || '',
+    accessLevel: item.AccessLevel || item.accessLevel || '',
+    remarks: item.Remarks || item.remarks || '',
+    status: item.Status !== false,
+  }))
+
+  const toPayload = (r: Record<string, unknown>) => ({
+    CardNumber: (r.cardNumber as string) || null,
+    CardType: (r.cardType as string) || null,
+    HolderName: (r.holderName as string) || null,
+    IssuedFor: (r.issuedFor as string) || null,
+    VendorContractor: (r.vendorContractor as string) || null,
+    SiteProject: (r.siteProject as string) || null,
+    MaterialCategory: (r.materialCategory as string) || null,
+    Validity: (r.validity as string) || null,
+    AccessLevel: (r.accessLevel as string) || null,
+    Remarks: (r.remarks as string) || null,
+    Status: r.status !== false,
+  })
+
+  const handleDataEvent = async (event: DataChangeEvent) => {
+    if (event.action === 'add') {
+      try {
+        await addCardMaster(toPayload(event.record))
+        toast.success('Card saved!')
+        await queryClient.invalidateQueries({ queryKey: ['card-masters'] })
+      } catch (err: any) { toast.error('Save failed: ' + err.message) }
+    }
+    if (event.action === 'update') {
+      try {
+        await updateCardMaster(event.id, toPayload(event.record))
+        toast.success('Card updated!')
+        await queryClient.invalidateQueries({ queryKey: ['card-masters'] })
+      } catch (err: any) { toast.error('Update failed: ' + err.message) }
+    }
+    if (event.action === 'delete') {
+      try {
+        await deleteCardMaster(event.id)
+        toast.success('Card deleted!')
+        await queryClient.invalidateQueries({ queryKey: ['card-masters'] })
+      } catch (err: any) { toast.error('Delete failed: ' + err.message) }
+    }
+  }
+
   const columnRenderers = {
     cardNumber: (value: unknown) => (
       <div className="flex items-center gap-2 min-w-[140px]">
@@ -204,34 +122,25 @@ export default function CardMaster() {
         </span>
       </div>
     ),
-    status: (value: unknown) => (
-      <span
-        className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[11px] font-heading ${
-          value
-            ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-400"
-            : "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-400"
-        }`}
-      >
-        <span
-          className={`mr-1.5 h-1.5 w-1.5 rounded-full ${
-            value ? "bg-emerald-500" : "bg-amber-500"
-          }`}
-        />
-        {value ? "Active" : "Inactive"}
-      </span>
-    ),
-  };
+  }
+
+  if (isLoading) return <div className="p-6 text-muted-foreground">Loading cards...</div>
+  if (error) return <div className="p-6 text-destructive">Failed to load cards.</div>
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "Material Module", "Card Master"]} />
+      <Breadcrumbs items={['Dashboard', 'Material Module', 'Card Master']} />
+      <h1 className="text-xl font-heading font-bold text-foreground mb-4">Card Master</h1>
       <MasterPage
-        title="Card Master"
-        fields={FIELDS}
-        columns={COLUMNS}
-        initialData={INITIAL_DATA}
+        title="Card"
+        fields={fields}
+        columns={columns}
         columnRenderers={columnRenderers}
+        initialData={mappedData}
+        onDataEvent={handleDataEvent}
       />
     </>
-  );
+  )
 }
+
+export default CardMaster
