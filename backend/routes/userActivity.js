@@ -2,17 +2,34 @@ const express = require("express");
 const router = express.Router();
 const crypto = require("crypto");
 const { getPool, sql } = require("../db");
-const authMiddleware = require("../middleware/auth");
 const allowRoles = require("../middleware/role");
 
-// Admin guard
 const adminOnly = allowRoles("admin", "super_admin", "dba");
-
-// ── Helpers ───────────────────────────────────────────────────────────────────
+const ALLOWED_ACTION_TYPES = new Set([
+  "read",
+  "create",
+  "update",
+  "delete",
+  "export",
+  "settings_change",
+]);
 
 function normalizePositiveInt(value, fallback) {
   const parsed = parseInt(String(value), 10);
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+}
+
+function normalizeNullableString(value, maxLength) {
+  if (value === undefined || value === null) return null;
+  const normalized = String(value).trim();
+  if (!normalized) return null;
+  return maxLength ? normalized.slice(0, maxLength) : normalized;
+}
+
+function normalizeNullableInt(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const parsed = parseInt(String(value), 10);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 let activeStreams = [];
@@ -39,9 +56,10 @@ function mapActivityRow(row) {
   };
 }
 
-// ── GET paginated activity logs (admin only) ──────────────────────────────────
-// Middleware already applied in server.js, no need to repeat here
-router.get("/", async (req, res) => {
+// GET paginated activity logs
+router.get("/", adminOnly, async (req, res) => {
+  let whereClause = "1 = 1";
+
   try {
     const pool = getPool();
 
@@ -97,38 +115,38 @@ router.get("/", async (req, res) => {
     }
 
     const whereConditions = ["1 = 1"];
-    const request = pool.request();
+    const queryInputs = [];
 
     if (search) {
       whereConditions.push(
         "(LOWER(UserName) LIKE @searchTerm OR LOWER(UserEmail) LIKE @searchTerm OR LOWER(IpAddress) LIKE @searchTerm OR LOWER(DeviceInfo) LIKE @searchTerm)",
       );
-      request.input("searchTerm", sql.NVarChar, `%${search}%`);
+      queryInputs.push(["searchTerm", sql.NVarChar, `%${search}%`]);
     }
 
     if (eventFilter) {
       whereConditions.push("EventType = @eventFilter");
-      request.input("eventFilter", sql.NVarChar(20), eventFilter);
+      queryInputs.push(["eventFilter", sql.NVarChar(20), eventFilter]);
     }
 
     if (roleFilter) {
       whereConditions.push("UserRole = @roleFilter");
-      request.input("roleFilter", sql.NVarChar(50), roleFilter);
+      queryInputs.push(["roleFilter", sql.NVarChar(50), roleFilter]);
     }
 
     if (computedDateFrom) {
       whereConditions.push("CreatedAt >= @dateFrom");
-      request.input("dateFrom", sql.DateTime2, new Date(computedDateFrom));
+      queryInputs.push(["dateFrom", sql.DateTime2, new Date(computedDateFrom)]);
     }
 
     if (computedDateTo) {
       const dateToObj = new Date(computedDateTo);
       dateToObj.setHours(23, 59, 59, 999);
       whereConditions.push("CreatedAt <= @dateTo");
-      request.input("dateTo", sql.DateTime2, dateToObj);
+      queryInputs.push(["dateTo", sql.DateTime2, dateToObj]);
     }
 
-    const whereClause = whereConditions.join(" AND ");
+    whereClause = whereConditions.join(" AND ");
 
     const sortColumn =
       sortField === "userName"
@@ -137,13 +155,21 @@ router.get("/", async (req, res) => {
           ? "EventType"
           : "CreatedAt";
 
-    const countResult = await request.query(
+    const countRequest = pool.request();
+    const dataRequest = pool.request();
+
+    for (const [name, type, value] of queryInputs) {
+      countRequest.input(name, type, value);
+      dataRequest.input(name, type, value);
+    }
+
+    const countResult = await countRequest.query(
       `SELECT COUNT(*) AS total FROM dbo.UserActivityLog WHERE ${whereClause}`,
     );
 
-    const total = countResult.recordset[0].total;
+    const total = countResult.recordset[0]?.total ?? 0;
 
-    const dataResult = await request.query(`
+    const dataResult = await dataRequest.query(`
       SELECT
         Id AS id, UserId AS userId, UserName AS userName,
         UserEmail AS userEmail, UserRole AS userRole,
@@ -168,21 +194,27 @@ router.get("/", async (req, res) => {
       pages: Math.ceil(total / limit),
     });
   } catch (err) {
-    console.error("UserActivity GET error:", err);
-    res.status(500).json({ error: "Failed to fetch activity logs" });
+    console.error("UserActivity GET / error details:", {
+      message: err.message,
+      stack: err.stack,
+      query: req.query,
+      whereClause,
+    });
+    res.status(500).json({
+      error: "Failed to fetch activity logs",
+      details:
+        process.env.NODE_ENV === "development" ? err.message : "Internal error",
+    });
   }
 });
 
-// ── SSE Stream ────────────────────────────────────────────────────────────────
-// Middleware already applied in server.js
-router.get("/stream", async (req, res) => {
-  // SSE headers
+// SSE stream
+router.get("/stream", adminOnly, async (req, res) => {
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
-  res.setHeader("X-Accel-Buffering", "no"); // Disable nginx buffering
-
-  // Disable response timeout
+  res.setHeader("X-Accel-Buffering", "no");
+  res.flushHeaders?.();
   res.setTimeout(0);
 
   activeStreams.push(res);
@@ -203,46 +235,40 @@ router.get("/stream", async (req, res) => {
       );
     } catch (err) {
       console.error("SSE data error:", err);
-      // Don't close connection on error, just skip this iteration
     }
   };
 
-  // Send keepalive ping every 30 seconds to prevent timeout
   const sendPing = () => {
     if (!res.writableEnded) {
-      res.write(`:ping\n\n`);
+      res.write(":ping\n\n");
     }
   };
 
-  // Send initial data immediately
   try {
     await sendLatest();
   } catch (err) {
     console.error("SSE initial send error:", err);
   }
 
-  // Set up intervals
   const dataInterval = setInterval(sendLatest, 5000);
   const pingInterval = setInterval(sendPing, 30000);
 
-  // Cleanup on client disconnect
   req.on("close", () => {
-    activeStreams = activeStreams.filter((s) => s !== res);
+    activeStreams = activeStreams.filter((stream) => stream !== res);
     clearInterval(dataInterval);
     clearInterval(pingInterval);
-    console.log("SSE client disconnected");
   });
 
   req.on("error", (err) => {
     console.error("SSE request error:", err);
+    activeStreams = activeStreams.filter((stream) => stream !== res);
     clearInterval(dataInterval);
     clearInterval(pingInterval);
   });
 });
 
-// ── Session timeline ──────────────────────────────────────────────────────────
-// Middleware already applied in server.js
-router.get("/session/:sessionId", async (req, res) => {
+// Session timeline
+router.get("/session/:sessionId", adminOnly, async (req, res) => {
   try {
     const pool = getPool();
 
@@ -260,14 +286,34 @@ router.get("/session/:sessionId", async (req, res) => {
   }
 });
 
-// ── POST activity ─────────────────────────────────────────────────────────────
-// Auth middleware applied in server.js - all authenticated users can log their activity
-// Only admins can READ logs, but anyone can WRITE to their own log
+// POST activity
 router.post("/", async (req, res) => {
   const { userId, userName, userEmail, userRole, event, ...rest } =
     req.body || {};
 
-  if (!userId || !userName || !event) {
+  const resolvedUserId = normalizeNullableString(
+    userId ?? req.user?.userId ?? req.user?.id,
+    50,
+  );
+  const resolvedUserName =
+    normalizeNullableString(
+      userName ?? req.user?.name ?? req.user?.email ?? "Unknown User",
+      100,
+    ) || "Unknown User";
+  const resolvedUserEmail = normalizeNullableString(
+    userEmail ?? req.user?.email,
+    100,
+  );
+  const resolvedUserRole = normalizeNullableString(
+    userRole ?? req.user?.role,
+    50,
+  );
+  const normalizedEvent = normalizeNullableString(event, 20);
+  const normalizedActionType = ALLOWED_ACTION_TYPES.has(rest.actionType)
+    ? rest.actionType
+    : null;
+
+  if (!resolvedUserId || !resolvedUserName || !normalizedEvent) {
     return res
       .status(400)
       .json({ error: "userId, userName and event are required" });
@@ -280,26 +326,43 @@ router.post("/", async (req, res) => {
     await pool
       .request()
       .input("id", sql.NVarChar(50), newId)
-      .input("userId", sql.NVarChar(50), String(userId))
-      .input("userName", sql.NVarChar(100), String(userName))
-      .input("userEmail", sql.NVarChar(100), userEmail || null)
-      .input("userRole", sql.NVarChar(50), userRole || null)
-      .input("event", sql.NVarChar(20), String(event))
-      .input("ipAddress", sql.NVarChar(50), rest.ipAddress || "unknown")
-      .input("deviceInfo", sql.NVarChar(255), rest.deviceInfo || "unknown")
+      .input("userId", sql.NVarChar(50), resolvedUserId)
+      .input("userName", sql.NVarChar(100), resolvedUserName)
+      .input("userEmail", sql.NVarChar(100), resolvedUserEmail)
+      .input("userRole", sql.NVarChar(50), resolvedUserRole)
+      .input("event", sql.NVarChar(20), normalizedEvent)
+      .input(
+        "ipAddress",
+        sql.NVarChar(50),
+        normalizeNullableString(rest.ipAddress, 50) || "unknown",
+      )
+      .input(
+        "deviceInfo",
+        sql.NVarChar(255),
+        normalizeNullableString(rest.deviceInfo, 255) || "unknown",
+      )
       .input(
         "deviceFingerprint",
         sql.NVarChar(100),
-        rest.deviceFingerprint || null,
+        normalizeNullableString(rest.deviceFingerprint, 100),
       )
-      .input("actionType", sql.NVarChar(50), rest.actionType || null)
-      .input("resource", sql.NVarChar(200), rest.resource || null)
-      .input("details", sql.NVarChar(sql.MAX), rest.details || null)
-      .input("sessionId", sql.NVarChar(50), rest.sessionId || null)
-      .input("sessionDuration", sql.Int, rest.sessionDuration || null)
-      .input("requestMethod", sql.NVarChar(10), rest.requestMethod || null)
-      .input("requestUrl", sql.NVarChar(500), rest.requestUrl || null)
-      .input("createdAt", sql.DateTime2, new Date()).query(`
+      .input("actionType", sql.NVarChar(50), normalizedActionType)
+      .input("resource", sql.NVarChar(200), normalizeNullableString(rest.resource, 200))
+      .input("details", sql.NVarChar(sql.MAX), normalizeNullableString(rest.details))
+      .input("sessionId", sql.NVarChar(50), normalizeNullableString(rest.sessionId, 50))
+      .input("sessionDuration", sql.Int, normalizeNullableInt(rest.sessionDuration))
+      .input(
+        "requestMethod",
+        sql.NVarChar(10),
+        normalizeNullableString(rest.requestMethod, 10),
+      )
+      .input(
+        "requestUrl",
+        sql.NVarChar(500),
+        normalizeNullableString(rest.requestUrl, 500),
+      )
+      .input("createdAt", sql.DateTime2, new Date())
+      .query(`
         INSERT INTO dbo.UserActivityLog (
           Id, UserId, UserName, UserEmail, UserRole, EventType,
           IpAddress, DeviceInfo, DeviceFingerprint,
@@ -317,8 +380,17 @@ router.post("/", async (req, res) => {
 
     res.json({ message: "Activity logged", id: newId });
   } catch (err) {
-    console.error("POST error:", err);
-    res.status(500).json({ error: "Failed to log activity" });
+    console.error("POST error:", {
+      message: err.message,
+      stack: err.stack,
+      body: req.body,
+      user: req.user,
+    });
+    res.status(500).json({
+      error: "Failed to log activity",
+      details:
+        process.env.NODE_ENV === "development" ? err.message : "Internal error",
+    });
   }
 });
 

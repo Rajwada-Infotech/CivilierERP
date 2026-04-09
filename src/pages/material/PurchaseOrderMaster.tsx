@@ -1,6 +1,14 @@
-import React from "react";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { MasterPage, type ColumnDef, type FieldDef, type RecordWithId } from "@/components/MasterPage";
+import React from 'react'
+import { Breadcrumbs } from '@/components/Breadcrumbs'
+import { MasterPage, type DataChangeEvent, type RecordWithId } from '@/components/MasterPage'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
+import {
+  getPurchaseOrders,
+  addPurchaseOrder,
+  updatePurchaseOrder,
+  deletePurchaseOrder,
+} from '@/api/purchaseOrdersApi'
 
 const FIELDS: FieldDef[] = [
   { name: "poNumber", label: "Purchase Order No", type: "text", required: true, uppercase: true },
@@ -58,55 +66,75 @@ const COLUMNS: ColumnDef[] = [
   { key: "status", label: "Status" },
 ];
 
-const INITIAL_DATA = [
-  {
-    poNumber: "PO-MAT-24001",
-    poDate: "2024-11-07",
-    expectedDate: "2024-11-14",
-    supplier: "Metro Steel Traders",
-    projectSite: "Skyline Tower A",
-    itemDescription: "TMT Fe500D 16mm dia bars, 25MT for column reinforcement",
-    quantity: 25,
-    unit: "MT",
-    rate: 62000,
-    totalAmount: 1550000,
-    paymentTerms: "30% advance, 60% on delivery, balance on acceptance",
-    status: "Issued",
-    remarks: "Urgent requirement for column casting next week. Prefer immediate dispatch.",
-  },
-  {
-    poNumber: "PO-MAT-24002",
-    poDate: "2024-11-05",
-    expectedDate: "2024-11-12",
-    supplier: "Shree Cement Distributors",
-    projectSite: "Riverfront Residency",
-    itemDescription: "OPC 53 Grade cement, 400 bags for plastering works",
-    quantity: 400,
-    unit: "Bags",
-    rate: 380,
-    totalAmount: 152000,
-    paymentTerms: "100% on delivery",
-    status: "Partially Received",
-    remarks: "200 bags received, balance expected by 11th Nov.",
-  },
-  {
-    poNumber: "PO-MAT-24003",
-    poDate: "2024-10-30",
-    expectedDate: "2024-11-18",
-    supplier: "BuildWell Aggregates",
-    projectSite: "Industrial Shed Phase 2",
-    itemDescription: "20mm crushed stone aggregate, 150 brass",
-    quantity: 150,
-    unit: "Brass",
-    rate: 850,
-    totalAmount: 127500,
-    paymentTerms: "Payment within 15 days of delivery",
-    status: "Draft",
-    remarks: "Pending approval from site engineer.",
-  },
-];
 
-export default function PurchaseOrderMaster() {
+
+const PurchaseOrderMaster = () => {
+  const queryClient = useQueryClient()
+
+  const { data: dbData, isLoading, error } = useQuery({
+    queryKey: ['purchase-orders'],
+    queryFn: getPurchaseOrders,
+  })
+
+  const dbItems = Array.isArray(dbData) ? dbData : []
+
+  const mappedData: RecordWithId[] = dbItems.map(item => ({
+    _id: String(item.POId || item.id || item._id),
+    poNumber: item.PONumber || item.poNumber || '',
+    poDate: item.PODate || item.poDate || '',
+    expectedDate: item.ExpectedDate || item.expectedDate || '',
+    supplier: item.Supplier || item.supplier || '',
+    projectSite: item.ProjectSite || item.projectSite || '',
+    itemDescription: item.ItemDescription || item.itemDescription || '',
+    quantity: item.Quantity || item.quantity || 0,
+    unit: item.Unit || item.unit || '',
+    rate: item.Rate || item.rate || 0,
+    totalAmount: item.TotalAmount || item.totalAmount || 0,
+    paymentTerms: item.PaymentTerms || item.paymentTerms || '',
+    status: item.Status || item.status || 'Draft',
+    remarks: item.Remarks || item.remarks || '',
+  }))
+
+  const toPayload = (r: Record<string, unknown>) => ({
+    PONumber: (r.poNumber as string) || null,
+    PODate: (r.poDate as string) || null,
+    ExpectedDate: (r.expectedDate as string) || null,
+    Supplier: (r.supplier as string) || null,
+    ProjectSite: (r.projectSite as string) || null,
+    ItemDescription: (r.itemDescription as string) || null,
+    Quantity: Number(r.quantity) || 0,
+    Unit: (r.unit as string) || null,
+    Rate: Number(r.rate) || 0,
+    TotalAmount: Number(r.totalAmount) || 0,
+    PaymentTerms: (r.paymentTerms as string) || null,
+    Status: (r.status as string) || 'Draft',
+    Remarks: (r.remarks as string) || null,
+  })
+
+  const handleDataEvent = async (event: DataChangeEvent) => {
+    if (event.action === 'add') {
+      try {
+        await addPurchaseOrder(toPayload(event.record))
+        toast.success('Purchase Order saved!')
+        await queryClient.invalidateQueries({ queryKey: ['purchase-orders'] })
+      } catch (err: any) { toast.error('Save failed: ' + err.message) }
+    }
+    if (event.action === 'update') {
+      try {
+        await updatePurchaseOrder(event.id, toPayload(event.record))
+        toast.success('Purchase Order updated!')
+        await queryClient.invalidateQueries({ queryKey: ['purchase-orders'] })
+      } catch (err: any) { toast.error('Update failed: ' + err.message) }
+    }
+    if (event.action === 'delete') {
+      try {
+        await deletePurchaseOrder(event.id)
+        toast.success('Purchase Order deleted!')
+        await queryClient.invalidateQueries({ queryKey: ['purchase-orders'] })
+      } catch (err: any) { toast.error('Delete failed: ' + err.message) }
+    }
+  }
+
   const columnRenderers = {
     poDate: (value: unknown) => {
       const date = new Date(String(value));
@@ -131,19 +159,26 @@ export default function PurchaseOrderMaster() {
         </span>
       );
     },
-  };
+  }
+
+  if (isLoading) return <div className="p-6 text-muted-foreground">Loading purchase orders...</div>
+  if (error) return <div className="p-6 text-destructive">Failed to load purchase orders.</div>
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "Material", "Purchase Order"]} />
+      <Breadcrumbs items={['Dashboard', 'Material', 'Purchase Order Master']} />
+      <h1 className="text-xl font-heading font-bold text-foreground mb-4">Purchase Order Master</h1>
       <MasterPage
         title="Purchase Order"
         fields={FIELDS}
         columns={COLUMNS}
-        initialData={INITIAL_DATA}
+        initialData={mappedData}
         columnRenderers={columnRenderers}
+        onDataEvent={handleDataEvent}
       />
     </>
-  );
+  )
 }
+
+export default PurchaseOrderMaster
 
