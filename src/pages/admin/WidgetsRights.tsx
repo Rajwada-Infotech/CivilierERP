@@ -35,6 +35,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { CreditCard, ArrowRight } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -43,6 +44,7 @@ import {
   SelectItem,
   SelectTrigger,
   SelectValue,
+
 } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 // FIX: Standardised to sonner (was using deprecated shadcn useToast)
@@ -74,6 +76,8 @@ const ACTION_CONFIG: Record<PageAction, { label: string; icon: React.ReactNode }
   export: { label: "CSV Export", icon: <Download className="w-3 h-3" /> },
   approve: { label: "Approve", icon: <CheckCircle className="w-3 h-3" /> },
   reject: { label: "Reject", icon: <XCircle className="w-3 h-3" /> },
+  pay: { label: "Pay", icon: <CreditCard className="w-3 h-3" /> },
+  convert: { label: "Convert", icon: <ArrowRight className="w-3 h-3" /> },
 };
 
 interface PermissionRow {
@@ -271,8 +275,8 @@ export default function WidgetsRights() {
                                       htmlFor={`perm-${key}-${action}`} 
                                       className="text-xs font-medium cursor-pointer m-0 p-0 leading-none flex items-center gap-1 text-foreground/80 hover:text-foreground"
                                     >
-                                      {config.icon}
-                                      {config.label}
+                                      {config?.icon || <Eye className="w-3 h-3" />}
+                                      {config?.label || action}
                                     </Label>
                                   </div>
                                 );
@@ -345,11 +349,16 @@ export default function WidgetsRights() {
                       <TableCell className="font-medium max-w-[160px] sm:max-w-[200px] truncate">{row.pageLabel}</TableCell>
                       <TableCell className="max-w-[200px] sm:max-w-[250px]">
                         <div className="flex flex-wrap gap-1">
-                          {row.actions.split(", ").map((actionLabel) => (
-                            <Badge key={actionLabel} variant="secondary" className="text-xs whitespace-nowrap">
-                              {actionLabel}
-                            </Badge>
-                          ))}
+                          {row.actions.split(", ").map((actionLabel) => {
+                            const action = actionLabel.toLowerCase() as keyof typeof ACTION_CONFIG;
+                            const config = ACTION_CONFIG[action];
+                            return (
+                              <Badge key={actionLabel} variant="secondary" className="text-xs whitespace-nowrap">
+                                {config?.icon || <Eye className="w-3 h-3 mr-1" />}
+                                {config?.label || actionLabel}
+                              </Badge>
+                            );
+                          })}
                         </div>
                       </TableCell>
 

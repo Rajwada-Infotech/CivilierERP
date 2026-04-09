@@ -159,8 +159,13 @@ router.get("/", authMiddleware, async (req, res) => {
       pages: Math.ceil(total / limit),
     });
   } catch (err) {
-    console.error("UserActivity GET error:", err);
-    res.status(500).json({ error: "Failed to fetch activity logs" });
+    console.error("UserActivity GET / error details:", {
+      message: err.message,
+      stack: err.stack,
+      query: req.query,
+      whereClause
+    });
+    res.status(500).json({ error: "Failed to fetch activity logs", details: process.env.NODE_ENV === 'development' ? err.message : 'Internal error' });
   }
 });
 
@@ -258,10 +263,14 @@ router.get("/session/:sessionId", authMiddleware, async (req, res) => {
 // so every POST silently failed with a constraint error.
 // We now generate a UUID here and include it in every INSERT.
 router.post("/", authMiddleware, async (req, res) => {
+  console.error("UserActivity POST - body:", req.body);
+  console.error("UserActivity POST - user from auth:", req.user);
+  
   const { userId, userName, userEmail, userRole, event, ...rest } =
     req.body || {};
 
   if (!userId || !userName || !event) {
+    console.error("UserActivity POST - validation failed: missing required fields");
     return res
       .status(400)
       .json({ error: "userId, userName and event are required" });
@@ -269,6 +278,7 @@ router.post("/", authMiddleware, async (req, res) => {
 
   try {
     const pool = getPool();
+    console.error("UserActivity POST - pool acquired successfully");
     const newId = crypto.randomUUID();
 
     await pool
