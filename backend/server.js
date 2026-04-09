@@ -131,7 +131,9 @@ async function startServer() {
     app.use("/api/debit-note", authMiddleware, require("./routes/debitNote"));
     app.use("/api/tc-master", authMiddleware, require("./routes/tcMaster"));
 
-    app.use("/api/user-activity", authMiddleware, require("./routes/userActivity"));
+    // User Activity Routes
+    const userActivityRouter = require("./routes/userActivity");
+    app.use("/api/user-activity", authMiddleware, userActivityRouter);
 
     const PORT = process.env.PORT || 5000;
     app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

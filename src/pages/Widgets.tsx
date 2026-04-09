@@ -1,9 +1,22 @@
 import { useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
-  Puzzle, BarChart2, TrendingUp, PieChart, Hash, Table2, Calendar,
-  Bell, MessageSquare, Map, Paperclip, RefreshCw, Calculator, X
+  Puzzle,
+  BarChart2,
+  TrendingUp,
+  PieChart,
+  Hash,
+  Table2,
+  Calendar,
+  Bell,
+  MessageSquare,
+  Map,
+  Paperclip,
+  RefreshCw,
+  Calculator,
+  X,
+  BarChart3,
 } from "lucide-react";
 
 const widgetItems = [
@@ -23,21 +36,34 @@ const widgetItems = [
 
 const Widgets = () => {
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const paramWidget = searchParams.get("w");
   const [selected, setSelected] = useState<string | null>(paramWidget);
 
   return (
     <>
-          <Breadcrumbs items={["Dashboard", selected || "Widgets"]} />
+      <Breadcrumbs items={["Dashboard", selected || "Widgets"]} />
 
       {selected ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <div className="w-16 h-16 rounded-2xl bg-primary/10 flex items-center justify-center mb-4">
-            {(() => { const w = widgetItems.find(i => i.label === selected); return w ? <w.icon size={32} className="text-primary" /> : <Puzzle size={32} className="text-primary" />; })()}
+            {(() => {
+              const w = widgetItems.find((i) => i.label === selected);
+              return w ? (
+                <w.icon size={32} className="text-primary" />
+              ) : (
+                <Puzzle size={32} className="text-primary" />
+              );
+            })()}
           </div>
-          <h1 className="text-2xl font-heading font-bold text-foreground mb-2">{selected}</h1>
+          <h1 className="text-2xl font-heading font-bold text-foreground mb-2">
+            {selected}
+          </h1>
           <p className="text-muted-foreground mb-6">{selected} — Coming Soon</p>
-          <button onClick={() => setSelected(null)} className="flex items-center gap-1.5 text-sm text-primary hover:underline font-heading">
+          <button
+            onClick={() => setSelected(null)}
+            className="flex items-center gap-1.5 text-sm text-primary hover:underline font-heading"
+          >
             <X size={14} /> Back to all widgets
           </button>
         </div>
@@ -45,9 +71,22 @@ const Widgets = () => {
         <>
           <div className="flex items-center gap-2 mb-6">
             <Puzzle size={20} className="text-primary" />
-            <h1 className="text-xl font-heading font-bold text-foreground">Widgets</h1>
+            <h1 className="text-xl font-heading font-bold text-foreground">
+              Widgets
+            </h1>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+            {/* Reports card — navigates to its own page */}
+            <button
+              onClick={() => navigate("/reports")}
+              className="flex flex-col items-center gap-2 p-5 rounded-lg border border-border bg-card transition-all hover:bg-accent/10 hover:shadow-md hover:-translate-y-0.5 hover:border-primary"
+            >
+              <BarChart3 size={28} className="text-primary" />
+              <span className="text-xs text-muted-foreground font-heading">
+                Reports
+              </span>
+            </button>
+
             {widgetItems.map(({ icon: Icon, label }) => (
               <button
                 key={label}
@@ -55,7 +94,9 @@ const Widgets = () => {
                 className="flex flex-col items-center gap-2 p-5 rounded-lg border border-border bg-card transition-all hover:bg-accent/10 hover:shadow-md hover:-translate-y-0.5 hover:border-primary"
               >
                 <Icon size={28} className="text-primary" />
-                <span className="text-xs text-muted-foreground font-heading">{label}</span>
+                <span className="text-xs text-muted-foreground font-heading">
+                  {label}
+                </span>
               </button>
             ))}
           </div>

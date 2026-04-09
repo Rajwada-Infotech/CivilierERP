@@ -6,8 +6,9 @@ import React, {
   useEffect,
   useMemo,
 } from "react";
+
 import { loginUser } from "../api/userApi";
-import { useActivityBrowser } from "../contexts/ActivityBrowserContext";
+
 import type {
   UserRole,
   PageKey,
@@ -15,10 +16,14 @@ import type {
   PagePermission,
   AppUser,
 } from "./types";
+
 import * as AuthUtils from "./auth.utils";
 
+// Re-export
 export { PAGE_DEFINITIONS } from "@/constants/pageDefinitions";
-export type { PageKey, PageAction };
+export type { PageKey, PageAction, PagePermission, AppUser };
+
+// ── TYPES ─────────────────────────────────────────────────────────────────────
 
 interface AuthContextType {
   currentUser: AppUser | null;
@@ -40,6 +45,8 @@ interface AuthContextType {
   canDoAction: (page: PageKey, action: PageAction) => boolean;
 }
 
+// ── CONTEXT ───────────────────────────────────────────────────────────────────
+
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export const useAuth = () => {
@@ -48,17 +55,31 @@ export const useAuth = () => {
   return ctx;
 };
 
+// ── PROVIDER ──────────────────────────────────────────────────────────────────
+
 export const AuthProvider = ({
   children,
   onLoginSuccess,
   onLogoutSuccess,
+  recordLogin,
+  recordLogout,
 }: {
   children: React.ReactNode;
   onLoginSuccess?: (user: AppUser) => void;
   onLogoutSuccess?: (user: AppUser) => void;
+  recordLogin?: (user: {
+    id: string;
+    name: string;
+    email: string;
+    role: string;
+  }) => Promise<void>;
+  recordLogout?: (user: {
+    id: string;
+    name: string;
+    email: string;
+    role: string;
+  }) => Promise<void>;
 }) => {
-  const { recordLogin, recordLogout } = useActivityBrowser();
-
   const [currentUser, setCurrentUser] = useState<AppUser | null>(() => {
     try {
       const stored = localStorage.getItem("user");
@@ -72,15 +93,16 @@ export const AuthProvider = ({
   const [users, setUsers] = useState<AppUser[]>([]);
 
   useEffect(() => {
-    // TODO: Replace with real API call later
-    const dummyUsers: AppUser[] = [];
-    setUsers(dummyUsers);
+    setUsers([]); // replace with API later
   }, []);
+
+  // ── LOGIN ──────────────────────────────────────────────────────────────────
 
   const login = useCallback(
     async (email: string, password: string) => {
       try {
         const data = await loginUser(email, password);
+
         if (!data.success) {
           return { success: false, error: "Invalid credentials" };
         }
@@ -104,58 +126,67 @@ export const AuthProvider = ({
         localStorage.setItem("user", JSON.stringify(appUser));
         setCurrentUser(appUser);
 
-        // Record login (original logic)
+        // ✅ Safe logging
         try {
-          await recordLogin({
+          await recordLogin?.({
             id: appUser.id,
             name: appUser.name,
             email: appUser.email,
             role: appUser.role,
           });
-        } catch (logErr) {
-          console.warn("Login tracking failed:", logErr);
+        } catch (err) {
+          console.warn("Login tracking failed:", err);
         }
 
         onLoginSuccess?.(appUser);
+
         return { success: true, role: appUser.role };
       } catch (err: unknown) {
         const errorMessage =
           err instanceof Error ? err.message : "Login failed";
+
         return { success: false, error: errorMessage };
       }
     },
     [onLoginSuccess, recordLogin],
   );
 
+  // ── LOGOUT ─────────────────────────────────────────────────────────────────
+
   const logout = useCallback(async () => {
     if (currentUser) {
       try {
-        await recordLogout({
+        await recordLogout?.({
           id: currentUser.id,
           name: currentUser.name,
           email: currentUser.email,
           role: currentUser.role,
         });
-      } catch (logErr) {
-        console.warn("Logout tracking failed:", logErr);
+      } catch (err) {
+        console.warn("Logout tracking failed:", err);
       }
+
       onLogoutSuccess?.(currentUser);
     }
 
     localStorage.removeItem("token");
     localStorage.removeItem("user");
     localStorage.removeItem("currentSessionId");
+
     setCurrentUser(null);
   }, [currentUser, onLogoutSuccess, recordLogout]);
 
+  // ── USER MGMT ──────────────────────────────────────────────────────────────
+
   const updateUserPagePermissions = useCallback(
     (userId: string, permissions: PagePermission[]) => {
-      setUsers((prevUsers) =>
-        prevUsers.map((user) =>
+      setUsers((prev) =>
+        prev.map((user) =>
           user.id === userId ? { ...user, pagePermissions: permissions } : user,
         ),
       );
-      if (currentUser && currentUser.id === userId) {
+
+      if (currentUser?.id === userId) {
         const updatedUser = { ...currentUser, pagePermissions: permissions };
         setCurrentUser(updatedUser);
         localStorage.setItem("user", JSON.stringify(updatedUser));
@@ -166,32 +197,34 @@ export const AuthProvider = ({
 
   const toggleUserStatus = useCallback((id: string) => {
     setUsers((prev) =>
-      prev.map((user) =>
-        user.id === id ? { ...user, isActive: !user.isActive } : user,
-      ),
+      prev.map((u) => (u.id === id ? { ...u, isActive: !u.isActive } : u)),
     );
   }, []);
 
   const deleteUser = useCallback((id: string) => {
-    setUsers((prev) => prev.filter((user) => user.id !== id));
+    setUsers((prev) => prev.filter((u) => u.id !== id));
   }, []);
 
   const addUser = useCallback(() => {
-    console.warn("addUser: Implement API call");
+    console.warn("addUser not implemented");
   }, []);
 
-  const { canAccessPage: rawCanAccessPage, canDoAction: rawCanDoAction } =
+  // ── PERMISSIONS ─────────────────────────────────────────────────────────────
+
+  const { canAccessPage: rawAccess, canDoAction: rawAction } =
     AuthUtils.createPermissionCheckers(currentUser);
 
   const canAccessPage = useCallback(
-    (page: PageKey) => rawCanAccessPage(page),
-    [rawCanAccessPage],
+    (page: PageKey) => rawAccess(page),
+    [rawAccess],
   );
 
   const canDoAction = useCallback(
-    (page: PageKey, action: PageAction) => rawCanDoAction(page, action),
-    [rawCanDoAction],
+    (page: PageKey, action: PageAction) => rawAction(page, action),
+    [rawAction],
   );
+
+  // ── VALUE ──────────────────────────────────────────────────────────────────
 
   const value = useMemo(
     () => ({
