@@ -40,8 +40,8 @@ function mapActivityRow(row) {
 }
 
 // ── GET paginated activity logs (admin only) ──────────────────────────────────
-
-router.get("/", authMiddleware, adminOnly, async (req, res) => {
+// Middleware already applied in server.js, no need to repeat here
+router.get("/", async (req, res) => {
   try {
     const pool = getPool();
 
@@ -174,11 +174,16 @@ router.get("/", authMiddleware, adminOnly, async (req, res) => {
 });
 
 // ── SSE Stream ────────────────────────────────────────────────────────────────
-
-router.get("/stream", authMiddleware, adminOnly, async (req, res) => {
+// Middleware already applied in server.js
+router.get("/stream", async (req, res) => {
+  // SSE headers
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
+  res.setHeader("X-Accel-Buffering", "no"); // Disable nginx buffering
+
+  // Disable response timeout
+  res.setTimeout(0);
 
   activeStreams.push(res);
 
@@ -197,47 +202,68 @@ router.get("/stream", authMiddleware, adminOnly, async (req, res) => {
         `data: ${JSON.stringify(result.recordset.map(mapActivityRow))}\n\n`,
       );
     } catch (err) {
-      console.error("SSE error:", err);
+      console.error("SSE data error:", err);
+      // Don't close connection on error, just skip this iteration
     }
   };
 
-  await sendLatest();
-  const interval = setInterval(sendLatest, 5000);
+  // Send keepalive ping every 30 seconds to prevent timeout
+  const sendPing = () => {
+    if (!res.writableEnded) {
+      res.write(`:ping\n\n`);
+    }
+  };
 
+  // Send initial data immediately
+  try {
+    await sendLatest();
+  } catch (err) {
+    console.error("SSE initial send error:", err);
+  }
+
+  // Set up intervals
+  const dataInterval = setInterval(sendLatest, 5000);
+  const pingInterval = setInterval(sendPing, 30000);
+
+  // Cleanup on client disconnect
   req.on("close", () => {
     activeStreams = activeStreams.filter((s) => s !== res);
-    clearInterval(interval);
+    clearInterval(dataInterval);
+    clearInterval(pingInterval);
+    console.log("SSE client disconnected");
+  });
+
+  req.on("error", (err) => {
+    console.error("SSE request error:", err);
+    clearInterval(dataInterval);
+    clearInterval(pingInterval);
   });
 });
 
 // ── Session timeline ──────────────────────────────────────────────────────────
+// Middleware already applied in server.js
+router.get("/session/:sessionId", async (req, res) => {
+  try {
+    const pool = getPool();
 
-router.get(
-  "/session/:sessionId",
-  authMiddleware,
-  adminOnly,
-  async (req, res) => {
-    try {
-      const pool = getPool();
+    const result = await pool
+      .request()
+      .input("sessionId", sql.NVarChar(50), req.params.sessionId)
+      .query(
+        "SELECT * FROM dbo.UserActivityLog WHERE SessionId = @sessionId ORDER BY CreatedAt ASC",
+      );
 
-      const result = await pool
-        .request()
-        .input("sessionId", sql.NVarChar(50), req.params.sessionId)
-        .query(
-          "SELECT * FROM dbo.UserActivityLog WHERE SessionId = @sessionId ORDER BY CreatedAt ASC",
-        );
-
-      res.json(result.recordset.map(mapActivityRow));
-    } catch (err) {
-      console.error("Session error:", err);
-      res.status(500).json({ error: "Failed to fetch session activity" });
-    }
-  },
-);
+    res.json(result.recordset.map(mapActivityRow));
+  } catch (err) {
+    console.error("Session error:", err);
+    res.status(500).json({ error: "Failed to fetch session activity" });
+  }
+});
 
 // ── POST activity ─────────────────────────────────────────────────────────────
-
-router.post("/", authMiddleware, adminOnly, async (req, res) => {
+// Auth middleware applied in server.js - all authenticated users can log their activity
+// Only admins can READ logs, but anyone can WRITE to their own log
+router.post("/", async (req, res) => {
   const { userId, userName, userEmail, userRole, event, ...rest } =
     req.body || {};
 

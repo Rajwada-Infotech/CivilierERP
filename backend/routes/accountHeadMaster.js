@@ -8,13 +8,17 @@ router.get("/", async (req, res) => {
     const pool = getPool();
     const result = await pool.request().query(
       `SELECT
-        lh.LHeadId, lh.LHeadName, lh.LHeadType, lh.LHeadPhone, lh.LHeadEmail,
+        lh.LHeadId, lh.LHeadName, lh.LHeadCode,
+        lh.LHeadPhone, lh.LHeadEmail,
         lh.LHeadAddress, lh.LHeadContactPerson, lh.LHeadStatus, lh.LHeadPaymentTerms,
         lh.LBranchName, lh.LGST, lh.LGSTState, lh.LCountry, lh.LBelongsTo,
         lh.LDescription, lh.isEdited,
-        ag.Name AS GroupName
+        ag.Name  AS GroupName,
+        ag.ParentGroupId,
+        parent.Name AS ParentGroupName
        FROM dbo.AccountHeadMaster lh
-       LEFT JOIN dbo.AccountGroup ag ON ag.AGId = lh.LBelongsTo`,
+       LEFT JOIN dbo.AccountGroup ag     ON ag.AGId     = lh.LBelongsTo
+       LEFT JOIN dbo.AccountGroup parent ON parent.AGId = ag.ParentGroupId`,
     );
     res.json(result.recordset);
   } catch (err) {
@@ -27,10 +31,10 @@ router.get("/", async (req, res) => {
 router.post("/", async (req, res) => {
   const {
     LHeadName,
+    LHeadCode,
     LHeadPhone,
     LHeadEmail,
     LHeadAddress,
-    LHeadType,
     LHeadContactPerson,
     LHeadStatus,
     LHeadPaymentTerms,
@@ -46,6 +50,7 @@ router.post("/", async (req, res) => {
     await pool
       .request()
       .input("LHeadName", sql.NVarChar(200), LHeadName)
+      .input("LHeadCode", sql.NVarChar(20), LHeadCode || null)
       .input("LHeadPhone", sql.VarChar(15), LHeadPhone || "0000000000")
       .input(
         "LHeadEmail",
@@ -53,7 +58,6 @@ router.post("/", async (req, res) => {
         LHeadEmail || `ledger-${Date.now()}@civilier.local`,
       )
       .input("LHeadAddress", sql.VarChar(300), LHeadAddress || "N/A")
-      .input("LHeadType", sql.VarChar(50), LHeadType || null)
       .input(
         "LHeadContactPerson",
         sql.VarChar(100),
@@ -70,12 +74,12 @@ router.post("/", async (req, res) => {
       .input("CreatedBy", sql.Int, 1)
       .input("CreatedAt", sql.DateTime, new Date()).query(`
         INSERT INTO dbo.AccountHeadMaster (
-          LHeadName, LHeadPhone, LHeadEmail, LHeadAddress, LHeadType,
+          LHeadName, LHeadCode, LHeadPhone, LHeadEmail, LHeadAddress,
           LHeadContactPerson, LHeadStatus, LHeadPaymentTerms, LBranchName,
           LGST, LGSTState, LCountry, LBelongsTo, LDescription,
           CreatedBy, CreatedAt
         ) VALUES (
-          @LHeadName, @LHeadPhone, @LHeadEmail, @LHeadAddress, @LHeadType,
+          @LHeadName, @LHeadCode, @LHeadPhone, @LHeadEmail, @LHeadAddress,
           @LHeadContactPerson, @LHeadStatus, @LHeadPaymentTerms, @LBranchName,
           @LGST, @LGSTState, @LCountry, @LBelongsTo, @LDescription,
           @CreatedBy, @CreatedAt
@@ -88,8 +92,8 @@ router.post("/", async (req, res) => {
   }
 });
 
-// GET id+name for FK dropdowns (used by DebitNote supplier field)
-// IMPORTANT: must be declared before /:id so Express does not treat "options" as a record id
+// GET id+name for FK dropdowns
+// IMPORTANT: declared before /:id so Express doesn't treat "options" as a record id
 router.get("/options", async (req, res) => {
   try {
     const pool = getPool();
@@ -108,7 +112,7 @@ router.get("/options", async (req, res) => {
 router.put("/:id", async (req, res) => {
   const {
     LHeadName,
-    LHeadType,
+    LHeadCode,
     LHeadPhone,
     LHeadEmail,
     LHeadAddress,
@@ -128,7 +132,7 @@ router.put("/:id", async (req, res) => {
       .request()
       .input("id", sql.Int, req.params.id)
       .input("LHeadName", sql.NVarChar(200), LHeadName || null)
-      .input("LHeadType", sql.VarChar(50), LHeadType || null)
+      .input("LHeadCode", sql.NVarChar(20), LHeadCode || null)
       .input("LHeadPhone", sql.VarChar(15), LHeadPhone || null)
       .input("LHeadEmail", sql.NVarChar(100), LHeadEmail || null)
       .input("LHeadAddress", sql.VarChar(300), LHeadAddress || null)
@@ -143,7 +147,7 @@ router.put("/:id", async (req, res) => {
       .input("LDescription", sql.NVarChar, LDescription || null).query(`
         UPDATE dbo.AccountHeadMaster SET
           LHeadName          = @LHeadName,
-          LHeadType          = @LHeadType,
+          LHeadCode          = @LHeadCode,
           LHeadPhone         = @LHeadPhone,
           LHeadEmail         = @LHeadEmail,
           LHeadAddress       = @LHeadAddress,

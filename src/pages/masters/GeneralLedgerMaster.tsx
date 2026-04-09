@@ -12,46 +12,51 @@ import {
   Plus,
   Search,
   BookOpen,
-  Tag,
+  Hash,
   ChevronDown,
   ChevronsUpDown,
   AlertCircle,
 } from "lucide-react";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface AccountGroup {
   _id: string;
   name: string;
+  parentId: string | null;
+  parentName: string | null;
 }
 
 interface LedgerHead {
   LHeadId: number;
   LHeadName: string;
-  LHeadType: string | null;
+  LHeadCode: string | null;
   LBelongsTo: number | null;
   GroupName: string | null;
+  ParentGroupName: string | null;
   LHeadStatus: boolean;
 }
 
 interface LedgerForm {
   LHeadName: string;
-  LHeadType: string;
-  LBelongsTo: string; // stored as string for select value
+  LHeadCode: string;
+  LBelongsTo: string;
 }
 
 const EMPTY_FORM: LedgerForm = {
   LHeadName: "",
-  LHeadType: "",
+  LHeadCode: "",
   LBelongsTo: "",
 };
 
-// ─── API helpers ─────────────────────────────────────────────────────────────
+// ─── API helpers ──────────────────────────────────────────────────────────────
 
 const BASE = "/api/account-head";
 
 const fetchLedgers = async (): Promise<LedgerHead[]> => {
-  const res = await fetch(BASE);
+  const res = await fetch(BASE, {
+    headers: { Authorization: `Bearer ${localStorage.getItem("token") ?? ""}` },
+  });
   if (!res.ok) throw new Error(`Failed to fetch ledgers: ${res.status}`);
   return res.json();
 };
@@ -59,63 +64,63 @@ const fetchLedgers = async (): Promise<LedgerHead[]> => {
 const createLedger = async (data: LedgerForm) => {
   const res = await fetch(BASE, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
+    },
     body: JSON.stringify({
       LHeadName: data.LHeadName.trim(),
-      LHeadType: data.LHeadType || null,
+      LHeadCode: data.LHeadCode.trim().toUpperCase() || null,
       LBelongsTo: data.LBelongsTo ? Number(data.LBelongsTo) : null,
     }),
   });
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error || "Failed to create");
+    const e = await res.json();
+    throw new Error(e.error || "Failed to create");
   }
   return res.json();
 };
 
-const updateLedger = async ({
-  id,
-  data,
-}: {
-  id: number;
-  data: LedgerForm;
-}) => {
+const updateLedger = async ({ id, data }: { id: number; data: LedgerForm }) => {
   const res = await fetch(`${BASE}/${id}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
+    },
     body: JSON.stringify({
       LHeadName: data.LHeadName.trim(),
-      LHeadType: data.LHeadType || null,
+      LHeadCode: data.LHeadCode.trim().toUpperCase() || null,
       LBelongsTo: data.LBelongsTo ? Number(data.LBelongsTo) : null,
     }),
   });
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error || "Failed to update");
+    const e = await res.json();
+    throw new Error(e.error || "Failed to update");
   }
   return res.json();
 };
 
 const deleteLedger = async (id: number) => {
-  const res = await fetch(`${BASE}/${id}`, { method: "DELETE" });
+  const res = await fetch(`${BASE}/${id}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${localStorage.getItem("token") ?? ""}` },
+  });
   if (!res.ok) {
-    const err = await res.json();
-    throw new Error(err.error || "Failed to delete");
+    const e = await res.json();
+    throw new Error(e.error || "Failed to delete");
   }
   return res.json();
 };
 
-// ─── Component ───────────────────────────────────────────────────────────────
+// ─── Component ────────────────────────────────────────────────────────────────
 
 const GeneralLedgerMaster: React.FC = () => {
   const qc = useQueryClient();
 
   // ── Remote data ────────────────────────────────────────────────────────────
 
-  const {
-    data: groupsData,
-    isLoading: groupsLoading,
-  } = useQuery({
+  const { data: groupsData, isLoading: groupsLoading } = useQuery({
     queryKey: ["account-groups"],
     queryFn: getAccountGroups,
   });
@@ -129,6 +134,7 @@ const GeneralLedgerMaster: React.FC = () => {
     queryFn: fetchLedgers,
   });
 
+  // Flatten all groups with parent info for display
   const accountGroups: AccountGroup[] = useMemo(() => {
     if (!Array.isArray(groupsData)) return [];
     return (groupsData as any[])
@@ -136,8 +142,37 @@ const GeneralLedgerMaster: React.FC = () => {
       .map((item) => ({
         _id: String(item.AGId),
         name: item.Name as string,
+        parentId: item.ParentGroupId ? String(item.ParentGroupId) : null,
+        parentName: item.ParentName || null,
       }));
   }, [groupsData]);
+
+  // Build optgroup structure: parent groups contain their children
+  const groupedOptions = useMemo(() => {
+    const parents = accountGroups.filter((g) => !g.parentId);
+    const children = accountGroups.filter((g) => g.parentId);
+
+    const result: Array<
+      | { kind: "group"; parent: AccountGroup; children: AccountGroup[] }
+      | { kind: "solo"; group: AccountGroup }
+    > = [];
+
+    parents.forEach((p) => {
+      const kids = children.filter((c) => c.parentId === p._id);
+      if (kids.length > 0) {
+        result.push({ kind: "group", parent: p, children: kids });
+      } else {
+        result.push({ kind: "solo", group: p });
+      }
+    });
+
+    // Orphaned children whose parent isn't in the list
+    children
+      .filter((c) => !parents.find((p) => p._id === c.parentId))
+      .forEach((c) => result.push({ kind: "solo", group: c }));
+
+    return result;
+  }, [accountGroups]);
 
   const ledgers: LedgerHead[] = useMemo(
     () => (Array.isArray(ledgersData) ? ledgersData : []),
@@ -148,11 +183,15 @@ const GeneralLedgerMaster: React.FC = () => {
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<LedgerForm>(EMPTY_FORM);
-  const [errors, setErrors] = useState<Partial<Record<keyof LedgerForm, boolean>>>({});
+  const [errors, setErrors] = useState<
+    Partial<Record<keyof LedgerForm, boolean>>
+  >({});
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [filterGroup, setFilterGroup] = useState("");
-  const [sortField, setSortField] = useState<"LHeadName" | "LHeadType" | "GroupName">("LHeadName");
+  const [sortField, setSortField] = useState<
+    "LHeadName" | "LHeadCode" | "GroupName"
+  >("LHeadName");
   const [sortAsc, setSortAsc] = useState(true);
 
   // ── Mutations ──────────────────────────────────────────────────────────────
@@ -161,19 +200,31 @@ const GeneralLedgerMaster: React.FC = () => {
 
   const createMut = useMutation({
     mutationFn: createLedger,
-    onSuccess: () => { toast.success("Ledger account created"); invalidate(); resetForm(); },
+    onSuccess: () => {
+      toast.success("Ledger account created");
+      invalidate();
+      resetForm();
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const updateMut = useMutation({
     mutationFn: updateLedger,
-    onSuccess: () => { toast.success("Ledger account updated"); invalidate(); resetForm(); },
+    onSuccess: () => {
+      toast.success("Ledger account updated");
+      invalidate();
+      resetForm();
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const deleteMut = useMutation({
     mutationFn: deleteLedger,
-    onSuccess: () => { toast.success("Ledger account deleted"); invalidate(); setDeleteConfirm(null); },
+    onSuccess: () => {
+      toast.success("Ledger account deleted");
+      invalidate();
+      setDeleteConfirm(null);
+    },
     onError: (e: Error) => toast.error(e.message),
   });
 
@@ -185,7 +236,7 @@ const GeneralLedgerMaster: React.FC = () => {
     setEditingId(l.LHeadId);
     setForm({
       LHeadName: l.LHeadName ?? "",
-      LHeadType: l.LHeadType ?? "",
+      LHeadCode: l.LHeadCode ?? "",
       LBelongsTo: l.LBelongsTo != null ? String(l.LBelongsTo) : "",
     });
     setErrors({});
@@ -201,18 +252,20 @@ const GeneralLedgerMaster: React.FC = () => {
   const handleSave = () => {
     const e: typeof errors = {};
     if (!form.LHeadName.trim()) e.LHeadName = true;
-    if (Object.keys(e).length) { setErrors(e); return; }
-
-    if (editingId !== null) {
-      updateMut.mutate({ id: editingId, data: form });
-    } else {
-      createMut.mutate(form);
+    if (Object.keys(e).length) {
+      setErrors(e);
+      return;
     }
+    if (editingId !== null) updateMut.mutate({ id: editingId, data: form });
+    else createMut.mutate(form);
   };
 
   const toggleSort = (field: typeof sortField) => {
     if (sortField === field) setSortAsc((a) => !a);
-    else { setSortField(field); setSortAsc(true); }
+    else {
+      setSortField(field);
+      setSortAsc(true);
+    }
   };
 
   // ── Filtered + sorted list ─────────────────────────────────────────────────
@@ -223,26 +276,65 @@ const GeneralLedgerMaster: React.FC = () => {
       const matchSearch =
         !q ||
         l.LHeadName?.toLowerCase().includes(q) ||
-        (l.LHeadType ?? "").toLowerCase().includes(q);
-      const matchGroup =
-        !filterGroup || String(l.LBelongsTo) === filterGroup;
+        (l.LHeadCode ?? "").toLowerCase().includes(q);
+      const matchGroup = !filterGroup || String(l.LBelongsTo) === filterGroup;
       return matchSearch && matchGroup;
     });
 
     return [...list].sort((a, b) => {
-      const av = (sortField === "LHeadName"
-        ? a.LHeadName
-        : sortField === "LHeadType"
-          ? a.LHeadType
-          : a.GroupName) ?? "";
-      const bv = (sortField === "LHeadName"
-        ? b.LHeadName
-        : sortField === "LHeadType"
-          ? b.LHeadType
-          : b.GroupName) ?? "";
+      const av =
+        sortField === "LHeadName"
+          ? a.LHeadName
+          : sortField === "LHeadCode"
+            ? (a.LHeadCode ?? "")
+            : (a.GroupName ?? "");
+      const bv =
+        sortField === "LHeadName"
+          ? b.LHeadName
+          : sortField === "LHeadCode"
+            ? (b.LHeadCode ?? "")
+            : (b.GroupName ?? "");
       return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
     });
   }, [ledgers, search, filterGroup, sortField, sortAsc]);
+
+  // ── Shared group select renderer ───────────────────────────────────────────
+
+  const GroupSelect = ({
+    value,
+    onChange,
+    className,
+  }: {
+    value: string;
+    onChange: (v: string) => void;
+    className?: string;
+  }) => (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      className={className}
+    >
+      <option value="">Select group…</option>
+      {groupedOptions.map((opt) => {
+        if (opt.kind === "group") {
+          return (
+            <optgroup key={opt.parent._id} label={opt.parent.name}>
+              {opt.children.map((child) => (
+                <option key={child._id} value={child._id}>
+                  {child.name}
+                </option>
+              ))}
+            </optgroup>
+          );
+        }
+        return (
+          <option key={opt.group._id} value={opt.group._id}>
+            {opt.group.name}
+          </option>
+        );
+      })}
+    </select>
+  );
 
   // ── Sub-components ─────────────────────────────────────────────────────────
 
@@ -279,7 +371,7 @@ const GeneralLedgerMaster: React.FC = () => {
           General Ledger Master
         </h1>
         <p className="text-xs text-muted-foreground mt-0.5">
-          Define ledger accounts with a name, type and account group
+          Define ledger accounts with a name, short code and account group
         </p>
       </div>
 
@@ -298,7 +390,6 @@ const GeneralLedgerMaster: React.FC = () => {
 
         <div className="p-5">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-5">
-
             {/* Account Name */}
             <div>
               <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-2">
@@ -322,31 +413,32 @@ const GeneralLedgerMaster: React.FC = () => {
               )}
             </div>
 
-            {/* Type */}
+            {/* Short Code */}
             <div>
               <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-2">
-                Type
+                Short Code
               </label>
               <div className="relative">
-                <select
-                  value={form.LHeadType}
-                  onChange={(e) =>
-                    setForm((p) => ({ ...p, LHeadType: e.target.value }))
-                  }
-                  className="w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition appearance-none"
-                >
-                  <option value="">Select type…</option>
-                  <option value="Asset">Asset</option>
-                  <option value="Liability">Liability</option>
-                  <option value="Income">Income</option>
-                  <option value="Expense">Expense</option>
-                  <option value="Equity">Equity</option>
-                </select>
-                <ChevronDown
+                <Hash
                   size={13}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                />
+                <input
+                  value={form.LHeadCode}
+                  onChange={(e) =>
+                    setForm((p) => ({
+                      ...p,
+                      LHeadCode: e.target.value.toUpperCase(),
+                    }))
+                  }
+                  placeholder="e.g. CASH"
+                  maxLength={20}
+                  className="w-full text-sm rounded-lg border border-border pl-8 pr-3 py-2.5 bg-background text-foreground font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
                 />
               </div>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                Optional — used for quick reference (max 20 chars)
+              </p>
             </div>
 
             {/* Account Group */}
@@ -360,20 +452,11 @@ const GeneralLedgerMaster: React.FC = () => {
                 </div>
               ) : (
                 <div className="relative">
-                  <select
+                  <GroupSelect
                     value={form.LBelongsTo}
-                    onChange={(e) =>
-                      setForm((p) => ({ ...p, LBelongsTo: e.target.value }))
-                    }
+                    onChange={(v) => setForm((p) => ({ ...p, LBelongsTo: v }))}
                     className="w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition appearance-none"
-                  >
-                    <option value="">Select group…</option>
-                    {accountGroups.map((g) => (
-                      <option key={g._id} value={g._id}>
-                        {g.name}
-                      </option>
-                    ))}
-                  </select>
+                  />
                   <ChevronDown
                     size={13}
                     className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
@@ -397,13 +480,11 @@ const GeneralLedgerMaster: React.FC = () => {
                 </>
               ) : editingId ? (
                 <>
-                  <Check size={14} />
-                  Update Account
+                  <Check size={14} /> Update Account
                 </>
               ) : (
                 <>
-                  <Plus size={14} />
-                  Save Account
+                  <Plus size={14} /> Save Account
                 </>
               )}
             </button>
@@ -412,8 +493,7 @@ const GeneralLedgerMaster: React.FC = () => {
                 onClick={resetForm}
                 className="px-5 py-2.5 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted transition-colors flex items-center gap-2"
               >
-                <RotateCcw size={13} />
-                Cancel
+                <RotateCcw size={13} /> Cancel
               </button>
             )}
           </div>
@@ -432,24 +512,17 @@ const GeneralLedgerMaster: React.FC = () => {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search name or type…"
+              placeholder="Search name or code…"
               className="w-56 text-sm rounded-lg border border-border pl-9 pr-3 py-2 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
             />
           </div>
 
           <div className="relative">
-            <select
+            <GroupSelect
               value={filterGroup}
-              onChange={(e) => setFilterGroup(e.target.value)}
+              onChange={setFilterGroup}
               className="text-sm rounded-lg border border-border pl-3 pr-8 py-2 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition appearance-none"
-            >
-              <option value="">All Groups</option>
-              {accountGroups.map((g) => (
-                <option key={g._id} value={g._id}>
-                  {g.name}
-                </option>
-              ))}
-            </select>
+            />
             <ChevronDown
               size={12}
               className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
@@ -458,11 +531,13 @@ const GeneralLedgerMaster: React.FC = () => {
 
           {(search || filterGroup) && (
             <button
-              onClick={() => { setSearch(""); setFilterGroup(""); }}
+              onClick={() => {
+                setSearch("");
+                setFilterGroup("");
+              }}
               className="text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-1.5 hover:bg-muted transition-colors flex items-center gap-1.5"
             >
-              <X size={11} />
-              Clear
+              <X size={11} /> Clear
             </button>
           )}
 
@@ -477,7 +552,7 @@ const GeneralLedgerMaster: React.FC = () => {
             <thead>
               <tr className="border-b border-border bg-muted/40">
                 <SortTh label="Account Name" field="LHeadName" />
-                <SortTh label="Type" field="LHeadType" />
+                <SortTh label="Code" field="LHeadCode" />
                 <SortTh label="Group" field="GroupName" />
                 <th className="py-3 px-4 w-24" />
               </tr>
@@ -494,7 +569,10 @@ const GeneralLedgerMaster: React.FC = () => {
               ) : ledgersError ? (
                 <tr>
                   <td colSpan={4} className="py-12 text-center">
-                    <AlertCircle size={24} className="text-red-400 mx-auto mb-2" />
+                    <AlertCircle
+                      size={24}
+                      className="text-red-400 mx-auto mb-2"
+                    />
                     <p className="text-sm text-red-500">
                       Failed to load ledger accounts.
                     </p>
@@ -503,10 +581,15 @@ const GeneralLedgerMaster: React.FC = () => {
               ) : filtered.length === 0 ? (
                 <tr>
                   <td colSpan={4} className="py-12 text-center">
-                    <BookOpen size={28} className="text-muted-foreground/30 mx-auto mb-3" />
+                    <BookOpen
+                      size={28}
+                      className="text-muted-foreground/30 mx-auto mb-3"
+                    />
                     {ledgers.length === 0 ? (
                       <>
-                        <p className="text-sm text-muted-foreground">No ledger accounts yet.</p>
+                        <p className="text-sm text-muted-foreground">
+                          No ledger accounts yet.
+                        </p>
                         <p className="text-xs text-muted-foreground/70 mt-1">
                           Use the form above to create your first account.
                         </p>
@@ -529,33 +612,47 @@ const GeneralLedgerMaster: React.FC = () => {
                     {/* Name */}
                     <td className="py-2.5 px-4">
                       <div className="flex items-center gap-2">
-                        <BookOpen size={14} className="text-primary/40 shrink-0" />
+                        <BookOpen
+                          size={14}
+                          className="text-primary/40 shrink-0"
+                        />
                         <span className="text-sm font-medium text-foreground">
                           {l.LHeadName}
                         </span>
                       </div>
                     </td>
 
-                    {/* Type */}
+                    {/* Code */}
                     <td className="py-2.5 px-4">
-                      {l.LHeadType ? (
+                      {l.LHeadCode ? (
                         <span className="text-xs font-mono bg-muted text-foreground/80 rounded px-2 py-0.5 flex items-center gap-1 w-fit">
-                          <Tag size={10} className="text-muted-foreground" />
-                          {l.LHeadType}
+                          <Hash size={10} className="text-muted-foreground" />
+                          {l.LHeadCode}
                         </span>
                       ) : (
-                        <span className="text-xs text-muted-foreground/50">—</span>
+                        <span className="text-xs text-muted-foreground/50">
+                          —
+                        </span>
                       )}
                     </td>
 
-                    {/* Group */}
+                    {/* Group — shows parent label above child badge when nested */}
                     <td className="py-2.5 px-4">
                       {l.GroupName ? (
-                        <span className="text-xs text-muted-foreground bg-muted/60 border border-border rounded-full px-2 py-0.5">
-                          {l.GroupName}
-                        </span>
+                        <div className="flex flex-col gap-0.5">
+                          {l.ParentGroupName && (
+                            <span className="text-[10px] text-muted-foreground/60 leading-none">
+                              {l.ParentGroupName}
+                            </span>
+                          )}
+                          <span className="text-xs text-muted-foreground bg-muted/60 border border-border rounded-full px-2 py-0.5 w-fit">
+                            {l.GroupName}
+                          </span>
+                        </div>
                       ) : (
-                        <span className="text-xs text-muted-foreground/50">—</span>
+                        <span className="text-xs text-muted-foreground/50">
+                          —
+                        </span>
                       )}
                     </td>
 
@@ -568,7 +665,6 @@ const GeneralLedgerMaster: React.FC = () => {
                         >
                           <Pencil size={13} />
                         </button>
-
                         {deleteConfirm === l.LHeadId ? (
                           <>
                             <button
