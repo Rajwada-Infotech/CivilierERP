@@ -131,11 +131,12 @@ async function startServer() {
     app.use("/api/debit-note", authMiddleware, require("./routes/debitNote"));
     app.use("/api/tc-master", authMiddleware, require("./routes/tcMaster"));
 
-    // POST is open to all authenticated users (any role can log their own activity).
-    // GET/export/stream are restricted to admin inside the route itself.
+    // All /api/user-activity routes are restricted to admin, super_admin, and dba.
+    // POST (write) and GET (read) guards are also enforced inside the route file.
     app.use(
       "/api/user-activity",
       authMiddleware,
+      allowRoles("admin", "super_admin", "dba"),
       require("./routes/userActivity"),
     );
 

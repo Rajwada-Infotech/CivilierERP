@@ -776,11 +776,157 @@ const ActivityBrowser: React.FC = () => {
                   key={session.sessionId}
                   className="overflow-hidden rounded-2xl border border-border bg-card shadow-sm"
                 >
-                  {/* Your full grouped session card - completely unchanged */}
+                  {/* ── Session header row ── */}
                   <div className="grid gap-4 border-b border-border bg-muted/30 p-5 lg:grid-cols-[1.3fr_1fr_1fr_1fr]">
-                    {/* ... all your session card JSX remains exactly as you had it ... */}
-                    {/* (I kept the entire block you provided) */}
+                    {/* User */}
+                    <div className="flex items-start gap-3">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary/10">
+                        <User size={16} className="text-primary" />
+                      </div>
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold text-foreground">
+                          {session.userName}
+                        </p>
+                        <p className="truncate text-xs text-muted-foreground">
+                          {session.userEmail}
+                        </p>
+                        <span
+                          className={`mt-1 inline-block rounded-full border px-2 py-0.5 text-[10px] font-heading uppercase tracking-wider ${ROLE_COLORS[session.userRole] ?? "bg-slate-500/10 text-slate-600 border-slate-500/20"}`}
+                        >
+                          {roleLabel(session.userRole)}
+                        </span>
+                        {alerts.map((a) => (
+                          <span
+                            key={a.label}
+                            className={`ml-1 inline-flex items-center gap-1 text-[10px] font-medium ${a.color}`}
+                          >
+                            <a.icon size={10} />
+                            {a.label}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* IP + Device */}
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-2 text-xs">
+                        <Monitor
+                          size={12}
+                          className="shrink-0 text-muted-foreground"
+                        />
+                        <span className="truncate text-muted-foreground">
+                          {session.loginEvent.ipAddress || "—"}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs">
+                        <Fingerprint
+                          size={12}
+                          className="shrink-0 text-muted-foreground"
+                        />
+                        <span className="truncate font-mono text-[10px] text-muted-foreground">
+                          {session.deviceFingerprint !== "Unknown"
+                            ? session.deviceFingerprint.slice(0, 16) + "…"
+                            : "Unknown"}
+                        </span>
+                      </div>
+                      <div className="truncate text-[11px] text-muted-foreground">
+                        {session.deviceInfo}
+                      </div>
+                    </div>
+
+                    {/* Login / Logout times */}
+                    <div className="space-y-2">
+                      <div className="flex items-center gap-2 text-xs">
+                        <LogIn
+                          size={12}
+                          className="shrink-0 text-emerald-500"
+                        />
+                        <span className="text-muted-foreground">
+                          {loginMeta.date}{" "}
+                          <span className="font-medium text-foreground">
+                            {loginMeta.time}
+                          </span>
+                        </span>
+                      </div>
+                      {session.logoutTime ? (
+                        <div className="flex items-center gap-2 text-xs">
+                          <LogOut
+                            size={12}
+                            className="shrink-0 text-rose-400"
+                          />
+                          <span className="text-muted-foreground">
+                            {logoutMeta.date}{" "}
+                            <span className="font-medium text-foreground">
+                              {logoutMeta.time}
+                            </span>
+                          </span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 text-xs text-emerald-500">
+                          <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-500" />
+                          Active session
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Duration + action count */}
+                    <div className="flex flex-col items-end justify-between gap-2 text-right">
+                      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                        <Timer size={12} />
+                        {session.durationMs
+                          ? formatDuration(session.durationMs)
+                          : "—"}
+                      </div>
+                      <Badge variant="secondary" className="text-[10px]">
+                        {session.actions.length} action
+                        {session.actions.length !== 1 ? "s" : ""}
+                      </Badge>
+                    </div>
                   </div>
+
+                  {/* ── Action list (collapsible rows) ── */}
+                  {session.actions.length > 0 && (
+                    <div className="divide-y divide-border/50">
+                      {session.actions.slice(0, 5).map((action) => {
+                        const { date, time } = formatDateTime(action.timestamp);
+                        return (
+                          <div
+                            key={action.id}
+                            className="flex flex-wrap items-center gap-3 px-5 py-2.5 text-xs text-muted-foreground hover:bg-muted/20"
+                          >
+                            <span
+                              className={`rounded-full border px-2 py-0.5 font-heading text-[10px] uppercase tracking-wider ${ACTION_COLORS[action.actionType || "read"]}`}
+                            >
+                              {action.actionType || "action"}
+                            </span>
+                            <span className="font-medium capitalize text-foreground">
+                              {action.resource || "—"}
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <Clock size={10} />
+                              {date} {time}
+                            </span>
+                            {action.requestMethod && (
+                              <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-[10px]">
+                                {action.requestMethod}
+                              </span>
+                            )}
+                            {action.requestUrl && (
+                              <span className="max-w-[260px] truncate font-mono text-[10px]">
+                                {action.requestUrl}
+                              </span>
+                            )}
+                          </div>
+                        );
+                      })}
+                      {session.actions.length > 5 && (
+                        <div className="px-5 py-2 text-[11px] italic text-muted-foreground">
+                          +{session.actions.length - 5} more action
+                          {session.actions.length - 5 !== 1 ? "s" : ""}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               );
             })}
