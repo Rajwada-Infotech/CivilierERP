@@ -8,6 +8,7 @@ import React, {
 } from "react";
 import { loginUser } from "../api/userApi";
 import { useActivityBrowser } from "../contexts/ActivityBrowserContext";
+
 import type {
   UserRole,
   PageKey,
@@ -15,10 +16,12 @@ import type {
   PagePermission,
   AppUser,
 } from "./types";
+
 import * as AuthUtils from "./auth.utils";
 
+// Re-export everything needed by WidgetsRights component
 export { PAGE_DEFINITIONS } from "@/constants/pageDefinitions";
-export type { PageKey, PageAction };
+export type { PageKey, PageAction, PagePermission, AppUser };
 
 interface AuthContextType {
   currentUser: AppUser | null;
@@ -86,7 +89,6 @@ export const AuthProvider = ({
         }
 
         const { token, user } = data;
-
         localStorage.setItem("token", token);
 
         const appUser: AppUser = {
@@ -104,7 +106,6 @@ export const AuthProvider = ({
         localStorage.setItem("user", JSON.stringify(appUser));
         setCurrentUser(appUser);
 
-        // Record login (original logic)
         try {
           await recordLogin({
             id: appUser.id,
@@ -155,6 +156,7 @@ export const AuthProvider = ({
           user.id === userId ? { ...user, pagePermissions: permissions } : user,
         ),
       );
+
       if (currentUser && currentUser.id === userId) {
         const updatedUser = { ...currentUser, pagePermissions: permissions };
         setCurrentUser(updatedUser);
