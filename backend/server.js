@@ -131,10 +131,12 @@ async function startServer() {
     app.use("/api/debit-note", authMiddleware, require("./routes/debitNote"));
     app.use("/api/tc-master", authMiddleware, require("./routes/tcMaster"));
 
+    // All /api/user-activity routes are restricted to admin, super_admin, and dba.
+    // POST (write) and GET (read) guards are also enforced inside the route file.
     app.use(
       "/api/user-activity",
       authMiddleware,
-      allowRoles("admin"),
+      allowRoles("admin", "super_admin", "dba"),
       require("./routes/userActivity"),
     );
 

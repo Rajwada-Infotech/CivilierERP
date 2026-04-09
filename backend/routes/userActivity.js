@@ -3,6 +3,10 @@ const router = express.Router();
 const crypto = require("crypto");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
+const allowRoles = require("../middleware/role");
+
+// Guard for all activity routes — admin, super_admin, and dba only
+const adminOnly = allowRoles("admin", "super_admin", "dba");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -35,8 +39,8 @@ function mapActivityRow(row) {
   };
 }
 
-// ── GET paginated activity logs ───────────────────────────────────────────────
-router.get("/", authMiddleware, async (req, res) => {
+// ── GET paginated activity logs (admin only) ──────────────────────────────────
+router.get("/", authMiddleware, adminOnly, async (req, res) => {
   try {
     const pool = getPool();
 
@@ -164,8 +168,8 @@ router.get("/", authMiddleware, async (req, res) => {
   }
 });
 
-// ── Export CSV ────────────────────────────────────────────────────────────────
-router.get("/export", authMiddleware, async (req, res) => {
+// ── Export CSV (admin only) ───────────────────────────────────────────────────
+router.get("/export", authMiddleware, adminOnly, async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -199,8 +203,8 @@ router.get("/export", authMiddleware, async (req, res) => {
   }
 });
 
-// ── SSE Stream — registered BEFORE /:sessionId so "stream" isn't swallowed ───
-router.get("/stream", authMiddleware, async (req, res) => {
+// ── SSE Stream (admin only) — registered BEFORE /:sessionId so "stream" isn't swallowed ───
+router.get("/stream", authMiddleware, adminOnly, async (req, res) => {
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
@@ -235,79 +239,84 @@ router.get("/stream", authMiddleware, async (req, res) => {
   });
 });
 
-// ── Session timeline ──────────────────────────────────────────────────────────
-router.get("/session/:sessionId", authMiddleware, async (req, res) => {
-  try {
-    const pool = getPool();
-    const result = await pool
-      .request()
-      .input("sessionId", sql.NVarChar(50), req.params.sessionId)
-      .query(
-        "SELECT * FROM dbo.UserActivityLog WHERE SessionId = @sessionId ORDER BY CreatedAt ASC",
-      );
-    res.json(result.recordset.map(mapActivityRow));
-  } catch (err) {
-    console.error("Session activity error:", err);
-    res.status(500).json({ error: "Failed to fetch session activity" });
-  }
-});
+// ── Session timeline (admin only) ────────────────────────────────────────────
+router.get(
+  "/session/:sessionId",
+  authMiddleware,
+  adminOnly,
+  async (req, res) => {
+    try {
+      const pool = getPool();
+      const result = await pool
+        .request()
+        .input("sessionId", sql.NVarChar(50), req.params.sessionId)
+        .query(
+          "SELECT * FROM dbo.UserActivityLog WHERE SessionId = @sessionId ORDER BY CreatedAt ASC",
+        );
+      res.json(result.recordset.map(mapActivityRow));
+    } catch (err) {
+      console.error("Session activity error:", err);
+      res.status(500).json({ error: "Failed to fetch session activity" });
+    }
+  },
+);
 
-// ── POST — log a single activity event ───────────────────────────────────────
-// FIX: INSERT was missing the Id column.
-// dbo.UserActivityLog has Id NVARCHAR(50) PRIMARY KEY with no DEFAULT,
-// so every POST silently failed with a constraint error.
-// We now generate a UUID here and include it in every INSERT.
-router.post("/", authMiddleware, async (req, res) => {
-  const { userId, userName, userEmail, userRole, event, ...rest } =
-    req.body || {};
+// ── POST — log a single activity event (admin / super_admin / dba only) ──────
+router.post(
+  "/",
+  authMiddleware,
+  allowRoles("admin", "super_admin", "dba"),
+  async (req, res) => {
+    const { userId, userName, userEmail, userRole, event, ...rest } =
+      req.body || {};
 
-  if (!userId || !userName || !event) {
-    return res
-      .status(400)
-      .json({ error: "userId, userName and event are required" });
-  }
+    if (!userId || !userName || !event) {
+      return res
+        .status(400)
+        .json({ error: "userId, userName and event are required" });
+    }
 
-  try {
-    const pool = getPool();
-    const newId = crypto.randomUUID();
+    try {
+      const pool = getPool();
+      const newId = crypto.randomUUID();
 
-    await pool
-      .request()
-      .input("id", sql.NVarChar(50), newId)
-      .input("userId", sql.NVarChar(50), String(userId))
-      .input("userName", sql.NVarChar(100), String(userName))
-      .input(
-        "userEmail",
-        sql.NVarChar(100),
-        userEmail ? String(userEmail) : null,
-      )
-      .input("userRole", sql.NVarChar(50), userRole ? String(userRole) : null)
-      .input("event", sql.NVarChar(20), String(event))
-      .input("ipAddress", sql.NVarChar(50), rest.ipAddress || "unknown")
-      .input("deviceInfo", sql.NVarChar(255), rest.deviceInfo || "unknown")
-      .input(
-        "deviceFingerprint",
-        sql.NVarChar(100),
-        rest.deviceFingerprint || null,
-      )
-      .input("actionType", sql.NVarChar(50), rest.actionType || null)
-      .input("resource", sql.NVarChar(200), rest.resource || null)
-      .input("details", sql.NVarChar(sql.MAX), rest.details || null)
-      .input("sessionId", sql.NVarChar(50), rest.sessionId || null)
-      .input(
-        "sessionDuration",
-        sql.Int,
-        Number.isFinite(Number(rest.sessionDuration))
-          ? Number(rest.sessionDuration)
-          : null,
-      )
-      .input(
-        "requestMethod",
-        sql.NVarChar(10),
-        rest.requestMethod ? String(rest.requestMethod).toUpperCase() : null,
-      )
-      .input("requestUrl", sql.NVarChar(500), rest.requestUrl || null)
-      .input("createdAt", sql.DateTime2, new Date()).query(`
+      await pool
+        .request()
+        .input("id", sql.NVarChar(50), newId)
+        .input("userId", sql.NVarChar(50), String(userId))
+        .input("userName", sql.NVarChar(100), String(userName))
+        .input(
+          "userEmail",
+          sql.NVarChar(100),
+          userEmail ? String(userEmail) : null,
+        )
+        .input("userRole", sql.NVarChar(50), userRole ? String(userRole) : null)
+        .input("event", sql.NVarChar(20), String(event))
+        .input("ipAddress", sql.NVarChar(50), rest.ipAddress || "unknown")
+        .input("deviceInfo", sql.NVarChar(255), rest.deviceInfo || "unknown")
+        .input(
+          "deviceFingerprint",
+          sql.NVarChar(100),
+          rest.deviceFingerprint || null,
+        )
+        .input("actionType", sql.NVarChar(50), rest.actionType || null)
+        .input("resource", sql.NVarChar(200), rest.resource || null)
+        .input("details", sql.NVarChar(sql.MAX), rest.details || null)
+        .input("sessionId", sql.NVarChar(50), rest.sessionId || null)
+        .input(
+          "sessionDuration",
+          sql.Int,
+          Number.isFinite(Number(rest.sessionDuration))
+            ? Number(rest.sessionDuration)
+            : null,
+        )
+        .input(
+          "requestMethod",
+          sql.NVarChar(10),
+          rest.requestMethod ? String(rest.requestMethod).toUpperCase() : null,
+        )
+        .input("requestUrl", sql.NVarChar(500), rest.requestUrl || null)
+        .input("createdAt", sql.DateTime2, new Date()).query(`
         INSERT INTO dbo.UserActivityLog (
           Id,
           UserId, UserName, UserEmail, UserRole, EventType,
@@ -325,23 +334,24 @@ router.post("/", authMiddleware, async (req, res) => {
         )
       `);
 
-    // Broadcast new event to all live SSE clients
-    const newLog = mapActivityRow({
-      ...req.body,
-      id: newId,
-      timestamp: new Date().toISOString(),
-    });
-    activeStreams.forEach((client) => {
-      if (!client.writableEnded) {
-        client.write(`data: ${JSON.stringify([newLog])}\n\n`);
-      }
-    });
+      // Broadcast new event to all live SSE clients
+      const newLog = mapActivityRow({
+        ...req.body,
+        id: newId,
+        timestamp: new Date().toISOString(),
+      });
+      activeStreams.forEach((client) => {
+        if (!client.writableEnded) {
+          client.write(`data: ${JSON.stringify([newLog])}\n\n`);
+        }
+      });
 
-    res.json({ message: "Activity logged successfully", id: newId });
-  } catch (err) {
-    console.error("UserActivity POST error:", err);
-    res.status(500).json({ error: "Failed to log activity" });
-  }
-});
+      res.json({ message: "Activity logged successfully", id: newId });
+    } catch (err) {
+      console.error("UserActivity POST error:", err);
+      res.status(500).json({ error: "Failed to log activity" });
+    }
+  },
+);
 
 module.exports = router;
