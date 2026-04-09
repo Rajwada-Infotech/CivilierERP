@@ -1,25 +1,25 @@
 import { fetchWithAuth } from '@/lib/fetchWithAuth'
 
-const BASE = '/api/purchaseOrders'
+const BASE = '/api/customerMaster'
 
 // ─── CRUD ─────────────────────────────────────────────────────────────────────
 
-export const getPurchaseOrders = () => fetchWithAuth(BASE).then(r => r.json())
+export const getCustomers = () => fetchWithAuth(BASE).then(r => r.json())
 
-export const addPurchaseOrder = (data: object) => 
+export const addCustomer = (data: object) => 
   fetchWithAuth(BASE, { 
     method: 'POST', 
     headers: { 'Content-Type': 'application/json' }, 
     body: JSON.stringify(data) 
   }).then(r => r.json())
 
-export const updatePurchaseOrder = (id: string, data: object) => 
+export const updateCustomer = (id: string, data: object) => 
   fetchWithAuth(`${BASE}/${id}`, { 
     method: 'PUT', 
     headers: { 'Content-Type': 'application/json' }, 
     body: JSON.stringify(data) 
   }).then(r => r.json())
 
-export const deletePurchaseOrder = (id: string) => 
+export const deleteCustomer = (id: string) => 
   fetchWithAuth(`${BASE}/${id}`, { method: 'DELETE' }).then(r => r.json())
 
