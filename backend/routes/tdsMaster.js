@@ -1,70 +1,79 @@
-const express = require("express")
+const express = require("express");
 const { cache } = require("../middleware/cache");
 const { redisDelPattern } = require("../redis");
-const router = express.Router()
-const { getPool, sql } = require("../db")
+const router = express.Router();
+const { getPool, sql } = require("../db");
 
 router.get("/", cache("tds-master", 300), async (req, res) => {
   try {
-    const pool = getPool()
-    const result = await pool.request().query("SELECT * FROM dbo.TDSMaster")
-    res.json(result.recordset)
-  } catch (err) { res.status(500).json({ error: err.message }) }
-})
+    const pool = getPool();
+    const result = await pool.request().query("SELECT * FROM dbo.TDSMaster");
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 router.post("/", async (req, res) => {
-  const { Nature, Name, Percentage, Status } = req.body
+  const { Nature, Name, Percentage, Status } = req.body;
   try {
-    const pool = getPool()
-    await pool.request()
-      .input("Nature",     sql.NVarChar,      Nature || null)
-      .input("Name",       sql.NVarChar,      Name || null)
-      .input("Percentage", sql.Decimal(5,2),  Percentage || null)
-      .input("Status",     sql.Bit,           Status ? 1 : 0)
-      .input("CreatedAt",  sql.DateTime,      new Date())
-      .query(`
+    const pool = getPool();
+    await pool
+      .request()
+      .input("Nature", sql.NVarChar, Nature || null)
+      .input("Name", sql.NVarChar, Name || null)
+      .input("Percentage", sql.Decimal(5, 2), Percentage || null)
+      .input("Status", sql.Bit, Status ? 1 : 0)
+      .input("CreatedAt", sql.DateTime, new Date()).query(`
         INSERT INTO dbo.TDSMaster (Nature, Name, Percentage, Status, CreatedAt)
         VALUES (@Nature, @Name, @Percentage, @Status, @CreatedAt)
-      `)
+      `);
     await redisDelPattern("cache:tds-master:*");
 
-    res.json({ message: "TDS added" })
-  } catch (err) { res.status(500).json({ error: err.message }) }
-})
+    res.json({ message: "TDS added" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 router.put("/:id", async (req, res) => {
-  const { Nature, Name, Percentage, Status } = req.body
+  const { Nature, Name, Percentage, Status } = req.body;
   try {
-    const pool = getPool()
-    await pool.request()
-      .input("TDSId",      sql.Int,           req.params.id)
-      .input("Nature",     sql.NVarChar,      Nature || null)
-      .input("Name",       sql.NVarChar,      Name || null)
-      .input("Percentage", sql.Decimal(5,2),  Percentage || null)
-      .input("Status",     sql.Bit,           Status ? 1 : 0)
-      .input("UpdatedAt",  sql.DateTime,      new Date())
-      .query(`
+    const pool = getPool();
+    await pool
+      .request()
+      .input("TDSId", sql.Int, req.params.id)
+      .input("Nature", sql.NVarChar, Nature || null)
+      .input("Name", sql.NVarChar, Name || null)
+      .input("Percentage", sql.Decimal(5, 2), Percentage || null)
+      .input("Status", sql.Bit, Status ? 1 : 0)
+      .input("UpdatedAt", sql.DateTime, new Date()).query(`
         UPDATE dbo.TDSMaster SET
           Nature=@Nature, Name=@Name, Percentage=@Percentage,
           Status=@Status, UpdatedAt=@UpdatedAt
         WHERE TDSId=@TDSId
-      `)
+      `);
     await redisDelPattern("cache:tds-master:*");
 
-    res.json({ message: "TDS updated" })
-  } catch (err) { res.status(500).json({ error: err.message }) }
-})
+    res.json({ message: "TDS updated" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 router.delete("/:id", async (req, res) => {
   try {
-    const pool = getPool()
-    await pool.request()
+    const pool = getPool();
+    await pool
+      .request()
       .input("TDSId", sql.Int, req.params.id)
-      .query("DELETE FROM dbo.TDSMaster WHERE TDSId=@TDSId")
+      .query("DELETE FROM dbo.TDSMaster WHERE TDSId=@TDSId");
     await redisDelPattern("cache:tds-master:*");
 
-    res.json({ message: "TDS deleted" })
-  } catch (err) { res.status(500).json({ error: err.message }) }
-})
+    res.json({ message: "TDS deleted" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
-module.exports = router
+module.exports = router;

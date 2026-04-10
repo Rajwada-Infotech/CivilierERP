@@ -1,6 +1,5 @@
 const express = require("express");
 const router = express.Router();
-const crypto = require("crypto");
 const { getPool, sql } = require("../db");
 const allowRoles = require("../middleware/role");
 
@@ -351,11 +350,9 @@ router.post("/", async (req, res) => {
 
   try {
     const pool = getPool();
-    const newId = crypto.randomUUID();
 
-    await pool
+    const insertResult = await pool
       .request()
-      .input("id", sql.NVarChar(50), newId)
       .input("userId", sql.NVarChar(50), resolvedUserId)
       .input("userName", sql.NVarChar(100), resolvedUserName)
       .input("userEmail", sql.NVarChar(100), resolvedUserEmail)
@@ -409,13 +406,15 @@ router.post("/", async (req, res) => {
       )
       .input("createdAt", sql.DateTime2, new Date()).query(`
         INSERT INTO dbo.UserActivityLog (
-          Id, UserId, UserName, UserEmail, UserRole, EventType,
+          UserId, UserName, UserEmail, UserRole, EventType,
           IpAddress, DeviceInfo, DeviceFingerprint,
           ActionType, Resource, Details,
           SessionId, SessionDuration,
           RequestMethod, RequestUrl, CreatedAt
-        ) VALUES (
-          @id, @userId, @userName, @userEmail, @userRole, @event,
+        )
+        OUTPUT INSERTED.Id
+        VALUES (
+          @userId, @userName, @userEmail, @userRole, @event,
           @ipAddress, @deviceInfo, @deviceFingerprint,
           @actionType, @resource, @details,
           @sessionId, @sessionDuration,
@@ -423,7 +422,8 @@ router.post("/", async (req, res) => {
         )
       `);
 
-    res.json({ message: "Activity logged", id: newId });
+    const insertedId = insertResult.recordset?.[0]?.Id ?? null;
+    res.json({ message: "Activity logged", id: insertedId });
   } catch (err) {
     console.error("POST error:", {
       message: err.message,

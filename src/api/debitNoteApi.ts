@@ -1,13 +1,15 @@
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
+
 const BASE_URL = "/api/debit-note";
 
 export const getDebitNotes = async () => {
-  const res = await fetch(BASE_URL);
+  const res = await fetchWithAuth(BASE_URL);
   if (!res.ok) throw new Error(`GET failed: ${res.status}`);
   return res.json();
 };
 
 export const addDebitNote = async (data: Record<string, unknown>) => {
-  const res = await fetch(BASE_URL, {
+  const res = await fetchWithAuth(BASE_URL, {
     method: "POST",
     body: JSON.stringify(data),
   });
@@ -19,7 +21,7 @@ export const addDebitNote = async (data: Record<string, unknown>) => {
 };
 
 export const updateDebitNote = async (id: number, data: Record<string, unknown>) => {
-  const res = await fetch(`${BASE_URL}/${id}`, {
+  const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
     method: "PUT",
     body: JSON.stringify(data),
   });
@@ -31,7 +33,7 @@ export const updateDebitNote = async (id: number, data: Record<string, unknown>)
 };
 
 export const deleteDebitNote = async (id: number) => {
-  const res = await fetch(`${BASE_URL}/${id}`, {
+  const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
     method: "DELETE",
   });
   if (!res.ok) {

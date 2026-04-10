@@ -1,21 +1,23 @@
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
+
 const BASE_URL = "/api/work-orders";
 
 // ── Header CRUD ──────────────────────────────────────────────────────────────
 
 export const getWorkOrders = async () => {
-  const res = await fetch(BASE_URL);
+  const res = await fetchWithAuth(BASE_URL);
   if (!res.ok) throw new Error(`GET failed: ${res.status}`);
   return res.json();
 };
 
 export const getWorkOrder = async (id: number) => {
-  const res = await fetch(`${BASE_URL}/${id}`);
+  const res = await fetchWithAuth(`${BASE_URL}/${id}`);
   if (!res.ok) throw new Error(`GET failed: ${res.status}`);
   return res.json();
 };
 
 export const createWorkOrder = async (data: Record<string, unknown>) => {
-  const res = await fetch(BASE_URL, {
+  const res = await fetchWithAuth(BASE_URL, {
     method: "POST",
     body: JSON.stringify(data),
   });
@@ -30,7 +32,7 @@ export const updateWorkOrder = async (
   id: number,
   data: Record<string, unknown>,
 ) => {
-  const res = await fetch(`${BASE_URL}/${id}`, {
+  const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
     method: "PUT",
     body: JSON.stringify(data),
   });
@@ -42,7 +44,7 @@ export const updateWorkOrder = async (
 };
 
 export const deleteWorkOrder = async (id: number) => {
-  const res = await fetch(`${BASE_URL}/${id}`, { method: "DELETE" });
+  const res = await fetchWithAuth(`${BASE_URL}/${id}`, { method: "DELETE" });
   if (!res.ok) {
     const err = await res.json();
     throw new Error(err.error || "DELETE failed");
@@ -97,7 +99,7 @@ export const saveFullWorkOrder = async (
   id: number,
   payload: WorkOrderFullPayload,
 ) => {
-  const res = await fetch(`${BASE_URL}/${id}/save-full`, {
+  const res = await fetchWithAuth(`${BASE_URL}/${id}/save-full`, {
     method: "POST",
     body: JSON.stringify(payload),
   });

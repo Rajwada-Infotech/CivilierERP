@@ -1,6 +1,7 @@
 const jwt = require("jsonwebtoken");
 const { redisGet } = require("../redis");
-const { BLACKLIST_PREFIX } = require("./blacklist");
+
+const BLACKLIST_PREFIX = "blacklist:";
 
 module.exports = async (req, res, next) => {
   try {
@@ -16,20 +17,13 @@ module.exports = async (req, res, next) => {
       return res.status(401).json({ error: "No token provided" });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-    // Reject tokens issued before last server boot
-    const bootTime = await redisGet("server:boot");
-    if (bootTime && decoded.iat * 1000 < parseInt(bootTime)) {
-      return res.status(401).json({ error: "Session expired. Please log in again." });
-    }
-
-    // Check Redis blacklist (logout invalidation) — only after JWT is valid
+    // Check Redis blacklist (logout invalidation)
     const isBlacklisted = await redisGet(`${BLACKLIST_PREFIX}${token}`);
     if (isBlacklisted) {
       return res.status(401).json({ error: "Token has been invalidated. Please log in again." });
     }
 
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.user = decoded;
     req.token = token; // store for use in logout route
 
