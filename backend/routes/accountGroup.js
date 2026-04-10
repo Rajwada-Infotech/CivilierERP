@@ -1,8 +1,10 @@
 const express = require("express");
+const { cache } = require("../middleware/cache");
+const { redisDelPattern } = require("../redis");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 
-router.get("/", async (req, res) => {
+router.get("/", cache("account-group", 300), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -36,6 +38,8 @@ router.post("/", async (req, res) => {
         INSERT INTO dbo.AccountGroup (Name, Code, ParentGroupId, Status, CreatedBy, CreatedAt)
         VALUES (@Name, @Code, @ParentGroupId, @Status, @CreatedBy, @CreatedAt)
       `);
+    await redisDelPattern("cache:account-group:*");
+
     res.json({ message: "Account group added" });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -60,6 +64,8 @@ router.put("/:id", async (req, res) => {
           Status=@Status, UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt
         WHERE AGId=@AGId
       `);
+    await redisDelPattern("cache:account-group:*");
+
     res.json({ message: "Account group updated" });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -73,6 +79,8 @@ router.delete("/:id", async (req, res) => {
       .request()
       .input("AGId", sql.Int, req.params.id)
       .query("DELETE FROM dbo.AccountGroup WHERE AGId=@AGId");
+    await redisDelPattern("cache:account-group:*");
+
     res.json({ message: "Account group deleted" });
   } catch (err) {
     res.status(500).json({ error: err.message });

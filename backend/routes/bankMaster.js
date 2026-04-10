@@ -1,9 +1,11 @@
 const express = require("express")
+const { cache } = require("../middleware/cache");
+const { redisDelPattern } = require("../redis");
 const router = express.Router()
 const { getPool, sql } = require("../db")
 
 // GET all banks
-router.get("/", async (req, res) => {
+router.get("/", cache("bank-master", 300), async (req, res) => {
   try {
     const pool = getPool()
     const result = await pool.request().query(
@@ -52,6 +54,8 @@ router.post("/", async (req, res) => {
           @BStatus, @CreatedBy, @CreatedAt
         )
       `)
+    await redisDelPattern("cache:bank-master:*");
+
     res.json({ message: "Bank added successfully" })
   } catch (err) {
     console.error("INSERT ERROR:", err.message)
@@ -98,6 +102,8 @@ router.put("/:id", async (req, res) => {
           UpdatedAt          = @UpdatedAt
         WHERE BId = @BId
       `)
+    await redisDelPattern("cache:bank-master:*");
+
     res.json({ message: "Bank updated successfully" })
   } catch (err) {
     console.error("UPDATE ERROR:", err.message)
@@ -112,6 +118,8 @@ router.delete("/:id", async (req, res) => {
     await pool.request()
       .input("BId", sql.Int, parseInt(req.params.id))
       .query("DELETE FROM dbo.BankMaster WHERE BId = @BId")
+    await redisDelPattern("cache:bank-master:*");
+
     res.json({ message: "Bank deleted successfully" })
   } catch (err) {
     console.error("DELETE ERROR:", err.message)

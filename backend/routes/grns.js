@@ -1,8 +1,10 @@
 const express = require("express")
+const { cache } = require("../middleware/cache");
+const { redisDelPattern } = require("../redis");
 const router = express.Router()
 const { sql } = require("../db")
 
-router.get("/", async (req, res) => {
+router.get("/", cache("grns", 300), async (req, res) => {
   try {
     const pool = await sql.connect()
     const result = await pool.request().query(`
@@ -92,6 +94,8 @@ router.put("/:id", async (req, res) => {
           Remarks = @Remarks
         WHERE GRNID = @GRNID
       `)
+    await redisDelPattern("cache:grns:*");
+
     res.json({ message: "GRN updated successfully" })
   } catch (err) { 
     res.status(500).json({ error: err.message }) 
@@ -104,6 +108,8 @@ router.delete("/:id", async (req, res) => {
     await pool.request()
       .input("GRNID", sql.Int, req.params.id)
       .query("DELETE FROM GoodsReceiptNotes WHERE GRNID = @GRNID")
+    await redisDelPattern("cache:grns:*");
+
     res.json({ message: "GRN deleted successfully" })
   } catch (err) { 
     res.status(500).json({ error: err.message }) 

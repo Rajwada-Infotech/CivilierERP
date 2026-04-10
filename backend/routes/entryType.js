@@ -1,9 +1,11 @@
 const express = require("express");
+const { cache } = require("../middleware/cache");
+const { redisDelPattern } = require("../redis");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 
 // GET all
-router.get("/", async (req, res) => {
+router.get("/", cache("entry-type", 300), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query("SELECT * FROM dbo.Entry_Type");
@@ -30,6 +32,8 @@ router.post("/", async (req, res) => {
         VALUES
           (@Epname, @EntryType, @Eprefix, @EDoc_N, NEWID(), @E_CreatedAt)
       `);
+    await redisDelPattern("cache:entry-type:*");
+
     res.json({ message: "Entry type added successfully" });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -54,6 +58,8 @@ router.put("/:id", async (req, res) => {
           Eprefix=@Eprefix, EDoc_N=@EDoc_N
         WHERE E_Id=@E_Id
       `);
+    await redisDelPattern("cache:entry-type:*");
+
     res.json({ message: "Entry type updated successfully" });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -69,6 +75,8 @@ router.delete("/:id", async (req, res) => {
       .request()
       .input("E_Id", sql.UniqueIdentifier, id)
       .query("DELETE FROM dbo.Entry_Type WHERE E_Id=@E_Id");
+    await redisDelPattern("cache:entry-type:*");
+
     res.json({ message: "Entry type deleted successfully" });
   } catch (err) {
     res.status(500).json({ error: err.message });
