@@ -1,8 +1,10 @@
 const express = require("express")
+const { cache } = require("../middleware/cache");
+const { redisDelPattern } = require("../redis");
 const router = express.Router()
 const { getPool, sql } = require("../db")
 
-router.get("/", async (req, res) => {
+router.get("/", cache("purchase-orders", 300), async (req, res) => {
   try {
     const pool = getPool()
     const result = await pool.request().query("SELECT * FROM dbo.PurchaseOrders")
@@ -44,6 +46,8 @@ router.post("/", async (req, res) => {
           @TotalAmount, @PaymentTerms, @Status, @Remarks, @CreatedAt
         )
       `)
+    await redisDelPattern("cache:purchase-orders:*");
+
     res.json({ message: "Purchase order added" })
   } catch (err) { res.status(500).json({ error: err.message }) }
 })
@@ -82,6 +86,8 @@ router.put("/:id", async (req, res) => {
           UpdatedAt=@UpdatedAt
         WHERE PurchaseOrderID=@PurchaseOrderID
       `)
+    await redisDelPattern("cache:purchase-orders:*");
+
     res.json({ message: "Purchase order updated" })
   } catch (err) { res.status(500).json({ error: err.message }) }
 })
@@ -92,6 +98,8 @@ router.delete("/:id", async (req, res) => {
     await pool.request()
       .input("PurchaseOrderID", sql.Int, req.params.id)
       .query("DELETE FROM dbo.PurchaseOrders WHERE PurchaseOrderID=@PurchaseOrderID")
+    await redisDelPattern("cache:purchase-orders:*");
+
     res.json({ message: "Purchase order deleted" })
   } catch (err) { res.status(500).json({ error: err.message }) }
 })

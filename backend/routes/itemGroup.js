@@ -1,4 +1,6 @@
 const express = require("express");
+const { cache } = require("../middleware/cache");
+const { redisDelPattern } = require("../redis");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 
@@ -6,7 +8,7 @@ const { getPool, sql } = require("../db");
 // Items are child rows: Parent_Id IS NOT NULL (handled by itemMaster route)
 
 // GET all item groups (top-level only)
-router.get("/", async (req, res) => {
+router.get("/", cache("item-groups", 300), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -162,6 +164,8 @@ router.put("/:id", async (req, res) => {
     if (result.rowsAffected[0] === 0) {
       return res.status(404).json({ error: "Item group not found" });
     }
+    await redisDelPattern("cache:item-groups:*");
+
     res.json({ message: "Item group updated successfully" });
   } catch (err) {
     console.error("PUT /item-groups ERROR:", err.message);
@@ -198,6 +202,8 @@ router.delete("/:id", async (req, res) => {
     if (result.rowsAffected[0] === 0) {
       return res.status(404).json({ error: "Item group not found" });
     }
+    await redisDelPattern("cache:item-groups:*");
+
     res.json({ message: "Item group deleted successfully" });
   } catch (err) {
     console.error("DELETE /item-groups ERROR:", err.message);
