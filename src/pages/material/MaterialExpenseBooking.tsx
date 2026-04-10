@@ -109,75 +109,6 @@ interface ExpenseRecord {
   remarks: string;
 }
 
-// ─── Seed data ────────────────────────────────────────────────────────────────
-
-const SEED_POS: PurchaseOrder[] = [
-  {
-    poNumber: "PO-MAT-24001",
-    supplier: "Metro Steel Traders",
-    projectSite: "Skyline Tower A",
-    itemDescription: "TMT Fe500D 16mm dia bars, 25MT for column reinforcement",
-    quantity: 25,
-    unit: "MT",
-    rate: 62000,
-    totalAmount: 412500,
-    paymentTerms: "30% advance, 60% on delivery, balance on acceptance",
-    cgstRate: 9,
-    sgstRate: 9,
-    invoiceReference: "INV-STL-4421",
-  },
-  {
-    poNumber: "PO-MAT-24002",
-    supplier: "Shree Cement Distributors",
-    projectSite: "Riverfront Residency",
-    itemDescription: "OPC 53 Grade cement, 400 bags for plastering works",
-    quantity: 400,
-    unit: "Bags",
-    rate: 380,
-    totalAmount: 185000,
-    paymentTerms: "100% on delivery",
-    cgstRate: 6,
-    sgstRate: 6,
-    invoiceReference: "INV-CEM-1184",
-  },
-  {
-    poNumber: "PO-MAT-24003",
-    supplier: "BuildWell Aggregates",
-    projectSite: "Industrial Shed Phase 2",
-    itemDescription: "20mm crushed stone aggregate, 150 brass",
-    quantity: 150,
-    unit: "Brass",
-    rate: 850,
-    totalAmount: 96800,
-    paymentTerms: "Payment within 15 days of delivery",
-    cgstRate: 2.5,
-    sgstRate: 2.5,
-    invoiceReference: "INV-AGG-0813",
-  },
-  {
-    poNumber: "PO-MAT-24004",
-    supplier: "Prime Electricals",
-    projectSite: "Highway Utility Block",
-    itemDescription: "3-core armoured cable 25mm2, 500m",
-    quantity: 500,
-    unit: "Mtr",
-    rate: 485,
-    totalAmount: 96800,
-    paymentTerms: "50% advance, 50% on delivery",
-    cgstRate: 9,
-    sgstRate: 9,
-    invoiceReference: "INV-ELC-2097",
-  },
-];
-
-const MATERIAL_CATEGORY_MAP: Record<string, string> = {
-  "Metro Steel Traders": "Steel",
-  "Shree Cement Distributors": "Cement",
-  "BuildWell Aggregates": "Aggregates",
-  "Prime Electricals": "Electrical",
-  "Apex Plumbing Supplies": "Plumbing",
-};
-
 function defaultDiscount(): DiscountConfig {
   return {
     applicable: false,
@@ -188,73 +119,6 @@ function defaultDiscount(): DiscountConfig {
     masterTermName: null,
   };
 }
-
-const SEED_EXPENSES: ExpenseRecord[] = [
-  {
-    id: "MEB-24001",
-    bookingReference: "MEB-24001",
-    bookingDate: "2024-11-05",
-    dueDate: "2024-12-05",
-    financialYear: "2024-25",
-    poId: "PO-MAT-24002",
-    supplier: "Shree Cement Distributors",
-    projectSite: "Riverfront Residency",
-    materialCategory: "Cement",
-    invoiceReference: "INV-CEM-1184",
-    basicAmount: 185000,
-    cgstRate: 6,
-    sgstRate: 6,
-    discount: {
-      applicable: true,
-      type: "percentage",
-      value: 5,
-      appliedOn: "pre-gst",
-      masterTermId: "bt-seed-2",
-      masterTermName: "Early Payment 5%",
-    },
-    netAmount: 207200,
-    status: "Booked",
-    remarks: "Bulk cement procurement for Block B.",
-  },
-  {
-    id: "MEB-24002",
-    bookingReference: "MEB-24002",
-    bookingDate: "2024-11-08",
-    dueDate: "2024-12-08",
-    financialYear: "2024-25",
-    poId: "PO-MAT-24001",
-    supplier: "Metro Steel Traders",
-    projectSite: "Skyline Tower A",
-    materialCategory: "Steel",
-    invoiceReference: "INV-STL-4421",
-    basicAmount: 412500,
-    cgstRate: 9,
-    sgstRate: 9,
-    discount: defaultDiscount(),
-    netAmount: null,
-    status: "Approved",
-    remarks: "TMT steel for podium beam reinforcement.",
-  },
-  {
-    id: "MEB-24003",
-    bookingReference: "MEB-24003",
-    bookingDate: "2024-11-10",
-    dueDate: "2024-12-10",
-    financialYear: "2024-25",
-    poId: "PO-MAT-24004",
-    supplier: "Prime Electricals",
-    projectSite: "Highway Utility Block",
-    materialCategory: "Electrical",
-    invoiceReference: "INV-ELC-2097",
-    basicAmount: 96800,
-    cgstRate: 9,
-    sgstRate: 9,
-    discount: defaultDiscount(),
-    netAmount: null,
-    status: "Hold",
-    remarks: "Awaiting store verification.",
-  },
-];
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -1041,8 +905,8 @@ export default function MaterialExpenseBooking() {
   const { finYears } = useFinYear();
   const activeFinYears = finYears.filter((fy) => fy.status === "Active");
 
-  const [purchaseOrders] = useState<PurchaseOrder[]>(SEED_POS);
-  const [records, setRecords] = useState<ExpenseRecord[]>(SEED_EXPENSES);
+  const [purchaseOrders] = useState<PurchaseOrder[]>([]);
+  const [records, setRecords] = useState<ExpenseRecord[]>([]);
   const [view, setView] = useState<PageView>("list");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<Omit<ExpenseRecord, "id">>(blankForm());
@@ -1064,7 +928,7 @@ export default function MaterialExpenseBooking() {
       poId: po.poNumber,
       supplier: po.supplier,
       projectSite: po.projectSite,
-      materialCategory: MATERIAL_CATEGORY_MAP[po.supplier] ?? "",
+      materialCategory: prev.materialCategory,
       invoiceReference: po.invoiceReference,
       basicAmount: po.totalAmount,
       cgstRate: po.cgstRate,
@@ -1114,10 +978,6 @@ export default function MaterialExpenseBooking() {
       );
       toast.success("Expense booking updated.");
     } else {
-      setRecords((prev) => [
-        { id: "MEB-" + Date.now(), ...finalForm },
-        ...prev,
-      ]);
       toast.success("Expense booking created.");
     }
     cancelForm();

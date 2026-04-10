@@ -1,43 +1,122 @@
 import React from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { getList, addRecord, updateRecord, deleteRecord } from "@/api/accountHeadApi";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { MasterPage, FieldDef, ColumnDef } from "@/components/MasterPage";
+import { MasterPage, type FieldDef, type ColumnDef, type DataChangeEvent } from "@/components/MasterPage";
+
+const SUPPLIER_TYPE = "S";
 
 const fields: FieldDef[] = [
-  { name: "name", label: "Supplier Name", type: "text", required: true },
-  { name: "contact", label: "Contact Person", type: "text" },
-  { name: "phone", label: "Phone Number", type: "text" },
-  { name: "email", label: "Email Address", type: "text" },
-  { name: "gst", label: "GST Number", type: "text", uppercase: true },
-  { name: "pan", label: "PAN Number", type: "text", uppercase: true },
-  { name: "category", label: "Supplier Category", type: "select", options: ["Material", "Equipment", "Labour", "Services", "Transport"] },
-  { name: "paymentTerms", label: "Payment Terms", type: "select", options: ["Advance", "15 Days", "30 Days", "45 Days", "60 Days"] },
-  { name: "creditLimit", label: "Credit Limit (₹)", type: "number", prefix: "₹" },
-  { name: "address", label: "Address", type: "textarea", fullWidth: true },
-  { name: "status", label: "Status", type: "toggle", defaultValue: true },
+  { name: "LHeadName",          label: "Supplier Name",     type: "text",     required: true },
+  { name: "LHeadContactPerson", label: "Contact Person",    type: "text" },
+  { name: "LHeadPhone",         label: "Phone Number",      type: "text" },
+  { name: "LHeadEmail",         label: "Email Address",     type: "text" },
+  { name: "LGST",               label: "GST Number",        type: "text",     uppercase: true },
+  { name: "LDescription",       label: "PAN Number",        type: "text",     uppercase: true },
+  { name: "supplierCategory",   label: "Supplier Category", type: "select",   options: ["Material", "Equipment", "Labour", "Services", "Transport"] },
+  { name: "LHeadPaymentTerms",  label: "Payment Terms",     type: "text" },
+  { name: "LHeadAddress",       label: "Address",           type: "textarea", fullWidth: true },
+  { name: "LHeadStatus",        label: "Status",            type: "toggle",   defaultValue: true },
 ];
 
 const columns: ColumnDef[] = [
-  { key: "name", label: "Supplier Name" },
-  { key: "contact", label: "Contact Person" },
-  { key: "phone", label: "Phone" },
-  { key: "gst", label: "GST No." },
-  { key: "category", label: "Category" },
-  { key: "paymentTerms", label: "Payment Terms" },
-  { key: "status", label: "Status" },
+  { key: "LHeadName",          label: "Supplier Name" },
+  { key: "LHeadContactPerson", label: "Contact Person" },
+  { key: "LHeadPhone",         label: "Phone" },
+  { key: "LGST",               label: "GST No." },
+  { key: "LHeadPaymentTerms",  label: "Payment Terms" },
+  { key: "LHeadStatus",        label: "Status" },
 ];
 
-const initialData = [
-  { name: "Metro Hardware", contact: "Amit Shah", phone: "9876000111", email: "amit@metro.com", gst: "27AABCM1111F1Z1", pan: "AABCM1111F", category: "Material", paymentTerms: "30 Days", creditLimit: "500000", address: "Pune, MH", status: true },
-  { name: "Bharat Steel Traders", contact: "Ravi Jain", phone: "9876000222", email: "ravi@bharatsteel.in", gst: "24BBDCB2222G2Z2", pan: "BBDCB2222G", category: "Material", paymentTerms: "45 Days", creditLimit: "800000", address: "Surat, GJ", status: true },
-  { name: "Quick Transport Co", contact: "Dinesh Rao", phone: "9876000333", email: "dinesh@quicktrans.co", gst: "29CDEQT3333H3Z3", pan: "CDEQT3333H", category: "Transport", paymentTerms: "15 Days", creditLimit: "200000", address: "Bangalore, KA", status: true },
-];
+const SupplierMaster: React.FC = () => {
+  const queryClient = useQueryClient();
 
-const SupplierMaster: React.FC = () => (
-  <>
+  const { data, isLoading, error } = useQuery({
+    queryKey: ["account-head", SUPPLIER_TYPE],
+    queryFn: () => getList(SUPPLIER_TYPE),
+  });
+
+  const mappedData = React.useMemo(() => {
+    if (!Array.isArray(data)) return [];
+    return data.map((item) => ({
+      _id:                String(item.LHeadId),
+      LHeadName:          item.LHeadName          || "",
+      LHeadContactPerson: item.LHeadContactPerson || "",
+      LHeadPhone:         item.LHeadPhone         || "",
+      LHeadEmail:         item.LHeadEmail         || "",
+      LGST:               item.LGST               || "",
+      LDescription:       item.LDescription       || "",
+      supplierCategory:   "Material",
+      LHeadPaymentTerms:  item.LHeadPaymentTerms  || "",
+      LHeadAddress:       item.LHeadAddress       || "",
+      LHeadStatus:        Boolean(item.LHeadStatus),
+    }));
+  }, [data]);
+
+  const handleDataEvent = async (event: DataChangeEvent) => {
+    try {
+      if (event.action === "delete") {
+        await deleteRecord(Number(event.id));
+        toast.success("Supplier deleted!");
+        await queryClient.invalidateQueries({ queryKey: ["account-head", SUPPLIER_TYPE] });
+        return;
+      }
+
+      const record = event.record;
+
+      if (!record) {
+        toast.error("No record data found");
+        return;
+      }
+
+      const payload = {
+        LHeadName:          record.LHeadName,
+        LHeadType:          SUPPLIER_TYPE,
+        LHeadContactPerson: record.LHeadContactPerson,
+        LHeadPhone:         record.LHeadPhone,
+        LHeadEmail:         record.LHeadEmail,
+        LGST:               record.LGST,
+        LDescription:       record.LDescription,
+        LHeadPaymentTerms:  record.LHeadPaymentTerms,
+        LHeadAddress:       record.LHeadAddress,
+        LHeadStatus:        record.LHeadStatus,
+        LBranchName:        "Main",
+        LGSTState:          null,
+        LCountry:           "India",
+        LBelongsTo:         null,
+      };
+
+      if (event.action === "add") {
+        await addRecord(payload, SUPPLIER_TYPE);
+        toast.success("Supplier saved!");
+      } else if (event.action === "update") {
+        await updateRecord(Number(event.id), payload, SUPPLIER_TYPE);
+        toast.success("Supplier updated!");
+      }
+
+      await queryClient.invalidateQueries({ queryKey: ["account-head", SUPPLIER_TYPE] });
+    } catch (err: unknown) {
+      toast.error((err as Error).message || "Operation failed");
+    }
+  };
+
+  if (isLoading) return <div className="p-6 text-muted-foreground">Loading...</div>;
+  if (error)     return <div className="p-6 text-red-500">Failed to load suppliers.</div>;
+
+  return (
+    <>
       <Breadcrumbs items={["Dashboard", "Finance Module", "Supplier Master"]} />
-    <h1 className="text-xl font-heading font-bold text-foreground mb-4">Supplier Master</h1>
-    <MasterPage title="Supplier" fields={fields} columns={columns} initialData={initialData} />
-  </>
-);
+      <h1 className="text-xl font-heading font-bold text-foreground mb-4">Supplier Master</h1>
+      <MasterPage
+        title="Supplier"
+        fields={fields}
+        columns={columns}
+        initialData={mappedData}
+        onDataEvent={handleDataEvent}
+      />
+    </>
+  );
+};
 
 export default SupplierMaster;

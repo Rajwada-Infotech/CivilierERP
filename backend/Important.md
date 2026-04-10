@@ -1,86 +1,33 @@
-# ⚠️ IMPORTANT — seedExpenses.js
+# Operational Notes
 
-## What is this file?
+## Expense Booking and Debit Note dependency
 
-`seedExpenses.js` is a **one-time database seed script** located in the `backend/` folder. It inserts 8 test `ExpenseBooking` records into `dbo.ExpenseBooking` in the **Civilier** SQL Server database.
+The Debit Note flow depends on valid records in `dbo.ExpenseBooking`. The bill selector and related foreign key constraints require each saved debit note to reference an existing expense booking record.
 
-These records are required for the **Debit Note Master** to function correctly. The bill dropdown in the Debit Note form is populated from `dbo.ExpenseBooking`, and the `FK_DN_Bill` foreign key constraint on `dbo.DebitNote.bill_id` enforces that every saved debit note must reference a real `Eid` from that table. Without these seed rows, saving any debit note will throw:
+If `dbo.ExpenseBooking` is empty, users must first create records through the application’s **Expense Booking** workflow before creating debit notes.
 
-> _"The INSERT statement conflicted with the FOREIGN KEY constraint FK\_DN\_Bill"_
+## Setup guidance
 
----
+For a new environment:
 
-## When to run it
+1. Confirm the database schema is applied correctly.
+2. Start the backend with the correct database configuration.
+3. Create required master and transactional records through the application UI.
+4. Verify the relevant API endpoints return live database data before user onboarding.
 
-Run this script **once**, the first time you set up the project on a new machine or a fresh database. You do **not** need to run it again unless the `dbo.ExpenseBooking` table is wiped.
+## Operational caution
 
-The script is safe to re-run — it checks the existing row count and skips insertion if seed data is already present.
+Avoid relying on hardcoded or seed business data in shared, staging, or production environments. Business records such as expense bookings should be created through the supported application flows so downstream modules continue to work with real data.
 
----
+## If Debit Note save fails due to missing bill references
 
-## How to run it
+If the database reports a foreign key conflict related to debit note bill references:
 
-From the project root, run:
+1. Check whether the selected bill exists in `dbo.ExpenseBooking`.
+2. Confirm the record was created successfully and is available to the backend.
+3. Verify the API used by the Debit Note form is reading from the intended database.
+4. Re-test after correcting the source data.
 
-```bash
-cd backend
-node seedExpenses.js
-```
+## Data reset caution
 
-Expected output:
-
-```
-Connecting to: 192.168.0.201 / Civilier
-Connected.
-
-dbo.ExpenseBooking currently has 0 row(s).
-
-Inserting 8 seed rows...
-
-  ✓ Inserted INV-1001 — Prestige Heights          →  Eid = 1
-  ✓ Inserted INV-1002 — Green Valley Phase 2       →  Eid = 2
-  ✓ Inserted INV-1003 — Prestige Heights           →  Eid = 3
-  ✓ Inserted INV-1004 — Riverside Residency        →  Eid = 4
-  ✓ Inserted INV-1005 — Green Valley Phase 2       →  Eid = 5
-  ✓ Inserted INV-1006 — Metro Commercial Hub       →  Eid = 6
-  ✓ Inserted INV-1007 — Prestige Heights           →  Eid = 7
-  ✓ Inserted INV-1008 — Riverside Residency        →  Eid = 8
-
-✅ Seed complete. Restart your backend and the bill dropdown will populate.
-```
-
-After running, **restart the backend server** so the `/api/expense-booking/options` endpoint picks up the new rows.
-
----
-
-## What it inserts
-
-| Eid | Doc No   | Project                  | Type    | Amount      | Status   |
-|-----|----------|--------------------------|---------|-------------|----------|
-| 1   | INV-1001 | Prestige Heights         | Invoice | ₹45,000     | Pending  |
-| 2   | INV-1002 | Green Valley Phase 2     | Invoice | ₹1,20,500   | Approved |
-| 3   | INV-1003 | Prestige Heights         | Bill    | ₹2,85,000   | Pending  |
-| 4   | INV-1004 | Riverside Residency      | Invoice | ₹67,250     | Approved |
-| 5   | INV-1005 | Green Valley Phase 2     | Bill    | ₹98,750     | Pending  |
-| 6   | INV-1006 | Metro Commercial Hub     | Invoice | ₹55,000     | Approved |
-| 7   | INV-1007 | Prestige Heights         | Bill    | ₹35,000     | Pending  |
-| 8   | INV-1008 | Riverside Residency      | Invoice | ₹42,000     | Approved |
-
----
-
-## How to reset
-
-If you need to wipe and re-seed, run the following SQL in SSMS **before** running the script again:
-
-```sql
-DELETE FROM dbo.DebitNote;
-DELETE FROM dbo.ExpenseBooking;
-```
-
-> ⚠️ Delete `dbo.DebitNote` first — it holds a FK reference to `dbo.ExpenseBooking` and will block deletion if reversed.
-
----
-
-## Production note
-
-This script is for **testing and development only**. In production, `dbo.ExpenseBooking` will be populated through the **Expense Booking** module in the application. Once real data exists, this seed script is no longer needed and can be removed from the codebase.
+Do not delete transactional tables directly in active environments unless the reset is planned and approved. If a non-production database must be reset, handle dependent tables in the correct order and take a backup first.

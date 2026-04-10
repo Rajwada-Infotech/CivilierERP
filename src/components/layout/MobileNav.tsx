@@ -245,14 +245,7 @@ export const MobileNav: React.FC = () => {
             icon: Archive,
             children: [{ label: "Records", path: "/records", icon: Archive }],
           },
-          {
-            label: "Widgets",
-            icon: Puzzle,
-            children: [
-              { label: "Widgets", path: "/widgets", icon: Puzzle },
-              { label: "Reports", path: "/reports", icon: BarChart3 },
-            ],
-          },
+          { label: "Widgets", path: "/widgets", icon: Puzzle },
         ];
 
       default:
@@ -273,7 +266,7 @@ export const MobileNav: React.FC = () => {
     {
       icon: Receipt,
       label: "General Ledger",
-      path: "/masters/expenses",
+      path: "/masters/general-ledger",
       color: "text-orange-400",
     },
     {

@@ -20,6 +20,7 @@ import {
   updateDebitNote,
   deleteDebitNote,
 } from "@/api/debitNoteApi";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { toast } from "sonner";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -276,18 +277,18 @@ const DebitNoteMaster: React.FC = () => {
 
   const { data: enterpriseData } = useQuery({
     queryKey: ["enterprise-options"],
-    queryFn: () => fetch("/api/enterprises/options").then((r) => r.json()),
+    queryFn: () => fetchWithAuth("/api/enterprises/options").then((r) => r.json()),
   });
 
   const { data: accountHeadData } = useQuery({
     queryKey: ["account-head-options"],
-    queryFn: () => fetch("/api/account-head/options").then((r) => r.json()),
+    queryFn: () => fetchWithAuth("/api/account-head/options").then((r) => r.json()),
   });
 
   const { data: expenseData, refetch: refetchExpenses, error: expenseError } = useQuery({
     queryKey: ["expense-booking-options"],
     queryFn: async () => {
-      const r = await fetch("/api/expense-booking/options");
+      const r = await fetchWithAuth("/api/expense-booking/options");
       if (!r.ok) {
         const body = await r.json().catch(() => ({}));
         throw new Error(body.error || `Failed to load expense options (${r.status})`);
