@@ -208,19 +208,31 @@ router.get("/", adminOnly, async (req, res) => {
   }
 });
 
-// SSE stream
+// SSE stream - IMPROVED FOR VERCEL
 router.get("/stream", adminOnly, async (req, res) => {
+  // Set SSE headers with improved configuration
   res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Cache-Control", "no-cache, no-transform");
   res.setHeader("Connection", "keep-alive");
   res.setHeader("X-Accel-Buffering", "no");
-  res.flushHeaders?.();
+
+  // Critical: Flush headers immediately
+  if (res.flushHeaders) {
+    res.flushHeaders();
+  }
+
+  // Disable timeout
   res.setTimeout(0);
+
+  // Send initial connection confirmation
+  res.write(":ok\n\n");
 
   activeStreams.push(res);
 
   const sendLatest = async () => {
-    if (res.writableEnded) return;
+    if (res.writableEnded || res.destroyed) {
+      return;
+    }
 
     try {
       const pool = getPool();
@@ -230,40 +242,58 @@ router.get("/stream", adminOnly, async (req, res) => {
           "SELECT TOP 25 * FROM dbo.UserActivityLog ORDER BY CreatedAt DESC",
         );
 
-      res.write(
-        `data: ${JSON.stringify(result.recordset.map(mapActivityRow))}\n\n`,
-      );
+      if (!res.writableEnded && !res.destroyed) {
+        res.write(
+          `data: ${JSON.stringify(result.recordset.map(mapActivityRow))}\n\n`,
+        );
+      }
     } catch (err) {
       console.error("SSE data error:", err);
     }
   };
 
   const sendPing = () => {
-    if (!res.writableEnded) {
+    if (!res.writableEnded && !res.destroyed) {
       res.write(":ping\n\n");
     }
   };
 
+  // Send initial data immediately
   try {
     await sendLatest();
   } catch (err) {
     console.error("SSE initial send error:", err);
   }
 
-  const dataInterval = setInterval(sendLatest, 5000);
-  const pingInterval = setInterval(sendPing, 30000);
+  // More frequent pings to keep connection alive (every 15s)
+  const pingInterval = setInterval(sendPing, 15000);
 
-  req.on("close", () => {
+  // Data updates every 5 seconds
+  const dataInterval = setInterval(sendLatest, 5000);
+
+  // Cleanup function
+  const cleanup = () => {
     activeStreams = activeStreams.filter((stream) => stream !== res);
     clearInterval(dataInterval);
     clearInterval(pingInterval);
+  };
+
+  // Handle client disconnect
+  req.on("close", () => {
+    console.log("SSE client disconnected");
+    cleanup();
   });
 
+  // Handle errors
   req.on("error", (err) => {
     console.error("SSE request error:", err);
-    activeStreams = activeStreams.filter((stream) => stream !== res);
-    clearInterval(dataInterval);
-    clearInterval(pingInterval);
+    cleanup();
+  });
+
+  // Handle response errors
+  res.on("error", (err) => {
+    console.error("SSE response error:", err);
+    cleanup();
   });
 });
 
@@ -347,10 +377,26 @@ router.post("/", async (req, res) => {
         normalizeNullableString(rest.deviceFingerprint, 100),
       )
       .input("actionType", sql.NVarChar(50), normalizedActionType)
-      .input("resource", sql.NVarChar(200), normalizeNullableString(rest.resource, 200))
-      .input("details", sql.NVarChar(sql.MAX), normalizeNullableString(rest.details))
-      .input("sessionId", sql.NVarChar(50), normalizeNullableString(rest.sessionId, 50))
-      .input("sessionDuration", sql.Int, normalizeNullableInt(rest.sessionDuration))
+      .input(
+        "resource",
+        sql.NVarChar(200),
+        normalizeNullableString(rest.resource, 200),
+      )
+      .input(
+        "details",
+        sql.NVarChar(sql.MAX),
+        normalizeNullableString(rest.details),
+      )
+      .input(
+        "sessionId",
+        sql.NVarChar(50),
+        normalizeNullableString(rest.sessionId, 50),
+      )
+      .input(
+        "sessionDuration",
+        sql.Int,
+        normalizeNullableInt(rest.sessionDuration),
+      )
       .input(
         "requestMethod",
         sql.NVarChar(10),
@@ -361,8 +407,7 @@ router.post("/", async (req, res) => {
         sql.NVarChar(500),
         normalizeNullableString(rest.requestUrl, 500),
       )
-      .input("createdAt", sql.DateTime2, new Date())
-      .query(`
+      .input("createdAt", sql.DateTime2, new Date()).query(`
         INSERT INTO dbo.UserActivityLog (
           Id, UserId, UserName, UserEmail, UserRole, EventType,
           IpAddress, DeviceInfo, DeviceFingerprint,
