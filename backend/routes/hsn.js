@@ -1,9 +1,11 @@
 const express = require("express")
+const { cache } = require("../middleware/cache");
+const { redisDelPattern } = require("../redis");
 const router = express.Router()
 const { getPool, sql } = require("../db")
 
 // GET all HSN
-router.get("/", async (req, res) => {
+router.get("/", cache("hsn", 300), async (req, res) => {
   try {
     const pool = getPool()
     const result = await pool.request().query(
@@ -55,6 +57,8 @@ router.post("/", async (req, res) => {
           @HCreatedBy, @HCreatedAt, @HApprovedBy, @HIsEdited
         )
       `)
+    await redisDelPattern("cache:hsn:*");
+
     res.json({ message: "HSN added successfully" })
   } catch (err) {
     console.error("INSERT ERROR:", err.message)
@@ -97,6 +101,8 @@ router.put("/:code", async (req, res) => {
           HIsEdited         = @HIsEdited
         WHERE HCode = @HCode
       `)
+    await redisDelPattern("cache:hsn:*");
+
     res.json({ message: "HSN updated successfully" })
   } catch (err) {
     console.error("UPDATE ERROR:", err.message)
@@ -113,6 +119,8 @@ router.delete("/:code", async (req, res) => {
       .request()
       .input("HCode", sql.VarChar, code)
       .query("DELETE FROM dbo.HSN WHERE HCode = @HCode")
+    await redisDelPattern("cache:hsn:*");
+
     res.json({ message: "HSN deleted successfully" })
   } catch (err) {
     console.error("DELETE ERROR:", err.message)
