@@ -9,7 +9,7 @@ export const getFinYears = async () => {
 };
 
 export const addFinYear = async (data: Record<string, unknown>) => {
-  const res = await fetch(BASE_URL, {
+  const res = await fetchWithAuth(BASE_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -25,7 +25,7 @@ export const updateFinYear = async (
   id: string,
   data: Record<string, unknown>,
 ) => {
-  const res = await fetch(`${BASE_URL}/${id}`, {
+  const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -38,7 +38,7 @@ export const updateFinYear = async (
 };
 
 export const deleteFinYear = async (id: string) => {
-  const res = await fetch(`${BASE_URL}/${id}`, { method: "DELETE" });
+  const res = await fetchWithAuth(`${BASE_URL}/${id}`, { method: "DELETE" });
   if (!res.ok) {
     const err = await res.json();
     throw new Error(err.error || "DELETE failed");

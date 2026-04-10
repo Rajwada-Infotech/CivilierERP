@@ -27,17 +27,38 @@ function extractResource(url: string) {
   try {
     const pathname = new URL(url, window.location.origin).pathname;
     const parts = pathname.split("/").filter(Boolean);
-    return parts[1] || parts[0] || "unknown";
+
+    // Skip 'api' prefix if present
+    const startIndex = parts[0] === "api" ? 1 : 0;
+
+    // Get the main resource (e.g., 'employees', 'expenses', 'masters')
+    let resource = parts[startIndex] || "general";
+
+    // Handle hyphenated resources by converting to readable format
+    // e.g., "tds-masters" -> "TDS Masters", "user-activity" -> "User Activity"
+    resource = resource
+      .split("-")
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(" ");
+
+    return resource;
   } catch {
-    return "unknown";
+    return "General";
   }
 }
 
 async function logAction(method: string, url: string) {
   try {
     const user = getStoredUser();
-    if (!user.id) return;
-    if (url.includes("/user-activity") || url.includes("/login")) return;
+    if (!user.id) {
+      console.debug("No user ID found, skipping activity log");
+      return;
+    }
+
+    // Don't log activity for user-activity or login endpoints to avoid recursion
+    if (url.includes("/user-activity") || url.includes("/login")) {
+      return;
+    }
 
     await logUserActivity({
       userId: user.id,
@@ -45,6 +66,7 @@ async function logAction(method: string, url: string) {
       userEmail: user.email || "",
       userRole: user.role || "",
       event: "action",
+      timestamp: new Date().toISOString(),
       actionType: ACTION_MAP[method] || "read",
       resource: extractResource(url),
       requestMethod: method,
@@ -54,7 +76,9 @@ async function logAction(method: string, url: string) {
         localStorage.getItem("deviceFingerprint_v1") || undefined,
     });
   } catch (error) {
-    console.debug("Action logging failed:", error);
+    // Don't throw - activity logging is non-critical
+    // Failures here shouldn't break the user's actual request
+    console.debug("Activity logging failed (non-critical):", error);
   }
 }
 
