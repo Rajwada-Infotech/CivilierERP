@@ -1,4 +1,11 @@
-import type { UserRole, PageKey, PageAction, PagePermission, AppUser, PageDefinition } from './types';
+import type {
+  UserRole,
+  PageKey,
+  PageAction,
+  PagePermission,
+  AppUser,
+  PageDefinition,
+} from "./types";
 
 export const PAGE_DEFINITIONS: PageDefinition[] = [
   {
@@ -14,7 +21,14 @@ export const PAGE_DEFINITIONS: PageDefinition[] = [
     path: "/transactions",
     group: "Main",
     availableActions: [
-      "view", "create", "edit", "delete", "print", "export", "approve", "reject",
+      "view",
+      "create",
+      "edit",
+      "delete",
+      "print",
+      "export",
+      "approve",
+      "reject",
     ],
   },
   {
@@ -178,7 +192,7 @@ export const createPermissionCheckers = (currentUser: AppUser | null) => {
     if (isPrivilegedRole(currentUser.role)) return true;
     if (ADMIN_ONLY_PAGES.includes(page)) return false;
     return currentUser.pagePermissions.some(
-      (p) => p.page === page && p.actions.includes("view")
+      (p) => p.page === page && p.actions.includes("view"),
     );
   };
 
@@ -187,10 +201,9 @@ export const createPermissionCheckers = (currentUser: AppUser | null) => {
     if (isPrivilegedRole(currentUser.role)) return true;
     if (ADMIN_ONLY_PAGES.includes(page)) return false;
     return currentUser.pagePermissions.some(
-      (p) => p.page === page && p.actions.includes(action)
+      (p) => p.page === page && p.actions.includes(action),
     );
   };
 
   return { canAccessPage, canDoAction };
 };
-

@@ -9,91 +9,63 @@ function getRedis() {
       port: parseInt(process.env.REDIS_PORT || "6379"),
       password: process.env.REDIS_PASSWORD || undefined,
       db: parseInt(process.env.REDIS_DB || "0"),
-      maxRetriesPerRequest: null,
       retryStrategy: (times) => {
-        console.log(`🔄 Retrying Redis... attempt ${times}`);
-        if (times > 5) return null;
+        if (times > 5) return null; // stop retrying after 5 attempts
         return Math.min(times * 500, 3000);
       },
+      // enableOfflineQueue: true (default) — queues commands while connecting
+      // lazyConnect: false (default) — connects immediately, no manual .connect() needed
     });
 
-    client.on("connect", () => console.log("✅ Redis connected"));
-    client.on("error", (err) =>
-      console.error("❌ Redis error:", err.message)
-    );
-    client.on("close", () =>
-      console.warn("⚠️ Redis connection closed")
-    );
-    
-    client.on("ready", () => console.log("🚀 Redis ready to use"));
+    client.on("connect", () => console.log("Redis connected"));
+    client.on("error", (err) => console.error("Redis error:", err.message));
+    client.on("close", () => console.warn("Redis connection closed"));
   }
-
   return client;
 }
 
-// Safe helpers (never crash app)
 async function redisGet(key) {
   try {
     return await getRedis().get(key);
-  } catch (err) {
-    console.error("Redis get error:", err.message);
+  } catch {
     return null;
   }
 }
 
 async function redisSet(key, value, ttlSeconds = null) {
-  if (!ttlSeconds) {
-    console.warn(`redisSet called on key "${key}" without TTL - data will persist indefinitely`);
-  }
   try {
     if (ttlSeconds) {
       await getRedis().set(key, value, "EX", ttlSeconds);
     } else {
       await getRedis().set(key, value);
     }
-  } catch (err) {
-    console.error("Redis set error:", err.message);
+  } catch {
+    // Redis down — skip silently, never block the app
   }
 }
 
 async function redisDel(key) {
   try {
     await getRedis().del(key);
-  } catch (err) {
-    console.error("Redis del error:", err.message);
-  }
+  } catch {}
 }
 
 async function redisDelPattern(pattern) {
   try {
     const redis = getRedis();
     let cursor = "0";
-
     do {
       const [nextCursor, keys] = await redis.scan(
         cursor,
         "MATCH",
         pattern,
         "COUNT",
-        100
+        100,
       );
-
       cursor = nextCursor;
-
-      if (keys.length) {
-        await redis.del(keys);
-      }
+      if (keys.length) await redis.del(...keys);
     } while (cursor !== "0");
-  } catch (err) {
-    console.error("Redis delPattern error:", err.message);
-  }
+  } catch {}
 }
 
-module.exports = {
-  getRedis,
-  redisGet,
-  redisSet,
-  redisDel,
-  redisDelPattern,
-};
-
+module.exports = { getRedis, redisGet, redisSet, redisDel, redisDelPattern };

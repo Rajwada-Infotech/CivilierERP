@@ -1,3 +1,4 @@
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import React from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
@@ -11,21 +12,22 @@ import { toast } from "sonner";
 // ─── API ──────────────────────────────────────────────────────────────────────
 const BASE = "/api/billing-terms";
 
-const getBillingTerms = () => fetch(BASE).then((r) => r.json());
+const getBillingTerms = () =>
+  fetchWithAuth(BASE).then((r) => r.json());
 const addBillingTerm = (data: object) =>
-  fetch(BASE, {
+  fetchWithAuth(BASE, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   }).then((r) => r.json());
 const updateBillingTerm = (id: string, data: object) =>
-  fetch(`${BASE}/${id}`, {
+  fetchWithAuth(`${BASE}/${id}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   }).then((r) => r.json());
 const deleteBillingTerm = (id: string) =>
-  fetch(`${BASE}/${id}`, { method: "DELETE" }).then((r) => r.json());
+  fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" }).then(
+    (r) => r.json(),
+  );
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface DbBillingTerm {

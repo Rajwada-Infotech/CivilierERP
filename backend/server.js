@@ -21,9 +21,6 @@ async function startServer() {
   try {
     await connectDB();
 
-    // Stamp boot time — invalidates all tokens issued before this restart
-    await getRedis().set("server:boot", Date.now().toString());
-
     // ---------------------------------------------------------------------------
     // Build Redis-backed rate limit stores INSIDE startServer so the Redis
     // client is already initialised before RedisStore tries to send commands.

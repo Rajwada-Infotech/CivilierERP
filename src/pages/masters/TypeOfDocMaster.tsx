@@ -1,3 +1,4 @@
+import { fetchWithAuth } from '@/lib/fetchWithAuth'
 import React from 'react'
 import { Breadcrumbs } from '@/components/Breadcrumbs'
 import { MasterPage, type DataChangeEvent, type RecordWithId } from '@/components/MasterPage'
@@ -7,10 +8,10 @@ import { toast } from 'sonner'
 // ─── API ──────────────────────────────────────────────────────────────────────
 const BASE = '/api/document-type'
 
-const getDocs    = () => fetch(BASE).then(r => r.json())
-const addDoc     = (data: object) => fetch(BASE, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(r => r.json())
-const updateDoc  = (id: string, data: object) => fetch(`${BASE}/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(r => r.json())
-const deleteDoc  = (id: string) => fetch(`${BASE}/${id}`, { method: 'DELETE' }).then(r => r.json())
+const getDocs    = () => fetchWithAuth(BASE).then(r => r.json())
+const addDoc     = (data: object) => fetchWithAuth(BASE, { method: 'POST', body: JSON.stringify(data) }).then(r => r.json())
+const updateDoc  = (id: string, data: object) => fetchWithAuth(`${BASE}/${id}`, { method: 'PUT', body: JSON.stringify(data) }).then(r => r.json())
+const deleteDoc  = (id: string) => fetchWithAuth(`${BASE}/${id}`, { method: 'DELETE' }).then(r => r.json())
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface DbDoc {

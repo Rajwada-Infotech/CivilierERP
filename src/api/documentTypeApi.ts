@@ -1,13 +1,15 @@
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
+
 const BASE_URL = "/api/document-type"
 
 export const getDocumentTypes = async () => {
-  const res = await fetch(BASE_URL)
+  const res = await fetchWithAuth(BASE_URL)
   if (!res.ok) throw new Error(`GET failed: ${res.status}`)
   return res.json()
 }
 
 export const addDocumentType = async (data: Record<string, unknown>) => {
-  const res = await fetch(BASE_URL, {
+  const res = await fetchWithAuth(BASE_URL, {
     method: "POST",
     body: JSON.stringify(data),
   })
@@ -16,7 +18,7 @@ export const addDocumentType = async (data: Record<string, unknown>) => {
 }
 
 export const updateDocumentType = async (id: string, data: Record<string, unknown>) => {
-  const res = await fetch(`${BASE_URL}/${id}`, {
+  const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
     method: "PUT",
     body: JSON.stringify(data),
   })
@@ -25,7 +27,7 @@ export const updateDocumentType = async (id: string, data: Record<string, unknow
 }
 
 export const deleteDocumentType = async (id: string) => {
-  const res = await fetch(`${BASE_URL}/${id}`, { method: "DELETE" })
+  const res = await fetchWithAuth(`${BASE_URL}/${id}`, { method: "DELETE" })
   if (!res.ok) { const err = await res.json(); throw new Error(err.error || "DELETE failed") }
   return res.json()
 }
