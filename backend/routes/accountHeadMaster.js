@@ -20,7 +20,7 @@ router.get("/", async (req, res) => {
     const request = pool.request();
     if (req.query.type) {
       query += ` WHERE lh.LHeadType = @type`;
-      request.input('type', sql.VarChar(50), req.query.type);
+      request.input("type", sql.VarChar(50), req.query.type);
     }
     const result = await request.query(query);
     res.json(result.recordset);
@@ -47,6 +47,7 @@ router.post("/", async (req, res) => {
     LCountry,
     LBelongsTo,
     LDescription,
+    LHeadType,
   } = req.body;
   try {
     const pool = getPool();
@@ -57,7 +58,11 @@ router.post("/", async (req, res) => {
       .input("LHeadPhone", sql.VarChar(15), LHeadPhone || null)
       .input("LHeadEmail", sql.NVarChar(100), LHeadEmail || null)
       .input("LHeadAddress", sql.VarChar(300), LHeadAddress || "N/A")
-      .input("LHeadContactPerson", sql.VarChar(100), LHeadContactPerson || "N/A")
+      .input(
+        "LHeadContactPerson",
+        sql.VarChar(100),
+        LHeadContactPerson || "N/A",
+      )
       .input("LHeadStatus", sql.Bit, LHeadStatus !== false ? 1 : 0)
       .input("LHeadPaymentTerms", sql.NVarChar(100), LHeadPaymentTerms || "N/A")
       .input("LBranchName", sql.VarChar(100), LBranchName || "Main")
@@ -66,18 +71,19 @@ router.post("/", async (req, res) => {
       .input("LCountry", sql.VarChar(50), LCountry || "India")
       .input("LBelongsTo", sql.Int, LBelongsTo || null)
       .input("LDescription", sql.NVarChar, LDescription || null)
+      .input("LHeadType", sql.VarChar(50), LHeadType || "GL")
       .input("CreatedBy", sql.Int, 1)
       .input("CreatedAt", sql.DateTime, new Date()).query(`
         INSERT INTO dbo.AccountHeadMaster (
           LHeadName, LHeadCode, LHeadPhone, LHeadEmail, LHeadAddress,
           LHeadContactPerson, LHeadStatus, LHeadPaymentTerms, LBranchName,
           LGST, LGSTState, LCountry, LBelongsTo, LDescription,
-          CreatedBy, CreatedAt
+          LHeadType, CreatedBy, CreatedAt
         ) VALUES (
           @LHeadName, @LHeadCode, @LHeadPhone, @LHeadEmail, @LHeadAddress,
           @LHeadContactPerson, @LHeadStatus, @LHeadPaymentTerms, @LBranchName,
           @LGST, @LGSTState, @LCountry, @LBelongsTo, @LDescription,
-          @CreatedBy, @CreatedAt
+          @LHeadType, @CreatedBy, @CreatedAt
         )
       `);
     res.json({ message: "Ledger head added successfully" });
@@ -92,11 +98,12 @@ router.post("/", async (req, res) => {
 router.get("/options", async (req, res) => {
   try {
     const pool = getPool();
-    let query = "SELECT LHeadId AS id, LHeadName AS label FROM dbo.AccountHeadMaster WHERE LHeadStatus = 1";
+    let query =
+      "SELECT LHeadId AS id, LHeadName AS label FROM dbo.AccountHeadMaster WHERE LHeadStatus = 1";
     const request = pool.request();
     if (req.query.type) {
       query += " AND LHeadType = @type";
-      request.input('type', sql.VarChar(50), req.query.type);
+      request.input("type", sql.VarChar(50), req.query.type);
     }
     query += " ORDER BY LHeadName";
     const result = await request.query(query);

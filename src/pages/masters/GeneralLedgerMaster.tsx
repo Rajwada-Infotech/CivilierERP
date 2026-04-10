@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getAccountGroups } from "@/api/accountApi";
 import { toast } from "sonner";
@@ -19,7 +19,6 @@ import {
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
 interface AccountGroup {
   _id: string;
   name: string;
@@ -49,10 +48,11 @@ const EMPTY_FORM: LedgerForm = {
 const BASE_URL = "/api/account-head";
 const GL_TYPE = "GL";
 
+// ─── API Functions ───────────────────────────────────────────────────────────
 const fetchLedgers = async (): Promise<LedgerHead[]> => {
   const res = await fetch(`${BASE_URL}?type=${encodeURIComponent(GL_TYPE)}`, {
-    headers: { 
-      Authorization: `Bearer ${localStorage.getItem("token") ?? ""}` 
+    headers: {
+      Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
     },
   });
   if (!res.ok) throw new Error(`Failed to fetch ledgers: ${res.status}`);
@@ -114,16 +114,11 @@ const deleteLedger = async (id: number) => {
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
-
 const GeneralLedgerMaster: React.FC = () => {
   const qc = useQueryClient();
 
   // ── Remote data ────────────────────────────────────────────────────────────
-
-  const {
-    data: groupsData,
-    isLoading: groupsLoading,
-  } = useQuery({
+  const { data: groupsData, isLoading: groupsLoading } = useQuery({
     queryKey: ["account-groups"],
     queryFn: getAccountGroups,
   });
@@ -153,54 +148,99 @@ const GeneralLedgerMaster: React.FC = () => {
   );
 
   // ── Local UI state ─────────────────────────────────────────────────────────
-
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<LedgerForm>(EMPTY_FORM);
-  const [errors, setErrors] = useState<Partial<Record<keyof LedgerForm, boolean>>>({});
+  const [errors, setErrors] = useState<
+    Partial<Record<keyof LedgerForm, boolean>>
+  >({});
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [filterGroup, setFilterGroup] = useState("");
-  const [sortField, setSortField] = useState<"LHeadName" | "LHeadCode" | "GroupName">("LHeadName");
+  const [sortField, setSortField] = useState<
+    "LHeadName" | "LHeadCode" | "GroupName"
+  >("LHeadName");
   const [sortAsc, setSortAsc] = useState(true);
 
-  // ── Mutations ──────────────────────────────────────────────────────────────
+  // Track whether user has manually edited the short code
+  const hasManuallyEditedCode = useRef(false);
 
+  // ── Mutations ──────────────────────────────────────────────────────────────
   const invalidate = () => qc.invalidateQueries({ queryKey: ["ledger-heads"] });
 
   const createMut = useMutation({
     mutationFn: createLedger,
-    onSuccess: () => { 
-      toast.success("Ledger account created"); 
-      invalidate(); 
-      resetForm(); 
+    onSuccess: () => {
+      toast.success("Ledger account created");
+      invalidate();
+      resetForm();
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const updateMut = useMutation({
     mutationFn: updateLedger,
-    onSuccess: () => { 
-      toast.success("Ledger account updated"); 
-      invalidate(); 
-      resetForm(); 
+    onSuccess: () => {
+      toast.success("Ledger account updated");
+      invalidate();
+      resetForm();
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const deleteMut = useMutation({
     mutationFn: deleteLedger,
-    onSuccess: () => { 
-      toast.success("Ledger account deleted"); 
-      invalidate(); 
-      setDeleteConfirm(null); 
+    onSuccess: () => {
+      toast.success("Ledger account deleted");
+      invalidate();
+      setDeleteConfirm(null);
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const saving = createMut.isPending || updateMut.isPending;
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
+  // ── Auto-generate Short Code Logic ────────────────────────────────────────
+  const generateShortCode = (name: string): string => {
+    const cleaned = name.trim().replace(/[^a-zA-Z0-9\s]/g, "");
+    const words = cleaned.split(/\s+/).filter(Boolean);
 
+    if (words.length === 0) return "";
+
+    if (words.length === 1) {
+      return words[0].substring(0, 4).toUpperCase();
+    } else if (words.length === 2) {
+      return (
+        words[0].substring(0, 3) + words[1].substring(0, 1)
+      ).toUpperCase();
+    } else {
+      return words
+        .slice(0, 4)
+        .map((w) => w[0])
+        .join("")
+        .toUpperCase();
+    }
+  };
+
+  // Auto-generate short code when account name changes (only for new records)
+  useEffect(() => {
+    if (editingId !== null) return; // Don't auto-generate during edit
+
+    const name = form.LHeadName.trim();
+
+    if (!name) {
+      setForm((prev) => ({ ...prev, LHeadCode: "" }));
+      hasManuallyEditedCode.current = false;
+      return;
+    }
+
+    // Auto-generate only if user has not manually edited the code
+    if (!hasManuallyEditedCode.current) {
+      const generated = generateShortCode(name);
+      setForm((prev) => ({ ...prev, LHeadCode: generated }));
+    }
+  }, [form.LHeadName, editingId]);
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
   const startEdit = (l: LedgerHead) => {
     setEditingId(l.LHeadId);
     setForm({
@@ -208,6 +248,7 @@ const GeneralLedgerMaster: React.FC = () => {
       LHeadCode: l.LHeadCode ?? "",
       LBelongsTo: l.LBelongsTo != null ? String(l.LBelongsTo) : "",
     });
+    hasManuallyEditedCode.current = true; // Existing code should be preserved
     setErrors({});
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
@@ -216,14 +257,16 @@ const GeneralLedgerMaster: React.FC = () => {
     setEditingId(null);
     setForm(EMPTY_FORM);
     setErrors({});
+    hasManuallyEditedCode.current = false;
   };
 
   const handleSave = () => {
     const e: Partial<Record<keyof LedgerForm, boolean>> = {};
     if (!form.LHeadName.trim()) e.LHeadName = true;
-    if (Object.keys(e).length) { 
-      setErrors(e); 
-      return; 
+
+    if (Object.keys(e).length) {
+      setErrors(e);
+      return;
     }
 
     if (editingId !== null) {
@@ -234,15 +277,15 @@ const GeneralLedgerMaster: React.FC = () => {
   };
 
   const toggleSort = (field: typeof sortField) => {
-    if (sortField === field) setSortAsc((a) => !a);
-    else { 
-      setSortField(field); 
-      setSortAsc(true); 
+    if (sortField === field) {
+      setSortAsc((a) => !a);
+    } else {
+      setSortField(field);
+      setSortAsc(true);
     }
   };
 
   // ── Filtered + sorted list ─────────────────────────────────────────────────
-
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
     const list = ledgers.filter((l) => {
@@ -250,51 +293,28 @@ const GeneralLedgerMaster: React.FC = () => {
         !q ||
         l.LHeadName?.toLowerCase().includes(q) ||
         (l.LHeadCode ?? "").toLowerCase().includes(q);
-      const matchGroup =
-        !filterGroup || String(l.LBelongsTo) === filterGroup;
+      const matchGroup = !filterGroup || String(l.LBelongsTo) === filterGroup;
       return matchSearch && matchGroup;
     });
 
     return [...list].sort((a, b) => {
-      const av = (sortField === "LHeadName"
-        ? a.LHeadName
-        : sortField === "LHeadCode"
-          ? a.LHeadCode
-          : a.GroupName) ?? "";
-      const bv = (sortField === "LHeadName"
-        ? b.LHeadName
-        : sortField === "LHeadCode"
-          ? b.LHeadCode
-          : b.GroupName) ?? "";
+      const av =
+        (sortField === "LHeadName"
+          ? a.LHeadName
+          : sortField === "LHeadCode"
+            ? a.LHeadCode
+            : a.GroupName) ?? "";
+      const bv =
+        (sortField === "LHeadName"
+          ? b.LHeadName
+          : sortField === "LHeadCode"
+            ? b.LHeadCode
+            : b.GroupName) ?? "";
       return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
     });
   }, [ledgers, search, filterGroup, sortField, sortAsc]);
 
-  // ── Sub-components ─────────────────────────────────────────────────────────
-
-  const SortTh = ({
-    label,
-    field,
-  }: {
-    label: string;
-    field: typeof sortField;
-  }) => (
-    <th
-      className="text-xs font-semibold text-muted-foreground uppercase tracking-wide py-3 px-4 cursor-pointer select-none hover:text-foreground transition-colors"
-      onClick={() => toggleSort(field)}
-    >
-      <div className="flex items-center gap-1">
-        {label}
-        <ChevronsUpDown
-          size={11}
-          className={sortField === field ? "text-primary" : "opacity-40"}
-        />
-      </div>
-    </th>
-  );
-
   // ── Render ─────────────────────────────────────────────────────────────────
-
   return (
     <>
       <Breadcrumbs items={["Masters", "General Ledger"]} />
@@ -309,7 +329,7 @@ const GeneralLedgerMaster: React.FC = () => {
         </p>
       </div>
 
-      {/* ── Form card ── */}
+      {/* Form Card */}
       <div className="rounded-xl border border-border bg-card mb-6">
         <div className="px-5 py-4 border-b border-border flex items-center justify-between">
           <h2 className="text-sm font-semibold text-foreground">
@@ -324,7 +344,6 @@ const GeneralLedgerMaster: React.FC = () => {
 
         <div className="p-5">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-5">
-
             {/* Account Name */}
             <div>
               <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-2">
@@ -360,19 +379,20 @@ const GeneralLedgerMaster: React.FC = () => {
                 />
                 <input
                   value={form.LHeadCode}
-                  onChange={(e) =>
+                  onChange={(e) => {
                     setForm((p) => ({
                       ...p,
                       LHeadCode: e.target.value.toUpperCase(),
-                    }))
-                  }
-                  placeholder="e.g. CASH"
+                    }));
+                    hasManuallyEditedCode.current = true;
+                  }}
+                  placeholder="e.g. CIH"
                   maxLength={20}
                   className="w-full text-sm rounded-lg border border-border pl-8 pr-3 py-2.5 bg-background text-foreground font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
                 />
               </div>
               <p className="text-[11px] text-muted-foreground mt-1">
-                Optional — used for quick reference (max 20 chars)
+                Auto-generated from account name (you can override manually)
               </p>
             </div>
 
@@ -410,7 +430,7 @@ const GeneralLedgerMaster: React.FC = () => {
             </div>
           </div>
 
-          {/* Actions */}
+          {/* Form Actions */}
           <div className="flex items-center gap-3 mt-6 pt-5 border-t border-border">
             <button
               onClick={handleSave}
@@ -432,6 +452,7 @@ const GeneralLedgerMaster: React.FC = () => {
                 </>
               )}
             </button>
+
             {editingId && (
               <button
                 onClick={resetForm}
@@ -444,7 +465,7 @@ const GeneralLedgerMaster: React.FC = () => {
         </div>
       </div>
 
-      {/* ── Table ── */}
+      {/* Table Section */}
       <div>
         {/* Toolbar */}
         <div className="mb-3 flex items-center gap-3 flex-wrap">
@@ -482,7 +503,10 @@ const GeneralLedgerMaster: React.FC = () => {
 
           {(search || filterGroup) && (
             <button
-              onClick={() => { setSearch(""); setFilterGroup(""); }}
+              onClick={() => {
+                setSearch("");
+                setFilterGroup("");
+              }}
               className="text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-1.5 hover:bg-muted transition-colors flex items-center gap-1.5"
             >
               <X size={11} /> Clear
@@ -499,9 +523,54 @@ const GeneralLedgerMaster: React.FC = () => {
           <table className="w-full text-left">
             <thead>
               <tr className="border-b border-border bg-muted/40">
-                <SortTh label="Account Name" field="LHeadName" />
-                <SortTh label="Code" field="LHeadCode" />
-                <SortTh label="Group" field="GroupName" />
+                <th
+                  className="text-xs font-semibold text-muted-foreground uppercase tracking-wide py-3 px-4 cursor-pointer select-none hover:text-foreground transition-colors"
+                  onClick={() => toggleSort("LHeadName")}
+                >
+                  <div className="flex items-center gap-1">
+                    Account Name
+                    <ChevronsUpDown
+                      size={11}
+                      className={
+                        sortField === "LHeadName"
+                          ? "text-primary"
+                          : "opacity-40"
+                      }
+                    />
+                  </div>
+                </th>
+                <th
+                  className="text-xs font-semibold text-muted-foreground uppercase tracking-wide py-3 px-4 cursor-pointer select-none hover:text-foreground transition-colors"
+                  onClick={() => toggleSort("LHeadCode")}
+                >
+                  <div className="flex items-center gap-1">
+                    Code
+                    <ChevronsUpDown
+                      size={11}
+                      className={
+                        sortField === "LHeadCode"
+                          ? "text-primary"
+                          : "opacity-40"
+                      }
+                    />
+                  </div>
+                </th>
+                <th
+                  className="text-xs font-semibold text-muted-foreground uppercase tracking-wide py-3 px-4 cursor-pointer select-none hover:text-foreground transition-colors"
+                  onClick={() => toggleSort("GroupName")}
+                >
+                  <div className="flex items-center gap-1">
+                    Group
+                    <ChevronsUpDown
+                      size={11}
+                      className={
+                        sortField === "GroupName"
+                          ? "text-primary"
+                          : "opacity-40"
+                      }
+                    />
+                  </div>
+                </th>
                 <th className="py-3 px-4 w-24" />
               </tr>
             </thead>
@@ -517,7 +586,10 @@ const GeneralLedgerMaster: React.FC = () => {
               ) : ledgersError ? (
                 <tr>
                   <td colSpan={4} className="py-12 text-center">
-                    <AlertCircle size={24} className="text-red-400 mx-auto mb-2" />
+                    <AlertCircle
+                      size={24}
+                      className="text-red-400 mx-auto mb-2"
+                    />
                     <p className="text-sm text-red-500">
                       Failed to load ledger accounts.
                     </p>
@@ -526,10 +598,15 @@ const GeneralLedgerMaster: React.FC = () => {
               ) : filtered.length === 0 ? (
                 <tr>
                   <td colSpan={4} className="py-12 text-center">
-                    <BookOpen size={28} className="text-muted-foreground/30 mx-auto mb-3" />
+                    <BookOpen
+                      size={28}
+                      className="text-muted-foreground/30 mx-auto mb-3"
+                    />
                     {ledgers.length === 0 ? (
                       <>
-                        <p className="text-sm text-muted-foreground">No ledger accounts yet.</p>
+                        <p className="text-sm text-muted-foreground">
+                          No ledger accounts yet.
+                        </p>
                         <p className="text-xs text-muted-foreground/70 mt-1">
                           Use the form above to create your first account.
                         </p>
@@ -549,17 +626,17 @@ const GeneralLedgerMaster: React.FC = () => {
                       editingId === l.LHeadId ? "bg-primary/5" : ""
                     }`}
                   >
-                    {/* Name */}
                     <td className="py-2.5 px-4">
                       <div className="flex items-center gap-2">
-                        <BookOpen size={14} className="text-primary/40 shrink-0" />
+                        <BookOpen
+                          size={14}
+                          className="text-primary/40 shrink-0"
+                        />
                         <span className="text-sm font-medium text-foreground">
                           {l.LHeadName}
                         </span>
                       </div>
                     </td>
-
-                    {/* Code */}
                     <td className="py-2.5 px-4">
                       {l.LHeadCode ? (
                         <span className="text-xs font-mono bg-muted text-foreground/80 rounded px-2 py-0.5 flex items-center gap-1 w-fit">
@@ -567,22 +644,22 @@ const GeneralLedgerMaster: React.FC = () => {
                           {l.LHeadCode}
                         </span>
                       ) : (
-                        <span className="text-xs text-muted-foreground/50">—</span>
+                        <span className="text-xs text-muted-foreground/50">
+                          —
+                        </span>
                       )}
                     </td>
-
-                    {/* Group */}
                     <td className="py-2.5 px-4">
                       {l.GroupName ? (
                         <span className="text-xs text-muted-foreground bg-muted/60 border border-border rounded-full px-2 py-0.5">
                           {l.GroupName}
                         </span>
                       ) : (
-                        <span className="text-xs text-muted-foreground/50">—</span>
+                        <span className="text-xs text-muted-foreground/50">
+                          —
+                        </span>
                       )}
                     </td>
-
-                    {/* Actions */}
                     <td className="py-2.5 px-4 text-right">
                       <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                         <button
