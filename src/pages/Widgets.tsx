@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useSearchParams, useNavigate } from "react-router-dom";
+import { useSearchParams } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   Puzzle,
@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 
 const widgetItems = [
+  { icon: BarChart3, label: "Reports" },
   { icon: BarChart2, label: "Bar Chart" },
   { icon: TrendingUp, label: "Line Chart" },
   { icon: PieChart, label: "Pie Chart" },
@@ -36,7 +37,6 @@ const widgetItems = [
 
 const Widgets = () => {
   const [searchParams] = useSearchParams();
-  const navigate = useNavigate();
   const paramWidget = searchParams.get("w");
   const [selected, setSelected] = useState<string | null>(paramWidget);
 
@@ -76,17 +76,6 @@ const Widgets = () => {
             </h1>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-            {/* Reports card — navigates to its own page */}
-            <button
-              onClick={() => navigate("/reports")}
-              className="flex flex-col items-center gap-2 p-5 rounded-lg border border-border bg-card transition-all hover:bg-accent/10 hover:shadow-md hover:-translate-y-0.5 hover:border-primary"
-            >
-              <BarChart3 size={28} className="text-primary" />
-              <span className="text-xs text-muted-foreground font-heading">
-                Reports
-              </span>
-            </button>
-
             {widgetItems.map(({ icon: Icon, label }) => (
               <button
                 key={label}

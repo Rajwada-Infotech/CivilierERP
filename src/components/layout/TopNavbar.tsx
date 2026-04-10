@@ -301,7 +301,6 @@ export const TopNavbar = () => {
   const { navCollapsed, setNavCollapsed } = useNavbarCollapse();
 
   const [setupOpen, setSetupOpen] = useState(false);
-  const [widgetsOpen, setWidgetsOpen] = useState(false);
   const [moduleSwitching, setModuleSwitching] = useState(false);
   const [moduleOpen, setModuleOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
@@ -390,20 +389,11 @@ export const TopNavbar = () => {
     setThemeOpen(false);
   }, []);
 
-  const toggleWidgets = useCallback(() => {
-    setWidgetsOpen((prev) => !prev);
-    setSetupOpen(false);
-    setModuleOpen(false);
-    setUserOpen(false);
-    setThemeOpen(false);
-  }, []);
-
   const closeAll = useCallback(() => {
     setSetupOpen(false);
     setModuleOpen(false);
     setUserOpen(false);
     setThemeOpen(false);
-    setWidgetsOpen(false);
   }, []);
 
   return (
@@ -485,59 +475,21 @@ export const TopNavbar = () => {
               />
             </div>
 
-            {/* Widgets + Reports dropdown */}
-            <div className="relative shrink-0">
-              <button
-                onClick={toggleWidgets}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all whitespace-nowrap ${
-                  widgetsOpen ||
-                  location.pathname === "/widgets" ||
-                  location.pathname === "/reports"
-                    ? "bg-muted text-foreground"
-                    : "hover:bg-muted text-foreground"
-                }`}
-              >
-                <Puzzle size={16} />
-                <span>Widgets</span>
-                <ChevronDown
-                  size={13}
-                  className={`transition-transform duration-200 ${widgetsOpen ? "rotate-180" : ""}`}
-                />
-              </button>
-              <Dropdown
-                open={widgetsOpen}
-                onClose={() => setWidgetsOpen(false)}
-                className="left-0 p-1.5"
-                style={{ minWidth: "11rem" }}
-              >
-                <button
-                  onClick={() => {
-                    navigate("/widgets");
-                    closeAll();
-                  }}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm font-heading transition-all ${
-                    location.pathname === "/widgets"
-                      ? "bg-primary/10 text-primary"
-                      : "hover:bg-muted text-foreground"
-                  }`}
-                >
-                  <Puzzle size={14} /> Widgets
-                </button>
-                <button
-                  onClick={() => {
-                    navigate("/reports");
-                    closeAll();
-                  }}
-                  className={`w-full flex items-center gap-2 px-3 py-2 rounded-md text-sm font-heading transition-all ${
-                    location.pathname === "/reports"
-                      ? "bg-primary/10 text-primary"
-                      : "hover:bg-muted text-foreground"
-                  }`}
-                >
-                  <BarChart3 size={14} /> Reports
-                </button>
-              </Dropdown>
-            </div>
+            {/* Widgets — direct link */}
+            <button
+              onClick={() => {
+                navigate("/widgets");
+                closeAll();
+              }}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all whitespace-nowrap ${
+                location.pathname === "/widgets"
+                  ? "bg-muted text-foreground"
+                  : "hover:bg-muted text-foreground"
+              }`}
+            >
+              <Puzzle size={16} />
+              <span>Widgets</span>
+            </button>
 
             {/* Module Selector */}
             <div className="relative shrink-0">
