@@ -2,7 +2,6 @@ import React, { useState, useMemo, useCallback } from "react";
 import {
   useAuth,
   PAGE_DEFINITIONS,
-  type PageKey,
   type PageAction,
   type PagePermission,
   type AppUser,
@@ -52,17 +51,13 @@ import {
 import { CreditCard, ArrowRight } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-<<<<<<< HEAD
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-
 } from "@/components/ui/select";
-=======
->>>>>>> 4ad8f3040e3bec64eb74e5143d5643fc5335b1cb
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import {
@@ -81,43 +76,29 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-<<<<<<< HEAD
-// Shared Action config for descriptive labels and icons
-const ACTION_CONFIG: Record<PageAction, { label: string; icon: React.ReactNode }> = {
-  view: { label: "View", icon: <Eye className="w-3 h-3" /> },
-  create: { label: "Add", icon: <PlusCircle className="w-3 h-3" /> },
-  edit: { label: "Edit", icon: <Edit2 className="w-3 h-3" /> },
-  delete: { label: "Delete", icon: <Trash className="w-3 h-3" /> },
-  print: { label: "Print", icon: <Printer className="w-3 h-3" /> },
-  preview: { label: "Preview", icon: <EyeOff className="w-3 h-3" /> },
-  export: { label: "CSV Export", icon: <Download className="w-3 h-3" /> },
-  approve: { label: "Approve", icon: <CheckCircle className="w-3 h-3" /> },
-  reject: { label: "Reject", icon: <XCircle className="w-3 h-3" /> },
-  pay: { label: "Pay", icon: <CreditCard className="w-3 h-3" /> },
-  convert: { label: "Convert", icon: <ArrowRight className="w-3 h-3" /> },
-=======
-// Safe Action Config with fallback
+// Action config with all actions from both branches
 const ACTION_CONFIG: Record<string, { label: string; icon: React.ReactNode }> =
   {
-    view: { label: "View", icon: <Eye className="h-4 w-4" /> },
-    create: { label: "Add", icon: <PlusCircle className="h-4 w-4" /> },
-    edit: { label: "Edit", icon: <Edit2 className="h-4 w-4" /> },
-    delete: { label: "Delete", icon: <Trash2 className="h-4 w-4" /> },
-    print: { label: "Print", icon: <Printer className="h-4 w-4" /> },
-    preview: { label: "Preview", icon: <Eye className="h-4 w-4" /> },
-    export: { label: "CSV Export", icon: <Download className="h-4 w-4" /> },
-    approve: { label: "Approve", icon: <CheckCircle className="h-4 w-4" /> },
-    reject: { label: "Reject", icon: <XCircle className="h-4 w-4" /> },
+    view: { label: "View", icon: <Eye className="w-3 h-3" /> },
+    create: { label: "Add", icon: <PlusCircle className="w-3 h-3" /> },
+    edit: { label: "Edit", icon: <Edit2 className="w-3 h-3" /> },
+    delete: { label: "Delete", icon: <Trash2 className="w-3 h-3" /> },
+    print: { label: "Print", icon: <Printer className="w-3 h-3" /> },
+    preview: { label: "Preview", icon: <Eye className="w-3 h-3" /> },
+    export: { label: "CSV Export", icon: <Download className="w-3 h-3" /> },
+    approve: { label: "Approve", icon: <CheckCircle className="w-3 h-3" /> },
+    reject: { label: "Reject", icon: <XCircle className="w-3 h-3" /> },
+    pay: { label: "Pay", icon: <CreditCard className="w-3 h-3" /> },
+    convert: { label: "Convert", icon: <ArrowRight className="w-3 h-3" /> },
   };
 
 const getActionConfig = (action: string) => {
   return (
     ACTION_CONFIG[action] || {
       label: action.charAt(0).toUpperCase() + action.slice(1),
-      icon: <Eye className="h-4 w-4" />,
+      icon: <Eye className="w-3 h-3" />,
     }
   );
->>>>>>> 4ad8f3040e3bec64eb74e5143d5643fc5335b1cb
 };
 
 interface PermissionRow {
@@ -126,7 +107,7 @@ interface PermissionRow {
   name: string;
   email: string;
   role: AppUser["role"];
-  pageKey: PageKey;
+  pageKey: string;
   pageLabel: string;
   pageGroup: string;
   actions: string;
@@ -145,7 +126,6 @@ export default function WidgetsRights() {
   >([]);
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
 
-  // Table Data
   const tableData = useMemo(() => {
     const rows: PermissionRow[] = [];
 
@@ -222,7 +202,7 @@ export default function WidgetsRights() {
   const pageGroups = useMemo(() => {
     const groups: Record<
       string,
-      Array<{ key: PageKey; label: string; actions: PageAction[] }>
+      Array<{ key: string; label: string; actions: PageAction[] }>
     > = {};
 
     PAGE_DEFINITIONS.forEach((def) => {
@@ -239,7 +219,6 @@ export default function WidgetsRights() {
 
   return (
     <>
-      {/* Removed Breadcrumbs import and usage for now */}
       <div className="flex justify-between items-center mb-6">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Widgets Rights</h1>
@@ -264,17 +243,18 @@ export default function WidgetsRights() {
                 <strong>{selectedUser?.name || "the user"}</strong>
               </DialogDescription>
             </DialogHeader>
-<<<<<<< HEAD
+
             <div className="space-y-4 py-4">
+              {/* User selector — from HEAD */}
               <div className="space-y-2">
                 <Label>User</Label>
-                <Select 
-                  value={selectedUser?.id || ""} 
+                <Select
+                  value={selectedUser?.id || ""}
                   onValueChange={(id) => {
                     const user = allUsers.find((u) => u.id === id);
                     if (user) {
                       setSelectedUser(user);
-                      setPendingPermissions([...user.pagePermissions]);
+                      setPendingPermissions([...(user.pagePermissions || [])]);
                     }
                   }}
                 >
@@ -282,43 +262,66 @@ export default function WidgetsRights() {
                     <SelectValue placeholder="Select user" />
                   </SelectTrigger>
                   <SelectContent>
-                    {allUsers.filter((u) => u.role !== "super_admin").map((user) => (
-                      <SelectItem key={user.id} value={user.id}>
-                        {user.name} ({user.email}) - {user.role}
-                      </SelectItem>
-                    ))}
+                    {allUsers
+                      .filter((u) => u.role !== "super_admin")
+                      .map((user) => (
+                        <SelectItem key={user.id} value={user.id}>
+                          {user.name} ({user.email}) — {user.role}
+                        </SelectItem>
+                      ))}
                   </SelectContent>
                 </Select>
               </div>
-              <div className="space-y-3 max-h-80 overflow-auto p-2 border rounded-md">
+
+              {/* Permissions grid */}
+              <div className="space-y-3 max-h-[50vh] overflow-auto p-2 border rounded-md">
                 {Object.entries(pageGroups).map(([group, pages]) => (
                   <Collapsible key={group} defaultOpen>
                     <CollapsibleTrigger className="w-full flex items-center gap-2 p-2 hover:bg-accent rounded-md">
                       <div className="font-medium">{group}</div>
                     </CollapsibleTrigger>
                     <CollapsibleContent className="space-y-2 pl-4">
-                      {pages.map(({key, label, actions}) => {
-                        const currentPerm = pendingPermissions.find((p) => p.page === key);
+                      {pages.map(({ key, label, actions }) => {
+                        const currentPerm = pendingPermissions.find(
+                          (p) => p.page === key,
+                        );
                         const currentActions = currentPerm?.actions || [];
+
                         return (
-                          <div key={key} className="flex items-start gap-3 p-3 border rounded-md">
-                            <Label className="text-sm font-medium w-48 pt-1 flex-shrink-0">{label}</Label>
+                          <div
+                            key={key}
+                            className="flex items-start gap-3 p-3 border rounded-md"
+                          >
+                            <Label className="text-sm font-medium w-48 pt-1 flex-shrink-0">
+                              {label}
+                            </Label>
                             <div className="flex gap-2 flex-wrap">
                               {actions.map((action) => {
-                                const config = ACTION_CONFIG[action];
+                                const config = getActionConfig(action);
                                 const checked = currentActions.includes(action);
+
                                 return (
-                                  <div key={action} className="flex items-center gap-1 p-1.5 border rounded-md hover:border-primary/50 transition-colors">
+                                  <div
+                                    key={action}
+                                    className="flex items-center gap-1 p-1.5 border rounded-md hover:border-primary/50 transition-colors"
+                                  >
                                     <Checkbox
                                       id={`perm-${key}-${action}`}
                                       checked={checked}
-                                      onCheckedChange={(checked) => {
-                                        const newActions = checked
+                                      onCheckedChange={(isChecked) => {
+                                        const newActions = isChecked
                                           ? [...currentActions, action]
-                                          : currentActions.filter((a) => a !== action);
-                                        const newPerm: PagePermission = { page: key, actions: newActions };
+                                          : currentActions.filter(
+                                              (a) => a !== action,
+                                            );
+                                        const newPerm: PagePermission = {
+                                          page: key,
+                                          actions: newActions as PageAction[],
+                                        };
                                         setPendingPermissions((prev) => {
-                                          const idx = prev.findIndex((p) => p.page === key);
+                                          const idx = prev.findIndex(
+                                            (p) => p.page === key,
+                                          );
                                           if (idx >= 0) {
                                             const copy = [...prev];
                                             copy[idx] = newPerm;
@@ -328,92 +331,24 @@ export default function WidgetsRights() {
                                         });
                                       }}
                                     />
-                                    <Label 
-                                      htmlFor={`perm-${key}-${action}`} 
+                                    <Label
+                                      htmlFor={`perm-${key}-${action}`}
                                       className="text-xs font-medium cursor-pointer m-0 p-0 leading-none flex items-center gap-1 text-foreground/80 hover:text-foreground"
                                     >
-                                      {config?.icon || <Eye className="w-3 h-3" />}
-                                      {config?.label || action}
-                                    </Label>
-=======
-
-            <div className="space-y-6 py-4">
-              {Object.entries(pageGroups).map(([group, pages]) => (
-                <Collapsible key={group} defaultOpen>
-                  <CollapsibleTrigger className="text-lg font-semibold">
-                    {group}
-                  </CollapsibleTrigger>
-                  <CollapsibleContent className="mt-4 space-y-5">
-                    {pages.map(({ key, label, actions }) => {
-                      const currentPerm = pendingPermissions.find(
-                        (p) => p.page === key,
-                      );
-                      const currentActions = currentPerm?.actions || [];
-
-                      return (
-                        <div
-                          key={key}
-                          className="border rounded-xl p-5 bg-card"
-                        >
-                          <Label className="text-base font-medium mb-4 block">
-                            {label}
-                          </Label>
-                          <div className="grid grid-cols-2 gap-4">
-                            {actions.map((action) => {
-                              const config = getActionConfig(action);
-                              const checked = currentActions.includes(
-                                action as PageAction,
-                              );
-
-                              return (
-                                <label
-                                  key={action}
-                                  className="flex items-center gap-3 cursor-pointer p-2 rounded-lg hover:bg-muted/50"
-                                >
-                                  <Checkbox
-                                    checked={checked}
-                                    onCheckedChange={(isChecked) => {
-                                      const newActions = isChecked
-                                        ? [...currentActions, action]
-                                        : currentActions.filter(
-                                            (a) => a !== action,
-                                          );
-
-                                      const newPerm: PagePermission = {
-                                        page: key,
-                                        actions: newActions as PageAction[],
-                                      };
-
-                                      setPendingPermissions((prev) => {
-                                        const idx = prev.findIndex(
-                                          (p) => p.page === key,
-                                        );
-                                        if (idx >= 0) {
-                                          const copy = [...prev];
-                                          copy[idx] = newPerm;
-                                          return copy;
-                                        }
-                                        return [...prev, newPerm];
-                                      });
-                                    }}
-                                  />
-                                  <div className="flex items-center gap-2">
-                                    {config.icon}
-                                    <span className="font-medium">
+                                      {config.icon}
                                       {config.label}
-                                    </span>
->>>>>>> 4ad8f3040e3bec64eb74e5143d5643fc5335b1cb
+                                    </Label>
                                   </div>
-                                </label>
-                              );
-                            })}
+                                );
+                              })}
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })}
-                  </CollapsibleContent>
-                </Collapsible>
-              ))}
+                        );
+                      })}
+                    </CollapsibleContent>
+                  </Collapsible>
+                ))}
+              </div>
             </div>
 
             <DialogFooter>
@@ -486,24 +421,21 @@ export default function WidgetsRights() {
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-wrap gap-1">
-<<<<<<< HEAD
                           {row.actions.split(", ").map((actionLabel) => {
-                            const action = actionLabel.toLowerCase() as keyof typeof ACTION_CONFIG;
-                            const config = ACTION_CONFIG[action];
+                            const config = getActionConfig(
+                              actionLabel.toLowerCase(),
+                            );
                             return (
-                              <Badge key={actionLabel} variant="secondary" className="text-xs whitespace-nowrap">
-                                {config?.icon || <Eye className="w-3 h-3 mr-1" />}
-                                {config?.label || actionLabel}
+                              <Badge
+                                key={actionLabel}
+                                variant="secondary"
+                                className="text-xs whitespace-nowrap flex items-center gap-1"
+                              >
+                                {config.icon}
+                                {config.label}
                               </Badge>
                             );
                           })}
-=======
-                          {row.actions.split(", ").map((label, i) => (
-                            <Badge key={i} variant="secondary">
-                              {label}
-                            </Badge>
-                          ))}
->>>>>>> 4ad8f3040e3bec64eb74e5143d5643fc5335b1cb
                         </div>
                       </TableCell>
                       <TableCell>
