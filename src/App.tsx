@@ -260,8 +260,9 @@ import { queryClient } from "@/lib/queryClient";
 
 // ─── Auth Guard ───────────────────────────────────────────────────────────────
 function RequireAuth({ children }: { children: React.ReactNode }) {
-  const { currentUser } = useAuth();
+  const { currentUser, isValidating } = useAuth();
   const location = useLocation();
+  if (isValidating) return <Loader />;
   if (!currentUser) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
@@ -328,7 +329,8 @@ function AuthSessionBridge({ children }: { children: React.ReactNode }) {
 
 // ─── App Routes ───────────────────────────────────────────────────────────────
 function AppRoutes() {
-  const { currentUser } = useAuth();
+  const { currentUser, isValidating } = useAuth();
+  if (isValidating) return <Loader />;
   return (
     <Routes>
       {/* AUTH */}

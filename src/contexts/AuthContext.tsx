@@ -8,6 +8,7 @@ import React, {
 } from "react";
 
 import { loginUser } from "../api/userApi";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 import type {
   UserRole,
@@ -43,6 +44,7 @@ interface AuthContextType {
   ) => void;
   canAccessPage: (page: PageKey) => boolean;
   canDoAction: (page: PageKey, action: PageAction) => boolean;
+  isValidating: boolean;
 }
 
 // ── CONTEXT ───────────────────────────────────────────────────────────────────
@@ -80,17 +82,43 @@ export const AuthProvider = ({
     role: string;
   }) => Promise<void>;
 }) => {
-  const [currentUser, setCurrentUser] = useState<AppUser | null>(() => {
-    try {
-      const stored = localStorage.getItem("user");
-      return stored ? JSON.parse(stored) : null;
-    } catch {
-      localStorage.removeItem("user");
-      return null;
-    }
-  });
-
+  const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
+  const [isValidating, setIsValidating] = useState(false);
   const [users, setUsers] = useState<AppUser[]>([]);
+
+  // ✅ Single effect: load + validate on mount only
+  useEffect(() => {
+    let cancelled = false;
+
+    const validateToken = async () => {
+      const stored = localStorage.getItem("user");
+      const token = localStorage.getItem("token");
+
+      if (!stored || !token) {
+        setCurrentUser(null);
+        return;
+      }
+
+      setIsValidating(true);
+      try {
+        const response = await fetchWithAuth("/api/users/me");
+        if (!response.ok) throw new Error("Invalid token");
+        if (!cancelled) setCurrentUser(JSON.parse(stored));
+      } catch {
+        if (!cancelled) {
+          localStorage.removeItem("token");
+          localStorage.removeItem("user");
+          localStorage.removeItem("currentSessionId");
+          setCurrentUser(null);
+        }
+      } finally {
+        if (!cancelled) setIsValidating(false);
+      }
+    };
+
+    validateToken();
+    return () => { cancelled = true; };
+  }, []); // ← empty deps, runs once
 
   useEffect(() => {
     setUsers([]); // replace with API later
@@ -239,6 +267,7 @@ export const AuthProvider = ({
       updateUserPagePermissions,
       canAccessPage,
       canDoAction,
+      isValidating,
     }),
     [
       currentUser,
@@ -251,6 +280,7 @@ export const AuthProvider = ({
       updateUserPagePermissions,
       canAccessPage,
       canDoAction,
+      isValidating,
     ],
   );
 

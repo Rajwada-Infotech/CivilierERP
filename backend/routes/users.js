@@ -3,13 +3,19 @@ const router = express.Router();
 const { getPool, sql } = require("../db");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
-const { redisGet, redisSet, redisDel } = require("../redis");
+const { redisGet, redisSet, redisDel, redisDelPattern } = require("../redis");
+const { cache } = require("../middleware/cache");
 const { blacklistToken } = require("../middleware/blacklist");
 const authMiddleware = require("../middleware/auth");
 
 const SALT_ROUNDS = 12;
 const MAX_LOGIN_ATTEMPTS = 5;
 const LOCKOUT_SECONDS = 15 * 60; // 15 minutes
+
+// GET /api/users/me — validates token & returns current user
+router.get("/me", authMiddleware, (req, res) => {
+  res.json({ user: req.user });
+});
 
 // POST /api/users/login
 router.post("/login", async (req, res) => {
@@ -102,8 +108,10 @@ router.post("/logout", authMiddleware, async (req, res) => {
   }
 });
 
-// GET all users
-router.get("/", async (req, res) => {
+// GET all users (now cached)
+router.get("/", authMiddleware, 
+  cache("users-list", 300), // 5 min auth+cache, auto-invalidates on mutations
+  async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(
@@ -111,14 +119,15 @@ router.get("/", async (req, res) => {
     );
     res.json(result.recordset);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch users" });
   }
 });
 
 // POST /api/users
-router.post("/", async (req, res) => {
+router.post("/", authMiddleware, async (req, res) => {
   const { name, email, role, password } = req.body;
-  if (!password) return res.status(400).json({ error: "Password is required" });
+  if (!name || !email || !password) return res.status(400).json({ error: "Name, email and password required" });
   try {
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
     const pool = getPool();
@@ -131,21 +140,24 @@ router.post("/", async (req, res) => {
       .query(
         "INSERT INTO dbo.users (name, email, role, password, created_datetime, discontinue) VALUES (@name, @email, @role, @password, GETDATE(), 0)"
       );
+    await redisDelPattern("cache:users-list:*");
     res.json({ message: "User added successfully" });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Failed to add user" });
   }
 });
 
 // PUT /api/users/:id
-router.put("/:id", async (req, res) => {
+router.put("/:id", authMiddleware, async (req, res) => {
   const { id } = req.params;
+  const idNum = parseInt(id);
+  if (isNaN(idNum)) return res.status(400).json({ error: "Invalid user ID" });
   const { name, email, role, discontinue } = req.body;
   try {
     const pool = getPool();
     await pool
       .request()
-      .input("id", sql.Int, id)
+      .input("id", sql.Int, idNum)
       .input("name", sql.NVarChar, name)
       .input("email", sql.NVarChar, email)
       .input("role", sql.NVarChar, role)
@@ -153,24 +165,28 @@ router.put("/:id", async (req, res) => {
       .query(
         "UPDATE dbo.users SET name=@name, email=@email, role=@role, discontinue=@discontinue WHERE id=@id"
       );
+    await redisDelPattern("cache:users-list:*");
     res.json({ message: "User updated successfully" });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Failed to update user" });
   }
 });
 
 // DELETE /api/users/:id
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", authMiddleware, async (req, res) => {
   const { id } = req.params;
+  const idNum = parseInt(id);
+  if (isNaN(idNum)) return res.status(400).json({ error: "Invalid user ID" });
   try {
     const pool = getPool();
     await pool
       .request()
-      .input("id", sql.Int, id)
+      .input("id", sql.Int, idNum)
       .query("DELETE FROM dbo.users WHERE id=@id");
+    await redisDelPattern("cache:users-list:*");
     res.json({ message: "User deleted successfully" });
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Failed to delete user" });
   }
 });
 
