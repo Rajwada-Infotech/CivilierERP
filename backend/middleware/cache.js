@@ -3,8 +3,12 @@ const { redisGet, redisSet } = require("../redis");
 /**
  * Cache middleware for GET routes.
  *
+ * ⚠️ IMPORTANT: Must be mounted AFTER authMiddleware on user-scoped routes.
+ * Cache key includes `req.user?.userId`. If auth runs after cache, all users share
+ * "anon" cache keys (data leak risk!).
+ *
  * Usage:
- *   router.get("/", cache("grns", 300), async (req, res) => { ... })
+ *   router.get("/", authMiddleware, cache("grns", 300), async (req, res) => { ... })
  *
  * @param {string} namespace   - Cache key prefix (e.g. "grns", "purchase-orders")
  * @param {number} ttl         - TTL in seconds (default 300 = 5 minutes)
