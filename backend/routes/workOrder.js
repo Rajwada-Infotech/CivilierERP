@@ -1,4 +1,6 @@
 const express = require("express")
+const { cache } = require("../middleware/cache");
+const { redisDelPattern } = require("../redis");
 const router = express.Router()
 const { getPool, sql } = require("../db")
 
@@ -7,7 +9,7 @@ const { getPool, sql } = require("../db")
 // =============================================
 
 // GET all headers — joined with enterprise + contractor names
-router.get("/", async (req, res) => {
+router.get("/", cache("work-orders", 300), async (req, res) => {
   try {
     const pool = getPool()
     const result = await pool.request().query(`
@@ -189,6 +191,8 @@ router.put("/:id", async (req, res) => {
           UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt
         WHERE Id=@Id
       `)
+    await redisDelPattern("cache:work-orders:*");
+
     res.json({ message: "Work order updated" })
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -212,6 +216,8 @@ router.delete("/:id", async (req, res) => {
     await pool.request()
       .input("Id", sql.Int, req.params.id)
       .query("DELETE FROM dbo.WorkOrderHeader WHERE Id = @Id")
+    await redisDelPattern("cache:work-orders:*");
+
     res.json({ message: "Work order and all related records deleted" })
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -316,6 +322,8 @@ router.put("/:id/activities/:activityId", async (req, res) => {
           MaterialAmount=@MaterialAmount, GrandTotal=@GrandTotal, Remarks=@Remarks
         WHERE Id=@Id
       `)
+    await redisDelPattern("cache:work-orders:*");
+
     res.json({ message: "Activity updated" })
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -332,6 +340,8 @@ router.delete("/:id/activities/:activityId", async (req, res) => {
     await pool.request()
       .input("Id", sql.Int, req.params.activityId)
       .query("DELETE FROM dbo.WorkOrderActivities WHERE Id = @Id")
+    await redisDelPattern("cache:work-orders:*");
+
     res.json({ message: "Activity and its materials deleted" })
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -417,6 +427,8 @@ router.put("/:id/activities/:activityId/materials/:materialId", async (req, res)
           UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt
         WHERE Id=@Id
       `)
+    await redisDelPattern("cache:work-orders:*");
+
     res.json({ message: "Material updated" })
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -430,6 +442,8 @@ router.delete("/:id/activities/:activityId/materials/:materialId", async (req, r
     await pool.request()
       .input("Id", sql.Int, req.params.materialId)
       .query("DELETE FROM dbo.WorkOrderActivityMaterials WHERE Id = @Id")
+    await redisDelPattern("cache:work-orders:*");
+
     res.json({ message: "Material deleted" })
   } catch (err) {
     res.status(500).json({ error: err.message })

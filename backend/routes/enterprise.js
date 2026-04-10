@@ -1,9 +1,11 @@
 const express = require("express");
+const { cache } = require("../middleware/cache");
+const { redisDelPattern } = require("../redis");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 
 // GET all
-router.get("/", async (req, res) => {
+router.get("/", cache("enterprises", 300), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query("SELECT * FROM dbo.enterprise");
@@ -73,6 +75,8 @@ router.post("/", async (req, res) => {
           @tds_limit, @description, @gst_type, @status, @cr_code, @discontinue
         )
       `);
+    await redisDelPattern("cache:enterprises:*");
+
     res.json({ message: "Enterprise added successfully" });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -140,6 +144,8 @@ router.put("/:id", async (req, res) => {
           cr_code=@cr_code, discontinue=@discontinue
         WHERE id=@id
       `);
+    await redisDelPattern("cache:enterprises:*");
+
     res.json({ message: "Enterprise updated successfully" });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -155,6 +161,8 @@ router.delete("/:id", async (req, res) => {
       .request()
       .input("id", sql.Int, id)
       .query("DELETE FROM dbo.enterprise WHERE id=@id");
+    await redisDelPattern("cache:enterprises:*");
+
     res.json({ message: "Enterprise deleted successfully" });
   } catch (err) {
     res.status(500).json({ error: err.message });
