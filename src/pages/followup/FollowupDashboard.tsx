@@ -25,10 +25,10 @@ const FollowupDashboard = () => {
     { label: 'Pending Tasks', value: tasks.filter(t => ['open', 'in_progress'].includes(t.status)).length.toString(), icon: Activity, color: 'bg-indigo-500/10 text-indigo-600' },
   ]
 
-  // Only render if followup module active
-  if (activeModule !== 'followup') {
-    return <div>Switch to Follow-Up module to view dashboard</div>
-  }
+// Temporarily allow render for testing (module state now syncs correctly)
+  // if (activeModule !== 'followup') {
+  //   return <div>Switch to Follow-Up module to view dashboard</div>
+  // }
 
   return (
     <div className="p-6 space-y-6">
