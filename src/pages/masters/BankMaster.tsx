@@ -27,8 +27,7 @@ import {
   type CompanyOption,
 } from "@/api/bankMasterApi";
 
-// ─── Local form types ─────────────────────────────────────────────────────────
-
+// ─── Local form types ────────────────────────────────────────────────────────
 interface FormState {
   companyName: string;
   bankName: string;
@@ -69,7 +68,9 @@ const BANK_TYPES = [
 const inp =
   "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground placeholder:text-muted-foreground/50";
 
-// ─── Component ────────────────────────────────────────────────────────────────
+const IFSC_REGEX = /^[A-Z]{4}0[A-Z0-9]{6}$/;
+
+// ─── Component ───────────────────────────────────────────────────────────────
 const BankMaster: React.FC = () => {
   const queryClient = useQueryClient();
 
@@ -100,13 +101,14 @@ const BankMaster: React.FC = () => {
     if (errors[k]) setErrors((e) => ({ ...e, [k]: false }));
   };
 
-  const IFSC_REGEX = /^[A-Z]{4}0[A-Z0-9]{6}$/;
-
   const validate = () => {
     const e: Record<string, boolean> = {};
     if (!form.bankName.trim()) e.bankName = true;
-    if (!form.ifsc.trim()) e.ifsc = true;
-    else if (!IFSC_REGEX.test(form.ifsc.trim().toUpperCase())) e.ifsc = true;
+    if (!form.ifsc.trim()) {
+      e.ifsc = true;
+    } else if (!IFSC_REGEX.test(form.ifsc.trim().toUpperCase())) {
+      e.ifsc = true;
+    }
     if (!form.accountNo.trim()) e.accountNo = true;
     setErrors(e);
     return Object.keys(e).length === 0;
@@ -128,6 +130,16 @@ const BankMaster: React.FC = () => {
 
   const handleSave = async () => {
     if (!validate()) return;
+
+    // Extra IFSC guard with user-friendly toast (from ac97f7f branch)
+    const ifsc = form.ifsc.trim().toUpperCase();
+    if (!IFSC_REGEX.test(ifsc)) {
+      toast.error(
+        `Invalid IFSC Code "${ifsc || "empty"}". Format must be like SBIN0001234 (11 characters).`,
+      );
+      return;
+    }
+
     try {
       if (editingId) {
         await updateBank(editingId, toPayload(form));
@@ -351,7 +363,7 @@ const BankMaster: React.FC = () => {
                     maxLength={11}
                     className={`${inp} pl-8 font-mono tracking-widest uppercase ${errors.ifsc ? "border-destructive" : ""}`}
                   />
-                  {form.ifsc.length === 11 && (
+                  {form.ifsc.length === 11 && IFSC_REGEX.test(form.ifsc) && (
                     <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[9px] font-heading text-green-600 bg-green-500/10 px-1.5 py-0.5 rounded">
                       ✓
                     </span>
@@ -617,7 +629,7 @@ const BankMaster: React.FC = () => {
                           )}
                         </td>
                         <td className="px-4 py-3 font-mono text-foreground text-sm">
-                          ₹
+                          ₹{" "}
                           {Number(bank.BOpeningBalance || 0).toLocaleString(
                             "en-IN",
                           )}
