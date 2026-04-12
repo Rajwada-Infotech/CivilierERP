@@ -1,6 +1,6 @@
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
-const BASE = "/api/card-master";
+const BASE = "/api/cheque-master";
 const BANKS_URL = "/api/bank-master";
 const COMPANY_URL = "/api/account-head/options?type=C";
 
@@ -18,22 +18,18 @@ async function handleResponse<T = unknown>(res: Response): Promise<T> {
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-export interface DbCard {
-  id: number;
-  company_name: string | null;
-  bank_name: string | null;
-  account_number: string | null;
-  ifsc_code: string | null;
-  card_network: string | null;
-  card_type: string | null;
-  card_holder_name: string | null;
-  card_number: string | null;
-  cvv: string | null;
-  expiry_month: number | null;
-  expiry_year: number | null;
-  reminder_enabled: boolean;
-  reminder_days: number | null;
-  status: boolean;
+export interface DbCheque {
+  CId: number;
+  CompanyId: number | null;
+  BankId: number | null;
+  AccountNumber: string | null;
+  IFSCCode: string | null;
+  ChequeLotNumber: string | null;
+  ChequeStartNumber: number | null;
+  ChequeEndNumber: number | null;
+  TotalCheques: number | null;
+  Remarks: string | null;
+  Status: boolean;
 }
 
 export interface DbBank {
@@ -49,53 +45,49 @@ export interface CompanyOption {
   label: string;
 }
 
-export interface CardPayload {
-  company_name: string | null;
-  bank_name: string | null;
-  account_number: string | null;
-  ifsc_code: string | null;
-  card_network: string | null;
-  card_type: string | null;
-  card_holder_name: string | null;
-  card_number: string | null;
-  cvv: string | null;
-  expiry_month: number | null;
-  expiry_year: number | null;
-  reminder_enabled: boolean;
-  reminder_days: number | null;
-  status: boolean;
+export interface ChequePayload {
+  CompanyId: number | null;
+  BankId: number | null;
+  AccountNumber: string | null;
+  IFSCCode: string | null;
+  ChequeLotNumber: string | null;
+  ChequeStartNumber: number | null;
+  ChequeEndNumber: number | null;
+  TotalCheques: number | null;
+  Remarks: string | null;
+  Status: boolean;
 }
 
 // ─── API calls ────────────────────────────────────────────────────────────────
-export const getCards = (): Promise<DbCard[]> =>
-  fetchWithAuth(BASE).then((r) => handleResponse<DbCard[]>(r));
+export const getCheques = (): Promise<DbCheque[]> =>
+  fetchWithAuth(BASE).then((r) => handleResponse<DbCheque[]>(r));
 
-export const getBanksForCard = (): Promise<DbBank[]> =>
+export const getBanksForCheque = (): Promise<DbBank[]> =>
   fetchWithAuth(BANKS_URL).then((r) => handleResponse<DbBank[]>(r));
 
 export const getCompanyOptions = (): Promise<CompanyOption[]> =>
   fetchWithAuth(COMPANY_URL).then((r) => handleResponse<CompanyOption[]>(r));
 
-export const addCard = (data: CardPayload): Promise<DbCard> =>
+export const addCheque = (data: ChequePayload): Promise<{ message: string }> =>
   fetchWithAuth(BASE, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
-  }).then((r) => handleResponse<DbCard>(r));
+  }).then((r) => handleResponse(r));
 
-export const updateCard = (
+export const updateCheque = (
   id: string | number,
-  data: CardPayload,
-): Promise<{ success: boolean; message: string }> =>
+  data: ChequePayload,
+): Promise<{ message: string }> =>
   fetchWithAuth(`${BASE}/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   }).then((r) => handleResponse(r));
 
-export const deleteCard = (
+export const deleteCheque = (
   id: string | number,
-): Promise<{ success: boolean }> =>
+): Promise<{ message: string }> =>
   fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" }).then((r) =>
     handleResponse(r),
   );

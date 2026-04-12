@@ -35,193 +35,152 @@ import {
 } from "@/contexts/ActivityBrowserContext";
 import { useAuth } from "@/contexts/AuthContext";
 
-// ─── Delay Helper ─────────────────────────────────────────────────────────────
-const withDelay = <T,>(importFn: () => Promise<T>, delay = 600): Promise<T> =>
-  Promise.all([importFn(), new Promise((res) => setTimeout(res, delay))]).then(
-    ([module]) => module,
+// ─── Page Skeleton (inline route-transition loader) ───────────────────────────
+function PageSkeleton() {
+  return (
+    <div className="p-6 space-y-5 animate-pulse">
+      {/* Breadcrumb line */}
+      <div className="h-4 w-48 rounded-md bg-muted" />
+      {/* Page title */}
+      <div className="h-6 w-64 rounded-md bg-muted" />
+      {/* Card block */}
+      <div className="rounded-xl border border-border bg-card/60 p-5 space-y-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div key={i} className="space-y-2">
+              <div className="h-3 w-24 rounded bg-muted" />
+              <div className="h-9 w-full rounded-lg bg-muted" />
+            </div>
+          ))}
+        </div>
+        <div className="flex gap-2 pt-2 border-t border-border">
+          <div className="h-9 w-20 rounded-lg bg-muted" />
+          <div className="h-9 w-20 rounded-lg bg-muted" />
+        </div>
+      </div>
+      {/* Table block */}
+      <div className="rounded-xl border border-border bg-card/60 overflow-hidden">
+        <div className="px-5 py-3.5 border-b border-border">
+          <div className="h-4 w-32 rounded bg-muted" />
+        </div>
+        <div className="divide-y divide-border">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div key={i} className="flex items-center gap-4 px-5 py-3.5">
+              <div className="h-4 w-1/4 rounded bg-muted" />
+              <div className="h-4 w-1/5 rounded bg-muted" />
+              <div className="h-4 w-1/6 rounded bg-muted" />
+              <div className="h-4 w-1/6 rounded bg-muted ml-auto" />
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   );
+}
 
 // ─── Lazy Pages ───────────────────────────────────────────────────────────────
 // Main Pages
-const Dashboard = lazy(() => withDelay(() => import("./pages/Dashboard")));
-const Reports = lazy(() => withDelay(() => import("./pages/Reports")));
-const Widgets = lazy(() => withDelay(() => import("./pages/Widgets")));
-const Tasks = lazy(() => withDelay(() => import("./pages/Tasks")));
-const Transactions = lazy(() =>
-  withDelay(() => import("./pages/Transactions")),
-);
-const Payment = lazy(() => withDelay(() => import("./pages/Payment")));
-const Brs = lazy(() => withDelay(() => import("./pages/Brs")));
-const Records = lazy(() => withDelay(() => import("./pages/Records")));
-const ReceivedPayment = lazy(() =>
-  withDelay(() => import("./pages/ReceivedPayment")),
-);
+const Dashboard = lazy(() => import("./pages/Dashboard"));
+const Reports = lazy(() => import("./pages/Reports"));
+const Widgets = lazy(() => import("./pages/Widgets"));
+const Tasks = lazy(() => import("./pages/Tasks"));
+const Transactions = lazy(() => import("./pages/Transactions"));
+const Payment = lazy(() => import("./pages/Payment"));
+const Brs = lazy(() => import("./pages/Brs"));
+const Records = lazy(() => import("./pages/Records"));
+const ReceivedPayment = lazy(() => import("./pages/ReceivedPayment"));
 
 // Task Detail
-const TaskDetail = lazy(() =>
-  withDelay(() => import("./pages/tasks/TaskDetail")),
-);
+const TaskDetail = lazy(() => import("./pages/tasks/TaskDetail"));
 
 // Masters
-const ContractorMaster = lazy(() =>
-  withDelay(() => import("./pages/masters/ContractorMaster")),
+const ContractorMaster = lazy(() => import("./pages/masters/ContractorMaster"));
+const SupplierMaster = lazy(() => import("./pages/masters/SupplierMaster"));
+const CustomerMaster = lazy(() => import("./pages/masters/CustomerMaster"));
+const BankMaster = lazy(() => import("./pages/masters/BankMaster"));
+const ExpensesMaster = lazy(() => import("./pages/masters/ExpensesMaster"));
+const ItemMaster = lazy(() => import("./pages/masters/ItemMaster"));
+const ItemGroupMaster = lazy(() => import("./pages/masters/ItemGroupMaster"));
+const HsnMaster = lazy(() => import("./pages/masters/HsnMaster"));
+const FinancialYearMaster = lazy(
+  () => import("./pages/masters/FinancialYearMaster"),
 );
-const SupplierMaster = lazy(() =>
-  withDelay(() => import("./pages/masters/SupplierMaster")),
+const ChequeMaster = lazy(() => import("./pages/masters/ChequeMaster"));
+const MaterialExpenseBookingMaster = lazy(
+  () => import("./pages/material/MaterialExpenseBooking"),
 );
-const CustomerMaster = lazy(() =>
-  withDelay(() => import("./pages/masters/CustomerMaster")),
+const WorkOrderMaster = lazy(() => import("./pages/material/WorkOrderMaster"));
+const PurchaseOrderMaster = lazy(
+  () => import("./pages/material/PurchaseOrderMaster"),
 );
-const BankMaster = lazy(() =>
-  withDelay(() => import("./pages/masters/BankMaster")),
+const CardMaster = lazy(() => import("./pages/masters/CardMaster"));
+const TdsMaster = lazy(() => import("./pages/masters/TdsMaster"));
+const AccountGroupMaster = lazy(
+  () => import("./pages/masters/AccountGroupMaster"),
 );
-const ExpensesMaster = lazy(() =>
-  withDelay(() => import("./pages/masters/ExpensesMaster")),
+const NamedEntryTypeMaster = lazy(
+  () => import("./pages/masters/NamedEntryTypeMaster"),
 );
-const ItemMaster = lazy(() =>
-  withDelay(() => import("./pages/masters/ItemMaster")),
+const TypeOfDocMaster = lazy(() => import("./pages/masters/TypeOfDocMaster"));
+const ActivityMaster = lazy(() => import("./pages/masters/ActivityMaster"));
+const DebitNoteMaster = lazy(() => import("./pages/masters/DebitNoteMaster"));
+const BillingTermsMaster = lazy(
+  () => import("./pages/masters/BillingTermsMaster"),
 );
-const ItemGroupMaster = lazy(() =>
-  withDelay(() => import("./pages/masters/ItemGroupMaster")),
-);
-const HsnMaster = lazy(() =>
-  withDelay(() => import("./pages/masters/HsnMaster")),
-);
-const FinancialYearMaster = lazy(() =>
-  withDelay(() => import("./pages/masters/FinancialYearMaster")),
-);
-const ChequeMaster = lazy(() =>
-  withDelay(() => import("./pages/masters/ChequeMaster")),
-);
-const MaterialExpenseBookingMaster = lazy(() =>
-  withDelay(() => import("./pages/material/MaterialExpenseBooking")),
-);
-const WorkOrderMaster = lazy(() =>
-  withDelay(() => import("./pages/material/WorkOrderMaster")),
-);
-const PurchaseOrderMaster = lazy(() =>
-  withDelay(() => import("./pages/material/PurchaseOrderMaster")),
-);
-const CardMaster = lazy(() =>
-  withDelay(() => import("./pages/masters/CardMaster")),
-);
-const TdsMaster = lazy(() =>
-  withDelay(() => import("./pages/masters/TdsMaster")),
-);
-const AccountGroupMaster = lazy(() =>
-  withDelay(() => import("./pages/masters/AccountGroupMaster")),
-);
-const NamedEntryTypeMaster = lazy(() =>
-  withDelay(() => import("./pages/masters/NamedEntryTypeMaster")),
-);
-const TypeOfDocMaster = lazy(() =>
-  withDelay(() => import("./pages/masters/TypeOfDocMaster")),
-);
-const ActivityMaster = lazy(() =>
-  withDelay(() => import("./pages/masters/ActivityMaster")),
-);
-const DebitNoteMaster = lazy(() =>
-  withDelay(() => import("./pages/masters/DebitNoteMaster")),
-);
-const BillingTermsMaster = lazy(() =>
-  withDelay(() => import("./pages/masters/BillingTermsMaster")),
-);
-const TCMaster = lazy(() =>
-  withDelay(() => import("./pages/material/T&CMaster")),
-);
-const UnitOfMeasurementMaster = lazy(() =>
-  withDelay(() => import("./pages/material/UnitOfMeasurementMaster")),
+const TCMaster = lazy(() => import("./pages/material/T&CMaster"));
+const UnitOfMeasurementMaster = lazy(
+  () => import("./pages/material/UnitOfMeasurementMaster"),
 );
 
 // Admin Pages
-const AdminDashboard = lazy(() =>
-  withDelay(() => import("./pages/admin/AdminDashboard")),
+const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
+const Users = lazy(() => import("./pages/Users"));
+const MenuRights = lazy(() => import("./pages/admin/MenuRights"));
+const WidgetRights = lazy(() => import("./pages/admin/WidgetsRights"));
+const FinYearRights = lazy(() => import("./pages/admin/FinYearRights"));
+const ApprovalSetup = lazy(() => import("./pages/admin/ApprovalSetup"));
+const PostApprovalRights = lazy(
+  () => import("./pages/admin/PostApprovalRights"),
 );
-const Users = lazy(() => withDelay(() => import("./pages/Users")));
-const MenuRights = lazy(() =>
-  withDelay(() => import("./pages/admin/MenuRights")),
+const ApiIntegrationPage = lazy(() => import("./pages/admin/ApiIntegration"));
+const SignaturePage = lazy(() => import("./pages/admin/Signature"));
+const SuperAdminProfile = lazy(() => import("./pages/admin/SuperAdminProfile"));
+const MetricsDashboard = lazy(() => import("./pages/admin/MetricsDashboard"));
+const PasswordResetPage = lazy(
+  () => import("./pages/admin/security/PasswordReset"),
 );
-const WidgetRights = lazy(() =>
-  withDelay(() => import("./pages/admin/WidgetsRights")),
-);
-const FinYearRights = lazy(() =>
-  withDelay(() => import("./pages/admin/FinYearRights")),
-);
-const ApprovalSetup = lazy(() =>
-  withDelay(() => import("./pages/admin/ApprovalSetup")),
-);
-const PostApprovalRights = lazy(() =>
-  withDelay(() => import("./pages/admin/PostApprovalRights")),
-);
-const ApiIntegrationPage = lazy(() =>
-  withDelay(() => import("./pages/admin/ApiIntegration")),
-);
-const SignaturePage = lazy(() =>
-  withDelay(() => import("./pages/admin/Signature")),
-);
-const SuperAdminProfile = lazy(() =>
-  withDelay(() => import("./pages/admin/SuperAdminProfile")),
-);
-const MetricsDashboard = lazy(() =>
-  withDelay(() => import("./pages/admin/MetricsDashboard")),
-);
-const PasswordResetPage = lazy(() =>
-  withDelay(() => import("./pages/admin/security/PasswordReset")),
-);
-const ActivityBrowserPage = lazy(() =>
-  withDelay(() => import("./pages/admin/Activitybrowser/ActivityBrowser")),
+const ActivityBrowserPage = lazy(
+  () => import("./pages/admin/Activitybrowser/ActivityBrowser"),
 );
 
 // Admin Masters
-const BusinessUnitMaster = lazy(() =>
-  withDelay(() => import("./pages/admin/masters/BusinessUnitMaster")),
+const BusinessUnitMaster = lazy(
+  () => import("./pages/admin/masters/BusinessUnitMaster"),
 );
-const ProjectMaster = lazy(() =>
-  withDelay(() => import("./pages/admin/masters/ProjectMaster")),
-);
-const CompanyMaster = lazy(() =>
-  withDelay(() => import("./pages/admin/masters/CompanyMaster")),
-);
+const ProjectMaster = lazy(() => import("./pages/admin/masters/ProjectMaster"));
+const CompanyMaster = lazy(() => import("./pages/admin/masters/CompanyMaster"));
 
 // Communicator Setup
-const SmsSetup = lazy(() =>
-  withDelay(() => import("./pages/admin/Communicator/SmsSetup")),
+const SmsSetup = lazy(() => import("./pages/admin/Communicator/SmsSetup"));
+const EmailSetup = lazy(() => import("./pages/admin/Communicator/EmailSetup"));
+const WhatsAppSetup = lazy(
+  () => import("./pages/admin/Communicator/WhatsAppSetup"),
 );
-const EmailSetup = lazy(() =>
-  withDelay(() => import("./pages/admin/Communicator/EmailSetup")),
-);
-const WhatsAppSetup = lazy(() =>
-  withDelay(() => import("./pages/admin/Communicator/WhatsAppSetup")),
-);
-const GeneralLedgerMaster = lazy(() =>
-  withDelay(() => import("./pages/masters/GeneralLedgerMaster")),
+const GeneralLedgerMaster = lazy(
+  () => import("./pages/masters/GeneralLedgerMaster"),
 );
 
 // New hierarchy pages
-const SuperAdminDashboard = lazy(() =>
-  withDelay(() => import("./pages/superadmin/SuperAdminDashboard")),
+const SuperAdminDashboard = lazy(
+  () => import("./pages/superadmin/SuperAdminDashboard"),
 );
-const AdminControlPanel = lazy(() =>
-  withDelay(() => import("./pages/admin/AdminControlPanel")),
-);
-const UserProfilePage = lazy(() =>
-  withDelay(() => import("./pages/user/UserProfile")),
-);
-const DBADashboard = lazy(() =>
-  withDelay(() => import("./pages/dba/DBADashboard")),
-);
-const ControlPanel = lazy(() =>
-  withDelay(() => import("./pages/dba/ControlPanel")),
-);
-const AdsManager = lazy(() =>
-  withDelay(() => import("./pages/dba/AdsManager")),
-);
-const RemindersManager = lazy(() =>
-  withDelay(() => import("./pages/dba/RemindersManager")),
-);
-const PaymentLogs = lazy(() =>
-  withDelay(() => import("./pages/dba/PaymentLogs")),
-);
+const AdminControlPanel = lazy(() => import("./pages/admin/AdminControlPanel"));
+const UserProfilePage = lazy(() => import("./pages/user/UserProfile"));
+const DBADashboard = lazy(() => import("./pages/dba/DBADashboard"));
+const ControlPanel = lazy(() => import("./pages/dba/ControlPanel"));
+const AdsManager = lazy(() => import("./pages/dba/AdsManager"));
+const RemindersManager = lazy(() => import("./pages/dba/RemindersManager"));
+const PaymentLogs = lazy(() => import("./pages/dba/PaymentLogs"));
 
 // ─── Error Boundary ───────────────────────────────────────────────────────────
 class ErrorBoundary extends Component<
@@ -295,7 +254,7 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
       <RequireRole allowed={[...ADMIN_ROLES]}>
         <AppLayout>
           <ErrorBoundary>
-            <Suspense fallback={<Loader />}>{children}</Suspense>
+            <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
           </ErrorBoundary>
         </AppLayout>
       </RequireRole>
@@ -309,7 +268,7 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     <RequireAuth>
       <AppLayout>
         <ErrorBoundary>
-          <Suspense fallback={<Loader />}>{children}</Suspense>
+          <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
         </ErrorBoundary>
       </AppLayout>
     </RequireAuth>
