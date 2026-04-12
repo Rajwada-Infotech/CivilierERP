@@ -7,17 +7,16 @@ const { getPool, sql } = require("../db"); // Fix: was only importing sql, missi
 // GET all GRNs
 router.get("/", cache("grns", 300), async (req, res) => {
   try {
-    const pool = getPool(); // Fix: was await sql.connect() — wrong, uses raw mssql without config
+    console.log("Fetching GRNs for user:", req.user?.userId);
+    const pool = getPool();
     const result = await pool.request().query(`
-      SELECT GRNID, GRNNo, GRNDate, SupplierID, POID, GRNItems, Status, CreatedDate,
-      s.LHeadName as SupplierName,
-      p.PurchaseOrderNo as PONumber
-      FROM GoodsReceiptNotes grn
-      LEFT JOIN [dbo].[AccountHeadMaster] s ON grn.SupplierID = s.LHeadId
-      LEFT JOIN PurchaseOrders p ON grn.POID = p.PurchaseOrderID
-    `); // Fix: dbo.LHead does not exist — corrected to dbo.AccountHeadMaster
+      SELECT TOP 10 * FROM GoodsReceiptNotes 
+      ORDER BY CreatedDate DESC
+    `);
+    console.log(`GRNs fetched: ${result.recordset.length} records`);
     res.json(result.recordset);
   } catch (err) {
+    console.error("GRN query failed:", err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -69,7 +68,7 @@ router.post("/", async (req, res) => {
     await redisDelPattern("cache:grns:*");
     res.json({ message: "GRN created successfully", grnId });
   } catch (err) {
-    console.error("GRN error:", err);
+    console.error("GRN POST error:", err);
     res.status(500).json({ error: err.message });
   }
 });

@@ -796,9 +796,17 @@ export const MobileNav: React.FC = () => {
               {/* Setup Section */}
               {setupConfig.available && (
                 <div className="px-5 pb-1">
-                  <button
+                  <div
+                    role="button"
+                    tabIndex={0}
                     onClick={() => setSetupOpen((p) => !p)}
-                    className="w-full flex items-center justify-between px-4 py-3 rounded-2xl border border-border hover:bg-muted transition-all text-sm font-heading text-foreground"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setSetupOpen((p) => !p);
+                      }
+                    }}
+                    className="w-full flex items-center justify-between px-4 py-3 rounded-2xl border border-border hover:bg-muted transition-all text-sm font-heading text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
                   >
                     <div className="flex items-center gap-2">
                       <Settings size={16} className="text-muted-foreground" />
@@ -813,7 +821,7 @@ export const MobileNav: React.FC = () => {
                       size={15}
                       className={`text-muted-foreground transition-transform duration-200 ${setupOpen ? "rotate-180" : ""}`}
                     />
-                  </button>
+                  </div>
 
                   {setupOpen && (
                     <div className="mt-2 p-3 rounded-2xl border border-border bg-muted/30">
@@ -848,12 +856,21 @@ export const MobileNav: React.FC = () => {
 
               {/* ── Reminders Section ──────────────────────────────── */}
               <div className="px-5 pb-2">
-                <button
+                <div
+                  role="button"
+                  tabIndex={0}
                   onClick={() => {
                     if (!remFetched) fetchReminders();
                     setRemOpen((p) => !p);
                   }}
-                  className="w-full flex items-center justify-between px-4 py-3 rounded-2xl border border-border hover:bg-muted transition-all text-sm font-heading text-foreground"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      if (!remFetched) fetchReminders();
+                      setRemOpen((p) => !p);
+                    }
+                  }}
+                  className="w-full flex items-center justify-between px-4 py-3 rounded-2xl border border-border hover:bg-muted transition-all text-sm font-heading text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
                 >
                   <div className="flex items-center gap-2">
                     <Bell size={16} className="text-amber-500" />
@@ -882,7 +899,7 @@ export const MobileNav: React.FC = () => {
                       className={`text-muted-foreground transition-transform duration-200 ${remOpen ? "rotate-180" : ""}`}
                     />
                   </div>
-                </button>
+                </div>
 
                 {remOpen && (
                   <div className="mt-2 rounded-2xl border border-border bg-muted/20 overflow-hidden">
@@ -1027,11 +1044,19 @@ export const MobileNav: React.FC = () => {
                   if (item.children) {
                     return (
                       <div key={item.label}>
-                        <button
+                        <div
+                          role="button"
+                          tabIndex={0}
                           onClick={() => toggleGroup(item.label)}
-                          className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-heading transition-all ${
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              toggleGroup(item.label);
+                            }
+                          }}
+                          className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-heading transition-all focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 ${
                             active
-                              ? "bg-primary/10 text-primary"
+                              ? "bg-primary/10 text-primary hover:bg-primary/20"
                               : "hover:bg-muted text-foreground"
                           }`}
                         >
@@ -1041,9 +1066,9 @@ export const MobileNav: React.FC = () => {
                             size={16}
                             className={`text-muted-foreground transition-transform ${openState ? "rotate-180" : ""}`}
                           />
-                        </button>
-
-                        {openState && (
+                        </div>
+  
+                          {openState && (
                           <div className="ml-6 pl-4 border-l border-border mt-1 mb-2 space-y-0.5">
                             {item.children.map((child) => {
                               const childActive =

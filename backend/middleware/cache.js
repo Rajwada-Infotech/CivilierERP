@@ -52,25 +52,28 @@ function cache(namespace, opts = {}) {
       // Continue to handler/DB
       const originalJson = res.json.bind(res);
         res.json = async (data) => {
-          if (res.statusCode >= 200 && res.statusCode < 300) {
-            const jsonStr = JSON.stringify(data);
-            await incrGlobalCacheMiss();
-            if (jsonStr.length > 1024) {
-              const compressed = compress(data);
-              if (compressed) {
-                await redisSet(key, compressed, await getDynamicTtl());
-                await setStaleCache(staleKey, compressed, await getDynamicTtl() * 2);
-                res.setHeader("X-Cache-Size", `${Buffer.byteLength(compressed, 'utf8')} -> ${jsonStr.length}`);
-              } else {
-                await redisSet(key, jsonStr, await getDynamicTtl());
-                await setStaleCache(staleKey, jsonStr, await getDynamicTtl() * 2);
-              }
+          const jsonStr = JSON.stringify(data);
+          const ttl = (res.statusCode >= 500 ? 30 : await getDynamicTtl());
+          await incrGlobalCacheMiss();
+          
+          // Cache all responses, short TTL for errors
+          if (jsonStr.length > 1024) {
+            const compressed = compress(data);
+            if (compressed) {
+              await redisSet(key, compressed, ttl);
+              await redisSet(staleKey, compressed, ttl * 2);
+              res.setHeader("X-Cache-Size", `${Buffer.byteLength(compressed, 'utf8')} -> ${jsonStr.length}`);
             } else {
-              await redisSet(key, jsonStr, await getDynamicTtl());
-              await setStaleCache(staleKey, jsonStr, await getDynamicTtl() * 2);
+              await redisSet(key, jsonStr, ttl);
+              await redisSet(staleKey, jsonStr, ttl * 2);
             }
+          } else {
+            await redisSet(key, jsonStr, ttl);
+            await redisSet(staleKey, jsonStr, ttl * 2);
           }
+          
           res.setHeader("X-Cache", "MISS");
+          res.setHeader("X-Cache-TTL", `${ttl}s`);
           return originalJson(data);
         };
         next();
