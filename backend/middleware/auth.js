@@ -1,5 +1,6 @@
 const jwt = require("jsonwebtoken");
 const { redisGet } = require("../redis");
+const { pfaddActiveUser } = require("../redis");
 
 const BLACKLIST_PREFIX = "blacklist:";
 
@@ -26,6 +27,11 @@ module.exports = async (req, res, next) => {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     req.user = decoded;
     req.token = token; // store for use in logout route
+
+    // Track active user (server.js already has post-auth middleware, but reinforce)
+    try {
+      await pfaddActiveUser(decoded.userId);
+    } catch {}
 
     next();
   } catch (err) {

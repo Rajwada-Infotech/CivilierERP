@@ -39,13 +39,15 @@ For production (e.g. Redis Cloud / Upstash), set `REDIS_HOST`, `REDIS_PORT`, and
 ## Install new dependencies
 
 ```bash
-cd backend
-npm install
+cd backend ; npm install lz-string
 ```
 
-New packages added to `package.json`:
-- `ioredis` — Redis client
-- `rate-limit-redis` — Redis store for express-rate-limit
+**Optimizations added:**
+- LZString cache compression (40-70% savings)
+- Lua delPattern (faster than SCAN)
+- Pipelining support
+- ZSET engagement scoring
+- Dynamic limits / rate-limits
 
 ---
 
@@ -108,12 +110,17 @@ On each failed login for `user@example.com`:
 
 | Key pattern | Purpose | TTL |
 |-------------|---------|-----|
-| `cache:<namespace>:<userId>:<queryJson>` | Cached GET response | 300s (5 min) |
+| `cache:<namespace>:<userId>:<queryJson>` | Cached GET response (LZ compressed) | 300s (5 min) |
 | `blacklist:<jwt>` | Invalidated token | Remaining JWT lifetime |
 | `login:attempts:<email>` | Failed login counter | 900s (15 min) |
 | `login:lock:<email>` | Account lockout flag | 900s (15 min) |
-| `rl:login:<ip>` | Login rate limit counter | 900s |
-| `rl:api:<ip>` | API rate limit counter | 900s |
+| `rl:login:<userId\|ip>` | Login rate limit counter | 900s |
+| `rl:api:<userId\|ip>` | API rate limit (dynamic per engagement) | 900s |
+| `engagement:score` | ZSET user engagement scores (member=userId) | 30 days auto-expire |
+
+**New headers:**
+- `X-Cache-Size: 1250 → 3200` (compressed → decompressed bytes)
+
 
 ---
 
