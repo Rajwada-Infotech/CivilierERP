@@ -2,6 +2,7 @@
 import React, { useState, useEffect } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useActivityBrowser } from "@/contexts/ActivityBrowserContext";
+import type { ActivityActionType } from "@/api/userActivityApi";
 
 import { ActivityBrowserFilters } from "./ActivityBrowserFilters";
 import { ActivityBrowserAnalytics } from "./ActivityBrowserAnalytics";
