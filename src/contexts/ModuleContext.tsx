@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useCallback } from "react";
 
-type Module = "finance" | "material" | null;
+type Module = "finance" | "material" | "followup" | null;
 
 interface ModuleContextType {
   activeModule: Module;
@@ -19,7 +19,7 @@ export const useModule = () => {
 
 export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [activeModule, setActiveModuleState] = useState<Module>(null);
-  const moduleLabel = activeModule === "finance" ? "💰 Finance" : activeModule === "material" ? "📦 Material" : "No Module Selected";
+const moduleLabel = activeModule === "finance" ? "💰 Finance" : activeModule === "material" ? "📦 Material" : activeModule === "followup" ? "📅 Follow-Up" : "No Module Selected";
 
   const setActiveModule = useCallback((m: Module) => {
     setActiveModuleState(m);

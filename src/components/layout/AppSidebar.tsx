@@ -7,6 +7,7 @@ import { useSidebarState } from "./AppLayout";
 
 import {
   BarChart3,
+  Calendar,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
@@ -459,6 +460,7 @@ export const AppSidebar = () => {
     if (isAdmin) return "Admin";
     if (isFinance) return "Finance";
     if (isMaterial) return "Material";
+    if (activeModule === "followup") return "Follow-Up";
     return "No module";
   };
 
@@ -470,9 +472,11 @@ export const AppSidebar = () => {
     if (isUserProfilePage)
       return "bg-gray-500/10 text-gray-500 border-gray-500/20";
     if (isAdmin) return "bg-blue-500/10 text-blue-500 border-blue-500/20";
-    if (isFinance) return "bg-primary/10 text-primary border-primary/20";
+  if (isFinance) return "bg-primary/10 text-primary border-primary/20";
     if (isMaterial)
       return "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
+    if (activeModule === "followup")
+      return "bg-indigo-500/10 text-indigo-500 border-indigo-500/20";
     return "bg-muted text-muted-foreground border-border";
   };
 
@@ -492,6 +496,7 @@ export const AppSidebar = () => {
     if (isAdmin) return ShieldCheck;
     if (isFinance) return Landmark;
     if (isMaterial) return Package;
+    if (activeModule === "followup") return Calendar;
     return Landmark;
   };
 

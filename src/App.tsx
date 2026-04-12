@@ -124,7 +124,7 @@ const DebitNoteMaster = lazy(() =>
   withDelay(() => import("./pages/masters/DebitNoteMaster")),
 );
 const BillingTermsMaster = lazy(() =>
-  withDelay(() => import("./pages/masters/BillingTermsMaster")),
+  withDelay(() => import("./pages/masters/BillingTermsmaster")),
 );
 const TCMaster = lazy(() =>
   withDelay(() => import("./pages/material/T&CMaster")),
@@ -213,6 +213,7 @@ const ControlPanel = lazy(() =>
 const AdsManager = lazy(() =>
   withDelay(() => import("./pages/dba/AdsManager")),
 );
+const FollowupDashboard = lazy(() => withDelay(() => import("./pages/followup")));
 const RemindersManager = lazy(() =>
   withDelay(() => import("./pages/dba/RemindersManager")),
 );
@@ -415,6 +416,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <Records />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup"
+        element={
+          <ProtectedRoute>
+            <FollowupDashboard />
           </ProtectedRoute>
         }
       />

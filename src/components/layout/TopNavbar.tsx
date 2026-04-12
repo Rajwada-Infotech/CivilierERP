@@ -183,6 +183,27 @@ const materialSetupItems = [
   },
 ];
 
+const followupSetupItems = [
+  {
+    icon: Calendar,
+    label: "Reminders",
+    path: "/followup/reminders",
+    color: "text-indigo-500",
+  },
+  {
+    icon: FileText,
+    label: "Follow-up Log",
+    path: "/followup/log",
+    color: "text-violet-500",
+  },
+  {
+    icon: Activity,
+    label: "Pending Tasks",
+    path: "/followup/tasks",
+    color: "text-purple-500",
+  },
+];
+
 const adminSetupItems = [
   {
     icon: Tag,
@@ -347,6 +368,13 @@ export const TopNavbar = () => {
         items: materialSetupItems,
         label: "Material",
         color: "bg-emerald-500/10 text-emerald-600 border-emerald-200/60",
+        available: true,
+      };
+    if (activeModule === "followup")
+      return {
+        items: followupSetupItems,
+        label: "Follow-Up",
+        color: "bg-indigo-500/10 text-indigo-600 border-indigo-200/60",
         available: true,
       };
     if (activeModule === "finance")
@@ -621,6 +649,43 @@ export const TopNavbar = () => {
                     </span>
                     {activeModule === "material" && !isAdminPage && (
                       <span className="text-[9px] font-heading px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600">
+                        Active
+                      </span>
+                    )}
+                  </button>
+
+                  {/* Follow-Up */}
+                  <button
+                    onClick={async () => {
+                      setModuleOpen(false);
+                      if (activeModule === "followup" && !isAdminPage) return;
+                      setModuleSwitching(true);
+                      await new Promise((res) => setTimeout(res, 600));
+                      setActiveModule("followup");
+                      navigate("/followup");
+                      setModuleSwitching(false);
+                    }}
+                    className={`group flex flex-col items-center gap-1.5 p-2.5 rounded-xl border transition-all ${
+                      activeModule === "followup" && !isAdminPage
+                        ? "border-indigo-500/60 bg-indigo-500/10 shadow-sm"
+                        : "border-border hover:border-indigo-500/40 hover:bg-muted/60"
+                    }`}
+                  >
+                    <Calendar
+                      size={22}
+                      className={`transition-colors ${
+                        activeModule === "followup" && !isAdminPage
+                          ? "text-indigo-500"
+                          : "text-muted-foreground group-hover:text-indigo-500"
+                      }`}
+                    />
+                    <span
+                      className={`text-xs font-heading ${activeModule === "followup" && !isAdminPage ? "text-indigo-600 font-semibold" : "text-muted-foreground group-hover:text-foreground"}`}
+                    >
+                      Follow-Up
+                    </span>
+                    {activeModule === "followup" && !isAdminPage && (
+                      <span className="text-[9px] font-heading px-1.5 py-0.5 rounded-full bg-indigo-500/15 text-indigo-600">
                         Active
                       </span>
                     )}
