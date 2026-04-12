@@ -162,6 +162,9 @@ const SignaturePage = lazy(() =>
 const SuperAdminProfile = lazy(() =>
   withDelay(() => import("./pages/admin/SuperAdminProfile")),
 );
+const MetricsDashboard = lazy(() =>
+  withDelay(() => import("./pages/admin/MetricsDashboard")),
+);
 const PasswordResetPage = lazy(() =>
   withDelay(() => import("./pages/admin/security/PasswordReset")),
 );
@@ -767,6 +770,14 @@ function AppRoutes() {
         element={
           <AdminRoute>
             <WhatsAppSetup />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/metrics"
+        element={
+          <AdminRoute>
+            <MetricsDashboard />
           </AdminRoute>
         }
       />
