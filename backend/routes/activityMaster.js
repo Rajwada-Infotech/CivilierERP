@@ -1,10 +1,10 @@
-const express1 = require("express");
+const express = require("express");
 const { cache } = require("../middleware/cache");
 const { redisDelPattern } = require("../redis");
-const router1 = express1.Router();
+const router = express.Router();
 const { getPool, sql } = require("../db");
 
-router1.get("/", cache("activity-master", 300), async (req, res) => {
+router.get("/", cache("activity-master", 300), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(
@@ -17,7 +17,7 @@ router1.get("/", cache("activity-master", 300), async (req, res) => {
   }
 });
 
-router1.post("/", async (req, res) => {
+router.post("/", async (req, res) => {
   const {
     activity_name,
     short_description,
@@ -49,7 +49,7 @@ router1.post("/", async (req, res) => {
   }
 });
 
-router1.put("/:id", async (req, res) => {
+router.put("/:id", async (req, res) => {
   const {
     activity_name,
     short_description,
@@ -83,7 +83,7 @@ router1.put("/:id", async (req, res) => {
   }
 });
 
-router1.delete("/:id", async (req, res) => {
+router.delete("/:id", async (req, res) => {
   try {
     const pool = getPool();
     await pool
@@ -98,4 +98,4 @@ router1.delete("/:id", async (req, res) => {
   }
 });
 
-module.exports = router1;
+module.exports = router;
