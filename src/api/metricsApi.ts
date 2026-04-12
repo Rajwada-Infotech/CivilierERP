@@ -1,5 +1,18 @@
 
 
+interface SystemMetrics {
+  rpm: number;
+  activeUsers: number;
+  memoryUsage: number;
+  cacheHitRate: number;
+  rpmHistory: number[];
+  predictedHistory: number[];
+  redisOk: boolean;
+  workerOk: boolean;
+  aofOk: boolean;
+  lastUpdated: number;
+}
+
 export const fetchMetrics = async (baseURL: string, token?: string): Promise<SystemMetrics> => {
   const url = `${baseURL.replace(/\/$/, '')}/api/system/metrics`;
   const headers: Record<string, string> = { 
