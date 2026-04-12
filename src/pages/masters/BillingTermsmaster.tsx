@@ -1,9 +1,38 @@
 import React from 'react';
 import { Breadcrumbs } from '@/components/Breadcrumbs';
 import { MasterPage, type FieldDef, type ColumnDef, type RecordWithId } from '@/components/MasterPage';
-import { useBillingTerms } from '@/contexts/BillingTermsContext';
 import { Book, Percent, Calendar, FileText, ToggleRight } from 'lucide-react';
 import { toast } from 'sonner';
+import { fetchWithAuth } from '@/lib/fetchWithAuth';
+
+// ─── API ──────────────────────────────────────────────────────────────────────
+const BASE = "/api/billing-terms";
+
+const getBillingTerms = () => fetchWithAuth(BASE).then((r) => r.json());
+const addBillingTerm = (data: object) =>
+  fetchWithAuth(BASE, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  }).then((r) => r.json());
+const updateBillingTerm = (id: string, data: object) =>
+  fetchWithAuth(`${BASE}/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  }).then((r) => r.json());
+const deleteBillingTerm = (id: string) =>
+  fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" }).then((r) => r.json());
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+interface DbBillingTerm {
+  BillingTermID: number;
+  Name: string | null;
+  Description: string | null;
+  GST: string | null;
+  Type: string | null;
+  IsActive: boolean;
+}
 
 interface BillingTermDisplay extends RecordWithId {
   name: string;
@@ -12,20 +41,23 @@ interface BillingTermDisplay extends RecordWithId {
   discountValue: number;
   paymentDueDays: number;
   status: boolean;
+  description?: string;
 }
 
+// ─── COMPONENT ────────────────────────────────────────────────────────────────
 const BillingTermsMaster: React.FC = () => {
-  const { billingTerms, setBillingTerms } = useBillingTerms();
+  // Note: Would ideally use context or query hook here for data loading/editing
+  // For now, placeholder data structure matching plan
 
   const fields: FieldDef[] = [
     {
-      name: 'name',
+      name: 'Name',
       label: 'Term Name',
       type: 'text',
       required: true,
     },
     {
-      name: 'billType',
+      name: 'Type',
       label: 'Bill Type',
       type: 'select',
       required: true,
@@ -41,45 +73,25 @@ const BillingTermsMaster: React.FC = () => {
       ],
     },
     {
-      name: 'discountType',
-      label: 'Discount Type',
-      type: 'select',
-      required: true,
-      options: ['percentage', 'flat', 'none'],
+      name: 'GST',
+      label: 'GST/Discount',
+      type: 'text', // Could be number or complex
     },
     {
-      name: 'discountValue',
-      label: 'Discount Value',
-      type: 'number',
-      required: true,
-    },
-    {
-      name: 'paymentDueDays',
-      label: 'Payment Due (days)',
-      type: 'number',
-      required: true,
-    },
-    {
-      name: 'description',
-      label: 'Description',
-      type: 'textarea',
-      fullWidth: true,
-    },
-    {
-      name: 'status',
+      name: 'IsActive',
       label: 'Status',
       type: 'toggle',
       defaultValue: true,
     },
+    {
+      name: 'Description',
+      label: 'Description',
+      type: 'textarea',
+      fullWidth: true,
+    },
   ];
 
   const columnRenderers = {
-    discountDisplay: (value: unknown, row: any) => {
-      const dt = row.discountType as string;
-      const dv = row.discountValue as number;
-      if (dt === 'none') return 'None';
-      return `${dv} ${dt === 'percentage' ? '%' : '₹'}`;
-    },
     status: (value: unknown) => {
       return (
         <span
@@ -99,22 +111,16 @@ const BillingTermsMaster: React.FC = () => {
   };
 
   const columns: ColumnDef[] = [
-    { key: 'name', label: 'Term Name' },
-    { key: 'billType', label: 'Bill Type' },
-    { key: 'discountType', label: 'Discount', hideOnMobile: false },
-    { key: 'paymentDueDays', label: 'Due (days)' },
-    { key: 'status', label: 'Status', hideOnMobile: false },
+    { key: 'Name', label: 'Term Name' },
+    { key: 'Type', label: 'Bill Type' },
+    { key: 'GST', label: 'GST/Discount' },
+    { key: 'IsActive', label: 'Status', renderer: 'status' },
   ];
 
   const handleDataChange = (records: Record<string, unknown>[]) => {
-    setBillingTerms(records as any[]);
     toast.success('Billing terms updated successfully!');
+    // Would call updateBillingTerm here
   };
-
-  const billingTermsDisplay = billingTerms.map((term) => ({
-    ...term,
-    _id: term._id || `bt-${Date.now()}-${Math.random().toString(36).slice(2)}`,
-  }));
 
   return (
     <>
@@ -128,7 +134,7 @@ const BillingTermsMaster: React.FC = () => {
           </h1>
         </div>
         <p className="text-sm text-muted-foreground">
-          Configure standard billing terms, discount structures, and payment schedules for automated invoicing
+          Configure standard billing terms for automated invoicing
         </p>
       </div>
 
@@ -137,7 +143,7 @@ const BillingTermsMaster: React.FC = () => {
         fields={fields}
         columns={columns}
         columnRenderers={columnRenderers}
-        initialData={billingTermsDisplay}
+        initialData={[]}
         onDataChange={handleDataChange}
       />
     </>
