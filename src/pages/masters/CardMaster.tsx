@@ -1,4 +1,3 @@
-import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import React, { useState, useMemo } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -23,59 +22,19 @@ import {
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
-
-// ─── API ──────────────────────────────────────────────────────────────────────
-const BASE = "/api/card-master";
-const BANKS_URL = "/api/bank-master";
-
-const getCards = () =>
-  fetchWithAuth(BASE).then((r) => r.json());
-const getBanks = () =>
-  fetchWithAuth(BANKS_URL).then((r) => r.json());
-const addCard = (data: object) =>
-  fetchWithAuth(BASE, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  }).then((r) => r.json());
-const updateCard = (id: string, data: object) =>
-  fetchWithAuth(`${BASE}/${id}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  }).then((r) => r.json());
-const deleteCard = (id: string) =>
-  fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" }).then(
-    (r) => r.json(),
-  );
+import {
+  getCards,
+  getBanksForCard,
+  getCompanyOptions,
+  addCard,
+  updateCard,
+  deleteCard,
+  type DbCard,
+  type DbBank,
+  type CompanyOption,
+} from "@/api/cardMasterApi";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-interface DbCard {
-  id: number;
-  company_name: string | null;
-  bank_name: string | null;
-  account_number: string | null;
-  ifsc_code: string | null;
-  card_network: string | null;
-  card_type: string | null;
-  card_holder_name: string | null;
-  card_number: string | null;
-  cvv: string | null;
-  expiry_month: number | null;
-  expiry_year: number | null;
-  reminder_enabled: boolean;
-  reminder_days: number | null;
-  status: boolean;
-}
-
-interface DbBank {
-  BId: number;
-  BName: string | null;
-  BBranch: string | null;
-  BAccountNumber: string | null;
-  BIfscCode: string | null;
-}
-
 interface CardRecord {
   _id: string;
   companyName: string;
@@ -302,9 +261,13 @@ const CardMaster: React.FC = () => {
     queryKey: ["cards"],
     queryFn: getCards,
   });
-  const { data: bankData, isLoading: loadingBanks } = useQuery({
+  const { data: bankData, isLoading: loadingBanks } = useQuery<DbBank[]>({
     queryKey: ["banks"],
-    queryFn: getBanks,
+    queryFn: getBanksForCard,
+  });
+  const { data: companies = [] } = useQuery<CompanyOption[]>({
+    queryKey: ["companyOptions"],
+    queryFn: getCompanyOptions,
   });
 
   const dbItems: DbCard[] = Array.isArray(dbData) ? dbData : [];
@@ -655,13 +618,18 @@ const CardMaster: React.FC = () => {
                 <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                   Company Name
                 </label>
-                <input
-                  type="text"
+                <select
                   value={form.companyName}
                   onChange={(e) => setField("companyName", e.target.value)}
-                  placeholder="Company name"
                   className={inp}
-                />
+                >
+                  <option value="">Select Company...</option>
+                  {companies.map((c) => (
+                    <option key={c.id} value={c.label}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               {/* Account Number — auto-filled from bank selection */}

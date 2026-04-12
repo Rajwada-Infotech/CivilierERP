@@ -2,52 +2,95 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const BASE = "/api/bank-master";
 
-async function handleResponse(res) {
-  let data = null;
+// ─── Response handler ─────────────────────────────────────────────────────────
+async function handleResponse<T = unknown>(res: Response): Promise<T> {
+  let data: any = null;
   try {
     data = await res.json();
   } catch {}
+
   if (!res.ok) {
     const msg = data?.message || data?.error || `HTTP ${res.status}`;
     throw new Error(msg);
   }
-  return data;
+  return data as T;
 }
 
-// Helper Functions (Frontend)
-const cleanIfsc = (value) => {
+// ─── Types ────────────────────────────────────────────────────────────────────
+export interface BankRecord {
+  BId: number;
+  BName: string | null;
+  BBranch: string | null;
+  BAccountNumber: string | null;
+  BIfscCode: string | null;
+  BAccountType: string | null;
+  BBankType: string | null;
+  BAccountHolderName: string | null;
+  BOpeningBalance: number | null;
+  BAddress: string | null;
+  BStatus: boolean;
+  BCompanyName: string | null;
+}
+
+export interface BankPayload {
+  BName: string;
+  BBranch?: string | null;
+  BAccountNumber?: string | null;
+  BIfscCode: string;
+  BAccountType?: string | null;
+  BBankType?: string | null;
+  BAccountHolderName?: string | null;
+  BOpeningBalance: number;
+  BAddress?: string | null;
+  BStatus: boolean;
+  BCompanyName?: string | null;
+}
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const cleanIfsc = (value: string | null | undefined): string | null => {
   if (!value || String(value).trim() === "") return null;
-  return String(value).trim().toUpperCase();
+  return String(value).trim().toUpperCase().slice(0, 11);
 };
 
-const cleanAccountType = (value) => {
+const cleanStr = (value: string | null | undefined): string | null => {
   if (!value || String(value).trim() === "") return null;
   return String(value).trim();
 };
 
-// GET ALL BANKS
-export const getBanks = async () => {
-  const res = await fetchWithAuth(BASE);
-  return handleResponse(res);
+// ─── Company options (LHeadType = 'C') ───────────────────────────────────────
+export interface CompanyOption {
+  id: number;
+  label: string;
+}
+
+export const getCompanyOptions = async (): Promise<CompanyOption[]> => {
+  const res = await fetchWithAuth("/api/account-head/options?type=C");
+  return handleResponse<CompanyOption[]>(res);
 };
 
-// ADD BANK
-export const addBank = async (formData) => {
-  const payload = {
-    BName: formData.BName?.trim() || null,
-    BBranch: formData.BBranch?.trim() || null,
-    BAccountNumber: formData.BAccountNumber?.trim() || null,
-    BIfscCode: cleanIfsc(formData.BIfscCode),
-    BAccountType: cleanAccountType(formData.BAccountType),
-    BBankType: formData.BBankType?.trim() || null,
-    BAccountHolderName: formData.BAccountHolderName?.trim() || null,
-    BOpeningBalance: Number(formData.BOpeningBalance) || 0,
-    BAddress: formData.BAddress?.trim() || null,
-    BStatus: formData.BStatus ?? true,
-    CompanyName: formData.CompanyName?.trim() || null,
-  };
+// ─── GET ALL BANKS ────────────────────────────────────────────────────────────
+export const getBanks = async (): Promise<BankRecord[]> => {
+  const res = await fetchWithAuth(BASE);
+  return handleResponse<BankRecord[]>(res);
+};
 
-  console.log("Sending payload to backend:", payload); // For debugging
+// ─── ADD BANK ─────────────────────────────────────────────────────────────────
+export const addBank = async (
+  formData: Record<string, unknown>,
+): Promise<BankRecord> => {
+  const payload: BankPayload = {
+    BName: String(formData.BName || "").trim(),
+    BBranch: cleanStr(formData.BBranch as string),
+    BAccountNumber: cleanStr(formData.BAccountNumber as string),
+    BIfscCode: cleanIfsc(formData.BIfscCode as string) || "", // required
+    BAccountType: cleanStr(formData.BAccountType as string),
+    BBankType: cleanStr(formData.BBankType as string),
+    BAccountHolderName: cleanStr(formData.BAccountHolderName as string),
+    BOpeningBalance: Number(formData.BOpeningBalance) || 0,
+    BAddress: cleanStr(formData.BAddress as string),
+    BStatus: formData.BStatus !== false,
+    BCompanyName: cleanStr(formData.BCompanyName as string),
+  };
 
   const res = await fetchWithAuth(BASE, {
     method: "POST",
@@ -55,17 +98,26 @@ export const addBank = async (formData) => {
     body: JSON.stringify(payload),
   });
 
-  return handleResponse(res);
+  return handleResponse<BankRecord>(res);
 };
 
-// UPDATE BANK
-export const updateBank = async (id, formData) => {
-  const payload = {
-    BName: formData.BName?.trim() || null,
-    BIfscCode: cleanIfsc(formData.BIfscCode),
-    BAccountType: cleanAccountType(formData.BAccountType),
-    BStatus: formData.BStatus ?? null,
-    BAddress: formData.BAddress?.trim() || null,
+// ─── UPDATE BANK ──────────────────────────────────────────────────────────────
+export const updateBank = async (
+  id: number | string,
+  formData: Record<string, unknown>,
+): Promise<{ success: boolean; message: string }> => {
+  const payload: BankPayload = {
+    BName: String(formData.BName || "").trim(),
+    BBranch: cleanStr(formData.BBranch as string),
+    BAccountNumber: cleanStr(formData.BAccountNumber as string),
+    BIfscCode: cleanIfsc(formData.BIfscCode as string) || "",
+    BAccountType: cleanStr(formData.BAccountType as string),
+    BBankType: cleanStr(formData.BBankType as string),
+    BAccountHolderName: cleanStr(formData.BAccountHolderName as string),
+    BOpeningBalance: Number(formData.BOpeningBalance) || 0,
+    BAddress: cleanStr(formData.BAddress as string),
+    BStatus: formData.BStatus !== false,
+    BCompanyName: cleanStr(formData.BCompanyName as string),
   };
 
   const res = await fetchWithAuth(`${BASE}/${id}`, {
@@ -77,8 +129,10 @@ export const updateBank = async (id, formData) => {
   return handleResponse(res);
 };
 
-// DELETE BANK
-export const deleteBank = async (id) => {
+// ─── DELETE BANK ──────────────────────────────────────────────────────────────
+export const deleteBank = async (
+  id: number | string,
+): Promise<{ success: boolean }> => {
   const res = await fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" });
   return handleResponse(res);
 };
