@@ -1,5 +1,4 @@
 import React, { useState, useEffect } from "react";
-import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -17,56 +16,21 @@ import {
   Calculator,
   BookOpen,
 } from "lucide-react";
-
-// ─── API ──────────────────────────────────────────────────────────────────────
-const BASE = "/api/cheque-master";
-const BANKS_URL = "/api/bank-master";
-
-const getCheques = () =>
-  fetchWithAuth(BASE).then((r) => r.json());
-const getBanks = () =>
-  fetchWithAuth(BANKS_URL).then((r) => r.json());
-const addCheque = (data: object) =>
-  fetchWithAuth(BASE, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  }).then((r) => r.json());
-const updateCheque = (id: string, data: object) =>
-  fetchWithAuth(`${BASE}/${id}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  }).then((r) => r.json());
-const deleteCheque = (id: string) =>
-  fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" }).then(
-    (r) => r.json(),
-  );
+import {
+  getCheques,
+  getBanksForCheque,
+  getCompanyOptions,
+  addCheque,
+  updateCheque,
+  deleteCheque,
+  type DbCheque,
+  type DbBank,
+  type CompanyOption,
+} from "@/api/chequeMasterApi";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-interface DbCheque {
-  CId: number;
-  CompanyId: number | null;
-  BankId: number | null;
-  AccountNumber: string | null;
-  IFSCCode: string | null;
-  ChequeLotNumber: string | null;
-  ChequeStartNumber: number | null;
-  ChequeEndNumber: number | null;
-  TotalCheques: number | null;
-  Remarks: string | null;
-  Status: boolean;
-}
-
-interface DbBank {
-  BId: number;
-  BName: string | null;
-  BBranch: string | null;
-  BAccountNumber: string | null;
-  BIfscCode: string | null;
-}
-
 interface FormState {
+  companyId: string;
   bankId: string;
   bankName: string;
   accountNumber: string;
@@ -80,6 +44,7 @@ interface FormState {
 }
 
 const EMPTY: FormState = {
+  companyId: "",
   bankId: "",
   bankName: "",
   accountNumber: "",
@@ -108,9 +73,13 @@ const ChequeMaster: React.FC = () => {
     queryKey: ["cheques"],
     queryFn: getCheques,
   });
-  const { data: bankData, isLoading: loadingBanks } = useQuery({
+  const { data: bankData, isLoading: loadingBanks } = useQuery<DbBank[]>({
     queryKey: ["banks"],
-    queryFn: getBanks,
+    queryFn: getBanksForCheque,
+  });
+  const { data: companies = [] } = useQuery<CompanyOption[]>({
+    queryKey: ["companyOptions"],
+    queryFn: getCompanyOptions,
   });
 
   const dbCheques: DbCheque[] = Array.isArray(chequeData) ? chequeData : [];
@@ -146,6 +115,7 @@ const ChequeMaster: React.FC = () => {
 
   const validate = () => {
     const e: Record<string, boolean> = {};
+    if (!form.companyId) e.companyId = true;
     if (!form.bankId) e.bankId = true;
     if (!form.accountNumber.trim()) e.accountNumber = true;
     if (!form.lotNumber.trim()) e.lotNumber = true;
@@ -162,6 +132,7 @@ const ChequeMaster: React.FC = () => {
   };
 
   const toPayload = (f: FormState) => ({
+    CompanyId: f.companyId ? Number(f.companyId) : null,
     BankId: f.bankId ? Number(f.bankId) : null,
     AccountNumber: f.accountNumber || null,
     IFSCCode: f.ifscCode || null,
@@ -194,6 +165,7 @@ const ChequeMaster: React.FC = () => {
   const handleEdit = (item: DbCheque) => {
     const bank = dbBanks.find((b) => b.BId === item.BankId);
     setForm({
+      companyId: item.CompanyId ? String(item.CompanyId) : "",
       bankId: item.BankId ? String(item.BankId) : "",
       bankName: bank?.BName || "",
       accountNumber: item.AccountNumber || "",
@@ -282,6 +254,30 @@ const ChequeMaster: React.FC = () => {
 
           <div className="p-5">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Company dropdown — live from DB */}
+              <div>
+                <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  Company <span className="text-destructive">*</span>
+                </label>
+                <select
+                  value={form.companyId}
+                  onChange={(e) => setField("companyId", e.target.value)}
+                  className={`${inp} ${errors.companyId ? "border-destructive" : ""}`}
+                >
+                  <option value="">Select Company...</option>
+                  {companies.map((c) => (
+                    <option key={c.id} value={String(c.id)}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+                {errors.companyId && (
+                  <p className="text-[11px] text-destructive mt-1">
+                    Company is required
+                  </p>
+                )}
+              </div>
+
               {/* Bank dropdown — live from DB */}
               <div>
                 <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
