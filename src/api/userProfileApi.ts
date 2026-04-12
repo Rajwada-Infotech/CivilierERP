@@ -24,6 +24,7 @@ export const changePassword = async (
 ) => {
   const res = await fetchWithAuth(`${BASE}/${id}/change-password`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ current_password, new_password }),
   });
   if (!res.ok) {

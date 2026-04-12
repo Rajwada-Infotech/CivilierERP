@@ -16,6 +16,7 @@ export const getEnterprises = async () => {
 export const addEnterprise = async (data: Record<string, unknown>) => {
   const res = await fetch(BASE_URL, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
     headers: getAuthHeaders(),
     body: JSON.stringify(data),
   });
@@ -32,6 +33,7 @@ export const updateEnterprise = async (
 ) => {
   const res = await fetch(`${BASE_URL}/${id}`, {
     method: "PUT",
+    headers: { "Content-Type": "application/json" },
     headers: getAuthHeaders(),
     body: JSON.stringify(data),
   });

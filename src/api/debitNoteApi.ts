@@ -11,6 +11,7 @@ export const getDebitNotes = async () => {
 export const addDebitNote = async (data: Record<string, unknown>) => {
   const res = await fetchWithAuth(BASE_URL, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -23,6 +24,7 @@ export const addDebitNote = async (data: Record<string, unknown>) => {
 export const updateDebitNote = async (id: number, data: Record<string, unknown>) => {
   const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
     method: "PUT",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
   if (!res.ok) {

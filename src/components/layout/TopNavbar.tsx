@@ -134,8 +134,8 @@ async function fetchAllReminders(): Promise<ReminderItem[]> {
   const [poRes, grnRes, chequeRes, tdsRes] = await Promise.allSettled([
     fetchWithAuth("/api/purchase-orders"),
     fetchWithAuth("/api/grns"),
-    fetchWithAuth("/api/chequeMaster"),
-    fetchWithAuth("/api/tdsMaster"),
+    fetchWithAuth("/api/cheque-master"),
+    fetchWithAuth("/api/tds-master"),
   ]);
 
   const items: ReminderItem[] = [];
@@ -991,7 +991,7 @@ export const TopNavbar = () => {
                     <button
                       onClick={() => {
                         setModuleOpen(false);
-                        navigate("/admin");
+                        navigate("/admin/dashboard");
                       }}
                       className={`group flex flex-col items-center gap-1.5 p-2.5 rounded-xl border transition-all
                         ${isAdminPage ? "border-blue-500/60 bg-blue-500/10 shadow-sm" : "border-border hover:border-blue-500/40 hover:bg-muted/60"}`}

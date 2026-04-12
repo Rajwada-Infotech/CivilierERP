@@ -621,9 +621,13 @@ function AppRoutes() {
         }
       />
 
-      {/* ADMIN */}
+      {/* ADMIN — /admin redirects straight to dashboard */}
       <Route
         path="/admin"
+        element={<Navigate to="/" replace />}
+      />
+      <Route
+        path="/admin/dashboard"
         element={
           <AdminRoute>
             <AdminDashboard />

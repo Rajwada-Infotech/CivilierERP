@@ -18,11 +18,13 @@ const getActivities = () =>
 const addActivity = (data: object) =>
   fetchWithAuth(BASE, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   }).then((r) => r.json());
 const updateActivity = (id: string, data: object) =>
   fetchWithAuth(`${BASE}/${id}`, {
     method: "PUT",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   }).then((r) => r.json());
 const deleteActivity = (id: string) =>

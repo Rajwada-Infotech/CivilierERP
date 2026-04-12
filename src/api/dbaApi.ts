@@ -18,6 +18,7 @@ export const getTableRowCount = async (tableName: string) => {
 export const runSelectQuery = async (query: string, tenantId?: string) => {
   const res = await fetchWithAuth(`${BASE}/query`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query, tenant_id: tenantId }),
   });
   if (!res.ok) {
@@ -30,6 +31,7 @@ export const runSelectQuery = async (query: string, tenantId?: string) => {
 export const runWriteQuery = async (query: string, tenantId?: string, confirmed = false) => {
   const res = await fetchWithAuth(`${BASE}/query/write`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query, tenant_id: tenantId, confirmed }),
   });
   if (!res.ok) {

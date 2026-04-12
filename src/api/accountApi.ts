@@ -16,6 +16,7 @@ export const getAccountGroups = async () => {
 export const addAccountGroup = async (data: Record<string, unknown>) => {
   const res = await fetch(BASE_URL, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
     headers: getAuthHeaders(),
     body: JSON.stringify(data),
   });
@@ -29,6 +30,7 @@ export const addAccountGroup = async (data: Record<string, unknown>) => {
 export const updateAccountGroup = async (id: string, data: Record<string, unknown>) => {
   const res = await fetch(`${BASE_URL}/${id}`, {
     method: "PUT",
+    headers: { "Content-Type": "application/json" },
     headers: getAuthHeaders(),
     body: JSON.stringify(data),
   });

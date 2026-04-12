@@ -17,11 +17,13 @@ const getHsn = () =>
 const addHsn = (data: object) =>
   fetchWithAuth(BASE, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   }).then((r) => r.json());
 const updateHsn = (code: string, data: object) =>
   fetchWithAuth(`${BASE}/${code}`, {
     method: "PUT",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   }).then((r) => r.json());
 const deleteHsn = (code: string) =>

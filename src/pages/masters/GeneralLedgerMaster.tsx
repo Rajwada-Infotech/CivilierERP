@@ -45,12 +45,11 @@ const EMPTY_FORM: LedgerForm = {
   LBelongsTo: "",
 };
 
-const BASE_URL = "/api/account-head";
-const GL_TYPE = "GL";
+const BASE_URL = "/api/general-ledger";
 
 // ─── API Functions ───────────────────────────────────────────────────────────
 const fetchLedgers = async (): Promise<LedgerHead[]> => {
-  const res = await fetch(`${BASE_URL}?type=${encodeURIComponent(GL_TYPE)}`, {
+  const res = await fetch(BASE_URL, {
     headers: {
       Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
     },
@@ -70,7 +69,6 @@ const createLedger = async (data: LedgerForm) => {
       LHeadName: data.LHeadName.trim(),
       LHeadCode: data.LHeadCode.trim().toUpperCase() || null,
       LBelongsTo: data.LBelongsTo ? Number(data.LBelongsTo) : null,
-      LHeadType: GL_TYPE,
     }),
   });
   if (!res.ok) {

@@ -9,8 +9,10 @@ import { toast } from 'sonner'
 const BASE = '/api/document-type'
 
 const getDocs    = () => fetchWithAuth(BASE).then(r => r.json())
-const addDoc     = (data: object) => fetchWithAuth(BASE, { method: 'POST', body: JSON.stringify(data) }).then(r => r.json())
-const updateDoc  = (id: string, data: object) => fetchWithAuth(`${BASE}/${id}`, { method: 'PUT', body: JSON.stringify(data) }).then(r => r.json())
+const addDoc     = (data: object) => fetchWithAuth(BASE, { method: 'POST',
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }).then(r => r.json())
+const updateDoc  = (id: string, data: object) => fetchWithAuth(`${BASE}/${id}`, { method: 'PUT',
+    headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) }).then(r => r.json())
 const deleteDoc  = (id: string) => fetchWithAuth(`${BASE}/${id}`, { method: 'DELETE' }).then(r => r.json())
 
 // ─── Types ────────────────────────────────────────────────────────────────────
