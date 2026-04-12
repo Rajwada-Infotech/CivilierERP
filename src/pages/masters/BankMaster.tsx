@@ -11,9 +11,11 @@ import { toast } from "sonner";
 
 // ─── API ──────────────────────────────────────────────────────────────────────
 const BASE = "/api/bank-master";
+const ENTERPRISE_OPTIONS_URL = "/api/enterprises/options";
 
-const getBanks = () =>
-  fetchWithAuth(BASE).then((r) => r.json());
+const getBanks = () => fetchWithAuth(BASE).then((r) => r.json());
+const getEnterpriseOptions = () =>
+  fetchWithAuth(ENTERPRISE_OPTIONS_URL).then((r) => r.json());
 const addBank = (data: object) =>
   fetchWithAuth(BASE, {
     method: "POST",
@@ -25,11 +27,14 @@ const updateBank = (id: string, data: object) =>
     body: JSON.stringify(data),
   }).then((r) => r.json());
 const deleteBank = (id: string) =>
-  fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" }).then(
-    (r) => r.json(),
-  );
+  fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" }).then((r) => r.json());
 
 // ─── Types ────────────────────────────────────────────────────────────────────
+interface DbEnterprise {
+  id: number;
+  label: string;
+}
+
 interface DbBank {
   BId: number;
   BName: string | null;
@@ -56,6 +61,7 @@ const toPayload = (r: Record<string, unknown>) => ({
   BOpeningBalance: r.openingBalance ? Number(r.openingBalance) : null,
   BAddress: (r.address as string) || null,
   BStatus: r.status !== false,
+  CompanyName: (r.companyName as string) || "",
 });
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -71,10 +77,19 @@ const BankMaster: React.FC = () => {
     queryFn: getBanks,
   });
 
+  const { data: enterpriseData, isLoading: loadingEnterprises } = useQuery({
+    queryKey: ["enterprise-options"],
+    queryFn: getEnterpriseOptions,
+  });
+
   const dbItems: DbBank[] = Array.isArray(dbData) ? dbData : [];
+  const enterprises: DbEnterprise[] = Array.isArray(enterpriseData)
+    ? enterpriseData
+    : [];
 
   const mappedData: RecordWithId[] = dbItems.map((item) => ({
     _id: String(item.BId),
+    companyName: (item as any).CompanyName || "",
     bankName: item.BName || "",
     branch: item.BBranch || "",
     accountNo: item.BAccountNumber || "",
@@ -153,7 +168,7 @@ const BankMaster: React.FC = () => {
     ),
   };
 
-  if (isLoading)
+  if (isLoading || loadingEnterprises)
     return <div className="p-6 text-muted-foreground">Loading...</div>;
   if (error)
     return <div className="p-6 text-red-500">Failed to load banks.</div>;
@@ -168,6 +183,13 @@ const BankMaster: React.FC = () => {
       <MasterPage
         title="Bank"
         fields={[
+          {
+            name: "companyName",
+            label: "Company Name",
+            type: "select",
+            required: true,
+            options: enterprises.map((e) => e.label),
+          },
           {
             name: "bankName",
             label: "Bank Name",
@@ -226,6 +248,7 @@ const BankMaster: React.FC = () => {
           },
         ]}
         columns={[
+          { key: "companyName", label: "Company", hideOnMobile: true },
           { key: "bankName", label: "Bank Name" },
           { key: "branch", label: "Branch", hideOnMobile: true },
           { key: "accountNo", label: "Account No." },
