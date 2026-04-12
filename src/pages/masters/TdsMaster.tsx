@@ -17,11 +17,13 @@ const getTds = () =>
 const addTds = (data: object) =>
   fetchWithAuth(BASE, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   }).then((r) => r.json());
 const updateTds = (id: string, data: object) =>
   fetchWithAuth(`${BASE}/${id}`, {
     method: "PUT",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   }).then((r) => r.json());
 const deleteTds = (id: string) =>

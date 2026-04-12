@@ -11,6 +11,7 @@ export const getDocumentTypes = async () => {
 export const addDocumentType = async (data: Record<string, unknown>) => {
   const res = await fetchWithAuth(BASE_URL, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   })
   if (!res.ok) { const err = await res.json(); throw new Error(err.error || "POST failed") }
@@ -20,6 +21,7 @@ export const addDocumentType = async (data: Record<string, unknown>) => {
 export const updateDocumentType = async (id: string, data: Record<string, unknown>) => {
   const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
     method: "PUT",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   })
   if (!res.ok) { const err = await res.json(); throw new Error(err.error || "PUT failed") }

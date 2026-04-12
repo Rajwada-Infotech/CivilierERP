@@ -141,8 +141,8 @@ async function loadReminders(): Promise<ReminderItem[]> {
   const [poR, grnR, chqR, tdsR] = await Promise.allSettled([
     fetchWithAuth("/api/purchase-orders"),
     fetchWithAuth("/api/grns"),
-    fetchWithAuth("/api/chequeMaster"),
-    fetchWithAuth("/api/tdsMaster"),
+    fetchWithAuth("/api/cheque-master"),
+    fetchWithAuth("/api/tds-master"),
   ]);
   const items: ReminderItem[] = [];
   const push = (
@@ -778,7 +778,7 @@ export const MobileNav: React.FC = () => {
                   {isAdmin && (
                     <button
                       onClick={() => {
-                        navigate("/admin");
+                        navigate("/admin/dashboard");
                         setOpen(false);
                       }}
                       className={`py-3 px-4 rounded-2xl border font-medium text-sm transition-all ${

@@ -836,7 +836,7 @@ const WorkOrderMaster: React.FC = () => {
       try {
         const [entRes, contrRes] = await Promise.all([
           fetchWithAuth("/api/enterprises"),
-          fetchWithAuth("/api/accountHeadMaster/options"),
+          fetchWithAuth("/api/account-head/options"),
         ]);
         if (entRes.ok) {
           const enterprises = await entRes.json();

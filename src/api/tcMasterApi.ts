@@ -14,6 +14,7 @@ export const getTCRecords = async () => {
 export const addTCRecord = async (data: Record<string, unknown>) => {
   const res = await fetch(BASE_URL, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
     headers: getAuthHeaders(),
     body: JSON.stringify(data),
   });
@@ -31,6 +32,7 @@ export const updateTCRecord = async (
 ) => {
   const res = await fetch(`${BASE_URL}/${id}`, {
     method: "PUT",
+    headers: { "Content-Type": "application/json" },
     headers: getAuthHeaders(),
     body: JSON.stringify(data),
   });

@@ -38,6 +38,7 @@ export const getUsers = async (): Promise<User[]> => {
 export const addUser = async (user: { name: string; email: string; role: string; password: string }) => {
   const res = await fetch(BASE_URL, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
     headers: getAuthHeaders(),
     body: JSON.stringify(user),
   });
@@ -48,6 +49,7 @@ export const addUser = async (user: { name: string; email: string; role: string;
 export const updateUser = async (id: number, user: Partial<User>) => {
   const res = await fetch(`${BASE_URL}/${id}`, {
     method: "PUT",
+    headers: { "Content-Type": "application/json" },
     headers: getAuthHeaders(),
     body: JSON.stringify(user),
   });

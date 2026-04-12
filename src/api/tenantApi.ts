@@ -26,6 +26,7 @@ export const createTenant = async (data: {
 }) => {
   const res = await fetchWithAuth(BASE, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error("Failed to create tenant");
@@ -45,6 +46,7 @@ export const updateTenant = async (id: string, data: Partial<{
 }>) => {
   const res = await fetchWithAuth(`${BASE}/${id}`, {
     method: "PUT",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error("Failed to update tenant");

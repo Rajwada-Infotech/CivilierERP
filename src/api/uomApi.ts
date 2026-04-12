@@ -11,6 +11,7 @@ export const getUomList = async () => {
 export const addUom = async (data: Record<string, unknown>) => {
   const res = await fetchWithAuth(BASE_URL, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -23,6 +24,7 @@ export const addUom = async (data: Record<string, unknown>) => {
 export const updateUom = async (id: number, data: Record<string, unknown>) => {
   const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
     method: "PUT",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
   if (!res.ok) {

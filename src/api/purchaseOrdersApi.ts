@@ -1,9 +1,8 @@
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
-// IMPORTANT: Match this with your backend route
-const BASE = "/api/purchase-orders"; // ← Changed from purchaseOrders to purchase-orders
+const BASE = "/api/purchase-orders";
 
-// ─── CRUD Operations ─────────────────────────────────────────────────────
+// ─── CRUD Operations ─────────────────────────────────────────────────────────
 export const getPurchaseOrders = () =>
   fetchWithAuth(BASE).then((r) => r.json());
 
@@ -24,9 +23,16 @@ export const updatePurchaseOrder = (id: string, data: object) =>
 export const deletePurchaseOrder = (id: string) =>
   fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" }).then((r) => r.json());
 
-// ─── Dropdown Data ───────────────────────────────────────────────────────
+// ─── Dropdown Data ────────────────────────────────────────────────────────────
+// Suppliers: AccountHeadMaster entries with LHeadType = 'Supplier'
+// Returns { LHeadId, LHeadName }
 export const getSuppliers = () =>
-  fetchWithAuth("/api/suppliers").then((r) => r.json());
+  fetchWithAuth("/api/account-head?type=Supplier").then((r) => r.json());
 
-export const getCompanies = () =>
-  fetchWithAuth("/api/companies").then((r) => r.json());
+// Projects: enterprise table
+// Returns { id, name }
+export const getProjects = () =>
+  fetchWithAuth("/api/enterprises").then((r) => r.json());
+
+// Keep getCompanies as alias so existing imports don't break
+export const getCompanies = getProjects;

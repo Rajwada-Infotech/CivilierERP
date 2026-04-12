@@ -29,11 +29,13 @@ const getBanks = () =>
 const addCheque = (data: object) =>
   fetchWithAuth(BASE, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   }).then((r) => r.json());
 const updateCheque = (id: string, data: object) =>
   fetchWithAuth(`${BASE}/${id}`, {
     method: "PUT",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   }).then((r) => r.json());
 const deleteCheque = (id: string) =>

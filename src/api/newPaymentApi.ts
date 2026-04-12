@@ -20,6 +20,7 @@ export const getPayments = async () => {
 export const addPayment = async (data: Record<string, unknown>) => {
   const res = await fetchWithAuth(BASE_URL, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error(await parseError(res, "POST failed"));
@@ -29,6 +30,7 @@ export const addPayment = async (data: Record<string, unknown>) => {
 export const updatePayment = async (id: string, data: Record<string, unknown>) => {
   const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
     method: "PUT",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error(await parseError(res, "PUT failed"));

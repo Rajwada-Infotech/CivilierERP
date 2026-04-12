@@ -120,6 +120,11 @@ async function startServer() {
       require("./routes/documentType"),
     );
     app.use("/api/fin-year", authMiddleware, require("./routes/finYear"));
+    app.use(
+      "/api/general-ledger",
+      authMiddleware,
+      require("./routes/generalLedger"),
+    );
     app.use("/api/hsn", authMiddleware, require("./routes/hsn"));
     app.use("/api/item-groups", authMiddleware, require("./routes/itemGroup"));
     app.use("/api/item-master", authMiddleware, require("./routes/itemMaster"));
