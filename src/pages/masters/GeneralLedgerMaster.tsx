@@ -85,11 +85,10 @@ const updateLedger = async ({ id, data }: { id: number; data: LedgerForm }) => {
       "Content-Type": "application/json",
       Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
     },
-    body: JSON.stringify({
+      body: JSON.stringify({
       LHeadName: data.LHeadName.trim(),
       LHeadCode: data.LHeadCode.trim().toUpperCase() || null,
       LBelongsTo: data.LBelongsTo ? Number(data.LBelongsTo) : null,
-      LHeadType: GL_TYPE,
     }),
   });
   if (!res.ok) {
