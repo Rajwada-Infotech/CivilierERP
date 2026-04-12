@@ -7,7 +7,8 @@ const cors = require("cors");
 const { connectDB } = require("./db");
 const authMiddleware = require("./middleware/auth");
 const rateLimit = require("express-rate-limit");
-const { getRedis } = require("./redis");
+const { ipKeyGenerator } = require("express-rate-limit");
+const { getRedis, redisZScore, incrGlobalRequests, pfaddActiveUser, getSystemMetrics, trackHourLoad, getPredictedRPM, getDynamicLimit } = require("./redis");
 
 const ALLOWED_ORIGINS = [
   "http://localhost:8080",
@@ -46,10 +47,17 @@ async function startServer() {
     });
 
     const apiLimiter = rateLimit({
-      windowMs: 15 * 60 * 1000,
-      max: 1000,
-      store: makeStore("rl:api:"),
+      windowMs: 60 * 1000, // 1 min buckets for scaling
+max: async (req) => {
+  if (!req.user || !req.user.userId) return 1000;
+  const score = Number(await redisZScore('engagement:score', req.user.userId) || 0);
+  const metrics = await getSystemMetrics();
+  const predictedRPM = await getPredictedRPM();
+  return getDynamicLimit(score, predictedRPM || metrics.rpm, metrics.memoryUsage);
+},
+      store: makeStore(`rl:api:${Math.floor(Date.now() / 60000)}:`),
       skip: (req) => req.path.startsWith("/api/user-activity"),
+      keyGenerator: (req) => `${req.user?.userId || ipKeyGenerator(req)}`,
     });
 
     // ---------------------------------------------------------------------------
@@ -61,6 +69,15 @@ async function startServer() {
     app.use(express.urlencoded({ extended: true }));
     app.use(helmet());
     app.use(morgan("dev"));
+
+    // Track global metrics on every request
+app.use(async (req, res, next) => {
+  try {
+    await incrGlobalRequests();
+    await trackHourLoad();
+  } catch {}
+  next();
+});
 
     app.use(
       cors({
@@ -86,6 +103,16 @@ async function startServer() {
 
     // Protected
     const allowRoles = require("./middleware/role");
+
+    // Track active users after auth
+    app.use(authMiddleware, async (req, res, next) => {
+      if (req.user?.userId) {
+        try {
+          await pfaddActiveUser(req.user.userId);
+        } catch {}
+      }
+      next();
+    });
 
     app.use(
       "/api/account-group",
@@ -164,6 +191,19 @@ async function startServer() {
       authMiddleware,
       require("./routes/userActivity"),
     );
+
+    // System metrics endpoint
+    app.get("/api/system/metrics", authMiddleware, async (req, res) => {
+      const metrics = await getSystemMetrics();
+      const predictedRPM = await getPredictedRPM();
+      metrics.predictedRPM = predictedRPM;
+      const topEngagedUsers = await getRedis().zrevrange('engagement:score', 0, 9, 'WITHSCORES');
+      metrics.topEngagedUsers = topEngagedUsers;
+      if (req.user) {
+        metrics.avgLimit = getDynamicLimit(await redisZScore('engagement:score', req.user.userId) || 0, predictedRPM || metrics.rpm, metrics.memoryUsage);
+      }
+      res.json(metrics);
+    });
 
     const PORT = process.env.PORT || 5000;
     app.listen(PORT, () => console.log(`Server running on port ${PORT}`));

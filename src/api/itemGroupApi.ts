@@ -17,8 +17,8 @@ export const getItemGroups = async () => {
 export const addItemGroup = async (data: Record<string, unknown>) => {
   const res = await fetch(BASE_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     headers: getAuthHeaders(),
+
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -34,8 +34,8 @@ export const updateItemGroup = async (
 ) => {
   const res = await fetch(`${BASE_URL}/${id}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    headers: getAuthHeaders(), // was missing — caused 401
+    headers: getAuthHeaders(),
+
     body: JSON.stringify(data),
   });
   if (!res.ok) {

@@ -16,8 +16,8 @@ export const getEntryTypes = async () => {
 export const addEntryType = async (data: Record<string, unknown>) => {
   const res = await fetch(BASE_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     headers: getAuthHeaders(),
+
     body: JSON.stringify(data),
   })
   if (!res.ok) { const err = await res.json(); throw new Error(err.error || "POST failed") }
@@ -27,8 +27,8 @@ export const addEntryType = async (data: Record<string, unknown>) => {
 export const updateEntryType = async (id: string, data: Record<string, unknown>) => {
   const res = await fetch(`${BASE_URL}/${id}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
     headers: getAuthHeaders(),
+
     body: JSON.stringify(data),
   })
   if (!res.ok) { const err = await res.json(); throw new Error(err.error || "PUT failed") }
