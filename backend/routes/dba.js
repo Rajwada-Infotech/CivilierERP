@@ -39,19 +39,20 @@ router.get("/tables", async (req, res) => {
 router.get("/tables/:tableName/count", async (req, res) => {
   const { tableName } = req.params;
 
-  // Strict whitelist validation - only allow safe table names
-  if (!/^[a-zA-Z0_][a-zA-Z0-9_]*$/.test(tableName)) {
+  // Fix: regex had typo `[a-zA-Z0_]` — the `0` was erroneous, allowing digit-or-underscore
+  // as a first character. Corrected to `[a-zA-Z_]` (letters and underscore only to start).
+  if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(tableName)) {
     return res.status(400).json({ error: "Invalid table name format" });
   }
 
   try {
     const pool = getPool();
-    const result = await pool
-      .request()
-      .input("tableName", sql.VarChar, tableName).query(`
-        SELECT COUNT(*) AS row_count
-        FROM dbo.[${tableName}]
-      `);
+    // Fix: removed dead .input("tableName", ...) binding that was never referenced in the query.
+    // The validated tableName is safe to interpolate after the regex check above.
+    const result = await pool.request().query(`
+      SELECT COUNT(*) AS row_count
+      FROM dbo.[${tableName}]
+    `);
 
     res.json(result.recordset[0]);
   } catch (err) {

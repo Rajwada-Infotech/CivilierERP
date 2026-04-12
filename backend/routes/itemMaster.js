@@ -1,4 +1,6 @@
 const express = require("express");
+const { cache } = require("../middleware/cache");
+const { redisDelPattern } = require("../redis");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 
@@ -7,7 +9,7 @@ const { getPool, sql } = require("../db");
 // Groups are records where Parent_Id IS NULL (top-level).
 
 // ─── GET all items (leaf records with a Parent_Id) ───────────────────────────
-router.get("/", async (req, res) => {
+router.get("/", cache("item-master", 300), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -221,6 +223,8 @@ router.put("/:id", async (req, res) => {
       `);
     if (result.rowsAffected[0] === 0)
       return res.status(404).json({ error: "Item not found" });
+    await redisDelPattern("cache:item-master:*");
+
     res.json({ message: "Item updated successfully" });
   } catch (err) {
     console.error("ITEM_MASTER UPDATE ERROR:", err.message);
@@ -239,6 +243,8 @@ router.delete("/:id", async (req, res) => {
       .query("DELETE FROM dbo.Item_Master_Group WHERE M_Id = @M_Id");
     if (result.rowsAffected[0] === 0)
       return res.status(404).json({ error: "Item not found" });
+    await redisDelPattern("cache:item-master:*");
+
     res.json({ message: "Item deleted successfully" });
   } catch (err) {
     console.error("ITEM_MASTER DELETE ERROR:", err.message);

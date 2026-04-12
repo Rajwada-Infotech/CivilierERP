@@ -27,8 +27,6 @@ import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { createWorkOrder, saveFullWorkOrder } from "@/api/workOrderApi";
-import { toast } from "sonner";
-import { useEffect } from "react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -67,10 +65,6 @@ interface WorkOrderForm {
 }
 
 // ─── Real API data loaded above ─
-
-
-
-
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -832,7 +826,7 @@ const WorkOrderMaster: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
-// ── Real API data ─────────
+  // ── Real API data ─────────
   const [companies, setCompanies] = useState([]);
   const [projects, setProjects] = useState([]);
   const [contractors, setContractors] = useState([]);
@@ -842,16 +836,28 @@ const WorkOrderMaster: React.FC = () => {
       try {
         const [entRes, contrRes] = await Promise.all([
           fetchWithAuth("/api/enterprises"),
-          fetchWithAuth("/api/accountHeadMaster/options")
+          fetchWithAuth("/api/account-head/options"),
         ]);
         if (entRes.ok) {
           const enterprises = await entRes.json();
-          setCompanies(enterprises.map((e: any) => ({ id: e.Id, name: e.Name || e.CompanyName })));
-          setProjects(enterprises.map((e: any) => ({ id: e.Id, name: e.ProjectName || e.Name })));
+          setCompanies(
+            enterprises.map((e: any) => ({
+              id: e.Id,
+              name: e.Name || e.CompanyName,
+            })),
+          );
+          setProjects(
+            enterprises.map((e: any) => ({
+              id: e.Id,
+              name: e.ProjectName || e.Name,
+            })),
+          );
         }
         if (contrRes.ok) {
           const contractorsData = await contrRes.json();
-          setContractors(contractorsData.map((c: any) => ({ id: c.id, name: c.label })));
+          setContractors(
+            contractorsData.map((c: any) => ({ id: c.id, name: c.label })),
+          );
         }
       } catch (err) {
         console.error("Failed to fetch dropdown data:", err);

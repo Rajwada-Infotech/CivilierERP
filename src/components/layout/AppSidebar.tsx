@@ -6,6 +6,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useSidebarState } from "./AppLayout";
 
 import {
+  TrendingUp,
   BarChart3,
   CheckCircle2,
   ChevronDown,
@@ -159,6 +160,7 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
     ],
   },
   { label: "API Integration", icon: Shield, path: "/admin/api-integration" },
+  { label: "Live Metrics", icon: TrendingUp, path: "/admin/metrics" },
   { label: "Signature", icon: FileText, path: "/admin/signature" },
 ];
 
