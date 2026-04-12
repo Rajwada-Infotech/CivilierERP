@@ -169,7 +169,7 @@ const PasswordResetPage = lazy(() =>
   withDelay(() => import("./pages/admin/security/PasswordReset")),
 );
 const ActivityBrowserPage = lazy(() =>
-  withDelay(() => import("./pages/admin/ActivityBrowser")),
+  withDelay(() => import("./pages/admin/Activitybrowser/ActivityBrowser")),
 );
 
 // Admin Masters
@@ -625,10 +625,7 @@ function AppRoutes() {
       />
 
       {/* ADMIN — /admin redirects straight to dashboard */}
-      <Route
-        path="/admin"
-        element={<Navigate to="/" replace />}
-      />
+      <Route path="/admin" element={<Navigate to="/" replace />} />
       <Route
         path="/admin/dashboard"
         element={

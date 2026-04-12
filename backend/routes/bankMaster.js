@@ -1,27 +1,26 @@
 const express = require("express");
-const { cache } = require("../middleware/cache");
-const { redisDelPattern } = require("../redis");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 
-// GET all banks
-router.get("/", cache("bank-master", 300), async (req, res) => {
+// GET ALL
+router.get("/", async (req, res) => {
   try {
-    const pool = getPool();
-    const result = await pool.request().query(
-      `SELECT BId, BName, BBranch, BAccountNumber, BIfscCode,
-              BAccountType, BBankType, BAccountHolderName,
-              BOpeningBalance, BAddress, BStatus
-       FROM dbo.BankMaster`,
-    );
+    const pool = await getPool();
+
+    const result = await pool.request().query(`
+      SELECT *
+      FROM dbo.BankMaster
+      ORDER BY BId DESC
+    `);
+
     res.json(result.recordset);
   } catch (err) {
-    console.error("GET ERROR:", err.message);
+    console.error("GET BANK ERROR:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ADD bank
+// INSERT
 router.post("/", async (req, res) => {
   const {
     BName,
@@ -36,125 +35,103 @@ router.post("/", async (req, res) => {
     BStatus,
     CompanyName,
   } = req.body;
-  const userId = req.user?.id || req.user?.userId || 1;
+
+  // validation
+  if (!BName || !BAccountNumber) {
+    return res.status(400).json({
+      error: "BName and BAccountNumber are required",
+    });
+  }
+
   try {
-    const pool = getPool();
-    await pool
+    const pool = await getPool();
+    const userId = req.user?.id || req.user?.userId || 1;
+
+    const result = await pool
       .request()
-      .input("BName", sql.NVarChar(150), BName || null)
-      .input("BBranch", sql.NVarChar(150), BBranch || null)
-      .input("BAccountNumber", sql.NVarChar(50), BAccountNumber || null)
-      .input("BIfscCode", sql.NVarChar(20), BIfscCode || null)
-      .input("BAccountType", sql.NVarChar(50), BAccountType || null)
-      .input("BBankType", sql.NVarChar(50), BBankType || null)
-      .input(
-        "BAccountHolderName",
-        sql.NVarChar(150),
-        BAccountHolderName || null,
-      )
-      .input("BOpeningBalance", sql.Decimal(18, 2), BOpeningBalance || 0)
-      .input("BAddress", sql.NVarChar(255), BAddress || null)
-      .input("BStatus", sql.Bit, BStatus ? 1 : 0)
-      .input("CompanyName", sql.NVarChar(150), CompanyName || "")
+      .input("BName", sql.NVarChar, BName)
+      .input("BBranch", sql.NVarChar, BBranch || null)
+      .input("BAccountNumber", sql.NVarChar, BAccountNumber)
+      .input("BIfscCode", sql.NVarChar, BIfscCode || null)
+      .input("BAccountType", sql.NVarChar, BAccountType || null)
+      .input("BBankType", sql.NVarChar, BBankType || null)
+      .input("BAccountHolderName", sql.NVarChar, BAccountHolderName || null)
+      .input("BOpeningBalance", sql.Decimal(18, 2), BOpeningBalance ?? 0)
+      .input("BAddress", sql.NVarChar, BAddress || null)
+      .input("BStatus", sql.Bit, BStatus ?? true)
+      .input("CompanyName", sql.NVarChar, CompanyName || null)
       .input("CreatedBy", sql.Int, userId)
-      .input("UpdatedBy", sql.Int, userId)
-      .input("CreatedAt", sql.DateTime2, new Date())
-      .input("UpdatedAt", sql.DateTime2, new Date()).query(`
+      .input("UpdatedBy", sql.Int, userId).query(`
         INSERT INTO dbo.BankMaster (
           BName, BBranch, BAccountNumber, BIfscCode, BAccountType,
           BBankType, BAccountHolderName, BOpeningBalance, BAddress,
           BStatus, CompanyName, CreatedBy, UpdatedBy, CreatedAt, UpdatedAt
-        ) VALUES (
+        )
+        OUTPUT INSERTED.*
+        VALUES (
           @BName, @BBranch, @BAccountNumber, @BIfscCode, @BAccountType,
           @BBankType, @BAccountHolderName, @BOpeningBalance, @BAddress,
-          @BStatus, @CompanyName, @CreatedBy, @UpdatedBy, @CreatedAt, @UpdatedAt
+          @BStatus, @CompanyName, @CreatedBy, @UpdatedBy, GETDATE(), GETDATE()
         )
       `);
-    await redisDelPattern("cache:bank-master:*");
 
-    res.json({ message: "Bank added successfully" });
+    res.status(201).json(result.recordset[0]);
   } catch (err) {
-    console.error("INSERT ERROR:", err.message);
-    res.status(500).json({ error: err.message });
+    console.error("INSERT BANK ERROR FULL:", err);
+
+    res.status(500).json({
+      error: err.message,
+      detail: err.originalError?.info || null,
+    });
   }
 });
 
-// UPDATE bank
+// UPDATE
 router.put("/:id", async (req, res) => {
-  const {
-    BName,
-    BBranch,
-    BAccountNumber,
-    BIfscCode,
-    BAccountType,
-    BBankType,
-    BAccountHolderName,
-    BOpeningBalance,
-    BAddress,
-    BStatus,
-    CompanyName,
-  } = req.body;
-  const userId = req.user?.id || req.user?.userId || 1;
+  const { id } = req.params;
+  const { BName } = req.body;
+
+  if (!BName) {
+    return res.status(400).json({
+      error: "BName is required",
+    });
+  }
+
   try {
-    const pool = getPool();
+    const pool = await getPool();
+
     await pool
       .request()
-      .input("BId", sql.Int, parseInt(req.params.id))
-      .input("BName", sql.NVarChar(150), BName || null)
-      .input("BBranch", sql.NVarChar(150), BBranch || null)
-      .input("BAccountNumber", sql.NVarChar(50), BAccountNumber || null)
-      .input("BIfscCode", sql.NVarChar(20), BIfscCode || null)
-      .input("BAccountType", sql.NVarChar(50), BAccountType || null)
-      .input("BBankType", sql.NVarChar(50), BBankType || null)
-      .input(
-        "BAccountHolderName",
-        sql.NVarChar(150),
-        BAccountHolderName || null,
-      )
-      .input("BOpeningBalance", sql.Decimal(18, 2), BOpeningBalance || 0)
-      .input("BAddress", sql.NVarChar(255), BAddress || null)
-      .input("BStatus", sql.Bit, BStatus ? 1 : 0)
-      .input("CompanyName", sql.NVarChar(150), CompanyName || "")
-      .input("UpdatedBy", sql.Int, userId)
-      .input("UpdatedAt", sql.DateTime2, new Date()).query(`
-        UPDATE dbo.BankMaster SET
-          BName              = @BName,
-          BBranch            = @BBranch,
-          BAccountNumber     = @BAccountNumber,
-          BIfscCode          = @BIfscCode,
-          BAccountType       = @BAccountType,
-          BBankType          = @BBankType,
-          BAccountHolderName = @BAccountHolderName,
-          BOpeningBalance    = @BOpeningBalance,
-          BAddress           = @BAddress,
-          BStatus            = @BStatus,
-          CompanyName        = @CompanyName,
-          UpdatedBy          = @UpdatedBy,
-          UpdatedAt          = @UpdatedAt
+      .input("BId", sql.Int, id)
+      .input("BName", sql.NVarChar, BName).query(`
+        UPDATE dbo.BankMaster
+        SET BName = @BName,
+            UpdatedAt = GETDATE()
         WHERE BId = @BId
       `);
-    await redisDelPattern("cache:bank-master:*");
 
-    res.json({ message: "Bank updated successfully" });
+    res.json({ success: true });
   } catch (err) {
-    console.error("UPDATE ERROR:", err.message);
+    console.error("UPDATE BANK ERROR:", err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// DELETE bank
+// DELETE
 router.delete("/:id", async (req, res) => {
+  const { id } = req.params;
+
   try {
-    const pool = getPool();
+    const pool = await getPool();
+
     await pool
       .request()
-      .input("BId", sql.Int, parseInt(req.params.id))
-      .query("DELETE FROM dbo.BankMaster WHERE BId = @BId");
-    await redisDelPattern("cache:bank-master:*");
+      .input("BId", sql.Int, id)
+      .query(`DELETE FROM dbo.BankMaster WHERE BId = @BId`);
 
-    res.json({ message: "Bank deleted successfully" });
+    res.json({ success: true });
   } catch (err) {
-    console.error("DELETE ERROR:", err.message);
+    console.error("DELETE BANK ERROR:", err);
     res.status(500).json({ error: err.message });
   }
 });
