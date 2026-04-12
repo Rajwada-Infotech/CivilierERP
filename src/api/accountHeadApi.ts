@@ -12,6 +12,7 @@ export const getList = async (type?: string) => {
 export const addRecord = async (data: Record<string, unknown>, type: string) => {
   const res = await fetchWithAuth(BASE_URL, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ...data, LHeadType: type }),
   });
   if (!res.ok) {
@@ -24,6 +25,7 @@ export const addRecord = async (data: Record<string, unknown>, type: string) => 
 export const updateRecord = async (id: number, data: Record<string, unknown>, type: string) => {
   const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
     method: "PUT",
+    headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ...data, LHeadType: type }),
   });
   if (!res.ok) {

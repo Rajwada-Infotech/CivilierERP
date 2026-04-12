@@ -19,12 +19,11 @@ import type {
 
 import * as AuthUtils from "./auth.utils";
 
-// Re-export
+// Re-exports
 export { PAGE_DEFINITIONS } from "@/constants/pageDefinitions";
 export type { PageKey, PageAction, PagePermission, AppUser };
 
 // ── TYPES ─────────────────────────────────────────────────────────────────────
-
 interface AuthContextType {
   currentUser: AppUser | null;
   allUsers: AppUser[];
@@ -46,17 +45,17 @@ interface AuthContextType {
 }
 
 // ── CONTEXT ───────────────────────────────────────────────────────────────────
-
 const AuthContext = createContext<AuthContextType | null>(null);
 
 export const useAuth = () => {
   const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error("useAuth must be used inside AuthProvider");
+  if (!ctx) {
+    throw new Error("useAuth must be used inside AuthProvider");
+  }
   return ctx;
 };
 
 // ── PROVIDER ──────────────────────────────────────────────────────────────────
-
 export const AuthProvider = ({
   children,
   onLoginSuccess,
@@ -92,12 +91,13 @@ export const AuthProvider = ({
 
   const [users, setUsers] = useState<AppUser[]>([]);
 
+  // Load users (replace with real API call later)
   useEffect(() => {
-    setUsers([]); // replace with API later
+    // TODO: Replace with actual API call to fetch all users
+    setUsers([]);
   }, []);
 
   // ── LOGIN ──────────────────────────────────────────────────────────────────
-
   const login = useCallback(
     async (email: string, password: string) => {
       try {
@@ -126,7 +126,7 @@ export const AuthProvider = ({
         localStorage.setItem("user", JSON.stringify(appUser));
         setCurrentUser(appUser);
 
-        // ✅ Safe logging
+        // Record login
         try {
           await recordLogin?.({
             id: appUser.id,
@@ -139,12 +139,10 @@ export const AuthProvider = ({
         }
 
         onLoginSuccess?.(appUser);
-
         return { success: true, role: appUser.role };
       } catch (err: unknown) {
         const errorMessage =
           err instanceof Error ? err.message : "Login failed";
-
         return { success: false, error: errorMessage };
       }
     },
@@ -152,7 +150,6 @@ export const AuthProvider = ({
   );
 
   // ── LOGOUT ─────────────────────────────────────────────────────────────────
-
   const logout = useCallback(async () => {
     if (currentUser) {
       try {
@@ -165,18 +162,42 @@ export const AuthProvider = ({
       } catch (err) {
         console.warn("Logout tracking failed:", err);
       }
-
       onLogoutSuccess?.(currentUser);
     }
 
     localStorage.removeItem("token");
     localStorage.removeItem("user");
     localStorage.removeItem("currentSessionId");
-
     setCurrentUser(null);
   }, [currentUser, onLogoutSuccess, recordLogout]);
 
-  // ── USER MGMT ──────────────────────────────────────────────────────────────
+  // ── USER MANAGEMENT ────────────────────────────────────────────────────────
+  const addUser = useCallback(
+    (newUser: Omit<AppUser, "id"> & { password: string }) => {
+      const userToAdd: AppUser = {
+        ...newUser,
+        id: `user_${Date.now()}`, // Temporary ID generation
+        initials: AuthUtils.getInitials(newUser.name),
+        pagePermissions:
+          newUser.pagePermissions ||
+          AuthUtils.getPermissionsByRole(newUser.role),
+        isActive: true,
+      };
+
+      setUsers((prev) => [...prev, userToAdd]);
+    },
+    [],
+  );
+
+  const deleteUser = useCallback((id: string) => {
+    setUsers((prev) => prev.filter((u) => u.id !== id));
+  }, []);
+
+  const toggleUserStatus = useCallback((id: string) => {
+    setUsers((prev) =>
+      prev.map((u) => (u.id === id ? { ...u, isActive: !u.isActive } : u)),
+    );
+  }, []);
 
   const updateUserPagePermissions = useCallback(
     (userId: string, permissions: PagePermission[]) => {
@@ -195,22 +216,7 @@ export const AuthProvider = ({
     [currentUser],
   );
 
-  const toggleUserStatus = useCallback((id: string) => {
-    setUsers((prev) =>
-      prev.map((u) => (u.id === id ? { ...u, isActive: !u.isActive } : u)),
-    );
-  }, []);
-
-  const deleteUser = useCallback((id: string) => {
-    setUsers((prev) => prev.filter((u) => u.id !== id));
-  }, []);
-
-  const addUser = useCallback(() => {
-    console.warn("addUser not implemented");
-  }, []);
-
-  // ── PERMISSIONS ─────────────────────────────────────────────────────────────
-
+  // ── PERMISSIONS ────────────────────────────────────────────────────────────
   const { canAccessPage: rawAccess, canDoAction: rawAction } =
     AuthUtils.createPermissionCheckers(currentUser);
 
@@ -224,8 +230,7 @@ export const AuthProvider = ({
     [rawAction],
   );
 
-  // ── VALUE ──────────────────────────────────────────────────────────────────
-
+  // ── CONTEXT VALUE ──────────────────────────────────────────────────────────
   const value = useMemo(
     () => ({
       currentUser,

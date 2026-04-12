@@ -1,216 +1,176 @@
-import React, { useMemo } from "react";
-import { Breadcrumbs } from "@/components/Breadcrumbs";
+import React from 'react';
+import { Breadcrumbs } from '@/components/Breadcrumbs';
+import { 
+  Card, 
+  CardContent, 
+  CardDescription, 
+  CardHeader, 
+  CardTitle 
+} from '@/components/ui/card';
+import { 
+  Table, 
+  TableBody, 
+  TableCell, 
+  TableHead, 
+  TableHeader, 
+  TableRow 
+} from '@/components/ui/table';
+import { 
+  Badge 
+} from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import {
-  HardHat, ShoppingCart, Landmark, Receipt, TrendingUp, Users, Package, CreditCard, FileText,
-  CheckCircle2, Clock, AlertCircle, ArrowRight, Circle,
-} from "lucide-react";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { useModule } from "@/contexts/ModuleContext";
-import { useTask } from "@/contexts/TaskContext";
-import { useAuth } from "@/contexts/AuthContext";
-import { useNavigate } from "react-router-dom";
-
-const chartData = [
-  { month: "Jan", expenses: 320000 },
-  { month: "Feb", expenses: 410000 },
-  { month: "Mar", expenses: 380000 },
-  { month: "Apr", expenses: 482000 },
-  { month: "May", expenses: 395000 },
-  { month: "Jun", expenses: 520000 },
-];
-
-const STATUS_DOT: Record<string, string> = {
-  open:        "bg-blue-400",
-  in_progress: "bg-yellow-400",
-  closed:      "bg-purple-400",
-  reviewed:    "bg-green-400",
-};
-
-const tooltipStyle = {
-  background: "hsl(var(--card))",
-  border: "1px solid hsl(var(--border))",
-  borderRadius: 8,
-  color: "hsl(var(--foreground))",
-};
-
-const MemoizedChart = React.memo(() => (
-  <ResponsiveContainer width="100%" height={260}>
-    <BarChart data={chartData}>
-      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-      <XAxis dataKey="month" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }} />
-      <YAxis tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }} tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`} />
-      <Tooltip contentStyle={tooltipStyle} formatter={(value: number) => [`₹${value.toLocaleString("en-IN")}`, "Expenses"]} />
-      <Bar dataKey="expenses" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
-    </BarChart>
-  </ResponsiveContainer>
-));
-MemoizedChart.displayName = "MemoizedChart";
+  TrendingUp,
+  Users,
+  FileText,
+  Package,
+  Clock,
+  DollarSign,
+  Truck,
+  CheckCircle2,
+  AlertCircle,
+} from 'lucide-react';
 
 const Dashboard = () => {
-  const { activeModule } = useModule();
-  const { tasks, getOverdueTasks, getDueSoonTasks } = useTask();
-  const { currentUser } = useAuth();
-  const navigate = useNavigate();
+  // Mock data for overview - replace with real API calls later
+  const stats = [
+    { label: 'Transactions Today', value: '24', change: '+12%', icon: TrendingUp, trend: 'up' },
+    { label: 'Pending Approvals', value: '3', change: '-2', icon: Clock, trend: 'down' },
+    { label: 'Open POs', value: '5', change: '+1', icon: Truck, trend: 'up' },
+    { label: 'Outstanding Payments', value: '₹45,200', change: '+8%', icon: DollarSign, trend: 'up' },
+  ];
 
-  const activities = useMemo(() => activeModule === "material" 
-    ? [
-        { text: "Work Order WO-024 approved", time: "2 hours ago" },
-        { text: "Material Expense ME-056 booked", time: "4 hours ago" },
-        { text: "Card Master CM-012 updated", time: "Yesterday" },
-        { text: "Work Order WO-023 closed", time: "Yesterday" },
-        { text: "New material supplier approved", time: "2 days ago" },
-      ]
-    : [
-        { text: "New contractor 'Raj Builders' added", time: "2 hours ago" },
-        { text: "Payment of ₹1,25,000 to Sai Suppliers", time: "4 hours ago" },
-        { text: "Bank account 'HDFC Current' updated", time: "Yesterday" },
-        { text: "Expense 'Site Material' created", time: "Yesterday" },
-        { text: "Supplier 'Metro Hardware' marked active", time: "2 days ago" },
-      ], [activeModule]);
+  const recentActivity = [
+    { id: 'PO#1001', description: 'Purchase Order approved', user: 'Rahul K.', time: '2h ago', status: 'success' },
+    { id: 'INV-456', description: 'Payment received from ABC Corp', user: 'Admin', time: '4h ago', status: 'success' },
+    { id: 'WO-789', description: 'Work Order #789 pending approval', user: 'Manager', time: '6h ago', status: 'pending' },
+    { id: 'GRN-321', description: 'GRN created for Item Group A', user: 'Rahul K.', time: '8h ago', status: 'success' },
+  ];
 
-  const stats = useMemo(() => activeModule === "material" ? [
-    { label: "Work Orders", value: "12", icon: HardHat, color: "hsl(239, 84%, 67%)" },
-    { label: "Material Expenses", value: "₹2,45,000", icon: Package, color: "hsl(174, 72%, 46%)" },
-    { label: "Card Masters", value: "8", icon: CreditCard, color: "hsl(263, 70%, 58%)" },
-    { label: "Pending Amendments", value: "3", icon: FileText, color: "hsl(217, 91%, 60%)" },
-  ] : [
-    { label: "Total Contractors", value: "24", icon: HardHat, color: "hsl(239, 84%, 67%)" },
-    { label: "Active Suppliers", value: "18", icon: ShoppingCart, color: "hsl(263, 70%, 58%)" },
-    { label: "Bank Accounts", value: "6", icon: Landmark, color: "hsl(217, 91%, 60%)" },
-    { label: "Monthly Expenses", value: "₹4,82,000", icon: Receipt, color: "hsl(174, 72%, 46%)" },
-  ] , [activeModule]);
-
-  const myTasks = useMemo(() => {
-    if (!currentUser) return [];
-    if (currentUser.role === "super_admin" || currentUser.role === "admin") return tasks;
-    return tasks.filter(t => t.assignedTo === currentUser.id || t.createdBy === currentUser.id);
-  }, [tasks, currentUser]);
-
-  const overdueTasks = getOverdueTasks();
-  const dueSoonTasks = getDueSoonTasks();
-  const openTasks = myTasks.filter(t => t.status === "open" || t.status === "in_progress");
-  const pendingReview = myTasks.filter(t => t.status === "closed");
+  const mastersOverview = [
+    { label: 'Items', count: 245, href: '/masters/items' },
+    { label: 'Suppliers', count: 67, href: '/masters/suppliers' },
+    { label: 'Customers', count: 42, href: '/masters/customers' },
+    { label: 'POs', count: 156, href: '/material/purchase-order' },
+  ];
 
   return (
     <>
-      <Breadcrumbs items={["Amendments"]} />
-      <div className="mb-6">
-        <h1 className="text-2xl font-heading font-bold text-foreground">
-          {activeModule === "material" ? "Material Amendments" : "Amendments"}
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          {activeModule === "material" 
-            ? "Recent material expenses, work orders, and card master changes" 
-            : "Your civil ERP command center - recent amendments and overview"
-          }
-        </p>
-      </div>
-
-      {/* Stat Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-        {stats.map((s) => (
-          <div key={s.label} className="rounded-xl bg-card border border-border p-4 flex items-center gap-4" style={{ borderLeftWidth: 3, borderLeftColor: s.color }}>
-            <div className="p-2 rounded-lg" style={{ background: `${s.color}20` }}>
-              <s.icon size={22} style={{ color: s.color }} />
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground font-heading">{s.label}</p>
-              <p className="text-lg sm:text-xl font-heading font-bold text-foreground">{s.value}</p>
-            </div>
-          </div>
+      <Breadcrumbs items={['Dashboard']} />
+      
+      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-8">
+        {stats.map((stat, i) => (
+          <Card key={i}>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <CardTitle className="text-sm font-medium">{stat.label}</CardTitle>
+              <stat.icon className="h-4 w-4 text-muted-foreground" />
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold">{stat.value}</div>
+              <p className="text-xs text-muted-foreground">
+                {stat.change} from yesterday
+              </p>
+              <span className={`text-xs ${stat.trend === 'up' ? 'text-green-500' : 'text-destructive'}`}>
+                {stat.trend === 'up' ? '↑' : '↓'}
+              </span>
+            </CardContent>
+          </Card>
         ))}
       </div>
 
-      {/* Chart + Activity */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-        <div className="lg:col-span-2 rounded-xl bg-card border border-border p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <TrendingUp size={18} className="text-primary" />
-            <h2 className="font-heading font-semibold text-foreground">{activeModule === "material" ? "Monthly Material Expenses" : "Monthly Expenses"}</h2>
-          </div>
-          <MemoizedChart />
-        </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
+        {/* Recent Activity */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              Recent Activity
+            </CardTitle>
+            <CardDescription>Last 8 hours</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>ID</TableHead>
+                  <TableHead>Activity</TableHead>
+                  <TableHead>User</TableHead>
+                  <TableHead>Time</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {recentActivity.map((activity, i) => (
+                  <TableRow key={i}>
+                    <TableCell className="font-medium">#{activity.id}</TableCell>
+                    <TableCell>{activity.description}</TableCell>
+                    <TableCell>
+                      <div className="font-medium">{activity.user}</div>
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={activity.status === 'success' ? 'default' : 'secondary'}>
+                        {activity.status === 'success' ? <CheckCircle2 className="w-3 h-3 mr-1" /> : <AlertCircle className="w-3 h-3 mr-1" />}
+                        {activity.status.toUpperCase()}
+                      </Badge>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
 
-        <div className="rounded-xl bg-card border border-border p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <Users size={18} className="text-primary" />
-            <h2 className="font-heading font-semibold text-foreground">Recent Activity</h2>
-          </div>
-          <div className="space-y-3">
-            {activities.map((a, i) => (
-              <div key={i} className="flex items-start gap-3">
-                <div className="w-2 h-2 rounded-full bg-primary mt-1.5 shrink-0" />
+        {/* Masters Overview */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Masters Overview</CardTitle>
+            <CardDescription>Key master data counts</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {mastersOverview.map((master, i) => (
+              <div key={i} className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-foreground">{a.text}</p>
-                  <p className="text-xs text-muted-foreground">{a.time}</p>
+                  <p className="text-sm font-medium">{master.label}</p>
+                  <p className="text-xs text-muted-foreground">Total records</p>
+                </div>
+                <div className="text-right">
+                  <div className="text-2xl font-bold">{master.count.toLocaleString()}</div>
+                  <Button variant="ghost" size="sm" className="h-6 mt-1">
+                    View
+                  </Button>
                 </div>
               </div>
             ))}
-          </div>
-        </div>
+          </CardContent>
+        </Card>
       </div>
 
-      {/* My Tasks Summary */}
-      <div className="rounded-xl bg-card border border-border p-5">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 size={18} className="text-primary" />
-            <h2 className="font-heading font-semibold text-foreground">My Tasks</h2>
-          </div>
-          <button
-            onClick={() => navigate("/tasks")}
-            className="flex items-center gap-1 text-xs text-primary hover:underline font-heading"
-          >
-            View all <ArrowRight size={12} />
-          </button>
-        </div>
-
-        {/* Task stats */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
-          {[
-            { label: "Open / In Progress", value: openTasks.length,     color: "hsl(var(--primary))",   icon: Circle },
-            { label: "Overdue",            value: overdueTasks.length,  color: "hsl(0,72%,51%)",        icon: AlertCircle },
-            { label: "Due Within 48h",     value: dueSoonTasks.length,  color: "hsl(38,92%,50%)",       icon: Clock },
-            { label: "Pending Review",     value: pendingReview.length, color: "hsl(263,70%,58%)",      icon: CheckCircle2 },
-          ].map((s) => (
-            <div
-              key={s.label}
-              className="rounded-lg bg-muted/40 p-3 text-center cursor-pointer hover:bg-muted/70 transition-colors"
-              style={{ borderTop: `2px solid ${s.color}` }}
-              onClick={() => navigate("/tasks")}
-            >
-              <p className="text-lg sm:text-xl font-heading font-bold text-foreground">{s.value}</p>
-              <p className="text-xs text-muted-foreground font-heading mt-0.5">{s.label}</p>
-            </div>
-          ))}
-        </div>
-
-        {/* Task list preview */}
-        {myTasks.length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-4">No tasks assigned to you.</p>
-        ) : (
-          <div className="divide-y divide-border">
-            {myTasks.slice(0, 4).map((task) => (
-              <div
-                key={task.id}
-                onClick={() => navigate(`/tasks/${task.id}`)}
-                className="flex items-center gap-3 py-2.5 cursor-pointer hover:opacity-75 transition-opacity"
-              >
-                <div className={`w-2 h-2 rounded-full shrink-0 ${STATUS_DOT[task.status] || "bg-muted"}`} />
-                <p className="text-sm text-foreground flex-1 truncate font-heading">{task.title}</p>
-                <p className="text-xs text-muted-foreground shrink-0">
-                  {new Date(task.dueDate) < new Date() && (task.status === "open" || task.status === "in_progress")
-                    ? <span className="text-red-400">Overdue</span>
-                    : new Date(task.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
-                </p>
-                <ArrowRight size={13} className="text-muted-foreground shrink-0" />
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+      {/* Quick Actions */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Quick Actions</CardTitle>
+          <CardDescription>Jump to common workflows</CardDescription>
+        </CardHeader>
+        <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-2">
+          <Button variant="outline" className="h-20 flex flex-col gap-2">
+            <FileText className="h-6 w-6" />
+            New Journal
+          </Button>
+          <Button variant="outline" className="h-20 flex flex-col gap-2">
+            <Package className="h-6 w-6" />
+            New PO
+          </Button>
+          <Button variant="outline" className="h-20 flex flex-col gap-2">
+            <Users className="h-6 w-6" />
+            New Supplier
+          </Button>
+          <Button variant="outline" className="h-20 flex flex-col gap-2">
+            <DollarSign className="h-6 w-6" />
+            Record Payment
+          </Button>
+        </CardContent>
+      </Card>
     </>
   );
 };
 
 export default Dashboard;
+

@@ -1,4 +1,4 @@
-const BASE = "/api/grn";
+const BASE = "/api/grns";
 
 const getAuthHeaders = () => ({
   "Content-Type": "application/json",
@@ -50,7 +50,7 @@ export interface GRNFormDataPayload {
 // ====================== GRN CRUD Operations ======================
 
 export const getGRNs = async (): Promise<any[]> => {
-  const res = await fetch(BASE);
+  const res = await fetch(BASE, { headers: getAuthHeaders() });
   if (!res.ok) throw new Error(`GET failed: ${res.status}`);
   return res.json();
 };
@@ -105,21 +105,22 @@ export const deleteGRN = async (id: string) => {
 // ====================== Helper Functions ======================
 
 export const getSuppliers = async (): Promise<Supplier[]> => {
-  const res = await fetch("/api/account-head");
+  const res = await fetch("/api/account-head?type=Supplier", {
+    headers: getAuthHeaders(),
+  });
   if (!res.ok) throw new Error("Suppliers fetch failed");
-
   const data = await res.json();
-  return data.filter((item: any) => item.LHeadType === "Supplier"); // Safe filter
+  return Array.isArray(data) ? data : [];
 };
 
 export const getPurchaseOrders = async (): Promise<PurchaseOrder[]> => {
-  const res = await fetch("/api/purchase-orders");
+  const res = await fetch("/api/purchase-orders", { headers: getAuthHeaders() });
   if (!res.ok) throw new Error("POs fetch failed");
   return res.json();
 };
 
 export const getItems = async (): Promise<Item[]> => {
-  const res = await fetch("/api/item-groups");
+  const res = await fetch("/api/item-groups", { headers: getAuthHeaders() });
   if (!res.ok) throw new Error("Items fetch failed");
   return res.json();
 };
