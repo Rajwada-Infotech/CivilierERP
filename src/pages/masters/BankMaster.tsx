@@ -104,7 +104,20 @@ const BankMaster: React.FC = () => {
     status: item.BStatus,
   }));
 
-  const handleDataEvent = async (event: DataChangeEvent) => {
+const handleDataEvent = async (event: DataChangeEvent) => {
+  // ── IFSC Validation (RBI Format: 4 letters + 0 + 6 alphanumeric) ──────────
+  if (event.action === "add" || event.action === "update") {
+    const ifsc = ((event.record.ifsc as string) || "").trim().toUpperCase();
+    const isValidIFSC = /^[A-Z]{4}0[A-Z0-9]{6}$/.test(ifsc);
+    if (!isValidIFSC) {
+      toast.error(
+        `Invalid IFSC Code "${ifsc || "empty"}". Format must be like SBIN0001234 (11 characters).`
+      );
+      return;
+    }
+  }
+  // ──────────────────────────────────────────────────────────────────────────
+
     if (event.action === "add") {
       try {
         await addBank(toPayload(event.record));
