@@ -87,6 +87,70 @@ const buildFinanceNavItems = (overdueCount: number): NavItem[] => [
   },
 ];
 
+// ── Follow-Up module sidebar ─────────────────────────────────────────────────
+const buildFollowupNavItems = (): NavItem[] => [
+  { label: "Follow-Up Dashboard", icon: BarChart3, path: "/followup" },
+{
+    label: "Sales",
+    icon: Users,
+    children: [
+      { label: "Applicants", path: "/followup/sales/applicants" },
+      { label: "Unit Selection", path: "/followup/sales/unit-selection" },
+      { label: "Welcome Calls", path: "/followup/sales/welcome-calls" },
+    ],
+  },
+{
+    label: "Agreement",
+    icon: FileText,
+    children: [
+      { label: "Agreements", path: "/followup/agreement/agreements" },
+    ],
+  },
+{
+    label: "Finance",
+    icon: Landmark,
+    children: [
+      { label: "Demands", path: "/followup/finance/demands" },
+      { label: "Payments", path: "/followup/finance/payments" },
+    ],
+  },
+{
+    label: "Closure",
+    icon: CheckCircle2,
+    children: [
+      { label: "NOC", path: "/followup/closure/noc" },
+      { label: "Sales Deed", path: "/followup/closure/sales-deed" },
+      { label: "Handover", path: "/followup/closure/handover" },
+    ],
+  },
+{
+    label: "Follow-Ups",
+    icon: BellRing,
+    children: [
+      { label: "Reminders", path: "/followup/follow-ups/reminders" },
+      { label: "Tasks", path: "/followup/follow-ups/tasks" },
+      { label: "Follow-Up Log", path: "/followup/follow-ups/log" },
+    ],
+  },
+{
+    label: "Construction",
+    icon: HardHat,
+    children: [
+      { label: "Updates", path: "/followup/construction/updates" },
+    ],
+  },
+{
+    label: "Reports",
+    icon: BarChart3,
+    children: [
+      { label: "Customer Report", path: "/followup/reports/customer" },
+      { label: "Financial Report", path: "/followup/reports/financial" },
+      { label: "Project Status", path: "/followup/reports/project-status" },
+      { label: "Employee Performance", path: "/followup/reports/employee-performance" },
+    ],
+  },
+];
+
 // ── Material module sidebar ──────────────────────────────────────────────────
 const buildMaterialNavItems = (): NavItem[] => [
   { label: "Amendments", icon: BarChart3, path: "/material/amendments" },
@@ -422,6 +486,8 @@ export const AppSidebar = () => {
         return buildMaterialNavItems();
       case "finance":
         return buildFinanceNavItems(overdueCount);
+      case "followup":
+        return buildFollowupNavItems();
       default:
         return [{ label: "Amendments", icon: BarChart3, path: "/" }];
     }

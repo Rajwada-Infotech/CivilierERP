@@ -873,32 +873,32 @@ function App() {
       <Toaster richColors position="top-right" />
       <ActivityBrowserProvider>
         <AuthSessionBridge>
-          <ModuleProvider>
-            <ThemeProvider>
-              <FinYearProvider>
-                <HsnProvider>
-                  <RecordsProvider>
-                    <TdsProvider>
-                      <DebitNoteProvider>
-                        <BillingTermsProvider>
-                          <TaskProvider>
-                            <Router
-                              future={{
-                                v7_startTransition: true,
-                                v7_relativeSplatPath: true,
-                              }}
-                            >
+          <Router
+            future={{
+              v7_startTransition: true,
+              v7_relativeSplatPath: true,
+            }}
+          >
+            <ModuleProvider>
+              <ThemeProvider>
+                <FinYearProvider>
+                  <HsnProvider>
+                    <RecordsProvider>
+                      <TdsProvider>
+                        <DebitNoteProvider>
+                          <BillingTermsProvider>
+                            <TaskProvider>
                               <AppRoutes />
-                            </Router>
-                          </TaskProvider>
-                        </BillingTermsProvider>
-                      </DebitNoteProvider>
-                    </TdsProvider>
-                  </RecordsProvider>
-                </HsnProvider>
-              </FinYearProvider>
-            </ThemeProvider>
-          </ModuleProvider>
+                            </TaskProvider>
+                          </BillingTermsProvider>
+                        </DebitNoteProvider>
+                      </TdsProvider>
+                    </RecordsProvider>
+                  </HsnProvider>
+                </FinYearProvider>
+              </ThemeProvider>
+            </ModuleProvider>
+          </Router>
         </AuthSessionBridge>
       </ActivityBrowserProvider>
     </QueryClientProvider>

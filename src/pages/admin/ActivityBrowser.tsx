@@ -296,7 +296,7 @@ const ActivityBrowser: React.FC = () => {
     start.setHours(0, 0, 0, 0);
     end.setHours(0, 0, 0, 0);
 
-    let curr = new Date(start);
+    const curr = new Date(start);
     let safety = 0;
     while (curr <= end && safety < 90) {
       const key = format(curr, "yyyy-MM-dd");

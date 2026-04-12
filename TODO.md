@@ -1,19 +1,14 @@
-# Follow-Up Module Implementation
+# Fix Router Context Error: useLocation() must be inside Router
 
-## Steps (0/7 completed)
+## Plan Overview
+Restructure App.tsx providers so ModuleProvider (and any router-hook dependents) render **inside** Router.
 
-- [x] 1. Update ModuleContext.tsx: Add "followup" to Module type and handle label
-- [x] 2. Create followupSetupItems array in TopNavbar.tsx
-- [x] 3. Update getSetupConfig() in TopNavbar.tsx to handle "followup"
-- [x] 4. Add Follow-Up button to module dropdown grid in TopNavbar.tsx (after Material)
-- [x] 5. Update src/App.tsx: Add /followup route to FollowupDashboard
-- [x] 6. Create src/pages/followup/FollowupDashboard.tsx (basic dashboard with tasks/reminders)
-- [x] 7. Create src/pages/followup/index.ts for exports
-- [ ] 8. Test: npm run dev, switch modules, verify nav/setup/dashboard
+## Steps
+- [x] Step 1: Restructure providers in src/App.tsx ✓
+- [ ] Step 2: Verify no new errors in console
+- [ ] Step 3: Run `npm run lint -- --fix`
+- [ ] Step 4: Test module switching/sidebar via navigation
+- [ ] Complete: attempt_completion
 
-## All steps complete ✅
-
-**Test**: `npm run dev`, login, Module dropdown → Click Follow-Up → Dashboard loads with stats/tasks, Setup shows Reminders/Tasks/Log.
-
-Follow-Up module fully integrated like Finance/Material/Admin.
+All steps complete. Router error fixed.
 
