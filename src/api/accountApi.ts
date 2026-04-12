@@ -17,6 +17,7 @@ export const addAccountGroup = async (data: Record<string, unknown>) => {
   const res = await fetch(BASE_URL, {
     method: "POST",
     headers: getAuthHeaders(),
+
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -30,6 +31,7 @@ export const updateAccountGroup = async (id: string, data: Record<string, unknow
   const res = await fetch(`${BASE_URL}/${id}`, {
     method: "PUT",
     headers: getAuthHeaders(),
+
     body: JSON.stringify(data),
   });
   if (!res.ok) {

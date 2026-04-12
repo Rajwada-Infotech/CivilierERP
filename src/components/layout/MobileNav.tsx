@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   BarChart3,
@@ -34,8 +34,13 @@ import {
   FileType2,
   Activity,
   Landmark,
+  Bell,
+  RefreshCw,
+  CalendarClock,
+  ShoppingCart,
 } from "lucide-react";
 
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { useModule } from "@/contexts/ModuleContext";
 import { BillingIcon } from "@/components/icons/BillingIcon";
 import { useAuth } from "@/contexts/AuthContext";
@@ -59,10 +64,175 @@ interface NavItem {
   isMasters?: boolean;
 }
 
+// ─── Reminder Types & Helpers ─────────────────────────────────────────────────
+
+interface ReminderItem {
+  id: string | number;
+  type: "purchase_order" | "grn" | "cheque" | "tds" | "general";
+  title: string;
+  subtitle: string;
+  dueDate: string;
+  timeSlot?: string;
+  urgency: "overdue" | "today" | "soon" | "upcoming";
+  amount?: number;
+}
+
+const URGENCY_CFG = {
+  overdue: {
+    label: "Overdue",
+    cls: "bg-red-500/15 text-red-600 border-red-400/30",
+    dot: "bg-red-500",
+  },
+  today: {
+    label: "Today",
+    cls: "bg-amber-500/15 text-amber-600 border-amber-400/30",
+    dot: "bg-amber-500",
+  },
+  soon: {
+    label: "Soon",
+    cls: "bg-blue-500/15 text-blue-600 border-blue-400/30",
+    dot: "bg-blue-500",
+  },
+  upcoming: {
+    label: "Upcoming",
+    cls: "bg-muted text-muted-foreground border-border",
+    dot: "bg-muted-foreground",
+  },
+};
+
+const REM_ICON: Record<ReminderItem["type"], React.ElementType> = {
+  purchase_order: ShoppingCart,
+  grn: Package,
+  cheque: BookOpen,
+  tds: FileWarning,
+  general: Bell,
+};
+
+function classifyUrgency(d: string): ReminderItem["urgency"] {
+  const due = new Date(d);
+  due.setHours(0, 0, 0, 0);
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  const diff = Math.floor((due.getTime() - now.getTime()) / 86400000);
+  if (diff < 0) return "overdue";
+  if (diff === 0) return "today";
+  if (diff <= 7) return "soon";
+  return "upcoming";
+}
+
+function relLabel(d: string, ts?: string) {
+  const due = new Date(d);
+  due.setHours(0, 0, 0, 0);
+  const now = new Date();
+  now.setHours(0, 0, 0, 0);
+  const diff = Math.floor((due.getTime() - now.getTime()) / 86400000);
+  const base =
+    diff < 0
+      ? `${Math.abs(diff)}d overdue`
+      : diff === 0
+        ? "Today"
+        : diff === 1
+          ? "Tomorrow"
+          : `In ${diff}d`;
+  return ts ? `${base} · ${ts}` : base;
+}
+
+async function loadReminders(): Promise<ReminderItem[]> {
+  const [poR, grnR, chqR, tdsR] = await Promise.allSettled([
+    fetchWithAuth("/api/purchase-orders"),
+    fetchWithAuth("/api/grns"),
+    fetchWithAuth("/api/cheque-master"),
+    fetchWithAuth("/api/tds-master"),
+  ]);
+  const items: ReminderItem[] = [];
+  const push = (
+    rows: any[],
+    type: ReminderItem["type"],
+    titleFn: (r: any) => string,
+    subtitleFn: (r: any) => string,
+    dateFn: (r: any) => string,
+    amtFn: (r: any) => number | undefined,
+    tsFn: (r: any) => string | undefined,
+  ) => {
+    rows.forEach((r) => {
+      const d = dateFn(r);
+      if (!d) return;
+      const urgency = classifyUrgency(d);
+      if (urgency === "upcoming") return;
+      items.push({
+        id: `${type}-${r.Id ?? r.id}`,
+        type,
+        title: titleFn(r),
+        subtitle: subtitleFn(r),
+        dueDate: d,
+        timeSlot: tsFn(r),
+        urgency,
+        amount: amtFn(r),
+      });
+    });
+  };
+  if (poR.status === "fulfilled" && poR.value.ok) {
+    const d = await poR.value.json();
+    push(
+      Array.isArray(d) ? d : (d.data ?? []),
+      "purchase_order",
+      (r) => `PO #${r.PONumber || r.DocumentNumber || r.Id}`,
+      (r) => r.SupplierName || r.VendorName || "Purchase Order",
+      (r) => r.ExpectedDeliveryDate || r.DeliveryDate || r.DocumentDate,
+      (r) => r.TotalAmount || r.Amount,
+      (r) => r.TimeSlot || r.DeliveryTime,
+    );
+  }
+  if (grnR.status === "fulfilled" && grnR.value.ok) {
+    const d = await grnR.value.json();
+    push(
+      Array.isArray(d) ? d : (d.data ?? []),
+      "grn",
+      (r) => `GRN #${r.GRNNumber || r.DocumentNumber || r.Id}`,
+      (r) => r.SupplierName || r.VendorName || "Goods Receipt",
+      (r) => r.ExpectedDate || r.ReceivedDate || r.DocumentDate,
+      (r) => r.TotalAmount,
+      (r) => r.TimeSlot,
+    );
+  }
+  if (chqR.status === "fulfilled" && chqR.value.ok) {
+    const d = await chqR.value.json();
+    push(
+      Array.isArray(d) ? d : (d.data ?? []),
+      "cheque",
+      (r) => `Cheque #${r.ChequeNumber || r.Id}`,
+      (r) => r.BankName || r.PartyName || "Cheque",
+      (r) => r.ChequeDate || r.DueDate || r.Date,
+      (r) => r.Amount,
+      (r) => r.TimeSlot,
+    );
+  }
+  if (tdsR.status === "fulfilled" && tdsR.value.ok) {
+    const d = await tdsR.value.json();
+    push(
+      Array.isArray(d) ? d : (d.data ?? []),
+      "tds",
+      (r) => `TDS #${r.TDSCertificateNo || r.Id}`,
+      (r) => r.PartyName || r.DeducteeName || "TDS Payment",
+      (r) => r.DueDate || r.PaymentDate || r.Date,
+      (r) => r.TDSAmount || r.Amount,
+      (r) => r.TimeSlot,
+    );
+  }
+  const ORD = { overdue: 0, today: 1, soon: 2, upcoming: 3 };
+  items.sort((a, b) => ORD[a.urgency] - ORD[b.urgency]);
+  return items;
+}
+
 export const MobileNav: React.FC = () => {
   const [open, setOpen] = useState(false);
   const [groupStates, setGroupStates] = useState<Record<string, boolean>>({});
   const [setupOpen, setSetupOpen] = useState(false);
+  const [remOpen, setRemOpen] = useState(false);
+  const [reminders, setReminders] = useState<ReminderItem[]>([]);
+  const [remLoading, setRemLoading] = useState(false);
+  const [remFetched, setRemFetched] = useState(false);
+  const [badgeCount, setBadgeCount] = useState(0);
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -72,6 +242,48 @@ export const MobileNav: React.FC = () => {
   const { getOverdueTasks } = useTask();
 
   const overdueCount = getOverdueTasks().length;
+
+  // Background badge count
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = async () => {
+      try {
+        const items = await loadReminders();
+        if (!cancelled) {
+          setBadgeCount(
+            items.filter(
+              (i) => i.urgency === "overdue" || i.urgency === "today",
+            ).length,
+          );
+        }
+      } catch {
+        /* non-critical */
+      }
+    };
+    refresh();
+    const id = setInterval(refresh, 120_000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, []);
+
+  const fetchReminders = useCallback(async () => {
+    setRemLoading(true);
+    try {
+      const items = await loadReminders();
+      setReminders(items);
+      setBadgeCount(
+        items.filter((i) => i.urgency === "overdue" || i.urgency === "today")
+          .length,
+      );
+      setRemFetched(true);
+    } catch {
+      /* non-critical */
+    } finally {
+      setRemLoading(false);
+    }
+  }, []);
 
   const isAdminPage =
     location.pathname.startsWith("/admin") ||
@@ -437,6 +649,11 @@ export const MobileNav: React.FC = () => {
         className="fixed bottom-4 right-4 z-50 w-12 h-12 rounded-full gradient-accent text-primary-foreground flex items-center justify-center shadow-lg md:hidden"
       >
         <Menu size={20} />
+        {badgeCount > 0 && (
+          <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center leading-none border-2 border-card">
+            {badgeCount > 99 ? "99+" : badgeCount}
+          </span>
+        )}
       </button>
 
       {open && (
@@ -561,7 +778,7 @@ export const MobileNav: React.FC = () => {
                   {isAdmin && (
                     <button
                       onClick={() => {
-                        navigate("/admin");
+                        navigate("/admin/dashboard");
                         setOpen(false);
                       }}
                       className={`py-3 px-4 rounded-2xl border font-medium text-sm transition-all ${
@@ -579,9 +796,17 @@ export const MobileNav: React.FC = () => {
               {/* Setup Section */}
               {setupConfig.available && (
                 <div className="px-5 pb-1">
-                  <button
+                  <div
+                    role="button"
+                    tabIndex={0}
                     onClick={() => setSetupOpen((p) => !p)}
-                    className="w-full flex items-center justify-between px-4 py-3 rounded-2xl border border-border hover:bg-muted transition-all text-sm font-heading text-foreground"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        setSetupOpen((p) => !p);
+                      }
+                    }}
+                    className="w-full flex items-center justify-between px-4 py-3 rounded-2xl border border-border hover:bg-muted transition-all text-sm font-heading text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
                   >
                     <div className="flex items-center gap-2">
                       <Settings size={16} className="text-muted-foreground" />
@@ -596,7 +821,7 @@ export const MobileNav: React.FC = () => {
                       size={15}
                       className={`text-muted-foreground transition-transform duration-200 ${setupOpen ? "rotate-180" : ""}`}
                     />
-                  </button>
+                  </div>
 
                   {setupOpen && (
                     <div className="mt-2 p-3 rounded-2xl border border-border bg-muted/30">
@@ -629,6 +854,187 @@ export const MobileNav: React.FC = () => {
                 </div>
               )}
 
+              {/* ── Reminders Section ──────────────────────────────── */}
+              <div className="px-5 pb-2">
+                <div
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => {
+                    if (!remFetched) fetchReminders();
+                    setRemOpen((p) => !p);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      if (!remFetched) fetchReminders();
+                      setRemOpen((p) => !p);
+                    }
+                  }}
+                  className="w-full flex items-center justify-between px-4 py-3 rounded-2xl border border-border hover:bg-muted transition-all text-sm font-heading text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+                >
+                  <div className="flex items-center gap-2">
+                    <Bell size={16} className="text-amber-500" />
+                    <span>Reminders</span>
+                    {badgeCount > 0 && (
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-500 text-white leading-none">
+                        {badgeCount}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        fetchReminders();
+                      }}
+                      className="p-1 rounded-md text-muted-foreground hover:text-foreground transition-colors"
+                    >
+                      <RefreshCw
+                        size={12}
+                        className={remLoading ? "animate-spin" : ""}
+                      />
+                    </button>
+                    <ChevronDown
+                      size={15}
+                      className={`text-muted-foreground transition-transform duration-200 ${remOpen ? "rotate-180" : ""}`}
+                    />
+                  </div>
+                </div>
+
+                {remOpen && (
+                  <div className="mt-2 rounded-2xl border border-border bg-muted/20 overflow-hidden">
+                    {remLoading ? (
+                      <div className="flex items-center justify-center gap-2 py-6">
+                        <RefreshCw
+                          size={16}
+                          className="text-muted-foreground animate-spin"
+                        />
+                        <span className="text-xs text-muted-foreground">
+                          Loading…
+                        </span>
+                      </div>
+                    ) : reminders.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center py-8 gap-2 text-center px-4">
+                        <CheckCircle2 size={24} className="text-emerald-500" />
+                        <p className="text-sm font-heading font-semibold text-foreground">
+                          All clear!
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          No overdue or upcoming items in the next 7 days.
+                        </p>
+                      </div>
+                    ) : (
+                      <>
+                        {/* urgency summary pills */}
+                        {(() => {
+                          const counts = reminders.reduce(
+                            (a, r) => ({
+                              ...a,
+                              [r.urgency]: (a[r.urgency] || 0) + 1,
+                            }),
+                            {} as Record<string, number>,
+                          );
+                          return (
+                            <div className="flex gap-1.5 px-3 pt-3 pb-1 flex-wrap">
+                              {(["overdue", "today", "soon"] as const).map(
+                                (u) =>
+                                  counts[u] ? (
+                                    <span
+                                      key={u}
+                                      className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${URGENCY_CFG[u].cls}`}
+                                    >
+                                      {counts[u]} {URGENCY_CFG[u].label}
+                                    </span>
+                                  ) : null,
+                              )}
+                            </div>
+                          );
+                        })()}
+                        <div className="divide-y divide-border/50 max-h-56 overflow-y-auto">
+                          {reminders.map((r) => {
+                            const Icon = REM_ICON[r.type];
+                            const cfg = URGENCY_CFG[r.urgency];
+                            return (
+                              <div
+                                key={r.id}
+                                className={`flex items-start gap-3 px-3 py-3
+                                  ${r.urgency === "overdue" ? "bg-red-500/5" : r.urgency === "today" ? "bg-amber-500/5" : ""}`}
+                              >
+                                <div
+                                  className={`mt-0.5 w-7 h-7 rounded-lg flex items-center justify-center shrink-0 border ${cfg.cls}`}
+                                >
+                                  <Icon size={13} />
+                                </div>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-start justify-between gap-1">
+                                    <p className="text-xs font-semibold text-foreground truncate">
+                                      {r.title}
+                                    </p>
+                                    {r.amount !== undefined && (
+                                      <span className="text-[10px] font-bold text-emerald-600 shrink-0">
+                                        ₹{r.amount.toLocaleString("en-IN")}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-[11px] text-muted-foreground truncate">
+                                    {r.subtitle}
+                                  </p>
+                                  <span
+                                    className={`inline-flex items-center gap-1 mt-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${cfg.cls}`}
+                                  >
+                                    <span
+                                      className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`}
+                                    />
+                                    {relLabel(r.dueDate, r.timeSlot)}
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        <p className="text-[10px] text-muted-foreground text-center py-2 border-t border-border/60">
+                          Overdue · Today · Next 7 days
+                        </p>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* ── Reports + Widgets quick links ───────────────────── */}
+              <div className="px-5 pb-1 flex gap-2">
+                <button
+                  onClick={() => go("/reports")}
+                  className={`flex-1 flex items-center gap-2 px-4 py-3 rounded-2xl border text-sm font-heading transition-all
+                    ${location.pathname === "/reports" ? "border-primary/40 bg-primary/10 text-primary" : "border-border hover:bg-muted text-foreground"}`}
+                >
+                  <BarChart3
+                    size={16}
+                    className={
+                      location.pathname === "/reports"
+                        ? "text-primary"
+                        : "text-muted-foreground"
+                    }
+                  />
+                  Reports
+                </button>
+                <button
+                  onClick={() => go("/widgets")}
+                  className={`flex-1 flex items-center gap-2 px-4 py-3 rounded-2xl border text-sm font-heading transition-all
+                    ${location.pathname === "/widgets" ? "border-primary/40 bg-primary/10 text-primary" : "border-border hover:bg-muted text-foreground"}`}
+                >
+                  <Puzzle
+                    size={16}
+                    className={
+                      location.pathname === "/widgets"
+                        ? "text-primary"
+                        : "text-muted-foreground"
+                    }
+                  />
+                  Widgets
+                </button>
+              </div>
+
               {/* Navigation Items */}
               <div className="px-5 space-y-1">
                 {itemsToRender.map((item) => {
@@ -638,11 +1044,19 @@ export const MobileNav: React.FC = () => {
                   if (item.children) {
                     return (
                       <div key={item.label}>
-                        <button
+                        <div
+                          role="button"
+                          tabIndex={0}
                           onClick={() => toggleGroup(item.label)}
-                          className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-heading transition-all ${
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              toggleGroup(item.label);
+                            }
+                          }}
+                          className={`w-full flex items-center gap-3 px-4 py-3 rounded-2xl text-sm font-heading transition-all focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 ${
                             active
-                              ? "bg-primary/10 text-primary"
+                              ? "bg-primary/10 text-primary hover:bg-primary/20"
                               : "hover:bg-muted text-foreground"
                           }`}
                         >
@@ -652,9 +1066,9 @@ export const MobileNav: React.FC = () => {
                             size={16}
                             className={`text-muted-foreground transition-transform ${openState ? "rotate-180" : ""}`}
                           />
-                        </button>
-
-                        {openState && (
+                        </div>
+  
+                          {openState && (
                           <div className="ml-6 pl-4 border-l border-border mt-1 mb-2 space-y-0.5">
                             {item.children.map((child) => {
                               const childActive =

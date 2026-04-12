@@ -1,8 +1,8 @@
 const express = require("express");
 const router = express.Router();
-const crypto = require("crypto");
 const { getPool, sql } = require("../db");
 const allowRoles = require("../middleware/role");
+const { redisZScore, redisZIncrBy, getSystemMetrics, getPredictedRPM, getDynamicLimit } = require("../redis");
 
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 const ALLOWED_ACTION_TYPES = new Set([
@@ -64,7 +64,16 @@ router.get("/", adminOnly, async (req, res) => {
     const pool = getPool();
 
     const page = Math.max(1, normalizePositiveInt(req.query.page, 1));
-    const limit = Math.min(normalizePositiveInt(req.query.limit, 20), 1000);
+    
+    // Adaptive dynamic limit
+    let engagementScore = 0;
+    if (req.user && req.user.userId) {
+      engagementScore = Number(await redisZScore('engagement:score', req.user.userId) || 0);
+    }
+    const metrics = await getSystemMetrics();
+    const predictedRPM = await getPredictedRPM();
+    const dynamicDefault = getDynamicLimit(engagementScore, predictedRPM || metrics.rpm, metrics.memoryUsage);
+    const limit = Math.min(normalizePositiveInt(req.query.limit, dynamicDefault), 1000);
     const offset = (page - 1) * limit;
 
     const search = (req.query.search || "").trim().toLowerCase();
@@ -349,13 +358,25 @@ router.post("/", async (req, res) => {
       .json({ error: "userId, userName and event are required" });
   }
 
+  // Update engagement score based on action weight
+  if (normalizedActionType && resolvedUserId) {
+    const WEIGHTS = {
+      read: 1,
+      'settings_change': 3,
+      export: 5,
+      update: 8,
+      create: 10,
+      delete: 15
+    };
+    const weight = WEIGHTS[normalizedActionType] || 2; // default low weight
+    await redisZIncrBy('engagement:score', weight, resolvedUserId, 2592000); // 30 days TTL
+  }
+
   try {
     const pool = getPool();
-    const newId = crypto.randomUUID();
 
-    await pool
+    const insertResult = await pool
       .request()
-      .input("id", sql.NVarChar(50), newId)
       .input("userId", sql.NVarChar(50), resolvedUserId)
       .input("userName", sql.NVarChar(100), resolvedUserName)
       .input("userEmail", sql.NVarChar(100), resolvedUserEmail)
@@ -409,13 +430,15 @@ router.post("/", async (req, res) => {
       )
       .input("createdAt", sql.DateTime2, new Date()).query(`
         INSERT INTO dbo.UserActivityLog (
-          Id, UserId, UserName, UserEmail, UserRole, EventType,
+          UserId, UserName, UserEmail, UserRole, EventType,
           IpAddress, DeviceInfo, DeviceFingerprint,
           ActionType, Resource, Details,
           SessionId, SessionDuration,
           RequestMethod, RequestUrl, CreatedAt
-        ) VALUES (
-          @id, @userId, @userName, @userEmail, @userRole, @event,
+        )
+        OUTPUT INSERTED.Id
+        VALUES (
+          @userId, @userName, @userEmail, @userRole, @event,
           @ipAddress, @deviceInfo, @deviceFingerprint,
           @actionType, @resource, @details,
           @sessionId, @sessionDuration,
@@ -423,7 +446,8 @@ router.post("/", async (req, res) => {
         )
       `);
 
-    res.json({ message: "Activity logged", id: newId });
+    const insertedId = insertResult.recordset?.[0]?.Id ?? null;
+    res.json({ message: "Activity logged", id: insertedId });
   } catch (err) {
     console.error("POST error:", {
       message: err.message,

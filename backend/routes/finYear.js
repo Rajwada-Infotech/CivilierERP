@@ -1,8 +1,10 @@
 const express = require("express")
+const { cache } = require("../middleware/cache");
+const { redisDelPattern } = require("../redis");
 const router = express.Router()
 const { getPool, sql } = require("../db")
 
-router.get("/", async (req, res) => {
+router.get("/", cache("fin-year", 300), async (req, res) => {
   try {
     const pool = getPool()
     const result = await pool.request().query("SELECT * FROM dbo.FinYear")
@@ -26,6 +28,8 @@ router.post("/", async (req, res) => {
         INSERT INTO dbo.FinYear (FName, FStartDate, FEndDate, FStatus, FisLocked, FCreatedBy, FCreatedAt)
         VALUES (@FName, @FStartDate, @FEndDate, @FStatus, @FisLocked, @FCreatedBy, @FCreatedAt)
       `)
+    await redisDelPattern("cache:fin-year:*");
+
     res.json({ message: "Financial year added" })
   } catch (err) { res.status(500).json({ error: err.message }) }
 })
@@ -50,6 +54,8 @@ router.put("/:id", async (req, res) => {
           FUpdatedBy=@FUpdatedBy, FUpdatedAt=@FUpdatedAt
         WHERE FId=@FId
       `)
+    await redisDelPattern("cache:fin-year:*");
+
     res.json({ message: "Financial year updated" })
   } catch (err) { res.status(500).json({ error: err.message }) }
 })
@@ -60,6 +66,8 @@ router.delete("/:id", async (req, res) => {
     await pool.request()
       .input("FId", sql.Int, req.params.id)
       .query("DELETE FROM dbo.FinYear WHERE FId=@FId")
+    await redisDelPattern("cache:fin-year:*");
+
     res.json({ message: "Financial year deleted" })
   } catch (err) { res.status(500).json({ error: err.message }) }
 })

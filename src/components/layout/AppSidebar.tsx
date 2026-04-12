@@ -6,6 +6,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useSidebarState } from "./AppLayout";
 
 import {
+  TrendingUp,
   BarChart3,
   Calendar,
   CheckCircle2,
@@ -21,7 +22,7 @@ import {
   Archive,
   MessageSquare,
   Package,
-  Receipt, // ← only once
+  Receipt,
   HardHat,
   Building2,
   Users,
@@ -90,7 +91,7 @@ const buildFinanceNavItems = (overdueCount: number): NavItem[] => [
 // ── Follow-Up module sidebar ─────────────────────────────────────────────────
 const buildFollowupNavItems = (): NavItem[] => [
   { label: "Follow-Up Dashboard", icon: BarChart3, path: "/followup" },
-{
+  {
     label: "Sales",
     icon: Users,
     children: [
@@ -99,14 +100,14 @@ const buildFollowupNavItems = (): NavItem[] => [
       { label: "Welcome Calls", path: "/followup/sales/welcome-calls" },
     ],
   },
-{
+  {
     label: "Agreement",
     icon: FileText,
     children: [
       { label: "Agreements", path: "/followup/agreement/agreements" },
     ],
   },
-{
+  {
     label: "Finance",
     icon: Landmark,
     children: [
@@ -114,7 +115,7 @@ const buildFollowupNavItems = (): NavItem[] => [
       { label: "Payments", path: "/followup/finance/payments" },
     ],
   },
-{
+  {
     label: "Closure",
     icon: CheckCircle2,
     children: [
@@ -123,7 +124,7 @@ const buildFollowupNavItems = (): NavItem[] => [
       { label: "Handover", path: "/followup/closure/handover" },
     ],
   },
-{
+  {
     label: "Follow-Ups",
     icon: BellRing,
     children: [
@@ -132,14 +133,14 @@ const buildFollowupNavItems = (): NavItem[] => [
       { label: "Follow-Up Log", path: "/followup/follow-ups/log" },
     ],
   },
-{
+  {
     label: "Construction",
     icon: HardHat,
     children: [
       { label: "Updates", path: "/followup/construction/updates" },
     ],
   },
-{
+  {
     label: "Reports",
     icon: BarChart3,
     children: [
@@ -224,6 +225,7 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
     ],
   },
   { label: "API Integration", icon: Shield, path: "/admin/api-integration" },
+  { label: "Live Metrics", icon: TrendingUp, path: "/admin/metrics" },
   { label: "Signature", icon: FileText, path: "/admin/signature" },
 ];
 
@@ -466,8 +468,6 @@ export const AppSidebar = () => {
   const ADMIN_TIER_ROLES = ["super_admin", "admin", "dba"];
   const hasAdminRole = ADMIN_TIER_ROLES.includes(currentUser?.role ?? "");
 
-  // isAdminPage is true only when BOTH the URL is an admin URL AND the user
-  // actually has an admin-tier role — prevents "user" role seeing admin sidebar.
   const isAdminPage =
     hasAdminRole &&
     (location.pathname.startsWith("/admin") ||
@@ -538,7 +538,7 @@ export const AppSidebar = () => {
     if (isUserProfilePage)
       return "bg-gray-500/10 text-gray-500 border-gray-500/20";
     if (isAdmin) return "bg-blue-500/10 text-blue-500 border-blue-500/20";
-  if (isFinance) return "bg-primary/10 text-primary border-primary/20";
+    if (isFinance) return "bg-primary/10 text-primary border-primary/20";
     if (isMaterial)
       return "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
     if (activeModule === "followup")
