@@ -102,6 +102,8 @@ router.post("/", async (req, res) => {
           NULL
         )
       `);
+    // Fix: cache invalidation was missing after insert — new groups stayed stale until TTL expired
+    await redisDelPattern("cache:item-groups:*");
     res.status(201).json({
       message: "Item group added successfully",
       M_Id: result.recordset[0].M_Id,
@@ -165,7 +167,6 @@ router.put("/:id", async (req, res) => {
       return res.status(404).json({ error: "Item group not found" });
     }
     await redisDelPattern("cache:item-groups:*");
-
     res.json({ message: "Item group updated successfully" });
   } catch (err) {
     console.error("PUT /item-groups ERROR:", err.message);
@@ -203,7 +204,6 @@ router.delete("/:id", async (req, res) => {
       return res.status(404).json({ error: "Item group not found" });
     }
     await redisDelPattern("cache:item-groups:*");
-
     res.json({ message: "Item group deleted successfully" });
   } catch (err) {
     console.error("DELETE /item-groups ERROR:", err.message);
