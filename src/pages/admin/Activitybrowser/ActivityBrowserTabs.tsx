@@ -13,8 +13,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import type { SessionEvent } from "@/api/userActivityApi";
+import type { SessionEvent, ActivityActionType } from "@/api/userActivityApi";
 import { ROLE_COLORS, ACTION_COLORS } from "./constants";
 
 type Props = {
@@ -22,7 +21,7 @@ type Props = {
   setActiveTab: (tab: "sessions" | "actions") => void;
   search: string;
   filterRole: "all" | "super_admin" | "admin" | "user";
-  quickFilter: any;
+  quickFilter: ActivityActionType | null;
   groupedSessions: any[];
   rawSessions: SessionEvent[];
 };
@@ -76,20 +75,22 @@ export const ActivityBrowserTabs: React.FC<Props> = ({
   groupedSessions,
   rawSessions,
 }) => {
+  // Compute q once - this avoids the eslint warning
   const q = search.trim().toLowerCase();
 
   const filteredSessions = useMemo(() => {
-    return groupedSessions.filter((session) => {
+    return groupedSessions.filter((session: any) => {
       const roleMatch = filterRole === "all" || session.userRole === filterRole;
       const actionTypeMatch =
         !quickFilter ||
         session.actions.some((a: any) => a.actionType === quickFilter);
+
       const searchMatch =
         !q ||
         session.userName.toLowerCase().includes(q) ||
         session.userEmail.toLowerCase().includes(q) ||
         session.deviceFingerprint.toLowerCase().includes(q) ||
-        session.deviceInfo.toLowerCase().includes(q) ||
+        session.deviceInfo?.toLowerCase().includes(q) ||
         session.actions.some(
           (action: any) =>
             action.resource?.toLowerCase().includes(q) ||
@@ -97,15 +98,18 @@ export const ActivityBrowserTabs: React.FC<Props> = ({
             action.details?.toLowerCase().includes(q) ||
             action.actionType?.toLowerCase().includes(q),
         );
+
       return roleMatch && searchMatch && actionTypeMatch;
     });
-  }, [groupedSessions, search, filterRole, quickFilter]);
+  }, [groupedSessions, filterRole, quickFilter, q]); // ← q is now included
 
   const filteredActions = useMemo(() => {
-    return rawSessions.filter((event) => {
+    return rawSessions.filter((event: SessionEvent) => {
       if (event.event !== "action") return false;
+
       const roleMatch = filterRole === "all" || event.userRole === filterRole;
       const actionTypeMatch = !quickFilter || event.actionType === quickFilter;
+
       const searchMatch =
         !q ||
         event.userName.toLowerCase().includes(q) ||
@@ -114,9 +118,10 @@ export const ActivityBrowserTabs: React.FC<Props> = ({
         event.requestUrl?.toLowerCase().includes(q) ||
         event.details?.toLowerCase().includes(q) ||
         event.actionType?.toLowerCase().includes(q);
+
       return roleMatch && searchMatch && actionTypeMatch;
     });
-  }, [rawSessions, search, filterRole, quickFilter]);
+  }, [rawSessions, filterRole, quickFilter, q]); // ← q is now included
 
   return (
     <>
@@ -145,6 +150,7 @@ export const ActivityBrowserTabs: React.FC<Props> = ({
         </nav>
       </div>
 
+      {/* Sessions Tab Content */}
       {activeTab === "sessions" ? (
         filteredSessions.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-4 rounded-2xl border-2 border-dashed border-border bg-muted/30 py-24 text-muted-foreground">
@@ -190,7 +196,7 @@ export const ActivityBrowserTabs: React.FC<Props> = ({
                           {session.userEmail}
                         </p>
                         <span
-                          className={`mt-1 inline-block rounded-full border px-2 py-0.5 text-[10px] font-heading uppercase tracking-wider ${ROLE_COLORS[session.userRole]}`}
+                          className={`mt-1 inline-block rounded-full border px-2 py-0.5 text-[10px] font-heading uppercase tracking-wider ${ROLE_COLORS[session.userRole] || ""}`}
                         >
                           {roleLabel(session.userRole)}
                         </span>
@@ -227,7 +233,7 @@ export const ActivityBrowserTabs: React.FC<Props> = ({
                       )}
                     </div>
 
-                    {/* Login / Logout */}
+                    {/* Login / Logout Time */}
                     <div className="space-y-2">
                       <div className="flex items-center gap-2 text-xs">
                         <LogIn
@@ -310,7 +316,7 @@ export const ActivityBrowserTabs: React.FC<Props> = ({
                   </td>
                   <td className="px-4 py-3">
                     <span
-                      className={`rounded-full border px-2 py-1 text-xs font-heading ${ACTION_COLORS[action.actionType || "read"]}`}
+                      className={`rounded-full border px-2 py-1 text-xs font-heading ${ACTION_COLORS[action.actionType || "read"] || ""}`}
                     >
                       {getActionLabel(action)}
                     </span>
