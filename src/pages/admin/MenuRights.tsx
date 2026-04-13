@@ -1,13 +1,13 @@
 import React, { useState, useMemo, useCallback } from "react";
-import { useAuth } from "@/contexts/AuthContext";
 import {
+  useAuth,
   PAGE_DEFINITIONS,
   type PageKey,
   type PageAction,
   type PagePermission,
-} from "@/constants/pageDefinitions";
-
-import type { AppUser } from "@/contexts/types"; // ← Import AppUser from your types file
+  // FIX: import AppUser from AuthContext (consistent with PostApprovalRights and WidgetsRights)
+  type AppUser,
+} from "@/contexts/AuthContext";
 
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
@@ -17,6 +17,16 @@ import {
   Trash2,
   Edit3,
   UserCheck,
+  Eye,
+  PlusCircle,
+  Edit,
+  Trash,
+  Printer,
+  Download,
+  CheckCircle,
+  XCircle,
+  CreditCard,
+  ArrowRight,
 } from "lucide-react";
 
 import {
@@ -48,6 +58,13 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
 import {
@@ -55,23 +72,38 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
-// Action Config
 const ACTION_CONFIG: Record<
   PageAction,
   { label: string; icon: React.ReactNode }
 > = {
-  view: { label: "View", icon: <span>👁️</span> },
-  create: { label: "Create", icon: <span>➕</span> },
-  edit: { label: "Edit", icon: <span>✏️</span> },
-  delete: { label: "Delete", icon: <span>🗑️</span> },
-  approve: { label: "Approve", icon: <span>✅</span> },
-  reject: { label: "Reject", icon: <span>❌</span> },
-  export: { label: "Export", icon: <span>📤</span> },
-  print: { label: "Print", icon: <span>🖨️</span> },
-  pay: { label: "Pay", icon: <span>💰</span> },
-  convert: { label: "Convert", icon: <span>🔄</span> },
+  view: { label: "View", icon: <Eye className="w-3 h-3" /> },
+  create: { label: "Create", icon: <PlusCircle className="w-3 h-3" /> },
+  edit: { label: "Edit", icon: <Edit className="w-3 h-3" /> },
+  delete: { label: "Delete", icon: <Trash className="w-3 h-3" /> },
+  approve: { label: "Approve", icon: <CheckCircle className="w-3 h-3" /> },
+  reject: { label: "Reject", icon: <XCircle className="w-3 h-3" /> },
+  export: { label: "Export", icon: <Download className="w-3 h-3" /> },
+  print: { label: "Print", icon: <Printer className="w-3 h-3" /> },
+  pay: { label: "Pay", icon: <CreditCard className="w-3 h-3" /> },
+  convert: { label: "Convert", icon: <ArrowRight className="w-3 h-3" /> },
 };
+
+const getActionConfig = (action: string) =>
+  ACTION_CONFIG[action as PageAction] ?? {
+    label: action.charAt(0).toUpperCase() + action.slice(1),
+    icon: <Eye className="w-3 h-3" />,
+  };
 
 interface PermissionRow {
   id: string;
@@ -87,7 +119,9 @@ interface PermissionRow {
 }
 
 export default function MenuRights() {
-  const { allUsers, toggleUserStatus, deleteUser } = useAuth();
+  // FIX: also pull updateUserPagePermissions — needed to actually persist changes
+  const { allUsers, updateUserPagePermissions, toggleUserStatus, deleteUser } =
+    useAuth();
 
   const [searchTerm, setSearchTerm] = useState("");
   const [showEditDialog, setShowEditDialog] = useState(false);
@@ -95,20 +129,16 @@ export default function MenuRights() {
   const [pendingPermissions, setPendingPermissions] = useState<
     PagePermission[]
   >([]);
+  const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
 
-  // Table Data
   const tableData = useMemo<PermissionRow[]>(() => {
     const rows: PermissionRow[] = [];
-
     allUsers.forEach((user) => {
       if (user.role === "super_admin") return;
-
       PAGE_DEFINITIONS.forEach((def) => {
         const userPerm = user.pagePermissions?.find((p) => p.page === def.key);
         const userActions = userPerm?.actions || [];
-
         if (!userActions.includes("view")) return;
-
         rows.push({
           id: `${user.id}-${def.key}`,
           userId: user.id,
@@ -118,67 +148,106 @@ export default function MenuRights() {
           pageKey: def.key,
           pageLabel: def.label,
           pageGroup: def.group,
-          actions: userActions
-            .map((a) => ACTION_CONFIG[a]?.label || a)
-            .join(", "),
+          actions: userActions.map((a) => getActionConfig(a).label).join(", "),
           status: user.isActive ? "Active" : "Inactive",
         });
       });
     });
-
     return rows;
   }, [allUsers]);
 
-  const filteredData = useMemo(() => {
-    return tableData.filter(
-      (row) =>
-        row.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        row.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        row.pageLabel.toLowerCase().includes(searchTerm.toLowerCase()),
-    );
-  }, [tableData, searchTerm]);
+  const filteredData = useMemo(
+    () =>
+      tableData.filter(
+        (row) =>
+          row.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          row.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          row.pageLabel.toLowerCase().includes(searchTerm.toLowerCase()),
+      ),
+    [tableData, searchTerm],
+  );
 
   const pageGroups = useMemo(() => {
     const groups: Record<
       string,
       { key: PageKey; label: string; actions: PageAction[] }[]
     > = {};
-
     PAGE_DEFINITIONS.forEach((def) => {
       if (!groups[def.group]) groups[def.group] = [];
       groups[def.group].push({
         key: def.key,
         label: def.label,
-        actions: [...def.availableActions],
+        actions: [...(def.availableActions || [])],
       });
     });
-
     return groups;
   }, []);
 
-  const openEditDialog = (user: AppUser) => {
+  // FIX: openEditDialog properly sets the user before showing dialog
+  const openEditDialog = useCallback((user: AppUser) => {
     setSelectedUser(user);
-    setPendingPermissions([...user.pagePermissions]);
+    setPendingPermissions([...(user.pagePermissions || [])]);
     setShowEditDialog(true);
-  };
+  }, []);
 
-  const handleSavePermissions = () => {
-    if (!selectedUser) return;
-    // TODO: Connect to updateUserPagePermissions from context later
+  // FIX: open dialog for a new assignment — user chooses from selector inside dialog
+  const openNewDialog = useCallback(() => {
+    setSelectedUser(null);
+    setPendingPermissions([]);
+    setShowEditDialog(true);
+  }, []);
+
+  // FIX: actually calls updateUserPagePermissions instead of TODO stub
+  const handleSavePermissions = useCallback(() => {
+    if (!selectedUser) {
+      toast.error("Please select a user first");
+      return;
+    }
+    updateUserPagePermissions(selectedUser.id, pendingPermissions);
     toast.success(`Permissions updated for ${selectedUser.name}`);
     setShowEditDialog(false);
     setSelectedUser(null);
-  };
+    setPendingPermissions([]);
+  }, [selectedUser, pendingPermissions, updateUserPagePermissions]);
 
-  const handleToggleStatus = (userId: string) => {
-    toggleUserStatus(userId);
-    toast.success("Status updated");
-  };
+  const handleToggleStatus = useCallback(
+    (userId: string) => {
+      toggleUserStatus(userId);
+      toast.success("User status updated");
+    },
+    [toggleUserStatus],
+  );
 
-  const handleDeleteUser = (userId: string) => {
-    deleteUser(userId);
-    toast.error("User deleted");
-  };
+  const handleDeleteUser = useCallback(() => {
+    if (deletingUserId) {
+      deleteUser(deletingUserId);
+      toast.error("User deleted");
+      setDeletingUserId(null);
+    }
+  }, [deletingUserId, deleteUser]);
+
+  const updatePermission = useCallback(
+    (pageKey: string, action: PageAction, checked: boolean) => {
+      setPendingPermissions((prev) => {
+        const idx = prev.findIndex((p) => p.page === pageKey);
+        const current = idx >= 0 ? prev[idx].actions : [];
+        const newActions = checked
+          ? [...current, action]
+          : current.filter((a) => a !== action);
+        const newPerm: PagePermission = {
+          page: pageKey as PageKey,
+          actions: newActions,
+        };
+        if (idx >= 0) {
+          const copy = [...prev];
+          copy[idx] = newPerm;
+          return copy;
+        }
+        return [...prev, newPerm];
+      });
+    },
+    [],
+  );
 
   return (
     <>
@@ -194,7 +263,8 @@ export default function MenuRights() {
             Control what each user can access
           </p>
         </div>
-        <Button onClick={() => setShowEditDialog(true)}>
+        {/* FIX: button opens dialog without pre-selecting a user — user selects inside dialog */}
+        <Button onClick={openNewDialog}>
           <Plus className="mr-2 h-4 w-4" />
           Manage Permissions
         </Button>
@@ -269,14 +339,16 @@ export default function MenuRights() {
                       </TableCell>
                       <TableCell>
                         <div className="flex gap-2">
+                          {/* FIX: row edit button always passes the found user */}
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() =>
-                              openEditDialog(
-                                allUsers.find((u) => u.id === row.userId)!,
-                              )
-                            }
+                            onClick={() => {
+                              const user = allUsers.find(
+                                (u) => u.id === row.userId,
+                              );
+                              if (user) openEditDialog(user);
+                            }}
                           >
                             <Edit3 className="h-4 w-4" />
                           </Button>
@@ -291,7 +363,7 @@ export default function MenuRights() {
                             variant="ghost"
                             size="sm"
                             className="text-destructive"
-                            onClick={() => handleDeleteUser(row.userId)}
+                            onClick={() => setDeletingUserId(row.userId)}
                           >
                             <Trash2 className="h-4 w-4" />
                           </Button>
@@ -306,95 +378,149 @@ export default function MenuRights() {
         </CardContent>
       </Card>
 
-      {/* Edit Dialog */}
+      {/* Edit / Assign Dialog */}
       <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
         <DialogContent className="max-w-4xl max-h-[90vh]">
           <DialogHeader>
-            <DialogTitle>Edit Permissions — {selectedUser?.name}</DialogTitle>
+            <DialogTitle>
+              {selectedUser
+                ? `Edit Permissions — ${selectedUser.name}`
+                : "Assign Permissions"}
+            </DialogTitle>
             <DialogDescription>
               Toggle access rights for each module
             </DialogDescription>
           </DialogHeader>
 
-          <div className="max-h-[60vh] overflow-y-auto pr-2 space-y-6 py-4">
-            {Object.entries(pageGroups).map(([group, pages]) => (
-              <Collapsible key={group} defaultOpen>
-                <CollapsibleTrigger className="w-full text-left font-semibold text-lg border-b pb-2 hover:text-primary">
-                  {group}
-                </CollapsibleTrigger>
-                <CollapsibleContent className="pt-4 space-y-4">
-                  {pages.map(({ key, label, actions }) => {
-                    const current = pendingPermissions.find(
-                      (p) => p.page === key,
-                    );
-                    const currentActions = current?.actions || [];
+          <div className="space-y-4 py-2">
+            {/* FIX: user selector so "Manage Permissions" button is usable without row click */}
+            <div className="space-y-2">
+              <Label>User</Label>
+              <Select
+                value={selectedUser?.id ?? ""}
+                onValueChange={(id) => {
+                  const user = allUsers.find((u) => u.id === id);
+                  if (user) {
+                    setSelectedUser(user);
+                    setPendingPermissions([...(user.pagePermissions || [])]);
+                  }
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a user" />
+                </SelectTrigger>
+                <SelectContent>
+                  {allUsers
+                    .filter((u) => u.role !== "super_admin")
+                    .map((u) => (
+                      <SelectItem key={u.id} value={u.id}>
+                        {u.name} ({u.email}) — {u.role}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
 
-                    return (
-                      <div key={key} className="border rounded-lg p-4">
-                        <Label className="font-medium text-base mb-3 block">
-                          {label}
-                        </Label>
-                        <div className="flex flex-wrap gap-3">
-                          {actions.map((action) => {
-                            const config = ACTION_CONFIG[action];
-                            const checked = currentActions.includes(action);
+            <div className="max-h-[52vh] overflow-y-auto pr-2 space-y-6">
+              {Object.entries(pageGroups).map(([group, pages]) => (
+                <Collapsible key={group} defaultOpen>
+                  <CollapsibleTrigger className="w-full text-left font-semibold text-lg border-b pb-2 hover:text-primary">
+                    {group}
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="pt-4 space-y-4">
+                    {pages.map(({ key, label, actions }) => {
+                      const current = pendingPermissions.find(
+                        (p) => p.page === key,
+                      );
+                      const currentActions = current?.actions || [];
 
-                            return (
-                              <div
-                                key={action}
-                                className="flex items-center gap-2 border rounded-md px-4 py-2.5 hover:bg-accent"
-                              >
-                                <Checkbox
-                                  checked={checked}
-                                  onCheckedChange={(val) => {
-                                    const newActions = val
-                                      ? [...currentActions, action]
-                                      : currentActions.filter(
-                                          (a) => a !== action,
-                                        );
-
-                                    setPendingPermissions((prev) => {
-                                      const idx = prev.findIndex(
-                                        (p) => p.page === key,
-                                      );
-                                      if (idx >= 0) {
-                                        const copy = [...prev];
-                                        copy[idx] = {
-                                          page: key,
-                                          actions: newActions,
-                                        };
-                                        return copy;
-                                      }
-                                      return [
-                                        ...prev,
-                                        { page: key, actions: newActions },
-                                      ];
-                                    });
-                                  }}
-                                />
-                                <Label className="cursor-pointer flex items-center gap-2">
-                                  {config.icon} {config.label}
-                                </Label>
-                              </div>
-                            );
-                          })}
+                      return (
+                        <div key={key} className="border rounded-lg p-4">
+                          <Label className="font-medium text-base mb-3 block">
+                            {label}
+                          </Label>
+                          <div className="flex flex-wrap gap-3">
+                            {actions.map((action) => {
+                              const config = getActionConfig(action);
+                              const checked = currentActions.includes(action);
+                              return (
+                                <div
+                                  key={action}
+                                  className="flex items-center gap-2 border rounded-md px-4 py-2.5 hover:bg-accent"
+                                >
+                                  <Checkbox
+                                    id={`mr-${key}-${action}`}
+                                    checked={checked}
+                                    onCheckedChange={(val) =>
+                                      updatePermission(
+                                        key,
+                                        action,
+                                        val as boolean,
+                                      )
+                                    }
+                                  />
+                                  <Label
+                                    htmlFor={`mr-${key}-${action}`}
+                                    className="cursor-pointer flex items-center gap-2"
+                                  >
+                                    {config.icon} {config.label}
+                                  </Label>
+                                </div>
+                              );
+                            })}
+                          </div>
                         </div>
-                      </div>
-                    );
-                  })}
-                </CollapsibleContent>
-              </Collapsible>
-            ))}
+                      );
+                    })}
+                  </CollapsibleContent>
+                </Collapsible>
+              ))}
+            </div>
           </div>
 
           <DialogFooter>
-            <Button variant="outline" onClick={() => setShowEditDialog(false)}>
+            <Button
+              variant="outline"
+              onClick={() => {
+                setShowEditDialog(false);
+                setSelectedUser(null);
+                setPendingPermissions([]);
+              }}
+            >
               Cancel
             </Button>
-            <Button onClick={handleSavePermissions}>Save Changes</Button>
+            {/* FIX: disabled until a user is selected */}
+            <Button onClick={handleSavePermissions} disabled={!selectedUser}>
+              Save Changes
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Delete confirmation */}
+      <AlertDialog
+        open={!!deletingUserId}
+        onOpenChange={(open) => !open && setDeletingUserId(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete user?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently remove the user and all their permissions.
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive"
+              onClick={handleDeleteUser}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
