@@ -1,47 +1,38 @@
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Plus, Trash2, Edit3, Save, X, Truck, CalendarDays } from "lucide-react";
-import * as api from "@/api/grnApi";
-
-interface Supplier {
-  LHeadId: number;
-  LHeadName: string;
-  LHeadType?: string;
-}
-
-interface PurchaseOrder {
-  PurchaseOrderID: number;
-  PurchaseOrderNo: string;
-  SupplierID?: number;
-  SupplierName?: string;
-  Items?: string;
-}
-
-interface Item {
-  ItemGroupId?: number;
-  id?: number;
-  ItemGroupName?: string;
-  name?: string;
-  ItemGroupDescription?: string;
-}
-
-interface GRNItemLine {
-  itemId: string;
-  itemName: string;
-  orderedQty: number;
-  receivedQty: number;
-  remainingQty: number;
-}
+import { Plus, Trash2, Edit3, Save, X, Truck } from "lucide-react";
+import * as grnApi from "@/api/grnApi";
+import type {
+  GRNFormDataPayload,
+  Item,
+  UOM,
+  GRNItemLine,
+  Supplier,
+  PurchaseOrder,
+} from "@/api/grnApi";
 
 interface GRNFormData {
   grnNo: string;
@@ -57,13 +48,36 @@ interface GRNFormData {
 
 const statusOptions = ["Draft", "Partially Received", "Fully Received"] as const;
 
-const units = ["MT", "Bags", "Brass", "Nos", "Ltr", "Kg"];
+const createEmptyItem = (): GRNItemLine => ({
+  itemId: "",
+  itemName: "",
+  orderedQty: 0,
+  receivedQty: 0,
+  remainingQty: 0,
+  uom: "",
+});
+
+const generateGrnNo = () => {
+  const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  return `GRN-MAT-${today}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+};
+
+const parseJsonArray = <T,>(value: unknown): T[] => {
+  if (Array.isArray(value)) return value as T[];
+  if (typeof value !== "string" || !value.trim()) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? (parsed as T[]) : [];
+  } catch {
+    return [];
+  }
+};
 
 export default function GRN() {
   const queryClient = useQueryClient();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState<GRNFormData>({
-    grnNo: "",
+    grnNo: generateGrnNo(),
     grnDate: new Date().toISOString().slice(0, 10),
     supplierId: "",
     supplierName: "",
@@ -71,128 +85,136 @@ export default function GRN() {
     poNumber: "",
     remarks: "",
     status: "Draft",
-    items: [{ itemId: "", itemName: "", orderedQty: 0, receivedQty: 0, remainingQty: 0 }],
+    items: [createEmptyItem()],
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [selectedPO, setSelectedPO] = useState<any>(null);
 
-  // Queries
-  const { data: grns = [] as any[], isLoading: loadingGrns } = useQuery({
+  const { data: grns = [], isLoading: loadingGrns } = useQuery({
     queryKey: ["grns"],
-    queryFn: api.getGRNs,
+    queryFn: grnApi.getGRNs,
   });
 
-  const { data: suppliersData = [] as Supplier[], isLoading: loadingSuppliers } = useQuery({
+  const { data: suppliersData = [], isLoading: loadingSuppliers } = useQuery({
     queryKey: ["suppliers"],
-    queryFn: api.getSuppliers,
+    queryFn: grnApi.getSuppliers,
   });
 
-  const { data: posData = [] as PurchaseOrder[], isLoading: loadingPOs } = useQuery({
+  const { data: posData = [], isLoading: loadingPOs } = useQuery({
     queryKey: ["purchaseOrders"],
-    queryFn: api.getPurchaseOrders,
+    queryFn: grnApi.getPurchaseOrders,
   });
 
-  const { data: itemsData = [] as Item[], isLoading: loadingItems } = useQuery({
-    queryKey: ["items"],
-    queryFn: api.getItems,
+  const { data: itemsData = [], isLoading: loadingItems } = useQuery({
+    queryKey: ["itemMaster"],
+    queryFn: grnApi.getItems,
   });
 
-  const suppliers = suppliersData.map((s: any) => ({
-    value: String(s.LHeadId),
-    label: s.LHeadName,
+  const { data: uomsData = [], isLoading: loadingUoms } = useQuery({
+    queryKey: ["uomMaster"],
+    queryFn: grnApi.getUoms,
+  });
+
+  const suppliers = suppliersData.map((supplier: Supplier) => ({
+    value: String(supplier.LHeadId),
+    label: supplier.LHeadName,
   }));
 
-  const pos = posData.map((po: any) => ({
+  const pos = posData.map((po: PurchaseOrder) => ({
     value: String(po.PurchaseOrderID),
     label: po.PurchaseOrderNo,
     data: po,
   }));
 
-  const items = itemsData.map((i: any) => ({
-    value: String(i.ItemGroupId || i.id),
-    label: i.ItemGroupName || i.name || i.ItemGroupDescription,
+  const items = itemsData.map((item: Item) => ({
+    value: item.M_Id,
+    label: item.M_Name,
+    group: item.ParentGroupName || "",
   }));
 
-  // Mutations
+  const uoms = uomsData.map((uom: UOM) => ({
+    value: uom.UOMCode,
+    label: uom.Symbol || uom.UOMSymbol
+      ? `${uom.UOMName} (${uom.Symbol || uom.UOMSymbol})`
+      : uom.UOMName,
+  }));
+
   const createMutation = useMutation({
-    mutationFn: api.addGRN,
+    mutationFn: grnApi.addGRN,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["grns"] });
       resetForm();
-      toast.success("GRN created");
+      toast.success("GRN created successfully");
     },
-    onError: (err: any) => toast.error(err.message || "Creation failed"),
+    onError: (err: Error) => toast.error(err.message || "Creation failed"),
   });
 
   const updateMutation = useMutation({
-    mutationFn: (data: GRNFormData) => api.updateGRN(editingId!, data),
+    mutationFn: (payload: GRNFormDataPayload) =>
+      grnApi.updateGRN(editingId!, payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["grns"] });
-      setEditingId(null);
-      toast.success("GRN updated");
+      resetForm();
+      toast.success("GRN updated successfully");
     },
-    onError: (err: any) => toast.error(err.message || "Update failed"),
+    onError: (err: Error) => toast.error(err.message || "Update failed"),
   });
 
   const deleteMutation = useMutation({
-    mutationFn: api.deleteGRN,
+    mutationFn: grnApi.deleteGRN,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["grns"] });
-      toast.success("GRN deleted");
+      toast.success("GRN deleted successfully");
     },
-    onError: (err: any) => toast.error(err.message || "Delete failed"),
+    onError: (err: Error) => toast.error(err.message || "Delete failed"),
   });
 
   const resetForm = () => {
-    const today = new Date().toISOString().slice(0, 10);
-    const grnNum = `GRN-MAT-${today.replace(/-/g,'')}-${Math.random().toString(36).substr(2, 4).toUpperCase()}`;
     setFormData({
-      grnNo: grnNum,
-      grnDate: today,
+      grnNo: generateGrnNo(),
+      grnDate: new Date().toISOString().slice(0, 10),
       supplierId: "",
       supplierName: "",
       poId: "",
       poNumber: "",
       remarks: "",
       status: "Draft",
-      items: [{ itemId: "", itemName: "", orderedQty: 0, receivedQty: 0, remainingQty: 0 }],
+      items: [createEmptyItem()],
     });
     setEditingId(null);
-    setSelectedPO(null);
     setErrors({});
   };
 
-  useEffect(() => {
-    // Auto calc remaining
-    const newItems = formData.items.map(item => ({
-      ...item,
-      remainingQty: item.orderedQty - item.receivedQty
-    }));
-    setFormData(prev => ({ ...prev, items: newItems }));
-  }, [formData.items]);
-
   const validate = () => {
     const newErrors: Record<string, string> = {};
+
     if (!formData.grnNo) newErrors.grnNo = "Required";
     if (!formData.supplierId) newErrors.supplierId = "Select supplier";
-    if (!formData.poId) newErrors.poId = "Select PO";
-    if (formData.items.some(item => 
-      !item.itemId || 
-      item.receivedQty <= 0 || 
-      item.receivedQty > item.orderedQty
-    )) {
-      newErrors.items = "Enter valid received qty (1 to ordered qty) for all items";
+    if (!formData.poId) newErrors.poId = "Select purchase order";
+
+    if (
+      formData.items.some(
+        (item) =>
+          !item.itemId ||
+          !item.uom ||
+          item.receivedQty <= 0 ||
+          item.receivedQty > item.orderedQty
+      )
+    ) {
+      newErrors.items =
+        "Each row must have an item, unit, and received quantity within ordered quantity";
     }
+
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
 
   const onSubmit = () => {
     if (!validate()) {
-      toast.error("Please fix errors");
+      toast.error("Please fix errors before saving");
       return;
     }
-    const payload = {
+
+    const payload: GRNFormDataPayload = {
       grnNo: formData.grnNo,
       grnDate: formData.grnDate,
       supplierId: Number(formData.supplierId),
@@ -202,7 +224,8 @@ export default function GRN() {
       remarks: formData.remarks,
       supplierName: formData.supplierName,
       poNumber: formData.poNumber,
-    } as any;
+    };
+
     if (editingId) {
       updateMutation.mutate(payload);
     } else {
@@ -210,83 +233,155 @@ export default function GRN() {
     }
   };
 
-  const updateField = (field: keyof GRNFormData, value: string | number) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+  const updateField = (field: keyof GRNFormData, value: string) => {
     if (field === "supplierId") {
-      const supplier = suppliersData.find((s: any) => String(s.LHeadId) === value);
-      setFormData(prev => ({ ...prev, supplierName: supplier?.LHeadName || "" }));
-    }
-    if (field === "poId") {
-      const po = posData.find((p: any) => String(p.PurchaseOrderID) === value);
-      setFormData(prev => ({ 
-        ...prev, 
-        poNumber: po?.PurchaseOrderNo || "",
-        supplierId: String(po?.SupplierID || ""),
-        supplierName: po?.SupplierName || ""
+      const supplier = suppliersData.find(
+        (entry: Supplier) => String(entry.LHeadId) === value
+      );
+
+      setFormData((prev) => ({
+        ...prev,
+        supplierId: value,
+        supplierName: supplier?.LHeadName || "",
       }));
-      if (po?.Items) {
-        try {
-          const poItems = JSON.parse(po.Items);
-          const grnItems: GRNItemLine[] = poItems.map((item: any) => ({
-            itemId: item.itemId || "",
-            itemName: item.itemName || "",
-            orderedQty: item.qty || 0,
-            receivedQty: 0,
-            remainingQty: item.qty || 0
-          }));
-          setFormData(prev => ({ ...prev, items: grnItems.length ? grnItems : prev.items }));
-          setSelectedPO(po);
-        } catch {
-          setFormData(prev => ({ ...prev, items: [{ itemId: "", itemName: "", orderedQty: 0, receivedQty: 0, remainingQty: 0 }] }));
-        }
-      }
+      return;
     }
+
+    if (field === "poId") {
+      const po = posData.find(
+        (entry: PurchaseOrder) => String(entry.PurchaseOrderID) === value
+      );
+
+      const poItems = parseJsonArray<any>(po?.Items);
+      const mappedPoItems: GRNItemLine[] =
+        poItems.length > 0
+          ? poItems.map((item) => {
+              const orderedQty = Number(
+                item.orderedQty ?? item.qty ?? item.Quantity ?? 0
+              );
+              const itemId = String(item.itemId ?? item.M_Id ?? item.ItemID ?? "");
+              const matchedItem = itemsData.find(
+                (entry: Item) => entry.M_Id === itemId
+              );
+
+              return {
+                itemId,
+                itemName:
+                  item.itemName ??
+                  item.M_Name ??
+                  matchedItem?.M_Name ??
+                  "",
+                orderedQty,
+                receivedQty: 0,
+                remainingQty: orderedQty,
+                uom: String(item.uom ?? item.Unit ?? item.unit ?? po?.Unit ?? ""),
+              };
+            })
+          : [
+              {
+                itemId: "",
+                itemName: po?.ItemDescription || "",
+                orderedQty: Number(po?.Quantity || 0),
+                receivedQty: 0,
+                remainingQty: Number(po?.Quantity || 0),
+                uom: po?.Unit || "",
+              },
+            ];
+
+      setFormData((prev) => ({
+        ...prev,
+        poId: value,
+        poNumber: po?.PurchaseOrderNo || "",
+        supplierId: po?.SupplierID ? String(po.SupplierID) : prev.supplierId,
+        supplierName: po?.SupplierName || prev.supplierName,
+        items: mappedPoItems.length ? mappedPoItems : [createEmptyItem()],
+      }));
+      return;
+    }
+
+    setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
   const addItem = () => {
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
-      items: [...prev.items, { itemId: "", itemName: "", orderedQty: 0, receivedQty: 0, remainingQty: 0 }],
+      items: [...prev.items, createEmptyItem()],
     }));
   };
 
   const removeItem = (index: number) => {
-    setFormData(prev => ({
+    setFormData((prev) => ({
       ...prev,
-      items: prev.items.filter((_, i) => i !== index),
+      items:
+        prev.items.length > 1
+          ? prev.items.filter((_, itemIndex) => itemIndex !== index)
+          : [createEmptyItem()],
     }));
   };
 
-  const updateItemField = (index: number, field: keyof GRNItemLine, value: string | number) => {
-    const newItems = [...formData.items];
-    newItems[index] = { ...newItems[index], [field]: value as never };
-    if (field === "itemId") {
-      const item = itemsData.find((i: any) => String(i.ItemGroupId || i.id) === value);
-      newItems[index].itemName = item?.ItemGroupName || item?.name || "";
-    }
-    // Auto calc remaining
-    newItems[index].remainingQty = newItems[index].orderedQty - newItems[index].receivedQty;
-    setFormData(prev => ({ ...prev, items: newItems }));
+  const updateItemField = (
+    index: number,
+    field: keyof GRNItemLine,
+    value: string | number
+  ) => {
+    setFormData((prev) => {
+      const nextItems = [...prev.items];
+      const currentItem = { ...nextItems[index], [field]: value };
+
+      if (field === "itemId") {
+        const matchedItem = itemsData.find((item: Item) => item.M_Id === value);
+        currentItem.itemName = matchedItem?.M_Name || "";
+      }
+
+      currentItem.orderedQty = Number(currentItem.orderedQty) || 0;
+      currentItem.receivedQty = Number(currentItem.receivedQty) || 0;
+      currentItem.remainingQty =
+        currentItem.orderedQty - currentItem.receivedQty;
+
+      nextItems[index] = currentItem;
+
+      return {
+        ...prev,
+        items: nextItems,
+      };
+    });
   };
 
   const onEdit = (grn: any) => {
-    const parsedItems = grn.GRNItems ? JSON.parse(grn.GRNItems) : [];
+    const parsedItems = parseJsonArray<GRNItemLine>(grn.GRNItems).map((item) => ({
+      ...createEmptyItem(),
+      ...item,
+      orderedQty: Number(item.orderedQty || 0),
+      receivedQty: Number(item.receivedQty || 0),
+      remainingQty:
+        Number(item.remainingQty ?? Number(item.orderedQty || 0) - Number(item.receivedQty || 0)),
+      uom: item.uom || "",
+    }));
+
     setFormData({
       grnNo: grn.GRNNo || "",
-      grnDate: grn.GRNDate || "",
+      grnDate: grn.GRNDate ? String(grn.GRNDate).slice(0, 10) : "",
       supplierId: String(grn.SupplierID || ""),
       supplierName: grn.SupplierName || "",
       poId: String(grn.POID || ""),
       poNumber: grn.PONumber || "",
       remarks: grn.Remarks || "",
       status: grn.Status || "Draft",
-      items: parsedItems.length ? parsedItems : [{ itemId: "", itemName: "", orderedQty: 0, receivedQty: 0, remainingQty: 0 }],
+      items: parsedItems.length ? parsedItems : [createEmptyItem()],
     });
+
     setEditingId(String(grn.GRNID));
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  if (loadingGrns || loadingSuppliers || loadingPOs || loadingItems) {
-    return <div className="p-8 text-center">Loading...</div>;
+  if (
+    loadingGrns ||
+    loadingSuppliers ||
+    loadingPOs ||
+    loadingItems ||
+    loadingUoms
+  ) {
+    return <div className="p-8 text-center">Loading GRN data...</div>;
   }
 
   return (
@@ -294,7 +389,6 @@ export default function GRN() {
       <Breadcrumbs items={["Dashboard", "Materials", "GRN Master"]} />
 
       <div className="space-y-6">
-        {/* Form Card */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -302,9 +396,9 @@ export default function GRN() {
               {editingId ? "Edit GRN" : "New Goods Receipt Note"}
             </CardTitle>
           </CardHeader>
+
           <CardContent className="space-y-6">
-            {/* Header Fields */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div>
                 <Label>GRN Number</Label>
                 <Input
@@ -312,128 +406,229 @@ export default function GRN() {
                   onChange={(e) => updateField("grnNo", e.target.value.toUpperCase())}
                   className={errors.grnNo ? "border-destructive" : ""}
                 />
-                {errors.grnNo && <p className="text-sm text-destructive mt-1">{errors.grnNo}</p>}
+                {errors.grnNo && (
+                  <p className="mt-1 text-sm text-destructive">{errors.grnNo}</p>
+                )}
               </div>
+
               <div>
                 <Label>GRN Date</Label>
-                <Input type="date" value={formData.grnDate} onChange={(e) => updateField("grnDate", e.target.value)} />
+                <Input
+                  type="date"
+                  value={formData.grnDate}
+                  onChange={(e) => updateField("grnDate", e.target.value)}
+                />
               </div>
+
               <div>
                 <Label>Supplier</Label>
-                <Select value={formData.supplierId} onValueChange={(v) => updateField("supplierId", v)}>
+                <Select
+                  value={formData.supplierId}
+                  onValueChange={(value) => updateField("supplierId", value)}
+                >
                   <SelectTrigger className={errors.supplierId ? "border-destructive" : ""}>
-                    <SelectValue />
+                    <SelectValue placeholder="Select supplier" />
                   </SelectTrigger>
                   <SelectContent>
-                    {suppliers.map((s) => (
-                      <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+                    {suppliers.map((supplier) => (
+                      <SelectItem key={supplier.value} value={supplier.value}>
+                        {supplier.label}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                {errors.supplierId && <p className="text-sm text-destructive mt-1">{errors.supplierId}</p>}
+                {errors.supplierId && (
+                  <p className="mt-1 text-sm text-destructive">{errors.supplierId}</p>
+                )}
               </div>
+
               <div>
                 <Label>Purchase Order</Label>
-                <Select value={formData.poId} onValueChange={(v) => updateField("poId", v)}>
-                  <SelectTrigger className={errors.poId ? "ring-destructive ring-offset-destructive" : ""}>
-                    <SelectValue />
+                <Select
+                  value={formData.poId}
+                  onValueChange={(value) => updateField("poId", value)}
+                >
+                  <SelectTrigger className={errors.poId ? "border-destructive" : ""}>
+                    <SelectValue placeholder="Select purchase order" />
                   </SelectTrigger>
                   <SelectContent>
-                    {pos.map((poOpt) => (
-                      <SelectItem key={poOpt.value} value={poOpt.value}>{poOpt.label}</SelectItem>
+                    {pos.map((poOption) => (
+                      <SelectItem key={poOption.value} value={poOption.value}>
+                        {poOption.label}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                {errors.poId && <p className="text-sm text-destructive mt-1">{errors.poId}</p>}
-                {formData.poNumber && <p className="text-sm text-muted-foreground mt-1">{formData.poNumber}</p>}
+                {errors.poId && (
+                  <p className="mt-1 text-sm text-destructive">{errors.poId}</p>
+                )}
+                {formData.poNumber && (
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    PO: {formData.poNumber}
+                  </p>
+                )}
               </div>
+
               <div>
                 <Label>Status</Label>
-                <Select value={formData.status} onValueChange={(v: string) => updateField("status", v)}>
+                <Select
+                  value={formData.status}
+                  onValueChange={(value) => updateField("status", value)}
+                >
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {statusOptions.map((s) => (
-                      <SelectItem key={s} value={s}>{s}</SelectItem>
+                    {statusOptions.map((status) => (
+                      <SelectItem key={status} value={status}>
+                        {status}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
             </div>
 
-            {/* Items Table */}
             <div>
-              <div className="flex justify-between items-center mb-4">
-                <h3 className="text-lg font-semibold flex items-center gap-2">
+              <div className="mb-4 flex items-center justify-between">
+                <h3 className="flex items-center gap-2 text-lg font-semibold">
                   <Truck className="h-5 w-5" />
                   Received Items
                 </h3>
                 <Button type="button" variant="outline" size="sm" onClick={addItem}>
-                  <Plus className="h-4 w-4 mr-1" />
+                  <Plus className="mr-1 h-4 w-4" />
                   Add Item
                 </Button>
               </div>
-              {errors.items && <p className="text-sm text-destructive mb-4">{errors.items}</p>}
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Item</TableHead>
-                    <TableHead>Ordered Qty</TableHead>
-                    <TableHead>Received Qty</TableHead>
-                    <TableHead>Remaining</TableHead>
-                    <TableHead>Unit</TableHead>
-                    <TableHead />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {formData.items.map((item, index) => (
-                    <TableRow key={index}>
-                      <TableCell>
-                        <Select value={item.itemId} onValueChange={(v) => updateItemField(index, "itemId", v)}>
-                          <SelectTrigger className="w-[200px]">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {items.map((it) => (
-                              <SelectItem key={it.value} value={it.value}>{it.label}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <div className="text-sm text-muted-foreground">{item.itemName}</div>
-                      </TableCell>
-                      <TableCell className="font-semibold">{item.orderedQty}</TableCell>
-                      <TableCell>
-                        <Input
-                          type="number"
-                          className="w-20"
-                          value={item.receivedQty || ""}
-                          onChange={(e) => updateItemField(index, "receivedQty", Number(e.target.value) || 0)}
-                          min={0}
-                        />
-                      </TableCell>
-                      <TableCell className={item.remainingQty < 0 ? "text-destructive font-semibold" : "font-mono"}>
-                        {item.remainingQty}
-                      </TableCell>
-                      <TableCell>{units[0]}</TableCell>
-                      <TableCell>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => removeItem(index)}
-                          disabled={formData.items.length <= 1}
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
+
+              {errors.items && (
+                <p className="mb-4 text-sm text-destructive">{errors.items}</p>
+              )}
+
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="min-w-[220px]">Item</TableHead>
+                      <TableHead className="min-w-[110px]">Ordered Qty</TableHead>
+                      <TableHead className="min-w-[120px]">Received Qty</TableHead>
+                      <TableHead className="min-w-[100px]">Remaining</TableHead>
+                      <TableHead className="min-w-[160px]">Unit (UOM)</TableHead>
+                      <TableHead />
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+
+                  <TableBody>
+                    {formData.items.map((item, index) => (
+                      <TableRow key={index}>
+                        <TableCell>
+                          <Select
+                            value={item.itemId}
+                            onValueChange={(value) =>
+                              updateItemField(index, "itemId", value)
+                            }
+                          >
+                            <SelectTrigger className="w-[220px]">
+                              <SelectValue placeholder="Select item" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {items.map((entry) => (
+                                <SelectItem key={entry.value} value={entry.value}>
+                                  {entry.group
+                                    ? `${entry.label} (${entry.group})`
+                                    : entry.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          {item.itemName && (
+                            <p className="mt-1 text-xs text-muted-foreground">
+                              {item.itemName}
+                            </p>
+                          )}
+                        </TableCell>
+
+                        <TableCell>
+                          <Input
+                            type="number"
+                            min={0}
+                            className="w-24"
+                            value={item.orderedQty || ""}
+                            onChange={(e) =>
+                              updateItemField(
+                                index,
+                                "orderedQty",
+                                Number(e.target.value) || 0
+                              )
+                            }
+                          />
+                        </TableCell>
+
+                        <TableCell>
+                          <Input
+                            type="number"
+                            min={0}
+                            max={item.orderedQty}
+                            className="w-24"
+                            value={item.receivedQty || ""}
+                            onChange={(e) =>
+                              updateItemField(
+                                index,
+                                "receivedQty",
+                                Number(e.target.value) || 0
+                              )
+                            }
+                          />
+                        </TableCell>
+
+                        <TableCell
+                          className={
+                            item.remainingQty < 0
+                              ? "font-semibold text-destructive"
+                              : "font-mono"
+                          }
+                        >
+                          {item.remainingQty}
+                        </TableCell>
+
+                        <TableCell>
+                          <Select
+                            value={item.uom}
+                            onValueChange={(value) =>
+                              updateItemField(index, "uom", value)
+                            }
+                          >
+                            <SelectTrigger className="w-[150px]">
+                              <SelectValue placeholder="Select unit" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {uoms.map((uom) => (
+                                <SelectItem key={uom.value} value={uom.value}>
+                                  {uom.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </TableCell>
+
+                        <TableCell>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => removeItem(index)}
+                            disabled={formData.items.length <= 1}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             </div>
 
-            {/* Remarks */}
             <div>
               <Label>Remarks</Label>
               <Textarea
@@ -444,21 +639,23 @@ export default function GRN() {
               />
             </div>
 
-            {/* Actions */}
             <div className="flex gap-3 pt-4">
-              <Button onClick={onSubmit} disabled={createMutation.isPending || updateMutation.isPending} className="flex-1">
-                <Save className="h-4 w-4 mr-2" />
+              <Button
+                onClick={onSubmit}
+                disabled={createMutation.isPending || updateMutation.isPending}
+                className="flex-1"
+              >
+                <Save className="mr-2 h-4 w-4" />
                 {editingId ? "Update" : "Create"} GRN
               </Button>
               <Button type="button" variant="outline" onClick={resetForm}>
-                <X className="h-4 w-4 mr-2" />
+                <X className="mr-2 h-4 w-4" />
                 {editingId ? "Cancel" : "Reset"}
               </Button>
             </div>
           </CardContent>
         </Card>
 
-        {/* List */}
         <Card>
           <CardHeader>
             <CardTitle>Goods Receipt Notes</CardTitle>
@@ -476,40 +673,51 @@ export default function GRN() {
                   <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
+
               <TableBody>
-                {grns.map((grn: any) => (
-                  <TableRow key={grn.GRNID}>
-                    <TableCell className="font-semibold">{grn.GRNNo}</TableCell>
-                    <TableCell>{grn.PONumber || grn.POID}</TableCell>
-                    <TableCell>{grn.SupplierName || grn.SupplierID}</TableCell>
-                    <TableCell>{new Date(grn.GRNDate).toLocaleDateString()}</TableCell>
-                    <TableCell>
-                      <Badge variant="secondary">{grn.Status}</Badge>
-                    </TableCell>
-                    <TableCell>{JSON.parse(grn.GRNItems || '[]').length}</TableCell>
-                    <TableCell>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => onEdit(grn)}
-                      >
-                        <Edit3 className="h-4 w-4" />
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => deleteMutation.mutate(String(grn.GRNID))}
-                        className="ml-1"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
+                {grns.map((grn: any) => {
+                  const lineItems = parseJsonArray(grn.GRNItems);
+                  return (
+                    <TableRow key={grn.GRNID}>
+                      <TableCell className="font-semibold">{grn.GRNNo}</TableCell>
+                      <TableCell>{grn.PONumber || grn.POID || "—"}</TableCell>
+                      <TableCell>{grn.SupplierName || grn.SupplierID || "—"}</TableCell>
+                      <TableCell>
+                        {grn.GRNDate
+                          ? new Date(grn.GRNDate).toLocaleDateString()
+                          : "—"}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="secondary">{grn.Status}</Badge>
+                      </TableCell>
+                      <TableCell>{lineItems.length}</TableCell>
+                      <TableCell>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => onEdit(grn)}
+                        >
+                          <Edit3 className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="ml-1"
+                          onClick={() => deleteMutation.mutate(String(grn.GRNID))}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
               </TableBody>
             </Table>
+
             {grns.length === 0 && (
-              <p className="text-muted-foreground text-center py-8">No GRNs. Create one from a Purchase Order!</p>
+              <p className="py-8 text-center text-muted-foreground">
+                No GRNs yet. Create one from a Purchase Order.
+              </p>
             )}
           </CardContent>
         </Card>

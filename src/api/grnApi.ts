@@ -16,15 +16,30 @@ export interface PurchaseOrder {
   PurchaseOrderNo: string;
   SupplierID?: number;
   SupplierName?: string;
-  Items: string;
+  ItemDescription?: string;
+  Quantity?: number;
+  Unit?: string;
+  Items?: string;
 }
 
 export interface Item {
-  ItemGroupId?: number;
-  id?: number;
-  ItemGroupName?: string;
-  name?: string;
-  ItemGroupDescription?: string;
+  M_Id: string;
+  M_Name: string;
+  M_Description?: string;
+  M_Type?: string;
+  M_Group?: string;
+  Parent_Id?: string;
+  ParentGroupName?: string;
+}
+
+export interface UOM {
+  Id: number;
+  UOMId?: number;
+  UOMName: string;
+  UOMCode: string;
+  Symbol?: string;
+  UOMSymbol?: string;
+  IsActive?: boolean;
 }
 
 export interface GRNItemLine {
@@ -33,6 +48,7 @@ export interface GRNItemLine {
   orderedQty: number;
   receivedQty: number;
   remainingQty: number;
+  uom: string;
 }
 
 export interface GRNFormDataPayload {
@@ -46,8 +62,6 @@ export interface GRNFormDataPayload {
   supplierName?: string;
   poNumber?: string;
 }
-
-// ====================== GRN CRUD Operations ======================
 
 export const getGRNs = async (): Promise<any[]> => {
   const res = await fetch(BASE, { headers: getAuthHeaders() });
@@ -69,6 +83,7 @@ export const addGRN = async (data: GRNFormDataPayload) => {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "POST failed");
   }
+
   return res.json();
 };
 
@@ -86,6 +101,7 @@ export const updateGRN = async (id: string, data: GRNFormDataPayload) => {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "PUT failed");
   }
+
   return res.json();
 };
 
@@ -99,10 +115,9 @@ export const deleteGRN = async (id: string) => {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "DELETE failed");
   }
+
   return res.json();
 };
-
-// ====================== Helper Functions ======================
 
 export const getSuppliers = async (): Promise<Supplier[]> => {
   const res = await fetch("/api/account-head?type=Supplier", {
@@ -114,13 +129,26 @@ export const getSuppliers = async (): Promise<Supplier[]> => {
 };
 
 export const getPurchaseOrders = async (): Promise<PurchaseOrder[]> => {
-  const res = await fetch("/api/purchase-orders", { headers: getAuthHeaders() });
+  const res = await fetch("/api/purchase-orders", {
+    headers: getAuthHeaders(),
+  });
   if (!res.ok) throw new Error("POs fetch failed");
-  return res.json();
+  const data = await res.json();
+  return Array.isArray(data) ? data : [];
 };
 
 export const getItems = async (): Promise<Item[]> => {
-  const res = await fetch("/api/item-groups", { headers: getAuthHeaders() });
+  const res = await fetch("/api/item-master", { headers: getAuthHeaders() });
   if (!res.ok) throw new Error("Items fetch failed");
-  return res.json();
+  const data = await res.json();
+  return Array.isArray(data) ? data : [];
+};
+
+export const getUoms = async (): Promise<UOM[]> => {
+  const res = await fetch("/api/uom-master", { headers: getAuthHeaders() });
+  if (!res.ok) throw new Error("UOMs fetch failed");
+  const data = await res.json();
+  return Array.isArray(data)
+    ? data.filter((u: UOM) => u.IsActive !== false)
+    : [];
 };
