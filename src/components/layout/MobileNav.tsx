@@ -390,15 +390,15 @@ export const MobileNav: React.FC = () => {
     switch (activeModule) {
       case "material":
         return [
-          {
-            label: "Amendments",
-            icon: BarChart3,
-            path: "/material/amendments",
-          },
-          {
+{
             label: "Transaction",
             icon: Receipt,
             children: [
+              {
+                label: "GRN",
+                path: "/material/grn",
+                icon: Package,
+              },
               {
                 label: "Expense Booking",
                 path: "/material/expense-booking",

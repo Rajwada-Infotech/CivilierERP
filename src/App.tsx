@@ -106,6 +106,7 @@ const FinancialYearMaster = lazy(
   () => import("./pages/masters/FinancialYearMaster"),
 );
 const ChequeMaster = lazy(() => import("./pages/masters/ChequeMaster"));
+const GRN = lazy(() => import("./pages/material/GRN"));
 const MaterialExpenseBookingMaster = lazy(
   () => import("./pages/material/MaterialExpenseBooking"),
 );
@@ -230,47 +231,25 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-// ─── Role Guard ───────────────────────────────────────────────────────────────
-function RequireRole({
-  children,
-  allowed,
-}: {
-  children: React.ReactNode;
-  allowed: string[];
-}) {
-  const { currentUser } = useAuth();
-  if (!currentUser || !allowed.includes(currentUser.role)) {
-    return <Navigate to="/" replace />;
-  }
-  return <>{children}</>;
-}
+
+
 
 // ─── Admin Protected Route ────────────────────────────────────────────────────
 const ADMIN_ROLES = ["super_admin", "admin", "dba"] as const;
 
-function AdminRoute({ children }: { children: React.ReactNode }) {
+function AdminRoute() {
   return (
     <RequireAuth>
-      <RequireRole allowed={[...ADMIN_ROLES]}>
-        <AppLayout>
-          <ErrorBoundary>
-            <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
-          </ErrorBoundary>
-        </AppLayout>
-      </RequireRole>
+      <AppLayout />
     </RequireAuth>
   );
 }
 
 // ─── Protected Route ──────────────────────────────────────────────────────────
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
+function ProtectedRoute() {
   return (
     <RequireAuth>
-      <AppLayout>
-        <ErrorBoundary>
-          <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
-        </ErrorBoundary>
-      </AppLayout>
+      <AppLayout />
     </RequireAuth>
   );
 }
@@ -299,516 +278,73 @@ function AppRoutes() {
         element={currentUser ? <Navigate to="/" replace /> : <Login />}
       />
 
-      {/* MAIN */}
-      <Route
-        path="/"
-        element={
-          <ProtectedRoute>
-            <Dashboard />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/transactions"
-        element={
-          <ProtectedRoute>
-            <Transactions />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/reports"
-        element={
-          <ProtectedRoute>
-            <Reports />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/widgets"
-        element={
-          <ProtectedRoute>
-            <Widgets />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/tasks"
-        element={
-          <ProtectedRoute>
-            <Tasks />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/tasks/:id"
-        element={
-          <ProtectedRoute>
-            <TaskDetail />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/payments"
-        element={
-          <ProtectedRoute>
-            <Payment />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/received-payments"
-        element={
-          <ProtectedRoute>
-            <ReceivedPayment />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/brs"
-        element={
-          <ProtectedRoute>
-            <Brs />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/records"
-        element={
-          <ProtectedRoute>
-            <Records />
-          </ProtectedRoute>
-        }
-      />
+      <Route element={<ProtectedRoute />}>
+        <Route index element={<Dashboard />} />
+        <Route path="/transactions" element={<Transactions />} />
+        <Route path="/reports" element={<Reports />} />
+        <Route path="/widgets" element={<Widgets />} />
+        <Route path="/tasks" element={<Tasks />} />
+        <Route path="/tasks/:id" element={<TaskDetail />} />
+        <Route path="/payments" element={<Payment />} />
+        <Route path="/received-payments" element={<ReceivedPayment />} />
+        <Route path="/brs" element={<Brs />} />
+        <Route path="/records" element={<Records />} />
 
-      {/* MASTERS */}
-      <Route
-        path="/masters/contractors"
-        element={
-          <ProtectedRoute>
-            <ContractorMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/masters/suppliers"
-        element={
-          <ProtectedRoute>
-            <SupplierMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/masters/customers"
-        element={
-          <ProtectedRoute>
-            <CustomerMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/masters/banks"
-        element={
-          <ProtectedRoute>
-            <BankMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/masters/expenses"
-        element={
-          <ProtectedRoute>
-            <ExpensesMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/masters/items"
-        element={
-          <ProtectedRoute>
-            <ItemMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/masters/item-groups"
-        element={
-          <ProtectedRoute>
-            <ItemGroupMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/masters/hsn"
-        element={
-          <ProtectedRoute>
-            <HsnMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/masters/financial-year"
-        element={
-          <ProtectedRoute>
-            <FinancialYearMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/masters/cheque"
-        element={
-          <ProtectedRoute>
-            <ChequeMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/material/expense-booking"
-        element={
-          <ProtectedRoute>
-            <MaterialExpenseBookingMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/material/work-order"
-        element={
-          <ProtectedRoute>
-            <WorkOrderMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/material/amendments"
-        element={
-          <ProtectedRoute>
-            <Dashboard />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/material/purchase-order"
-        element={
-          <ProtectedRoute>
-            <PurchaseOrderMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/masters/card"
-        element={
-          <ProtectedRoute>
-            <CardMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/masters/tds"
-        element={
-          <ProtectedRoute>
-            <TdsMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/masters/account-group"
-        element={
-          <ProtectedRoute>
-            <AccountGroupMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/masters/named-entry-type"
-        element={
-          <ProtectedRoute>
-            <NamedEntryTypeMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/masters/type-of-doc"
-        element={
-          <ProtectedRoute>
-            <TypeOfDocMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/masters/activity"
-        element={
-          <ProtectedRoute>
-            <ActivityMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/masters/general-ledger"
-        element={
-          <ProtectedRoute>
-            <GeneralLedgerMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/masters/debit-note"
-        element={
-          <ProtectedRoute>
-            <DebitNoteMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/masters/billing-terms"
-        element={
-          <ProtectedRoute>
-            <BillingTermsMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/material/t-c-master"
-        element={
-          <ProtectedRoute>
-            <TCMaster />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/masters/unit-measurement"
-        element={
-          <ProtectedRoute>
-            <UnitOfMeasurementMaster />
-          </ProtectedRoute>
-        }
-      />
+        <Route path="/masters/contractors" element={<ContractorMaster />} />
+        <Route path="/masters/suppliers" element={<SupplierMaster />} />
+        <Route path="/masters/customers" element={<CustomerMaster />} />
+        <Route path="/masters/banks" element={<BankMaster />} />
+        <Route path="/masters/expenses" element={<ExpensesMaster />} />
+        <Route path="/masters/items" element={<ItemMaster />} />
+        <Route path="/masters/item-groups" element={<ItemGroupMaster />} />
+        <Route path="/masters/hsn" element={<HsnMaster />} />
+        <Route path="/masters/financial-year" element={<FinancialYearMaster />} />
+        <Route path="/masters/cheque" element={<ChequeMaster />} />
+        <Route path="/material/expense-booking" element={<MaterialExpenseBookingMaster />} />
+        <Route path="/material/work-order" element={<WorkOrderMaster />} />
+        <Route path="/material/amendments" element={<Dashboard />} />
+        <Route path="/material/purchase-order" element={<PurchaseOrderMaster />} />
+        <Route path="/masters/card" element={<CardMaster />} />
+        <Route path="/masters/tds" element={<TdsMaster />} />
+        <Route path="/masters/account-group" element={<AccountGroupMaster />} />
+        <Route path="/masters/named-entry-type" element={<NamedEntryTypeMaster />} />
+        <Route path="/masters/type-of-doc" element={<TypeOfDocMaster />} />
+        <Route path="/masters/activity" element={<ActivityMaster />} />
+        <Route path="/masters/general-ledger" element={<GeneralLedgerMaster />} />
+        <Route path="/masters/debit-note" element={<DebitNoteMaster />} />
+        <Route path="/masters/billing-terms" element={<BillingTermsMaster />} />
+        <Route path="/material/t-c-master" element={<TCMaster />} />
+        <Route path="/material/grn" element={<GRN />} />
+        <Route path="/masters/unit-measurement" element={<UnitOfMeasurementMaster />} />
+      </Route>
 
-      {/* ADMIN — /admin redirects straight to dashboard */}
+      <Route element={<AdminRoute />}>
+        <Route path="/admin/dashboard" element={<AdminDashboard />} />
+        <Route path="/users" element={<Users />} />
+        <Route path="/admin/rights/menu" element={<MenuRights />} />
+        <Route path="/admin/rights/widgets" element={<WidgetRights />} />
+        <Route path="/admin/rights/fin-year" element={<FinYearRights />} />
+        <Route path="/admin/approval/setup" element={<ApprovalSetup />} />
+        <Route path="/admin/approval/post-rights" element={<PostApprovalRights />} />
+        <Route path="/admin/api-integration" element={<ApiIntegrationPage />} />
+        <Route path="/admin/signature" element={<SignaturePage />} />
+        <Route path="/admin/profile" element={<SuperAdminProfile />} />
+        <Route path="/admin/masters/business-unit" element={<BusinessUnitMaster />} />
+        <Route path="/admin/masters/project" element={<ProjectMaster />} />
+        <Route path="/admin/masters/company" element={<CompanyMaster />} />
+        <Route path="/admin/security/password-reset" element={<PasswordResetPage />} />
+        <Route path="/admin/activity-browser" element={<ActivityBrowserPage />} />
+        <Route path="/admin/communicator/sms-setup" element={<SmsSetup />} />
+        <Route path="/admin/communicator/email-setup" element={<EmailSetup />} />
+        <Route path="/admin/communicator/whatsapp-setup" element={<WhatsAppSetup />} />
+        <Route path="/admin/metrics" element={<MetricsDashboard />} />
+        <Route path="/superadmin" element={<SuperAdminDashboard />} />
+        <Route path="/admin/control-panel" element={<AdminControlPanel />} />
+      </Route>
       <Route path="/admin" element={<Navigate to="/" replace />} />
-      <Route
-        path="/admin/dashboard"
-        element={
-          <AdminRoute>
-            <AdminDashboard />
-          </AdminRoute>
-        }
-      />
-      <Route
-        path="/users"
-        element={
-          <AdminRoute>
-            <Users />
-          </AdminRoute>
-        }
-      />
-      <Route
-        path="/admin/rights/menu"
-        element={
-          <AdminRoute>
-            <MenuRights />
-          </AdminRoute>
-        }
-      />
-      <Route
-        path="/admin/rights/widgets"
-        element={
-          <AdminRoute>
-            <WidgetRights />
-          </AdminRoute>
-        }
-      />
-      <Route
-        path="/admin/rights/fin-year"
-        element={
-          <AdminRoute>
-            <FinYearRights />
-          </AdminRoute>
-        }
-      />
-      <Route
-        path="/admin/approval/setup"
-        element={
-          <AdminRoute>
-            <ApprovalSetup />
-          </AdminRoute>
-        }
-      />
-      <Route
-        path="/admin/approval/post-rights"
-        element={
-          <AdminRoute>
-            <PostApprovalRights />
-          </AdminRoute>
-        }
-      />
-      <Route
-        path="/admin/api-integration"
-        element={
-          <AdminRoute>
-            <ApiIntegrationPage />
-          </AdminRoute>
-        }
-      />
-      <Route
-        path="/admin/signature"
-        element={
-          <AdminRoute>
-            <SignaturePage />
-          </AdminRoute>
-        }
-      />
-      <Route
-        path="/admin/profile"
-        element={
-          <AdminRoute>
-            <SuperAdminProfile />
-          </AdminRoute>
-        }
-      />
-      <Route
-        path="/admin/masters/business-unit"
-        element={
-          <AdminRoute>
-            <BusinessUnitMaster />
-          </AdminRoute>
-        }
-      />
-      <Route
-        path="/admin/masters/project"
-        element={
-          <AdminRoute>
-            <ProjectMaster />
-          </AdminRoute>
-        }
-      />
-      <Route
-        path="/admin/masters/company"
-        element={
-          <AdminRoute>
-            <CompanyMaster />
-          </AdminRoute>
-        }
-      />
-      <Route
-        path="/admin/security/password-reset"
-        element={
-          <AdminRoute>
-            <PasswordResetPage />
-          </AdminRoute>
-        }
-      />
-      <Route
-        path="/admin/activity-browser"
-        element={
-          <AdminRoute>
-            <ActivityBrowserPage />
-          </AdminRoute>
-        }
-      />
-      <Route
-        path="/admin/communicator/sms-setup"
-        element={
-          <AdminRoute>
-            <SmsSetup />
-          </AdminRoute>
-        }
-      />
-      <Route
-        path="/admin/communicator/email-setup"
-        element={
-          <AdminRoute>
-            <EmailSetup />
-          </AdminRoute>
-        }
-      />
-      <Route
-        path="/admin/communicator/whatsapp-setup"
-        element={
-          <AdminRoute>
-            <WhatsAppSetup />
-          </AdminRoute>
-        }
-      />
-      <Route
-        path="/admin/metrics"
-        element={
-          <AdminRoute>
-            <MetricsDashboard />
-          </AdminRoute>
-        }
-      />
 
-      {/* SUPER ADMIN */}
-      <Route
-        path="/superadmin"
-        element={
-          <AdminRoute>
-            <SuperAdminDashboard />
-          </AdminRoute>
-        }
-      />
+      {/* USER PROFILE & DBA already nested above */ }
 
-      {/* ADMIN CONTROL PANEL */}
-      <Route
-        path="/admin/control-panel"
-        element={
-          <AdminRoute>
-            <AdminControlPanel />
-          </AdminRoute>
-        }
-      />
-
-      {/* USER PROFILE */}
-      <Route
-        path="/user/profile"
-        element={
-          <ProtectedRoute>
-            <UserProfilePage />
-          </ProtectedRoute>
-        }
-      />
-
-      {/* DBA CONSOLE */}
-      <Route
-        path="/dba"
-        element={
-          <ProtectedRoute>
-            <DBADashboard />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/dba/control-panel"
-        element={
-          <ProtectedRoute>
-            <ControlPanel />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/dba/ads"
-        element={
-          <ProtectedRoute>
-            <AdsManager />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/dba/reminders"
-        element={
-          <ProtectedRoute>
-            <RemindersManager />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/dba/payment-logs"
-        element={
-          <ProtectedRoute>
-            <PaymentLogs />
-          </ProtectedRoute>
-        }
-      />
 
       {/* Maintenance */}
       <Route path="/maintenance" element={<Maintenance />} />
@@ -844,14 +380,16 @@ function App() {
                       <DebitNoteProvider>
                         <BillingTermsProvider>
                           <TaskProvider>
-                            <Router
-                              future={{
-                                v7_startTransition: true,
-                                v7_relativeSplatPath: true,
-                              }}
-                            >
-                              <AppRoutes />
-                            </Router>
+<Suspense fallback={<Loader />}>
+                              <Router
+                                future={{
+                                  v7_startTransition: true,
+                                  v7_relativeSplatPath: true,
+                                }}
+                              >
+                                <AppRoutes />
+                              </Router>
+                            </Suspense>
                           </TaskProvider>
                         </BillingTermsProvider>
                       </DebitNoteProvider>
