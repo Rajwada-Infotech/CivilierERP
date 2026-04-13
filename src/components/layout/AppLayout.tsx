@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useMemo } from "react";
+import { Outlet } from "react-router-dom";
 import { TopNavbar } from "./TopNavbar";
 import { AppSidebar } from "./AppSidebar";
 import { MobileNav } from "./MobileNav";
@@ -30,7 +31,7 @@ const NavbarCollapseContext = createContext<NavbarCollapseContextType>({
 
 export const useNavbarCollapse = () => useContext(NavbarCollapseContext);
 
-export const AppLayout = ({ children }: { children: React.ReactNode }) => {
+export const AppLayout = () => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [navCollapsed, setNavCollapsed] = useState(false);
   const isMobile = useIsMobile();
@@ -65,7 +66,9 @@ export const AppLayout = ({ children }: { children: React.ReactNode }) => {
               isMobile ? "ml-0 pb-16" : sidebarCollapsed ? "ml-16" : "ml-56"
             }`}
           >
-            <div className="p-4 md:p-6">{children}</div>
+            <div className="p-4 md:p-6">
+              <Outlet />
+            </div>
           </main>
         </div>
       </NavbarCollapseContext.Provider>
