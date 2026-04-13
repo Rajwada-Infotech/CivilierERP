@@ -41,8 +41,11 @@ import { queryClient } from "./lib/queryClient";
 function PageSkeleton() {
   return (
     <div className="p-6 space-y-5 animate-pulse">
+      {/* Breadcrumb line */}
       <div className="h-4 w-48 rounded-md bg-muted" />
+      {/* Page title */}
       <div className="h-6 w-64 rounded-md bg-muted" />
+      {/* Card block */}
       <div className="rounded-xl border border-border bg-card/60 p-5 space-y-4">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           {Array.from({ length: 6 }).map((_, i) => (
@@ -57,6 +60,7 @@ function PageSkeleton() {
           <div className="h-9 w-20 rounded-lg bg-muted" />
         </div>
       </div>
+      {/* Table block */}
       <div className="rounded-xl border border-border bg-card/60 overflow-hidden">
         <div className="px-5 py-3.5 border-b border-border">
           <div className="h-4 w-32 rounded bg-muted" />
@@ -124,7 +128,7 @@ const TypeOfDocMaster = lazy(() => import("./pages/masters/TypeOfDocMaster"));
 const ActivityMaster = lazy(() => import("./pages/masters/ActivityMaster"));
 const DebitNoteMaster = lazy(() => import("./pages/masters/DebitNoteMaster"));
 const BillingTermsMaster = lazy(
-  () => import("./pages/masters/BillingTermsmaster"),
+  () => import("./pages/masters/BillingTermsMaster"),
 );
 const TCMaster = lazy(() => import("./pages/material/T&CMaster"));
 const UnitOfMeasurementMaster = lazy(
@@ -245,21 +249,29 @@ function RequireRole({
 // ─── Admin Protected Route ────────────────────────────────────────────────────
 const ADMIN_ROLES = ["super_admin", "admin", "dba"] as const;
 
-function AdminRoute() {
+function AdminRoute({ children }: { children: React.ReactNode }) {
   return (
     <RequireAuth>
       <RequireRole allowed={[...ADMIN_ROLES]}>
-        <AppLayout />
+        <AppLayout>
+          <ErrorBoundary>
+            <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
+          </ErrorBoundary>
+        </AppLayout>
       </RequireRole>
     </RequireAuth>
   );
 }
 
 // ─── Protected Route ──────────────────────────────────────────────────────────
-function ProtectedRoute() {
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return (
     <RequireAuth>
-      <AppLayout />
+      <AppLayout>
+        <ErrorBoundary>
+          <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
+        </ErrorBoundary>
+      </AppLayout>
     </RequireAuth>
   );
 }
@@ -285,654 +297,532 @@ function AppRoutes() {
         element={currentUser ? <Navigate to="/" replace /> : <Login />}
       />
 
-      <Route element={<ProtectedRoute />}>
-        <Route
-          index
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <Dashboard />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/transactions"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <Transactions />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/reports"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <Reports />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/widgets"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <Widgets />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/tasks"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <Tasks />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/tasks/:id"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <TaskDetail />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/payments"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <Payment />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/received-payments"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <ReceivedPayment />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/brs"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <Brs />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/records"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <Records />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/followup"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <FollowupDashboard />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
+      {/* MAIN */}
+      <Route
+        path="/"
+        element={
+          <ProtectedRoute>
+            <Dashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/transactions"
+        element={
+          <ProtectedRoute>
+            <Transactions />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/reports"
+        element={
+          <ProtectedRoute>
+            <Reports />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/widgets"
+        element={
+          <ProtectedRoute>
+            <Widgets />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/tasks"
+        element={
+          <ProtectedRoute>
+            <Tasks />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/tasks/:id"
+        element={
+          <ProtectedRoute>
+            <TaskDetail />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/payments"
+        element={
+          <ProtectedRoute>
+            <Payment />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/received-payments"
+        element={
+          <ProtectedRoute>
+            <ReceivedPayment />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/brs"
+        element={
+          <ProtectedRoute>
+            <Brs />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/records"
+        element={
+          <ProtectedRoute>
+            <Records />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup"
+        element={
+          <ProtectedRoute>
+            <FollowupDashboard />
+          </ProtectedRoute>
+        }
+      />
 
-        <Route
-          path="/masters/contractors"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <ContractorMaster />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/masters/suppliers"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <SupplierMaster />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/masters/customers"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <CustomerMaster />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/masters/banks"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <BankMaster />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/masters/expenses"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <ExpensesMaster />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/masters/items"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <ItemMaster />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/masters/item-groups"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <ItemGroupMaster />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/masters/hsn"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <HsnMaster />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/masters/financial-year"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <FinancialYearMaster />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/masters/cheque"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <ChequeMaster />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/material/expense-booking"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <MaterialExpenseBookingMaster />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/material/work-order"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <WorkOrderMaster />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/material/amendments"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <Dashboard />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/material/purchase-order"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <PurchaseOrderMaster />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/masters/card"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <CardMaster />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/masters/tds"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <TdsMaster />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/masters/account-group"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <AccountGroupMaster />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/masters/named-entry-type"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <NamedEntryTypeMaster />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/masters/type-of-doc"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <TypeOfDocMaster />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/masters/activity"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <ActivityMaster />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/masters/general-ledger"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <GeneralLedgerMaster />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/masters/debit-note"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <DebitNoteMaster />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/masters/billing-terms"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <BillingTermsMaster />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/material/t-c-master"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <TCMaster />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/material/grn"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <GRN />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/masters/unit-measurement"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <UnitOfMeasurementMaster />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/user/profile"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <UserProfilePage />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/dba"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <DBADashboard />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/dba/control-panel"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <ControlPanel />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/dba/ads"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <AdsManager />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/dba/reminders"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <RemindersManager />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/dba/payment-logs"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <PaymentLogs />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-      </Route>
+      {/* MASTERS */}
+      <Route
+        path="/masters/contractors"
+        element={
+          <ProtectedRoute>
+            <ContractorMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/suppliers"
+        element={
+          <ProtectedRoute>
+            <SupplierMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/customers"
+        element={
+          <ProtectedRoute>
+            <CustomerMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/banks"
+        element={
+          <ProtectedRoute>
+            <BankMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/expenses"
+        element={
+          <ProtectedRoute>
+            <ExpensesMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/items"
+        element={
+          <ProtectedRoute>
+            <ItemMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/item-groups"
+        element={
+          <ProtectedRoute>
+            <ItemGroupMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/hsn"
+        element={
+          <ProtectedRoute>
+            <HsnMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/financial-year"
+        element={
+          <ProtectedRoute>
+            <FinancialYearMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/cheque"
+        element={
+          <ProtectedRoute>
+            <ChequeMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/material/grn"
+        element={
+          <ProtectedRoute>
+            <GRN />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/material/expense-booking"
+        element={
+          <ProtectedRoute>
+            <MaterialExpenseBookingMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/material/work-order"
+        element={
+          <ProtectedRoute>
+            <WorkOrderMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/material/amendments"
+        element={
+          <ProtectedRoute>
+            <Dashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/material/purchase-order"
+        element={
+          <ProtectedRoute>
+            <PurchaseOrderMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/material/t-c-master"
+        element={
+          <ProtectedRoute>
+            <TCMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/card"
+        element={
+          <ProtectedRoute>
+            <CardMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/tds"
+        element={
+          <ProtectedRoute>
+            <TdsMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/account-group"
+        element={
+          <ProtectedRoute>
+            <AccountGroupMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/named-entry-type"
+        element={
+          <ProtectedRoute>
+            <NamedEntryTypeMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/type-of-doc"
+        element={
+          <ProtectedRoute>
+            <TypeOfDocMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/activity"
+        element={
+          <ProtectedRoute>
+            <ActivityMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/general-ledger"
+        element={
+          <ProtectedRoute>
+            <GeneralLedgerMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/debit-note"
+        element={
+          <ProtectedRoute>
+            <DebitNoteMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/billing-terms"
+        element={
+          <ProtectedRoute>
+            <BillingTermsMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/masters/unit-measurement"
+        element={
+          <ProtectedRoute>
+            <UnitOfMeasurementMaster />
+          </ProtectedRoute>
+        }
+      />
 
+      {/* USER */}
+      <Route
+        path="/user/profile"
+        element={
+          <ProtectedRoute>
+            <UserProfilePage />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* DBA CONSOLE */}
+      <Route
+        path="/dba"
+        element={
+          <ProtectedRoute>
+            <DBADashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/dba/control-panel"
+        element={
+          <ProtectedRoute>
+            <ControlPanel />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/dba/ads"
+        element={
+          <ProtectedRoute>
+            <AdsManager />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/dba/reminders"
+        element={
+          <ProtectedRoute>
+            <RemindersManager />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/dba/payment-logs"
+        element={
+          <ProtectedRoute>
+            <PaymentLogs />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* ADMIN — bare /admin redirects to home */}
       <Route path="/admin" element={<Navigate to="/" replace />} />
-      <Route element={<AdminRoute />}>
-        <Route
-          path="/admin/dashboard"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <AdminDashboard />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/users"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <Users />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/admin/rights/menu"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <MenuRights />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/admin/rights/widgets"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <WidgetRights />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/admin/rights/fin-year"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <FinYearRights />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/admin/approval/setup"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <ApprovalSetup />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/admin/approval/post-rights"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <PostApprovalRights />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/admin/api-integration"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <ApiIntegrationPage />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/admin/signature"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <SignaturePage />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/admin/profile"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <SuperAdminProfile />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/admin/masters/business-unit"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <BusinessUnitMaster />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/admin/masters/project"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <ProjectMaster />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/admin/masters/company"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <CompanyMaster />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/admin/security/password-reset"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <PasswordResetPage />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/admin/activity-browser"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <ActivityBrowserPage />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/admin/communicator/sms-setup"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <SmsSetup />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/admin/communicator/email-setup"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <EmailSetup />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/admin/communicator/whatsapp-setup"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <WhatsAppSetup />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/admin/metrics"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <MetricsDashboard />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/superadmin"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <SuperAdminDashboard />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-        <Route
-          path="/admin/control-panel"
-          element={
-            <ErrorBoundary>
-              <Suspense fallback={<PageSkeleton />}>
-                <AdminControlPanel />
-              </Suspense>
-            </ErrorBoundary>
-          }
-        />
-      </Route>
+      <Route
+        path="/admin/dashboard"
+        element={
+          <AdminRoute>
+            <AdminDashboard />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/users"
+        element={
+          <AdminRoute>
+            <Users />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/rights/menu"
+        element={
+          <AdminRoute>
+            <MenuRights />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/rights/widgets"
+        element={
+          <AdminRoute>
+            <WidgetRights />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/rights/fin-year"
+        element={
+          <AdminRoute>
+            <FinYearRights />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/approval/setup"
+        element={
+          <AdminRoute>
+            <ApprovalSetup />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/approval/post-rights"
+        element={
+          <AdminRoute>
+            <PostApprovalRights />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/api-integration"
+        element={
+          <AdminRoute>
+            <ApiIntegrationPage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/signature"
+        element={
+          <AdminRoute>
+            <SignaturePage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/profile"
+        element={
+          <AdminRoute>
+            <SuperAdminProfile />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/masters/business-unit"
+        element={
+          <AdminRoute>
+            <BusinessUnitMaster />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/masters/project"
+        element={
+          <AdminRoute>
+            <ProjectMaster />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/masters/company"
+        element={
+          <AdminRoute>
+            <CompanyMaster />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/security/password-reset"
+        element={
+          <AdminRoute>
+            <PasswordResetPage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/activity-browser"
+        element={
+          <AdminRoute>
+            <ActivityBrowserPage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/communicator/sms-setup"
+        element={
+          <AdminRoute>
+            <SmsSetup />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/communicator/email-setup"
+        element={
+          <AdminRoute>
+            <EmailSetup />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/communicator/whatsapp-setup"
+        element={
+          <AdminRoute>
+            <WhatsAppSetup />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/metrics"
+        element={
+          <AdminRoute>
+            <MetricsDashboard />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/control-panel"
+        element={
+          <AdminRoute>
+            <AdminControlPanel />
+          </AdminRoute>
+        }
+      />
 
+      {/* SUPER ADMIN */}
+      <Route
+        path="/superadmin"
+        element={
+          <AdminRoute>
+            <SuperAdminDashboard />
+          </AdminRoute>
+        }
+      />
+
+      {/* MAINTENANCE & 404 */}
       <Route path="/maintenance" element={<Maintenance />} />
       <Route path="*" element={<NotFound />} />
     </Routes>

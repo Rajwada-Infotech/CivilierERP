@@ -1,12 +1,12 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
+import { useGracefulLogout } from "@/hooks/useGracefulLogout";
 import { useNavigate, useLocation } from "react-router-dom";
 import { LogoFull } from "../Logo";
 import { useTheme, THEME_DOTS, Theme } from "@/contexts/ThemeContext";
-import { useModule } from "@/contexts/ModuleContext";
+import { useModule, MODULE_DASHBOARD_ROUTES } from "@/contexts/ModuleContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavbarCollapse } from "./AppLayout";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import Loader from "../Loader";
 import {
   Calendar,
   FileText,
@@ -667,12 +667,14 @@ export const TopNavbar = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { theme, setTheme } = useTheme();
-  const { activeModule, setActiveModule } = useModule();
+  const { activeModule, setActiveModule, moduleSwitching, setModuleSwitching } =
+    useModule();
   const { currentUser, logout } = useAuth();
   const { navCollapsed, setNavCollapsed } = useNavbarCollapse();
+  const { handleLogout, overlay: logoutOverlay } = useGracefulLogout();
 
   const [setupOpen, setSetupOpen] = useState(false);
-  const [moduleSwitching, setModuleSwitching] = useState(false);
+  const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const [moduleOpen, setModuleOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
@@ -807,7 +809,7 @@ export const TopNavbar = () => {
 
   return (
     <>
-      {moduleSwitching && <Loader />}
+      {logoutOverlay}
       <header className="fixed top-0 left-0 right-0 h-14 z-50 flex items-center justify-between px-4 border-b border-border bg-card/80 backdrop-blur-lg">
         {/* Logo */}
         <button
@@ -899,12 +901,19 @@ export const TopNavbar = () => {
 
             {/* Module selector */}
             <div className="relative shrink-0">
-              <button onClick={toggleMod} className={navBtn(moduleOpen)}>
-                <LayoutGrid size={16} />
-                <span>Module</span>
+              <button
+                onClick={toggleMod}
+                className={navBtn(moduleOpen)}
+                disabled={moduleSwitching}
+              >
+                <LayoutGrid
+                  size={16}
+                  className={moduleSwitching ? "animate-spin" : ""}
+                />
+                <span>{switchingTo ? `${switchingTo}…` : "Module"}</span>
                 <ChevronDown
                   size={13}
-                  className={`transition-transform duration-200 ${moduleOpen ? "rotate-180" : ""}`}
+                  className={`transition-transform duration-200 ${moduleOpen ? "rotate-180" : ""} ${moduleSwitching ? "opacity-0" : ""}`}
                 />
               </button>
 
@@ -925,11 +934,13 @@ export const TopNavbar = () => {
                     onClick={async () => {
                       setModuleOpen(false);
                       if (activeModule === "finance" && !isAdminPage) return;
+                      setSwitchingTo("Finance");
                       setModuleSwitching(true);
-                      await new Promise((r) => setTimeout(r, 600));
+                      await new Promise((r) => setTimeout(r, 350));
                       setActiveModule("finance");
-                      navigate("/");
+                      navigate(MODULE_DASHBOARD_ROUTES.finance);
                       setModuleSwitching(false);
+                      setSwitchingTo(null);
                     }}
                     className={`group flex flex-col items-center gap-1.5 p-2.5 rounded-xl border transition-all
                     ${activeModule === "finance" && !isAdminPage ? "border-primary bg-primary/10 shadow-sm" : "border-border hover:border-primary/40 hover:bg-muted/60"}`}
@@ -990,11 +1001,13 @@ export const TopNavbar = () => {
                     onClick={async () => {
                       setModuleOpen(false);
                       if (activeModule === "material" && !isAdminPage) return;
+                      setSwitchingTo("Material");
                       setModuleSwitching(true);
-                      await new Promise((r) => setTimeout(r, 600));
+                      await new Promise((r) => setTimeout(r, 350));
                       setActiveModule("material");
-                      navigate("/material/expense-booking");
+                      navigate(MODULE_DASHBOARD_ROUTES.material);
                       setModuleSwitching(false);
+                      setSwitchingTo(null);
                     }}
                     className={`group flex flex-col items-center gap-1.5 p-2.5 rounded-xl border transition-all
                     ${activeModule === "material" && !isAdminPage ? "border-emerald-500/60 bg-emerald-500/10 shadow-sm" : "border-border hover:border-emerald-500/40 hover:bg-muted/60"}`}
@@ -1020,11 +1033,13 @@ export const TopNavbar = () => {
                     onClick={async () => {
                       setModuleOpen(false);
                       if (activeModule === "followup" && !isAdminPage) return;
+                      setSwitchingTo("Follow-Up");
                       setModuleSwitching(true);
-                      await new Promise((res) => setTimeout(res, 600));
+                      await new Promise((res) => setTimeout(res, 350));
                       setActiveModule("followup");
-                      navigate("/followup");
+                      navigate(MODULE_DASHBOARD_ROUTES.followup);
                       setModuleSwitching(false);
+                      setSwitchingTo(null);
                     }}
                     className={`group flex flex-col items-center gap-1.5 p-2.5 rounded-xl border transition-all ${
                       activeModule === "followup" && !isAdminPage
@@ -1228,10 +1243,7 @@ export const TopNavbar = () => {
                 <User size={14} /> Profile
               </button>
               <button
-                onMouseDown={() => {
-                  logout();
-                  navigate("/login");
-                }}
+                onMouseDown={handleLogout}
                 className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted transition-colors text-destructive"
               >
                 <LogOut size={14} /> Sign Out
@@ -1305,10 +1317,7 @@ export const TopNavbar = () => {
                 <User size={14} /> Profile
               </button>
               <button
-                onMouseDown={() => {
-                  logout();
-                  navigate("/login");
-                }}
+                onMouseDown={handleLogout}
                 className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted text-destructive"
               >
                 <LogOut size={14} /> Sign Out
