@@ -79,7 +79,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-// Safe Action Configuration with fallback
 const ACTION_CONFIG: Partial<
   Record<PageAction, { label: string; icon: React.ReactNode }>
 > = {
@@ -88,18 +87,15 @@ const ACTION_CONFIG: Partial<
   edit: { label: "Edit", icon: <Edit className="w-3 h-3" /> },
   delete: { label: "Delete", icon: <Trash className="w-3 h-3" /> },
   print: { label: "Print", icon: <Printer className="w-3 h-3" /> },
-  preview: { label: "Preview", icon: <Eye className="w-3 h-3" /> }, // changed from EyeOff
+  preview: { label: "Preview", icon: <Eye className="w-3 h-3" /> },
   export: { label: "CSV Export", icon: <Download className="w-3 h-3" /> },
   approve: { label: "Approve", icon: <CheckCircle className="w-3 h-3" /> },
   reject: { label: "Reject", icon: <XCircle className="w-3 h-3" /> },
 };
 
-// Safe getter with fallback
 const getActionConfig = (action: PageAction | string) => {
   const config = ACTION_CONFIG[action as PageAction];
   if (config) return config;
-
-  // Fallback for unknown actions
   return {
     label: action.charAt(0).toUpperCase() + action.slice(1),
     icon: <Eye className="w-3 h-3" />,
@@ -131,19 +127,14 @@ export default function PostApprovalRights() {
   >([]);
   const [deletingUserId, setDeletingUserId] = useState<string | null>(null);
 
-  // Table Data
   const tableData = useMemo<PermissionRow[]>(() => {
     const rows: PermissionRow[] = [];
-
     allUsers.forEach((user) => {
       if (user.role === "super_admin") return;
-
       PAGE_DEFINITIONS.forEach((def) => {
         const userPerm = user.pagePermissions?.find((p) => p.page === def.key);
         const userActions = userPerm?.actions || [];
-
         if (!userActions.includes("view")) return;
-
         rows.push({
           id: `${user.id}-${def.key}`,
           userId: user.id,
@@ -158,19 +149,20 @@ export default function PostApprovalRights() {
         });
       });
     });
-
     return rows;
   }, [allUsers]);
 
-  const filteredData = useMemo(() => {
-    return tableData.filter(
-      (row) =>
-        row.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        row.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        row.pageLabel.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        row.role.toLowerCase().includes(searchTerm.toLowerCase()),
-    );
-  }, [tableData, searchTerm]);
+  const filteredData = useMemo(
+    () =>
+      tableData.filter(
+        (row) =>
+          row.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          row.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          row.pageLabel.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          row.role.toLowerCase().includes(searchTerm.toLowerCase()),
+      ),
+    [tableData, searchTerm],
+  );
 
   const handleSavePermissions = useCallback(() => {
     if (!selectedUser) return;
@@ -210,7 +202,6 @@ export default function PostApprovalRights() {
       string,
       Array<{ key: PageKey; label: string; actions: PageAction[] }>
     > = {};
-
     PAGE_DEFINITIONS.forEach((def) => {
       if (!groups[def.group]) groups[def.group] = [];
       groups[def.group].push({
@@ -219,7 +210,6 @@ export default function PostApprovalRights() {
         actions: def.availableActions || [],
       });
     });
-
     return groups;
   }, []);
 
@@ -256,7 +246,6 @@ export default function PostApprovalRights() {
             </DialogHeader>
 
             <div className="space-y-4 py-4">
-              {/* User Selector */}
               <div className="space-y-2">
                 <Label>User</Label>
                 <Select
@@ -284,7 +273,6 @@ export default function PostApprovalRights() {
                 </Select>
               </div>
 
-              {/* Permissions */}
               <div className="space-y-3 max-h-80 overflow-auto p-2 border rounded-md">
                 {Object.entries(pageGroups).map(([group, pages]) => (
                   <Collapsible key={group} defaultOpen>
@@ -317,7 +305,7 @@ export default function PostApprovalRights() {
                                     className="flex items-center gap-1 p-1.5 border rounded-md hover:border-primary/50 transition-colors"
                                   >
                                     <Checkbox
-                                      id={`perm-${key}-${action}`}
+                                      id={`par-${key}-${action}`}
                                       checked={checked}
                                       onCheckedChange={(isChecked) => {
                                         const newActions = isChecked
@@ -325,12 +313,10 @@ export default function PostApprovalRights() {
                                           : currentActions.filter(
                                               (a) => a !== action,
                                             );
-
                                         const newPerm: PagePermission = {
                                           page: key,
                                           actions: newActions,
                                         };
-
                                         setPendingPermissions((prev) => {
                                           const idx = prev.findIndex(
                                             (p) => p.page === key,
@@ -345,7 +331,7 @@ export default function PostApprovalRights() {
                                       }}
                                     />
                                     <Label
-                                      htmlFor={`perm-${key}-${action}`}
+                                      htmlFor={`par-${key}-${action}`}
                                       className="text-xs font-medium cursor-pointer m-0 p-0 leading-none flex items-center gap-1"
                                     >
                                       {config.icon}
@@ -365,7 +351,19 @@ export default function PostApprovalRights() {
             </div>
 
             <DialogFooter>
-              <Button onClick={handleSavePermissions}>Save Permissions</Button>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowEditDialog(false);
+                  setSelectedUser(null);
+                  setPendingPermissions([]);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button onClick={handleSavePermissions} disabled={!selectedUser}>
+                Save Permissions
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -396,8 +394,9 @@ export default function PostApprovalRights() {
             <TableHeader>
               <TableRow>
                 <TableHead>User</TableHead>
-                <TableHead>Post Approval Rights</TableHead>
-                <TableHead>Actions</TableHead>
+                {/* FIX: removed duplicate "Actions" column header — was "Actions" twice */}
+                <TableHead>Module</TableHead>
+                <TableHead>Permissions</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Actions</TableHead>
               </TableRow>
@@ -417,7 +416,6 @@ export default function PostApprovalRights() {
               ) : (
                 filteredData.map((row) => {
                   const user = allUsers.find((u) => u.id === row.userId);
-
                   return (
                     <TableRow key={row.id}>
                       <TableCell className="font-medium">
@@ -459,7 +457,6 @@ export default function PostApprovalRights() {
                           <Edit3 className="w-4 h-4 mr-1" />
                           Edit
                         </Button>
-
                         <Button
                           variant="ghost"
                           size="sm"
@@ -469,7 +466,6 @@ export default function PostApprovalRights() {
                           <UserCheck className="w-4 h-4 mr-1" />
                           {row.status === "Active" ? "Deactivate" : "Activate"}
                         </Button>
-
                         <Button
                           variant="ghost"
                           size="sm"
