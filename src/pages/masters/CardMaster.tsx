@@ -30,7 +30,7 @@ import {
   updateCard,
   deleteCard,
   type DbCard,
-  type DbBank,
+  type BankOption,
   type CompanyOption,
 } from "@/api/cardMasterApi";
 
@@ -261,7 +261,7 @@ const CardMaster: React.FC = () => {
     queryKey: ["cards"],
     queryFn: getCards,
   });
-  const { data: bankData, isLoading: loadingBanks } = useQuery<DbBank[]>({
+  const { data: bankData, isLoading: loadingBanks } = useQuery<BankOption[]>({
     queryKey: ["banks"],
     queryFn: getBanksForCard,
   });
@@ -271,17 +271,17 @@ const CardMaster: React.FC = () => {
   });
 
   const dbItems: DbCard[] = Array.isArray(dbData) ? dbData : [];
-  const dbBanks: DbBank[] = Array.isArray(bankData) ? bankData : [];
+  const dbBanks: BankOption[] = Array.isArray(bankData) ? bankData : [];
 
   const cards: CardRecord[] = dbItems.map((item) => {
     const mm = String(item.expiry_month ?? 0).padStart(2, "0");
     const yy = String(item.expiry_year ?? 0).slice(-2);
     // Try to match back to a bank record by name so bankId is consistent
-    const matchedBank = dbBanks.find((b) => b.BName === item.bank_name);
+    const matchedBank = dbBanks.find((b) => b.label === item.bank_name);
     return {
       _id: String(item.id),
       companyName: item.company_name || "",
-      bankId: matchedBank ? String(matchedBank.BId) : "",
+      bankId: matchedBank ? String(matchedBank.id) : "",
       bankName: item.bank_name || "",
       accountNumber: item.account_number || "",
       ifscCode: item.ifsc_code || "",
@@ -329,13 +329,13 @@ const CardMaster: React.FC = () => {
 
   // ── Bank dropdown handler — auto-fills account number & IFSC ──────────────
   const handleBankChange = (bankId: string) => {
-    const bank = dbBanks.find((b) => String(b.BId) === bankId);
+    const bank = dbBanks.find((b) => String(b.id) === bankId);
     setForm((p) => ({
       ...p,
       bankId,
-      bankName: bank?.BName || "",
-      accountNumber: bank?.BAccountNumber || "",
-      ifscCode: bank?.BIfscCode || "",
+      bankName: bank?.label || "",
+      accountNumber: bank?.accountNumber || "",
+      ifscCode: bank?.ifscCode || "",
     }));
     if (errors.bankId) setErrors((e) => ({ ...e, bankId: false }));
   };
@@ -600,8 +600,8 @@ const CardMaster: React.FC = () => {
                   >
                     <option value="">Select Bank...</option>
                     {dbBanks.map((b) => (
-                      <option key={b.BId} value={String(b.BId)}>
-                        {b.BName}
+                      <option key={b.id} value={String(b.id)}>
+                        {b.label}
                         {b.BBranch ? ` — ${b.BBranch}` : ""}
                       </option>
                     ))}
