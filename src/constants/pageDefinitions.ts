@@ -154,6 +154,14 @@ export const PAGE_DEFINITIONS = [
     group: "Reports",
     availableActions: ["view", "export", "print"] as const,
   },
+
+  // ==================== MATERIALS ====================
+  {
+    key: "grn-master",
+    label: "GRN Master",
+    group: "Materials",
+    availableActions: ["view", "create", "edit", "delete"] as const,
+  },
 ] as const;
 
 // ==================== TYPES ====================
