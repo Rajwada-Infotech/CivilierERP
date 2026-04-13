@@ -1,9 +1,14 @@
-import React from 'react';
-import { Breadcrumbs } from '@/components/Breadcrumbs';
-import { MasterPage, type FieldDef, type ColumnDef, type RecordWithId } from '@/components/MasterPage';
-import { Book, Percent, Calendar, FileText, ToggleRight } from 'lucide-react';
-import { toast } from 'sonner';
-import { fetchWithAuth } from '@/lib/fetchWithAuth';
+import React from "react";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
+import {
+  MasterPage,
+  type FieldDef,
+  type ColumnDef,
+  type RecordWithId,
+} from "@/components/MasterPage";
+import { Book, Percent, Calendar, FileText, ToggleRight } from "lucide-react";
+import { toast } from "sonner";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 // ─── API ──────────────────────────────────────────────────────────────────────
 const BASE = "/api/billing-terms";
@@ -51,42 +56,42 @@ const BillingTermsMaster: React.FC = () => {
 
   const fields: FieldDef[] = [
     {
-      name: 'Name',
-      label: 'Term Name',
-      type: 'text',
+      name: "Name",
+      label: "Term Name",
+      type: "text",
       required: true,
     },
     {
-      name: 'Type',
-      label: 'Bill Type',
-      type: 'select',
+      name: "Type",
+      label: "Bill Type",
+      type: "select",
       required: true,
       options: [
-        'Tax Invoice',
-        'Proforma Invoice', 
-        'Credit Note',
-        'Debit Note',
-        'Bill of Supply',
-        'Receipt Voucher',
-        'Delivery Challan',
-        'Self Invoice'
+        "Tax Invoice",
+        "Proforma Invoice",
+        "Credit Note",
+        "Debit Note",
+        "Bill of Supply",
+        "Receipt Voucher",
+        "Delivery Challan",
+        "Self Invoice",
       ],
     },
     {
-      name: 'GST',
-      label: 'GST/Discount',
-      type: 'text', // Could be number or complex
+      name: "GST",
+      label: "GST/Discount",
+      type: "text", // Could be number or complex
     },
     {
-      name: 'IsActive',
-      label: 'Status',
-      type: 'toggle',
+      name: "IsActive",
+      label: "Status",
+      type: "toggle",
       defaultValue: true,
     },
     {
-      name: 'Description',
-      label: 'Description',
-      type: 'textarea',
+      name: "Description",
+      label: "Description",
+      type: "textarea",
       fullWidth: true,
     },
   ];
@@ -111,21 +116,21 @@ const BillingTermsMaster: React.FC = () => {
   };
 
   const columns: ColumnDef[] = [
-    { key: 'Name', label: 'Term Name' },
-    { key: 'Type', label: 'Bill Type' },
-    { key: 'GST', label: 'GST/Discount' },
-    { key: 'IsActive', label: 'Status', renderer: 'status' },
+    { key: "Name", label: "Term Name" },
+    { key: "Type", label: "Bill Type" },
+    { key: "GST", label: "GST/Discount" },
+    { key: "IsActive", label: "Status", renderer: "status" },
   ];
 
   const handleDataChange = (records: Record<string, unknown>[]) => {
-    toast.success('Billing terms updated successfully!');
+    toast.success("Billing terms updated successfully!");
     // Would call updateBillingTerm here
   };
 
   return (
     <>
-      <Breadcrumbs items={['Masters', 'Billing Terms']} />
-      
+      <Breadcrumbs items={["Masters", "Billing Terms"]} />
+
       <div className="mb-6">
         <div className="flex items-center gap-3 mb-2">
           <Book className="w-6 h-6 text-primary" />
@@ -151,4 +156,3 @@ const BillingTermsMaster: React.FC = () => {
 };
 
 export default BillingTermsMaster;
-
