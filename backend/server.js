@@ -15,6 +15,10 @@ const ALLOWED_ORIGINS = [
   "http://localhost:8080",
   "http://localhost:8081", 
   "http://localhost:5173",
+  "http://[::1]:3000",
+  "http://[::1]:8080",
+  "http://[::1]:8081",
+  "http://[::1]:5173",
   "http://127.0.0.1:3000",
   "http://127.0.0.1:5173",
   "https://civiliererp.vercel.app",
@@ -85,10 +89,12 @@ app.use(async (req, res, next) => {
     app.use(
       cors({
         origin: (origin, cb) => {
+          console.log(`CORS request from origin: ${origin || 'undefined'}`);
           if (!origin || ALLOWED_ORIGINS.includes(origin)) {
             cb(null, true);
           } else {
-            cb(new Error("Not allowed by CORS"));
+            console.log(`CORS rejected origin: ${origin}`);
+            cb(null, false);
           }
         },
         credentials: true,
