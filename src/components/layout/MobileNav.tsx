@@ -460,6 +460,122 @@ export const MobileNav: React.FC = () => {
           { label: "Widgets", path: "/widgets", icon: Puzzle },
         ];
 
+      case "followup":
+        return [
+          {
+            label: "Dashboard",
+            icon: BarChart3,
+            path: "/followup",
+          },
+          {
+            label: "Sales",
+            icon: Users,
+            children: [
+              {
+                label: "Applicants",
+                path: "/followup/sales/applicants",
+                icon: FileText,
+              },
+              {
+                label: "Unit Selection",
+                path: "/followup/sales/unit-selection",
+                icon: FileText,
+              },
+              {
+                label: "Welcome Calls",
+                path: "/followup/sales/welcome-calls",
+                icon: FileText,
+              },
+            ],
+          },
+          {
+            label: "Agreement",
+            icon: FileText,
+            children: [
+              {
+                label: "Agreements",
+                path: "/followup/agreement/agreements",
+                icon: FileText,
+              },
+            ],
+          },
+          {
+            label: "Finance",
+            icon: Landmark,
+            children: [
+              {
+                label: "Demands",
+                path: "/followup/finance/demands",
+                icon: FileText,
+              },
+              {
+                label: "Payments",
+                path: "/followup/finance/payments",
+                icon: FileText,
+              },
+            ],
+          },
+          {
+            label: "Closure",
+            icon: CheckCircle2,
+            children: [
+              { label: "NOC", path: "/followup/closure/noc", icon: FileText },
+              {
+                label: "Sales Deed",
+                path: "/followup/closure/sales-deed",
+                icon: FileText,
+              },
+              {
+                label: "Handover",
+                path: "/followup/closure/handover",
+                icon: FileText,
+              },
+            ],
+          },
+          {
+            label: "Follow-Ups",
+            icon: CalendarClock,
+            children: [
+              {
+                label: "Reminders",
+                path: "/followup/follow-ups/reminders",
+                icon: Bell,
+              },
+              {
+                label: "Tasks",
+                path: "/followup/follow-ups/tasks",
+                icon: CheckCircle2,
+              },
+              {
+                label: "Follow-Up Log",
+                path: "/followup/follow-ups/log",
+                icon: FileText,
+              },
+            ],
+          },
+          {
+            label: "Reports",
+            icon: BarChart3,
+            children: [
+              {
+                label: "Customer Report",
+                path: "/followup/reports/customer",
+                icon: FileText,
+              },
+              {
+                label: "Financial Report",
+                path: "/followup/reports/financial",
+                icon: FileText,
+              },
+              {
+                label: "Project Status",
+                path: "/followup/reports/project-status",
+                icon: FileText,
+              },
+            ],
+          },
+        ];
+
       default:
         return [{ label: "Amendments", icon: BarChart3, path: "/" }];
     }
@@ -742,54 +858,70 @@ export const MobileNav: React.FC = () => {
 
               {/* Module Switcher */}
               <div className="px-5 pt-4 pb-3">
-                <div
-                  className={`grid gap-2 ${isAdmin ? "grid-cols-3" : "grid-cols-2"}`}
-                >
-                  <button
-                    onClick={() => {
-                      setActiveModule("finance");
-                      if (activeModule !== "finance") navigate("/");
-                      setOpen(false);
-                    }}
-                    className={`py-3 px-4 rounded-2xl border font-medium text-sm transition-all ${
-                      activeModule === "finance" && !isAdminPage
-                        ? "bg-primary text-primary-foreground border-primary"
-                        : "border-border hover:bg-muted"
-                    }`}
-                  >
-                    Finance
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      setActiveModule("material");
-                      navigate("/material/amendments");
-                      setOpen(false);
-                    }}
-                    className={`py-3 px-4 rounded-2xl border font-medium text-sm transition-all ${
-                      activeModule === "material" && !isAdminPage
-                        ? "bg-emerald-500 text-emerald-50 border-emerald-500"
-                        : "border-border hover:bg-muted"
-                    }`}
-                  >
-                    Material
-                  </button>
-
-                  {isAdmin && (
-                    <button
-                      onClick={() => {
-                        navigate("/admin/dashboard");
+                <div className="flex gap-2 overflow-x-auto scrollbar-none pb-1 -mx-1 px-1">
+                  {[
+                    {
+                      label: "Finance",
+                      module: "finance",
+                      active: activeModule === "finance" && !isAdminPage,
+                      color:
+                        "bg-primary text-primary-foreground border-primary",
+                      onClick: () => {
+                        setActiveModule("finance");
+                        if (activeModule !== "finance") navigate("/");
                         setOpen(false);
-                      }}
-                      className={`py-3 px-4 rounded-2xl border font-medium text-sm transition-all ${
-                        isAdminPage
-                          ? "bg-blue-500 text-white border-blue-500"
-                          : "border-border hover:bg-muted"
+                      },
+                    },
+                    {
+                      label: "Material",
+                      module: "material",
+                      active: activeModule === "material" && !isAdminPage,
+                      color:
+                        "bg-emerald-500 text-emerald-50 border-emerald-500",
+                      onClick: () => {
+                        setActiveModule("material");
+                        navigate("/material/amendments");
+                        setOpen(false);
+                      },
+                    },
+                    {
+                      label: "Follow Up",
+                      module: "followup",
+                      active: activeModule === "followup" && !isAdminPage,
+                      color: "bg-violet-500 text-violet-50 border-violet-500",
+                      onClick: () => {
+                        setActiveModule("followup");
+                        navigate("/followup");
+                        setOpen(false);
+                      },
+                    },
+                    ...(isAdmin
+                      ? [
+                          {
+                            label: "Admin",
+                            module: "admin",
+                            active: isAdminPage,
+                            color: "bg-blue-500 text-white border-blue-500",
+                            onClick: () => {
+                              navigate("/admin/dashboard");
+                              setOpen(false);
+                            },
+                          },
+                        ]
+                      : []),
+                  ].map((btn) => (
+                    <button
+                      key={btn.module}
+                      onClick={btn.onClick}
+                      className={`flex-shrink-0 py-2 px-4 rounded-full border font-medium text-sm transition-all ${
+                        btn.active
+                          ? btn.color
+                          : "border-border hover:bg-muted text-foreground"
                       }`}
                     >
-                      Admin
+                      {btn.label}
                     </button>
-                  )}
+                  ))}
                 </div>
               </div>
 
@@ -801,7 +933,7 @@ export const MobileNav: React.FC = () => {
                     tabIndex={0}
                     onClick={() => setSetupOpen((p) => !p)}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
+                      if (e.key === "Enter" || e.key === " ") {
                         e.preventDefault();
                         setSetupOpen((p) => !p);
                       }
@@ -864,7 +996,7 @@ export const MobileNav: React.FC = () => {
                     setRemOpen((p) => !p);
                   }}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' || e.key === ' ') {
+                    if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
                       if (!remFetched) fetchReminders();
                       setRemOpen((p) => !p);
@@ -1049,7 +1181,7 @@ export const MobileNav: React.FC = () => {
                           tabIndex={0}
                           onClick={() => toggleGroup(item.label)}
                           onKeyDown={(e) => {
-                            if (e.key === 'Enter' || e.key === ' ') {
+                            if (e.key === "Enter" || e.key === " ") {
                               e.preventDefault();
                               toggleGroup(item.label);
                             }
@@ -1067,8 +1199,8 @@ export const MobileNav: React.FC = () => {
                             className={`text-muted-foreground transition-transform ${openState ? "rotate-180" : ""}`}
                           />
                         </div>
-  
-                          {openState && (
+
+                        {openState && (
                           <div className="ml-6 pl-4 border-l border-border mt-1 mb-2 space-y-0.5">
                             {item.children.map((child) => {
                               const childActive =

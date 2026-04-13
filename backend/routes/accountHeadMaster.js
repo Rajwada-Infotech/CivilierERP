@@ -113,6 +113,27 @@ router.get("/options", async (req, res) => {
   }
 });
 
+// GET bank options with account number and IFSC for auto-fill
+// IMPORTANT: declared before /:id
+router.get("/bank-options", async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+        SELECT
+          LHeadId    AS id,
+          LHeadName  AS label,
+          LAccountNo AS accountNumber,
+          LIFSCCode  AS ifscCode
+        FROM dbo.AccountHeadMaster
+        WHERE LHeadType = 'B' AND LHeadStatus = 1
+        ORDER BY LHeadName
+      `);
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // UPDATE ledger head
 router.put("/:id", async (req, res) => {
   const {

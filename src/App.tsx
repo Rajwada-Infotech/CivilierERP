@@ -102,36 +102,25 @@ const ExpensesMaster = lazy(() => import("./pages/masters/ExpensesMaster"));
 const ItemMaster = lazy(() => import("./pages/masters/ItemMaster"));
 const ItemGroupMaster = lazy(() => import("./pages/masters/ItemGroupMaster"));
 const HsnMaster = lazy(() => import("./pages/masters/HsnMaster"));
-const FinancialYearMaster = lazy(
-  () => import("./pages/masters/FinancialYearMaster"),
-);
+const FinancialYearMaster = lazy(() => import("./pages/masters/FinancialYearMaster"));
 const ChequeMaster = lazy(() => import("./pages/masters/ChequeMaster"));
+
 const GRN = lazy(() => import("./pages/material/GRN"));
-const MaterialExpenseBookingMaster = lazy(
-  () => import("./pages/material/MaterialExpenseBooking"),
+const MaterialExpenseBookingMaster = lazy(() =>
+  import("./pages/material/MaterialExpenseBooking")
 );
 const WorkOrderMaster = lazy(() => import("./pages/material/WorkOrderMaster"));
-const PurchaseOrderMaster = lazy(
-  () => import("./pages/material/PurchaseOrderMaster"),
-);
+const PurchaseOrderMaster = lazy(() => import("./pages/material/PurchaseOrderMaster"));
 const CardMaster = lazy(() => import("./pages/masters/CardMaster"));
 const TdsMaster = lazy(() => import("./pages/masters/TdsMaster"));
-const AccountGroupMaster = lazy(
-  () => import("./pages/masters/AccountGroupMaster"),
-);
-const NamedEntryTypeMaster = lazy(
-  () => import("./pages/masters/NamedEntryTypeMaster"),
-);
+const AccountGroupMaster = lazy(() => import("./pages/masters/AccountGroupMaster"));
+const NamedEntryTypeMaster = lazy(() => import("./pages/masters/NamedEntryTypeMaster"));
 const TypeOfDocMaster = lazy(() => import("./pages/masters/TypeOfDocMaster"));
 const ActivityMaster = lazy(() => import("./pages/masters/ActivityMaster"));
 const DebitNoteMaster = lazy(() => import("./pages/masters/DebitNoteMaster"));
-const BillingTermsMaster = lazy(
-  () => import("./pages/masters/BillingTermsMaster"),
-);
+const BillingTermsMaster = lazy(() => import("./pages/masters/BillingTermsMaster"));
 const TCMaster = lazy(() => import("./pages/material/T&CMaster"));
-const UnitOfMeasurementMaster = lazy(
-  () => import("./pages/material/UnitOfMeasurementMaster"),
-);
+const UnitOfMeasurementMaster = lazy(() => import("./pages/material/UnitOfMeasurementMaster"));
 
 // Admin Pages
 const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
@@ -140,46 +129,33 @@ const MenuRights = lazy(() => import("./pages/admin/MenuRights"));
 const WidgetRights = lazy(() => import("./pages/admin/WidgetsRights"));
 const FinYearRights = lazy(() => import("./pages/admin/FinYearRights"));
 const ApprovalSetup = lazy(() => import("./pages/admin/ApprovalSetup"));
-const PostApprovalRights = lazy(
-  () => import("./pages/admin/PostApprovalRights"),
-);
+const PostApprovalRights = lazy(() => import("./pages/admin/PostApprovalRights"));
 const ApiIntegrationPage = lazy(() => import("./pages/admin/ApiIntegration"));
 const SignaturePage = lazy(() => import("./pages/admin/Signature"));
 const SuperAdminProfile = lazy(() => import("./pages/admin/SuperAdminProfile"));
 const MetricsDashboard = lazy(() => import("./pages/admin/MetricsDashboard"));
-const PasswordResetPage = lazy(
-  () => import("./pages/admin/security/PasswordReset"),
-);
-const ActivityBrowserPage = lazy(
-  () => import("./pages/admin/Activitybrowser/ActivityBrowser"),
-);
+const PasswordResetPage = lazy(() => import("./pages/admin/security/PasswordReset"));
+const ActivityBrowserPage = lazy(() => import("./pages/admin/Activitybrowser/ActivityBrowser"));
 
 // Admin Masters
-const BusinessUnitMaster = lazy(
-  () => import("./pages/admin/masters/BusinessUnitMaster"),
-);
+const BusinessUnitMaster = lazy(() => import("./pages/admin/masters/BusinessUnitMaster"));
 const ProjectMaster = lazy(() => import("./pages/admin/masters/ProjectMaster"));
 const CompanyMaster = lazy(() => import("./pages/admin/masters/CompanyMaster"));
 
 // Communicator Setup
 const SmsSetup = lazy(() => import("./pages/admin/Communicator/SmsSetup"));
 const EmailSetup = lazy(() => import("./pages/admin/Communicator/EmailSetup"));
-const WhatsAppSetup = lazy(
-  () => import("./pages/admin/Communicator/WhatsAppSetup"),
-);
-const GeneralLedgerMaster = lazy(
-  () => import("./pages/masters/GeneralLedgerMaster"),
-);
+const WhatsAppSetup = lazy(() => import("./pages/admin/Communicator/WhatsAppSetup"));
+const GeneralLedgerMaster = lazy(() => import("./pages/masters/GeneralLedgerMaster"));
 
 // New hierarchy pages
-const SuperAdminDashboard = lazy(
-  () => import("./pages/superadmin/SuperAdminDashboard"),
-);
+const SuperAdminDashboard = lazy(() => import("./pages/superadmin/SuperAdminDashboard"));
 const AdminControlPanel = lazy(() => import("./pages/admin/AdminControlPanel"));
 const UserProfilePage = lazy(() => import("./pages/user/UserProfile"));
 const DBADashboard = lazy(() => import("./pages/dba/DBADashboard"));
 const ControlPanel = lazy(() => import("./pages/dba/ControlPanel"));
 const AdsManager = lazy(() => import("./pages/dba/AdsManager"));
+const FollowupDashboard = lazy(() => import("./pages/followup"));
 const RemindersManager = lazy(() => import("./pages/dba/RemindersManager"));
 const PaymentLogs = lazy(() => import("./pages/dba/PaymentLogs"));
 
@@ -255,9 +231,6 @@ function ProtectedRoute() {
 }
 
 // ─── Auth Session Bridge ──────────────────────────────────────────────────────
-// Sits inside ActivityBrowserProvider so it can read recordLogin/recordLogout
-// and pass them down as props to AuthProvider — breaking the circular dependency
-// that previously caused AuthContext to import useActivityBrowser directly.
 function AuthSessionBridge({ children }: { children: React.ReactNode }) {
   const { recordLogin, recordLogout } = useActivityBrowser();
   return (
@@ -270,14 +243,16 @@ function AuthSessionBridge({ children }: { children: React.ReactNode }) {
 // ─── App Routes ───────────────────────────────────────────────────────────────
 function AppRoutes() {
   const { currentUser } = useAuth();
+
   return (
     <Routes>
-      {/* AUTH */}
+      {/* LOGIN */}
       <Route
         path="/login"
         element={currentUser ? <Navigate to="/" replace /> : <Login />}
       />
 
+      {/* PROTECTED */}
       <Route element={<ProtectedRoute />}>
         <Route index element={<Dashboard />} />
         <Route path="/transactions" element={<Transactions />} />
@@ -289,7 +264,9 @@ function AppRoutes() {
         <Route path="/received-payments" element={<ReceivedPayment />} />
         <Route path="/brs" element={<Brs />} />
         <Route path="/records" element={<Records />} />
+        <Route path="/followup" element={<FollowupDashboard />} />
 
+        {/* MASTERS */}
         <Route path="/masters/contractors" element={<ContractorMaster />} />
         <Route path="/masters/suppliers" element={<SupplierMaster />} />
         <Route path="/masters/customers" element={<CustomerMaster />} />
@@ -300,10 +277,6 @@ function AppRoutes() {
         <Route path="/masters/hsn" element={<HsnMaster />} />
         <Route path="/masters/financial-year" element={<FinancialYearMaster />} />
         <Route path="/masters/cheque" element={<ChequeMaster />} />
-        <Route path="/material/expense-booking" element={<MaterialExpenseBookingMaster />} />
-        <Route path="/material/work-order" element={<WorkOrderMaster />} />
-        <Route path="/material/amendments" element={<Dashboard />} />
-        <Route path="/material/purchase-order" element={<PurchaseOrderMaster />} />
         <Route path="/masters/card" element={<CardMaster />} />
         <Route path="/masters/tds" element={<TdsMaster />} />
         <Route path="/masters/account-group" element={<AccountGroupMaster />} />
@@ -313,43 +286,25 @@ function AppRoutes() {
         <Route path="/masters/general-ledger" element={<GeneralLedgerMaster />} />
         <Route path="/masters/debit-note" element={<DebitNoteMaster />} />
         <Route path="/masters/billing-terms" element={<BillingTermsMaster />} />
-        <Route path="/material/t-c-master" element={<TCMaster />} />
-        <Route path="/material/grn" element={<GRN />} />
         <Route path="/masters/unit-measurement" element={<UnitOfMeasurementMaster />} />
+
+        {/* MATERIAL */}
+        <Route path="/material/grn" element={<GRN />} />
+        <Route path="/material/expense-booking" element={<MaterialExpenseBookingMaster />} />
+        <Route path="/material/work-order" element={<WorkOrderMaster />} />
+        <Route path="/material/purchase-order" element={<PurchaseOrderMaster />} />
+        <Route path="/material/t-c-master" element={<TCMaster />} />
       </Route>
 
+      {/* ADMIN */}
       <Route element={<AdminRoute />}>
         <Route path="/admin/dashboard" element={<AdminDashboard />} />
         <Route path="/users" element={<Users />} />
-        <Route path="/admin/rights/menu" element={<MenuRights />} />
-        <Route path="/admin/rights/widgets" element={<WidgetRights />} />
-        <Route path="/admin/rights/fin-year" element={<FinYearRights />} />
-        <Route path="/admin/approval/setup" element={<ApprovalSetup />} />
-        <Route path="/admin/approval/post-rights" element={<PostApprovalRights />} />
-        <Route path="/admin/api-integration" element={<ApiIntegrationPage />} />
-        <Route path="/admin/signature" element={<SignaturePage />} />
-        <Route path="/admin/profile" element={<SuperAdminProfile />} />
-        <Route path="/admin/masters/business-unit" element={<BusinessUnitMaster />} />
-        <Route path="/admin/masters/project" element={<ProjectMaster />} />
-        <Route path="/admin/masters/company" element={<CompanyMaster />} />
-        <Route path="/admin/security/password-reset" element={<PasswordResetPage />} />
         <Route path="/admin/activity-browser" element={<ActivityBrowserPage />} />
-        <Route path="/admin/communicator/sms-setup" element={<SmsSetup />} />
-        <Route path="/admin/communicator/email-setup" element={<EmailSetup />} />
-        <Route path="/admin/communicator/whatsapp-setup" element={<WhatsAppSetup />} />
-        <Route path="/admin/metrics" element={<MetricsDashboard />} />
-        <Route path="/superadmin" element={<SuperAdminDashboard />} />
-        <Route path="/admin/control-panel" element={<AdminControlPanel />} />
       </Route>
-      <Route path="/admin" element={<Navigate to="/" replace />} />
 
-      {/* USER PROFILE & DBA already nested above */ }
-
-
-      {/* Maintenance */}
+      {/* OTHER */}
       <Route path="/maintenance" element={<Maintenance />} />
-
-      {/* 404 */}
       <Route path="*" element={<NotFound />} />
     </Routes>
   );
@@ -364,13 +319,157 @@ function App() {
     return () => clearTimeout(timer);
   }, []);
 
+  return (
+    <QueryClientProvider client={queryClient}>
+      <Toaster richColors position="top-right" />
+
+      <ActivityBrowserProvider>
+        <AuthSessionBridge>
+          <Router
+            future={{
+              v7_startTransition: true,
+              v7_relativeSplatPath: true,
+            }}
+          >
+            <ModuleProvider>
+              <ThemeProvider>
+                <FinYearProvider>
+                  <HsnProvider>
+                    <RecordsProvider>
+                      <TdsProvider>
+                        <DebitNoteProvider>
+                          <BillingTermsProvider>
+                            <TaskProvider>
+                              <Suspense fallback={<Loader />}>
+                                <AppRoutes />
+                              </Suspense>
+                            </TaskProvider>
+                          </BillingTermsProvider>
+                        </DebitNoteProvider>
+                      </TdsProvider>
+                    </RecordsProvider>
+                  </HsnProvider>
+                </FinYearProvider>
+              </ThemeProvider>
+            </ModuleProvider>
+          </Router>
+        </AuthSessionBridge>
+      </ActivityBrowserProvider>
+    </QueryClientProvider>
+  );
+}
+=======
   if (initialLoading) return <Loader />;
 
   return (
     <QueryClientProvider client={queryClient}>
       <Toaster richColors position="top-right" />
+
       <ActivityBrowserProvider>
         <AuthSessionBridge>
+          <Router
+            future={{
+              v7_startTransition: true,
+              v7_relativeSplatPath: true,
+            }}
+          >
+            <ModuleProvider>
+              <ThemeProvider>
+                <FinYearProvider>
+                  <HsnProvider>
+                    <RecordsProvider>
+                      <TdsProvider>
+                        <DebitNoteProvider>
+                          <BillingTermsProvider>
+                            <TaskProvider>
+                              <Suspense fallback={<Loader />}>
+                                <AppRoutes />
+                              </Suspense>
+                            </TaskProvider>
+                          </BillingTermsProvider>
+                        </DebitNoteProvider>
+                      </TdsProvider>
+                    </RecordsProvider>
+                  </HsnProvider>
+                </FinYearProvider>
+              </ThemeProvider>
+            </ModuleProvider>
+          </Router>
+        </AuthSessionBridge>
+      </ActivityBrowserProvider>
+    </QueryClientProvider>
+  );
+}
+=======
+  return (
+    <QueryClientProvider client={queryClient}>
+      <Toaster richColors position="top-right" />
+
+      <ActivityBrowserProvider>
+        <AuthSessionBridge>
+          <Router
+            future={{
+              v7_startTransition: true,
+              v7_relativeSplatPath: true,
+            }}
+          >
+            <ModuleProvider>
+              <ThemeProvider>
+                <FinYearProvider>
+                  <HsnProvider>
+                    <RecordsProvider>
+                      <TdsProvider>
+                        <DebitNoteProvider>
+                          <BillingTermsProvider>
+                            <TaskProvider>
+                              <Suspense fallback={<Loader />}>
+                                <AppRoutes />
+                              </Suspense>
+                            </TaskProvider>
+                          </BillingTermsProvider>
+                        </DebitNoteProvider>
+                      </TdsProvider>
+                    </RecordsProvider>
+                  </HsnProvider>
+                </FinYearProvider>
+              </ThemeProvider>
+            </ModuleProvider>
+          </Router>
+        </AuthSessionBridge>
+      </ActivityBrowserProvider>
+    </QueryClientProvider>
+  );
+}
+
+=======
+      <ActivityBrowserProvider>
+        <AuthSessionBridge>
+          <Router
+            future={{
+              v7_startTransition: true,
+              v7_relativeSplatPath: true,
+            }}
+          >
+            <ModuleProvider>
+              <ThemeProvider>
+                <FinYearProvider>
+                  <HsnProvider>
+                    <RecordsProvider>
+                      <TdsProvider>
+                        <DebitNoteProvider>
+                          <BillingTermsProvider>
+                            <TaskProvider>
+                              <AppRoutes />
+                            </TaskProvider>
+                          </BillingTermsProvider>
+                        </DebitNoteProvider>
+                      </TdsProvider>
+                    </RecordsProvider>
+                  </HsnProvider>
+                </FinYearProvider>
+              </ThemeProvider>
+            </ModuleProvider>
+          </Router>
           <ModuleProvider>
             <ThemeProvider>
               <FinYearProvider>
