@@ -1,7 +1,7 @@
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const BASE = "/api/card-master";
-const BANKS_URL = "/api/bank-master";
+const BANKS_URL = "/api/account-head/bank-options";
 const COMPANY_URL = "/api/account-head/options?type=C";
 
 // ─── Response handler ─────────────────────────────────────────────────────────
@@ -36,12 +36,11 @@ export interface DbCard {
   status: boolean;
 }
 
-export interface DbBank {
-  BId: number;
-  BName: string | null;
-  BBranch: string | null;
-  BAccountNumber: string | null;
-  BIfscCode: string | null;
+export interface BankOption {
+  id: number;
+  label: string;
+  accountNumber: string | null;
+  ifscCode: string | null;
 }
 
 export interface CompanyOption {
@@ -70,8 +69,8 @@ export interface CardPayload {
 export const getCards = (): Promise<DbCard[]> =>
   fetchWithAuth(BASE).then((r) => handleResponse<DbCard[]>(r));
 
-export const getBanksForCard = (): Promise<DbBank[]> =>
-  fetchWithAuth(BANKS_URL).then((r) => handleResponse<DbBank[]>(r));
+export const getBanksForCard = (): Promise<BankOption[]> =>
+  fetchWithAuth(BANKS_URL).then((r) => handleResponse<BankOption[]>(r));
 
 export const getCompanyOptions = (): Promise<CompanyOption[]> =>
   fetchWithAuth(COMPANY_URL).then((r) => handleResponse<CompanyOption[]>(r));
