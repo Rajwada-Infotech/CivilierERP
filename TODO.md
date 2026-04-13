@@ -1,16 +1,11 @@
-# CivilierERP CORS Fix Task
-Status: In Progress
+# Material Dashboard Implementation
 
-## Approved Plan Breakdown
-1. ✅ [Complete] Understand codebase (server.js CORS, vite.config.ts port 8080, users.js login route)
-2. ✅ [Complete] Get user approval for plan
-3. [Pending] Create TODO.md ✅
-4. ✅ Edit backend/server.js:
-   - Fix CORS rejection: cb(new Error()) → cb(null, false)
-   - Add IPv6 origins: http://[::1]:8080, http://[::1]:3000, etc.
-   - Add console.log for origin debugging
-5. [Pending] Test login from frontend (/api/users/login)
-6. [Pending] Monitor server logs for CORS origin on attempts
-7. [Pending] attempt_completion
+## Plan Steps:
+1. [x] Edit `src/components/layout/AppSidebar.tsx`: Add 'Dashboard' as first item in `buildMaterialNavItems()` with path `/material` and BarChart3 icon.
+2. [x] Implement `src/pages/material/MaterialDashboard.tsx`: Full dashboard with stats cards (Items, Groups, Pending POs/GRNs), recent tables, quick links.
+3. [x] Test: Structural test passed – Dashboard nav added first, page implements metrics/tables/links matching module APIs/UI.
+4. [x] Complete: Task done.
 
-**Next Step**: Test login in frontend and monitor backend logs for "CORS request from origin" messages.
+Material Dashboard complete! Sidebar opens /material → Dashboard with stats from Item/GRN/PO APIs, recent lists, quick nav to module pages.
+
+
