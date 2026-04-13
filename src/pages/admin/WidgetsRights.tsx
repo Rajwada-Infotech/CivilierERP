@@ -174,18 +174,25 @@ export default function WidgetsRights() {
     return groups;
   }, []);
 
+  // FIX: updatePermission operates strictly on (pageKey, action).
+  // Toggling an action for one page never touches any other page's actions.
   const updatePermission = useCallback(
     (pageKey: string, action: PageAction, checked: boolean) => {
       setPendingPermissions((prev) => {
         const idx = prev.findIndex((p) => p.page === pageKey);
-        const current = idx >= 0 ? prev[idx].actions : [];
+        const currentActions = idx >= 0 ? [...prev[idx].actions] : [];
+
         const newActions = checked
-          ? [...current, action]
-          : current.filter((a) => a !== action);
+          ? currentActions.includes(action)
+            ? currentActions
+            : [...currentActions, action]
+          : currentActions.filter((a) => a !== action);
+
         const newPerm: PagePermission = {
           page: pageKey,
           actions: newActions as PageAction[],
         };
+
         if (idx >= 0) {
           const copy = [...prev];
           copy[idx] = newPerm;
@@ -197,16 +204,18 @@ export default function WidgetsRights() {
     [],
   );
 
-  const handleSavePermissions = useCallback(() => {
+  const handleSavePermissions = useCallback(async () => {
     if (!selectedUser) {
       toast.error("Please select a user");
       return;
     }
-    updateUserPagePermissions(selectedUser.id, pendingPermissions);
-    toast.success(`Permissions updated for ${selectedUser.name}`);
-    setShowEditDialog(false);
-    setSelectedUser(null);
-    setPendingPermissions([]);
+    try {
+      await updateUserPagePermissions(selectedUser.id, pendingPermissions);
+      toast.success(`Permissions updated for ${selectedUser.name}`);
+      closeDialog();
+    } catch {
+      toast.error("Failed to save permissions. Please try again.");
+    }
   }, [selectedUser, pendingPermissions, updateUserPagePermissions]);
 
   const handleToggleStatus = useCallback(
@@ -227,14 +236,18 @@ export default function WidgetsRights() {
     }
   }, [deletingUserId, deleteUser]);
 
-  // FIX: openEditDialog sets the user so Save is immediately enabled
+  // FIX: openEditDialog deep-clones permissions into local state — no shared reference
   const openEditDialog = useCallback((user: AppUser) => {
     setSelectedUser(user);
-    setPendingPermissions([...(user.pagePermissions || [])]);
+    setPendingPermissions(
+      (user.pagePermissions || []).map((p) => ({
+        page: p.page,
+        actions: [...p.actions],
+      })),
+    );
     setShowEditDialog(true);
   }, []);
 
-  // FIX: new-assignment button opens dialog without pre-selecting — user picks from selector
   const openNewDialog = useCallback(() => {
     setSelectedUser(null);
     setPendingPermissions([]);
@@ -249,7 +262,6 @@ export default function WidgetsRights() {
 
   return (
     <>
-      {/* FIX: Breadcrumbs were missing from WidgetsRights */}
       <Breadcrumbs items={["Admin", "Rights", "Widgets Rights"]} />
 
       <div className="flex justify-between items-center mb-6">
@@ -259,7 +271,6 @@ export default function WidgetsRights() {
             Manage widget access permissions for users
           </p>
         </div>
-        {/* FIX: no longer uses DialogTrigger wrapping — opens with openNewDialog so state is clean */}
         <Button onClick={openNewDialog}>
           <Plus className="mr-2 h-4 w-4" />
           Manage Permissions
@@ -381,8 +392,8 @@ export default function WidgetsRights() {
         </CardContent>
       </Card>
 
-      {/* Edit / Assign Dialog */}
-      <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
+      {/* Edit / Assign Dialog — fully state-controlled, no DialogTrigger */}
+      <Dialog open={showEditDialog} onOpenChange={(open) => !open && closeDialog()}>
         <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
@@ -396,7 +407,6 @@ export default function WidgetsRights() {
           </DialogHeader>
 
           <div className="space-y-6 py-4">
-            {/* FIX: user selector present so "Manage Permissions" CTA is functional */}
             <div className="space-y-2">
               <Label>User</Label>
               <Select
@@ -405,7 +415,12 @@ export default function WidgetsRights() {
                   const user = allUsers.find((u) => u.id === id);
                   if (user) {
                     setSelectedUser(user);
-                    setPendingPermissions([...(user.pagePermissions || [])]);
+                    setPendingPermissions(
+                      (user.pagePermissions || []).map((p) => ({
+                        page: p.page,
+                        actions: [...p.actions],
+                      })),
+                    );
                   }
                 }}
               >
@@ -447,6 +462,7 @@ export default function WidgetsRights() {
                           <div className="flex gap-2 flex-wrap">
                             {actions.map((action) => {
                               const config = getActionConfig(action);
+                              // FIX: checked is computed per (key, action) — strictly isolated
                               const checked = currentActions.includes(action);
                               return (
                                 <div
@@ -454,6 +470,7 @@ export default function WidgetsRights() {
                                   className="flex items-center gap-2 px-3 py-2 border rounded-md hover:border-primary/50 transition-all"
                                 >
                                   <Checkbox
+                                    // FIX: id scoped to widget page + action — unique, no cross-linking
                                     id={`wr-${key}-${action}`}
                                     checked={checked}
                                     onCheckedChange={(val) =>
@@ -488,7 +505,6 @@ export default function WidgetsRights() {
             <Button variant="outline" onClick={closeDialog}>
               Cancel
             </Button>
-            {/* FIX: disabled clearly when no user selected */}
             <Button onClick={handleSavePermissions} disabled={!selectedUser}>
               Save Permissions
             </Button>
@@ -496,7 +512,7 @@ export default function WidgetsRights() {
         </DialogContent>
       </Dialog>
 
-      {/* Single AlertDialog outside the table loop */}
+      {/* FIX: AlertDialog is outside the table loop — only one instance, no stacking */}
       <AlertDialog
         open={!!deletingUserId}
         onOpenChange={(open) => !open && setDeletingUserId(null)}
