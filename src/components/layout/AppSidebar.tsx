@@ -90,10 +90,11 @@ const buildFinanceNavItems = (overdueCount: number): NavItem[] => [
 // ── Material module sidebar ──────────────────────────────────────────────────
 const buildMaterialNavItems = (): NavItem[] => [
   { label: "Amendments", icon: BarChart3, path: "/material/amendments" },
-  {
+{
     label: "Transaction",
     icon: Receipt,
     children: [
+      { label: "GRN", path: "/material/grn" },
       { label: "Expense Booking", path: "/material/expense-booking" },
       { label: "Work Order", path: "/material/work-order" },
       { label: "Purchase Order", path: "/material/purchase-order" },
