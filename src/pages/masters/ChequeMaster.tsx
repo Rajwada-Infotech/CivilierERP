@@ -24,7 +24,7 @@ import {
   updateCheque,
   deleteCheque,
   type DbCheque,
-  type DbBank,
+  type BankOption,
   type CompanyOption,
 } from "@/api/chequeMasterApi";
 
@@ -73,7 +73,7 @@ const ChequeMaster: React.FC = () => {
     queryKey: ["cheques"],
     queryFn: getCheques,
   });
-  const { data: bankData, isLoading: loadingBanks } = useQuery<DbBank[]>({
+  const { data: bankData, isLoading: loadingBanks } = useQuery<BankOption[]>({
     queryKey: ["banks"],
     queryFn: getBanksForCheque,
   });
@@ -83,7 +83,7 @@ const ChequeMaster: React.FC = () => {
   });
 
   const dbCheques: DbCheque[] = Array.isArray(chequeData) ? chequeData : [];
-  const dbBanks: DbBank[] = Array.isArray(bankData) ? bankData : [];
+  const dbBanks: BankOption[] = Array.isArray(bankData) ? bankData : [];
 
   const [form, setForm] = useState<FormState>(EMPTY);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -97,13 +97,13 @@ const ChequeMaster: React.FC = () => {
   }, [form.chqStart, form.chqEnd]);
 
   const handleBankChange = (bankId: string) => {
-    const bank = dbBanks.find((b) => String(b.BId) === bankId);
+    const bank = dbBanks.find((b) => String(b.id) === bankId);
     setForm((p) => ({
       ...p,
       bankId,
-      bankName: bank?.BName || "",
-      accountNumber: bank?.BAccountNumber || "",
-      ifscCode: bank?.BIfscCode || "",
+      bankName: bank?.label || "",
+      accountNumber: bank?.accountNumber || "",
+      ifscCode: bank?.ifscCode || "",
     }));
     if (errors.bankId) setErrors((e) => ({ ...e, bankId: false }));
   };
@@ -163,11 +163,11 @@ const ChequeMaster: React.FC = () => {
   };
 
   const handleEdit = (item: DbCheque) => {
-    const bank = dbBanks.find((b) => b.BId === item.BankId);
+    const bank = dbBanks.find((b) => b.id === item.BankId);
     setForm({
       companyId: item.CompanyId ? String(item.CompanyId) : "",
       bankId: item.BankId ? String(item.BankId) : "",
-      bankName: bank?.BName || "",
+      bankName: bank?.label || "",
       accountNumber: item.AccountNumber || "",
       ifscCode: item.IFSCCode || "",
       lotNumber: item.ChequeLotNumber || "",
@@ -205,9 +205,9 @@ const ChequeMaster: React.FC = () => {
   const filtered = dbCheques.filter((r) => {
     if (!search) return true;
     const q = search.toLowerCase();
-    const bank = dbBanks.find((b) => b.BId === r.BankId);
+    const bank = dbBanks.find((b) => b.id === r.BankId);
     return (
-      (bank?.BName || "").toLowerCase().includes(q) ||
+      (bank?.label || "").toLowerCase().includes(q) ||
       (r.AccountNumber || "").toLowerCase().includes(q) ||
       (r.ChequeLotNumber || "").toLowerCase().includes(q) ||
       String(r.ChequeStartNumber).includes(q) ||
@@ -295,8 +295,8 @@ const ChequeMaster: React.FC = () => {
                   >
                     <option value="">Select Bank...</option>
                     {dbBanks.map((b) => (
-                      <option key={b.BId} value={String(b.BId)}>
-                        {b.BName}
+                      <option key={b.id} value={String(b.id)}>
+                        {b.label}
                         {b.BBranch ? ` — ${b.BBranch}` : ""}
                       </option>
                     ))}
@@ -627,7 +627,7 @@ const ChequeMaster: React.FC = () => {
                   </tr>
                 ) : (
                   filtered.map((row) => {
-                    const bank = dbBanks.find((b) => b.BId === row.BankId);
+                    const bank = dbBanks.find((b) => b.id === row.BankId);
                     const id = String(row.CId);
                     return (
                       <tr
@@ -635,7 +635,7 @@ const ChequeMaster: React.FC = () => {
                         className={`hover:bg-muted/20 transition-colors ${editingId === id ? "bg-primary/5 border-l-2 border-l-primary" : ""}`}
                       >
                         <td className="px-4 py-3 text-foreground font-body">
-                          {bank?.BName || "—"}
+                          {bank?.label || "—"}
                         </td>
                         <td className="px-4 py-3 font-mono text-foreground text-xs">
                           {row.AccountNumber ? (
