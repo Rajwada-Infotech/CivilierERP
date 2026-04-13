@@ -1,15 +1,7 @@
 import React, { useState, useMemo, useCallback } from "react";
 import { useFinYear, type FinYear } from "@/contexts/FinYearContext";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import {
-  Calendar,
-  Plus,
-  Search,
-  Trash2,
-  Edit3,
-  Lock,
-  CalendarDays,
-} from "lucide-react";
+import { Calendar, Plus, Search, Trash2, Edit3, Lock } from "lucide-react";
 import {
   Card,
   CardContent,
@@ -45,9 +37,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { Switch } from "@/components/ui/switch";
-// FIX: Standardised to sonner (was using deprecated shadcn useToast)
+// FIX: use Sonner's toast.success / toast.error (was calling toast({}) which is shadcn useToast API)
 import { toast } from "sonner";
 import {
   AlertDialog,
@@ -59,8 +50,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { format } from "date-fns";
-import { cn } from "@/lib/utils";
 
 export default function FinYearRights() {
   const { finYears, addFinYear, updateFinYear, toggleLock, deleteFinYear } =
@@ -73,6 +62,8 @@ export default function FinYearRights() {
     year: "",
     startDate: "",
     endDate: "",
+    // FIX: expose status in form so user can choose Active vs Closed
+    status: "Active" as "Active" | "Closed",
     locked: false,
   });
   const [deletingId, setDeletingId] = useState<string | null>(null);
@@ -88,9 +79,21 @@ export default function FinYearRights() {
     [finYears, searchTerm],
   );
 
+  // FIX: accurate count — only count truly Active years
+  const activeCount = useMemo(
+    () => finYears.filter((fy) => fy.status === "Active").length,
+    [finYears],
+  );
+
   const openAddDialog = useCallback(() => {
     setEditingFinYear(null);
-    setFormData({ year: "", startDate: "", endDate: "", locked: false });
+    setFormData({
+      year: "",
+      startDate: "",
+      endDate: "",
+      status: "Active",
+      locked: false,
+    });
     setShowDialog(true);
   }, []);
 
@@ -100,65 +103,69 @@ export default function FinYearRights() {
       year: fy.year,
       startDate: fy.startDate,
       endDate: fy.endDate,
+      status: fy.status,
       locked: fy.locked,
     });
     setShowDialog(true);
   }, []);
 
-  const handleSave = useCallback(() => {
+  const handleSave = useCallback(async () => {
     if (!formData.year || !formData.startDate || !formData.endDate) {
-      toast({
-        title: "Error",
-        description: "Please fill all fields",
-        variant: "destructive",
-      });
+      // FIX: use toast.error() — not toast({variant:"destructive"})
+      toast.error("Please fill all fields");
       return;
     }
     if (editingFinYear) {
-      updateFinYear(editingFinYear.id, formData);
-      toast({ title: "Updated", description: `Updated ${formData.year}` });
+      await updateFinYear(editingFinYear.id, formData);
+      // FIX: use toast.success()
+      toast.success(`Financial year "${formData.year}" updated`);
     } else {
-      addFinYear({
+      await addFinYear({
         year: formData.year,
         startDate: formData.startDate,
         endDate: formData.endDate,
-        status: "Active" as const,
+        status: formData.status,
         locked: formData.locked,
       });
-      toast({ title: "Added", description: `Added ${formData.year}` });
+      toast.success(`Financial year "${formData.year}" added`);
     }
     setShowDialog(false);
-  }, [formData, editingFinYear, addFinYear, updateFinYear, toast]);
+  }, [formData, editingFinYear, addFinYear, updateFinYear]);
 
+  // FIX: pass currentLocked as 2nd arg — context needs it to flip the value correctly
   const handleToggleLock = useCallback(
-    (id: string) => {
-      toggleLock(id);
-      toast({ title: "Toggled", description: "Lock status updated" });
+    async (id: string, currentLocked: boolean) => {
+      await toggleLock(id, currentLocked);
+      toast.success(
+        currentLocked ? "Financial year unlocked" : "Financial year locked",
+      );
     },
-    [toggleLock, toast],
+    [toggleLock],
   );
 
-  const handleDelete = useCallback(() => {
+  const handleDelete = useCallback(async () => {
     if (deletingId) {
-      deleteFinYear(deletingId);
-      toast({
-        title: "Deleted",
-        description: "Financial year removed",
-        variant: "destructive",
-      });
+      await deleteFinYear(deletingId);
+      toast.error("Financial year deleted");
       setDeletingId(null);
     }
-  }, [deletingId, deleteFinYear, toast]);
+  }, [deletingId, deleteFinYear]);
 
   const resetForm = useCallback(() => {
-    setFormData({ year: "", startDate: "", endDate: "", locked: false });
+    setFormData({
+      year: "",
+      startDate: "",
+      endDate: "",
+      status: "Active",
+      locked: false,
+    });
     setEditingFinYear(null);
     setShowDialog(false);
   }, []);
 
   return (
     <>
-          <Breadcrumbs items={["Admin", "Rights", "Fin Year Rights"]} />
+      <Breadcrumbs items={["Admin", "Rights", "Fin Year Rights"]} />
       <div className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-2xl font-bold text-foreground flex items-center gap-3">
@@ -171,7 +178,7 @@ export default function FinYearRights() {
         </div>
         <Dialog open={showDialog} onOpenChange={setShowDialog}>
           <DialogTrigger asChild>
-            <Button onClick={resetForm}>
+            <Button onClick={openAddDialog}>
               <Plus className="w-4 h-4 mr-2" />
               New Financial Year
             </Button>
@@ -221,6 +228,29 @@ export default function FinYearRights() {
                   />
                 </div>
               </div>
+
+              {/* FIX: status selector so user can explicitly set Active or Closed */}
+              <div className="space-y-2">
+                <Label htmlFor="status">Status</Label>
+                <Select
+                  value={formData.status}
+                  onValueChange={(val) =>
+                    setFormData({
+                      ...formData,
+                      status: val as "Active" | "Closed",
+                    })
+                  }
+                >
+                  <SelectTrigger id="status">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="Active">Active</SelectItem>
+                    <SelectItem value="Closed">Closed</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
               <div className="flex items-center space-x-2">
                 <Switch
                   id="locked"
@@ -248,8 +278,9 @@ export default function FinYearRights() {
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
             <CardTitle>Financial Years</CardTitle>
+            {/* FIX: show accurate active count, not total filtered count */}
             <CardDescription>
-              {filteredFinYears.length} active financial years
+              {activeCount} active · {finYears.length} total financial years
             </CardDescription>
           </div>
           <div className="relative">
@@ -285,14 +316,33 @@ export default function FinYearRights() {
                   <TableRow key={fy.id}>
                     <TableCell className="font-medium">{fy.year}</TableCell>
                     <TableCell>
-                      {fy.startDate} - {fy.endDate}
+                      {fy.startDate} – {fy.endDate}
                     </TableCell>
                     <TableCell>
-                      <Badge variant="default">{fy.status}</Badge>
+                      {/* FIX: use variant based on actual status value */}
+                      <Badge
+                        variant={
+                          fy.status === "Active" ? "default" : "secondary"
+                        }
+                        className={
+                          fy.status === "Active"
+                            ? "bg-green-500/10 border-green-500/20 text-green-700 border"
+                            : "bg-red-500/10 border-red-500/20 text-red-700 border"
+                        }
+                      >
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full mr-1.5 inline-block ${
+                            fy.status === "Active"
+                              ? "bg-green-500"
+                              : "bg-red-500"
+                          }`}
+                        />
+                        {fy.status}
+                      </Badge>
                     </TableCell>
                     <TableCell>
                       <Badge variant={fy.locked ? "destructive" : "secondary"}>
-                        {fy.locked ? "Yes" : "No"}
+                        {fy.locked ? "Locked" : "Unlocked"}
                       </Badge>
                     </TableCell>
                     <TableCell className="space-x-1">
@@ -305,11 +355,12 @@ export default function FinYearRights() {
                         <Edit3 className="w-4 h-4 mr-1" />
                         Edit
                       </Button>
+                      {/* FIX: pass fy.locked as second argument */}
                       <Button
                         variant="ghost"
                         size="sm"
                         className="h-8"
-                        onClick={() => handleToggleLock(fy.id)}
+                        onClick={() => handleToggleLock(fy.id, fy.locked)}
                       >
                         <Lock className="w-4 h-4 mr-1" />
                         {fy.locked ? "Unlock" : "Lock"}
