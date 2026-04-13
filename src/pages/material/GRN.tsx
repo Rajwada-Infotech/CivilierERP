@@ -291,7 +291,7 @@ export default function GRN() {
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "Material", "GRN"]} />
+      <Breadcrumbs items={["Dashboard", "Materials", "GRN Master"]} />
 
       <div className="space-y-6">
         {/* Form Card */}
