@@ -1,9 +1,9 @@
 import React, { createContext, useContext, useState, useMemo } from "react";
-import { Outlet } from "react-router-dom";
 import { TopNavbar } from "./TopNavbar";
 import { AppSidebar } from "./AppSidebar";
 import { MobileNav } from "./MobileNav";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useModule } from "@/contexts/ModuleContext";
 
 // Sidebar Context
 interface SidebarContextType {
@@ -31,17 +31,18 @@ const NavbarCollapseContext = createContext<NavbarCollapseContextType>({
 
 export const useNavbarCollapse = () => useContext(NavbarCollapseContext);
 
-export const AppLayout = () => {
+export const AppLayout = ({ children }: { children: React.ReactNode }) => {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [navCollapsed, setNavCollapsed] = useState(false);
   const isMobile = useIsMobile();
+  const { moduleSwitching } = useModule();
 
   const sidebarValue = useMemo(
     () => ({
       collapsed: sidebarCollapsed,
       setCollapsed: setSidebarCollapsed,
     }),
-    [sidebarCollapsed]
+    [sidebarCollapsed],
   );
 
   const navbarValue = useMemo(
@@ -49,7 +50,7 @@ export const AppLayout = () => {
       navCollapsed,
       setNavCollapsed,
     }),
-    [navCollapsed]
+    [navCollapsed],
   );
 
   return (
@@ -66,8 +67,11 @@ export const AppLayout = () => {
               isMobile ? "ml-0 pb-16" : sidebarCollapsed ? "ml-16" : "ml-56"
             }`}
           >
-            <div className="p-4 md:p-6">
-              <Outlet />
+            <div
+              className="p-4 md:p-6 transition-opacity duration-300"
+              style={{ opacity: moduleSwitching ? 0 : 1 }}
+            >
+              {children}
             </div>
           </main>
         </div>

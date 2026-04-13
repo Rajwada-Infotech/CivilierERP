@@ -41,11 +41,12 @@ import {
 } from "lucide-react";
 
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { useModule } from "@/contexts/ModuleContext";
+import { useModule, MODULE_DASHBOARD_ROUTES } from "@/contexts/ModuleContext";
 import { BillingIcon } from "@/components/icons/BillingIcon";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme, THEME_DOTS, Theme } from "@/contexts/ThemeContext";
 import { useTask } from "@/contexts/TaskContext";
+import { useGracefulLogout } from "@/hooks/useGracefulLogout";
 
 interface NavItemChild {
   label: string;
@@ -240,6 +241,7 @@ export const MobileNav: React.FC = () => {
   const { currentUser, logout } = useAuth();
   const { activeModule, setActiveModule } = useModule();
   const { getOverdueTasks } = useTask();
+  const { handleLogout, overlay: logoutOverlay } = useGracefulLogout();
 
   const overdueCount = getOverdueTasks().length;
 
@@ -390,7 +392,7 @@ export const MobileNav: React.FC = () => {
     switch (activeModule) {
       case "material":
         return [
-{
+          {
             label: "Transaction",
             icon: Receipt,
             children: [
@@ -758,6 +760,7 @@ export const MobileNav: React.FC = () => {
 
   return (
     <>
+      {logoutOverlay}
       {/* Floating Action Button */}
       <button
         onClick={() => setOpen(true)}
@@ -843,11 +846,7 @@ export const MobileNav: React.FC = () => {
                       <User size={18} />
                     </button>
                     <button
-                      onClick={() => {
-                        logout();
-                        navigate("/login");
-                        setOpen(false);
-                      }}
+                      onClick={handleLogout}
                       className="p-3 border border-border rounded-2xl hover:bg-destructive/10 text-destructive transition-colors"
                     >
                       <LogOut size={18} />
@@ -868,7 +867,8 @@ export const MobileNav: React.FC = () => {
                         "bg-primary text-primary-foreground border-primary",
                       onClick: () => {
                         setActiveModule("finance");
-                        if (activeModule !== "finance") navigate("/");
+                        if (activeModule !== "finance")
+                          navigate(MODULE_DASHBOARD_ROUTES.finance);
                         setOpen(false);
                       },
                     },
@@ -880,7 +880,7 @@ export const MobileNav: React.FC = () => {
                         "bg-emerald-500 text-emerald-50 border-emerald-500",
                       onClick: () => {
                         setActiveModule("material");
-                        navigate("/material/amendments");
+                        navigate(MODULE_DASHBOARD_ROUTES.material);
                         setOpen(false);
                       },
                     },
@@ -891,7 +891,7 @@ export const MobileNav: React.FC = () => {
                       color: "bg-violet-500 text-violet-50 border-violet-500",
                       onClick: () => {
                         setActiveModule("followup");
-                        navigate("/followup");
+                        navigate(MODULE_DASHBOARD_ROUTES.followup);
                         setOpen(false);
                       },
                     },
