@@ -17,8 +17,13 @@ interface User {
 // ─── API calls ────────────────────────────────────────────────────────────────
 const BASE_URL = "/api/users";
 
+const authHeaders = () => ({
+  "Content-Type": "application/json",
+  Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
+});
+
 const getUsers = async (): Promise<User[]> => {
-  const res = await fetch(BASE_URL);
+  const res = await fetch(BASE_URL, { headers: authHeaders() });
   if (!res.ok) throw new Error("Failed to fetch users");
   return res.json();
 };
@@ -31,26 +36,38 @@ const addUserApi = async (user: {
 }) => {
   const res = await fetch(BASE_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders(),
     body: JSON.stringify(user),
   });
-  if (!res.ok) throw new Error("Failed to add user");
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data?.error || "Failed to add user");
+  }
   return res.json();
 };
 
 const updateUserApi = async (id: number, data: Partial<User>) => {
   const res = await fetch(`${BASE_URL}/${id}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    headers: authHeaders(),
     body: JSON.stringify(data),
   });
-  if (!res.ok) throw new Error("Failed to update user");
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body?.error || "Failed to update user");
+  }
   return res.json();
 };
 
 const deleteUserApi = async (id: number) => {
-  const res = await fetch(`${BASE_URL}/${id}`, { method: "DELETE" });
-  if (!res.ok) throw new Error("Failed to delete user");
+  const res = await fetch(`${BASE_URL}/${id}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data?.error || "Failed to delete user");
+  }
   return res.json();
 };
 
@@ -166,19 +183,24 @@ const Users = () => {
   };
 
   const resetForm = () => {
-    setForm({ name: "", email: "", role: "user", password: "", isActive: true });
+    setForm({
+      name: "",
+      email: "",
+      role: "user",
+      password: "",
+      isActive: true,
+    });
     setEditUserId(null);
   };
 
   const filteredUsers = allUsers.filter(
     (u) =>
       u.name.toLowerCase().includes(filter.toLowerCase()) ||
-      u.email.toLowerCase().includes(filter.toLowerCase())
+      u.email.toLowerCase().includes(filter.toLowerCase()),
   );
 
-  const viewedUser = viewUserId !== null
-    ? allUsers.find((u) => u.id === viewUserId)
-    : null;
+  const viewedUser =
+    viewUserId !== null ? allUsers.find((u) => u.id === viewUserId) : null;
 
   return (
     <>
@@ -334,8 +356,13 @@ const Users = () => {
             <tbody>
               {filteredUsers.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-6 py-12 text-center text-muted-foreground">
-                    {filter ? "No users found matching your search." : "No users added yet."}
+                  <td
+                    colSpan={5}
+                    className="px-6 py-12 text-center text-muted-foreground"
+                  >
+                    {filter
+                      ? "No users found matching your search."
+                      : "No users added yet."}
                   </td>
                 </tr>
               ) : (
@@ -345,8 +372,12 @@ const Users = () => {
                     className="border-t border-border hover:bg-muted/30 transition"
                   >
                     <td className="px-6 py-4 font-medium">{user.name}</td>
-                    <td className="px-6 py-4 text-muted-foreground">{user.email}</td>
-                    <td className="px-6 py-4 text-muted-foreground">{user.role}</td>
+                    <td className="px-6 py-4 text-muted-foreground">
+                      {user.email}
+                    </td>
+                    <td className="px-6 py-4 text-muted-foreground">
+                      {user.role}
+                    </td>
                     <td className="px-6 py-4">
                       <span
                         className={`inline-block px-3 py-1 text-xs font-medium rounded-full ${
