@@ -1,13 +1,28 @@
-import React, { createContext, useContext, useState, useCallback, useEffect } from "react";
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useEffect,
+} from "react";
 import { useLocation } from "react-router-dom";
 
 type Module = "finance" | "material" | "followup" | null;
+
+// Single source of truth for module dashboard routes
+export const MODULE_DASHBOARD_ROUTES: Record<NonNullable<Module>, string> = {
+  finance: "/",
+  material: "/material/grn",
+  followup: "/followup",
+};
 
 interface ModuleContextType {
   activeModule: Module;
   setActiveModule: (m: Module) => void;
   toggleModule: (m: Module) => void;
   moduleLabel: string;
+  moduleSwitching: boolean;
+  setModuleSwitching: (v: boolean) => void;
 }
 
 const ModuleContext = createContext<ModuleContextType | null>(null);
@@ -18,10 +33,20 @@ export const useModule = () => {
   return ctx;
 };
 
-export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
+  children,
+}) => {
   const location = useLocation();
   const [activeModule, setActiveModuleState] = useState<Module>(null);
-const moduleLabel = activeModule === "finance" ? "💰 Finance" : activeModule === "material" ? "📦 Material" : activeModule === "followup" ? "📅 Follow-Up" : "No Module Selected";
+  const [moduleSwitching, setModuleSwitching] = useState(false);
+  const moduleLabel =
+    activeModule === "finance"
+      ? "💰 Finance"
+      : activeModule === "material"
+        ? "📦 Material"
+        : activeModule === "followup"
+          ? "📅 Follow-Up"
+          : "No Module Selected";
 
   const setActiveModule = useCallback((m: Module) => {
     setActiveModuleState(m);
@@ -50,7 +75,10 @@ const moduleLabel = activeModule === "finance" ? "💰 Finance" : activeModule =
     const stored = localStorage.getItem("activeModule") as Module | null;
     let initialModule: Module = null;
 
-    if (stored && (["finance", "material", "followup"] as Module[]).includes(stored)) {
+    if (
+      stored &&
+      (["finance", "material", "followup"] as Module[]).includes(stored)
+    ) {
       initialModule = stored;
     } else {
       // Infer from pathname
@@ -68,9 +96,17 @@ const moduleLabel = activeModule === "finance" ? "💰 Finance" : activeModule =
   }, [location.pathname]);
 
   return (
-    <ModuleContext.Provider value={{ activeModule, setActiveModule, toggleModule, moduleLabel }}>
+    <ModuleContext.Provider
+      value={{
+        activeModule,
+        setActiveModule,
+        toggleModule,
+        moduleLabel,
+        moduleSwitching,
+        setModuleSwitching,
+      }}
+    >
       {children}
     </ModuleContext.Provider>
   );
-
 };
