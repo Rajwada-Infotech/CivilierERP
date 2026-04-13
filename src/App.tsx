@@ -102,35 +102,21 @@ const ExpensesMaster = lazy(() => import("./pages/masters/ExpensesMaster"));
 const ItemMaster = lazy(() => import("./pages/masters/ItemMaster"));
 const ItemGroupMaster = lazy(() => import("./pages/masters/ItemGroupMaster"));
 const HsnMaster = lazy(() => import("./pages/masters/HsnMaster"));
-const FinancialYearMaster = lazy(
-  () => import("./pages/masters/FinancialYearMaster"),
-);
+const FinancialYearMaster = lazy(() => import("./pages/masters/FinancialYearMaster"));
 const ChequeMaster = lazy(() => import("./pages/masters/ChequeMaster"));
-const MaterialExpenseBookingMaster = lazy(
-  () => import("./pages/material/MaterialExpenseBooking"),
-);
+const MaterialExpenseBookingMaster = lazy(() => import("./pages/material/MaterialExpenseBooking"));
 const WorkOrderMaster = lazy(() => import("./pages/material/WorkOrderMaster"));
-const PurchaseOrderMaster = lazy(
-  () => import("./pages/material/PurchaseOrderMaster"),
-);
+const PurchaseOrderMaster = lazy(() => import("./pages/material/PurchaseOrderMaster"));
 const CardMaster = lazy(() => import("./pages/masters/CardMaster"));
 const TdsMaster = lazy(() => import("./pages/masters/TdsMaster"));
-const AccountGroupMaster = lazy(
-  () => import("./pages/masters/AccountGroupMaster"),
-);
-const NamedEntryTypeMaster = lazy(
-  () => import("./pages/masters/NamedEntryTypeMaster"),
-);
+const AccountGroupMaster = lazy(() => import("./pages/masters/AccountGroupMaster"));
+const NamedEntryTypeMaster = lazy(() => import("./pages/masters/NamedEntryTypeMaster"));
 const TypeOfDocMaster = lazy(() => import("./pages/masters/TypeOfDocMaster"));
 const ActivityMaster = lazy(() => import("./pages/masters/ActivityMaster"));
 const DebitNoteMaster = lazy(() => import("./pages/masters/DebitNoteMaster"));
-const BillingTermsMaster = lazy(
-  () => import("./pages/masters/BillingTermsMaster"),
-);
+const BillingTermsMaster = lazy(() => import("./pages/masters/BillingTermsMaster"));
 const TCMaster = lazy(() => import("./pages/material/T&CMaster"));
-const UnitOfMeasurementMaster = lazy(
-  () => import("./pages/material/UnitOfMeasurementMaster"),
-);
+const UnitOfMeasurementMaster = lazy(() => import("./pages/material/UnitOfMeasurementMaster"));
 
 // Admin Pages
 const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
@@ -139,46 +125,33 @@ const MenuRights = lazy(() => import("./pages/admin/MenuRights"));
 const WidgetRights = lazy(() => import("./pages/admin/WidgetsRights"));
 const FinYearRights = lazy(() => import("./pages/admin/FinYearRights"));
 const ApprovalSetup = lazy(() => import("./pages/admin/ApprovalSetup"));
-const PostApprovalRights = lazy(
-  () => import("./pages/admin/PostApprovalRights"),
-);
+const PostApprovalRights = lazy(() => import("./pages/admin/PostApprovalRights"));
 const ApiIntegrationPage = lazy(() => import("./pages/admin/ApiIntegration"));
 const SignaturePage = lazy(() => import("./pages/admin/Signature"));
 const SuperAdminProfile = lazy(() => import("./pages/admin/SuperAdminProfile"));
 const MetricsDashboard = lazy(() => import("./pages/admin/MetricsDashboard"));
-const PasswordResetPage = lazy(
-  () => import("./pages/admin/security/PasswordReset"),
-);
-const ActivityBrowserPage = lazy(
-  () => import("./pages/admin/Activitybrowser/ActivityBrowser"),
-);
+const PasswordResetPage = lazy(() => import("./pages/admin/security/PasswordReset"));
+const ActivityBrowserPage = lazy(() => import("./pages/admin/Activitybrowser/ActivityBrowser"));
 
 // Admin Masters
-const BusinessUnitMaster = lazy(
-  () => import("./pages/admin/masters/BusinessUnitMaster"),
-);
+const BusinessUnitMaster = lazy(() => import("./pages/admin/masters/BusinessUnitMaster"));
 const ProjectMaster = lazy(() => import("./pages/admin/masters/ProjectMaster"));
 const CompanyMaster = lazy(() => import("./pages/admin/masters/CompanyMaster"));
 
 // Communicator Setup
 const SmsSetup = lazy(() => import("./pages/admin/Communicator/SmsSetup"));
 const EmailSetup = lazy(() => import("./pages/admin/Communicator/EmailSetup"));
-const WhatsAppSetup = lazy(
-  () => import("./pages/admin/Communicator/WhatsAppSetup"),
-);
-const GeneralLedgerMaster = lazy(
-  () => import("./pages/masters/GeneralLedgerMaster"),
-);
+const WhatsAppSetup = lazy(() => import("./pages/admin/Communicator/WhatsAppSetup"));
+const GeneralLedgerMaster = lazy(() => import("./pages/masters/GeneralLedgerMaster"));
 
 // New hierarchy pages
-const SuperAdminDashboard = lazy(
-  () => import("./pages/superadmin/SuperAdminDashboard"),
-);
+const SuperAdminDashboard = lazy(() => import("./pages/superadmin/SuperAdminDashboard"));
 const AdminControlPanel = lazy(() => import("./pages/admin/AdminControlPanel"));
 const UserProfilePage = lazy(() => import("./pages/user/UserProfile"));
 const DBADashboard = lazy(() => import("./pages/dba/DBADashboard"));
 const ControlPanel = lazy(() => import("./pages/dba/ControlPanel"));
 const AdsManager = lazy(() => import("./pages/dba/AdsManager"));
+const FollowupDashboard = lazy(() => import("./pages/followup"));
 const RemindersManager = lazy(() => import("./pages/dba/RemindersManager"));
 const PaymentLogs = lazy(() => import("./pages/dba/PaymentLogs"));
 
@@ -276,9 +249,6 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 // ─── Auth Session Bridge ──────────────────────────────────────────────────────
-// Sits inside ActivityBrowserProvider so it can read recordLogin/recordLogout
-// and pass them down as props to AuthProvider — breaking the circular dependency
-// that previously caused AuthContext to import useActivityBrowser directly.
 function AuthSessionBridge({ children }: { children: React.ReactNode }) {
   const { recordLogin, recordLogout } = useActivityBrowser();
   return (
@@ -377,6 +347,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <Records />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup"
+        element={
+          <ProtectedRoute>
+            <FollowupDashboard />
           </ProtectedRoute>
         }
       />
@@ -835,32 +813,32 @@ function App() {
       <Toaster richColors position="top-right" />
       <ActivityBrowserProvider>
         <AuthSessionBridge>
-          <ModuleProvider>
-            <ThemeProvider>
-              <FinYearProvider>
-                <HsnProvider>
-                  <RecordsProvider>
-                    <TdsProvider>
-                      <DebitNoteProvider>
-                        <BillingTermsProvider>
-                          <TaskProvider>
-                            <Router
-                              future={{
-                                v7_startTransition: true,
-                                v7_relativeSplatPath: true,
-                              }}
-                            >
+          <Router
+            future={{
+              v7_startTransition: true,
+              v7_relativeSplatPath: true,
+            }}
+          >
+            <ModuleProvider>
+              <ThemeProvider>
+                <FinYearProvider>
+                  <HsnProvider>
+                    <RecordsProvider>
+                      <TdsProvider>
+                        <DebitNoteProvider>
+                          <BillingTermsProvider>
+                            <TaskProvider>
                               <AppRoutes />
-                            </Router>
-                          </TaskProvider>
-                        </BillingTermsProvider>
-                      </DebitNoteProvider>
-                    </TdsProvider>
-                  </RecordsProvider>
-                </HsnProvider>
-              </FinYearProvider>
-            </ThemeProvider>
-          </ModuleProvider>
+                            </TaskProvider>
+                          </BillingTermsProvider>
+                        </DebitNoteProvider>
+                      </TdsProvider>
+                    </RecordsProvider>
+                  </HsnProvider>
+                </FinYearProvider>
+              </ThemeProvider>
+            </ModuleProvider>
+          </Router>
         </AuthSessionBridge>
       </ActivityBrowserProvider>
     </QueryClientProvider>
