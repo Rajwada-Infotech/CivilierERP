@@ -1,16 +1,36 @@
-# CivilierERP CORS Fix Task
-Status: In Progress
+# GRN Database Integration - Approved Plan Implementation
 
-## Approved Plan Breakdown
-1. ✅ [Complete] Understand codebase (server.js CORS, vite.config.ts port 8080, users.js login route)
-2. ✅ [Complete] Get user approval for plan
-3. [Pending] Create TODO.md ✅
-4. ✅ Edit backend/server.js:
-   - Fix CORS rejection: cb(new Error()) → cb(null, false)
-   - Add IPv6 origins: http://[::1]:8080, http://[::1]:3000, etc.
-   - Add console.log for origin debugging
-5. [Pending] Test login from frontend (/api/users/login)
-6. [Pending] Monitor server logs for CORS origin on attempts
-7. [Pending] attempt_completion
+Status: ✅ Plan approved by user. Fixes: dynamic items from item-master, units from uom-master, ItemID type fix.
 
-**Next Step**: Test login in frontend and monitor backend logs for "CORS request from origin" messages.
+## Steps (Step 1/4 Complete after this)
+
+### ✅ Step 0: Analysis Complete
+- Files analyzed: GRN.tsx, grnApi.ts, grns.js, migration, APIs, routes.
+- Integrations confirmed: Supplier (AccountHeadMaster), PO (PurchaseOrders), Item (fix to ItemMaster), Unit (UOM).
+
+### ⏳ Step 1: Update src/api/grnApi.ts
+- Change getItems → /api/item-master
+- Add getUoms → /api/uom-master
+- Update interfaces: Item (M_Id/M_Name), GRNItemLine (+uom)
+
+### ⏳ Step 2: Update src/pages/material/GRN.tsx
+- Items dropdown: use itemMaster M_Id/M_Name
+- Per-item UOM dropdown from uoms
+- Remove hardcoded units
+- Form sends uom per item
+
+### ⏳ Step 3: Update backend/routes/grns.js  
+- Handle uom in GRNItems JSON (auto)
+- StockLedger ItemID: sql.NVarChar(50) for UUID
+- Add UOM to StockLedger insert
+
+### ⏳ Step 4: Test & Complete
+- npm run dev
+- Navigate /material/grn
+- Verify dropdowns from DB, submit GRN → DB insert
+- attempt_completion
+
+**Notes:** 
+- ItemMaster uses UUID M_Id → StockLedger.ItemID change to NVARCHAR(50)
+- DB may need ALTER TABLE StockLedger ALTER COLUMN ItemID NVARCHAR(50)
+
