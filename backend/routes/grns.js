@@ -7,7 +7,7 @@ const { getPool, sql } = require("../db");
 // GET all GRNs
 router.get("/", cache("grns", 300), async (req, res) => {
   try {
-    const pool = await getPool(); // Fixed: await added
+    const pool = await getPool();
     const result = await pool.request().query(`
       SELECT
         grn.GRNID,
@@ -47,8 +47,7 @@ router.post("/", async (req, res) => {
       .json({ error: "GRNNo, GRNDate and SupplierID are required" });
   }
 
-  const pool = await getPool(); // Fixed: await outside
-
+  const pool = await getPool();
   const transaction = pool.transaction();
 
   try {
@@ -74,24 +73,27 @@ router.post("/", async (req, res) => {
 
     const grnId = grnResult.recordset[0].GRNID;
 
-    // Insert Stock Ledger Entries
+    // Parse items JSON for StockLedger entries
     const items = Array.isArray(grnItems)
       ? grnItems
       : typeof grnItems === "string"
         ? JSON.parse(grnItems)
         : [];
 
+    // Insert Stock Ledger Entries - supports UUID itemId and uom
     for (const item of items) {
-      if (item.itemId && item.receivedQty) {
+      if (item.itemId && item.receivedQty > 0) {
         await transaction
           .request()
-          .input("ItemID", sql.Int, item.itemId)
+          .input("ItemID", sql.NVarChar(50), item.itemId)
           .input("Qty", sql.Decimal(18, 2), item.receivedQty)
+          .input("UOM", sql.NVarChar(20), item.uom || null)
           .input("Type", sql.NVarChar(10), "IN")
           .input("RefType", sql.NVarChar(20), "GRN")
-          .input("RefID", sql.Int, grnId).query(`
-            INSERT INTO StockLedger (ItemID, Qty, Type, RefType, RefID, CreatedDate)
-            VALUES (@ItemID, @Qty, @Type, @RefType, @RefID, GETDATE())
+          .input("RefID", sql.Int, grnId)
+          .query(`
+            INSERT INTO StockLedger (ItemID, Qty, UOM, Type, RefType, RefID, CreatedDate)
+            VALUES (@ItemID, @Qty, @UOM, @Type, @RefType, @RefID, GETDATE())
           `);
       }
     }
@@ -104,8 +106,7 @@ router.post("/", async (req, res) => {
       grnId,
     });
   } catch (err) {
-    await transaction.rollback().catch(() => {}); // rollback if possible
-
+    await transaction.rollback().catch(() => {});
     console.error("CREATE GRN FULL ERROR:", err);
     res.status(500).json({
       error: "Failed to create GRN",
@@ -178,3 +179,4 @@ router.delete("/:id", async (req, res) => {
 });
 
 module.exports = router;
+
