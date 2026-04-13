@@ -5,7 +5,6 @@ import {
   type PageKey,
   type PageAction,
   type PagePermission,
-  // FIX: import AppUser from AuthContext (consistent with PostApprovalRights and WidgetsRights)
   type AppUser,
 } from "@/contexts/AuthContext";
 
@@ -119,11 +118,12 @@ interface PermissionRow {
 }
 
 export default function MenuRights() {
-  // FIX: also pull updateUserPagePermissions — needed to actually persist changes
   const { allUsers, updateUserPagePermissions, toggleUserStatus, deleteUser } =
     useAuth();
 
   const [searchTerm, setSearchTerm] = useState("");
+  // FIX: dialog is controlled purely via state — no DialogTrigger.
+  // This lets the row Edit button open the dialog with the correct user pre-loaded.
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [selectedUser, setSelectedUser] = useState<AppUser | null>(null);
   const [pendingPermissions, setPendingPermissions] = useState<
@@ -183,32 +183,45 @@ export default function MenuRights() {
     return groups;
   }, []);
 
-  // FIX: openEditDialog properly sets the user before showing dialog
+  // FIX: openEditDialog sets selectedUser and clones their permissions into local state.
+  // Pending permissions are isolated to this dialog session — other pages/users are NOT affected.
   const openEditDialog = useCallback((user: AppUser) => {
     setSelectedUser(user);
-    setPendingPermissions([...(user.pagePermissions || [])]);
+    // Deep-clone permissions so edits don't mutate the context directly
+    setPendingPermissions(
+      (user.pagePermissions || []).map((p) => ({
+        page: p.page,
+        actions: [...p.actions],
+      })),
+    );
     setShowEditDialog(true);
   }, []);
 
-  // FIX: open dialog for a new assignment — user chooses from selector inside dialog
   const openNewDialog = useCallback(() => {
     setSelectedUser(null);
     setPendingPermissions([]);
     setShowEditDialog(true);
   }, []);
 
-  // FIX: actually calls updateUserPagePermissions instead of TODO stub
-  const handleSavePermissions = useCallback(() => {
+  const closeDialog = useCallback(() => {
+    setShowEditDialog(false);
+    setSelectedUser(null);
+    setPendingPermissions([]);
+  }, []);
+
+  const handleSavePermissions = useCallback(async () => {
     if (!selectedUser) {
       toast.error("Please select a user first");
       return;
     }
-    updateUserPagePermissions(selectedUser.id, pendingPermissions);
-    toast.success(`Permissions updated for ${selectedUser.name}`);
-    setShowEditDialog(false);
-    setSelectedUser(null);
-    setPendingPermissions([]);
-  }, [selectedUser, pendingPermissions, updateUserPagePermissions]);
+    try {
+      await updateUserPagePermissions(selectedUser.id, pendingPermissions);
+      toast.success(`Permissions updated for ${selectedUser.name}`);
+      closeDialog();
+    } catch {
+      toast.error("Failed to save permissions. Please try again.");
+    }
+  }, [selectedUser, pendingPermissions, updateUserPagePermissions, closeDialog]);
 
   const handleToggleStatus = useCallback(
     (userId: string) => {
@@ -226,18 +239,28 @@ export default function MenuRights() {
     }
   }, [deletingUserId, deleteUser]);
 
+  // FIX: updatePermission is scoped to (pageKey, action) independently.
+  // Toggling "Edit" on page A does NOT touch "Edit" on page B — each (page, action)
+  // pair is addressed by its own array slot in pendingPermissions.
   const updatePermission = useCallback(
     (pageKey: string, action: PageAction, checked: boolean) => {
       setPendingPermissions((prev) => {
+        // Find existing entry for this specific page
         const idx = prev.findIndex((p) => p.page === pageKey);
-        const current = idx >= 0 ? prev[idx].actions : [];
+        const currentActions = idx >= 0 ? [...prev[idx].actions] : [];
+
+        // Add or remove only this specific action — other actions on this page untouched
         const newActions = checked
-          ? [...current, action]
-          : current.filter((a) => a !== action);
+          ? currentActions.includes(action)
+            ? currentActions
+            : [...currentActions, action]
+          : currentActions.filter((a) => a !== action);
+
         const newPerm: PagePermission = {
           page: pageKey as PageKey,
           actions: newActions,
         };
+
         if (idx >= 0) {
           const copy = [...prev];
           copy[idx] = newPerm;
@@ -263,7 +286,6 @@ export default function MenuRights() {
             Control what each user can access
           </p>
         </div>
-        {/* FIX: button opens dialog without pre-selecting a user — user selects inside dialog */}
         <Button onClick={openNewDialog}>
           <Plus className="mr-2 h-4 w-4" />
           Manage Permissions
@@ -339,7 +361,8 @@ export default function MenuRights() {
                       </TableCell>
                       <TableCell>
                         <div className="flex gap-2">
-                          {/* FIX: row edit button always passes the found user */}
+                          {/* FIX: row Edit finds the user and calls openEditDialog — dialog opens correctly
+                              because it's no longer inside or competing with a DialogTrigger */}
                           <Button
                             variant="ghost"
                             size="sm"
@@ -378,8 +401,8 @@ export default function MenuRights() {
         </CardContent>
       </Card>
 
-      {/* Edit / Assign Dialog */}
-      <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
+      {/* Edit / Assign Dialog — fully state-controlled, no DialogTrigger */}
+      <Dialog open={showEditDialog} onOpenChange={(open) => !open && closeDialog()}>
         <DialogContent className="max-w-4xl max-h-[90vh]">
           <DialogHeader>
             <DialogTitle>
@@ -393,7 +416,6 @@ export default function MenuRights() {
           </DialogHeader>
 
           <div className="space-y-4 py-2">
-            {/* FIX: user selector so "Manage Permissions" button is usable without row click */}
             <div className="space-y-2">
               <Label>User</Label>
               <Select
@@ -402,7 +424,12 @@ export default function MenuRights() {
                   const user = allUsers.find((u) => u.id === id);
                   if (user) {
                     setSelectedUser(user);
-                    setPendingPermissions([...(user.pagePermissions || [])]);
+                    setPendingPermissions(
+                      (user.pagePermissions || []).map((p) => ({
+                        page: p.page,
+                        actions: [...p.actions],
+                      })),
+                    );
                   }
                 }}
               >
@@ -442,6 +469,7 @@ export default function MenuRights() {
                           <div className="flex flex-wrap gap-3">
                             {actions.map((action) => {
                               const config = getActionConfig(action);
+                              // FIX: checked is computed per (key, action) — fully isolated
                               const checked = currentActions.includes(action);
                               return (
                                 <div
@@ -449,6 +477,7 @@ export default function MenuRights() {
                                   className="flex items-center gap-2 border rounded-md px-4 py-2.5 hover:bg-accent"
                                 >
                                   <Checkbox
+                                    // FIX: id uses page key + action — guaranteed unique, no cross-linking
                                     id={`mr-${key}-${action}`}
                                     checked={checked}
                                     onCheckedChange={(val) =>
@@ -479,17 +508,9 @@ export default function MenuRights() {
           </div>
 
           <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setShowEditDialog(false);
-                setSelectedUser(null);
-                setPendingPermissions([]);
-              }}
-            >
+            <Button variant="outline" onClick={closeDialog}>
               Cancel
             </Button>
-            {/* FIX: disabled until a user is selected */}
             <Button onClick={handleSavePermissions} disabled={!selectedUser}>
               Save Changes
             </Button>
@@ -497,7 +518,7 @@ export default function MenuRights() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete confirmation */}
+      {/* Delete confirmation — single AlertDialog outside the table loop */}
       <AlertDialog
         open={!!deletingUserId}
         onOpenChange={(open) => !open && setDeletingUserId(null)}
