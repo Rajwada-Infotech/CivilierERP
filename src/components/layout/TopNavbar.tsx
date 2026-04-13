@@ -580,6 +580,12 @@ const adminSetupItems = [
     path: "/masters/type-of-doc",
     color: "text-sky-500",
   },
+  {
+    icon: Users,
+    label: "Role Master",
+    path: "/masters/role-master",
+    color: "text-blue-400",
+  },
 ];
 
 // ─── Setup Dropdown ───────────────────────────────────────────────────────────

@@ -162,6 +162,13 @@ export const PAGE_DEFINITIONS = [
     group: "Materials",
     availableActions: ["view", "create", "edit", "delete"] as const,
   },
+  // Role Master
+  {
+    key: "role-master",
+    label: "Role Master",
+    group: "Administration",
+    availableActions: ["view", "create", "edit", "delete"] as const,
+  },
 ] as const;
 
 // ==================== TYPES ====================

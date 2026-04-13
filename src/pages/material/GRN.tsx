@@ -27,11 +27,11 @@ import { Plus, Trash2, Edit3, Save, X, Truck } from "lucide-react";
 import * as grnApi from "@/api/grnApi";
 import type {
   GRNFormDataPayload,
-  Item,
-  UOM,
   GRNItemLine,
   Supplier,
   PurchaseOrder,
+  Item,
+  UOM,
 } from "@/api/grnApi";
 
 interface GRNFormData {
@@ -48,7 +48,7 @@ interface GRNFormData {
 
 const statusOptions = ["Draft", "Partially Received", "Fully Received"] as const;
 
-const createEmptyItem = (): GRNItemLine => ({
+const emptyItem = (): GRNItemLine => ({
   itemId: "",
   itemName: "",
   orderedQty: 0,
@@ -57,17 +57,17 @@ const createEmptyItem = (): GRNItemLine => ({
   uom: "",
 });
 
-const generateGrnNo = () => {
-  const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-  return `GRN-MAT-${today}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+const genGrnNo = () => {
+  const d = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  return `GRN-MAT-${d}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 };
 
-const parseJsonArray = <T,>(value: unknown): T[] => {
-  if (Array.isArray(value)) return value as T[];
-  if (typeof value !== "string" || !value.trim()) return [];
+const safeParseArray = <T,>(val: unknown): T[] => {
+  if (Array.isArray(val)) return val as T[];
+  if (typeof val !== "string" || !val.trim()) return [];
   try {
-    const parsed = JSON.parse(value);
-    return Array.isArray(parsed) ? (parsed as T[]) : [];
+    const p = JSON.parse(val);
+    return Array.isArray(p) ? (p as T[]) : [];
   } catch {
     return [];
   }
@@ -77,7 +77,7 @@ export default function GRN() {
   const queryClient = useQueryClient();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formData, setFormData] = useState<GRNFormData>({
-    grnNo: generateGrnNo(),
+    grnNo: genGrnNo(),
     grnDate: new Date().toISOString().slice(0, 10),
     supplierId: "",
     supplierName: "",
@@ -85,58 +85,62 @@ export default function GRN() {
     poNumber: "",
     remarks: "",
     status: "Draft",
-    items: [createEmptyItem()],
+    items: [emptyItem()],
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  // ── Queries ──────────────────────────────────────────────────────────────────
 
   const { data: grns = [], isLoading: loadingGrns } = useQuery({
     queryKey: ["grns"],
     queryFn: grnApi.getGRNs,
   });
 
-  const { data: suppliersData = [], isLoading: loadingSuppliers } = useQuery({
-    queryKey: ["suppliers"],
+  const { data: suppliersData = [], isLoading: loadingSuppliers } = useQuery<Supplier[]>({
+    queryKey: ["suppliers-grn"],
     queryFn: grnApi.getSuppliers,
   });
 
-  const { data: posData = [], isLoading: loadingPOs } = useQuery({
-    queryKey: ["purchaseOrders"],
+  const { data: posData = [], isLoading: loadingPOs } = useQuery<PurchaseOrder[]>({
+    queryKey: ["purchaseOrders-grn"],
     queryFn: grnApi.getPurchaseOrders,
   });
 
-  const { data: itemsData = [], isLoading: loadingItems } = useQuery({
-    queryKey: ["itemMaster"],
+  const { data: itemsData = [], isLoading: loadingItems } = useQuery<Item[]>({
+    queryKey: ["itemMaster-grn"],
     queryFn: grnApi.getItems,
   });
 
-  const { data: uomsData = [], isLoading: loadingUoms } = useQuery({
-    queryKey: ["uomMaster"],
+  const { data: uomsData = [], isLoading: loadingUoms } = useQuery<UOM[]>({
+    queryKey: ["uomMaster-grn"],
     queryFn: grnApi.getUoms,
   });
 
-  const suppliers = suppliersData.map((supplier: Supplier) => ({
-    value: String(supplier.LHeadId),
-    label: supplier.LHeadName,
+  // ── Derived option lists ──────────────────────────────────────────────────────
+
+  const supplierOptions = suppliersData.map((s) => ({
+    value: String(s.LHeadId),
+    label: s.LHeadName,
   }));
 
-  const pos = posData.map((po: PurchaseOrder) => ({
+  const poOptions = posData.map((po) => ({
     value: String(po.PurchaseOrderID),
     label: po.PurchaseOrderNo,
-    data: po,
   }));
 
-  const items = itemsData.map((item: Item) => ({
-    value: item.M_Id,
-    label: item.M_Name,
-    group: item.ParentGroupName || "",
+  // Items: M_Id (UUID) as value, M_Name as label
+  const itemOptions = itemsData.map((i) => ({
+    value: i.M_Id,
+    label: i.ParentGroupName ? `${i.M_Name} (${i.ParentGroupName})` : i.M_Name,
   }));
 
-  const uoms = uomsData.map((uom: UOM) => ({
-    value: uom.UOMCode,
-    label: uom.Symbol || uom.UOMSymbol
-      ? `${uom.UOMName} (${uom.Symbol || uom.UOMSymbol})`
-      : uom.UOMName,
+  // UOMs: UOMCode as value, UOMName + Symbol as label
+  const uomOptions = uomsData.map((u) => ({
+    value: u.UOMCode,
+    label: u.Symbol ? `${u.UOMName} (${u.Symbol})` : u.UOMName,
   }));
+
+  // ── Mutations ─────────────────────────────────────────────────────────────────
 
   const createMutation = useMutation({
     mutationFn: grnApi.addGRN,
@@ -149,8 +153,7 @@ export default function GRN() {
   });
 
   const updateMutation = useMutation({
-    mutationFn: (payload: GRNFormDataPayload) =>
-      grnApi.updateGRN(editingId!, payload),
+    mutationFn: (payload: GRNFormDataPayload) => grnApi.updateGRN(editingId!, payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["grns"] });
       resetForm();
@@ -163,14 +166,16 @@ export default function GRN() {
     mutationFn: grnApi.deleteGRN,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["grns"] });
-      toast.success("GRN deleted successfully");
+      toast.success("GRN deleted");
     },
     onError: (err: Error) => toast.error(err.message || "Delete failed"),
   });
 
+  // ── Helpers ───────────────────────────────────────────────────────────────────
+
   const resetForm = () => {
     setFormData({
-      grnNo: generateGrnNo(),
+      grnNo: genGrnNo(),
       grnDate: new Date().toISOString().slice(0, 10),
       supplierId: "",
       supplierName: "",
@@ -178,34 +183,25 @@ export default function GRN() {
       poNumber: "",
       remarks: "",
       status: "Draft",
-      items: [createEmptyItem()],
+      items: [emptyItem()],
     });
     setEditingId(null);
     setErrors({});
   };
 
   const validate = () => {
-    const newErrors: Record<string, string> = {};
-
-    if (!formData.grnNo) newErrors.grnNo = "Required";
-    if (!formData.supplierId) newErrors.supplierId = "Select supplier";
-    if (!formData.poId) newErrors.poId = "Select purchase order";
-
+    const e: Record<string, string> = {};
+    if (!formData.grnNo) e.grnNo = "Required";
+    if (!formData.supplierId) e.supplierId = "Select a supplier";
     if (
       formData.items.some(
-        (item) =>
-          !item.itemId ||
-          !item.uom ||
-          item.receivedQty <= 0 ||
-          item.receivedQty > item.orderedQty
+        (item) => !item.itemId || item.receivedQty <= 0
       )
     ) {
-      newErrors.items =
-        "Each row must have an item, unit, and received quantity within ordered quantity";
+      e.items = "Each row needs an item and received quantity > 0";
     }
-
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+    setErrors(e);
+    return Object.keys(e).length === 0;
   };
 
   const onSubmit = () => {
@@ -213,19 +209,17 @@ export default function GRN() {
       toast.error("Please fix errors before saving");
       return;
     }
-
     const payload: GRNFormDataPayload = {
       grnNo: formData.grnNo,
       grnDate: formData.grnDate,
       supplierId: Number(formData.supplierId),
-      poId: Number(formData.poId),
+      poId: Number(formData.poId) || 0,
       grnItems: formData.items,
       status: formData.status,
       remarks: formData.remarks,
       supplierName: formData.supplierName,
       poNumber: formData.poNumber,
     };
-
     if (editingId) {
       updateMutation.mutate(payload);
     } else {
@@ -233,68 +227,49 @@ export default function GRN() {
     }
   };
 
-  const updateField = (field: keyof GRNFormData, value: string) => {
-    if (field === "supplierId") {
-      const supplier = suppliersData.find(
-        (entry: Supplier) => String(entry.LHeadId) === value
-      );
+  // ── Field handlers ────────────────────────────────────────────────────────────
 
+  const updateField = (field: keyof GRNFormData, value: string) => {
+    // Supplier selected — resolve name
+    if (field === "supplierId") {
+      const found = suppliersData.find((s) => String(s.LHeadId) === value);
       setFormData((prev) => ({
         ...prev,
         supplierId: value,
-        supplierName: supplier?.LHeadName || "",
+        supplierName: found?.LHeadName || "",
       }));
       return;
     }
 
+    // PO selected — auto-fill supplier + one item row from PO columns
+    // dbo.PurchaseOrders has: ItemDescription, Quantity, Unit per row
     if (field === "poId") {
-      const po = posData.find(
-        (entry: PurchaseOrder) => String(entry.PurchaseOrderID) === value
-      );
+      const po = posData.find((p) => String(p.PurchaseOrderID) === value);
+      if (!po) {
+        setFormData((prev) => ({ ...prev, poId: value }));
+        return;
+      }
 
-      const poItems = parseJsonArray<any>(po?.Items);
-      const mappedPoItems: GRNItemLine[] =
-        poItems.length > 0
-          ? poItems.map((item) => {
-              const orderedQty = Number(
-                item.orderedQty ?? item.qty ?? item.Quantity ?? 0
-              );
-              const itemId = String(item.itemId ?? item.M_Id ?? item.ItemID ?? "");
-              const matchedItem = itemsData.find(
-                (entry: Item) => entry.M_Id === itemId
-              );
+      // Resolve supplier from PO
+      const supplier = suppliersData.find((s) => s.LHeadId === po.SupplierID);
 
-              return {
-                itemId,
-                itemName:
-                  item.itemName ??
-                  item.M_Name ??
-                  matchedItem?.M_Name ??
-                  "",
-                orderedQty,
-                receivedQty: 0,
-                remainingQty: orderedQty,
-                uom: String(item.uom ?? item.Unit ?? item.unit ?? po?.Unit ?? ""),
-              };
-            })
-          : [
-              {
-                itemId: "",
-                itemName: po?.ItemDescription || "",
-                orderedQty: Number(po?.Quantity || 0),
-                receivedQty: 0,
-                remainingQty: Number(po?.Quantity || 0),
-                uom: po?.Unit || "",
-              },
-            ];
+      // Build one item row from PO's ItemDescription / Quantity / Unit
+      const autoItem: GRNItemLine = {
+        itemId: "",          // user must pick from item-master dropdown
+        itemName: po.ItemDescription || "",
+        orderedQty: Number(po.Quantity) || 0,
+        receivedQty: 0,
+        remainingQty: Number(po.Quantity) || 0,
+        uom: po.Unit || "",  // pre-fill unit from PO.Unit column
+      };
 
       setFormData((prev) => ({
         ...prev,
         poId: value,
-        poNumber: po?.PurchaseOrderNo || "",
-        supplierId: po?.SupplierID ? String(po.SupplierID) : prev.supplierId,
-        supplierName: po?.SupplierName || prev.supplierName,
-        items: mappedPoItems.length ? mappedPoItems : [createEmptyItem()],
+        poNumber: po.PurchaseOrderNo,
+        supplierId: String(po.SupplierID),
+        supplierName: supplier?.LHeadName || po.SupplierName || "",
+        items: [autoItem],
       }));
       return;
     }
@@ -303,59 +278,43 @@ export default function GRN() {
   };
 
   const addItem = () => {
-    setFormData((prev) => ({
-      ...prev,
-      items: [...prev.items, createEmptyItem()],
-    }));
+    setFormData((prev) => ({ ...prev, items: [...prev.items, emptyItem()] }));
   };
 
   const removeItem = (index: number) => {
     setFormData((prev) => ({
       ...prev,
-      items:
-        prev.items.length > 1
-          ? prev.items.filter((_, itemIndex) => itemIndex !== index)
-          : [createEmptyItem()],
+      items: prev.items.length > 1
+        ? prev.items.filter((_, i) => i !== index)
+        : [emptyItem()],
     }));
   };
 
-  const updateItemField = (
-    index: number,
-    field: keyof GRNItemLine,
-    value: string | number
-  ) => {
+  const updateItemField = (index: number, field: keyof GRNItemLine, value: string | number) => {
     setFormData((prev) => {
-      const nextItems = [...prev.items];
-      const currentItem = { ...nextItems[index], [field]: value };
+      const next = [...prev.items];
+      const row = { ...next[index], [field]: value };
 
       if (field === "itemId") {
-        const matchedItem = itemsData.find((item: Item) => item.M_Id === value);
-        currentItem.itemName = matchedItem?.M_Name || "";
+        const found = itemsData.find((i) => i.M_Id === value);
+        row.itemName = found?.M_Name || "";
       }
 
-      currentItem.orderedQty = Number(currentItem.orderedQty) || 0;
-      currentItem.receivedQty = Number(currentItem.receivedQty) || 0;
-      currentItem.remainingQty =
-        currentItem.orderedQty - currentItem.receivedQty;
-
-      nextItems[index] = currentItem;
-
-      return {
-        ...prev,
-        items: nextItems,
-      };
+      row.orderedQty = Number(row.orderedQty) || 0;
+      row.receivedQty = Number(row.receivedQty) || 0;
+      row.remainingQty = row.orderedQty - row.receivedQty;
+      next[index] = row;
+      return { ...prev, items: next };
     });
   };
 
   const onEdit = (grn: any) => {
-    const parsedItems = parseJsonArray<GRNItemLine>(grn.GRNItems).map((item) => ({
-      ...createEmptyItem(),
+    const parsedItems = safeParseArray<GRNItemLine>(grn.GRNItems).map((item) => ({
+      ...emptyItem(),
       ...item,
       orderedQty: Number(item.orderedQty || 0),
       receivedQty: Number(item.receivedQty || 0),
-      remainingQty:
-        Number(item.remainingQty ?? Number(item.orderedQty || 0) - Number(item.receivedQty || 0)),
-      uom: item.uom || "",
+      remainingQty: Number(item.orderedQty || 0) - Number(item.receivedQty || 0),
     }));
 
     setFormData({
@@ -367,28 +326,26 @@ export default function GRN() {
       poNumber: grn.PONumber || "",
       remarks: grn.Remarks || "",
       status: grn.Status || "Draft",
-      items: parsedItems.length ? parsedItems : [createEmptyItem()],
+      items: parsedItems.length ? parsedItems : [emptyItem()],
     });
-
     setEditingId(String(grn.GRNID));
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  if (
-    loadingGrns ||
-    loadingSuppliers ||
-    loadingPOs ||
-    loadingItems ||
-    loadingUoms
-  ) {
-    return <div className="p-8 text-center">Loading GRN data...</div>;
+  // ── Loading ───────────────────────────────────────────────────────────────────
+
+  if (loadingGrns || loadingSuppliers || loadingPOs || loadingItems || loadingUoms) {
+    return <div className="p-8 text-center text-muted-foreground">Loading GRN data…</div>;
   }
+
+  // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Materials", "GRN Master"]} />
 
       <div className="space-y-6">
+        {/* ── Form ─────────────────────────────────────────────────────────── */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -398,7 +355,10 @@ export default function GRN() {
           </CardHeader>
 
           <CardContent className="space-y-6">
+            {/* Header row */}
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+
+              {/* GRN Number */}
               <div>
                 <Label>GRN Number</Label>
                 <Input
@@ -406,11 +366,10 @@ export default function GRN() {
                   onChange={(e) => updateField("grnNo", e.target.value.toUpperCase())}
                   className={errors.grnNo ? "border-destructive" : ""}
                 />
-                {errors.grnNo && (
-                  <p className="mt-1 text-sm text-destructive">{errors.grnNo}</p>
-                )}
+                {errors.grnNo && <p className="mt-1 text-sm text-destructive">{errors.grnNo}</p>}
               </div>
 
+              {/* GRN Date */}
               <div>
                 <Label>GRN Date</Label>
                 <Input
@@ -420,75 +379,60 @@ export default function GRN() {
                 />
               </div>
 
+              {/* Supplier — from AccountHeadMaster WHERE LHeadType = 'S' */}
               <div>
                 <Label>Supplier</Label>
-                <Select
-                  value={formData.supplierId}
-                  onValueChange={(value) => updateField("supplierId", value)}
-                >
+                <Select value={formData.supplierId} onValueChange={(v) => updateField("supplierId", v)}>
                   <SelectTrigger className={errors.supplierId ? "border-destructive" : ""}>
                     <SelectValue placeholder="Select supplier" />
                   </SelectTrigger>
                   <SelectContent>
-                    {suppliers.map((supplier) => (
-                      <SelectItem key={supplier.value} value={supplier.value}>
-                        {supplier.label}
-                      </SelectItem>
+                    {supplierOptions.map((s) => (
+                      <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                {errors.supplierId && (
-                  <p className="mt-1 text-sm text-destructive">{errors.supplierId}</p>
+                {errors.supplierId && <p className="mt-1 text-sm text-destructive">{errors.supplierId}</p>}
+                {formData.supplierName && (
+                  <p className="mt-1 text-xs text-muted-foreground">{formData.supplierName}</p>
                 )}
               </div>
 
+              {/* Purchase Order — from dbo.PurchaseOrders */}
               <div>
                 <Label>Purchase Order</Label>
-                <Select
-                  value={formData.poId}
-                  onValueChange={(value) => updateField("poId", value)}
-                >
-                  <SelectTrigger className={errors.poId ? "border-destructive" : ""}>
+                <Select value={formData.poId} onValueChange={(v) => updateField("poId", v)}>
+                  <SelectTrigger>
                     <SelectValue placeholder="Select purchase order" />
                   </SelectTrigger>
                   <SelectContent>
-                    {pos.map((poOption) => (
-                      <SelectItem key={poOption.value} value={poOption.value}>
-                        {poOption.label}
-                      </SelectItem>
+                    {poOptions.map((po) => (
+                      <SelectItem key={po.value} value={po.value}>{po.label}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                {errors.poId && (
-                  <p className="mt-1 text-sm text-destructive">{errors.poId}</p>
-                )}
                 {formData.poNumber && (
-                  <p className="mt-1 text-sm text-muted-foreground">
-                    PO: {formData.poNumber}
-                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">PO: {formData.poNumber}</p>
                 )}
               </div>
 
+              {/* Status */}
               <div>
                 <Label>Status</Label>
-                <Select
-                  value={formData.status}
-                  onValueChange={(value) => updateField("status", value)}
-                >
+                <Select value={formData.status} onValueChange={(v) => updateField("status", v)}>
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {statusOptions.map((status) => (
-                      <SelectItem key={status} value={status}>
-                        {status}
-                      </SelectItem>
+                    {statusOptions.map((s) => (
+                      <SelectItem key={s} value={s}>{s}</SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
             </div>
 
+            {/* ── Items table ───────────────────────────────────────────────── */}
             <div>
               <div className="mb-4 flex items-center justify-between">
                 <h3 className="flex items-center gap-2 text-lg font-semibold">
@@ -501,15 +445,13 @@ export default function GRN() {
                 </Button>
               </div>
 
-              {errors.items && (
-                <p className="mb-4 text-sm text-destructive">{errors.items}</p>
-              )}
+              {errors.items && <p className="mb-3 text-sm text-destructive">{errors.items}</p>}
 
               <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="min-w-[220px]">Item</TableHead>
+                      <TableHead className="min-w-[240px]">Item (from Item Master)</TableHead>
                       <TableHead className="min-w-[110px]">Ordered Qty</TableHead>
                       <TableHead className="min-w-[120px]">Received Qty</TableHead>
                       <TableHead className="min-w-[100px]">Remaining</TableHead>
@@ -517,37 +459,39 @@ export default function GRN() {
                       <TableHead />
                     </TableRow>
                   </TableHeader>
-
                   <TableBody>
                     {formData.items.map((item, index) => (
                       <TableRow key={index}>
+
+                        {/* Item — from Item_Master_Group via /api/item-master */}
                         <TableCell>
                           <Select
                             value={item.itemId}
-                            onValueChange={(value) =>
-                              updateItemField(index, "itemId", value)
-                            }
+                            onValueChange={(v) => updateItemField(index, "itemId", v)}
                           >
-                            <SelectTrigger className="w-[220px]">
+                            <SelectTrigger className="w-[230px]">
                               <SelectValue placeholder="Select item" />
                             </SelectTrigger>
                             <SelectContent>
-                              {items.map((entry) => (
-                                <SelectItem key={entry.value} value={entry.value}>
-                                  {entry.group
-                                    ? `${entry.label} (${entry.group})`
-                                    : entry.label}
+                              {itemOptions.map((it) => (
+                                <SelectItem key={it.value} value={it.value}>
+                                  {it.label}
                                 </SelectItem>
                               ))}
                             </SelectContent>
                           </Select>
-                          {item.itemName && (
+                          {/* Show PO item description hint if item not picked yet */}
+                          {item.itemName && !item.itemId && (
                             <p className="mt-1 text-xs text-muted-foreground">
-                              {item.itemName}
+                              PO item: {item.itemName}
                             </p>
+                          )}
+                          {item.itemId && item.itemName && (
+                            <p className="mt-1 text-xs text-muted-foreground">{item.itemName}</p>
                           )}
                         </TableCell>
 
+                        {/* Ordered Qty */}
                         <TableCell>
                           <Input
                             type="number"
@@ -555,15 +499,12 @@ export default function GRN() {
                             className="w-24"
                             value={item.orderedQty || ""}
                             onChange={(e) =>
-                              updateItemField(
-                                index,
-                                "orderedQty",
-                                Number(e.target.value) || 0
-                              )
+                              updateItemField(index, "orderedQty", Number(e.target.value) || 0)
                             }
                           />
                         </TableCell>
 
+                        {/* Received Qty */}
                         <TableCell>
                           <Input
                             type="number"
@@ -572,45 +513,38 @@ export default function GRN() {
                             className="w-24"
                             value={item.receivedQty || ""}
                             onChange={(e) =>
-                              updateItemField(
-                                index,
-                                "receivedQty",
-                                Number(e.target.value) || 0
-                              )
+                              updateItemField(index, "receivedQty", Number(e.target.value) || 0)
                             }
                           />
                         </TableCell>
 
+                        {/* Remaining */}
                         <TableCell
-                          className={
-                            item.remainingQty < 0
-                              ? "font-semibold text-destructive"
-                              : "font-mono"
-                          }
+                          className={item.remainingQty < 0 ? "font-semibold text-destructive" : "font-mono"}
                         >
                           {item.remainingQty}
                         </TableCell>
 
+                        {/* UOM — from dbo.UOMMaster via /api/uom-master */}
                         <TableCell>
                           <Select
                             value={item.uom}
-                            onValueChange={(value) =>
-                              updateItemField(index, "uom", value)
-                            }
+                            onValueChange={(v) => updateItemField(index, "uom", v)}
                           >
                             <SelectTrigger className="w-[150px]">
                               <SelectValue placeholder="Select unit" />
                             </SelectTrigger>
                             <SelectContent>
-                              {uoms.map((uom) => (
-                                <SelectItem key={uom.value} value={uom.value}>
-                                  {uom.label}
+                              {uomOptions.map((u) => (
+                                <SelectItem key={u.value} value={u.value}>
+                                  {u.label}
                                 </SelectItem>
                               ))}
                             </SelectContent>
                           </Select>
                         </TableCell>
 
+                        {/* Remove row */}
                         <TableCell>
                           <Button
                             type="button"
@@ -629,6 +563,7 @@ export default function GRN() {
               </div>
             </div>
 
+            {/* Remarks */}
             <div>
               <Label>Remarks</Label>
               <Textarea
@@ -639,6 +574,7 @@ export default function GRN() {
               />
             </div>
 
+            {/* Actions */}
             <div className="flex gap-3 pt-4">
               <Button
                 onClick={onSubmit}
@@ -656,6 +592,7 @@ export default function GRN() {
           </CardContent>
         </Card>
 
+        {/* ── GRN List ─────────────────────────────────────────────────────── */}
         <Card>
           <CardHeader>
             <CardTitle>Goods Receipt Notes</CardTitle>
@@ -665,7 +602,7 @@ export default function GRN() {
               <TableHeader>
                 <TableRow>
                   <TableHead>GRN No</TableHead>
-                  <TableHead>PO</TableHead>
+                  <TableHead>Purchase Order</TableHead>
                   <TableHead>Supplier</TableHead>
                   <TableHead>Date</TableHead>
                   <TableHead>Status</TableHead>
@@ -673,36 +610,28 @@ export default function GRN() {
                   <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
-
               <TableBody>
-                {grns.map((grn: any) => {
-                  const lineItems = parseJsonArray(grn.GRNItems);
+                {(grns as any[]).map((grn: any) => {
+                  const lineItems = safeParseArray(grn.GRNItems);
                   return (
                     <TableRow key={grn.GRNID}>
                       <TableCell className="font-semibold">{grn.GRNNo}</TableCell>
                       <TableCell>{grn.PONumber || grn.POID || "—"}</TableCell>
                       <TableCell>{grn.SupplierName || grn.SupplierID || "—"}</TableCell>
                       <TableCell>
-                        {grn.GRNDate
-                          ? new Date(grn.GRNDate).toLocaleDateString()
-                          : "—"}
+                        {grn.GRNDate ? new Date(grn.GRNDate).toLocaleDateString() : "—"}
                       </TableCell>
                       <TableCell>
                         <Badge variant="secondary">{grn.Status}</Badge>
                       </TableCell>
                       <TableCell>{lineItems.length}</TableCell>
-                      <TableCell>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => onEdit(grn)}
-                        >
+                      <TableCell className="flex gap-1">
+                        <Button variant="ghost" size="sm" onClick={() => onEdit(grn)}>
                           <Edit3 className="h-4 w-4" />
                         </Button>
                         <Button
                           variant="ghost"
                           size="sm"
-                          className="ml-1"
                           onClick={() => deleteMutation.mutate(String(grn.GRNID))}
                         >
                           <Trash2 className="h-4 w-4" />
@@ -713,10 +642,9 @@ export default function GRN() {
                 })}
               </TableBody>
             </Table>
-
-            {grns.length === 0 && (
+            {(grns as any[]).length === 0 && (
               <p className="py-8 text-center text-muted-foreground">
-                No GRNs yet. Create one from a Purchase Order.
+                No GRNs yet. Create one above.
               </p>
             )}
           </CardContent>
