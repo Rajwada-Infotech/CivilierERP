@@ -21,6 +21,7 @@ import {
   type DbItem,
 } from "@/api/itemMasterApi";
 import { getItemGroups } from "@/api/itemGroupApi";
+import { getUomList } from "@/api/uomApi";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -32,7 +33,8 @@ interface HsnCode {
 // UI-facing shape (flat, easy to bind to form fields)
 interface Item {
   _id: string; // maps to M_Id
-  description: string; // maps to M_Name
+  itemName: string; // maps to M_Name (the item's actual name)
+  description: string; // maps to M_Description
   itemCode: string; // maps to M_Group (the short identity code)
   shortCode: string; // maps to M_Group as well (same field used as code)
   itemType: "Service" | "Goods" | ""; // maps to M_Type
@@ -40,46 +42,51 @@ interface Item {
   showTaxCalculated: boolean; // maps to M_IdentityCode
   taxRate: number; // derived: M_IGST ?? (M_CGST + M_SGST) ?? 0
   belongsTo: string; // maps to Parent_Id (the group UUID)
+  uomCode: string; // maps to M_UOM (UOM code from UOMMaster)
   discontinue: "active" | "discontinued"; // not in DB — kept for UI only
 }
 
 // Map a DB row → UI item
 function dbToItem(row: DbItem): Item {
+  const taxRate = row.M_IGST ?? (row.M_CGST ?? 0) + (row.M_SGST ?? 0);
   return {
     _id: row.M_Id,
-    description: row.M_Name || "",
+    itemName: row.M_Name || "",
+    description: row.M_Description || "",
     itemCode: row.M_Group || "",
     shortCode: row.M_Group || "",
     itemType: (row.M_Type as Item["itemType"]) || "",
     hsnCode: row.M_HSN || "",
-    showTaxCalculated: !!row.M_IdentityCode,
-    taxRate: row.M_IGST ?? (row.M_CGST ?? 0) + (row.M_SGST ?? 0),
+    showTaxCalculated: taxRate > 0,
+    taxRate,
     belongsTo: row.Parent_Id || "",
-    discontinue: "active", // DB has no discontinue column — default active
+    uomCode: row.M_UOM || "",
+    discontinue: "active",
   };
 }
 
 // Map form state → POST/PUT payload
 function itemToPayload(form: Omit<Item, "_id">) {
-  const cgst = form.taxRate / 2;
-  const sgst = form.taxRate / 2;
-  const igst = form.taxRate;
+  const hasTax = form.showTaxCalculated && form.taxRate > 0;
   return {
-    M_Name: form.description,
-    M_Description: form.description,
+    M_Name: form.itemName,
+    M_Description: form.description || form.itemName,
     M_Type: form.itemType || null,
     M_Group: form.shortCode || null,
     M_HSN: form.hsnCode || null,
     M_IdentityCode: form.showTaxCalculated ? 1 : 0,
-    M_CGST: form.showTaxCalculated ? cgst : null,
-    M_IGST: form.showTaxCalculated ? igst : null,
-    M_SGST: form.showTaxCalculated ? sgst : null,
+    // CK_Group_TaxNull: when no tax, send NULL (not 0) to satisfy the constraint
+    M_CGST: hasTax ? form.taxRate / 2 : null,
+    M_IGST: hasTax ? form.taxRate : null,
+    M_SGST: hasTax ? form.taxRate / 2 : null,
+    M_UOM: form.uomCode || null,
     M_BelongsTo: null,
     Parent_Id: form.belongsTo || null,
   };
 }
 
 const EMPTY_FORM: Omit<Item, "_id"> = {
+  itemName: "",
   description: "",
   itemCode: "",
   shortCode: "",
@@ -88,6 +95,7 @@ const EMPTY_FORM: Omit<Item, "_id"> = {
   showTaxCalculated: false,
   taxRate: 0,
   belongsTo: "",
+  uomCode: "",
   discontinue: "active",
 };
 
@@ -272,12 +280,27 @@ const ItemMaster: React.FC = () => {
     queryFn: getItemGroups,
   });
 
+  // Load UOM master for the UOM dropdown
+  const { data: dbUoms = [] } = useQuery({
+    queryKey: ["uom-master"],
+    queryFn: getUomList,
+  });
+
   const itemGroups = Array.isArray(dbGroups)
     ? dbGroups.map((g: any) => ({
         id: String(g.M_Id),
         description: g.M_Name || "",
         code: g.M_Group || "",
       }))
+    : [];
+
+  const uomOptions = Array.isArray(dbUoms)
+    ? dbUoms
+        .filter((u: any) => u.IsActive !== false)
+        .map((u: any) => ({
+          value: u.UOMCode,
+          label: u.Symbol ? `${u.UOMName} (${u.Symbol})` : u.UOMName,
+        }))
     : [];
 
   const data: Item[] = (Array.isArray(dbItems) ? dbItems : []).map(dbToItem);
@@ -316,7 +339,7 @@ const ItemMaster: React.FC = () => {
 
   const validate = () => {
     const errs: Record<string, boolean> = {};
-    if (!form.description.trim()) errs.description = true;
+    if (!form.itemName.trim()) errs.itemName = true;
     if (!form.shortCode.trim()) errs.shortCode = true;
     if (!form.itemType) errs.itemType = true;
     if (!form.belongsTo) errs.belongsTo = true;
@@ -413,14 +436,14 @@ const ItemMaster: React.FC = () => {
         </h2>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Description */}
-          <Field label="Description" required error={errors.description}>
+          {/* Item Name — maps directly to M_Name */}
+          <Field label="Item Name" required error={errors.itemName}>
             <input
               type="text"
-              value={form.description}
-              onChange={(e) => set("description", e.target.value)}
-              className={inputCls(errors.description)}
-              placeholder="Item description"
+              value={form.itemName}
+              onChange={(e) => set("itemName", e.target.value)}
+              className={inputCls(errors.itemName)}
+              placeholder="e.g. Cement UltraTech"
             />
           </Field>
 
@@ -434,6 +457,39 @@ const ItemMaster: React.FC = () => {
               placeholder="e.g. CEM"
               maxLength={6}
             />
+          </Field>
+
+          {/* Belongs To — Parent_Id, live from DB item groups */}
+          <Field label="Item Group (Parent)" required error={errors.belongsTo}>
+            <select
+              value={form.belongsTo}
+              onChange={(e) => set("belongsTo", e.target.value)}
+              className={inputCls(errors.belongsTo)}
+            >
+              <option value="">Select group...</option>
+              {itemGroups.map((g) => (
+                <option key={g.id} value={g.id}>
+                  {g.description}
+                  {g.code ? ` (${g.code})` : ""}
+                </option>
+              ))}
+            </select>
+          </Field>
+
+          {/* UOM — live from UOMMaster */}
+          <Field label="Unit of Measure (UOM)">
+            <select
+              value={form.uomCode}
+              onChange={(e) => set("uomCode", e.target.value)}
+              className={inputCls()}
+            >
+              <option value="">Select UOM...</option>
+              {uomOptions.map((u) => (
+                <option key={u.value} value={u.value}>
+                  {u.label}
+                </option>
+              ))}
+            </select>
           </Field>
 
           {/* Type of Item */}
@@ -458,25 +514,15 @@ const ItemMaster: React.FC = () => {
             />
           </Field>
 
-          {/* Belongs To — live from DB */}
-          <Field
-            label="Belongs To (Item Group)"
-            required
-            error={errors.belongsTo}
-          >
-            <select
-              value={form.belongsTo}
-              onChange={(e) => set("belongsTo", e.target.value)}
-              className={inputCls(errors.belongsTo)}
-            >
-              <option value="">Select group...</option>
-              {itemGroups.map((g) => (
-                <option key={g.id} value={g.id}>
-                  {g.description}
-                  {g.code ? ` (${g.code})` : ""}
-                </option>
-              ))}
-            </select>
+          {/* Description — optional additional notes */}
+          <Field label="Description">
+            <input
+              type="text"
+              value={form.description}
+              onChange={(e) => set("description", e.target.value)}
+              className={inputCls()}
+              placeholder="Additional description (optional)"
+            />
           </Field>
 
           {/* Show Tax Calculated */}
@@ -581,25 +627,27 @@ const ItemMaster: React.FC = () => {
           </div>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-sm min-w-[700px]">
+          <table className="w-full text-sm min-w-[900px]">
             <colgroup>
-              <col className="w-auto" /> {/* Description */}
+              <col className="w-auto" /> {/* Item Name */}
               <col className="w-[6rem]" /> {/* Short Code */}
-              <col className="w-[6rem]" /> {/* Type */}
-              <col className="w-[7rem]" /> {/* HSN */}
               <col className="w-[10rem]" />
               {/* Group */}
+              <col className="w-[6rem]" /> {/* UOM */}
+              <col className="w-[6rem]" /> {/* Type */}
+              <col className="w-[7rem]" /> {/* HSN */}
               <col className="w-[4rem]" /> {/* Tax */}
               <col className="w-[5rem]" /> {/* Actions */}
             </colgroup>
             <thead>
               <tr className="border-b border-border">
                 {[
-                  "Description",
+                  "Item Name",
                   "Short Code",
+                  "Group",
+                  "UOM",
                   "Type",
                   "HSN",
-                  "Group",
                   "Tax",
                   "",
                 ].map((h) => (
@@ -616,7 +664,7 @@ const ItemMaster: React.FC = () => {
               {filtered.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={7}
+                    colSpan={8}
                     className="px-4 py-8 text-center text-muted-foreground text-sm"
                   >
                     {search
@@ -629,24 +677,45 @@ const ItemMaster: React.FC = () => {
                   const groupName =
                     itemGroups.find((g) => g.id === row.belongsTo)
                       ?.description || row.belongsTo;
+                  const uomLabel =
+                    uomOptions.find((u) => u.value === row.uomCode)?.label ||
+                    row.uomCode;
                   return (
                     <tr
                       key={row._id}
                       className="hover:bg-muted/30 transition-colors"
                     >
-                      <td className="px-4 py-3 text-foreground max-w-[200px] truncate">
-                        {row.description}
+                      {/* Item Name */}
+                      <td className="px-4 py-3 text-foreground max-w-[200px] truncate font-medium">
+                        {row.itemName || "—"}
                       </td>
+                      {/* Short Code */}
                       <td className="px-4 py-3 font-mono text-xs">
-                        {row.shortCode}
+                        {row.shortCode || "—"}
                       </td>
+                      {/* Group */}
+                      <td className="px-4 py-3 text-muted-foreground text-xs">
+                        {groupName || "—"}
+                      </td>
+                      {/* UOM */}
+                      <td className="px-4 py-3">
+                        {uomLabel ? (
+                          <span className="px-2 py-0.5 rounded-full text-xs font-heading bg-muted text-foreground whitespace-nowrap">
+                            {uomLabel}
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
+                      {/* Type */}
                       <td className="px-4 py-3">
                         <span
                           className={`px-2 py-0.5 rounded-full text-xs font-heading ${row.itemType === "Service" ? "bg-blue-500/10 text-blue-400" : "bg-orange-500/10 text-orange-400"}`}
                         >
-                          {row.itemType}
+                          {row.itemType || "—"}
                         </span>
                       </td>
+                      {/* HSN */}
                       <td className="px-4 py-3 whitespace-nowrap">
                         {row.hsnCode ? (
                           <span className="font-mono text-xs text-primary">
@@ -656,9 +725,7 @@ const ItemMaster: React.FC = () => {
                           <span className="text-muted-foreground">—</span>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground text-xs">
-                        {groupName || "—"}
-                      </td>
+                      {/* Tax */}
                       <td className="px-4 py-3">
                         {row.showTaxCalculated ? (
                           <span className="px-2 py-0.5 rounded-full text-xs font-mono bg-primary/10 text-primary whitespace-nowrap">
@@ -670,6 +737,7 @@ const ItemMaster: React.FC = () => {
                           </span>
                         )}
                       </td>
+                      {/* Actions */}
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-2">
                           {deleteConfirmId === row._id ? (

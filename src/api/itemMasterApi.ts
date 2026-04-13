@@ -19,6 +19,7 @@ export interface DbItem {
   M_CGST: number | null;
   M_IGST: number | null;
   M_SGST: number | null;
+  M_UOM: string | null; // UOM code from UOMMaster
   M_CreatedBy: string | null;
   M_CreatedDate: string;
   M_ApprovedBy: string | null;

@@ -38,6 +38,7 @@ import {
   RefreshCw,
   CalendarClock,
   ShoppingCart,
+  TrendingUp,
 } from "lucide-react";
 
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -856,19 +857,23 @@ export const MobileNav: React.FC = () => {
               </div>
 
               {/* Module Switcher */}
-              <div className="px-5 pt-4 pb-3">
-                <div className="flex gap-2 overflow-x-auto scrollbar-none pb-1 -mx-1 px-1">
+              <div className="px-4 pt-4 pb-4 border-b border-border">
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-2.5">
+                  Module
+                </p>
+                <div className="grid grid-cols-2 gap-2">
                   {[
                     {
                       label: "Finance",
                       module: "finance",
                       active: activeModule === "finance" && !isAdminPage,
-                      color:
-                        "bg-primary text-primary-foreground border-primary",
+                      icon: TrendingUp,
+                      activeClass:
+                        "bg-primary/10 border-primary/40 text-primary",
+                      dotClass: "bg-primary",
                       onClick: () => {
                         setActiveModule("finance");
-                        if (activeModule !== "finance")
-                          navigate(MODULE_DASHBOARD_ROUTES.finance);
+                        navigate(MODULE_DASHBOARD_ROUTES.finance);
                         setOpen(false);
                       },
                     },
@@ -876,8 +881,10 @@ export const MobileNav: React.FC = () => {
                       label: "Material",
                       module: "material",
                       active: activeModule === "material" && !isAdminPage,
-                      color:
-                        "bg-emerald-500 text-emerald-50 border-emerald-500",
+                      icon: Package,
+                      activeClass:
+                        "bg-emerald-500/10 border-emerald-500/40 text-emerald-600",
+                      dotClass: "bg-emerald-500",
                       onClick: () => {
                         setActiveModule("material");
                         navigate(MODULE_DASHBOARD_ROUTES.material);
@@ -888,7 +895,10 @@ export const MobileNav: React.FC = () => {
                       label: "Follow Up",
                       module: "followup",
                       active: activeModule === "followup" && !isAdminPage,
-                      color: "bg-violet-500 text-violet-50 border-violet-500",
+                      icon: Calendar,
+                      activeClass:
+                        "bg-indigo-500/10 border-indigo-500/40 text-indigo-600",
+                      dotClass: "bg-indigo-500",
                       onClick: () => {
                         setActiveModule("followup");
                         navigate(MODULE_DASHBOARD_ROUTES.followup);
@@ -901,7 +911,10 @@ export const MobileNav: React.FC = () => {
                             label: "Admin",
                             module: "admin",
                             active: isAdminPage,
-                            color: "bg-blue-500 text-white border-blue-500",
+                            icon: ShieldCheck,
+                            activeClass:
+                              "bg-blue-500/10 border-blue-500/40 text-blue-600",
+                            dotClass: "bg-blue-500",
                             onClick: () => {
                               navigate("/admin/dashboard");
                               setOpen(false);
@@ -909,25 +922,48 @@ export const MobileNav: React.FC = () => {
                           },
                         ]
                       : []),
-                  ].map((btn) => (
-                    <button
-                      key={btn.module}
-                      onClick={btn.onClick}
-                      className={`flex-shrink-0 py-2 px-4 rounded-full border font-medium text-sm transition-all ${
-                        btn.active
-                          ? btn.color
-                          : "border-border hover:bg-muted text-foreground"
-                      }`}
-                    >
-                      {btn.label}
-                    </button>
-                  ))}
+                  ].map((btn) => {
+                    const Icon = btn.icon;
+                    return (
+                      <button
+                        key={btn.module}
+                        onClick={btn.onClick}
+                        className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border transition-all text-left ${
+                          btn.active
+                            ? btn.activeClass
+                            : "border-border hover:bg-muted text-foreground"
+                        }`}
+                      >
+                        <Icon
+                          size={15}
+                          className={
+                            btn.active ? "opacity-100" : "text-muted-foreground"
+                          }
+                        />
+                        <span className="text-sm font-heading font-medium">
+                          {btn.label}
+                        </span>
+                        {btn.active && (
+                          <span
+                            className={`ml-auto w-1.5 h-1.5 rounded-full flex-shrink-0 ${btn.dotClass}`}
+                          />
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
+              </div>
+
+              {/* Navigation */}
+              <div className="px-4 pt-3">
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-2.5">
+                  Navigation
+                </p>
               </div>
 
               {/* Setup Section */}
               {setupConfig.available && (
-                <div className="px-5 pb-1">
+                <div className="px-4 pb-1">
                   <div
                     role="button"
                     tabIndex={0}
@@ -987,7 +1023,7 @@ export const MobileNav: React.FC = () => {
               )}
 
               {/* ── Reminders Section ──────────────────────────────── */}
-              <div className="px-5 pb-2">
+              <div className="px-4 pb-2">
                 <div
                   role="button"
                   tabIndex={0}
@@ -1134,7 +1170,7 @@ export const MobileNav: React.FC = () => {
               </div>
 
               {/* ── Reports + Widgets quick links ───────────────────── */}
-              <div className="px-5 pb-1 flex gap-2">
+              <div className="px-4 pb-1 flex gap-2">
                 <button
                   onClick={() => go("/reports")}
                   className={`flex-1 flex items-center gap-2 px-4 py-3 rounded-2xl border text-sm font-heading transition-all
@@ -1168,7 +1204,7 @@ export const MobileNav: React.FC = () => {
               </div>
 
               {/* Navigation Items */}
-              <div className="px-5 space-y-1">
+              <div className="px-4 space-y-1">
                 {itemsToRender.map((item) => {
                   const openState = groupStates[item.label] ?? false;
                   const active = isActive(item.path, item.children);
