@@ -126,9 +126,11 @@ export const getPurchaseOrders = async (): Promise<PurchaseOrder[]> => {
   return Array.isArray(data) ? data : [];
 };
 
-// Items (from Item_Master_Group)
+// Items (from Item_Master_Group) — only M_IdentityCode=1 records (actual items, not groups)
 export const getItems = async (): Promise<Item[]> => {
-  const res = await fetch("/api/item-master", { headers: getAuthHeaders() });
+  const res = await fetch("/api/item-master?identityCode=1", {
+    headers: getAuthHeaders(),
+  });
   if (!res.ok) throw new Error("Failed to fetch Items");
   const data = await res.json();
   return Array.isArray(data) ? data : [];
