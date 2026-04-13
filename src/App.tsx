@@ -130,6 +130,7 @@ const DebitNoteMaster = lazy(() => import("./pages/masters/DebitNoteMaster"));
 const BillingTermsMaster = lazy(
   () => import("./pages/masters/BillingTermsMaster"),
 );
+const RoleMaster = lazy(() => import("./pages/masters/RoleMaster"));
 const TCMaster = lazy(() => import("./pages/material/T&CMaster"));
 const UnitOfMeasurementMaster = lazy(
   () => import("./pages/material/UnitOfMeasurementMaster"),
@@ -589,13 +590,21 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/masters/role-master"
+        element={
+          <ProtectedRoute>
+            <RoleMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/masters/unit-measurement"
         element={
           <ProtectedRoute>
             <UnitOfMeasurementMaster />
           </ProtectedRoute>
         }
-      />
+      /> 
 
       {/* USER */}
       <Route

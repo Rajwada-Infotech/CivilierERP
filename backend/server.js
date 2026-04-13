@@ -201,6 +201,10 @@ app.use(async (req, res, next) => {
       require("./routes/userActivity"),
     );
 
+    // Role Master API
+    app.use("/api/roles", require("./routes/roles"));
+    
+
     // System metrics endpoint
     app.get("/api/system/metrics", authMiddleware, async (req, res) => {
       const metrics = await getSystemMetrics();
