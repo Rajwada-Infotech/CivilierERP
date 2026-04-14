@@ -2,28 +2,18 @@ import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Plus, Trash2, Edit3, Save, X, Truck } from "lucide-react";
+  Truck,
+  Package,
+  Plus,
+  Trash2,
+  Edit3,
+  Save,
+  X,
+  Search,
+  Calendar,
+  FileText,
+} from "lucide-react";
 import * as grnApi from "@/api/grnApi";
 import type {
   GRNFormDataPayload,
@@ -34,21 +24,9 @@ import type {
   UOM,
 } from "@/api/grnApi";
 
-interface GRNFormData {
-  grnNo: string;
-  grnDate: string;
-  supplierId: string;
-  supplierName: string;
-  poId: string;
-  poNumber: string;
-  remarks: string;
-  status: "Draft" | "Partially Received" | "Fully Received";
-  items: GRNItemLine[];
-}
-
 const statusOptions = ["Draft", "Partially Received", "Fully Received"] as const;
 
-const emptyItem = (): GRNItemLine => ({
+const createEmptyItem = (): GRNItemLine => ({
   itemId: "",
   itemName: "",
   orderedQty: 0,
@@ -57,91 +35,105 @@ const emptyItem = (): GRNItemLine => ({
   uom: "",
 });
 
-const genGrnNo = () => {
-  const d = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-  return `GRN-MAT-${d}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
+const generateGrnNo = () => {
+  const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+  return `GRN-${today}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
 };
 
-const safeParseArray = <T,>(val: unknown): T[] => {
+const parseJsonArray = <T,>(val: unknown): T[] => {
   if (Array.isArray(val)) return val as T[];
   if (typeof val !== "string" || !val.trim()) return [];
   try {
-    const p = JSON.parse(val);
-    return Array.isArray(p) ? (p as T[]) : [];
+    const parsed = JSON.parse(val);
+    return Array.isArray(parsed) ? (parsed as T[]) : [];
   } catch {
     return [];
   }
 };
 
+const inp =
+  "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground placeholder:text-muted-foreground/50";
+
 export default function GRN() {
   const queryClient = useQueryClient();
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [formData, setFormData] = useState<GRNFormData>({
-    grnNo: genGrnNo(),
+  const [search, setSearch] = useState("");
+
+  const [formData, setFormData] = useState({
+    grnNo: generateGrnNo(),
     grnDate: new Date().toISOString().slice(0, 10),
     supplierId: "",
     supplierName: "",
     poId: "",
     poNumber: "",
     remarks: "",
-    status: "Draft",
-    items: [emptyItem()],
+    status: "Draft" as const,
+    items: [createEmptyItem()],
   });
+
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   // ── Queries ──────────────────────────────────────────────────────────────────
-
   const { data: grns = [], isLoading: loadingGrns } = useQuery({
     queryKey: ["grns"],
     queryFn: grnApi.getGRNs,
   });
 
-  const { data: suppliersData = [], isLoading: loadingSuppliers } = useQuery<Supplier[]>({
-    queryKey: ["suppliers-grn"],
+  const { data: suppliersData = [] } = useQuery({
+    queryKey: ["suppliers"],
     queryFn: grnApi.getSuppliers,
   });
 
-  const { data: posData = [], isLoading: loadingPOs } = useQuery<PurchaseOrder[]>({
-    queryKey: ["purchaseOrders-grn"],
+  const { data: posData = [] } = useQuery({
+    queryKey: ["purchaseOrders"],
     queryFn: grnApi.getPurchaseOrders,
   });
 
-  const { data: itemsData = [], isLoading: loadingItems } = useQuery<Item[]>({
-    queryKey: ["itemMaster-grn"],
+  const { data: itemsData = [] } = useQuery({
+    queryKey: ["itemMaster"],
     queryFn: grnApi.getItems,
   });
 
-  const { data: uomsData = [], isLoading: loadingUoms } = useQuery<UOM[]>({
-    queryKey: ["uomMaster-grn"],
+  const { data: uomsData = [] } = useQuery({
+    queryKey: ["uomMaster"],
     queryFn: grnApi.getUoms,
   });
 
-  // ── Derived option lists ──────────────────────────────────────────────────────
-
-  const supplierOptions = suppliersData.map((s) => ({
+  // ── Mapped Options ───────────────────────────────────────────────────────────
+  const suppliers = suppliersData.map((s: Supplier) => ({
     value: String(s.LHeadId),
     label: s.LHeadName,
   }));
 
-  const poOptions = posData.map((po) => ({
+  const pos = posData.map((po: PurchaseOrder) => ({
     value: String(po.PurchaseOrderID),
     label: po.PurchaseOrderNo,
   }));
 
-  // Items: M_Id (UUID) as value, M_Name as label
-  const itemOptions = itemsData.map((i) => ({
-    value: i.M_Id,
-    label: i.ParentGroupName ? `${i.M_Name} (${i.ParentGroupName})` : i.M_Name,
+  const items = itemsData.map((item: Item) => ({
+    value: String(item.M_Id),
+    label: item.M_Name,
+    group: item.ParentGroupName || "",
   }));
 
-  // UOMs: UOMCode as value, UOMName + Symbol as label
-  const uomOptions = uomsData.map((u) => ({
-    value: u.UOMCode,
-    label: u.Symbol ? `${u.UOMName} (${u.Symbol})` : u.UOMName,
-  }));
+  const uoms = uomsData
+    .filter((u: UOM) => u.IsActive !== false)
+    .map((uom: UOM) => ({
+      value: uom.UOMCode,
+      label: uom.Symbol ? `${uom.UOMName} (${uom.Symbol})` : uom.UOMName,
+    }));
 
-  // ── Mutations ─────────────────────────────────────────────────────────────────
+  const filteredGrns = grns.filter((grn: any) => {
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (
+      grn.GRNNo?.toLowerCase().includes(q) ||
+      grn.PONumber?.toLowerCase().includes(q) ||
+      grn.SupplierName?.toLowerCase().includes(q)
+    );
+  });
 
+  // ── Mutations ────────────────────────────────────────────────────────────────
   const createMutation = useMutation({
     mutationFn: grnApi.addGRN,
     onSuccess: () => {
@@ -149,7 +141,7 @@ export default function GRN() {
       resetForm();
       toast.success("GRN created successfully");
     },
-    onError: (err: Error) => toast.error(err.message || "Creation failed"),
+    onError: (err: any) => toast.error(err.message || "Failed to create GRN"),
   });
 
   const updateMutation = useMutation({
@@ -159,23 +151,22 @@ export default function GRN() {
       resetForm();
       toast.success("GRN updated successfully");
     },
-    onError: (err: Error) => toast.error(err.message || "Update failed"),
+    onError: (err: any) => toast.error(err.message || "Failed to update GRN"),
   });
 
   const deleteMutation = useMutation({
     mutationFn: grnApi.deleteGRN,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["grns"] });
-      toast.success("GRN deleted");
+      toast.success("GRN deleted successfully");
     },
-    onError: (err: Error) => toast.error(err.message || "Delete failed"),
+    onError: (err: any) => toast.error(err.message || "Failed to delete GRN"),
   });
 
-  // ── Helpers ───────────────────────────────────────────────────────────────────
-
+  // ── Helpers ──────────────────────────────────────────────────────────────────
   const resetForm = () => {
     setFormData({
-      grnNo: genGrnNo(),
+      grnNo: generateGrnNo(),
       grnDate: new Date().toISOString().slice(0, 10),
       supplierId: "",
       supplierName: "",
@@ -183,32 +174,30 @@ export default function GRN() {
       poNumber: "",
       remarks: "",
       status: "Draft",
-      items: [emptyItem()],
+      items: [createEmptyItem()],
     });
     setEditingId(null);
     setErrors({});
   };
 
   const validate = () => {
-    const e: Record<string, string> = {};
-    if (!formData.grnNo) e.grnNo = "Required";
-    if (!formData.supplierId) e.supplierId = "Select a supplier";
-    if (
-      formData.items.some(
-        (item) => !item.itemId || item.receivedQty <= 0
-      )
-    ) {
-      e.items = "Each row needs an item and received quantity > 0";
+    const newErrors: Record<string, string> = {};
+    if (!formData.grnNo.trim()) newErrors.grnNo = "GRN Number is required";
+    if (!formData.supplierId) newErrors.supplierId = "Supplier is required";
+    if (!formData.poId) newErrors.poId = "Purchase Order is required";
+    if (formData.items.some((i) => !i.itemId || !i.uom || i.receivedQty <= 0)) {
+      newErrors.items = "Please complete all item details correctly";
     }
-    setErrors(e);
-    return Object.keys(e).length === 0;
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
   };
 
   const onSubmit = () => {
     if (!validate()) {
-      toast.error("Please fix errors before saving");
+      toast.error("Please fix the errors before saving");
       return;
     }
+
     const payload: GRNFormDataPayload = {
       grnNo: formData.grnNo,
       grnDate: formData.grnDate,
@@ -220,6 +209,7 @@ export default function GRN() {
       supplierName: formData.supplierName,
       poNumber: formData.poNumber,
     };
+
     if (editingId) {
       updateMutation.mutate(payload);
     } else {
@@ -227,49 +217,65 @@ export default function GRN() {
     }
   };
 
-  // ── Field handlers ────────────────────────────────────────────────────────────
-
-  const updateField = (field: keyof GRNFormData, value: string) => {
-    // Supplier selected — resolve name
+  // ── Field & Item Handlers ────────────────────────────────────────────────────
+  const updateField = (field: keyof typeof formData, value: any) => {
     if (field === "supplierId") {
-      const found = suppliersData.find((s) => String(s.LHeadId) === value);
+      const supplier = suppliersData.find((s: Supplier) => String(s.LHeadId) === value);
       setFormData((prev) => ({
         ...prev,
         supplierId: value,
-        supplierName: found?.LHeadName || "",
+        supplierName: supplier?.LHeadName || "",
       }));
       return;
     }
 
-    // PO selected — auto-fill supplier + one item row from PO columns
-    // dbo.PurchaseOrders has: ItemDescription, Quantity, Unit per row
     if (field === "poId") {
-      const po = posData.find((p) => String(p.PurchaseOrderID) === value);
+      const po = posData.find((p: PurchaseOrder) => String(p.PurchaseOrderID) === String(value));
       if (!po) {
-        setFormData((prev) => ({ ...prev, poId: value }));
+        setFormData((prev) => ({ ...prev, poId: String(value) }));
         return;
       }
 
-      // Resolve supplier from PO
-      const supplier = suppliersData.find((s) => s.LHeadId === po.SupplierID);
+      // Auto-populate logic (best from dev branch)
+      let autoItemId = "";
+      let autoItemName = po.ItemDescription || "";
+      let autoUom = po.Unit || "";
 
-      // Build one item row from PO's ItemDescription / Quantity / Unit
-      const autoItem: GRNItemLine = {
-        itemId: "",          // user must pick from item-master dropdown
-        itemName: po.ItemDescription || "",
-        orderedQty: Number(po.Quantity) || 0,
-        receivedQty: 0,
-        remainingQty: Number(po.Quantity) || 0,
-        uom: po.Unit || "",  // pre-fill unit from PO.Unit column
-      };
+      const matchedItem = itemsData.find(
+        (it: Item) => it.M_Name.trim().toLowerCase() === po.ItemDescription?.trim().toLowerCase()
+      );
+      if (matchedItem) {
+        autoItemId = String(matchedItem.M_Id);
+        autoItemName = matchedItem.M_Name;
+      }
+
+      const matchedUom = uomsData.find(
+        (u: UOM) =>
+          u.UOMCode.trim().toLowerCase() === po.Unit?.trim().toLowerCase() ||
+          u.UOMName.trim().toLowerCase() === po.Unit?.trim().toLowerCase()
+      );
+      if (matchedUom) autoUom = matchedUom.UOMCode;
+
+      const mappedItems: GRNItemLine[] = po.ItemDescription
+        ? [
+            {
+              itemId: autoItemId,
+              itemName: autoItemName,
+              orderedQty: Number(po.Quantity || 0),
+              receivedQty: 0,
+              remainingQty: Number(po.Quantity || 0),
+              uom: autoUom,
+            },
+          ]
+        : [createEmptyItem()];
 
       setFormData((prev) => ({
         ...prev,
-        poId: value,
-        poNumber: po.PurchaseOrderNo,
-        supplierId: String(po.SupplierID),
-        supplierName: supplier?.LHeadName || po.SupplierName || "",
-        items: [autoItem],
+        poId: String(value),
+        poNumber: po.PurchaseOrderNo || "",
+        supplierId: po.SupplierID ? String(po.SupplierID) : prev.supplierId,
+        supplierName: po.SupplierName || prev.supplierName,
+        items: mappedItems,
       }));
       return;
     }
@@ -278,43 +284,42 @@ export default function GRN() {
   };
 
   const addItem = () => {
-    setFormData((prev) => ({ ...prev, items: [...prev.items, emptyItem()] }));
+    setFormData((prev) => ({ ...prev, items: [...prev.items, createEmptyItem()] }));
   };
 
   const removeItem = (index: number) => {
     setFormData((prev) => ({
       ...prev,
-      items: prev.items.length > 1
-        ? prev.items.filter((_, i) => i !== index)
-        : [emptyItem()],
+      items: prev.items.length > 1 ? prev.items.filter((_, i) => i !== index) : [createEmptyItem()],
     }));
   };
 
-  const updateItemField = (index: number, field: keyof GRNItemLine, value: string | number) => {
+  const updateItemField = (index: number, field: keyof GRNItemLine, value: any) => {
     setFormData((prev) => {
-      const next = [...prev.items];
-      const row = { ...next[index], [field]: value };
+      const nextItems = [...prev.items];
+      const current = { ...nextItems[index], [field]: value };
 
       if (field === "itemId") {
-        const found = itemsData.find((i) => i.M_Id === value);
-        row.itemName = found?.M_Name || "";
+        const matched = itemsData.find((it: Item) => String(it.M_Id) === String(value));
+        current.itemName = matched?.M_Name || current.itemName || "";
       }
 
-      row.orderedQty = Number(row.orderedQty) || 0;
-      row.receivedQty = Number(row.receivedQty) || 0;
-      row.remainingQty = row.orderedQty - row.receivedQty;
-      next[index] = row;
-      return { ...prev, items: next };
+      current.orderedQty = Number(current.orderedQty) || 0;
+      current.receivedQty = Number(current.receivedQty) || 0;
+      current.remainingQty = current.orderedQty - current.receivedQty;
+
+      nextItems[index] = current;
+      return { ...prev, items: nextItems };
     });
   };
 
   const onEdit = (grn: any) => {
-    const parsedItems = safeParseArray<GRNItemLine>(grn.GRNItems).map((item) => ({
-      ...emptyItem(),
+    const parsedItems = parseJsonArray<GRNItemLine>(grn.GRNItems).map((item) => ({
+      ...createEmptyItem(),
       ...item,
       orderedQty: Number(item.orderedQty || 0),
       receivedQty: Number(item.receivedQty || 0),
-      remainingQty: Number(item.orderedQty || 0) - Number(item.receivedQty || 0),
+      remainingQty: Number(item.remainingQty || 0),
     }));
 
     setFormData({
@@ -325,330 +330,331 @@ export default function GRN() {
       poId: String(grn.POID || ""),
       poNumber: grn.PONumber || "",
       remarks: grn.Remarks || "",
-      status: grn.Status || "Draft",
-      items: parsedItems.length ? parsedItems : [emptyItem()],
+      status: (grn.Status as any) || "Draft",
+      items: parsedItems.length ? parsedItems : [createEmptyItem()],
     });
+
     setEditingId(String(grn.GRNID));
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  // ── Loading ───────────────────────────────────────────────────────────────────
-
-  if (loadingGrns || loadingSuppliers || loadingPOs || loadingItems || loadingUoms) {
-    return <div className="p-8 text-center text-muted-foreground">Loading GRN data…</div>;
+  if (loadingGrns) {
+    return <div className="p-6 text-muted-foreground">Loading GRNs...</div>;
   }
-
-  // ── Render ────────────────────────────────────────────────────────────────────
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "Materials", "GRN Master"]} />
+      <Breadcrumbs items={["Dashboard", "Materials", "GRN"]} />
+      <h1 className="text-xl font-heading font-bold text-foreground mb-6">
+        Goods Receipt Note (GRN)
+      </h1>
 
       <div className="space-y-6">
-        {/* ── Form ─────────────────────────────────────────────────────────── */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              {editingId ? <Edit3 className="h-5 w-5" /> : <Truck className="h-5 w-5" />}
-              {editingId ? "Edit GRN" : "New Goods Receipt Note"}
-            </CardTitle>
-          </CardHeader>
+        {/* Form Card */}
+        <div className="rounded-xl bg-card border border-border shadow-sm overflow-hidden">
+          <div className="flex items-center justify-between px-6 py-4 border-b border-border bg-card/60">
+            <h2 className="font-heading font-semibold flex items-center gap-2">
+              {editingId ? <Edit3 size={18} /> : <Truck size={18} />}
+              {editingId ? "Edit Goods Receipt Note" : "New Goods Receipt Note"}
+            </h2>
+            {editingId && (
+              <span className="text-xs px-3 py-1 rounded-full bg-primary/10 text-primary border border-primary/20">
+                Editing Mode
+              </span>
+            )}
+          </div>
 
-          <CardContent className="space-y-6">
-            {/* Header row */}
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-
-              {/* GRN Number */}
+          <div className="p-6 space-y-6">
+            {/* Header Fields */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
               <div>
-                <Label>GRN Number</Label>
-                <Input
-                  value={formData.grnNo}
-                  onChange={(e) => updateField("grnNo", e.target.value.toUpperCase())}
-                  className={errors.grnNo ? "border-destructive" : ""}
-                />
-                {errors.grnNo && <p className="mt-1 text-sm text-destructive">{errors.grnNo}</p>}
+                <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  GRN Number <span className="text-destructive">*</span>
+                </label>
+                <div className="relative">
+                  <FileText size={15} className="absolute left-3 top-3 text-muted-foreground" />
+                  <input
+                    value={formData.grnNo}
+                    onChange={(e) => updateField("grnNo", e.target.value.toUpperCase())}
+                    className={`${inp} pl-10`}
+                  />
+                </div>
+                {errors.grnNo && <p className="text-destructive text-sm mt-1">{errors.grnNo}</p>}
               </div>
 
-              {/* GRN Date */}
               <div>
-                <Label>GRN Date</Label>
-                <Input
-                  type="date"
-                  value={formData.grnDate}
-                  onChange={(e) => updateField("grnDate", e.target.value)}
-                />
+                <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  GRN Date
+                </label>
+                <div className="relative">
+                  <Calendar size={15} className="absolute left-3 top-3 text-muted-foreground" />
+                  <input
+                    type="date"
+                    value={formData.grnDate}
+                    onChange={(e) => updateField("grnDate", e.target.value)}
+                    className={`${inp} pl-10`}
+                  />
+                </div>
               </div>
 
-              {/* Supplier — from AccountHeadMaster WHERE LHeadType = 'S' */}
               <div>
-                <Label>Supplier</Label>
-                <Select value={formData.supplierId} onValueChange={(v) => updateField("supplierId", v)}>
-                  <SelectTrigger className={errors.supplierId ? "border-destructive" : ""}>
-                    <SelectValue placeholder="Select supplier" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {supplierOptions.map((s) => (
-                      <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {errors.supplierId && <p className="mt-1 text-sm text-destructive">{errors.supplierId}</p>}
-                {formData.supplierName && (
-                  <p className="mt-1 text-xs text-muted-foreground">{formData.supplierName}</p>
-                )}
+                <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  Supplier <span className="text-destructive">*</span>
+                </label>
+                <select
+                  value={formData.supplierId}
+                  onChange={(e) => updateField("supplierId", e.target.value)}
+                  className={inp}
+                >
+                  <option value="">Select Supplier...</option>
+                  {suppliers.map((s) => (
+                    <option key={s.value} value={s.value}>
+                      {s.label}
+                    </option>
+                  ))}
+                </select>
+                {errors.supplierId && <p className="text-destructive text-sm mt-1">{errors.supplierId}</p>}
               </div>
 
-              {/* Purchase Order — from dbo.PurchaseOrders */}
               <div>
-                <Label>Purchase Order</Label>
-                <Select value={formData.poId} onValueChange={(v) => updateField("poId", v)}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select purchase order" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {poOptions.map((po) => (
-                      <SelectItem key={po.value} value={po.value}>{po.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {formData.poNumber && (
-                  <p className="mt-1 text-xs text-muted-foreground">PO: {formData.poNumber}</p>
-                )}
+                <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  Purchase Order <span className="text-destructive">*</span>
+                </label>
+                <select
+                  value={formData.poId}
+                  onChange={(e) => updateField("poId", e.target.value)}
+                  className={inp}
+                >
+                  <option value="">Select Purchase Order...</option>
+                  {pos.map((po) => (
+                    <option key={po.value} value={po.value}>
+                      {po.label}
+                    </option>
+                  ))}
+                </select>
+                {formData.poNumber && <p className="text-xs text-muted-foreground mt-1">PO: {formData.poNumber}</p>}
+                {errors.poId && <p className="text-destructive text-sm mt-1">{errors.poId}</p>}
               </div>
 
-              {/* Status */}
               <div>
-                <Label>Status</Label>
-                <Select value={formData.status} onValueChange={(v) => updateField("status", v)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {statusOptions.map((s) => (
-                      <SelectItem key={s} value={s}>{s}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  Status
+                </label>
+                <select
+                  value={formData.status}
+                  onChange={(e) => updateField("status", e.target.value)}
+                  className={inp}
+                >
+                  {statusOptions.map((st) => (
+                    <option key={st} value={st}>
+                      {st}
+                    </option>
+                  ))}
+                </select>
               </div>
             </div>
 
-            {/* ── Items table ───────────────────────────────────────────────── */}
+            {/* Items Table */}
             <div>
-              <div className="mb-4 flex items-center justify-between">
-                <h3 className="flex items-center gap-2 text-lg font-semibold">
-                  <Truck className="h-5 w-5" />
-                  Received Items
+              <div className="flex justify-between items-center mb-3">
+                <h3 className="font-heading font-semibold text-sm flex items-center gap-2">
+                  <Package size={17} /> Received Items
                 </h3>
-                <Button type="button" variant="outline" size="sm" onClick={addItem}>
-                  <Plus className="mr-1 h-4 w-4" />
-                  Add Item
-                </Button>
+                <button
+                  onClick={addItem}
+                  className="flex items-center gap-1.5 text-primary hover:bg-primary/10 px-4 py-2 rounded-lg transition-colors text-sm"
+                >
+                  <Plus size={16} /> Add Item
+                </button>
               </div>
 
-              {errors.items && <p className="mb-3 text-sm text-destructive">{errors.items}</p>}
+              {errors.items && <p className="text-destructive text-sm mb-3">{errors.items}</p>}
 
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="min-w-[240px]">Item (from Item Master)</TableHead>
-                      <TableHead className="min-w-[110px]">Ordered Qty</TableHead>
-                      <TableHead className="min-w-[120px]">Received Qty</TableHead>
-                      <TableHead className="min-w-[100px]">Remaining</TableHead>
-                      <TableHead className="min-w-[160px]">Unit (UOM)</TableHead>
-                      <TableHead />
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {formData.items.map((item, index) => (
-                      <TableRow key={index}>
-
-                        {/* Item — from Item_Master_Group via /api/item-master */}
-                        <TableCell>
-                          <Select
+              <div className="border border-border rounded-xl overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-muted/50">
+                      <th className="px-4 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">Item</th>
+                      <th className="px-4 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">Ordered</th>
+                      <th className="px-4 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">Received</th>
+                      <th className="px-4 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">Remaining</th>
+                      <th className="px-4 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">UOM</th>
+                      <th className="w-12"></th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border">
+                    {formData.items.map((item, idx) => (
+                      <tr key={idx}>
+                        <td className="p-3">
+                          <select
                             value={item.itemId}
-                            onValueChange={(v) => updateItemField(index, "itemId", v)}
+                            onChange={(e) => updateItemField(idx, "itemId", e.target.value)}
+                            className={inp}
                           >
-                            <SelectTrigger className="w-[230px]">
-                              <SelectValue placeholder="Select item" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {itemOptions.map((it) => (
-                                <SelectItem key={it.value} value={it.value}>
-                                  {it.label}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          {/* Show PO item description hint if item not picked yet */}
-                          {item.itemName && !item.itemId && (
-                            <p className="mt-1 text-xs text-muted-foreground">
-                              PO item: {item.itemName}
-                            </p>
-                          )}
-                          {item.itemId && item.itemName && (
-                            <p className="mt-1 text-xs text-muted-foreground">{item.itemName}</p>
-                          )}
-                        </TableCell>
-
-                        {/* Ordered Qty */}
-                        <TableCell>
-                          <Input
+                            <option value="">Select Item</option>
+                            {items.map((it) => (
+                              <option key={it.value} value={it.value}>
+                                {it.label} {it.group && `(${it.group})`}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="p-3">
+                          <input
                             type="number"
-                            min={0}
-                            className="w-24"
-                            value={item.orderedQty || ""}
-                            onChange={(e) =>
-                              updateItemField(index, "orderedQty", Number(e.target.value) || 0)
-                            }
+                            value={item.orderedQty}
+                            onChange={(e) => updateItemField(idx, "orderedQty", Number(e.target.value))}
+                            className={inp}
                           />
-                        </TableCell>
-
-                        {/* Received Qty */}
-                        <TableCell>
-                          <Input
+                        </td>
+                        <td className="p-3">
+                          <input
                             type="number"
-                            min={0}
-                            max={item.orderedQty}
-                            className="w-24"
-                            value={item.receivedQty || ""}
-                            onChange={(e) =>
-                              updateItemField(index, "receivedQty", Number(e.target.value) || 0)
-                            }
+                            value={item.receivedQty}
+                            onChange={(e) => updateItemField(idx, "receivedQty", Number(e.target.value))}
+                            className={inp}
                           />
-                        </TableCell>
-
-                        {/* Remaining */}
-                        <TableCell
-                          className={item.remainingQty < 0 ? "font-semibold text-destructive" : "font-mono"}
-                        >
-                          {item.remainingQty}
-                        </TableCell>
-
-                        {/* UOM — from dbo.UOMMaster via /api/uom-master */}
-                        <TableCell>
-                          <Select
+                        </td>
+                        <td className="p-3 font-medium text-center">{item.remainingQty}</td>
+                        <td className="p-3">
+                          <select
                             value={item.uom}
-                            onValueChange={(v) => updateItemField(index, "uom", v)}
+                            onChange={(e) => updateItemField(idx, "uom", e.target.value)}
+                            className={inp}
                           >
-                            <SelectTrigger className="w-[150px]">
-                              <SelectValue placeholder="Select unit" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {uomOptions.map((u) => (
-                                <SelectItem key={u.value} value={u.value}>
-                                  {u.label}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </TableCell>
-
-                        {/* Remove row */}
-                        <TableCell>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => removeItem(index)}
-                            disabled={formData.items.length <= 1}
+                            <option value="">Select UOM</option>
+                            {uoms.map((u) => (
+                              <option key={u.value} value={u.value}>
+                                {u.label}
+                              </option>
+                            ))}
+                          </select>
+                        </td>
+                        <td className="p-3">
+                          <button
+                            onClick={() => removeItem(idx)}
+                            disabled={formData.items.length === 1}
+                            className="text-destructive hover:bg-destructive/10 p-2 rounded transition-colors disabled:opacity-50"
                           >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
+                            <Trash2 size={18} />
+                          </button>
+                        </td>
+                      </tr>
                     ))}
-                  </TableBody>
-                </Table>
+                  </tbody>
+                </table>
               </div>
             </div>
 
             {/* Remarks */}
             <div>
-              <Label>Remarks</Label>
-              <Textarea
+              <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                Remarks
+              </label>
+              <textarea
                 value={formData.remarks}
                 onChange={(e) => updateField("remarks", e.target.value)}
-                placeholder="GRN notes..."
                 rows={3}
+                className={`${inp} resize-y`}
+                placeholder="Additional notes, remarks, etc."
               />
             </div>
 
-            {/* Actions */}
+            {/* Action Buttons */}
             <div className="flex gap-3 pt-4">
-              <Button
+              <button
                 onClick={onSubmit}
-                disabled={createMutation.isPending || updateMutation.isPending}
-                className="flex-1"
+                className="flex-1 bg-primary text-primary-foreground py-3 rounded-lg font-semibold flex items-center justify-center gap-2 hover:bg-primary/90 transition-colors"
               >
-                <Save className="mr-2 h-4 w-4" />
-                {editingId ? "Update" : "Create"} GRN
-              </Button>
-              <Button type="button" variant="outline" onClick={resetForm}>
-                <X className="mr-2 h-4 w-4" />
-                {editingId ? "Cancel" : "Reset"}
-              </Button>
+                <Save size={18} />
+                {editingId ? "Update GRN" : "Create GRN"}
+              </button>
+              <button
+                onClick={resetForm}
+                className="px-8 border border-border hover:bg-muted py-3 rounded-lg flex items-center gap-2 transition-colors"
+              >
+                <X size={18} /> Cancel
+              </button>
             </div>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
 
-        {/* ── GRN List ─────────────────────────────────────────────────────── */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Goods Receipt Notes</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>GRN No</TableHead>
-                  <TableHead>Purchase Order</TableHead>
-                  <TableHead>Supplier</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead>Items</TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(grns as any[]).map((grn: any) => {
-                  const lineItems = safeParseArray(grn.GRNItems);
-                  return (
-                    <TableRow key={grn.GRNID}>
-                      <TableCell className="font-semibold">{grn.GRNNo}</TableCell>
-                      <TableCell>{grn.PONumber || grn.POID || "—"}</TableCell>
-                      <TableCell>{grn.SupplierName || grn.SupplierID || "—"}</TableCell>
-                      <TableCell>
-                        {grn.GRNDate ? new Date(grn.GRNDate).toLocaleDateString() : "—"}
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="secondary">{grn.Status}</Badge>
-                      </TableCell>
-                      <TableCell>{lineItems.length}</TableCell>
-                      <TableCell className="flex gap-1">
-                        <Button variant="ghost" size="sm" onClick={() => onEdit(grn)}>
-                          <Edit3 className="h-4 w-4" />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => deleteMutation.mutate(String(grn.GRNID))}
+        {/* GRN List */}
+        <div className="rounded-xl bg-card border border-border shadow-sm overflow-hidden">
+          <div className="flex justify-between items-center px-6 py-4 border-b border-border bg-card/60">
+            <h3 className="font-heading font-semibold">GRN History</h3>
+            <div className="relative w-80">
+              <Search size={15} className="absolute left-3 top-3 text-muted-foreground" />
+              <input
+                type="text"
+                placeholder="Search GRN, PO or Supplier..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-10 w-full py-2.5 bg-muted border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-primary"
+              />
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-muted/50 border-b">
+                  <th className="px-6 py-4 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">GRN No</th>
+                  <th className="px-6 py-4 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">PO No</th>
+                  <th className="px-6 py-4 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">Supplier</th>
+                  <th className="px-6 py-4 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">Date</th>
+                  <th className="px-6 py-4 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">Status</th>
+                  <th className="px-6 py-4 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {filteredGrns.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="px-6 py-12 text-center text-muted-foreground">
+                      No GRNs found
+                    </td>
+                  </tr>
+                ) : (
+                  filteredGrns.map((grn: any) => (
+                    <tr key={grn.GRNID} className="hover:bg-muted/30 transition-colors">
+                      <td className="px-6 py-4 font-medium">{grn.GRNNo}</td>
+                      <td className="px-6 py-4">{grn.PONumber || "—"}</td>
+                      <td className="px-6 py-4">{grn.SupplierName || "—"}</td>
+                      <td className="px-6 py-4">
+                        {grn.GRNDate ? new Date(grn.GRNDate).toLocaleDateString("en-IN") : "—"}
+                      </td>
+                      <td className="px-6 py-4">
+                        <span
+                          className={`inline-block px-3 py-1 rounded-full text-xs font-medium ${
+                            grn.Status === "Fully Received"
+                              ? "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-400"
+                              : "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400"
+                          }`}
                         >
-                          <Trash2 className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
-            {(grns as any[]).length === 0 && (
-              <p className="py-8 text-center text-muted-foreground">
-                No GRNs yet. Create one above.
-              </p>
-            )}
-          </CardContent>
-        </Card>
+                          {grn.Status || "Draft"}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-right space-x-2">
+                        <button
+                          onClick={() => onEdit(grn)}
+                          className="text-primary hover:bg-primary/10 p-2 rounded transition-colors"
+                        >
+                          <Edit3 size={18} />
+                        </button>
+                        <button
+                          onClick={() => deleteMutation.mutate(String(grn.GRNID))}
+                          className="text-destructive hover:bg-destructive/10 p-2 rounded transition-colors"
+                        >
+                          <Trash2 size={18} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </>
   );

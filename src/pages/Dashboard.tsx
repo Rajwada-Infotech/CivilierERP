@@ -1,214 +1,417 @@
-import React, { useMemo } from "react";
+import React from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
-  HardHat, ShoppingCart, Landmark, Receipt, TrendingUp, Users, Package, CreditCard, FileText,
-  CheckCircle2, Clock, AlertCircle, ArrowRight, Circle,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  TrendingUp,
+  Users,
+  FileText,
+  Package,
+  CreditCard,
+  Landmark,
+  Truck,
+  ShoppingCart,
+  ArrowUpRight,
+  ArrowDownRight,
+  BookOpen,
+  Receipt,
+  CheckCircle2,
+  Clock,
+  AlertCircle,
 } from "lucide-react";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { useModule } from "@/contexts/ModuleContext";
-import { useTask } from "@/contexts/TaskContext";
 import { useAuth } from "@/contexts/AuthContext";
-import { useNavigate } from "react-router-dom";
+import { useTask } from "@/contexts/TaskContext";
 
-const chartData = [
-  { month: "Jan", expenses: 320000 },
-  { month: "Feb", expenses: 410000 },
-  { month: "Mar", expenses: 380000 },
-  { month: "Apr", expenses: 482000 },
-  { month: "May", expenses: 395000 },
-  { month: "Jun", expenses: 520000 },
-];
+// ─── API ──────────────────────────────────────────────────────────────────────
+const getAuthHeaders = () => ({
+  "Content-Type": "application/json",
+  Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
+});
 
-const STATUS_DOT: Record<string, string> = {
-  open:        "bg-blue-400",
-  in_progress: "bg-yellow-400",
-  closed:      "bg-purple-400",
-  reviewed:    "bg-green-400",
-};
+interface DashboardData {
+  payments: {
+    totalCount: number;
+    todayCount: number;
+    totalAmount: number;
+    todayAmount: number;
+  };
+  purchaseOrders: {
+    totalCount: number;
+    openCount: number;
+    totalValue: number;
+    openValue: number;
+  };
+  grns: { totalCount: number; thisMonthCount: number };
+  cheques: { totalCount: number; pendingCount: number };
+  parties: {
+    supplierCount: number;
+    customerCount: number;
+    activeGLCount: number;
+  };
+  recentPayments: any[];
+  recentPOs: any[];
+}
 
-const tooltipStyle = {
-  background: "hsl(var(--card))",
-  border: "1px solid hsl(var(--border))",
-  borderRadius: 8,
-  color: "hsl(var(--foreground))",
-};
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const fmt = (n: number) =>
+  new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(n);
 
-const MemoizedChart = React.memo(() => (
-  <ResponsiveContainer width="100%" height={260}>
-    <BarChart data={chartData}>
-      <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-      <XAxis dataKey="month" tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }} />
-      <YAxis tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }} tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`} />
-      <Tooltip contentStyle={tooltipStyle} formatter={(value: number) => [`₹${value.toLocaleString("en-IN")}`, "Expenses"]} />
-      <Bar dataKey="expenses" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
-    </BarChart>
-  </ResponsiveContainer>
-));
-MemoizedChart.displayName = "MemoizedChart";
+const fmtDate = (d: string | null) =>
+  d
+    ? new Date(d).toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      })
+    : "—";
 
+// ─── Stat Card ────────────────────────────────────────────────────────────────
+const StatCard = ({
+  label,
+  value,
+  sub,
+  icon: Icon,
+  trend,
+  onClick,
+}: {
+  label: string;
+  value: string;
+  sub: string;
+  icon: React.ElementType;
+  trend?: "up" | "down" | "neutral";
+  onClick?: () => void;
+}) => (
+  <Card
+    className={`relative overflow-hidden transition-all duration-200 ${onClick ? "cursor-pointer hover:shadow-md hover:-translate-y-0.5" : ""}`}
+    onClick={onClick}
+  >
+    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+      <CardTitle className="text-xs font-heading uppercase tracking-widest text-muted-foreground">
+        {label}
+      </CardTitle>
+      <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+        <Icon size={15} className="text-primary" />
+      </div>
+    </CardHeader>
+    <CardContent>
+      <div className="text-2xl font-bold font-heading text-foreground">
+        {value}
+      </div>
+      <div className="flex items-center gap-1 mt-1">
+        {trend === "up" && <ArrowUpRight size={13} className="text-emerald-500" />}
+        {trend === "down" && <ArrowDownRight size={13} className="text-destructive" />}
+        <p className="text-xs text-muted-foreground">{sub}</p>
+      </div>
+    </CardContent>
+  </Card>
+);
+
+const StatCardSkeleton = () => (
+  <Card>
+    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+      <Skeleton className="h-3 w-28" />
+      <Skeleton className="h-8 w-8 rounded-lg" />
+    </CardHeader>
+    <CardContent>
+      <Skeleton className="h-7 w-24 mb-2" />
+      <Skeleton className="h-3 w-32" />
+    </CardContent>
+  </Card>
+);
+
+// ─── Main Dashboard ───────────────────────────────────────────────────────────
 const Dashboard = () => {
-  const { activeModule } = useModule();
-  const { tasks, getOverdueTasks, getDueSoonTasks } = useTask();
-  const { currentUser } = useAuth();
   const navigate = useNavigate();
+  const { currentUser } = useAuth();
+  const { tasks, getOverdueTasks, getDueSoonTasks } = useTask();
 
-  const activities = useMemo(() => activeModule === "material" 
-    ? [
-        { text: "Work Order WO-024 approved", time: "2 hours ago" },
-        { text: "Material Expense ME-056 booked", time: "4 hours ago" },
-        { text: "Card Master CM-012 updated", time: "Yesterday" },
-        { text: "Work Order WO-023 closed", time: "Yesterday" },
-        { text: "New material supplier approved", time: "2 days ago" },
-      ]
-    : [
-        { text: "New contractor 'Raj Builders' added", time: "2 hours ago" },
-        { text: "Payment of ₹1,25,000 to Sai Suppliers", time: "4 hours ago" },
-        { text: "Bank account 'HDFC Current' updated", time: "Yesterday" },
-        { text: "Expense 'Site Material' created", time: "Yesterday" },
-        { text: "Supplier 'Metro Hardware' marked active", time: "2 days ago" },
-      ], [activeModule]);
+  const { data, isLoading, isError } = useQuery<DashboardData>({
+    queryKey: ["financeDashboard"],
+    queryFn: async () => {
+      const res = await fetch("/api/finance-dashboard", { headers: getAuthHeaders() });
+      if (!res.ok) throw new Error("Failed to fetch dashboard data");
+      return res.json();
+    },
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+  });
 
-  const stats = useMemo(() => activeModule === "material" ? [
-    { label: "Work Orders", value: "12", icon: HardHat, color: "hsl(239, 84%, 67%)" },
-    { label: "Material Expenses", value: "₹2,45,000", icon: Package, color: "hsl(174, 72%, 46%)" },
-    { label: "Card Masters", value: "8", icon: CreditCard, color: "hsl(263, 70%, 58%)" },
-    { label: "Pending Amendments", value: "3", icon: FileText, color: "hsl(217, 91%, 60%)" },
-  ] : [
-    { label: "Total Contractors", value: "24", icon: HardHat, color: "hsl(239, 84%, 67%)" },
-    { label: "Active Suppliers", value: "18", icon: ShoppingCart, color: "hsl(263, 70%, 58%)" },
-    { label: "Bank Accounts", value: "6", icon: Landmark, color: "hsl(217, 91%, 60%)" },
-    { label: "Monthly Expenses", value: "₹4,82,000", icon: Receipt, color: "hsl(174, 72%, 46%)" },
-  ] , [activeModule]);
-
-  const myTasks = useMemo(() => {
+  // Task calculations (from old branch)
+  const myTasks = React.useMemo(() => {
     if (!currentUser) return [];
     if (currentUser.role === "super_admin" || currentUser.role === "admin") return tasks;
-    return tasks.filter(t => t.assignedTo === currentUser.id || t.createdBy === currentUser.id);
+    return tasks.filter((t) => t.assignedTo === currentUser.id || t.createdBy === currentUser.id);
   }, [tasks, currentUser]);
 
   const overdueTasks = getOverdueTasks();
   const dueSoonTasks = getDueSoonTasks();
-  const openTasks = myTasks.filter(t => t.status === "open" || t.status === "in_progress");
-  const pendingReview = myTasks.filter(t => t.status === "closed");
+  const openTasks = myTasks.filter((t) => t.status === "open" || t.status === "in_progress");
+
+  const stats = data
+    ? [
+        {
+          label: "Payments Today",
+          value: data.payments.todayCount.toString(),
+          sub: `${fmt(data.payments.todayAmount)} collected today`,
+          icon: Receipt,
+          trend: "up" as const,
+          onClick: () => navigate("/payments"),
+        },
+        {
+          label: "Open Purchase Orders",
+          value: data.purchaseOrders.openCount.toString(),
+          sub: `${fmt(data.purchaseOrders.openValue)} outstanding`,
+          icon: ShoppingCart,
+          trend: data.purchaseOrders.openCount > 0 ? ("up" as const) : ("neutral" as const),
+          onClick: () => navigate("/material/purchase-order"),
+        },
+        {
+          label: "GRNs This Month",
+          value: data.grns.thisMonthCount.toString(),
+          sub: `${data.grns.totalCount} total receipts`,
+          icon: Package,
+          trend: "neutral" as const,
+          onClick: () => navigate("/material/grn"),
+        },
+        {
+          label: "Pending Cheques",
+          value: data.cheques.pendingCount.toString(),
+          sub: `${data.cheques.totalCount} total cheques`,
+          icon: BookOpen,
+          trend: data.cheques.pendingCount > 0 ? ("down" as const) : ("neutral" as const),
+          onClick: () => navigate("/masters/cheque"),
+        },
+      ]
+    : [];
 
   return (
     <>
-      <Breadcrumbs items={["Amendments"]} />
-      <div className="mb-6">
-        <h1 className="text-2xl font-heading font-bold text-foreground">
-          {activeModule === "material" ? "Material Amendments" : "Amendments"}
-        </h1>
-        <p className="text-sm text-muted-foreground mt-1">
-          {activeModule === "material" 
-            ? "Recent material expenses, work orders, and card master changes" 
-            : "Your civil ERP command center - recent amendments and overview"
-          }
-        </p>
-      </div>
+      <Breadcrumbs items={["Dashboard", "Finance"]} />
+      <h1 className="text-2xl font-heading font-bold text-foreground mb-6">
+        Finance Overview
+      </h1>
+
+      {isError && (
+        <div className="mb-6 px-4 py-3 rounded-lg bg-destructive/10 text-destructive text-sm border border-destructive/20">
+          Failed to load dashboard data. Please refresh the page.
+        </div>
+      )}
 
       {/* Stat Cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-        {stats.map((s) => (
-          <div key={s.label} className="rounded-xl bg-card border border-border p-4 flex items-center gap-4" style={{ borderLeftWidth: 3, borderLeftColor: s.color }}>
-            <div className="p-2 rounded-lg" style={{ background: `${s.color}20` }}>
-              <s.icon size={22} style={{ color: s.color }} />
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground font-heading">{s.label}</p>
-              <p className="text-lg sm:text-xl font-heading font-bold text-foreground">{s.value}</p>
-            </div>
-          </div>
-        ))}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        {isLoading
+          ? Array.from({ length: 4 }).map((_, i) => <StatCardSkeleton key={i} />)
+          : stats.map((s) => <StatCard key={s.label} {...s} />)}
       </div>
 
-      {/* Chart + Activity */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
-        <div className="lg:col-span-2 rounded-xl bg-card border border-border p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <TrendingUp size={18} className="text-primary" />
-            <h2 className="font-heading font-semibold text-foreground">{activeModule === "material" ? "Monthly Material Expenses" : "Monthly Expenses"}</h2>
-          </div>
-          <MemoizedChart />
-        </div>
-
-        <div className="rounded-xl bg-card border border-border p-5">
-          <div className="flex items-center gap-2 mb-4">
-            <Users size={18} className="text-primary" />
-            <h2 className="font-heading font-semibold text-foreground">Recent Activity</h2>
-          </div>
-          <div className="space-y-3">
-            {activities.map((a, i) => (
-              <div key={i} className="flex items-start gap-3">
-                <div className="w-2 h-2 rounded-full bg-primary mt-1.5 shrink-0" />
-                <div>
-                  <p className="text-sm text-foreground">{a.text}</p>
-                  <p className="text-xs text-muted-foreground">{a.time}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
-      {/* My Tasks Summary */}
-      <div className="rounded-xl bg-card border border-border p-5">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 size={18} className="text-primary" />
-            <h2 className="font-heading font-semibold text-foreground">My Tasks</h2>
-          </div>
-          <button
-            onClick={() => navigate("/tasks")}
-            className="flex items-center gap-1 text-xs text-primary hover:underline font-heading"
-          >
-            View all <ArrowRight size={12} />
-          </button>
-        </div>
-
-        {/* Task stats */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
-          {[
-            { label: "Open / In Progress", value: openTasks.length,     color: "hsl(var(--primary))",   icon: Circle },
-            { label: "Overdue",            value: overdueTasks.length,  color: "hsl(0,72%,51%)",        icon: AlertCircle },
-            { label: "Due Within 48h",     value: dueSoonTasks.length,  color: "hsl(38,92%,50%)",       icon: Clock },
-            { label: "Pending Review",     value: pendingReview.length, color: "hsl(263,70%,58%)",      icon: CheckCircle2 },
-          ].map((s) => (
-            <div
-              key={s.label}
-              className="rounded-lg bg-muted/40 p-3 text-center cursor-pointer hover:bg-muted/70 transition-colors"
-              style={{ borderTop: `2px solid ${s.color}` }}
-              onClick={() => navigate("/tasks")}
-            >
-              <p className="text-lg sm:text-xl font-heading font-bold text-foreground">{s.value}</p>
-              <p className="text-xs text-muted-foreground font-heading mt-0.5">{s.label}</p>
-            </div>
-          ))}
-        </div>
-
-        {/* Task list preview */}
-        {myTasks.length === 0 ? (
-          <p className="text-sm text-muted-foreground text-center py-4">No tasks assigned to you.</p>
+      {/* Party & GL Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+        {isLoading ? (
+          Array.from({ length: 3 }).map((_, i) => <StatCardSkeleton key={i} />)
         ) : (
-          <div className="divide-y divide-border">
-            {myTasks.slice(0, 4).map((task) => (
-              <div
-                key={task.id}
-                onClick={() => navigate(`/tasks/${task.id}`)}
-                className="flex items-center gap-3 py-2.5 cursor-pointer hover:opacity-75 transition-opacity"
-              >
-                <div className={`w-2 h-2 rounded-full shrink-0 ${STATUS_DOT[task.status] || "bg-muted"}`} />
-                <p className="text-sm text-foreground flex-1 truncate font-heading">{task.title}</p>
-                <p className="text-xs text-muted-foreground shrink-0">
-                  {new Date(task.dueDate) < new Date() && (task.status === "open" || task.status === "in_progress")
-                    ? <span className="text-red-400">Overdue</span>
-                    : new Date(task.dueDate).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
-                </p>
-                <ArrowRight size={13} className="text-muted-foreground shrink-0" />
-              </div>
-            ))}
-          </div>
+          <>
+            <StatCard
+              label="Suppliers"
+              value={(data?.parties.supplierCount ?? 0).toString()}
+              sub="Active suppliers"
+              icon={Truck}
+              onClick={() => navigate("/masters/suppliers")}
+            />
+            <StatCard
+              label="Customers"
+              value={(data?.parties.customerCount ?? 0).toString()}
+              sub="Active customers"
+              icon={Users}
+              onClick={() => navigate("/masters/customers")}
+            />
+            <StatCard
+              label="GL Heads"
+              value={(data?.parties.activeGLCount ?? 0).toString()}
+              sub="Active ledger heads"
+              icon={Landmark}
+              onClick={() => navigate("/masters/general-ledger")}
+            />
+          </>
         )}
       </div>
+
+      {/* Recent Tables */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        {/* Recent Payments */}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div>
+              <CardTitle className="text-sm font-heading flex items-center gap-2">
+                <CreditCard size={16} /> Recent Payments
+              </CardTitle>
+              <CardDescription>Last 8 entries</CardDescription>
+            </div>
+            <button
+              onClick={() => navigate("/payments")}
+              className="text-xs text-primary hover:underline"
+            >
+              View all →
+            </button>
+          </CardHeader>
+          <CardContent className="p-0">
+            {/* Table content same as dev branch - kept as is */}
+            {isLoading ? (
+              <div className="p-4 space-y-3">
+                {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}
+              </div>
+            ) : (data?.recentPayments.length ?? 0) === 0 ? (
+              <div className="text-center text-muted-foreground py-10">No payments recorded yet</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Mode</TableHead>
+                      <TableHead className="text-right">Amount</TableHead>
+                      <TableHead>Date</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {(data?.recentPayments ?? []).map((p: any) => (
+                      <TableRow key={p.PPaymentID}>
+                        <TableCell className="font-medium truncate max-w-[140px]">
+                          {p.PPaymentName || "—"}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline">{p.PMode || "—"}</Badge>
+                        </TableCell>
+                        <TableCell className="text-right font-medium text-emerald-600">
+                          {p.PAmount != null ? fmt(p.PAmount) : "—"}
+                        </TableCell>
+                        <TableCell className="text-muted-foreground">
+                          {fmtDate(p.PDate)}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* Recent Purchase Orders */}
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div>
+              <CardTitle className="text-sm font-heading flex items-center gap-2">
+                <FileText size={16} /> Recent Purchase Orders
+              </CardTitle>
+              <CardDescription>Last 5 POs</CardDescription>
+            </div>
+            <button
+              onClick={() => navigate("/material/purchase-order")}
+              className="text-xs text-primary hover:underline"
+            >
+              View all →
+            </button>
+          </CardHeader>
+          <CardContent className="p-0">
+            {/* Same as dev branch */}
+            {isLoading ? (
+              <div className="p-4 space-y-3">
+                {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}
+              </div>
+            ) : (data?.recentPOs.length ?? 0) === 0 ? (
+              <div className="text-center text-muted-foreground py-10">No purchase orders yet</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>PO No</TableHead>
+                      <TableHead>Supplier</TableHead>
+                      <TableHead className="text-right">Value</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {(data?.recentPOs ?? []).map((po: any) => (
+                      <TableRow key={po.PurchaseOrderID}>
+                        <TableCell className="font-medium">{po.PurchaseOrderNo}</TableCell>
+                        <TableCell className="truncate max-w-[140px] text-muted-foreground">
+                          {po.SupplierName || "—"}
+                        </TableCell>
+                        <TableCell className="text-right font-medium">
+                          {po.TotalAmount != null ? fmt(po.TotalAmount) : "—"}
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className={
+                              po.Status === "Closed"
+                                ? "border-emerald-500 text-emerald-600"
+                                : po.Status === "Approved"
+                                ? "border-blue-500 text-blue-600"
+                                : "border-amber-500 text-amber-600"
+                            }
+                          >
+                            {po.Status || "Draft"}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Quick Actions */}
+      <Card>
+        <CardHeader>
+          <CardTitle>Quick Actions</CardTitle>
+          <CardDescription>Common workflows</CardDescription>
+        </CardHeader>
+        <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {[
+            { label: "New Payment", icon: Receipt, path: "/payments" },
+            { label: "New PO", icon: ShoppingCart, path: "/material/purchase-order" },
+            { label: "New GRN", icon: Package, path: "/material/grn" },
+            { label: "Manage Suppliers", icon: Truck, path: "/masters/suppliers" },
+          ].map(({ label, icon: Icon, path }) => (
+            <button
+              key={path}
+              onClick={() => navigate(path)}
+              className="flex flex-col items-center gap-3 py-6 rounded-xl border border-border hover:bg-muted hover:border-primary/30 transition-all active:scale-95"
+            >
+              <div className="w-11 h-11 rounded-xl bg-primary/10 flex items-center justify-center">
+                <Icon size={20} className="text-primary" />
+              </div>
+              <span className="text-sm font-medium text-center">{label}</span>
+            </button>
+          ))}
+        </CardContent>
+      </Card>
     </>
   );
 };
