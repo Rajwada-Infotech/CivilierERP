@@ -33,12 +33,16 @@ interface AccountGroup {
   parentId: string | null;
 }
 
+interface TreeNode extends AccountGroup {
+  children: TreeNode[];
+}
+
 // ─── Tree Helpers ─────────────────────────────────────────────────────────────
 
-function buildTree(items: AccountGroup[]) {
-  const map: Record<string, AccountGroup & { children: any[] }> = {};
+function buildTree(items: AccountGroup[]): TreeNode[] {
+  const map: Record<string, TreeNode> = {};
   items.forEach((i) => (map[i._id] = { ...i, children: [] }));
-  const roots: (AccountGroup & { children: any[] })[] = [];
+  const roots: TreeNode[] = [];
   items.forEach((i) => {
     if (i.parentId && map[i.parentId])
       map[i.parentId].children.push(map[i._id]);
@@ -60,9 +64,40 @@ function getDescendants(id: string, items: AccountGroup[]): string[] {
   return out;
 }
 
-function getParentName(parentId: string | null, items: AccountGroup[]): string {
-  if (!parentId) return "—";
-  return items.find((g) => g._id === parentId)?.name ?? "—";
+/**
+ * Returns the full ancestry path for display in the "Belongs To" column.
+ * e.g. for "Stationery" under "Office Expense" under "Expenses":
+ *   returns "Expenses / Office Expense"
+ * (The group's own name is NOT included — only its ancestors)
+ */
+function getBelongsTo(id: string, items: AccountGroup[]): string {
+  const map: Record<string, AccountGroup> = {};
+  items.forEach((i) => (map[i._id] = i));
+  const chain: string[] = [];
+  let current = map[id];
+  while (current?.parentId && map[current.parentId]) {
+    current = map[current.parentId];
+    chain.unshift(current.name);
+  }
+  return chain.join(" / ");
+}
+
+/**
+ * Flattens the tree into an ordered list for the parent dropdown,
+ * preserving hierarchy order with depth info for visual indentation.
+ */
+function flattenForDropdown(
+  nodes: TreeNode[],
+  depth = 0,
+): { group: AccountGroup; depth: number }[] {
+  const result: { group: AccountGroup; depth: number }[] = [];
+  for (const node of nodes) {
+    result.push({ group: node, depth });
+    if (node.children.length > 0) {
+      result.push(...flattenForDropdown(node.children, depth + 1));
+    }
+  }
+  return result;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -81,8 +116,9 @@ function TreeRow({
   deleteConfirm,
   setDeleteConfirm,
   activeEditId,
+  allGroups,
 }: {
-  node: AccountGroup & { children: any[] };
+  node: TreeNode;
   depth: number;
   expanded: Set<string>;
   onToggle: (id: string) => void;
@@ -91,14 +127,20 @@ function TreeRow({
   deleteConfirm: string | null;
   setDeleteConfirm: (id: string | null) => void;
   activeEditId: string | null;
+  allGroups: AccountGroup[];
 }) {
   const hasChildren = node.children.length > 0;
   const isExpanded = expanded.has(node._id);
+  const belongsTo = getBelongsTo(node._id, allGroups);
+
   return (
     <>
       <tr
-        className={`group border-b border-border transition-colors ${activeEditId === node._id ? "bg-primary/5" : "hover:bg-muted/30"}`}
+        className={`group border-b border-border transition-colors ${
+          activeEditId === node._id ? "bg-primary/5" : "hover:bg-muted/30"
+        }`}
       >
+        {/* Group Name */}
         <td className="py-2.5 px-4">
           <div
             className="flex items-center gap-2"
@@ -106,7 +148,11 @@ function TreeRow({
           >
             <button
               onClick={() => hasChildren && onToggle(node._id)}
-              className={`w-5 h-5 flex items-center justify-center rounded text-muted-foreground transition-colors ${hasChildren ? "hover:text-foreground hover:bg-muted cursor-pointer" : "opacity-0 cursor-default"}`}
+              className={`w-5 h-5 flex items-center justify-center rounded text-muted-foreground transition-colors ${
+                hasChildren
+                  ? "hover:text-foreground hover:bg-muted cursor-pointer"
+                  : "opacity-0 cursor-default"
+              }`}
             >
               {isExpanded ? (
                 <ChevronDown size={14} />
@@ -125,7 +171,11 @@ function TreeRow({
               <Folder size={14} className="text-muted-foreground/40 shrink-0" />
             )}
             <span
-              className={`text-sm ${depth === 0 ? "font-semibold text-foreground" : "font-medium text-foreground/80"}`}
+              className={`text-sm ${
+                depth === 0
+                  ? "font-semibold text-foreground"
+                  : "font-medium text-foreground/80"
+              }`}
             >
               {node.name}
             </span>
@@ -136,12 +186,27 @@ function TreeRow({
             )}
           </div>
         </td>
+
+        {/* Code */}
         <td className="py-2.5 px-4">
           <span className="text-xs font-mono text-muted-foreground flex items-center gap-1">
             <Hash size={10} />
             {node.code || "—"}
           </span>
         </td>
+
+        {/* Belongs To */}
+        <td className="py-2.5 px-4">
+          {belongsTo ? (
+            <span className="text-xs text-muted-foreground font-medium">
+              {belongsTo}
+            </span>
+          ) : (
+            <span className="text-xs text-muted-foreground/30">—</span>
+          )}
+        </td>
+
+        {/* Actions */}
         <td className="py-2.5 px-4 text-right">
           <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
             <button
@@ -176,8 +241,9 @@ function TreeRow({
           </div>
         </td>
       </tr>
+
       {isExpanded &&
-        node.children.map((child: any) => (
+        node.children.map((child) => (
           <TreeRow
             key={child._id}
             node={child}
@@ -189,6 +255,7 @@ function TreeRow({
             deleteConfirm={deleteConfirm}
             setDeleteConfirm={setDeleteConfirm}
             activeEditId={activeEditId}
+            allGroups={allGroups}
           />
         ))}
     </>
@@ -200,7 +267,11 @@ function TreeRow({
 const AccountGroupMaster: React.FC = () => {
   const queryClient = useQueryClient();
 
-  const { data: dbData, isLoading, error } = useQuery({
+  const {
+    data: dbData,
+    isLoading,
+    error,
+  } = useQuery({
     queryKey: ["account-groups"],
     queryFn: getAccountGroups,
   });
@@ -295,12 +366,23 @@ const AccountGroupMaster: React.FC = () => {
     }
   };
 
-  const invalidParents = editingId
-    ? [editingId, ...getDescendants(editingId, allGroups)]
-    : [];
-  const parentOptions = allGroups.filter(
-    (g) => !invalidParents.includes(g._id),
+  // Exclude current group + its descendants from parent options
+  const invalidParents = useMemo(
+    () =>
+      new Set(
+        editingId ? [editingId, ...getDescendants(editingId, allGroups)] : [],
+      ),
+    [editingId, allGroups],
   );
+
+  // Filter the tree to remove invalid options, then flatten in hierarchy order
+  const dropdownOptions = useMemo(() => {
+    const filterNodes = (nodes: TreeNode[]): TreeNode[] =>
+      nodes
+        .filter((n) => !invalidParents.has(n._id))
+        .map((n) => ({ ...n, children: filterNodes(n.children) }));
+    return flattenForDropdown(filterNodes(tree));
+  }, [tree, invalidParents]);
 
   const filteredFlat = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -314,11 +396,19 @@ const AccountGroupMaster: React.FC = () => {
   const rootCount = allGroups.filter((g) => !g.parentId).length;
   const subCount = allGroups.filter((g) => g.parentId).length;
 
+  // Preview the full path of the selected parent
+  const selectedParentPath = useMemo(() => {
+    if (!form.parentId) return null;
+    const parent = allGroups.find((g) => g._id === form.parentId);
+    if (!parent) return null;
+    const ancestry = getBelongsTo(form.parentId, allGroups);
+    return ancestry ? `${ancestry} / ${parent.name}` : parent.name;
+  }, [form.parentId, allGroups]);
+
   return (
     <>
       <Breadcrumbs items={["Masters", "Account Group"]} />
 
-      {/* ── Page header ── */}
       <div className="mb-6">
         <h1 className="text-xl font-heading font-bold text-foreground">
           Account Group Master
@@ -355,7 +445,9 @@ const AccountGroupMaster: React.FC = () => {
                   setErrors((p) => ({ ...p, name: false }));
                 }}
                 placeholder="e.g. Office Expenses"
-                className={`w-full text-sm rounded-lg border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition ${errors.name ? "border-red-400" : "border-border"}`}
+                className={`w-full text-sm rounded-lg border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition ${
+                  errors.name ? "border-red-400" : "border-border"
+                }`}
               />
               {errors.name && (
                 <p className="text-xs text-red-500 mt-1">Required</p>
@@ -377,14 +469,16 @@ const AccountGroupMaster: React.FC = () => {
                   setErrors((p) => ({ ...p, code: false }));
                 }}
                 placeholder="e.g. EXP-OFF"
-                className={`w-full text-sm rounded-lg border px-3 py-2.5 bg-background text-foreground font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition ${errors.code ? "border-red-400" : "border-border"}`}
+                className={`w-full text-sm rounded-lg border px-3 py-2.5 bg-background text-foreground font-mono placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition ${
+                  errors.code ? "border-red-400" : "border-border"
+                }`}
               />
               {errors.code && (
                 <p className="text-xs text-red-500 mt-1">Required</p>
               )}
             </div>
 
-            {/* Parent Group */}
+            {/* Parent Group — hierarchical dropdown */}
             <div>
               <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-2">
                 PARENT GROUP
@@ -396,15 +490,27 @@ const AccountGroupMaster: React.FC = () => {
                 }
                 className="w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition"
               >
-                <option value="">Select...</option>
-                {parentOptions.map((g) => (
-                  <option key={g._id} value={g._id}>
-                    {g.parentId ? `  └ ${g.name}` : g.name}
+                <option value="">— Top-level group (no parent)</option>
+                {dropdownOptions.map(({ group, depth }) => (
+                  <option key={group._id} value={group._id}>
+                    {"\u00a0\u00a0\u00a0\u00a0".repeat(depth)}
+                    {depth > 0 ? "└ " : ""}
+                    {group.name}
+                    {group.code ? ` (${group.code})` : ""}
                   </option>
                 ))}
               </select>
               <p className="text-[11px] text-muted-foreground mt-1">
-                Leave blank to create a top-level group
+                {selectedParentPath ? (
+                  <>
+                    Will nest under:{" "}
+                    <span className="font-medium text-foreground">
+                      {selectedParentPath}
+                    </span>
+                  </>
+                ) : (
+                  "Leave blank to create a top-level group"
+                )}
               </p>
             </div>
           </div>
@@ -442,47 +548,6 @@ const AccountGroupMaster: React.FC = () => {
                 Cancel
               </button>
             )}
-          </div>
-        </div>
-      </div>
-
-      {/* ── Structure example ── */}
-      <div className="rounded-xl border border-border bg-card mb-6 p-4">
-        <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-3">
-          Structure Example
-        </p>
-        <div className="flex gap-8 text-[12px] text-muted-foreground">
-          <div className="space-y-1">
-            <div className="flex items-center gap-1.5">
-              <Layers size={12} className="text-primary/60" />
-              <span className="font-semibold text-foreground/80">Expenses</span>
-            </div>
-            <div className="flex items-center gap-1.5 pl-4">
-              <span className="text-muted-foreground/40">└</span>
-              <Folder size={11} className="text-muted-foreground/50" />
-              <span>Office Expense</span>
-            </div>
-            <div className="flex items-center gap-1.5 pl-4">
-              <span className="text-muted-foreground/40">└</span>
-              <Folder size={11} className="text-muted-foreground/50" />
-              <span>Civil Expense</span>
-            </div>
-          </div>
-          <div className="space-y-1">
-            <div className="flex items-center gap-1.5">
-              <Layers size={12} className="text-primary/60" />
-              <span className="font-semibold text-foreground/80">Income</span>
-            </div>
-            <div className="flex items-center gap-1.5 pl-4">
-              <span className="text-muted-foreground/40">└</span>
-              <Folder size={11} className="text-muted-foreground/50" />
-              <span>Customer Income</span>
-            </div>
-            <div className="flex items-center gap-1.5 pl-4">
-              <span className="text-muted-foreground/40">└</span>
-              <Folder size={11} className="text-muted-foreground/50" />
-              <span>Others</span>
-            </div>
           </div>
         </div>
       </div>
@@ -550,6 +615,9 @@ const AccountGroupMaster: React.FC = () => {
                   <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wide py-3 px-4">
                     Code
                   </th>
+                  <th className="text-xs font-semibold text-muted-foreground uppercase tracking-wide py-3 px-4">
+                    Belongs To
+                  </th>
                   <th className="py-3 px-4 w-24" />
                 </tr>
               </thead>
@@ -558,84 +626,95 @@ const AccountGroupMaster: React.FC = () => {
                   filteredFlat.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={3}
+                        colSpan={4}
                         className="py-10 text-center text-muted-foreground text-sm"
                       >
                         No results for "{search}"
                       </td>
                     </tr>
                   ) : (
-                    filteredFlat.map((g) => (
-                      <tr
-                        key={g._id}
-                        className={`group border-b border-border hover:bg-muted/30 transition-colors ${editingId === g._id ? "bg-primary/5" : ""}`}
-                      >
-                        <td className="py-2.5 px-4">
-                          <div className="flex items-center gap-2">
-                            <Folder
-                              size={14}
-                              className="text-muted-foreground/40"
-                            />
-                            <span className="text-sm font-medium text-foreground">
-                              {g.name}
+                    filteredFlat.map((g) => {
+                      const belongsTo = getBelongsTo(g._id, allGroups);
+                      return (
+                        <tr
+                          key={g._id}
+                          className={`group border-b border-border hover:bg-muted/30 transition-colors ${
+                            editingId === g._id ? "bg-primary/5" : ""
+                          }`}
+                        >
+                          <td className="py-2.5 px-4">
+                            <div className="flex items-center gap-2">
+                              <Folder
+                                size={14}
+                                className="text-muted-foreground/40 shrink-0"
+                              />
+                              <span className="text-sm font-medium text-foreground">
+                                {g.name}
+                              </span>
+                              {g.parentId && (
+                                <span className="text-[10px] text-muted-foreground bg-muted rounded-full px-1.5 py-0.5">
+                                  sub
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-4">
+                            <span className="text-xs font-mono text-muted-foreground flex items-center gap-1">
+                              <Hash size={10} />
+                              {g.code || "—"}
                             </span>
-                            {g.parentId && (
-                              <span className="text-[10px] text-muted-foreground bg-muted rounded-full px-1.5 py-0.5">
-                                sub
+                          </td>
+                          <td className="py-2.5 px-4">
+                            {belongsTo ? (
+                              <span className="text-xs text-muted-foreground font-medium">
+                                {belongsTo}
+                              </span>
+                            ) : (
+                              <span className="text-xs text-muted-foreground/30">
+                                —
                               </span>
                             )}
-                          </div>
-                          {g.parentId && (
-                            <div className="text-[11px] text-muted-foreground ml-6 mt-0.5">
-                              under {getParentName(g.parentId, allGroups)}
-                            </div>
-                          )}
-                        </td>
-                        <td className="py-2.5 px-4">
-                          <span className="text-xs font-mono text-muted-foreground flex items-center gap-1">
-                            <Hash size={10} />
-                            {g.code || "—"}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-4 text-right">
-                          <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button
-                              onClick={() => startEdit(g)}
-                              className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
-                            >
-                              <Pencil size={13} />
-                            </button>
-                            {deleteConfirm === g._id ? (
-                              <>
-                                <button
-                                  onClick={() => handleDelete(g._id)}
-                                  className="w-7 h-7 flex items-center justify-center rounded text-red-500 hover:bg-red-50"
-                                >
-                                  <Check size={13} />
-                                </button>
-                                <button
-                                  onClick={() => setDeleteConfirm(null)}
-                                  className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:bg-muted"
-                                >
-                                  <X size={13} />
-                                </button>
-                              </>
-                            ) : (
+                          </td>
+                          <td className="py-2.5 px-4 text-right">
+                            <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                               <button
-                                onClick={() => setDeleteConfirm(g._id)}
-                                className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-red-500 hover:bg-red-50 transition-colors"
+                                onClick={() => startEdit(g)}
+                                className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
                               >
-                                <Trash2 size={13} />
+                                <Pencil size={13} />
                               </button>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    ))
+                              {deleteConfirm === g._id ? (
+                                <>
+                                  <button
+                                    onClick={() => handleDelete(g._id)}
+                                    className="w-7 h-7 flex items-center justify-center rounded text-red-500 hover:bg-red-50"
+                                  >
+                                    <Check size={13} />
+                                  </button>
+                                  <button
+                                    onClick={() => setDeleteConfirm(null)}
+                                    className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:bg-muted"
+                                  >
+                                    <X size={13} />
+                                  </button>
+                                </>
+                              ) : (
+                                <button
+                                  onClick={() => setDeleteConfirm(g._id)}
+                                  className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-red-500 hover:bg-red-50 transition-colors"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })
                   )
                 ) : tree.length === 0 ? (
                   <tr>
-                    <td colSpan={3} className="py-12 text-center">
+                    <td colSpan={4} className="py-12 text-center">
                       <Layers
                         size={28}
                         className="text-muted-foreground/30 mx-auto mb-3"
@@ -661,6 +740,7 @@ const AccountGroupMaster: React.FC = () => {
                       deleteConfirm={deleteConfirm}
                       setDeleteConfirm={setDeleteConfirm}
                       activeEditId={editingId}
+                      allGroups={allGroups}
                     />
                   ))
                 )}

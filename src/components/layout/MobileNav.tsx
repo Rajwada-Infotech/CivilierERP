@@ -38,14 +38,16 @@ import {
   RefreshCw,
   CalendarClock,
   ShoppingCart,
+  TrendingUp,
+  CheckSquare,
 } from "lucide-react";
 
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { useModule } from "@/contexts/ModuleContext";
+import { useModule, MODULE_DASHBOARD_ROUTES } from "@/contexts/ModuleContext";
 import { BillingIcon } from "@/components/icons/BillingIcon";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme, THEME_DOTS, Theme } from "@/contexts/ThemeContext";
-import { useTask } from "@/contexts/TaskContext";
+import { useGracefulLogout } from "@/hooks/useGracefulLogout";
 
 interface NavItemChild {
   label: string;
@@ -68,13 +70,14 @@ interface NavItem {
 
 interface ReminderItem {
   id: string | number;
-  type: "purchase_order" | "grn" | "cheque" | "tds" | "general";
+  type: "purchase_order" | "grn" | "cheque" | "tds" | "task" | "general";
   title: string;
   subtitle: string;
   dueDate: string;
   timeSlot?: string;
   urgency: "overdue" | "today" | "soon" | "upcoming";
   amount?: number;
+  taskId?: string;
 }
 
 const URGENCY_CFG = {
@@ -105,6 +108,7 @@ const REM_ICON: Record<ReminderItem["type"], React.ElementType> = {
   grn: Package,
   cheque: BookOpen,
   tds: FileWarning,
+  task: CheckSquare,
   general: Bell,
 };
 
@@ -138,11 +142,12 @@ function relLabel(d: string, ts?: string) {
 }
 
 async function loadReminders(): Promise<ReminderItem[]> {
-  const [poR, grnR, chqR, tdsR] = await Promise.allSettled([
+  const [poR, grnR, chqR, tdsR, taskR] = await Promise.allSettled([
     fetchWithAuth("/api/purchase-orders"),
     fetchWithAuth("/api/grns"),
     fetchWithAuth("/api/cheque-master"),
     fetchWithAuth("/api/tds-master"),
+    fetchWithAuth("/api/tasks?scope=mine&status=open,in_progress"),
   ]);
   const items: ReminderItem[] = [];
   const push = (
@@ -219,6 +224,24 @@ async function loadReminders(): Promise<ReminderItem[]> {
       (r) => r.TimeSlot,
     );
   }
+  // Tasks — from /api/tasks directly, no separate /reminders endpoint
+  if (taskR.status === "fulfilled" && taskR.value.ok) {
+    const tasks: any[] = await taskR.value.json();
+    tasks.forEach((t: any) => {
+      if (!t.dueDate) return;
+      const urgency = classifyUrgency(t.dueDate);
+      if (urgency === "upcoming") return;
+      items.push({
+        id: `task-${t.id}`,
+        type: "task",
+        title: t.title,
+        subtitle: `Assigned to ${t.assignedToName}`,
+        dueDate: t.dueDate,
+        urgency,
+        taskId: String(t.id),
+      });
+    });
+  }
   const ORD = { overdue: 0, today: 1, soon: 2, upcoming: 3 };
   items.sort((a, b) => ORD[a.urgency] - ORD[b.urgency]);
   return items;
@@ -239,14 +262,18 @@ export const MobileNav: React.FC = () => {
   const { theme, setTheme } = useTheme();
   const { currentUser, logout } = useAuth();
   const { activeModule, setActiveModule } = useModule();
-  const { getOverdueTasks } = useTask();
+  const { handleLogout, overlay: logoutOverlay } = useGracefulLogout();
 
-  const overdueCount = getOverdueTasks().length;
+  // Overdue task count — derived from reminders once fetched, no separate context call
+  const overdueCount = reminders.filter(
+    (r) => r.type === "task" && r.urgency === "overdue",
+  ).length;
 
-  // Background badge count
+  // Background badge count — only fire when authenticated
   useEffect(() => {
     let cancelled = false;
     const refresh = async () => {
+      if (!localStorage.getItem("token")) return; // guard: no token, no fetch
       try {
         const items = await loadReminders();
         if (!cancelled) {
@@ -399,6 +426,11 @@ export const MobileNav: React.FC = () => {
             label: "Transaction",
             icon: Receipt,
             children: [
+              {
+                label: "GRN",
+                path: "/material/grn",
+                icon: Package,
+              },
               {
                 label: "Expense Booking",
                 path: "/material/expense-booking",
@@ -692,6 +724,12 @@ export const MobileNav: React.FC = () => {
       path: "/masters/type-of-doc",
       color: "text-sky-500",
     },
+    {
+      icon: Users,
+      label: "Role Master",
+      path: "/masters/role-master",
+      color: "text-blue-400",
+    },
   ];
 
   const getSetupConfig = () => {
@@ -758,6 +796,7 @@ export const MobileNav: React.FC = () => {
 
   return (
     <>
+      {logoutOverlay}
       {/* Floating Action Button */}
       <button
         onClick={() => setOpen(true)}
@@ -843,11 +882,7 @@ export const MobileNav: React.FC = () => {
                       <User size={18} />
                     </button>
                     <button
-                      onClick={() => {
-                        logout();
-                        navigate("/login");
-                        setOpen(false);
-                      }}
+                      onClick={handleLogout}
                       className="p-3 border border-border rounded-2xl hover:bg-destructive/10 text-destructive transition-colors"
                     >
                       <LogOut size={18} />
@@ -857,18 +892,23 @@ export const MobileNav: React.FC = () => {
               </div>
 
               {/* Module Switcher */}
-              <div className="px-5 pt-4 pb-3">
-                <div className="flex gap-2 overflow-x-auto scrollbar-none pb-1 -mx-1 px-1">
+              <div className="px-4 pt-4 pb-4 border-b border-border">
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-2.5">
+                  Module
+                </p>
+                <div className="grid grid-cols-2 gap-2">
                   {[
                     {
                       label: "Finance",
                       module: "finance",
                       active: activeModule === "finance" && !isAdminPage,
-                      color:
-                        "bg-primary text-primary-foreground border-primary",
+                      icon: TrendingUp,
+                      activeClass:
+                        "bg-primary/10 border-primary/40 text-primary",
+                      dotClass: "bg-primary",
                       onClick: () => {
                         setActiveModule("finance");
-                        if (activeModule !== "finance") navigate("/");
+                        navigate(MODULE_DASHBOARD_ROUTES.finance);
                         setOpen(false);
                       },
                     },
@@ -876,11 +916,13 @@ export const MobileNav: React.FC = () => {
                       label: "Material",
                       module: "material",
                       active: activeModule === "material" && !isAdminPage,
-                      color:
-                        "bg-emerald-500 text-emerald-50 border-emerald-500",
+                      icon: Package,
+                      activeClass:
+                        "bg-emerald-500/10 border-emerald-500/40 text-emerald-600",
+                      dotClass: "bg-emerald-500",
                       onClick: () => {
                         setActiveModule("material");
-                        navigate("/material/amendments");
+                        navigate(MODULE_DASHBOARD_ROUTES.material);
                         setOpen(false);
                       },
                     },
@@ -888,10 +930,13 @@ export const MobileNav: React.FC = () => {
                       label: "Follow Up",
                       module: "followup",
                       active: activeModule === "followup" && !isAdminPage,
-                      color: "bg-violet-500 text-violet-50 border-violet-500",
+                      icon: Calendar,
+                      activeClass:
+                        "bg-indigo-500/10 border-indigo-500/40 text-indigo-600",
+                      dotClass: "bg-indigo-500",
                       onClick: () => {
                         setActiveModule("followup");
-                        navigate("/followup");
+                        navigate(MODULE_DASHBOARD_ROUTES.followup);
                         setOpen(false);
                       },
                     },
@@ -901,7 +946,10 @@ export const MobileNav: React.FC = () => {
                             label: "Admin",
                             module: "admin",
                             active: isAdminPage,
-                            color: "bg-blue-500 text-white border-blue-500",
+                            icon: ShieldCheck,
+                            activeClass:
+                              "bg-blue-500/10 border-blue-500/40 text-blue-600",
+                            dotClass: "bg-blue-500",
                             onClick: () => {
                               navigate("/admin/dashboard");
                               setOpen(false);
@@ -909,25 +957,48 @@ export const MobileNav: React.FC = () => {
                           },
                         ]
                       : []),
-                  ].map((btn) => (
-                    <button
-                      key={btn.module}
-                      onClick={btn.onClick}
-                      className={`flex-shrink-0 py-2 px-4 rounded-full border font-medium text-sm transition-all ${
-                        btn.active
-                          ? btn.color
-                          : "border-border hover:bg-muted text-foreground"
-                      }`}
-                    >
-                      {btn.label}
-                    </button>
-                  ))}
+                  ].map((btn) => {
+                    const Icon = btn.icon;
+                    return (
+                      <button
+                        key={btn.module}
+                        onClick={btn.onClick}
+                        className={`flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border transition-all text-left ${
+                          btn.active
+                            ? btn.activeClass
+                            : "border-border hover:bg-muted text-foreground"
+                        }`}
+                      >
+                        <Icon
+                          size={15}
+                          className={
+                            btn.active ? "opacity-100" : "text-muted-foreground"
+                          }
+                        />
+                        <span className="text-sm font-heading font-medium">
+                          {btn.label}
+                        </span>
+                        {btn.active && (
+                          <span
+                            className={`ml-auto w-1.5 h-1.5 rounded-full flex-shrink-0 ${btn.dotClass}`}
+                          />
+                        )}
+                      </button>
+                    );
+                  })}
                 </div>
+              </div>
+
+              {/* Navigation */}
+              <div className="px-4 pt-3">
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-2.5">
+                  Navigation
+                </p>
               </div>
 
               {/* Setup Section */}
               {setupConfig.available && (
-                <div className="px-5 pb-1">
+                <div className="px-4 pb-1">
                   <div
                     role="button"
                     tabIndex={0}
@@ -987,7 +1058,7 @@ export const MobileNav: React.FC = () => {
               )}
 
               {/* ── Reminders Section ──────────────────────────────── */}
-              <div className="px-5 pb-2">
+              <div className="px-4 pb-2">
                 <div
                   role="button"
                   tabIndex={0}
@@ -1089,7 +1160,18 @@ export const MobileNav: React.FC = () => {
                             return (
                               <div
                                 key={r.id}
+                                onClick={() => {
+                                  if (r.type === "task") {
+                                    navigate(
+                                      r.taskId
+                                        ? `/tasks/${r.taskId}`
+                                        : "/tasks",
+                                    );
+                                    setOpen(false);
+                                  }
+                                }}
                                 className={`flex items-start gap-3 px-3 py-3
+                                  ${r.type === "task" ? "cursor-pointer" : "cursor-default"}
                                   ${r.urgency === "overdue" ? "bg-red-500/5" : r.urgency === "today" ? "bg-amber-500/5" : ""}`}
                               >
                                 <div
@@ -1134,7 +1216,7 @@ export const MobileNav: React.FC = () => {
               </div>
 
               {/* ── Reports + Widgets quick links ───────────────────── */}
-              <div className="px-5 pb-1 flex gap-2">
+              <div className="px-4 pb-1 flex gap-2">
                 <button
                   onClick={() => go("/reports")}
                   className={`flex-1 flex items-center gap-2 px-4 py-3 rounded-2xl border text-sm font-heading transition-all
@@ -1168,7 +1250,7 @@ export const MobileNav: React.FC = () => {
               </div>
 
               {/* Navigation Items */}
-              <div className="px-5 space-y-1">
+              <div className="px-4 space-y-1">
                 {itemsToRender.map((item) => {
                   const openState = groupStates[item.label] ?? false;
                   const active = isActive(item.path, item.children);
