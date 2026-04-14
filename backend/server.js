@@ -133,7 +133,7 @@ async function startServer() {
       }
       next();
     });
-    app.use("/api/userRights", authMiddleware, require("./routes/userRights"));
+    app.use("/api/user-rights", authMiddleware, require("./routes/userRights"));
     app.use(
       "/api/account-group",
       authMiddleware,
