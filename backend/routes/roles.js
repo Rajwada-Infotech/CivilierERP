@@ -1,12 +1,8 @@
 const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
-const allowRoles = require("../middleware/role");
 const authMiddleware = require("../middleware/auth");
-
-// Middleware: Admin/Super Admin/DBA only
-router.use(authMiddleware);
-router.use(allowRoles("admin", "super_admin", "dba"));
+const { checkPermission } = require("../middleware/permissions");
 
 // ====================== HELPERS ======================
 const cleanStr = (v, len = 255) => {
@@ -24,7 +20,10 @@ function generateRoleCode(rName) {
 }
 
 // ====================== GET ALL ROLES ======================
-router.get("/", async (req, res) => {
+router.get("/", 
+  authMiddleware,
+  checkPermission("Rights", "Menu", "CanView"),
+  async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -41,7 +40,10 @@ router.get("/", async (req, res) => {
 });
 
 // ====================== CREATE ROLE ======================
-router.post("/", async (req, res) => {
+router.post("/", 
+  authMiddleware, 
+  checkPermission("Rights", "Menu", "CanAdd"),
+  async (req, res) => {
   const { RName, RDesc } = req.body;
 
   if (!RName?.trim()) {
@@ -82,7 +84,10 @@ router.post("/", async (req, res) => {
 });
 
 // ====================== UPDATE ROLE ======================
-router.put("/:id", async (req, res) => {
+router.put("/:id", 
+  authMiddleware,
+  checkPermission("Rights", "Menu", "CanEdit"),
+  async (req, res) => {
   const { id } = req.params;
   const { RName, RDesc } = req.body;
   const userId = req.user?.id || req.user?.userId || "system";
@@ -142,7 +147,10 @@ router.put("/:id", async (req, res) => {
 });
 
 // ====================== DELETE ROLE ======================
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", 
+  authMiddleware,
+  checkPermission("Rights", "Menu", "CanDelete"),
+  async (req, res) => {
   try {
     const pool = getPool();
     await pool.request()
@@ -156,5 +164,117 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
-module.exports = router;
+// ====================== GET ROLE RIGHTS ======================
+router.get("/:roleId/rights", authMiddleware, async (req, res) => {
+  try {
+    const roleId = parseInt(req.params.roleId);
 
+    const pool = getPool();
+    const result = await pool.request()
+      .input("RoleId", sql.Int, roleId)
+      .query(`
+        SELECT Module, SubModule, CanView, CanAdd, CanEdit, CanDelete
+        FROM dbo.RoleRights
+        WHERE RoleId = @RoleId
+      `);
+
+    const PAGE_MAPPINGS = {
+      "Rights_Menu": "menu-rights",
+      "Rights_Role Master": "roles",
+      "Rights_Widgets": "widgets-rights",
+      "Rights_Financial Year": "fin-year",
+      "User Control_Manage Users": "users",
+      "User Control_Activity Browser": "activity-browser",
+    };
+
+    const frontendRights = result.recordset.map(row => {
+      const key = `${row.Module}_${row.SubModule}`.trim();
+
+      const page =
+        PAGE_MAPPINGS[key] ||
+        key.toLowerCase().replace(/\s+/g, "-");
+
+      const actions = [];
+
+      // ✅ STRICT CHECK (IMPORTANT)
+      if (Number(row.CanView) === 1) actions.push("view");
+      if (Number(row.CanAdd) === 1) actions.push("create");
+      if (Number(row.CanEdit) === 1) actions.push("edit");
+      if (Number(row.CanDelete) === 1) actions.push("delete");
+
+      return { page, actions };
+    });
+
+    return res.json(frontendRights);
+
+  } catch (err) {
+    console.error("GET RIGHTS ERROR:", err);
+    return res.status(500).json({ error: "Failed to fetch rights" });
+  }
+});
+
+
+
+// ====================== SET ROLE RIGHTS ======================
+router.post("/:roleId/rights", authMiddleware, async (req, res) => {
+  try {
+    const roleId = parseInt(req.params.roleId);
+    const { pagePermissions } = req.body;
+
+    const PAGE_MAPPINGS = {
+      "menu-rights": { module: "Rights", submodule: "Menu" },
+      "roles": { module: "Rights", submodule: "Role Master" },
+      "widgets-rights": { module: "Rights", submodule: "Widgets" },
+      "fin-year": { module: "Rights", submodule: "Financial Year" },
+      "users": { module: "User Control", submodule: "Manage Users" },
+      "activity-browser": { module: "User Control", submodule: "Activity Browser" },
+    };
+
+    const pool = getPool();
+    const transaction = new sql.Transaction(pool);
+
+    await transaction.begin();
+
+    // 🧹 Clear old
+    await new sql.Request(transaction)
+      .input("RoleId", sql.Int, roleId)
+      .query("DELETE FROM dbo.RoleRights WHERE RoleId=@RoleId");
+
+    // 🧠 Insert new
+    for (const permission of pagePermissions || []) {
+      const mapping = PAGE_MAPPINGS[permission.page] || {
+        module: permission.page.replace(/-/g, " "),
+        submodule: permission.page.replace(/-/g, " "),
+      };
+
+      const actions = permission.actions || [];
+
+      await new sql.Request(transaction)
+        .input("RoleId", sql.Int, roleId)
+        .input("Module", sql.NVarChar(100), mapping.module)
+        .input("SubModule", sql.NVarChar(100), mapping.submodule)
+        .input("CanView", sql.Bit, actions.includes("view") ? 1 : 0)
+        .input("CanAdd", sql.Bit, actions.includes("create") ? 1 : 0)
+        .input("CanEdit", sql.Bit, actions.includes("edit") ? 1 : 0)
+        .input("CanDelete", sql.Bit, actions.includes("delete") ? 1 : 0)
+        .query(`
+          INSERT INTO dbo.RoleRights
+          (RoleId, Module, SubModule, CanView, CanAdd, CanEdit, CanDelete)
+          VALUES (@RoleId, @Module, @SubModule, @CanView, @CanAdd, @CanEdit, @CanDelete)
+        `);
+    }
+
+    await transaction.commit();
+
+    return res.json({ success: true });
+
+  } catch (err) {
+    console.error("SAVE RIGHTS ERROR:", err);
+    return res.status(500).json({ error: "Failed to save rights" });
+  }
+});
+
+
+
+
+module.exports = router;
