@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useModule } from "@/contexts/ModuleContext";
-import { useTask } from "@/contexts/TaskContext";
+import { useReminders } from "@/hooks/useReminders";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSidebarState } from "./AppLayout";
 
@@ -455,10 +455,8 @@ export const AppSidebar = () => {
   const location = useLocation();
   const { activeModule } = useModule();
   const { collapsed, setCollapsed } = useSidebarState();
-  const { getOverdueTasks } = useTask();
+  const { overdueTaskCount: overdueCount } = useReminders();
   const { currentUser } = useAuth();
-
-  const overdueCount = getOverdueTasks().length;
 
   const ADMIN_SETUP_PATHS = [
     "/masters/named-entry-type",
