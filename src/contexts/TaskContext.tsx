@@ -10,7 +10,6 @@ import { toast } from "sonner";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
 export type TaskStatus = "open" | "in_progress" | "closed" | "reviewed";
 export type TaskPriority = "low" | "medium" | "high";
 
@@ -43,7 +42,6 @@ export interface Task {
   reviewedByName?: string;
   dueDate: string;
   qualityCriteria: QualityCriteria[];
-  /** Comments stored inline — no separate TaskComments table or endpoint. */
   comments: TaskComment[];
   closedAt?: string;
   reviewedAt?: string;
@@ -77,17 +75,15 @@ interface TaskContextType {
 }
 
 // ─── Context ──────────────────────────────────────────────────────────────────
-
 const TaskContext = createContext<TaskContextType | null>(null);
 
 export const useTask = () => {
   const ctx = useContext(TaskContext);
-  if (!ctx) throw new Error("useTask must be inside TaskProvider");
+  if (!ctx) throw new Error("useTask must be used inside TaskProvider");
   return ctx;
 };
 
 // ─── Provider ─────────────────────────────────────────────────────────────────
-
 export const TaskProvider = ({ children }: { children: React.ReactNode }) => {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [loading, setLoading] = useState(true);
@@ -95,8 +91,15 @@ export const TaskProvider = ({ children }: { children: React.ReactNode }) => {
 
   // ── Fetch tasks ──────────────────────────────────────────────────────────
   const refetch = useCallback(async () => {
+    // Prevent unnecessary requests if user is not logged in
+    if (!localStorage.getItem("token")) {
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     setError(null);
+
     try {
       const res = await fetchWithAuth("/api/tasks");
       if (!res.ok) throw new Error("Failed to load tasks");
@@ -130,10 +133,12 @@ export const TaskProvider = ({ children }: { children: React.ReactNode }) => {
             qualityCriteria: task.qualityCriteria,
           }),
         });
+
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
           throw new Error((err as any).error || "Failed to create task");
         }
+
         const newTask: Task = await res.json();
         setTasks((prev) => [newTask, ...prev]);
         toast.success(`Task "${task.title}" created.`);
@@ -155,10 +160,12 @@ export const TaskProvider = ({ children }: { children: React.ReactNode }) => {
           method: "PUT",
           body: JSON.stringify(updates),
         });
+
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
           throw new Error((err as any).error || "Failed to update task");
         }
+
         const updated: Task = await res.json();
         setTasks((prev) => prev.map((t) => (t.id === taskId ? updated : t)));
       } catch (err) {
@@ -177,10 +184,12 @@ export const TaskProvider = ({ children }: { children: React.ReactNode }) => {
       const res = await fetchWithAuth(`/api/tasks/${taskId}`, {
         method: "DELETE",
       });
+
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error((err as any).error || "Failed to delete task");
       }
+
       setTasks((prev) => prev.filter((t) => t.id !== taskId));
       toast.success("Task deleted.");
     } catch (err) {
@@ -197,10 +206,12 @@ export const TaskProvider = ({ children }: { children: React.ReactNode }) => {
         method: "PUT",
         body: JSON.stringify({ status: "closed" }),
       });
+
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error((err as any).error || "Failed to close task");
       }
+
       const updated: Task = await res.json();
       setTasks((prev) => prev.map((t) => (t.id === taskId ? updated : t)));
       toast.success("Task marked as closed. Pending review.");
@@ -228,12 +239,15 @@ export const TaskProvider = ({ children }: { children: React.ReactNode }) => {
           method: "PUT",
           body: JSON.stringify(body),
         });
+
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
           throw new Error((err as any).error || "Failed to review task");
         }
+
         const updated: Task = await res.json();
         setTasks((prev) => prev.map((t) => (t.id === taskId ? updated : t)));
+
         if (approved) toast.success("Task reviewed and approved.");
         else toast.warning("Task sent back for rework.");
       } catch (err) {
@@ -246,7 +260,7 @@ export const TaskProvider = ({ children }: { children: React.ReactNode }) => {
     [],
   );
 
-  // ── Add comment (inline, via PUT — no separate POST /comments endpoint) ──
+  // ── Add comment ──────────────────────────────────────────────────────────
   const addComment = useCallback(
     async (
       taskId: string,
@@ -278,11 +292,9 @@ export const TaskProvider = ({ children }: { children: React.ReactNode }) => {
           method: "PUT",
           body: JSON.stringify({ comments: updatedComments }),
         });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error((err as any).error || "Failed to add comment");
-        }
-        // Server may return a cleaned-up version; sync it
+
+        if (!res.ok) throw new Error("Failed to add comment");
+
         const updated: Task = await res.json();
         setTasks((prev) => prev.map((t) => (t.id === taskId ? updated : t)));
       } catch (err) {
@@ -301,10 +313,11 @@ export const TaskProvider = ({ children }: { children: React.ReactNode }) => {
     [tasks],
   );
 
-  // ── Toggle quality criteria (optimistic) ─────────────────────────────────
+  // ── Toggle quality criteria ─────────────────────────────────────────────
   const toggleQualityCriteria = useCallback(
     async (taskId: string, criteriaId: string) => {
       let updatedQC: QualityCriteria[] = [];
+
       setTasks((prev) =>
         prev.map((t) => {
           if (t.id !== taskId) return t;
@@ -321,21 +334,20 @@ export const TaskProvider = ({ children }: { children: React.ReactNode }) => {
           body: JSON.stringify({ qualityCriteria: updatedQC }),
         });
       } catch {
-        await refetch();
         toast.error("Failed to save quality criteria. Please try again.");
+        refetch(); // fallback
       }
     },
     [refetch],
   );
 
-  // ── Derived helpers ───────────────────────────────────────────────────────
+  // ── Derived helpers ─────────────────────────────────────────────────────
   const getTasksForUser = useCallback(
     (userId: string) =>
       tasks.filter((t) => t.assignedTo === userId || t.createdBy === userId),
     [tasks],
   );
 
-  // ── Task filter helpers ──────────────────────────────────────────────────
   const today = useMemo(() => new Date(), []);
   const threeDaysFromNow = useMemo(() => {
     const date = new Date();
@@ -347,9 +359,7 @@ export const TaskProvider = ({ children }: { children: React.ReactNode }) => {
     return tasks.filter((task) => {
       const due = new Date(task.dueDate);
       return (
-        due < today &&
-        task.status !== "closed" &&
-        task.status !== "reviewed"
+        due < today && task.status !== "closed" && task.status !== "reviewed"
       );
     });
   }, [tasks, today]);
@@ -365,6 +375,7 @@ export const TaskProvider = ({ children }: { children: React.ReactNode }) => {
     });
   }, [tasks, threeDaysFromNow]);
 
+  // ── Context Value ───────────────────────────────────────────────────────
   const value = useMemo(
     () => ({
       tasks,

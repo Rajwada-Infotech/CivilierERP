@@ -34,8 +34,9 @@ export const TdsProvider: React.FC<{ children: React.ReactNode }> = ({
   const { data: dbData, isLoading } = useQuery({
     queryKey: ["tds"],
     queryFn: () => fetchWithAuth("/api/tds-master").then((r) => r.json()),
-    enabled: !!currentUser,
+    enabled: !!currentUser && !!localStorage.getItem("token"),
     staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
   const tdsRecords: TdsRecord[] = Array.isArray(dbData)

@@ -7,6 +7,7 @@ const { connectDB } = require("./db");
 const authMiddleware = require("./middleware/auth");
 const rateLimit = require("express-rate-limit");
 const { ipKeyGenerator } = require("express-rate-limit");
+
 const {
   getRedis,
   redisZScore,
@@ -37,9 +38,6 @@ async function startServer() {
   try {
     await connectDB();
 
-    // ---------------------------------------------------------------------------
-    // Build Redis-backed rate limit stores
-    // ---------------------------------------------------------------------------
     function makeStore(prefix) {
       try {
         const { RedisStore } = require("rate-limit-redis");
@@ -79,16 +77,16 @@ async function startServer() {
       keyGenerator: (req) => `${req.user?.userId || ipKeyGenerator(req)}`,
     });
 
-    // ---------------------------------------------------------------------------
     const app = express();
 
     app.disable("x-powered-by");
+
+    // ====================== MIDDLEWARE ======================
     app.use(express.json());
     app.use(express.urlencoded({ extended: true }));
     app.use(helmet());
     app.use(morgan("dev"));
 
-    // Track global metrics on every request
     app.use(async (req, res, next) => {
       try {
         await incrGlobalRequests();
@@ -97,138 +95,88 @@ async function startServer() {
       next();
     });
 
+    // CORS
     app.use(
       cors({
-        origin: (origin, cb) => {
-          console.log(`CORS request from origin: ${origin || "undefined"}`);
+        origin: (origin, callback) => {
           if (!origin || ALLOWED_ORIGINS.includes(origin)) {
-            cb(null, true);
+            callback(null, true);
           } else {
-            console.log(`CORS rejected origin: ${origin}`);
-            cb(null, false);
+            console.warn(`CORS rejected origin: ${origin}`);
+            callback(new Error("Not allowed by CORS"));
           }
         },
         credentials: true,
+        methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+        allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+        optionsSuccessStatus: 204,
       }),
     );
 
-    app.get("/", (req, res) => res.send("CivilierERP API running"));
-
-    // Rate limiters
+    // ====================== RATE LIMITERS ======================
     app.use("/api/users/login", loginLimiter);
     app.use("/api", apiLimiter);
 
+    // ====================== ROUTES ======================
+
     // Public routes
     app.use("/api/users", require("./routes/users"));
+    app.use("/api/roles", require("./routes/roles"));
 
-    // Protected routes
-    const allowRoles = require("./middleware/role");
+    // Global authentication for all /api routes (except the public ones above)
+    app.use("/api", authMiddleware);
 
-    // Track active users after auth
-    app.use(authMiddleware, async (req, res, next) => {
+    // Active user tracking
+    app.use((req, res, next) => {
       if (req.user?.userId) {
-        try {
-          await pfaddActiveUser(req.user.userId);
-        } catch {}
+        pfaddActiveUser(req.user.userId).catch(() => {});
       }
       next();
     });
-    app.use("/api/user-rights", authMiddleware, require("./routes/userRights"));
-    app.use(
-      "/api/account-group",
-      authMiddleware,
-      require("./routes/accountGroup"),
-    );
-    app.use(
-      "/api/account-head",
-      authMiddleware,
-      require("./routes/accountHeadMaster"),
-    );
-    app.use(
-      "/api/activity-master",
-      authMiddleware,
-      require("./routes/activityMaster"),
-    );
-    app.use("/api/bank-master", authMiddleware, require("./routes/bankMaster"));
-    app.use(
-      "/api/billing-terms",
-      authMiddleware,
-      require("./routes/billingTerms"),
-    );
-    app.use("/api/card-master", authMiddleware, require("./routes/cardMaster"));
-    app.use(
-      "/api/cheque-master",
-      authMiddleware,
-      require("./routes/chequeMaster"),
-    );
-    app.use(
-      "/api/document-type",
-      authMiddleware,
-      require("./routes/documentType"),
-    );
-    app.use("/api/fin-year", authMiddleware, require("./routes/finYear"));
-    app.use(
-      "/api/general-ledger",
-      authMiddleware,
-      require("./routes/generalLedger"),
-    );
-    app.use("/api/hsn", authMiddleware, require("./routes/hsn"));
-    app.use("/api/item-groups", authMiddleware, require("./routes/itemGroup"));
-    app.use("/api/item-master", authMiddleware, require("./routes/itemMaster"));
-    app.use("/api/tds-master", authMiddleware, require("./routes/tdsMaster"));
-    app.use("/api/enterprises", authMiddleware, require("./routes/enterprise"));
-    app.use("/api/entry-type", authMiddleware, require("./routes/entryType"));
-    app.use(
-      "/api/expense-booking",
-      authMiddleware,
-      require("./routes/expenseBooking"),
-    );
-    app.use("/api/new-payment", authMiddleware, require("./routes/newPayment"));
-    app.use(
-      "/api/purchase-orders",
-      authMiddleware,
-      require("./routes/purchaseOrders"),
-    );
-    app.use("/api/tenants", authMiddleware, require("./routes/tenants"));
+
+    // Protected routes
+    app.use("/api/user-rights", require("./routes/userRights"));
+    app.use("/api/account-group", require("./routes/accountGroup"));
+    app.use("/api/account-head", require("./routes/accountHeadMaster"));
+    app.use("/api/activity-master", require("./routes/activityMaster"));
+    app.use("/api/bank-master", require("./routes/bankMaster"));
+    app.use("/api/billing-terms", require("./routes/billingTerms"));
+    app.use("/api/card-master", require("./routes/cardMaster"));
+    app.use("/api/cheque-master", require("./routes/chequeMaster"));
+    app.use("/api/document-type", require("./routes/documentType"));
+    app.use("/api/fin-year", require("./routes/finYear"));
+    app.use("/api/general-ledger", require("./routes/generalLedger"));
+    app.use("/api/hsn", require("./routes/hsn"));
+    app.use("/api/item-groups", require("./routes/itemGroup"));
+    app.use("/api/item-master", require("./routes/itemMaster"));
+    app.use("/api/tds-master", require("./routes/tdsMaster"));
+    app.use("/api/enterprises", require("./routes/enterprise"));
+    app.use("/api/entry-type", require("./routes/entryType"));
+    app.use("/api/expense-booking", require("./routes/expenseBooking"));
+    app.use("/api/new-payment", require("./routes/newPayment"));
+    app.use("/api/purchase-orders", require("./routes/purchaseOrders"));
+    app.use("/api/tenants", require("./routes/tenants"));
+    app.use("/api/work-orders", require("./routes/workOrder"));
+    app.use("/api/user-profile", require("./routes/userProfile"));
+    app.use("/api/uom-master", require("./routes/uomMaster"));
+    app.use("/api/debit-note", require("./routes/debitNote"));
+    app.use("/api/tc-master", require("./routes/tcMaster"));
+    app.use("/api/grns", require("./routes/grns"));
+    app.use("/api/finance-dashboard", require("./routes/financeDashboard"));
+    app.use("/api/material-dashboard", require("./routes/materialDashboard"));
+    app.use("/api/user-activity", require("./routes/userActivity"));
+    app.use("/api/tasks", require("./routes/tasks"));
+
+    // Routes with extra role checks
+    const allowRoles = require("./middleware/role");
     app.use(
       "/api/dba",
-      authMiddleware,
-      allowRoles("dba", "admin"),
+      allowRoles("dba", "admin", "director"),
       require("./routes/dba"),
     );
-    app.use("/api/work-orders", authMiddleware, require("./routes/workOrder"));
-    app.use(
-      "/api/user-profile",
-      authMiddleware,
-      require("./routes/userProfile"),
-    );
-    app.use("/api/uom-master", authMiddleware, require("./routes/uomMaster"));
-    app.use("/api/debit-note", authMiddleware, require("./routes/debitNote"));
-    app.use("/api/tc-master", authMiddleware, require("./routes/tcMaster"));
-    app.use("/api/grns", authMiddleware, require("./routes/grns"));
-    app.use(
-      "/api/finance-dashboard",
-      authMiddleware,
-      require("./routes/financeDashboard"),
-    );
-    app.use(
-      "/api/material-dashboard",
-      authMiddleware,
-      require("./routes/materialDashboard"),
-    );
-    app.use(
-      "/api/user-activity",
-      authMiddleware,
-      require("./routes/userActivity"),
-    );
 
-    // Role Master API
-    app.use("/api/roles", require("./routes/roles"));
-    
-    app.use("/api/tasks", authMiddleware, require("./routes/tasks"));
-
-    // System metrics endpoint
-    app.get("/api/system/metrics", authMiddleware, async (req, res) => {
+    // System metrics
+    app.get("/api/system/metrics", async (req, res) => {
       const metrics = await getSystemMetrics();
       const predictedRPM = await getPredictedRPM();
       metrics.predictedRPM = predictedRPM;
@@ -248,12 +196,15 @@ async function startServer() {
           metrics.memoryUsage,
         );
       }
-
       res.json(metrics);
     });
 
+    app.get("/", (req, res) => res.send("CivilierERP API running"));
+
     const PORT = process.env.PORT || 5000;
-    app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+    app.listen(PORT, () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+    });
 
     return app;
   } catch (err) {
@@ -263,7 +214,6 @@ async function startServer() {
 }
 
 const appPromise = startServer();
-
 module.exports = async (req, res) => {
   const app = await appPromise;
   return app(req, res);

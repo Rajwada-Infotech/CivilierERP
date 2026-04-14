@@ -34,9 +34,7 @@ router.post("/login", async (req, res) => {
     }
 
     const pool = getPool();
-    const result = await pool
-      .request()
-      .input("email", sql.NVarChar, email)
+    const result = await pool.request().input("email", sql.NVarChar, email)
       .query(`
         SELECT u.id, u.name, u.email, u.RoleId, u.password, u.discontinue,
                r.RName AS roleName
@@ -69,11 +67,11 @@ router.post("/login", async (req, res) => {
       {
         userId: user.id,
         roleId: user.RoleId,
-        roleName: user.roleName,
+        role: user.roleName.toLowerCase().replace(/\s+/g, "_"),
         email: user.email,
       },
       process.env.JWT_SECRET,
-      { expiresIn: "7d" }
+      { expiresIn: "7d" },
     );
 
     res.json({
@@ -84,7 +82,7 @@ router.post("/login", async (req, res) => {
         name: user.name,
         email: user.email,
         roleId: user.RoleId,
-        roleName: user.roleName,
+        role: user.roleName.toLowerCase().replace(/\s+/g, "_"),
       },
     });
   } catch (err) {
@@ -141,7 +139,7 @@ router.get(
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
-  }
+  },
 );
 
 // CREATE USER
@@ -167,8 +165,7 @@ router.post(
         .input("name", sql.NVarChar, name)
         .input("email", sql.NVarChar, email)
         .input("RoleId", sql.Int, assignedRoleId)
-        .input("password", sql.NVarChar, hashed)
-        .query(`
+        .input("password", sql.NVarChar, hashed).query(`
           INSERT INTO dbo.users (name, email, password, RoleId, created_datetime, discontinue)
           VALUES (@name, @email, @password, @RoleId, GETDATE(), 0)
         `);
@@ -177,7 +174,7 @@ router.post(
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
-  }
+  },
 );
 
 // UPDATE USER
@@ -200,8 +197,7 @@ router.put(
         .input("name", sql.NVarChar, name)
         .input("email", sql.NVarChar, email)
         .input("RoleId", sql.Int, assignedRoleId)
-        .input("discontinue", sql.Bit, discontinue ? 1 : 0)
-        .query(`
+        .input("discontinue", sql.Bit, discontinue ? 1 : 0).query(`
           UPDATE dbo.users
           SET name=@name, email=@email, RoleId=@RoleId, discontinue=@discontinue
           WHERE id=@id
@@ -211,7 +207,7 @@ router.put(
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
-  }
+  },
 );
 
 // DELETE USER
@@ -238,7 +234,7 @@ router.delete(
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
-  }
+  },
 );
 
 module.exports = router;
