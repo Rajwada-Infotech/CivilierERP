@@ -28,9 +28,8 @@ const fields: FieldDef[] = [
     name: "supplierCategory",
     label: "Supplier Category",
     type: "select",
-    options: ["Goods", "Services"],
+    options: ["Goods", "Services", "Both"],
   },
-  { name: "LHeadPaymentTerms", label: "Payment Terms", type: "text" },
   { name: "LHeadAddress", label: "Address", type: "textarea", fullWidth: true },
   { name: "LHeadStatus", label: "Status", type: "toggle", defaultValue: true },
 ];
@@ -40,7 +39,6 @@ const columns: ColumnDef[] = [
   { key: "LHeadContactPerson", label: "Contact Person" },
   { key: "LHeadPhone", label: "Phone" },
   { key: "LGST", label: "GST No." },
-  { key: "LHeadPaymentTerms", label: "Payment Terms" },
   { key: "LHeadStatus", label: "Status" },
 ];
 
@@ -63,7 +61,6 @@ const SupplierMaster: React.FC = () => {
       LGST: item.LGST || "",
       LDescription: item.LDescription || "",
       supplierCategory: "Material",
-      LHeadPaymentTerms: item.LHeadPaymentTerms || "",
       LHeadAddress: item.LHeadAddress || "",
       LHeadStatus: Boolean(item.LHeadStatus),
     }));
@@ -81,7 +78,6 @@ const SupplierMaster: React.FC = () => {
       }
 
       const record = event.record;
-
       if (!record) {
         toast.error("No record data found");
         return;
@@ -95,7 +91,6 @@ const SupplierMaster: React.FC = () => {
         LHeadEmail: record.LHeadEmail,
         LGST: record.LGST,
         LDescription: record.LDescription,
-        LHeadPaymentTerms: record.LHeadPaymentTerms,
         LHeadAddress: record.LHeadAddress,
         LHeadStatus: record.LHeadStatus,
         LBranchName: "Main",
