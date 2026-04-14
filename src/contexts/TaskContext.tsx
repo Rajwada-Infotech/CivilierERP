@@ -72,6 +72,8 @@ interface TaskContextType {
   ) => Promise<void>;
   toggleQualityCriteria: (taskId: string, criteriaId: string) => Promise<void>;
   getTasksForUser: (userId: string) => Task[];
+  getOverdueTasks: () => Task[];
+  getDueSoonTasks: () => Task[];
 }
 
 // ─── Context ──────────────────────────────────────────────────────────────────
@@ -333,6 +335,36 @@ export const TaskProvider = ({ children }: { children: React.ReactNode }) => {
     [tasks],
   );
 
+  // ── Task filter helpers ──────────────────────────────────────────────────
+  const today = useMemo(() => new Date(), []);
+  const threeDaysFromNow = useMemo(() => {
+    const date = new Date();
+    date.setDate(date.getDate() + 3);
+    return date;
+  }, []);
+
+  const getOverdueTasks = useCallback(() => {
+    return tasks.filter((task) => {
+      const due = new Date(task.dueDate);
+      return (
+        due < today &&
+        task.status !== "closed" &&
+        task.status !== "reviewed"
+      );
+    });
+  }, [tasks, today]);
+
+  const getDueSoonTasks = useCallback(() => {
+    return tasks.filter((task) => {
+      const due = new Date(task.dueDate);
+      return (
+        due <= threeDaysFromNow &&
+        task.status !== "closed" &&
+        task.status !== "reviewed"
+      );
+    });
+  }, [tasks, threeDaysFromNow]);
+
   const value = useMemo(
     () => ({
       tasks,
@@ -347,6 +379,8 @@ export const TaskProvider = ({ children }: { children: React.ReactNode }) => {
       addComment,
       toggleQualityCriteria,
       getTasksForUser,
+      getOverdueTasks,
+      getDueSoonTasks,
     }),
     [
       tasks,
@@ -361,6 +395,8 @@ export const TaskProvider = ({ children }: { children: React.ReactNode }) => {
       addComment,
       toggleQualityCriteria,
       getTasksForUser,
+      getOverdueTasks,
+      getDueSoonTasks,
     ],
   );
 
