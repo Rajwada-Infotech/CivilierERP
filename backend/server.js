@@ -1,5 +1,4 @@
 require("dotenv").config();
-
 const express = require("express");
 const helmet = require("helmet");
 const morgan = require("morgan");
@@ -39,9 +38,7 @@ async function startServer() {
     await connectDB();
 
     // ---------------------------------------------------------------------------
-    // Build Redis-backed rate limit stores INSIDE startServer so the Redis
-    // client is already initialised before RedisStore tries to send commands.
-    // Falls back to in-memory if the package isn't available or Redis is down.
+    // Build Redis-backed rate limit stores
     // ---------------------------------------------------------------------------
     function makeStore(prefix) {
       try {
@@ -51,7 +48,7 @@ async function startServer() {
           sendCommand: (...args) => getRedis().call(...args),
         });
       } catch {
-        return undefined; // in-memory fallback
+        return undefined;
       }
     }
 
@@ -63,7 +60,7 @@ async function startServer() {
     });
 
     const apiLimiter = rateLimit({
-      windowMs: 60 * 1000, // 1 min buckets for scaling
+      windowMs: 60 * 1000,
       max: async (req) => {
         if (!req.user || !req.user.userId) return 1000;
         const score = Number(
@@ -83,10 +80,9 @@ async function startServer() {
     });
 
     // ---------------------------------------------------------------------------
-
     const app = express();
-    app.disable("x-powered-by");
 
+    app.disable("x-powered-by");
     app.use(express.json());
     app.use(express.urlencoded({ extended: true }));
     app.use(helmet());
@@ -122,10 +118,10 @@ async function startServer() {
     app.use("/api/users/login", loginLimiter);
     app.use("/api", apiLimiter);
 
-    // Public
+    // Public routes
     app.use("/api/users", require("./routes/users"));
 
-    // Protected
+    // Protected routes
     const allowRoles = require("./middleware/role");
 
     // Track active users after auth
@@ -137,7 +133,7 @@ async function startServer() {
       }
       next();
     });
-
+    app.use("/api/userRights", authMiddleware, require("./routes/userRights"));
     app.use(
       "/api/account-group",
       authMiddleware,
@@ -226,11 +222,14 @@ async function startServer() {
       require("./routes/userActivity"),
     );
 
+    app.use("/api/tasks", authMiddleware, require("./routes/tasks"));
+
     // System metrics endpoint
     app.get("/api/system/metrics", authMiddleware, async (req, res) => {
       const metrics = await getSystemMetrics();
       const predictedRPM = await getPredictedRPM();
       metrics.predictedRPM = predictedRPM;
+
       const topEngagedUsers = await getRedis().zrevrange(
         "engagement:score",
         0,
@@ -238,6 +237,7 @@ async function startServer() {
         "WITHSCORES",
       );
       metrics.topEngagedUsers = topEngagedUsers;
+
       if (req.user) {
         metrics.avgLimit = getDynamicLimit(
           (await redisZScore("engagement:score", req.user.userId)) || 0,
@@ -245,6 +245,7 @@ async function startServer() {
           metrics.memoryUsage,
         );
       }
+
       res.json(metrics);
     });
 

@@ -39,6 +39,7 @@ import {
   CalendarClock,
   ShoppingCart,
   TrendingUp,
+  CheckSquare,
 } from "lucide-react";
 
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -46,7 +47,6 @@ import { useModule, MODULE_DASHBOARD_ROUTES } from "@/contexts/ModuleContext";
 import { BillingIcon } from "@/components/icons/BillingIcon";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTheme, THEME_DOTS, Theme } from "@/contexts/ThemeContext";
-import { useTask } from "@/contexts/TaskContext";
 import { useGracefulLogout } from "@/hooks/useGracefulLogout";
 
 interface NavItemChild {
@@ -70,13 +70,14 @@ interface NavItem {
 
 interface ReminderItem {
   id: string | number;
-  type: "purchase_order" | "grn" | "cheque" | "tds" | "general";
+  type: "purchase_order" | "grn" | "cheque" | "tds" | "task" | "general";
   title: string;
   subtitle: string;
   dueDate: string;
   timeSlot?: string;
   urgency: "overdue" | "today" | "soon" | "upcoming";
   amount?: number;
+  taskId?: string;
 }
 
 const URGENCY_CFG = {
@@ -107,6 +108,7 @@ const REM_ICON: Record<ReminderItem["type"], React.ElementType> = {
   grn: Package,
   cheque: BookOpen,
   tds: FileWarning,
+  task: CheckSquare,
   general: Bell,
 };
 
@@ -140,11 +142,12 @@ function relLabel(d: string, ts?: string) {
 }
 
 async function loadReminders(): Promise<ReminderItem[]> {
-  const [poR, grnR, chqR, tdsR] = await Promise.allSettled([
+  const [poR, grnR, chqR, tdsR, taskR] = await Promise.allSettled([
     fetchWithAuth("/api/purchase-orders"),
     fetchWithAuth("/api/grns"),
     fetchWithAuth("/api/cheque-master"),
     fetchWithAuth("/api/tds-master"),
+    fetchWithAuth("/api/tasks?scope=mine&status=open,in_progress"),
   ]);
   const items: ReminderItem[] = [];
   const push = (
@@ -221,6 +224,24 @@ async function loadReminders(): Promise<ReminderItem[]> {
       (r) => r.TimeSlot,
     );
   }
+  // Tasks — from /api/tasks directly, no separate /reminders endpoint
+  if (taskR.status === "fulfilled" && taskR.value.ok) {
+    const tasks: any[] = await taskR.value.json();
+    tasks.forEach((t: any) => {
+      if (!t.dueDate) return;
+      const urgency = classifyUrgency(t.dueDate);
+      if (urgency === "upcoming") return;
+      items.push({
+        id: `task-${t.id}`,
+        type: "task",
+        title: t.title,
+        subtitle: `Assigned to ${t.assignedToName}`,
+        dueDate: t.dueDate,
+        urgency,
+        taskId: String(t.id),
+      });
+    });
+  }
   const ORD = { overdue: 0, today: 1, soon: 2, upcoming: 3 };
   items.sort((a, b) => ORD[a.urgency] - ORD[b.urgency]);
   return items;
@@ -241,10 +262,12 @@ export const MobileNav: React.FC = () => {
   const { theme, setTheme } = useTheme();
   const { currentUser, logout } = useAuth();
   const { activeModule, setActiveModule } = useModule();
-  const { getOverdueTasks } = useTask();
   const { handleLogout, overlay: logoutOverlay } = useGracefulLogout();
 
-  const overdueCount = getOverdueTasks().length;
+  // Overdue task count — derived from reminders once fetched, no separate context call
+  const overdueCount = reminders.filter(
+    (r) => r.type === "task" && r.urgency === "overdue",
+  ).length;
 
   // Background badge count
   useEffect(() => {
@@ -1130,7 +1153,18 @@ export const MobileNav: React.FC = () => {
                             return (
                               <div
                                 key={r.id}
+                                onClick={() => {
+                                  if (r.type === "task") {
+                                    navigate(
+                                      r.taskId
+                                        ? `/tasks/${r.taskId}`
+                                        : "/tasks",
+                                    );
+                                    setOpen(false);
+                                  }
+                                }}
                                 className={`flex items-start gap-3 px-3 py-3
+                                  ${r.type === "task" ? "cursor-pointer" : "cursor-default"}
                                   ${r.urgency === "overdue" ? "bg-red-500/5" : r.urgency === "today" ? "bg-amber-500/5" : ""}`}
                               >
                                 <div

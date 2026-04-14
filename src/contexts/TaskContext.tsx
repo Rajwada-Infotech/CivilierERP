@@ -1,5 +1,15 @@
-import React, { createContext, useContext, useState, useCallback, useMemo } from "react";
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useMemo,
+  useEffect,
+} from "react";
 import { toast } from "sonner";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 export type TaskStatus = "open" | "in_progress" | "closed" | "reviewed";
 export type TaskPriority = "low" | "medium" | "high";
@@ -33,94 +43,38 @@ export interface Task {
   reviewedByName?: string;
   dueDate: string;
   qualityCriteria: QualityCriteria[];
+  /** Comments stored inline — no separate TaskComments table or endpoint. */
   comments: TaskComment[];
   closedAt?: string;
   reviewedAt?: string;
   createdAt: string;
-  reminderSent: boolean;
 }
-
-const DEMO_TASKS: Task[] = [
-  {
-    id: "task-1",
-    title: "Complete Contractor Master Data Entry",
-    description: "Enter all contractor details including GST and PAN numbers for Q1.",
-    priority: "high",
-    status: "open",
-    assignedTo: "u-user-1",
-    assignedToName: "Rajesh Kumar",
-    createdBy: "u-admin-1",
-    createdByName: "Admin User",
-    dueDate: new Date(Date.now() - 1 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-    qualityCriteria: [
-      { id: "qc-1", label: "All GST numbers verified", met: false },
-      { id: "qc-2", label: "PAN numbers entered", met: false },
-      { id: "qc-3", label: "Contact details complete", met: false },
-    ],
-    comments: [],
-    createdAt: new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString(),
-    reminderSent: false,
-  },
-  {
-    id: "task-2",
-    title: "Verify Bank Account Reconciliation",
-    description: "Reconcile all bank accounts for the month of March.",
-    priority: "medium",
-    status: "in_progress",
-    assignedTo: "u-user-2",
-    assignedToName: "Meena Patel",
-    createdBy: "u-admin-1",
-    createdByName: "Admin User",
-    dueDate: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-    qualityCriteria: [
-      { id: "qc-4", label: "HDFC account reconciled", met: true },
-      { id: "qc-5", label: "SBI account reconciled", met: false },
-      { id: "qc-6", label: "ICICI account reconciled", met: false },
-    ],
-    comments: [
-      { id: "c-1", userId: "u-user-2", userName: "Meena Patel", userInitials: "MP", text: "Started HDFC reconciliation.", createdAt: new Date(Date.now() - 1 * 60 * 60 * 1000).toISOString() },
-    ],
-    createdAt: new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString(),
-    reminderSent: false,
-  },
-  {
-    id: "task-3",
-    title: "Supplier Invoice Review",
-    description: "Review all pending supplier invoices and approve payments.",
-    priority: "low",
-    status: "closed",
-    assignedTo: "u-user-1",
-    assignedToName: "Rajesh Kumar",
-    createdBy: "u-super-1",
-    createdByName: "Super Admin",
-    reviewedBy: undefined,
-    dueDate: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-    qualityCriteria: [
-      { id: "qc-7", label: "All invoices stamped", met: true },
-      { id: "qc-8", label: "Amounts verified", met: true },
-    ],
-    comments: [],
-    closedAt: new Date().toISOString(),
-    createdAt: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
-    reminderSent: false,
-  },
-];
 
 interface TaskContextType {
   tasks: Task[];
-  addTask: (task: Omit<Task, "id" | "createdAt" | "comments" | "reminderSent">) => void;
-  updateTask: (taskId: string, updates: Partial<Task>) => void;
-  deleteTask: (taskId: string) => void;
-  // FIX: Removed unused userId/userName params from closeTask signature.
-  //      The function only sets status/closedAt and never used those params.
-  closeTask: (taskId: string) => void;
-  reviewTask: (taskId: string, userId: string, userName: string, approved: boolean) => void;
-  addComment: (taskId: string, user: { id: string; name: string; initials: string }, text: string) => void;
-  toggleQualityCriteria: (taskId: string, criteriaId: string) => void;
+  loading: boolean;
+  error: string | null;
+  refetch: () => Promise<void>;
+  addTask: (task: Omit<Task, "id" | "createdAt" | "comments">) => Promise<void>;
+  updateTask: (taskId: string, updates: Partial<Task>) => Promise<void>;
+  deleteTask: (taskId: string) => Promise<void>;
+  closeTask: (taskId: string) => Promise<void>;
+  reviewTask: (
+    taskId: string,
+    userId: string,
+    userName: string,
+    approved: boolean,
+  ) => Promise<void>;
+  addComment: (
+    taskId: string,
+    user: { id: string; name: string; initials: string },
+    text: string,
+  ) => Promise<void>;
+  toggleQualityCriteria: (taskId: string, criteriaId: string) => Promise<void>;
   getTasksForUser: (userId: string) => Task[];
-  getOverdueTasks: () => Task[];
-  getDueSoonTasks: () => Task[];
 }
+
+// ─── Context ──────────────────────────────────────────────────────────────────
 
 const TaskContext = createContext<TaskContextType | null>(null);
 
@@ -130,97 +84,285 @@ export const useTask = () => {
   return ctx;
 };
 
+// ─── Provider ─────────────────────────────────────────────────────────────────
+
 export const TaskProvider = ({ children }: { children: React.ReactNode }) => {
-  const [tasks, setTasks] = useState<Task[]>(DEMO_TASKS);
+  const [tasks, setTasks] = useState<Task[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  const addTask = useCallback((task: Omit<Task, "id" | "createdAt" | "comments" | "reminderSent">) => {
-    const newTask: Task = {
-      ...task,
-      id: `task-${Date.now()}`,
-      createdAt: new Date().toISOString(),
-      comments: [],
-      reminderSent: false,
-    };
-    setTasks(prev => [newTask, ...prev]);
-    toast.success(`Task "${task.title}" created.`);
-  }, []);
-
-  const updateTask = useCallback((taskId: string, updates: Partial<Task>) => {
-    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, ...updates } : t));
-  }, []);
-
-  const deleteTask = useCallback((taskId: string) => {
-    setTasks(prev => prev.filter(t => t.id !== taskId));
-    toast.success("Task deleted.");
-  }, []);
-
-  // FIX: Removed unused userId, userName parameters
-  const closeTask = useCallback((taskId: string) => {
-    setTasks(prev => prev.map(t => t.id === taskId ? {
-      ...t, status: "closed" as TaskStatus, closedAt: new Date().toISOString(),
-    } : t));
-    toast.success("Task marked as closed. Pending review.");
-  }, []);
-
-  const reviewTask = useCallback((taskId: string, userId: string, userName: string, approved: boolean) => {
-    if (approved) {
-      setTasks(prev => prev.map(t => t.id === taskId ? {
-        ...t, status: "reviewed" as TaskStatus,
-        reviewedBy: userId, reviewedByName: userName,
-        reviewedAt: new Date().toISOString(),
-      } : t));
-      toast.success("Task reviewed and approved.");
-    } else {
-      setTasks(prev => prev.map(t => t.id === taskId ? {
-        ...t, status: "in_progress" as TaskStatus,
-        reviewedBy: undefined, reviewedByName: undefined,
-      } : t));
-      toast.warning("Task sent back for rework.");
+  // ── Fetch tasks ──────────────────────────────────────────────────────────
+  const refetch = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetchWithAuth("/api/tasks");
+      if (!res.ok) throw new Error("Failed to load tasks");
+      const data: Task[] = await res.json();
+      setTasks(data);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to load tasks";
+      setError(msg);
+      console.error("TaskContext refetch:", err);
+    } finally {
+      setLoading(false);
     }
   }, []);
 
-  const addComment = useCallback((taskId: string, user: { id: string; name: string; initials: string }, text: string) => {
-    const comment: TaskComment = {
-      id: `c-${Date.now()}`,
-      userId: user.id,
-      userName: user.name,
-      userInitials: user.initials,
-      text,
-      createdAt: new Date().toISOString(),
-    };
-    setTasks(prev => prev.map(t => t.id === taskId ? { ...t, comments: [...t.comments, comment] } : t));
+  useEffect(() => {
+    refetch();
+  }, [refetch]);
+
+  // ── Add task ─────────────────────────────────────────────────────────────
+  const addTask = useCallback(
+    async (task: Omit<Task, "id" | "createdAt" | "comments">) => {
+      try {
+        const res = await fetchWithAuth("/api/tasks", {
+          method: "POST",
+          body: JSON.stringify({
+            title: task.title,
+            description: task.description,
+            priority: task.priority,
+            assignedTo: task.assignedTo,
+            dueDate: task.dueDate,
+            qualityCriteria: task.qualityCriteria,
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error((err as any).error || "Failed to create task");
+        }
+        const newTask: Task = await res.json();
+        setTasks((prev) => [newTask, ...prev]);
+        toast.success(`Task "${task.title}" created.`);
+      } catch (err) {
+        const msg =
+          err instanceof Error ? err.message : "Failed to create task";
+        toast.error(msg);
+        throw err;
+      }
+    },
+    [],
+  );
+
+  // ── Update task ──────────────────────────────────────────────────────────
+  const updateTask = useCallback(
+    async (taskId: string, updates: Partial<Task>) => {
+      try {
+        const res = await fetchWithAuth(`/api/tasks/${taskId}`, {
+          method: "PUT",
+          body: JSON.stringify(updates),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error((err as any).error || "Failed to update task");
+        }
+        const updated: Task = await res.json();
+        setTasks((prev) => prev.map((t) => (t.id === taskId ? updated : t)));
+      } catch (err) {
+        const msg =
+          err instanceof Error ? err.message : "Failed to update task";
+        toast.error(msg);
+        throw err;
+      }
+    },
+    [],
+  );
+
+  // ── Delete task ──────────────────────────────────────────────────────────
+  const deleteTask = useCallback(async (taskId: string) => {
+    try {
+      const res = await fetchWithAuth(`/api/tasks/${taskId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as any).error || "Failed to delete task");
+      }
+      setTasks((prev) => prev.filter((t) => t.id !== taskId));
+      toast.success("Task deleted.");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to delete task";
+      toast.error(msg);
+      throw err;
+    }
   }, []);
 
-  const toggleQualityCriteria = useCallback((taskId: string, criteriaId: string) => {
-    setTasks(prev => prev.map(t => t.id === taskId ? {
-      ...t,
-      qualityCriteria: t.qualityCriteria.map(qc => qc.id === criteriaId ? { ...qc, met: !qc.met } : qc),
-    } : t));
+  // ── Close task ───────────────────────────────────────────────────────────
+  const closeTask = useCallback(async (taskId: string) => {
+    try {
+      const res = await fetchWithAuth(`/api/tasks/${taskId}`, {
+        method: "PUT",
+        body: JSON.stringify({ status: "closed" }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error((err as any).error || "Failed to close task");
+      }
+      const updated: Task = await res.json();
+      setTasks((prev) => prev.map((t) => (t.id === taskId ? updated : t)));
+      toast.success("Task marked as closed. Pending review.");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to close task";
+      toast.error(msg);
+      throw err;
+    }
   }, []);
 
-  const getTasksForUser = useCallback((userId: string) =>
-    tasks.filter(t => t.assignedTo === userId || t.createdBy === userId), [tasks]);
+  // ── Review task ──────────────────────────────────────────────────────────
+  const reviewTask = useCallback(
+    async (
+      taskId: string,
+      userId: string,
+      _userName: string,
+      approved: boolean,
+    ) => {
+      try {
+        const body = approved
+          ? { status: "reviewed", reviewedBy: userId }
+          : { status: "in_progress" };
 
-  const getOverdueTasks = useCallback(() => {
-    const now = new Date();
-    return tasks.filter(t =>
-      (t.status === "open" || t.status === "in_progress") && new Date(t.dueDate) < now
-    );
-  }, [tasks]);
+        const res = await fetchWithAuth(`/api/tasks/${taskId}`, {
+          method: "PUT",
+          body: JSON.stringify(body),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error((err as any).error || "Failed to review task");
+        }
+        const updated: Task = await res.json();
+        setTasks((prev) => prev.map((t) => (t.id === taskId ? updated : t)));
+        if (approved) toast.success("Task reviewed and approved.");
+        else toast.warning("Task sent back for rework.");
+      } catch (err) {
+        const msg =
+          err instanceof Error ? err.message : "Failed to review task";
+        toast.error(msg);
+        throw err;
+      }
+    },
+    [],
+  );
 
-  const getDueSoonTasks = useCallback(() => {
-    const now = new Date();
-    const soon = new Date(now.getTime() + 2 * 24 * 60 * 60 * 1000);
-    return tasks.filter(t =>
-      (t.status === "open" || t.status === "in_progress") &&
-      new Date(t.dueDate) >= now && new Date(t.dueDate) <= soon
-    );
-  }, [tasks]);
+  // ── Add comment (inline, via PUT — no separate POST /comments endpoint) ──
+  const addComment = useCallback(
+    async (
+      taskId: string,
+      user: { id: string; name: string; initials: string },
+      text: string,
+    ) => {
+      const task = tasks.find((t) => t.id === taskId);
+      if (!task) return;
 
-  const value = useMemo(() => ({
-    tasks, addTask, updateTask, deleteTask, closeTask, reviewTask,
-    addComment, toggleQualityCriteria, getTasksForUser, getOverdueTasks, getDueSoonTasks,
-  }), [tasks, addTask, updateTask, deleteTask, closeTask, reviewTask, addComment, toggleQualityCriteria, getTasksForUser, getOverdueTasks, getDueSoonTasks]);
+      const newComment: TaskComment = {
+        id: `c-${Date.now()}`,
+        userId: user.id,
+        userName: user.name,
+        userInitials: user.initials,
+        text,
+        createdAt: new Date().toISOString(),
+      };
+
+      // Optimistic update
+      setTasks((prev) =>
+        prev.map((t) =>
+          t.id === taskId ? { ...t, comments: [...t.comments, newComment] } : t,
+        ),
+      );
+
+      try {
+        const updatedComments = [...task.comments, newComment];
+        const res = await fetchWithAuth(`/api/tasks/${taskId}`, {
+          method: "PUT",
+          body: JSON.stringify({ comments: updatedComments }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error((err as any).error || "Failed to add comment");
+        }
+        // Server may return a cleaned-up version; sync it
+        const updated: Task = await res.json();
+        setTasks((prev) => prev.map((t) => (t.id === taskId ? updated : t)));
+      } catch (err) {
+        // Revert optimistic update
+        setTasks((prev) =>
+          prev.map((t) =>
+            t.id === taskId ? { ...t, comments: task.comments } : t,
+          ),
+        );
+        const msg =
+          err instanceof Error ? err.message : "Failed to add comment";
+        toast.error(msg);
+        throw err;
+      }
+    },
+    [tasks],
+  );
+
+  // ── Toggle quality criteria (optimistic) ─────────────────────────────────
+  const toggleQualityCriteria = useCallback(
+    async (taskId: string, criteriaId: string) => {
+      let updatedQC: QualityCriteria[] = [];
+      setTasks((prev) =>
+        prev.map((t) => {
+          if (t.id !== taskId) return t;
+          updatedQC = t.qualityCriteria.map((qc) =>
+            qc.id === criteriaId ? { ...qc, met: !qc.met } : qc,
+          );
+          return { ...t, qualityCriteria: updatedQC };
+        }),
+      );
+
+      try {
+        await fetchWithAuth(`/api/tasks/${taskId}`, {
+          method: "PUT",
+          body: JSON.stringify({ qualityCriteria: updatedQC }),
+        });
+      } catch {
+        await refetch();
+        toast.error("Failed to save quality criteria. Please try again.");
+      }
+    },
+    [refetch],
+  );
+
+  // ── Derived helpers ───────────────────────────────────────────────────────
+  const getTasksForUser = useCallback(
+    (userId: string) =>
+      tasks.filter((t) => t.assignedTo === userId || t.createdBy === userId),
+    [tasks],
+  );
+
+  const value = useMemo(
+    () => ({
+      tasks,
+      loading,
+      error,
+      refetch,
+      addTask,
+      updateTask,
+      deleteTask,
+      closeTask,
+      reviewTask,
+      addComment,
+      toggleQualityCriteria,
+      getTasksForUser,
+    }),
+    [
+      tasks,
+      loading,
+      error,
+      refetch,
+      addTask,
+      updateTask,
+      deleteTask,
+      closeTask,
+      reviewTask,
+      addComment,
+      toggleQualityCriteria,
+      getTasksForUser,
+    ],
+  );
 
   return <TaskContext.Provider value={value}>{children}</TaskContext.Provider>;
 };
