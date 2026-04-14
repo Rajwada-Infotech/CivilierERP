@@ -1,5 +1,6 @@
 import React from "react";
 import { useQuery } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   Card,
@@ -19,261 +20,379 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
-  TrendingUp,
   Package,
   Truck,
   FileText,
   Layers,
-  CheckCircle2,
-  AlertCircle,
+  HardHat,
+  ArrowUpRight,
+  ArrowDownRight,
+  ShoppingCart,
 } from "lucide-react";
 
-import { getItemGroups } from "@/api/itemGroupApi";
-import { getItems } from "@/api/itemMasterApi";
-import { getGRNs } from "@/api/grnApi";
-import { getPurchaseOrders } from "@/api/purchaseOrdersApi";
+// ─── API ──────────────────────────────────────────────────────────────────────
 
-interface GRN {
-  GRNID: string;
-  GRNNo: string;
-  GRNDate: string;
-  SupplierName: string;
-  Status: string;
-  PONumber: string;
+const getAuthHeaders = () => ({
+  "Content-Type": "application/json",
+  Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
+});
+
+interface DashboardData {
+  items: { count: number; groupCount: number };
+  grns: { total: number; thisMonth: number; today: number };
+  purchaseOrders: { total: number; open: number; openValue: number };
+  workOrders: { total: number };
+  recentGRNs: any[];
+  recentPOs: any[];
 }
 
-interface PO {
-  PurchaseOrderID: string;
-  PurchaseOrderNo: string;
-  SupplierName?: string;
-  Status?: string;
-}
+const fetchDashboard = async (): Promise<DashboardData> => {
+  const res = await fetch("/api/material-dashboard", {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error("Failed to fetch material dashboard");
+  return res.json();
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const fmt = (n: number) =>
+  new Intl.NumberFormat("en-IN", {
+    style: "currency",
+    currency: "INR",
+    maximumFractionDigits: 0,
+  }).format(n);
+
+const fmtDate = (d: string | null) =>
+  d
+    ? new Date(d).toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      })
+    : "—";
+
+// ─── Stat Card ────────────────────────────────────────────────────────────────
+
+const StatCard = ({
+  label,
+  value,
+  sub,
+  icon: Icon,
+  trend,
+  onClick,
+}: {
+  label: string;
+  value: string;
+  sub: string;
+  icon: React.ElementType;
+  trend?: "up" | "down" | "neutral";
+  onClick?: () => void;
+}) => (
+  <Card
+    className={`relative overflow-hidden transition-all duration-200 ${onClick ? "cursor-pointer hover:shadow-md hover:-translate-y-0.5" : ""}`}
+    onClick={onClick}
+  >
+    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+      <CardTitle className="text-xs font-heading uppercase tracking-widest text-muted-foreground">
+        {label}
+      </CardTitle>
+      <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center">
+        <Icon size={15} className="text-emerald-600" />
+      </div>
+    </CardHeader>
+    <CardContent>
+      <div className="text-2xl font-bold font-heading text-foreground">
+        {value}
+      </div>
+      <div className="flex items-center gap-1 mt-1">
+        {trend === "up" && (
+          <ArrowUpRight size={13} className="text-emerald-500" />
+        )}
+        {trend === "down" && (
+          <ArrowDownRight size={13} className="text-destructive" />
+        )}
+        <p className="text-xs text-muted-foreground">{sub}</p>
+      </div>
+    </CardContent>
+  </Card>
+);
+
+const StatSkeleton = () => (
+  <Card>
+    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+      <Skeleton className="h-3 w-28" />
+      <Skeleton className="h-8 w-8 rounded-lg" />
+    </CardHeader>
+    <CardContent>
+      <Skeleton className="h-7 w-20 mb-2" />
+      <Skeleton className="h-3 w-32" />
+    </CardContent>
+  </Card>
+);
+
+// ─── Component ────────────────────────────────────────────────────────────────
 
 const MaterialDashboard = () => {
-  // Queries
-  const { data: itemGroups = [], isLoading: loadingGroups } = useQuery({
-    queryKey: ["item-groups"],
-    queryFn: getItemGroups,
+  const navigate = useNavigate();
+
+  const { data, isLoading, isError } = useQuery<DashboardData>({
+    queryKey: ["materialDashboard"],
+    queryFn: fetchDashboard,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
   });
 
-  const { data: itemMasters = [], isLoading: loadingItems } = useQuery({
-    queryKey: ["item-master"],
-    queryFn: getItems,
-  });
-
-  const { data: grns = [], isLoading: loadingGRNs } = useQuery({
-    queryKey: ["grns"],
-    queryFn: getGRNs,
-  });
-
-  const { data: pos = [], isLoading: loadingPOs } = useQuery({
-    queryKey: ["purchase-orders"],
-    queryFn: getPurchaseOrders,
-  });
-
-  const totalGroups = itemGroups.length;
-  const totalItems = itemMasters.length;
-  const totalGRNs = grns.length;
-  const totalPOs = pos.length;
-
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const thisMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-
-  const grnsToday = grns.filter((grn: GRN) => {
-    const d = new Date(grn.GRNDate);
-    d.setHours(0, 0, 0, 0);
-    return d.getTime() === today.getTime();
-  }).length;
-
-  const grnsThisMonth = grns.filter(
-    (grn: GRN) => new Date(grn.GRNDate) >= thisMonth,
-  ).length;
-
-  const recentGRNs = grns.slice(0, 5).reverse();
-  const recentPOs = pos.slice(0, 5).reverse();
-
-  const isLoading = loadingGroups || loadingItems || loadingGRNs || loadingPOs;
-
-  const stats = [
-    {
-      label: "Total Items",
-      value: totalItems.toLocaleString(),
-      icon: Package,
-      change: "+12",
-      trend: "up",
-    },
-    {
-      label: "Item Groups",
-      value: totalGroups.toLocaleString(),
-      icon: Layers,
-      change: "+3",
-      trend: "up",
-    },
-    {
-      label: "Total GRNs",
-      value: totalGRNs.toLocaleString(),
-      icon: Truck,
-      change: "+8",
-      trend: "up",
-    },
-    {
-      label: "Pending POs",
-      value: totalPOs.toLocaleString(),
-      icon: FileText,
-      change: "-2",
-      trend: "down",
-    },
-  ];
-
-  if (isLoading) {
-    return (
-      <div className="p-6 space-y-6">
-        <Skeleton className="h-8 w-64" />
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          {Array(4)
-            .fill(0)
-            .map((_, i) => (
-              <Skeleton key={i} className="h-32 w-full" />
-            ))}
-        </div>
-      </div>
-    );
-  }
+  const stats = data
+    ? [
+        {
+          label: "Total Items",
+          value: data.items.count.toLocaleString(),
+          sub: `${data.items.groupCount} item groups`,
+          icon: Package,
+          trend: "neutral" as const,
+          onClick: () => navigate("/masters/items"),
+        },
+        {
+          label: "GRNs This Month",
+          value: data.grns.thisMonth.toLocaleString(),
+          sub: `${data.grns.today} today · ${data.grns.total} total`,
+          icon: Truck,
+          trend: "up" as const,
+          onClick: () => navigate("/material/grn"),
+        },
+        {
+          label: "Open Purchase Orders",
+          value: data.purchaseOrders.open.toLocaleString(),
+          sub: `${fmt(data.purchaseOrders.openValue)} outstanding`,
+          icon: ShoppingCart,
+          trend:
+            data.purchaseOrders.open > 0
+              ? ("down" as const)
+              : ("neutral" as const),
+          onClick: () => navigate("/material/purchase-order"),
+        },
+        {
+          label: "Work Orders",
+          value: data.workOrders.total.toLocaleString(),
+          sub: `${data.purchaseOrders.total} total POs`,
+          icon: HardHat,
+          trend: "neutral" as const,
+          onClick: () => navigate("/material/work-order"),
+        },
+      ]
+    : [];
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Material"]} />
+      <h1 className="text-xl font-heading font-bold text-foreground mb-6">
+        Material Overview
+      </h1>
 
-      {/* Stats Overview */}
-      <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 mb-8">
-        {stats.map((stat, i) => (
-          <Card key={i}>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">
-                {stat.label}
-              </CardTitle>
-              <stat.icon className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{stat.value}</div>
-              <p className="text-xs text-muted-foreground flex items-center gap-1">
-                {stat.change} from last month
-                <span
-                  className={`text-xs ${stat.trend === "up" ? "text-green-500" : "text-destructive"}`}
-                >
-                  {stat.trend === "up" ? "↑" : "↓"}
-                </span>
-              </p>
-            </CardContent>
-          </Card>
-        ))}
+      {isError && (
+        <div className="mb-4 px-4 py-3 rounded-lg bg-destructive/10 text-destructive text-sm border border-destructive/20">
+          Failed to load dashboard data. Please refresh.
+        </div>
+      )}
+
+      {/* Stats */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+        {isLoading
+          ? Array.from({ length: 4 }).map((_, i) => <StatSkeleton key={i} />)
+          : stats.map((s) => <StatCard key={s.label} {...s} />)}
       </div>
 
+      {/* Tables */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Recent GRNs */}
         <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Truck className="h-5 w-5" />
-              Recent GRNs
-            </CardTitle>
-            <CardDescription>Last 5 Goods Received Notes</CardDescription>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div>
+              <CardTitle className="text-sm font-heading font-semibold flex items-center gap-2">
+                <Truck size={15} /> Recent GRNs
+              </CardTitle>
+              <CardDescription>Last 5 goods receipt notes</CardDescription>
+            </div>
+            <button
+              onClick={() => navigate("/material/grn")}
+              className="text-xs text-emerald-600 hover:underline font-heading"
+            >
+              View all →
+            </button>
           </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>GRN No</TableHead>
-                  <TableHead>PO No</TableHead>
-                  <TableHead>Supplier</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {recentGRNs.map((grn: GRN) => (
-                  <TableRow key={grn.GRNID}>
-                    <TableCell className="font-medium">{grn.GRNNo}</TableCell>
-                    <TableCell>{grn.PONumber}</TableCell>
-                    <TableCell>{grn.SupplierName}</TableCell>
-                    <TableCell>
-                      {new Date(grn.GRNDate).toLocaleDateString("en-GB", {
-                        month: "short",
-                        day: "numeric",
-                      })}
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant="default">
-                        <CheckCircle2 className="w-3 h-3 mr-1" />
-                        {grn.Status}
-                      </Badge>
-                    </TableCell>
-                  </TableRow>
+          <CardContent className="p-0">
+            {isLoading ? (
+              <div className="p-4 space-y-3">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <Skeleton key={i} className="h-8 w-full" />
                 ))}
-                {recentGRNs.length === 0 && (
-                  <TableRow>
-                    <TableCell
-                      colSpan={5}
-                      className="text-center py-8 text-muted-foreground"
-                    >
-                      No recent GRNs found
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
+              </div>
+            ) : (data?.recentGRNs.length ?? 0) === 0 ? (
+              <div className="text-center text-muted-foreground text-sm py-10">
+                No GRNs recorded yet
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-xs">GRN No</TableHead>
+                      <TableHead className="text-xs">Supplier</TableHead>
+                      <TableHead className="text-xs">Date</TableHead>
+                      <TableHead className="text-xs">Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {(data?.recentGRNs ?? []).map((grn: any) => (
+                      <TableRow key={grn.GRNID} className="hover:bg-muted/30">
+                        <TableCell className="text-xs font-medium">
+                          {grn.GRNNo}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground truncate max-w-[120px]">
+                          {grn.SupplierName || "—"}
+                        </TableCell>
+                        <TableCell className="text-xs">
+                          {fmtDate(grn.GRNDate)}
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className={`text-[10px] py-0 ${
+                              grn.Status === "Fully Received"
+                                ? "border-emerald-500/40 text-emerald-600"
+                                : "border-amber-500/40 text-amber-600"
+                            }`}
+                          >
+                            {grn.Status || "Draft"}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
           </CardContent>
         </Card>
 
-        {/* Recent Purchase Orders */}
+        {/* Recent POs */}
         <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <FileText className="h-5 w-5" />
-              Recent Purchase Orders
-            </CardTitle>
-            <CardDescription>Last 5 POs</CardDescription>
+          <CardHeader className="flex flex-row items-center justify-between">
+            <div>
+              <CardTitle className="text-sm font-heading font-semibold flex items-center gap-2">
+                <FileText size={15} /> Recent Purchase Orders
+              </CardTitle>
+              <CardDescription>Last 5 purchase orders</CardDescription>
+            </div>
+            <button
+              onClick={() => navigate("/material/purchase-order")}
+              className="text-xs text-emerald-600 hover:underline font-heading"
+            >
+              View all →
+            </button>
           </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>PO No</TableHead>
-                  <TableHead>Supplier</TableHead>
-                  <TableHead>Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {recentPOs.map((po: PO) => (
-                  <TableRow key={po.PurchaseOrderID}>
-                    <TableCell className="font-medium">
-                      {po.PurchaseOrderNo}
-                    </TableCell>
-                    <TableCell>{po.SupplierName || "N/A"}</TableCell>
-                    <TableCell>
-                      <Badge variant="secondary">
-                        <AlertCircle className="w-3 h-3 mr-1" />
-                        {po.Status || "Pending"}
-                      </Badge>
-                    </TableCell>
-                  </TableRow>
+          <CardContent className="p-0">
+            {isLoading ? (
+              <div className="p-4 space-y-3">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <Skeleton key={i} className="h-8 w-full" />
                 ))}
-                {recentPOs.length === 0 && (
-                  <TableRow>
-                    <TableCell
-                      colSpan={3}
-                      className="text-center py-8 text-muted-foreground"
-                    >
-                      No recent Purchase Orders
-                    </TableCell>
-                  </TableRow>
-                )}
-              </TableBody>
-            </Table>
+              </div>
+            ) : (data?.recentPOs.length ?? 0) === 0 ? (
+              <div className="text-center text-muted-foreground text-sm py-10">
+                No purchase orders yet
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-xs">PO No</TableHead>
+                      <TableHead className="text-xs">Supplier</TableHead>
+                      <TableHead className="text-xs text-right">
+                        Value
+                      </TableHead>
+                      <TableHead className="text-xs">Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {(data?.recentPOs ?? []).map((po: any) => (
+                      <TableRow
+                        key={po.PurchaseOrderID}
+                        className="hover:bg-muted/30"
+                      >
+                        <TableCell className="text-xs font-medium">
+                          {po.PurchaseOrderNo || `#${po.PurchaseOrderID}`}
+                        </TableCell>
+                        <TableCell className="text-xs text-muted-foreground truncate max-w-[100px]">
+                          {po.SupplierName || "—"}
+                        </TableCell>
+                        <TableCell className="text-xs text-right font-medium">
+                          {po.TotalAmount != null ? fmt(po.TotalAmount) : "—"}
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className={`text-[10px] py-0 ${
+                              po.Status === "Closed"
+                                ? "border-emerald-500/40 text-emerald-600"
+                                : po.Status === "Approved"
+                                  ? "border-blue-500/40 text-blue-600"
+                                  : "border-amber-500/40 text-amber-600"
+                            }`}
+                          >
+                            {po.Status || "Draft"}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
+
+      {/* Quick Actions */}
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle className="text-sm font-heading font-semibold">
+            Quick Actions
+          </CardTitle>
+          <CardDescription>Jump to common workflows</CardDescription>
+        </CardHeader>
+        <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-3 pt-0">
+          {[
+            { label: "New GRN", icon: Truck, path: "/material/grn" },
+            {
+              label: "New Purchase Order",
+              icon: ShoppingCart,
+              path: "/material/purchase-order",
+            },
+            {
+              label: "New Work Order",
+              icon: HardHat,
+              path: "/material/work-order",
+            },
+            { label: "Manage Items", icon: Package, path: "/masters/items" },
+          ].map(({ label, icon: Icon, path }) => (
+            <button
+              key={path}
+              onClick={() => navigate(path)}
+              className="flex flex-col items-center gap-2 py-4 px-3 rounded-xl border border-border hover:bg-muted hover:border-emerald-500/20 transition-all duration-150 active:scale-95 group"
+            >
+              <div className="w-9 h-9 rounded-lg bg-emerald-500/10 flex items-center justify-center group-hover:bg-emerald-500/15 transition-colors">
+                <Icon size={16} className="text-emerald-600" />
+              </div>
+              <span className="text-xs font-heading text-muted-foreground group-hover:text-foreground text-center leading-tight">
+                {label}
+              </span>
+            </button>
+          ))}
+        </CardContent>
+      </Card>
     </>
   );
 };
