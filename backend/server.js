@@ -8,12 +8,21 @@ const { connectDB } = require("./db");
 const authMiddleware = require("./middleware/auth");
 const rateLimit = require("express-rate-limit");
 const { ipKeyGenerator } = require("express-rate-limit");
-const { getRedis, redisZScore, incrGlobalRequests, pfaddActiveUser, getSystemMetrics, trackHourLoad, getPredictedRPM, getDynamicLimit } = require("./redis");
+const {
+  getRedis,
+  redisZScore,
+  incrGlobalRequests,
+  pfaddActiveUser,
+  getSystemMetrics,
+  trackHourLoad,
+  getPredictedRPM,
+  getDynamicLimit,
+} = require("./redis");
 
 const ALLOWED_ORIGINS = [
   "http://localhost:3000",
   "http://localhost:8080",
-  "http://localhost:8081", 
+  "http://localhost:8081",
   "http://localhost:5173",
   "http://[::1]:3000",
   "http://[::1]:8080",
@@ -55,13 +64,19 @@ async function startServer() {
 
     const apiLimiter = rateLimit({
       windowMs: 60 * 1000, // 1 min buckets for scaling
-max: async (req) => {
-  if (!req.user || !req.user.userId) return 1000;
-  const score = Number(await redisZScore('engagement:score', req.user.userId) || 0);
-  const metrics = await getSystemMetrics();
-  const predictedRPM = await getPredictedRPM();
-  return getDynamicLimit(score, predictedRPM || metrics.rpm, metrics.memoryUsage);
-},
+      max: async (req) => {
+        if (!req.user || !req.user.userId) return 1000;
+        const score = Number(
+          (await redisZScore("engagement:score", req.user.userId)) || 0,
+        );
+        const metrics = await getSystemMetrics();
+        const predictedRPM = await getPredictedRPM();
+        return getDynamicLimit(
+          score,
+          predictedRPM || metrics.rpm,
+          metrics.memoryUsage,
+        );
+      },
       store: makeStore(`rl:api:${Math.floor(Date.now() / 60000)}:`),
       skip: (req) => req.path.startsWith("/api/user-activity"),
       keyGenerator: (req) => `${req.user?.userId || ipKeyGenerator(req)}`,
@@ -78,18 +93,18 @@ max: async (req) => {
     app.use(morgan("dev"));
 
     // Track global metrics on every request
-app.use(async (req, res, next) => {
-  try {
-    await incrGlobalRequests();
-    await trackHourLoad();
-  } catch {}
-  next();
-});
+    app.use(async (req, res, next) => {
+      try {
+        await incrGlobalRequests();
+        await trackHourLoad();
+      } catch {}
+      next();
+    });
 
     app.use(
       cors({
         origin: (origin, cb) => {
-          console.log(`CORS request from origin: ${origin || 'undefined'}`);
+          console.log(`CORS request from origin: ${origin || "undefined"}`);
           if (!origin || ALLOWED_ORIGINS.includes(origin)) {
             cb(null, true);
           } else {
@@ -196,6 +211,11 @@ app.use(async (req, res, next) => {
     app.use("/api/tc-master", authMiddleware, require("./routes/tcMaster"));
     app.use("/api/grns", authMiddleware, require("./routes/grns"));
     app.use(
+      "/api/finance-dashboard",
+      authMiddleware,
+      require("./routes/financeDashboard"),
+    );
+    app.use(
       "/api/user-activity",
       authMiddleware,
       require("./routes/userActivity"),
@@ -206,10 +226,19 @@ app.use(async (req, res, next) => {
       const metrics = await getSystemMetrics();
       const predictedRPM = await getPredictedRPM();
       metrics.predictedRPM = predictedRPM;
-      const topEngagedUsers = await getRedis().zrevrange('engagement:score', 0, 9, 'WITHSCORES');
+      const topEngagedUsers = await getRedis().zrevrange(
+        "engagement:score",
+        0,
+        9,
+        "WITHSCORES",
+      );
       metrics.topEngagedUsers = topEngagedUsers;
       if (req.user) {
-        metrics.avgLimit = getDynamicLimit(await redisZScore('engagement:score', req.user.userId) || 0, predictedRPM || metrics.rpm, metrics.memoryUsage);
+        metrics.avgLimit = getDynamicLimit(
+          (await redisZScore("engagement:score", req.user.userId)) || 0,
+          predictedRPM || metrics.rpm,
+          metrics.memoryUsage,
+        );
       }
       res.json(metrics);
     });
