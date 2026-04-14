@@ -184,7 +184,7 @@ router.get("/:roleId/rights", authMiddleware, async (req, res) => {
       "Rights_Widgets": "widgets-rights",
       "Rights_Financial Year": "fin-year",
       "User Control_Manage Users": "users",
-      "User Control_Activity Browser": "activity-browser",
+      "UserActivity_List": "activity-browser",
     };
 
     const frontendRights = result.recordset.map(row => {
@@ -227,7 +227,7 @@ router.post("/:roleId/rights", authMiddleware, async (req, res) => {
       "widgets-rights": { module: "Rights", submodule: "Widgets" },
       "fin-year": { module: "Rights", submodule: "Financial Year" },
       "users": { module: "User Control", submodule: "Manage Users" },
-      "activity-browser": { module: "User Control", submodule: "Activity Browser" },
+      "activity-browser": { module: "UserActivity", submodule: "List" },
     };
 
     const pool = getPool();
