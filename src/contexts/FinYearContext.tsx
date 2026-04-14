@@ -49,11 +49,11 @@ export const FinYearProvider = ({ children }: { children: ReactNode }) => {
   const { data: dbData, isLoading } = useQuery({
     queryKey: QUERY_KEY,
     queryFn: getFinYears,
-    enabled: !!currentUser,
-    // FIX: reduced staleTime so invalidate() always triggers an immediate refetch.
-    // 5 min staleTime meant React Query considered data "fresh" and skipped the
-    // refetch even after invalidate() was called — so the badge never updated.
-    staleTime: 0,
+    enabled: !!currentUser && !!localStorage.getItem("token"),
+    // staleTime: 0 was causing a refetch on every render. invalidateQueries()
+    // correctly forces a refetch regardless of staleTime — so 5 min is safe.
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
   const finYears: FinYear[] = Array.isArray(dbData)
@@ -81,10 +81,13 @@ export const FinYearProvider = ({ children }: { children: ReactNode }) => {
         return old.map((item: any) => {
           if (String(item.FId) !== id) return item;
           const updated = { ...item };
-          if (patch.locked !== undefined) updated.FisLocked = patch.locked ? 1 : 0;
-          if (patch.status !== undefined) updated.FStatus = patch.status !== "Closed" ? 1 : 0;
+          if (patch.locked !== undefined)
+            updated.FisLocked = patch.locked ? 1 : 0;
+          if (patch.status !== undefined)
+            updated.FStatus = patch.status !== "Closed" ? 1 : 0;
           if (patch.year !== undefined) updated.FName = patch.year;
-          if (patch.startDate !== undefined) updated.FStartDate = patch.startDate;
+          if (patch.startDate !== undefined)
+            updated.FStartDate = patch.startDate;
           if (patch.endDate !== undefined) updated.FEndDate = patch.endDate;
           return updated;
         });
@@ -140,9 +143,11 @@ export const FinYearProvider = ({ children }: { children: ReactNode }) => {
 
       const payload: any = {};
       if (updates.year !== undefined) payload.FName = updates.year;
-      if (updates.startDate !== undefined) payload.FStartDate = updates.startDate;
+      if (updates.startDate !== undefined)
+        payload.FStartDate = updates.startDate;
       if (updates.endDate !== undefined) payload.FEndDate = updates.endDate;
-      if (updates.status !== undefined) payload.FStatus = updates.status !== "Closed";
+      if (updates.status !== undefined)
+        payload.FStatus = updates.status !== "Closed";
       if (updates.locked !== undefined) payload.FisLocked = updates.locked;
 
       try {
