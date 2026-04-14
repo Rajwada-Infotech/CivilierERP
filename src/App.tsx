@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useState, useEffect, Component } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
 import Loader from "./components/Loader";
 import { Toaster } from "sonner";
 import {
@@ -16,24 +16,26 @@ import NotFound from "./pages/NotFound";
 import Maintenance from "./pages/Maintenance";
 
 // Layout
-import { AppLayout } from "@/components/layout/AppLayout";
+import { AppLayout } from "./components/layout/AppLayout";
 
 // Contexts
-import { AuthProvider } from "@/contexts/AuthContext";
-import { ModuleProvider } from "@/contexts/ModuleContext";
-import { ThemeProvider } from "@/contexts/ThemeContext";
-import { TaskProvider } from "@/contexts/TaskContext";
-import { FinYearProvider } from "@/contexts/FinYearContext";
-import { HsnProvider } from "@/contexts/HsnContext";
-import { RecordsProvider } from "@/contexts/RecordsContext";
-import { TdsProvider } from "@/contexts/TdsContext";
-import { DebitNoteProvider } from "@/contexts/DebitNoteContext";
-import { BillingTermsProvider } from "@/contexts/BillingTermsContext";
+import { AuthProvider, useAuth } from "./contexts/AuthContext";
+import { ModuleProvider } from "./contexts/ModuleContext";
+import { ThemeProvider } from "./contexts/ThemeContext";
+import { TaskProvider } from "./contexts/TaskContext";
+import { FinYearProvider } from "./contexts/FinYearContext";
+import { HsnProvider } from "./contexts/HsnContext";
+import { RecordsProvider } from "./contexts/RecordsContext";
+import { TdsProvider } from "./contexts/TdsContext";
+import { DebitNoteProvider } from "./contexts/DebitNoteContext";
+import { BillingTermsProvider } from "./contexts/BillingTermsContext";
 import {
   ActivityBrowserProvider,
   useActivityBrowser,
-} from "@/contexts/ActivityBrowserContext";
-import { useAuth } from "@/contexts/AuthContext";
+} from "./contexts/ActivityBrowserContext";
+
+// Query Client
+import { queryClient } from "./lib/queryClient";
 
 // ─── Page Skeleton (inline route-transition loader) ───────────────────────────
 function PageSkeleton() {
@@ -102,21 +104,40 @@ const ExpensesMaster = lazy(() => import("./pages/masters/ExpensesMaster"));
 const ItemMaster = lazy(() => import("./pages/masters/ItemMaster"));
 const ItemGroupMaster = lazy(() => import("./pages/masters/ItemGroupMaster"));
 const HsnMaster = lazy(() => import("./pages/masters/HsnMaster"));
-const FinancialYearMaster = lazy(() => import("./pages/masters/FinancialYearMaster"));
+const FinancialYearMaster = lazy(
+  () => import("./pages/masters/FinancialYearMaster"),
+);
 const ChequeMaster = lazy(() => import("./pages/masters/ChequeMaster"));
-const MaterialExpenseBookingMaster = lazy(() => import("./pages/material/MaterialExpenseBooking"));
+const GRN = lazy(() => import("./pages/material/GRN"));
+const MaterialDashboard = lazy(
+  () => import("./pages/material/MaterialDashboard"),
+);
+const MaterialExpenseBookingMaster = lazy(
+  () => import("./pages/material/MaterialExpenseBooking"),
+);
 const WorkOrderMaster = lazy(() => import("./pages/material/WorkOrderMaster"));
-const PurchaseOrderMaster = lazy(() => import("./pages/material/PurchaseOrderMaster"));
+const PurchaseOrderMaster = lazy(
+  () => import("./pages/material/PurchaseOrderMaster"),
+);
 const CardMaster = lazy(() => import("./pages/masters/CardMaster"));
 const TdsMaster = lazy(() => import("./pages/masters/TdsMaster"));
-const AccountGroupMaster = lazy(() => import("./pages/masters/AccountGroupMaster"));
-const NamedEntryTypeMaster = lazy(() => import("./pages/masters/NamedEntryTypeMaster"));
+const AccountGroupMaster = lazy(
+  () => import("./pages/masters/AccountGroupMaster"),
+);
+const NamedEntryTypeMaster = lazy(
+  () => import("./pages/masters/NamedEntryTypeMaster"),
+);
 const TypeOfDocMaster = lazy(() => import("./pages/masters/TypeOfDocMaster"));
 const ActivityMaster = lazy(() => import("./pages/masters/ActivityMaster"));
 const DebitNoteMaster = lazy(() => import("./pages/masters/DebitNoteMaster"));
-const BillingTermsMaster = lazy(() => import("./pages/masters/BillingTermsMaster"));
+const BillingTermsMaster = lazy(
+  () => import("./pages/masters/BillingTermsMaster"),
+);
+const RoleMaster = lazy(() => import("./pages/masters/RoleMaster"));
 const TCMaster = lazy(() => import("./pages/material/T&CMaster"));
-const UnitOfMeasurementMaster = lazy(() => import("./pages/material/UnitOfMeasurementMaster"));
+const UnitOfMeasurementMaster = lazy(
+  () => import("./pages/material/UnitOfMeasurementMaster"),
+);
 
 // Admin Pages
 const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
@@ -125,27 +146,41 @@ const MenuRights = lazy(() => import("./pages/admin/MenuRights"));
 const WidgetRights = lazy(() => import("./pages/admin/WidgetsRights"));
 const FinYearRights = lazy(() => import("./pages/admin/FinYearRights"));
 const ApprovalSetup = lazy(() => import("./pages/admin/ApprovalSetup"));
-const PostApprovalRights = lazy(() => import("./pages/admin/PostApprovalRights"));
+const PostApprovalRights = lazy(
+  () => import("./pages/admin/PostApprovalRights"),
+);
 const ApiIntegrationPage = lazy(() => import("./pages/admin/ApiIntegration"));
 const SignaturePage = lazy(() => import("./pages/admin/Signature"));
 const SuperAdminProfile = lazy(() => import("./pages/admin/SuperAdminProfile"));
 const MetricsDashboard = lazy(() => import("./pages/admin/MetricsDashboard"));
-const PasswordResetPage = lazy(() => import("./pages/admin/security/PasswordReset"));
-const ActivityBrowserPage = lazy(() => import("./pages/admin/Activitybrowser/ActivityBrowser"));
+const PasswordResetPage = lazy(
+  () => import("./pages/admin/security/PasswordReset"),
+);
+const ActivityBrowserPage = lazy(
+  () => import("./pages/admin/Activitybrowser/ActivityBrowser"),
+);
 
 // Admin Masters
-const BusinessUnitMaster = lazy(() => import("./pages/admin/masters/BusinessUnitMaster"));
+const BusinessUnitMaster = lazy(
+  () => import("./pages/admin/masters/BusinessUnitMaster"),
+);
 const ProjectMaster = lazy(() => import("./pages/admin/masters/ProjectMaster"));
 const CompanyMaster = lazy(() => import("./pages/admin/masters/CompanyMaster"));
 
 // Communicator Setup
 const SmsSetup = lazy(() => import("./pages/admin/Communicator/SmsSetup"));
 const EmailSetup = lazy(() => import("./pages/admin/Communicator/EmailSetup"));
-const WhatsAppSetup = lazy(() => import("./pages/admin/Communicator/WhatsAppSetup"));
-const GeneralLedgerMaster = lazy(() => import("./pages/masters/GeneralLedgerMaster"));
+const WhatsAppSetup = lazy(
+  () => import("./pages/admin/Communicator/WhatsAppSetup"),
+);
+const GeneralLedgerMaster = lazy(
+  () => import("./pages/masters/GeneralLedgerMaster"),
+);
 
 // New hierarchy pages
-const SuperAdminDashboard = lazy(() => import("./pages/superadmin/SuperAdminDashboard"));
+const SuperAdminDashboard = lazy(
+  () => import("./pages/superadmin/SuperAdminDashboard"),
+);
 const AdminControlPanel = lazy(() => import("./pages/admin/AdminControlPanel"));
 const UserProfilePage = lazy(() => import("./pages/user/UserProfile"));
 const DBADashboard = lazy(() => import("./pages/dba/DBADashboard"));
@@ -189,9 +224,6 @@ class ErrorBoundary extends Component<
     return this.props.children;
   }
 }
-
-// ─── Query Client ─────────────────────────────────────────────────────────────
-import { queryClient } from "@/lib/queryClient";
 
 // ─── Auth Guard ───────────────────────────────────────────────────────────────
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -441,6 +473,22 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/material"
+        element={
+          <ProtectedRoute>
+            <MaterialDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/material/grn"
+        element={
+          <ProtectedRoute>
+            <GRN />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/material/expense-booking"
         element={
           <ProtectedRoute>
@@ -460,7 +508,7 @@ function AppRoutes() {
         path="/material/amendments"
         element={
           <ProtectedRoute>
-            <Dashboard />
+            <MaterialDashboard />
           </ProtectedRoute>
         }
       />
@@ -469,6 +517,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <PurchaseOrderMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/material/t-c-master"
+        element={
+          <ProtectedRoute>
+            <TCMaster />
           </ProtectedRoute>
         }
       />
@@ -545,10 +601,10 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/material/t-c-master"
+        path="/masters/role-master"
         element={
           <ProtectedRoute>
-            <TCMaster />
+            <RoleMaster />
           </ProtectedRoute>
         }
       />
@@ -559,9 +615,61 @@ function AppRoutes() {
             <UnitOfMeasurementMaster />
           </ProtectedRoute>
         }
+      /> 
+
+      {/* USER */}
+      <Route
+        path="/user/profile"
+        element={
+          <ProtectedRoute>
+            <UserProfilePage />
+          </ProtectedRoute>
+        }
       />
 
-      {/* ADMIN — /admin redirects straight to dashboard */}
+      {/* DBA CONSOLE */}
+      <Route
+        path="/dba"
+        element={
+          <ProtectedRoute>
+            <DBADashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/dba/control-panel"
+        element={
+          <ProtectedRoute>
+            <ControlPanel />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/dba/ads"
+        element={
+          <ProtectedRoute>
+            <AdsManager />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/dba/reminders"
+        element={
+          <ProtectedRoute>
+            <RemindersManager />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/dba/payment-logs"
+        element={
+          <ProtectedRoute>
+            <PaymentLogs />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* ADMIN — bare /admin redirects to home */}
       <Route path="/admin" element={<Navigate to="/" replace />} />
       <Route
         path="/admin/dashboard"
@@ -715,6 +823,14 @@ function AppRoutes() {
           </AdminRoute>
         }
       />
+      <Route
+        path="/admin/control-panel"
+        element={
+          <AdminRoute>
+            <AdminControlPanel />
+          </AdminRoute>
+        }
+      />
 
       {/* SUPER ADMIN */}
       <Route
@@ -726,72 +842,8 @@ function AppRoutes() {
         }
       />
 
-      {/* ADMIN CONTROL PANEL */}
-      <Route
-        path="/admin/control-panel"
-        element={
-          <AdminRoute>
-            <AdminControlPanel />
-          </AdminRoute>
-        }
-      />
-
-      {/* USER PROFILE */}
-      <Route
-        path="/user/profile"
-        element={
-          <ProtectedRoute>
-            <UserProfilePage />
-          </ProtectedRoute>
-        }
-      />
-
-      {/* DBA CONSOLE */}
-      <Route
-        path="/dba"
-        element={
-          <ProtectedRoute>
-            <DBADashboard />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/dba/control-panel"
-        element={
-          <ProtectedRoute>
-            <ControlPanel />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/dba/ads"
-        element={
-          <ProtectedRoute>
-            <AdsManager />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/dba/reminders"
-        element={
-          <ProtectedRoute>
-            <RemindersManager />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/dba/payment-logs"
-        element={
-          <ProtectedRoute>
-            <PaymentLogs />
-          </ProtectedRoute>
-        }
-      />
-
-      {/* Maintenance */}
+      {/* MAINTENANCE & 404 */}
       <Route path="/maintenance" element={<Maintenance />} />
-
-      {/* 404 */}
       <Route path="*" element={<NotFound />} />
     </Routes>
   );

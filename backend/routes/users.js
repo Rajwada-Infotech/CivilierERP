@@ -6,21 +6,43 @@ const jwt = require("jsonwebtoken");
 const { redisGet, redisSet, redisDel } = require("../redis");
 const { blacklistToken } = require("../middleware/blacklist");
 const authMiddleware = require("../middleware/auth");
-const allowRoles = require("../middleware/role");
+const { checkPermission } = require("../middleware/permissions");
 
 const SALT_ROUNDS = 12;
 const MAX_LOGIN_ATTEMPTS = 5;
-const LOCKOUT_SECONDS = 15 * 60; // 15 minutes
-
-const ADMIN_ROLES = ["admin", "super_admin"];
-const adminOnly = allowRoles(...ADMIN_ROLES);
+const LOCKOUT_SECONDS = 15 * 60;
 
 // ======================
-//  LOGIN (Public)
+// ROLE NORMALIZER - Root Cause Fix
+// ======================
+const normalizeRole = (role) => {
+  if (!role || typeof role !== "string") return "";
+
+  const r = role.trim().toLowerCase();
+
+  const roleMap = {
+    sa: "super_admin",
+    "super admin": "super_admin",
+    superadmin: "super_admin",
+    super_admin: "super_admin",
+
+    dba: "dba",
+    "db admin": "dba",
+    "database admin": "dba",
+    db_admin: "dba",
+
+    admin: "admin",
+    administrator: "admin",
+  };
+
+  return roleMap[r] || r.replace(/\s+/g, "_");
+};
+
+// ======================
+// LOGIN
 // ======================
 router.post("/login", async (req, res) => {
   const { email, password } = req.body;
-
   if (!email || !password) {
     return res.status(400).json({ error: "Email and password are required" });
   }
@@ -29,32 +51,31 @@ router.post("/login", async (req, res) => {
   const attemptsKey = `login:attempts:${email.toLowerCase()}`;
 
   try {
-    // Check if account is locked
     const locked = await redisGet(lockKey);
     if (locked) {
       return res.status(429).json({
-        error:
-          "Account temporarily locked due to too many failed attempts. Try again in 15 minutes.",
+        error: "Too many attempts. Try again later.",
       });
     }
 
     const pool = getPool();
-    const result = await pool
-      .request()
-      .input("email", sql.NVarChar, email)
-      .query(
-        "SELECT id, name, email, role, password, discontinue FROM dbo.users WHERE email = @email",
-      );
+    const result = await pool.request().input("email", sql.NVarChar, email)
+      .query(`
+        SELECT u.id, u.name, u.email, u.RoleId, u.password, u.discontinue,
+               r.RName AS roleName
+        FROM dbo.users u
+        LEFT JOIN dbo.Role r ON u.RoleId = r.RId
+        WHERE u.email = @email
+      `);
 
     const user = result.recordset[0];
-
     if (!user) {
       await incrementLoginAttempts(attemptsKey, lockKey);
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
     if (user.discontinue) {
-      return res.status(403).json({ error: "User is inactive" });
+      return res.status(403).json({ error: "User inactive" });
     }
 
     const match = await bcrypt.compare(password, user.password);
@@ -63,224 +84,182 @@ router.post("/login", async (req, res) => {
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
-    // Successful login - reset attempts
     await redisDel(attemptsKey);
     await redisDel(lockKey);
 
-    const { password: _pw, ...safeUser } = user;
+    // FIXED: Normalize role
+    const normalizedRole = normalizeRole(user.roleName);
 
     const token = jwt.sign(
-      { userId: user.id, role: user.role, email: user.email },
+      {
+        userId: user.id,
+        roleId: user.RoleId,
+        role: normalizedRole,
+        email: user.email,
+      },
       process.env.JWT_SECRET,
       { expiresIn: "7d" },
     );
 
-    console.log(
-      `User ${safeUser.email} logged in at ${new Date().toISOString()} from IP ${req.ip}`,
-    );
-
-    res.json({ success: true, token, user: safeUser });
+    res.json({
+      success: true,
+      token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        roleId: user.RoleId,
+        role: normalizedRole,
+      },
+    });
   } catch (err) {
     console.error("Login Error:", err);
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
-// Helper function
 async function incrementLoginAttempts(attemptsKey, lockKey) {
   try {
     const attempts = parseInt((await redisGet(attemptsKey)) || "0") + 1;
     await redisSet(attemptsKey, String(attempts), LOCKOUT_SECONDS);
-
     if (attempts >= MAX_LOGIN_ATTEMPTS) {
       await redisSet(lockKey, "1", LOCKOUT_SECONDS);
-      console.warn(
-        `Account locked after ${attempts} failed attempts: ${attemptsKey}`,
-      );
     }
-  } catch (e) {
-    // Redis unavailable - fail silently
-  }
+  } catch {}
 }
 
 // ======================
-//  LOGOUT
+// LOGOUT
 // ======================
 router.post("/logout", authMiddleware, async (req, res) => {
   try {
-    const token = req.token;
-    const exp = req.user?.exp;
-
-    if (token && exp) {
-      await blacklistToken(token, exp);
+    if (req.token && req.user?.exp) {
+      await blacklistToken(req.token, req.user.exp);
     }
-
-    res.json({ success: true, message: "Logged out successfully" });
-  } catch (err) {
-    console.error("Logout error:", err);
+    res.json({ success: true });
+  } catch {
     res.status(500).json({ error: "Logout failed" });
   }
 });
 
 // ======================
-//  ADMIN ONLY ROUTES
+// GET USERS
 // ======================
+router.get(
+  "/",
+  authMiddleware,
+  checkPermission("Users", "List", "CanView"),
+  async (req, res) => {
+    try {
+      const pool = getPool();
+      const result = await pool.request().query(`
+        SELECT u.id, u.name, u.email, u.RoleId,
+               r.RName AS roleName,
+               u.created_datetime, u.discontinue
+        FROM dbo.users u
+        LEFT JOIN dbo.Role r ON u.RoleId = r.RId
+      `);
 
-// GET all users - Admin only
-router.get("/", authMiddleware, adminOnly, async (req, res) => {
-  try {
-    const pool = getPool();
-    const result = await pool
-      .request()
-      .query(
-        "SELECT id, name, email, role, created_datetime, discontinue FROM dbo.users",
-      );
-    res.json(result.recordset);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
-  }
-});
+      // Normalize roles for frontend
+      const normalizedUsers = result.recordset.map((user) => ({
+        ...user,
+        role: normalizeRole(user.roleName),
+        roleName: user.roleName,
+      }));
 
-// CREATE user - Admin only + role restrictions
-router.post("/", authMiddleware, adminOnly, async (req, res) => {
-  const { name, email, role, password } = req.body;
-
-  if (!password) return res.status(400).json({ error: "Password is required" });
-
-  const callerRole = req.user?.role;
-
-  // Only super_admin can create super_admin
-  if (role === "super_admin" && callerRole !== "super_admin") {
-    return res
-      .status(403)
-      .json({ error: "Only super_admin can assign the super_admin role" });
-  }
-
-  const ALLOWED_ROLES = ["user", "admin", "super_admin", "dba"];
-  const assignedRole = ALLOWED_ROLES.includes(role) ? role : "user";
-
-  try {
-    const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
-    const pool = getPool();
-
-    await pool
-      .request()
-      .input("name", sql.NVarChar, name)
-      .input("email", sql.NVarChar, email)
-      .input("role", sql.NVarChar, assignedRole)
-      .input("password", sql.NVarChar, hashedPassword)
-      .query(
-        "INSERT INTO dbo.users (name, email, role, password, created_datetime, discontinue) " +
-          "VALUES (@name, @email, @role, @password, GETDATE(), 0)",
-      );
-
-    res.json({ message: "User created successfully" });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// UPDATE user - Admin only + strong role protection
-router.put("/:id", authMiddleware, adminOnly, async (req, res) => {
-  const { id } = req.params;
-  const { name, email, role, discontinue } = req.body;
-  const callerRole = req.user?.role;
-
-  try {
-    const pool = getPool();
-
-    // Get current target user role
-    const existingResult = await pool
-      .request()
-      .input("id", sql.Int, id)
-      .query("SELECT role FROM dbo.users WHERE id = @id");
-
-    if (!existingResult.recordset.length) {
-      return res.status(404).json({ error: "User not found" });
+      res.json(normalizedUsers);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
     }
+  },
+);
 
-    const targetCurrentRole = existingResult.recordset[0].role;
-
-    // Security checks
-    if (targetCurrentRole === "super_admin" && callerRole !== "super_admin") {
-      return res
-        .status(403)
-        .json({ error: "Only super_admin can modify a super_admin account" });
+// ======================
+// CREATE USER
+// ======================
+router.post(
+  "/",
+  authMiddleware,
+  checkPermission("Users", "List", "CanAdd"),
+  async (req, res) => {
+    const { name, email, RoleId, roleId, password } = req.body;
+    if (!password) {
+      return res.status(400).json({ error: "Password required" });
     }
-
-    if (role === "super_admin" && callerRole !== "super_admin") {
-      return res
-        .status(403)
-        .json({ error: "Only super_admin can assign the super_admin role" });
+    const assignedRoleId = Number(RoleId ?? roleId);
+    try {
+      const hashed = await bcrypt.hash(password, SALT_ROUNDS);
+      const pool = getPool();
+      await pool
+        .request()
+        .input("name", sql.NVarChar, name)
+        .input("email", sql.NVarChar, email)
+        .input("RoleId", sql.Int, assignedRoleId)
+        .input("password", sql.NVarChar, hashed).query(`
+          INSERT INTO dbo.users (name, email, password, RoleId, created_datetime, discontinue)
+          VALUES (@name, @email, @password, @RoleId, GETDATE(), 0)
+        `);
+      res.json({ message: "User created" });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
     }
+  },
+);
 
-    const ALLOWED_ROLES = ["user", "admin", "super_admin", "dba"];
-    const assignedRole = ALLOWED_ROLES.includes(role)
-      ? role
-      : targetCurrentRole;
-
-    await pool
-      .request()
-      .input("id", sql.Int, id)
-      .input("name", sql.NVarChar, name)
-      .input("email", sql.NVarChar, email)
-      .input("role", sql.NVarChar, assignedRole)
-      .input("discontinue", sql.Bit, discontinue ? 1 : 0)
-      .query(
-        "UPDATE dbo.users SET name=@name, email=@email, role=@role, discontinue=@discontinue WHERE id=@id",
-      );
-
-    res.json({ message: "User updated successfully" });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// DELETE user - Admin only
-router.delete("/:id", authMiddleware, adminOnly, async (req, res) => {
-  const { id } = req.params;
-
-  // Prevent self-deletion
-  if (parseInt(id) === req.user?.userId) {
-    return res
-      .status(400)
-      .json({ error: "You cannot delete your own account" });
-  }
-
-  try {
-    const pool = getPool();
-
-    const existing = await pool
-      .request()
-      .input("id", sql.Int, id)
-      .query("SELECT role FROM dbo.users WHERE id = @id");
-
-    if (!existing.recordset.length) {
-      return res.status(404).json({ error: "User not found" });
+// ======================
+// UPDATE USER
+// ======================
+router.put(
+  "/:id",
+  authMiddleware,
+  checkPermission("Users", "List", "CanEdit"),
+  async (req, res) => {
+    const { id } = req.params;
+    const { name, email, RoleId, roleId, discontinue } = req.body;
+    try {
+      const pool = getPool();
+      const assignedRoleId = Number(RoleId ?? roleId);
+      await pool
+        .request()
+        .input("id", sql.Int, id)
+        .input("name", sql.NVarChar, name)
+        .input("email", sql.NVarChar, email)
+        .input("RoleId", sql.Int, assignedRoleId)
+        .input("discontinue", sql.Bit, discontinue ? 1 : 0).query(`
+          UPDATE dbo.users
+          SET name=@name, email=@email, RoleId=@RoleId, discontinue=@discontinue
+          WHERE id=@id
+        `);
+      res.json({ message: "User updated" });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
     }
+  },
+);
 
-    if (
-      existing.recordset[0].role === "super_admin" &&
-      req.user?.role !== "super_admin"
-    ) {
-      return res
-        .status(403)
-        .json({ error: "Only super_admin can delete a super_admin account" });
+// ======================
+// DELETE USER
+// ======================
+router.delete(
+  "/:id",
+  authMiddleware,
+  checkPermission("Users", "List", "CanDelete"),
+  async (req, res) => {
+    const { id } = req.params;
+    if (parseInt(id) === req.user?.userId) {
+      return res.status(400).json({ error: "Cannot delete yourself" });
     }
-
-    await pool
-      .request()
-      .input("id", sql.Int, id)
-      .query("DELETE FROM dbo.users WHERE id = @id");
-
-    res.json({ message: "User deleted successfully" });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message });
-  }
-});
+    try {
+      const pool = getPool();
+      await pool
+        .request()
+        .input("id", sql.Int, id)
+        .query("DELETE FROM dbo.users WHERE id=@id");
+      res.json({ message: "User deleted" });
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
 module.exports = router;

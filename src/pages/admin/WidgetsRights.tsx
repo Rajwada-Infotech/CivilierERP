@@ -19,6 +19,8 @@ import {
   Download,
   CheckCircle,
   XCircle,
+  CreditCard,
+  ArrowRight,
 } from "lucide-react";
 import {
   Card,
@@ -44,9 +46,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
-import { CreditCard, ArrowRight } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -73,6 +73,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 
 const ACTION_CONFIG: Record<string, { label: string; icon: React.ReactNode }> =
   {
@@ -89,14 +90,11 @@ const ACTION_CONFIG: Record<string, { label: string; icon: React.ReactNode }> =
     convert: { label: "Convert", icon: <ArrowRight className="w-3 h-3" /> },
   };
 
-const getActionConfig = (action: string) => {
-  return (
-    ACTION_CONFIG[action] || {
-      label: action.charAt(0).toUpperCase() + action.slice(1),
-      icon: <Eye className="w-3 h-3" />,
-    }
-  );
-};
+const getActionConfig = (action: string) =>
+  ACTION_CONFIG[action] ?? {
+    label: action.charAt(0).toUpperCase() + action.slice(1),
+    icon: <Eye className="w-3 h-3" />,
+  };
 
 interface PermissionRow {
   id: string;
@@ -127,14 +125,10 @@ export default function WidgetsRights() {
     const rows: PermissionRow[] = [];
     allUsers.forEach((user) => {
       if (user.role === "super_admin") return;
-
       PAGE_DEFINITIONS.forEach((def) => {
         const userPerm = user.pagePermissions?.find((p) => p.page === def.key);
         const userActions = userPerm?.actions || [];
-
-        // Only show if user has at least "view" permission
         if (!userActions.includes("view")) return;
-
         rows.push({
           id: `${user.id}-${def.key}`,
           userId: user.id,
@@ -152,26 +146,76 @@ export default function WidgetsRights() {
     return rows;
   }, [allUsers]);
 
-  const filteredData = useMemo(() => {
-    return tableData.filter(
-      (row) =>
-        row.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        row.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        row.pageLabel.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        row.role.toLowerCase().includes(searchTerm.toLowerCase()),
-    );
-  }, [tableData, searchTerm]);
+  const filteredData = useMemo(
+    () =>
+      tableData.filter(
+        (row) =>
+          row.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          row.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          row.pageLabel.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          row.role.toLowerCase().includes(searchTerm.toLowerCase()),
+      ),
+    [tableData, searchTerm],
+  );
 
-  const handleSavePermissions = useCallback(() => {
+  const pageGroups = useMemo(() => {
+    const groups: Record<
+      string,
+      Array<{ key: string; label: string; actions: PageAction[] }>
+    > = {};
+    PAGE_DEFINITIONS.forEach((def) => {
+      if (!groups[def.group]) groups[def.group] = [];
+      groups[def.group].push({
+        key: def.key,
+        label: def.label,
+        actions: def.availableActions || [],
+      });
+    });
+    return groups;
+  }, []);
+
+  // FIX: updatePermission operates strictly on (pageKey, action).
+  // Toggling an action for one page never touches any other page's actions.
+  const updatePermission = useCallback(
+    (pageKey: string, action: PageAction, checked: boolean) => {
+      setPendingPermissions((prev) => {
+        const idx = prev.findIndex((p) => p.page === pageKey);
+        const currentActions = idx >= 0 ? [...prev[idx].actions] : [];
+
+        const newActions = checked
+          ? currentActions.includes(action)
+            ? currentActions
+            : [...currentActions, action]
+          : currentActions.filter((a) => a !== action);
+
+        const newPerm: PagePermission = {
+          page: pageKey,
+          actions: newActions as PageAction[],
+        };
+
+        if (idx >= 0) {
+          const copy = [...prev];
+          copy[idx] = newPerm;
+          return copy;
+        }
+        return [...prev, newPerm];
+      });
+    },
+    [],
+  );
+
+  const handleSavePermissions = useCallback(async () => {
     if (!selectedUser) {
       toast.error("Please select a user");
       return;
     }
-    updateUserPagePermissions(selectedUser.id, pendingPermissions);
-    toast.success(`Permissions updated for ${selectedUser.name}`);
-    setShowEditDialog(false);
-    setSelectedUser(null);
-    setPendingPermissions([]);
+    try {
+      await updateUserPagePermissions(selectedUser.id, pendingPermissions);
+      toast.success(`Permissions updated for ${selectedUser.name}`);
+      closeDialog();
+    } catch {
+      toast.error("Failed to save permissions. Please try again.");
+    }
   }, [selectedUser, pendingPermissions, updateUserPagePermissions]);
 
   const handleToggleStatus = useCallback(
@@ -192,56 +236,34 @@ export default function WidgetsRights() {
     }
   }, [deletingUserId, deleteUser]);
 
+  // FIX: openEditDialog deep-clones permissions into local state — no shared reference
   const openEditDialog = useCallback((user: AppUser) => {
     setSelectedUser(user);
-    setPendingPermissions([...(user.pagePermissions || [])]);
+    setPendingPermissions(
+      (user.pagePermissions || []).map((p) => ({
+        page: p.page,
+        actions: [...p.actions],
+      })),
+    );
     setShowEditDialog(true);
   }, []);
 
-  const pageGroups = useMemo(() => {
-    const groups: Record<
-      string,
-      Array<{ key: string; label: string; actions: PageAction[] }>
-    > = {};
-
-    PAGE_DEFINITIONS.forEach((def) => {
-      if (!groups[def.group]) groups[def.group] = [];
-      groups[def.group].push({
-        key: def.key,
-        label: def.label,
-        actions: def.availableActions || [],
-      });
-    });
-    return groups;
+  const openNewDialog = useCallback(() => {
+    setSelectedUser(null);
+    setPendingPermissions([]);
+    setShowEditDialog(true);
   }, []);
 
-  // Update permission with cleanup when no actions remain
-  const updatePermission = useCallback(
-    (pageKey: string, newActions: string[]) => {
-      setPendingPermissions((prev) => {
-        if (newActions.length === 0) {
-          return prev.filter((p) => p.page !== pageKey);
-        }
-
-        const newPerm: PagePermission = {
-          page: pageKey,
-          actions: newActions as PageAction[],
-        };
-
-        const idx = prev.findIndex((p) => p.page === pageKey);
-        if (idx >= 0) {
-          const copy = [...prev];
-          copy[idx] = newPerm;
-          return copy;
-        }
-        return [...prev, newPerm];
-      });
-    },
-    [],
-  );
+  const closeDialog = useCallback(() => {
+    setShowEditDialog(false);
+    setSelectedUser(null);
+    setPendingPermissions([]);
+  }, []);
 
   return (
     <>
+      <Breadcrumbs items={["Admin", "Rights", "Widgets Rights"]} />
+
       <div className="flex justify-between items-center mb-6">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Widgets Rights</h1>
@@ -249,134 +271,10 @@ export default function WidgetsRights() {
             Manage widget access permissions for users
           </p>
         </div>
-
-        <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="mr-2 h-4 w-4" />
-              Manage Permissions
-            </Button>
-          </DialogTrigger>
-
-          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Manage Widget Permissions</DialogTitle>
-              <DialogDescription>
-                Assign widget access for{" "}
-                <strong>{selectedUser?.name || "selected user"}</strong>
-              </DialogDescription>
-            </DialogHeader>
-
-            <div className="space-y-6 py-4">
-              {/* User Selector */}
-              <div className="space-y-2">
-                <Label>User</Label>
-                <Select
-                  value={selectedUser?.id || ""}
-                  onValueChange={(id) => {
-                    const user = allUsers.find((u) => u.id === id);
-                    if (user) {
-                      setSelectedUser(user);
-                      setPendingPermissions([...(user.pagePermissions || [])]);
-                    }
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a user" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {allUsers
-                      .filter((u) => u.role !== "super_admin")
-                      .map((user) => (
-                        <SelectItem key={user.id} value={user.id}>
-                          {user.name} ({user.email}) — {user.role}
-                        </SelectItem>
-                      ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* Permissions */}
-              <div className="space-y-3 max-h-[55vh] overflow-auto p-2 border rounded-md">
-                {Object.entries(pageGroups).map(([group, pages]) => (
-                  <Collapsible key={group} defaultOpen>
-                    <CollapsibleTrigger className="w-full flex items-center gap-2 p-3 hover:bg-accent rounded-md text-left">
-                      <div className="font-semibold">{group}</div>
-                    </CollapsibleTrigger>
-                    <CollapsibleContent className="space-y-3 pl-4 pt-2">
-                      {pages.map(({ key, label, actions }) => {
-                        const currentPerm = pendingPermissions.find(
-                          (p) => p.page === key,
-                        );
-                        const currentActions = currentPerm?.actions || [];
-
-                        return (
-                          <div
-                            key={key}
-                            className="flex items-start gap-4 p-4 border rounded-lg bg-card"
-                          >
-                            <Label className="text-sm font-medium w-52 pt-1 flex-shrink-0">
-                              {label}
-                            </Label>
-                            <div className="flex gap-2 flex-wrap">
-                              {actions.map((action) => {
-                                const config = getActionConfig(action);
-                                const checked = currentActions.includes(action);
-
-                                return (
-                                  <div
-                                    key={action}
-                                    className="flex items-center gap-2 px-3 py-2 border rounded-md hover:border-primary/50 transition-all"
-                                  >
-                                    <Checkbox
-                                      id={`perm-${key}-${action}`}
-                                      checked={checked}
-                                      onCheckedChange={(isChecked) => {
-                                        const newActions = isChecked
-                                          ? [...currentActions, action]
-                                          : currentActions.filter(
-                                              (a) => a !== action,
-                                            );
-                                        updatePermission(key, newActions);
-                                      }}
-                                    />
-                                    <Label
-                                      htmlFor={`perm-${key}-${action}`}
-                                      className="text-xs font-medium cursor-pointer flex items-center gap-1.5"
-                                    >
-                                      {config.icon}
-                                      {config.label}
-                                    </Label>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </CollapsibleContent>
-                  </Collapsible>
-                ))}
-              </div>
-            </div>
-
-            <DialogFooter>
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setShowEditDialog(false);
-                  setSelectedUser(null);
-                  setPendingPermissions([]);
-                }}
-              >
-                Cancel
-              </Button>
-              <Button onClick={handleSavePermissions} disabled={!selectedUser}>
-                Save Permissions
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <Button onClick={openNewDialog}>
+          <Plus className="mr-2 h-4 w-4" />
+          Manage Permissions
+        </Button>
       </div>
 
       <Card>
@@ -476,7 +374,6 @@ export default function WidgetsRights() {
                         >
                           {row.status === "Active" ? "Deactivate" : "Activate"}
                         </Button>
-
                         <Button
                           variant="ghost"
                           size="sm"
@@ -495,14 +392,134 @@ export default function WidgetsRights() {
         </CardContent>
       </Card>
 
-      {/* Single AlertDialog outside the table */}
+      {/* Edit / Assign Dialog — fully state-controlled, no DialogTrigger */}
+      <Dialog open={showEditDialog} onOpenChange={(open) => !open && closeDialog()}>
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              {selectedUser
+                ? `Edit Widget Permissions — ${selectedUser.name}`
+                : "Assign Widget Permissions"}
+            </DialogTitle>
+            <DialogDescription>
+              Toggle widget access rights for each module
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-6 py-4">
+            <div className="space-y-2">
+              <Label>User</Label>
+              <Select
+                value={selectedUser?.id ?? ""}
+                onValueChange={(id) => {
+                  const user = allUsers.find((u) => u.id === id);
+                  if (user) {
+                    setSelectedUser(user);
+                    setPendingPermissions(
+                      (user.pagePermissions || []).map((p) => ({
+                        page: p.page,
+                        actions: [...p.actions],
+                      })),
+                    );
+                  }
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select a user" />
+                </SelectTrigger>
+                <SelectContent>
+                  {allUsers
+                    .filter((u) => u.role !== "super_admin")
+                    .map((u) => (
+                      <SelectItem key={u.id} value={u.id}>
+                        {u.name} ({u.email}) — {u.role}
+                      </SelectItem>
+                    ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-3 max-h-[55vh] overflow-auto p-2 border rounded-md">
+              {Object.entries(pageGroups).map(([group, pages]) => (
+                <Collapsible key={group} defaultOpen>
+                  <CollapsibleTrigger className="w-full flex items-center gap-2 p-3 hover:bg-accent rounded-md text-left">
+                    <div className="font-semibold">{group}</div>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="space-y-3 pl-4 pt-2">
+                    {pages.map(({ key, label, actions }) => {
+                      const currentPerm = pendingPermissions.find(
+                        (p) => p.page === key,
+                      );
+                      const currentActions = currentPerm?.actions || [];
+                      return (
+                        <div
+                          key={key}
+                          className="flex items-start gap-4 p-4 border rounded-lg bg-card"
+                        >
+                          <Label className="text-sm font-medium w-52 pt-1 flex-shrink-0">
+                            {label}
+                          </Label>
+                          <div className="flex gap-2 flex-wrap">
+                            {actions.map((action) => {
+                              const config = getActionConfig(action);
+                              // FIX: checked is computed per (key, action) — strictly isolated
+                              const checked = currentActions.includes(action);
+                              return (
+                                <div
+                                  key={action}
+                                  className="flex items-center gap-2 px-3 py-2 border rounded-md hover:border-primary/50 transition-all"
+                                >
+                                  <Checkbox
+                                    // FIX: id scoped to widget page + action — unique, no cross-linking
+                                    id={`wr-${key}-${action}`}
+                                    checked={checked}
+                                    onCheckedChange={(val) =>
+                                      updatePermission(
+                                        key,
+                                        action,
+                                        val as boolean,
+                                      )
+                                    }
+                                  />
+                                  <Label
+                                    htmlFor={`wr-${key}-${action}`}
+                                    className="text-xs font-medium cursor-pointer flex items-center gap-1.5"
+                                  >
+                                    {config.icon}
+                                    {config.label}
+                                  </Label>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </CollapsibleContent>
+                </Collapsible>
+              ))}
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={closeDialog}>
+              Cancel
+            </Button>
+            <Button onClick={handleSavePermissions} disabled={!selectedUser}>
+              Save Permissions
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* FIX: AlertDialog is outside the table loop — only one instance, no stacking */}
       <AlertDialog
         open={!!deletingUserId}
-        onOpenChange={() => setDeletingUserId(null)}
+        onOpenChange={(open) => !open && setDeletingUserId(null)}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete User?</AlertDialogTitle>
+            <AlertDialogTitle>Delete user?</AlertDialogTitle>
             <AlertDialogDescription>
               This action cannot be undone. This will permanently delete the
               user and remove all their permissions.

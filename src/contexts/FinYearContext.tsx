@@ -8,12 +8,11 @@ import React, {
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getFinYears,
-  addFinYear,
-  updateFinYear,
-  deleteFinYear,
+  addFinYear as apiAddFinYear,
+  updateFinYear as apiUpdateFinYear,
+  deleteFinYear as apiDeleteFinYear,
 } from "@/api/finYearApi";
 import { useAuth } from "./AuthContext";
-import { fetchWithAuth } from "../lib/fetchWithAuth";
 
 export interface FinYear {
   id: string;
@@ -29,7 +28,7 @@ interface FinYearContextType {
   isLoading: boolean;
   addFinYear: (finYear: Omit<FinYear, "id">) => Promise<void>;
   updateFinYear: (id: string, updates: Partial<FinYear>) => Promise<void>;
-  toggleLock: (id: string, currentLocked: boolean) => Promise<void>;
+  toggleLock: (id: string, newLockedState: boolean) => Promise<void>;
   deleteFinYear: (id: string) => Promise<void>;
 }
 
@@ -41,15 +40,20 @@ export const useFinYear = () => {
   return ctx;
 };
 
+const QUERY_KEY = ["fin-years"];
+
 export const FinYearProvider = ({ children }: { children: ReactNode }) => {
   const queryClient = useQueryClient();
-
   const { currentUser } = useAuth();
+
   const { data: dbData, isLoading } = useQuery({
-    queryKey: ["fin-years"],
+    queryKey: QUERY_KEY,
     queryFn: getFinYears,
-    enabled: !!currentUser,
-    staleTime: 5 * 60 * 1000, // 5 min from global + explicit
+    enabled: !!currentUser && !!localStorage.getItem("token"),
+    // staleTime: 0 was causing a refetch on every render. invalidateQueries()
+    // correctly forces a refetch regardless of staleTime — so 5 min is safe.
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
   });
 
   const finYears: FinYear[] = Array.isArray(dbData)
@@ -64,16 +68,66 @@ export const FinYearProvider = ({ children }: { children: ReactNode }) => {
     : [];
 
   const invalidate = useCallback(
-    () => queryClient.invalidateQueries({ queryKey: ["fin-years"] }),
+    () => queryClient.invalidateQueries({ queryKey: QUERY_KEY }),
     [queryClient],
   );
 
-  const add = useCallback(
+  // Helper: optimistically patch the cached query data so the UI updates
+  // instantly without waiting for the refetch round-trip.
+  const optimisticPatch = useCallback(
+    (id: string, patch: Partial<FinYear>) => {
+      queryClient.setQueryData(QUERY_KEY, (old: any[]) => {
+        if (!Array.isArray(old)) return old;
+        return old.map((item: any) => {
+          if (String(item.FId) !== id) return item;
+          const updated = { ...item };
+          if (patch.locked !== undefined)
+            updated.FisLocked = patch.locked ? 1 : 0;
+          if (patch.status !== undefined)
+            updated.FStatus = patch.status !== "Closed" ? 1 : 0;
+          if (patch.year !== undefined) updated.FName = patch.year;
+          if (patch.startDate !== undefined)
+            updated.FStartDate = patch.startDate;
+          if (patch.endDate !== undefined) updated.FEndDate = patch.endDate;
+          return updated;
+        });
+      });
+    },
+    [queryClient],
+  );
+
+  // FIX: toggleLock now:
+  // 1. Optimistically flips the locked badge in the UI immediately
+  // 2. Calls apiUpdateFinYear directly (not the local updateFinYear callback)
+  //    so { FisLocked } reaches the backend as a raw DB field — not filtered
+  //    through the Partial<FinYear> mapper which would silently drop it
+  // 3. On error, rolls back the optimistic update and re-throws
+  const toggleLock = useCallback(
+    async (id: string, newLockedState: boolean) => {
+      // Step 1 — optimistic update: flip the badge before the request finishes
+      optimisticPatch(id, { locked: newLockedState });
+
+      try {
+        // Step 2 — persist to DB via the raw API (bypasses the FinYear-key mapper)
+        await apiUpdateFinYear(id, { FisLocked: newLockedState });
+        // Step 3 — invalidate so the next read is fresh (clears Redis cache too)
+        await invalidate();
+      } catch (error) {
+        // Step 4 — rollback: flip back if the request failed
+        optimisticPatch(id, { locked: !newLockedState });
+        console.error("Failed to toggle lock:", error);
+        throw error;
+      }
+    },
+    [optimisticPatch, invalidate],
+  );
+
+  const addFinYear = useCallback(
     async (finYear: Omit<FinYear, "id">) => {
-      await addFinYear({
-        FName: finYear.year || null,
-        FStartDate: finYear.startDate || null,
-        FEndDate: finYear.endDate || null,
+      await apiAddFinYear({
+        FName: finYear.year,
+        FStartDate: finYear.startDate,
+        FEndDate: finYear.endDate,
         FStatus: finYear.status !== "Closed",
         FisLocked: finYear.locked,
       });
@@ -82,42 +136,35 @@ export const FinYearProvider = ({ children }: { children: ReactNode }) => {
     [invalidate],
   );
 
-  const update = useCallback(
+  const updateFinYear = useCallback(
     async (id: string, updates: Partial<FinYear>) => {
-      const current = finYears.find((f) => f.id === id);
-      if (!current) return;
-      const merged = { ...current, ...updates };
-      await updateFinYear(id, {
-        FName: merged.year || null,
-        FStartDate: merged.startDate || null,
-        FEndDate: merged.endDate || null,
-        FStatus: merged.status !== "Closed",
-        FisLocked: merged.locked,
-      });
-      await invalidate();
+      // Optimistic update for edit dialog saves too
+      optimisticPatch(id, updates);
+
+      const payload: any = {};
+      if (updates.year !== undefined) payload.FName = updates.year;
+      if (updates.startDate !== undefined)
+        payload.FStartDate = updates.startDate;
+      if (updates.endDate !== undefined) payload.FEndDate = updates.endDate;
+      if (updates.status !== undefined)
+        payload.FStatus = updates.status !== "Closed";
+      if (updates.locked !== undefined) payload.FisLocked = updates.locked;
+
+      try {
+        await apiUpdateFinYear(id, payload);
+        await invalidate();
+      } catch (error) {
+        // Rollback on failure
+        await invalidate();
+        throw error;
+      }
     },
-    [finYears, invalidate],
+    [optimisticPatch, invalidate],
   );
 
-  const toggleLock = useCallback(
-    async (id: string, currentLocked: boolean) => {
-      const current = finYears.find((f) => f.id === id);
-      if (!current) return;
-      await updateFinYear(id, {
-        FName: current.year || null,
-        FStartDate: current.startDate || null,
-        FEndDate: current.endDate || null,
-        FStatus: current.status !== "Closed",
-        FisLocked: !currentLocked,
-      });
-      await invalidate();
-    },
-    [finYears, invalidate],
-  );
-
-  const remove = useCallback(
+  const deleteFinYear = useCallback(
     async (id: string) => {
-      await deleteFinYear(id);
+      await apiDeleteFinYear(id);
       await invalidate();
     },
     [invalidate],
@@ -127,12 +174,12 @@ export const FinYearProvider = ({ children }: { children: ReactNode }) => {
     () => ({
       finYears,
       isLoading,
-      addFinYear: add,
-      updateFinYear: update,
+      addFinYear,
+      updateFinYear,
       toggleLock,
-      deleteFinYear: remove,
+      deleteFinYear,
     }),
-    [finYears, isLoading, add, update, toggleLock, remove],
+    [finYears, isLoading, addFinYear, updateFinYear, toggleLock, deleteFinYear],
   );
 
   return (
