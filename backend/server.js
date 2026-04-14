@@ -164,6 +164,7 @@ async function startServer() {
     app.use("/api/grns", require("./routes/grns"));
     app.use("/api/finance-dashboard", require("./routes/financeDashboard"));
     app.use("/api/material-dashboard", require("./routes/materialDashboard"));
+    app.use("/api/admin-dashboard", require("./routes/adminDashboard"));
     app.use("/api/user-activity", require("./routes/userActivity"));
     app.use("/api/tasks", require("./routes/tasks"));
 
