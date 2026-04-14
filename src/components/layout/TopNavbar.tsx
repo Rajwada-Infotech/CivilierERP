@@ -815,9 +815,7 @@ export const TopNavbar = () => {
         {/* Logo */}
         <button
           type="button"
-          onClick={() =>
-            navigate(activeModule ? MODULE_DASHBOARD_ROUTES[activeModule] : "/")
-          }
+          onClick={() => navigate("/")}
           title="Go to dashboard"
           aria-label="Go to dashboard"
           className="flex items-center gap-2 hover:opacity-80 transition-opacity shrink-0"
@@ -832,13 +830,17 @@ export const TopNavbar = () => {
           <button
             onClick={() => setNavCollapsed(!navCollapsed)}
             title={navCollapsed ? "Expand navigation" : "Collapse navigation"}
-            className="p-1.5 rounded-md bg-muted hover:bg-muted/80 text-foreground border border-border transition-all duration-200 shrink-0"
+            className="p-1.5 rounded-md bg-muted hover:bg-muted/80 active:scale-90 text-foreground border border-border shrink-0 overflow-hidden transition-colors duration-150"
           >
-            {navCollapsed ? (
+            <span
+              style={{
+                display: "block",
+                transform: navCollapsed ? "rotate(0deg)" : "rotate(180deg)",
+                transition: "transform 420ms cubic-bezier(0.34, 1.56, 0.64, 1)",
+              }}
+            >
               <ChevronsRight size={15} />
-            ) : (
-              <ChevronsLeft size={15} />
-            )}
+            </span>
           </button>
 
           {/* Collapsible items */}
