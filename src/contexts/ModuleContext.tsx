@@ -39,6 +39,7 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
   const location = useLocation();
   const [activeModule, setActiveModuleState] = useState<Module>(null);
   const [moduleSwitching, setModuleSwitching] = useState(false);
+
   const moduleLabel =
     activeModule === "finance"
       ? "💰 Finance"
@@ -70,30 +71,34 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
     });
   }, []);
 
-  // Initialize activeModule from localStorage or infer from pathname
+  // Initialize activeModule ONCE on mount — prefer localStorage, then infer from pathname.
+  // We do NOT re-run this on pathname changes so that explicit module switches
+  // are never clobbered by navigation within a module.
   useEffect(() => {
     const stored = localStorage.getItem("activeModule") as Module | null;
-    let initialModule: Module = null;
 
     if (
       stored &&
       (["finance", "material", "followup"] as Module[]).includes(stored)
     ) {
-      initialModule = stored;
-    } else {
-      // Infer from pathname
-      const pathname = location.pathname;
-      if (pathname.startsWith("/followup")) {
-        initialModule = "followup";
-      } else if (pathname.startsWith("/material")) {
-        initialModule = "material";
-      } else {
-        initialModule = "finance";
-      }
+      setActiveModuleState(stored);
+      return;
     }
 
-    setActiveModuleState(initialModule);
-  }, [location.pathname]);
+    // First visit — no stored preference, infer from URL
+    const pathname = location.pathname;
+    if (pathname.startsWith("/followup")) {
+      setActiveModuleState("followup");
+      localStorage.setItem("activeModule", "followup");
+    } else if (pathname.startsWith("/material")) {
+      setActiveModuleState("material");
+      localStorage.setItem("activeModule", "material");
+    } else {
+      setActiveModuleState("finance");
+      localStorage.setItem("activeModule", "finance");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // intentionally run once on mount only
 
   return (
     <ModuleContext.Provider

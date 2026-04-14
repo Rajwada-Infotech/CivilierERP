@@ -126,9 +126,10 @@ export const getPurchaseOrders = async (): Promise<PurchaseOrder[]> => {
   return Array.isArray(data) ? data : [];
 };
 
-// Items (from Item_Master_Group) — only M_IdentityCode=1 records (actual items, not groups)
+// Items from Item_Master_Group — no query filter; the backend WHERE clause
+// already excludes pure group-header rows (Parent_Id IS NULL AND M_IdentityCode=0).
 export const getItems = async (): Promise<Item[]> => {
-  const res = await fetch("/api/item-master?identityCode=1", {
+  const res = await fetch("/api/item-master", {
     headers: getAuthHeaders(),
   });
   if (!res.ok) throw new Error("Failed to fetch Items");
