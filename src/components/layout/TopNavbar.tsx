@@ -553,20 +553,21 @@ export const TopNavbar = () => {
   }, [bellOpen, remFetched, refreshReminders]);
 
   const ADMIN_PATHS = ["/masters/named-entry-type", "/masters/type-of-doc"];
-  const isAdminPage =
-    location.pathname.startsWith("/admin") ||
-    location.pathname.startsWith("/users") ||
-    ADMIN_PATHS.some((p) => location.pathname.startsWith(p));
   const isSuperAdmin = currentUser?.role === "super_admin";
   const isDba = currentUser?.role === "dba";
   const isAdmin = currentUser?.role === "admin" || isSuperAdmin || isDba;
+  const isAdminPage =
+    isAdmin &&
+    (location.pathname.startsWith("/admin") ||
+      location.pathname.startsWith("/users") ||
+      ADMIN_PATHS.some((p) => location.pathname.startsWith(p)));
 
   const RoleIcon = isSuperAdmin
     ? Crown
-    : isAdmin
-      ? Shield
-      : isDba
-        ? Database
+    : isDba
+      ? Database
+      : isAdmin
+        ? Shield
         : null;
   const roleBadgeCls = isSuperAdmin
     ? "bg-violet-600"
