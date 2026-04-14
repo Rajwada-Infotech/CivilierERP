@@ -162,12 +162,11 @@ export const PAGE_DEFINITIONS = [
     group: "Materials",
     availableActions: ["view", "create", "edit", "delete"] as const,
   },
-  // Role Master
   {
-    key: "role-master",
-    label: "Role Master",
+    key: "activity-browser",
+    label: "Activity Browser",
     group: "Admin",
-    availableActions: ["view", "create", "edit", "delete"] as const,
+    availableActions: ["view"] as const,
   },
 ] as const;
 
