@@ -13,25 +13,25 @@ export const PAGE_DEFINITIONS = [
   {
     key: "users",
     label: "Users",
-    group: "Administration",
+    group: "Admin",
     availableActions: ["view", "create", "edit", "delete"] as const,
   },
   {
     key: "menu-rights",
     label: "Menu Rights",
-    group: "Administration",
+    group: "Admin",
     availableActions: ["view", "edit"] as const,
   },
   {
     key: "roles",
     label: "Roles & Permissions",
-    group: "Administration",
+    group: "Admin",
     availableActions: ["view", "create", "edit", "delete"] as const,
   },
   {
     key: "company-settings",
     label: "Company Settings",
-    group: "Administration",
+    group: "Admin",
     availableActions: ["view", "edit"] as const,
   },
 
@@ -161,6 +161,12 @@ export const PAGE_DEFINITIONS = [
     label: "GRN Master",
     group: "Materials",
     availableActions: ["view", "create", "edit", "delete"] as const,
+  },
+  {
+    key: "activity-browser",
+    label: "Activity Browser",
+    group: "Admin",
+    availableActions: ["view"] as const,
   },
 ] as const;
 
