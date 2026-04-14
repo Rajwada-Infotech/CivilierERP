@@ -7,7 +7,7 @@ const { getPool, sql } = require("../db");
 // GET all GRNs
 router.get("/", cache("grns", 300), async (req, res) => {
   try {
-    const pool = await getPool();
+    const pool = getPool();
     const result = await pool.request().query(`
       SELECT
         grn.GRNID,
@@ -17,6 +17,7 @@ router.get("/", cache("grns", 300), async (req, res) => {
         grn.POID,
         grn.GRNItems,
         grn.Status,
+        grn.Remarks,
         grn.CreatedDate,
         s.LHeadName AS SupplierName,
         p.PurchaseOrderNo AS PONumber
@@ -47,7 +48,7 @@ router.post("/", async (req, res) => {
       .json({ error: "GRNNo, GRNDate and SupplierID are required" });
   }
 
-  const pool = await getPool();
+  const pool = getPool();
   const transaction = pool.transaction();
 
   try {
@@ -90,8 +91,7 @@ router.post("/", async (req, res) => {
           .input("UOM", sql.NVarChar(20), item.uom || null)
           .input("Type", sql.NVarChar(10), "IN")
           .input("RefType", sql.NVarChar(20), "GRN")
-          .input("RefID", sql.Int, grnId)
-          .query(`
+          .input("RefID", sql.Int, grnId).query(`
             INSERT INTO StockLedger (ItemID, Qty, UOM, Type, RefType, RefID, CreatedDate)
             VALUES (@ItemID, @Qty, @UOM, @Type, @RefType, @RefID, GETDATE())
           `);
@@ -179,4 +179,3 @@ router.delete("/:id", async (req, res) => {
 });
 
 module.exports = router;
-

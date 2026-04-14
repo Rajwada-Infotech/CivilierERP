@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useModule } from "@/contexts/ModuleContext";
-import { useTask } from "@/contexts/TaskContext";
+import { useReminders } from "@/hooks/useReminders";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSidebarState } from "./AppLayout";
 
@@ -103,9 +103,7 @@ const buildFollowupNavItems = (): NavItem[] => [
   {
     label: "Agreement",
     icon: FileText,
-    children: [
-      { label: "Agreements", path: "/followup/agreement/agreements" },
-    ],
+    children: [{ label: "Agreements", path: "/followup/agreement/agreements" }],
   },
   {
     label: "Finance",
@@ -136,9 +134,7 @@ const buildFollowupNavItems = (): NavItem[] => [
   {
     label: "Construction",
     icon: HardHat,
-    children: [
-      { label: "Updates", path: "/followup/construction/updates" },
-    ],
+    children: [{ label: "Updates", path: "/followup/construction/updates" }],
   },
   {
     label: "Reports",
@@ -147,7 +143,10 @@ const buildFollowupNavItems = (): NavItem[] => [
       { label: "Customer Report", path: "/followup/reports/customer" },
       { label: "Financial Report", path: "/followup/reports/financial" },
       { label: "Project Status", path: "/followup/reports/project-status" },
-      { label: "Employee Performance", path: "/followup/reports/employee-performance" },
+      {
+        label: "Employee Performance",
+        path: "/followup/reports/employee-performance",
+      },
     ],
   },
 ];
@@ -155,7 +154,7 @@ const buildFollowupNavItems = (): NavItem[] => [
 // ── Material module sidebar ──────────────────────────────────────────────────
 const buildMaterialNavItems = (): NavItem[] => [
   { label: "Amendments", icon: BarChart3, path: "/material/amendments" },
-{
+  {
     label: "Transaction",
     icon: Receipt,
     children: [
@@ -470,10 +469,8 @@ export const AppSidebar = () => {
   const location = useLocation();
   const { activeModule } = useModule();
   const { collapsed, setCollapsed } = useSidebarState();
-  const { getOverdueTasks } = useTask();
+  const { overdueTaskCount: overdueCount } = useReminders();
   const { currentUser } = useAuth();
-
-  const overdueCount = getOverdueTasks().length;
 
   const ADMIN_SETUP_PATHS = [
     "/masters/named-entry-type",
@@ -491,8 +488,7 @@ export const AppSidebar = () => {
 
   const isSuperAdminPage =
     hasAdminRole && location.pathname.startsWith("/superadmin");
-  const isDbaPage =
-    hasAdminRole && location.pathname.startsWith("/dba");
+  const isDbaPage = hasAdminRole && location.pathname.startsWith("/dba");
   const isUserProfilePage = location.pathname.startsWith("/user/profile");
 
   const getModuleNavItems = (): NavItem[] => {

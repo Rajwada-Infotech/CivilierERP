@@ -6,7 +6,11 @@ import { useTheme, THEME_DOTS, Theme } from "@/contexts/ThemeContext";
 import { useModule, MODULE_DASHBOARD_ROUTES } from "@/contexts/ModuleContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavbarCollapse } from "./AppLayout";
-import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import {
+  useReminders,
+  type ReminderItem,
+  formatRelative,
+} from "@/hooks/useReminders";
 import {
   Calendar,
   FileText,
@@ -43,42 +47,13 @@ import {
   ShoppingCart,
   FileWarning,
   RefreshCw,
+  TrendingUp,
+  CheckSquare,
 } from "lucide-react";
 import { BillingIcon } from "@/components/icons/BillingIcon";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-interface ReminderItem {
-  id: string | number;
-  type:
-    | "payment"
-    | "deadline"
-    | "purchase_order"
-    | "grn"
-    | "cheque"
-    | "tds"
-    | "general";
-  title: string;
-  subtitle: string;
-  dueDate: string;
-  timeSlot?: string;
-  urgency: "overdue" | "today" | "soon" | "upcoming";
-  amount?: number;
-}
-
-// ─── Reminder helpers ─────────────────────────────────────────────────────────
-
-function classifyUrgency(dueDateStr: string): ReminderItem["urgency"] {
-  const due = new Date(dueDateStr);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  due.setHours(0, 0, 0, 0);
-  const diffDays = Math.floor((due.getTime() - today.getTime()) / 86400000);
-  if (diffDays < 0) return "overdue";
-  if (diffDays === 0) return "today";
-  if (diffDays <= 7) return "soon";
-  return "upcoming";
-}
+// ReminderItem is imported from @/hooks/useReminders
 
 const URGENCY_CONFIG = {
   overdue: {
@@ -110,136 +85,23 @@ const TYPE_ICON: Record<ReminderItem["type"], React.ElementType> = {
   grn: Package,
   cheque: BookOpen,
   tds: FileWarning,
+  task: CheckSquare,
   general: Bell,
 };
-
-function formatRelative(dueDateStr: string, timeSlot?: string): string {
-  const due = new Date(dueDateStr);
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  due.setHours(0, 0, 0, 0);
-  const diffDays = Math.floor((due.getTime() - today.getTime()) / 86400000);
-  const base =
-    diffDays < 0
-      ? `${Math.abs(diffDays)}d overdue`
-      : diffDays === 0
-        ? "Today"
-        : diffDays === 1
-          ? "Tomorrow"
-          : `In ${diffDays} days`;
-  return timeSlot ? `${base} · ${timeSlot}` : base;
-}
-
-async function fetchAllReminders(): Promise<ReminderItem[]> {
-  const [poRes, grnRes, chequeRes, tdsRes] = await Promise.allSettled([
-    fetchWithAuth("/api/purchase-orders"),
-    fetchWithAuth("/api/grns"),
-    fetchWithAuth("/api/cheque-master"),
-    fetchWithAuth("/api/tds-master"),
-  ]);
-
-  const items: ReminderItem[] = [];
-
-  // Purchase Orders
-  if (poRes.status === "fulfilled" && poRes.value.ok) {
-    const data = await poRes.value.json();
-    (Array.isArray(data) ? data : (data.data ?? [])).forEach((po: any) => {
-      const d = po.ExpectedDeliveryDate || po.DeliveryDate || po.DocumentDate;
-      if (!d) return;
-      const urgency = classifyUrgency(d);
-      if (urgency === "upcoming") return;
-      items.push({
-        id: `po-${po.Id ?? po.id}`,
-        type: "purchase_order",
-        title: `PO #${po.PONumber || po.DocumentNumber || po.Id}`,
-        subtitle: po.SupplierName || po.VendorName || "Purchase Order",
-        dueDate: d,
-        timeSlot: po.TimeSlot || po.DeliveryTime || undefined,
-        urgency,
-        amount: po.TotalAmount || po.Amount || undefined,
-      });
-    });
-  }
-
-  // GRNs
-  if (grnRes.status === "fulfilled" && grnRes.value.ok) {
-    const data = await grnRes.value.json();
-    (Array.isArray(data) ? data : (data.data ?? [])).forEach((grn: any) => {
-      const d = grn.ExpectedDate || grn.ReceivedDate || grn.DocumentDate;
-      if (!d) return;
-      const urgency = classifyUrgency(d);
-      if (urgency === "upcoming") return;
-      items.push({
-        id: `grn-${grn.Id ?? grn.id}`,
-        type: "grn",
-        title: `GRN #${grn.GRNNumber || grn.DocumentNumber || grn.Id}`,
-        subtitle: grn.SupplierName || grn.VendorName || "Goods Receipt",
-        dueDate: d,
-        timeSlot: grn.TimeSlot || undefined,
-        urgency,
-        amount: grn.TotalAmount || undefined,
-      });
-    });
-  }
-
-  // Cheques
-  if (chequeRes.status === "fulfilled" && chequeRes.value.ok) {
-    const data = await chequeRes.value.json();
-    (Array.isArray(data) ? data : (data.data ?? [])).forEach((chq: any) => {
-      const d = chq.ChequeDate || chq.DueDate || chq.Date;
-      if (!d) return;
-      const urgency = classifyUrgency(d);
-      if (urgency === "upcoming") return;
-      items.push({
-        id: `chq-${chq.Id ?? chq.id}`,
-        type: "cheque",
-        title: `Cheque #${chq.ChequeNumber || chq.Id}`,
-        subtitle: chq.BankName || chq.PartyName || "Cheque",
-        dueDate: d,
-        timeSlot: chq.TimeSlot || undefined,
-        urgency,
-        amount: chq.Amount || undefined,
-      });
-    });
-  }
-
-  // TDS
-  if (tdsRes.status === "fulfilled" && tdsRes.value.ok) {
-    const data = await tdsRes.value.json();
-    (Array.isArray(data) ? data : (data.data ?? [])).forEach((tds: any) => {
-      const d = tds.DueDate || tds.PaymentDate || tds.Date;
-      if (!d) return;
-      const urgency = classifyUrgency(d);
-      if (urgency === "upcoming") return;
-      items.push({
-        id: `tds-${tds.Id ?? tds.id}`,
-        type: "tds",
-        title: `TDS #${tds.TDSCertificateNo || tds.Id}`,
-        subtitle: tds.PartyName || tds.DeducteeName || "TDS Payment",
-        dueDate: d,
-        timeSlot: tds.TimeSlot || undefined,
-        urgency,
-        amount: tds.TDSAmount || tds.Amount || undefined,
-      });
-    });
-  }
-
-  const ORDER = { overdue: 0, today: 1, soon: 2, upcoming: 3 };
-  items.sort((a, b) => ORDER[a.urgency] - ORDER[b.urgency]);
-  return items;
-}
 
 // ─── Bell / Reminders Dropdown ────────────────────────────────────────────────
 
 const RemindersDropdown: React.FC<{
   open: boolean;
   onClose: () => void;
-}> = ({ open, onClose }) => {
+  reminders: ReminderItem[];
+  loading: boolean;
+  refresh: () => Promise<void>;
+}> = ({ open, onClose, reminders, loading, refresh }) => {
   const ref = useRef<HTMLDivElement>(null);
-  const [reminders, setReminders] = useState<ReminderItem[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [fetched, setFetched] = useState(false);
+  const navigate = useNavigate();
 
+  // Close on outside click
   useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
@@ -248,23 +110,6 @@ const RemindersDropdown: React.FC<{
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
   }, [open, onClose]);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const items = await fetchAllReminders();
-      setReminders(items);
-      setFetched(true);
-    } catch {
-      /* non-critical */
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (open && !fetched) load();
-  }, [open, fetched, load]);
 
   const urgencyCounts = reminders.reduce(
     (acc, r) => {
@@ -296,13 +141,12 @@ const RemindersDropdown: React.FC<{
             </span>
           )}
         </div>
+        {/* Refresh button — calls shared hook's refresh() directly */}
         <button
-          onClick={() => {
-            setFetched(false);
-            load();
-          }}
-          title="Refresh"
-          className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          onClick={refresh}
+          disabled={loading}
+          title="Refresh reminders"
+          className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50"
         >
           <RefreshCw size={12} className={loading ? "animate-spin" : ""} />
         </button>
@@ -352,7 +196,14 @@ const RemindersDropdown: React.FC<{
               return (
                 <div
                   key={r.id}
-                  className={`flex items-start gap-3 px-4 py-3 transition-colors cursor-default
+                  onClick={() => {
+                    if (r.type === "task") {
+                      navigate(r.taskId ? `/tasks/${r.taskId}` : "/tasks");
+                      onClose();
+                    }
+                  }}
+                  className={`flex items-start gap-3 px-4 py-3 transition-colors
+                    ${r.type === "task" ? "cursor-pointer" : "cursor-default"}
                     ${
                       r.urgency === "overdue"
                         ? "bg-red-500/5 hover:bg-red-500/10"
@@ -401,7 +252,7 @@ const RemindersDropdown: React.FC<{
       {/* Footer */}
       <div className="border-t border-border px-4 py-2.5">
         <p className="text-[10px] text-muted-foreground text-center">
-          Overdue · Today · Next 7 days · Time-slotted items only
+          Overdue · Today · Next 7 days · Tasks &amp; finance items
         </p>
       </div>
     </div>
@@ -686,30 +537,20 @@ export const TopNavbar = () => {
   const [themeOpen, setThemeOpen] = useState(false);
   const [bellOpen, setBellOpen] = useState(false);
 
-  // Badge count — fetched in background every 2 min
-  const [badgeCount, setBadgeCount] = useState<number>(0);
+  // Single useReminders instance — shared between badge, dropdown, and refresh button
+  const {
+    reminders,
+    loading: remLoading,
+    badgeCount,
+    refresh: refreshReminders,
+    fetched: remFetched,
+  } = useReminders();
+
+  // Fetch once when bell is first opened (already fetching on mount via polling, but
+  // if the user opens before the first poll completes we trigger it explicitly)
   useEffect(() => {
-    let cancelled = false;
-    const refresh = async () => {
-      try {
-        const items = await fetchAllReminders();
-        if (!cancelled)
-          setBadgeCount(
-            items.filter(
-              (i) => i.urgency === "overdue" || i.urgency === "today",
-            ).length,
-          );
-      } catch {
-        /* non-critical */
-      }
-    };
-    refresh();
-    const id = setInterval(refresh, 120_000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, []);
+    if (bellOpen && !remFetched) refreshReminders();
+  }, [bellOpen, remFetched, refreshReminders]);
 
   const ADMIN_PATHS = ["/masters/named-entry-type", "/masters/type-of-doc"];
   const isAdminPage =
@@ -835,13 +676,17 @@ export const TopNavbar = () => {
           <button
             onClick={() => setNavCollapsed(!navCollapsed)}
             title={navCollapsed ? "Expand navigation" : "Collapse navigation"}
-            className="p-1.5 rounded-md bg-muted hover:bg-muted/80 text-foreground border border-border transition-all duration-200 shrink-0"
+            className="p-1.5 rounded-md bg-muted hover:bg-muted/80 active:scale-90 text-foreground border border-border shrink-0 overflow-hidden transition-colors duration-150"
           >
-            {navCollapsed ? (
+            <span
+              style={{
+                display: "block",
+                transform: navCollapsed ? "rotate(0deg)" : "rotate(180deg)",
+                transition: "transform 420ms cubic-bezier(0.34, 1.56, 0.64, 1)",
+              }}
+            >
               <ChevronsRight size={15} />
-            ) : (
-              <ChevronsLeft size={15} />
-            )}
+            </span>
           </button>
 
           {/* Collapsible items */}
@@ -926,193 +771,224 @@ export const TopNavbar = () => {
               <Dropdown
                 open={moduleOpen}
                 onClose={() => setModuleOpen(false)}
-                className="right-0 p-3"
-                style={{ minWidth: "20rem" }}
+                className="right-0 p-1.5"
+                style={{ minWidth: "17rem" }}
               >
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-3 px-1">
-                  Select Module
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading px-3 pt-2 pb-2">
+                  Switch Module
                 </p>
-                <div
-                  className={`grid gap-2 ${isAdmin ? "grid-cols-3" : "grid-cols-2"}`}
+
+                {/* Finance */}
+                <button
+                  onClick={async () => {
+                    setModuleOpen(false);
+                    setSwitchingTo("Finance");
+                    setModuleSwitching(true);
+                    await new Promise((r) => setTimeout(r, 350));
+                    setActiveModule("finance");
+                    navigate(MODULE_DASHBOARD_ROUTES.finance);
+                    setModuleSwitching(false);
+                    setSwitchingTo(null);
+                  }}
+                  className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${
+                    activeModule === "finance" && !isAdminPage
+                      ? "bg-primary/10 text-primary"
+                      : "hover:bg-muted text-foreground"
+                  }`}
                 >
-                  {/* Finance */}
-                  <button
-                    onClick={async () => {
-                      setModuleOpen(false);
-                      if (activeModule === "finance" && !isAdminPage) return;
-                      setSwitchingTo("Finance");
-                      setModuleSwitching(true);
-                      await new Promise((r) => setTimeout(r, 350));
-                      setActiveModule("finance");
-                      navigate(MODULE_DASHBOARD_ROUTES.finance);
-                      setModuleSwitching(false);
-                      setSwitchingTo(null);
-                    }}
-                    className={`group flex flex-col items-center gap-1.5 p-2.5 rounded-xl border transition-all
-                    ${activeModule === "finance" && !isAdminPage ? "border-primary bg-primary/10 shadow-sm" : "border-border hover:border-primary/40 hover:bg-muted/60"}`}
+                  <span
+                    className={`flex items-center justify-center w-7 h-7 rounded-md transition-colors ${
+                      activeModule === "finance" && !isAdminPage
+                        ? "bg-primary/15"
+                        : "bg-muted group-hover:bg-muted-foreground/10"
+                    }`}
                   >
-                    <svg width="22" height="22" viewBox="0 0 36 36" fill="none">
-                      <circle
-                        cx="12"
-                        cy="22"
-                        r="7"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        className={
-                          activeModule === "finance" && !isAdminPage
-                            ? "text-primary"
-                            : "text-muted-foreground group-hover:text-primary"
-                        }
-                      />
-                      <circle
-                        cx="24"
-                        cy="22"
-                        r="7"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        className={
-                          activeModule === "finance" && !isAdminPage
-                            ? "text-primary/50"
-                            : "text-muted-foreground/50 group-hover:text-primary/50"
-                        }
-                      />
-                      <rect
-                        x="8"
-                        y="6"
-                        width="20"
-                        height="3"
-                        rx="1.5"
-                        fill="currentColor"
-                        className={
-                          activeModule === "finance" && !isAdminPage
-                            ? "text-primary"
-                            : "text-muted-foreground group-hover:text-primary"
-                        }
-                      />
-                    </svg>
-                    <span
-                      className={`text-xs font-heading ${activeModule === "finance" && !isAdminPage ? "text-primary font-semibold" : "text-muted-foreground group-hover:text-foreground"}`}
+                    <TrendingUp
+                      size={14}
+                      className={
+                        activeModule === "finance" && !isAdminPage
+                          ? "text-primary"
+                          : "text-muted-foreground group-hover:text-foreground"
+                      }
+                    />
+                  </span>
+                  <div className="flex-1 text-left">
+                    <p
+                      className={`text-sm font-heading font-medium leading-none ${activeModule === "finance" && !isAdminPage ? "text-primary" : "text-foreground"}`}
                     >
                       Finance
-                    </span>
-                    {activeModule === "finance" && !isAdminPage && (
-                      <span className="text-[9px] font-heading px-1.5 py-0.5 rounded-full bg-primary/15 text-primary">
-                        Active
-                      </span>
-                    )}
-                  </button>
+                    </p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      Ledger, payments & BRS
+                    </p>
+                  </div>
+                  {activeModule === "finance" && !isAdminPage && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" />
+                  )}
+                </button>
 
-                  {/* Material */}
-                  <button
-                    onClick={async () => {
-                      setModuleOpen(false);
-                      if (activeModule === "material" && !isAdminPage) return;
-                      setSwitchingTo("Material");
-                      setModuleSwitching(true);
-                      await new Promise((r) => setTimeout(r, 350));
-                      setActiveModule("material");
-                      navigate(MODULE_DASHBOARD_ROUTES.material);
-                      setModuleSwitching(false);
-                      setSwitchingTo(null);
-                    }}
-                    className={`group flex flex-col items-center gap-1.5 p-2.5 rounded-xl border transition-all
-                    ${activeModule === "material" && !isAdminPage ? "border-emerald-500/60 bg-emerald-500/10 shadow-sm" : "border-border hover:border-emerald-500/40 hover:bg-muted/60"}`}
+                {/* Material */}
+                <button
+                  onClick={async () => {
+                    setModuleOpen(false);
+                    setSwitchingTo("Material");
+                    setModuleSwitching(true);
+                    await new Promise((r) => setTimeout(r, 350));
+                    setActiveModule("material");
+                    navigate(MODULE_DASHBOARD_ROUTES.material);
+                    setModuleSwitching(false);
+                    setSwitchingTo(null);
+                  }}
+                  className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${
+                    activeModule === "material" && !isAdminPage
+                      ? "bg-emerald-500/10 text-emerald-600"
+                      : "hover:bg-muted text-foreground"
+                  }`}
+                >
+                  <span
+                    className={`flex items-center justify-center w-7 h-7 rounded-md transition-colors ${
+                      activeModule === "material" && !isAdminPage
+                        ? "bg-emerald-500/15"
+                        : "bg-muted group-hover:bg-muted-foreground/10"
+                    }`}
                   >
                     <Package
-                      size={22}
-                      className={`transition-colors ${activeModule === "material" && !isAdminPage ? "text-emerald-500" : "text-muted-foreground group-hover:text-emerald-500"}`}
+                      size={14}
+                      className={
+                        activeModule === "material" && !isAdminPage
+                          ? "text-emerald-500"
+                          : "text-muted-foreground group-hover:text-foreground"
+                      }
                     />
-                    <span
-                      className={`text-xs font-heading ${activeModule === "material" && !isAdminPage ? "text-emerald-600 font-semibold" : "text-muted-foreground group-hover:text-foreground"}`}
+                  </span>
+                  <div className="flex-1 text-left">
+                    <p
+                      className={`text-sm font-heading font-medium leading-none ${activeModule === "material" && !isAdminPage ? "text-emerald-600" : "text-foreground"}`}
                     >
                       Material
-                    </span>
-                    {activeModule === "material" && !isAdminPage && (
-                      <span className="text-[9px] font-heading px-1.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-600">
-                        Active
-                      </span>
-                    )}
-                  </button>
+                    </p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      GRN, PO & work orders
+                    </p>
+                  </div>
+                  {activeModule === "material" && !isAdminPage && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0" />
+                  )}
+                </button>
 
-                  {/* Follow-Up */}
-                  <button
-                    onClick={async () => {
-                      setModuleOpen(false);
-                      if (activeModule === "followup" && !isAdminPage) return;
-                      setSwitchingTo("Follow-Up");
-                      setModuleSwitching(true);
-                      await new Promise((res) => setTimeout(res, 350));
-                      setActiveModule("followup");
-                      navigate(MODULE_DASHBOARD_ROUTES.followup);
-                      setModuleSwitching(false);
-                      setSwitchingTo(null);
-                    }}
-                    className={`group flex flex-col items-center gap-1.5 p-2.5 rounded-xl border transition-all ${
+                {/* Follow-Up */}
+                <button
+                  onClick={async () => {
+                    setModuleOpen(false);
+                    setSwitchingTo("Follow-Up");
+                    setModuleSwitching(true);
+                    await new Promise((res) => setTimeout(res, 350));
+                    setActiveModule("followup");
+                    navigate(MODULE_DASHBOARD_ROUTES.followup);
+                    setModuleSwitching(false);
+                    setSwitchingTo(null);
+                  }}
+                  className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${
+                    activeModule === "followup" && !isAdminPage
+                      ? "bg-indigo-500/10 text-indigo-600"
+                      : "hover:bg-muted text-foreground"
+                  }`}
+                >
+                  <span
+                    className={`flex items-center justify-center w-7 h-7 rounded-md transition-colors ${
                       activeModule === "followup" && !isAdminPage
-                        ? "border-indigo-500/60 bg-indigo-500/10 shadow-sm"
-                        : "border-border hover:border-indigo-500/40 hover:bg-muted/60"
+                        ? "bg-indigo-500/15"
+                        : "bg-muted group-hover:bg-muted-foreground/10"
                     }`}
                   >
                     <Calendar
-                      size={22}
-                      className={`transition-colors ${
+                      size={14}
+                      className={
                         activeModule === "followup" && !isAdminPage
                           ? "text-indigo-500"
-                          : "text-muted-foreground group-hover:text-indigo-500"
-                      }`}
+                          : "text-muted-foreground group-hover:text-foreground"
+                      }
                     />
-                    <span
-                      className={`text-xs font-heading ${activeModule === "followup" && !isAdminPage ? "text-indigo-600 font-semibold" : "text-muted-foreground group-hover:text-foreground"}`}
+                  </span>
+                  <div className="flex-1 text-left">
+                    <p
+                      className={`text-sm font-heading font-medium leading-none ${activeModule === "followup" && !isAdminPage ? "text-indigo-600" : "text-foreground"}`}
                     >
                       Follow-Up
-                    </span>
-                    {activeModule === "followup" && !isAdminPage && (
-                      <span className="text-[9px] font-heading px-1.5 py-0.5 rounded-full bg-indigo-500/15 text-indigo-600">
-                        Active
-                      </span>
-                    )}
-                  </button>
+                    </p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5">
+                      Sales, agreements & CRM
+                    </p>
+                  </div>
+                  {activeModule === "followup" && !isAdminPage && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 flex-shrink-0" />
+                  )}
+                </button>
 
-                  {/* Admin */}
-                  {isAdmin && (
+                {/* Admin */}
+                {isAdmin && (
+                  <>
+                    <div className="mx-3 my-1.5 border-t border-border" />
                     <button
-                      onClick={() => {
+                      onClick={async () => {
                         setModuleOpen(false);
+                        setSwitchingTo("Admin");
+                        setModuleSwitching(true);
+                        await new Promise((r) => setTimeout(r, 350));
                         navigate("/admin/dashboard");
+                        setModuleSwitching(false);
+                        setSwitchingTo(null);
                       }}
-                      className={`group flex flex-col items-center gap-1.5 p-2.5 rounded-xl border transition-all
-                        ${isAdminPage ? "border-blue-500/60 bg-blue-500/10 shadow-sm" : "border-border hover:border-blue-500/40 hover:bg-muted/60"}`}
+                      className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${
+                        isAdminPage
+                          ? "bg-blue-500/10 text-blue-600"
+                          : "hover:bg-muted text-foreground"
+                      }`}
                     >
-                      <div className="relative">
+                      <span
+                        className={`flex items-center justify-center w-7 h-7 rounded-md transition-colors relative ${
+                          isAdminPage
+                            ? "bg-blue-500/15"
+                            : "bg-muted group-hover:bg-muted-foreground/10"
+                        }`}
+                      >
                         <ShieldCheck
-                          size={22}
-                          className={`transition-colors ${isAdminPage ? "text-blue-500" : "text-muted-foreground group-hover:text-blue-500"}`}
+                          size={14}
+                          className={
+                            isAdminPage
+                              ? "text-blue-500"
+                              : "text-muted-foreground group-hover:text-foreground"
+                          }
                         />
                         {isSuperAdmin && (
-                          <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center bg-violet-600">
-                            <Crown size={8} className="text-white" />
+                          <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full flex items-center justify-center bg-violet-600">
+                            <Crown size={6} className="text-white" />
                           </span>
                         )}
-                      </div>
-                      <span
-                        className={`text-xs font-heading ${isAdminPage ? "text-blue-600 font-semibold" : "text-muted-foreground group-hover:text-foreground"}`}
-                      >
-                        Admin
                       </span>
+                      <div className="flex-1 text-left">
+                        <p
+                          className={`text-sm font-heading font-medium leading-none ${isAdminPage ? "text-blue-600" : "text-foreground"}`}
+                        >
+                          Admin
+                        </p>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
+                          Users, rights & config
+                        </p>
+                      </div>
                       {isAdminPage && (
-                        <span className="text-[9px] font-heading px-1.5 py-0.5 rounded-full bg-blue-500/15 text-blue-600">
-                          Active
-                        </span>
+                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0" />
                       )}
                     </button>
-                  )}
-                </div>
-                <div className="mt-3 pt-3 border-t border-border">
-                  <p className="text-[10px] text-muted-foreground font-heading text-center">
+                  </>
+                )}
+
+                <div className="mx-3 mt-1.5 mb-1 pt-2 border-t border-border">
+                  <p className="text-[10px] text-muted-foreground font-heading">
                     {isAdminPage
                       ? "Currently in Admin"
                       : activeModule
-                        ? `Currently in ${activeModule.charAt(0).toUpperCase() + activeModule.slice(1)}`
+                        ? `Active: ${activeModule.charAt(0).toUpperCase() + activeModule.slice(1)}`
                         : "No module selected"}
                   </p>
                 </div>
@@ -1137,6 +1013,9 @@ export const TopNavbar = () => {
             <RemindersDropdown
               open={bellOpen}
               onClose={() => setBellOpen(false)}
+              reminders={reminders}
+              loading={remLoading}
+              refresh={refreshReminders}
             />
           </div>
 
@@ -1276,6 +1155,9 @@ export const TopNavbar = () => {
             <RemindersDropdown
               open={bellOpen}
               onClose={() => setBellOpen(false)}
+              reminders={reminders}
+              loading={remLoading}
+              refresh={refreshReminders}
             />
           </div>
 
