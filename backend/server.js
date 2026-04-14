@@ -216,6 +216,11 @@ async function startServer() {
       require("./routes/financeDashboard"),
     );
     app.use(
+      "/api/material-dashboard",
+      authMiddleware,
+      require("./routes/materialDashboard"),
+    );
+    app.use(
       "/api/user-activity",
       authMiddleware,
       require("./routes/userActivity"),
