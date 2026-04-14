@@ -7,6 +7,14 @@ import type {
   PageDefinition,
 } from "./types";
 
+// ======================
+// CENTRALIZED PRIVILEGED ROLES (Fix 3)
+// ======================
+export const PRIVILEGED_ROLES: UserRole[] = ["super_admin", "admin", "dba"];
+
+// ======================
+// PAGE DEFINITIONS
+// ======================
 export const PAGE_DEFINITIONS: PageDefinition[] = [
   {
     key: "dashboard",
@@ -162,8 +170,9 @@ export const DEFAULT_USER_ACCESS: PagePermission[] = [
   { page: "reports", actions: ["view"] },
 ];
 
+// Updated to use centralized PRIVILEGED_ROLES
 export const getPermissionsByRole = (role: UserRole): PagePermission[] => {
-  if (["super_admin", "admin", "dba"].includes(role)) return FULL_ACCESS;
+  if (PRIVILEGED_ROLES.includes(role)) return FULL_ACCESS;
   return DEFAULT_USER_ACCESS;
 };
 
@@ -183,8 +192,9 @@ export const ADMIN_ONLY_PAGES: PageKey[] = [
   "admin_post_approval_rights",
 ];
 
+// Updated to use centralized PRIVILEGED_ROLES
 export const isPrivilegedRole = (role: UserRole): boolean =>
-  ["super_admin", "admin", "dba"].includes(role);
+  PRIVILEGED_ROLES.includes(role);
 
 export const createPermissionCheckers = (currentUser: AppUser | null) => {
   const canAccessPage = (page: PageKey): boolean => {
