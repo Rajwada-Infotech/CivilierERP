@@ -222,6 +222,9 @@ async function startServer() {
       require("./routes/userActivity"),
     );
 
+    // Role Master API
+    app.use("/api/roles", require("./routes/roles"));
+    
     app.use("/api/tasks", authMiddleware, require("./routes/tasks"));
 
     // System metrics endpoint

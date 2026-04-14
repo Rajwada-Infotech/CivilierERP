@@ -1,10 +1,10 @@
 const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
-const allowRoles = require("../middleware/role");
+const authMiddleware = require("../middleware/auth");
 const { redisZScore, redisZIncrBy, getSystemMetrics, getPredictedRPM, getDynamicLimit } = require("../redis");
 
-const adminOnly = allowRoles("admin", "super_admin", "dba");
+const { checkPermission } = require("../middleware/permissions");
 const ALLOWED_ACTION_TYPES = new Set([
   "read",
   "create",
@@ -57,7 +57,7 @@ function mapActivityRow(row) {
 }
 
 // GET paginated activity logs
-router.get("/", adminOnly, async (req, res) => {
+router.get("/", authMiddleware, checkPermission("UserActivity", "List", "CanView"), async (req, res) => {
   let whereClause = "1 = 1";
 
   try {
@@ -218,7 +218,7 @@ router.get("/", adminOnly, async (req, res) => {
 });
 
 // SSE stream - IMPROVED FOR VERCEL
-router.get("/stream", adminOnly, async (req, res) => {
+router.get("/stream", authMiddleware, checkPermission("UserActivity", "List", "CanView"), async (req, res) => {
   // Set SSE headers with improved configuration
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache, no-transform");
@@ -307,7 +307,7 @@ router.get("/stream", adminOnly, async (req, res) => {
 });
 
 // Session timeline
-router.get("/session/:sessionId", adminOnly, async (req, res) => {
+router.get("/session/:sessionId", authMiddleware, checkPermission("UserActivity", "List", "CanView"), async (req, res) => {
   try {
     const pool = getPool();
 

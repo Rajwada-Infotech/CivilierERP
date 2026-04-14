@@ -215,6 +215,20 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
       { label: "Password Reset", path: "/admin/security/password-reset" },
     ],
   },
+  // Role Master Setup
+  {
+    label: "Setup",
+    icon: Users,
+    sections: [
+      {
+        label: "Masters",
+        icon: Package,
+        items: [
+          { label: "Role Master", path: "/masters/role-master" },
+        ],
+      },
+    ],
+  },
   {
     label: "Communicator",
     icon: MessageSquare,

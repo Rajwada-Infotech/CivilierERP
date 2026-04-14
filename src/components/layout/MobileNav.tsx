@@ -710,20 +710,26 @@ export const MobileNav: React.FC = () => {
       color: "text-lime-500",
     },
   ];
-  const adminSetupItems = [
-    {
-      icon: Tag,
-      label: "Entry Type",
-      path: "/masters/named-entry-type",
-      color: "text-purple-400",
-    },
-    {
-      icon: FileType2,
-      label: "Type of Doc",
-      path: "/masters/type-of-doc",
-      color: "text-sky-500",
-    },
-  ];
+const adminSetupItems = [
+  {
+    icon: Tag,
+    label: "Entry Type",
+    path: "/masters/named-entry-type",
+    color: "text-purple-400",
+  },
+  {
+    icon: FileType2,
+    label: "Type of Doc",
+    path: "/masters/type-of-doc",
+    color: "text-sky-500",
+  },
+  {
+    icon: Users,
+    label: "Role Master",
+    path: "/masters/role-master",
+    color: "text-blue-400",
+  },
+];
 
   const getSetupConfig = () => {
     if (isAdminPage)
