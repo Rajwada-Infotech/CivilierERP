@@ -815,7 +815,9 @@ export const TopNavbar = () => {
         {/* Logo */}
         <button
           type="button"
-          onClick={() => navigate("/")}
+          onClick={() =>
+            navigate(activeModule ? MODULE_DASHBOARD_ROUTES[activeModule] : "/")
+          }
           title="Go to dashboard"
           aria-label="Go to dashboard"
           className="flex items-center gap-2 hover:opacity-80 transition-opacity shrink-0"

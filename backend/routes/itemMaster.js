@@ -20,13 +20,9 @@ router.get("/", cache("item-master", 300), async (req, res) => {
     `);
     const hasUOM = colCheck.recordset[0].cnt > 0;
 
-    // Optional ?identityCode=1 filter — used by GRN/PO pickers to show only purchasable items
-    const { identityCode } = req.query;
-    const identityFilter =
-      identityCode !== undefined
-        ? `AND item.M_IdentityCode = ${identityCode === "1" ? 1 : 0}`
-        : "";
-
+    // Include a row if it has a parent group (proper item) OR is flagged as
+    // an item via M_IdentityCode=1 (covers items saved without a Parent_Id).
+    // Pure group-header rows (Parent_Id IS NULL AND M_IdentityCode=0) are excluded.
     const result = await pool.request().query(`
       SELECT
         item.M_Id,
@@ -49,7 +45,7 @@ router.get("/", cache("item-master", 300), async (req, res) => {
       FROM dbo.Item_Master_Group item
       LEFT JOIN dbo.Item_Master_Group grp ON grp.M_Id = item.Parent_Id
       WHERE item.Parent_Id IS NOT NULL
-        ${identityFilter}
+         OR item.M_IdentityCode = 1
       ORDER BY grp.M_Name, item.M_Name
     `);
     res.json(result.recordset);

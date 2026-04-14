@@ -394,6 +394,11 @@ export const MobileNav: React.FC = () => {
       case "material":
         return [
           {
+            label: "Amendments",
+            icon: BarChart3,
+            path: "/material/amendments",
+          },
+          {
             label: "Transaction",
             icon: Receipt,
             children: [
