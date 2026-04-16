@@ -3,9 +3,11 @@ const express = require("express");
 const helmet = require("helmet");
 const morgan = require("morgan");
 const cors = require("cors");
+const compression = require("compression");
 const { connectDB } = require("./db");
 const authMiddleware = require("./middleware/auth");
 const rateLimit = require("express-rate-limit");
+const logger = require("./logger");
 const { ipKeyGenerator } = require("express-rate-limit");
 const {
   getRedis,
@@ -86,7 +88,7 @@ async function startServer() {
     app.use(express.json());
     app.use(express.urlencoded({ extended: true }));
     app.use(helmet());
-    app.use(morgan("dev"));
+    app.use(morgan("tiny"));
 
     // Track global metrics on every request
     app.use(async (req, res, next) => {
@@ -100,17 +102,43 @@ async function startServer() {
     app.use(
       cors({
         origin: (origin, cb) => {
-          console.log(`CORS request from origin: ${origin || "undefined"}`);
+          if (process.env.NODE_ENV === "development" && origin) {
+            console.log("CORS:", origin);
+          }
+
           if (!origin || ALLOWED_ORIGINS.includes(origin)) {
             cb(null, true);
           } else {
-            console.log(`CORS rejected origin: ${origin}`);
-            cb(null, false);
+            if (process.env.NODE_ENV === "development") {
+              console.log(`CORS rejected: ${origin}`);
+            }
+            cb(new Error("Not allowed by CORS"));
           }
         },
         credentials: true,
       }),
+
     );
+
+
+app.use(compression());
+
+app.use((req, res, next) => {
+        const start = Date.now();
+        
+
+      res.on("finish", () => {
+        const duration = Date.now() - start;
+        logger.info({
+          method: req.method,
+          url: req.originalUrl,
+          status: res.statusCode,
+          time: `${duration}ms`,
+        });
+      });
+
+      next();
+    });
 
     app.get("/", (req, res) => res.send("CivilierERP API running"));
 
@@ -227,6 +255,17 @@ async function startServer() {
     
     app.use("/api/tasks", authMiddleware, require("./routes/tasks"));
 
+    app.use((err, req, res, next) => {
+      logger.error({
+        message: err.message,
+        stack: err.stack,
+      });
+
+      res.status(500).json({
+        error: "Internal Server Error",
+      });
+    });
+
     // System metrics endpoint
     app.get("/api/system/metrics", authMiddleware, async (req, res) => {
       const metrics = await getSystemMetrics();
@@ -253,7 +292,7 @@ async function startServer() {
     });
 
     const PORT = process.env.PORT || 5000;
-    app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+    app.listen(PORT, () => logger.info(`Server running on port ${PORT}`));
 
     return app;
   } catch (err) {

@@ -1,5 +1,7 @@
+const logger = require("./logger");
 const Redis = require("ioredis");
 const LZString = require("lz-string");
+
 
 let cachedMetrics = {
   rpm: 0,
@@ -25,7 +27,7 @@ function getRedis() {
       // lazyConnect: false (default) — connects immediately, no manual .connect() needed
     });
 
-    client.on("connect", () => console.log("Redis connected"));
+    client.on("connect", () => logger.info("Redis connected"));
     client.on("error", (err) => console.error("Redis error:", err.message));
     client.on("close", () => console.warn("Redis connection closed"));
   }
