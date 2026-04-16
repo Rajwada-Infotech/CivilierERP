@@ -6,8 +6,9 @@
  *   app.use("/api/tasks", authMiddleware, require("./routes/tasks"));
  */
 
-const { redisGet, redisSet, redisDel } = require("../redis");
 const express = require("express");
+const logger = require("../logger");
+const { redisGet, redisSet, redisDel } = require("../redis");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");

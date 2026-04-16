@@ -670,7 +670,14 @@ function AppRoutes() {
       />
 
       {/* ADMIN — bare /admin redirects to home */}
-      <Route path="/admin" element={<Navigate to="/" replace />} />
+<Route
+        path="/admin"
+        element={
+          <AdminRoute>
+            <AdminDashboard />
+          </AdminRoute>
+        }
+      />
       <Route
         path="/admin/dashboard"
         element={
