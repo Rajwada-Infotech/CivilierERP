@@ -99,26 +99,27 @@ async function startServer() {
       next();
     });
 
-    app.use(
-      cors({
-        origin: (origin, cb) => {
-          if (process.env.NODE_ENV === "development" && origin) {
-            console.log("CORS:", origin);
-          }
+const corsOptions = {
+  origin: (origin, cb) => {
+    if (process.env.NODE_ENV === "development" && origin) {
+      console.log("CORS:", origin);
+    }
 
-          if (!origin || ALLOWED_ORIGINS.includes(origin)) {
-            cb(null, true);
-          } else {
-            if (process.env.NODE_ENV === "development") {
-              console.log(`CORS rejected: ${origin}`);
-            }
-            cb(new Error("Not allowed by CORS"));
-          }
-        },
-        credentials: true,
-      }),
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+      cb(null, true);
+    } else {
+      if (process.env.NODE_ENV === "development") {
+        console.log(`CORS rejected: ${origin}`);
+      }
+      cb(new Error("Not allowed by CORS"));
+    }
+  },
+  credentials: true,
+  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+};
 
-    );
+app.use(cors(corsOptions));
 
 
 app.use(compression());

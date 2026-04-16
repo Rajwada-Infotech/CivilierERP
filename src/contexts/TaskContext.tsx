@@ -112,7 +112,10 @@ export const TaskProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   useEffect(() => {
-    refetch();
+    const token = localStorage.getItem("token");
+    if (token) {
+      refetch();
+    }
   }, [refetch]);
 
   // ── Add task ─────────────────────────────────────────────────────────────

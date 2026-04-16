@@ -7,7 +7,8 @@ import React, {
   useMemo,
 } from "react";
 
-import { loginUser, getUsers } from "../api/userApi";
+import { loginUser } from "../api/auth";
+import { getUsers } from "../api/userApi";
 
 import type {
   UserRole,
@@ -91,7 +92,7 @@ export const AuthProvider = ({
 
   const [users, setUsers] = useState<AppUser[]>([]);
 
-  // FIX: actually fetch users from the backend instead of setUsers([])
+  // Fetch users from backend after login
   useEffect(() => {
     if (!currentUser) return;
 
@@ -106,7 +107,7 @@ export const AuthProvider = ({
           email: u.email,
           role: u.role as UserRole,
           initials: AuthUtils.getInitials(u.name),
-          // FIX: use persisted permissions from DB, fall back to role defaults
+          // use persisted permissions from DB, fall back to role defaults
           pagePermissions:
             Array.isArray(u.pagePermissions) && u.pagePermissions.length > 0
               ? u.pagePermissions
@@ -126,53 +127,19 @@ export const AuthProvider = ({
       try {
         const data = await loginUser(email, password);
 
-        if (!data.success) {
-          return { success: false, error: "Invalid credentials" };
-        }
+        localStorage.setItem("token", data.token);
 
-        const { token, user } = data;
+        setCurrentUser(data.user);
 
-        localStorage.setItem("token", token);
-
-        const appUser: AppUser = {
-          id: String(user.id),
-          name: user.name,
-          email: user.email,
-          role: (user.roleName || user.role || user.Role || user.role_id || 'user')?.toString().trim().toLowerCase() || 'user',
-          initials: AuthUtils.getInitials(user.name),
-          // FIX: use pagePermissions from login response (now sent by backend)
-          pagePermissions:
-            Array.isArray(user.pagePermissions) &&
-            user.pagePermissions.length > 0
-              ? user.pagePermissions
-              : AuthUtils.getPermissionsByRole(user.role as UserRole),
-          isActive: !user.discontinue,
+        return { success: true, role: data.user.role };
+      } catch (err: any) {
+        return {
+          success: false,
+          error: err.response?.data?.message || "Login failed",
         };
-        console.log('🔍 AUTH DEBUG - Backend role:', user.roleName || user.role, '→ Frontend role:', appUser.role);
-
-        localStorage.setItem("user", JSON.stringify(appUser));
-        setCurrentUser(appUser);
-
-        try {
-          await recordLogin?.({
-            id: appUser.id,
-            name: appUser.name,
-            email: appUser.email,
-            role: appUser.role,
-          });
-        } catch (err) {
-          console.warn("Login tracking failed:", err);
-        }
-
-        onLoginSuccess?.(appUser);
-        return { success: true, role: appUser.role };
-      } catch (err: unknown) {
-        const errorMessage =
-          err instanceof Error ? err.message : "Login failed";
-        return { success: false, error: errorMessage };
       }
     },
-    [onLoginSuccess, recordLogin],
+    [],
   );
 
   // ── LOGOUT ─────────────────────────────────────────────────────────────────
@@ -225,8 +192,7 @@ export const AuthProvider = ({
     );
   }, []);
 
-  // FIX: now async — calls PATCH /api/users/:id/permissions to persist to DB
-  // then updates local state so the UI reflects immediately without a refetch
+  // Update user page permissions - persist to DB then local state
   const updateUserPagePermissions = useCallback(
     async (userId: string, permissions: PagePermission[]) => {
       const token = localStorage.getItem("token");
@@ -247,18 +213,17 @@ export const AuthProvider = ({
         }
       } catch (err) {
         console.error("updateUserPagePermissions:", err);
-        throw err; // re-throw so the calling component can show a toast.error
+        throw err;
       }
 
-      // Update local state optimistically (after confirmed server success)
+      // Update local state
       setUsers((prev) =>
         prev.map((user) =>
           user.id === userId ? { ...user, pagePermissions: permissions } : user,
         ),
       );
 
-      // If the currently logged-in user's own permissions were changed,
-      // update their session too
+      // Update current session if self
       if (currentUser?.id === userId) {
         const updatedUser = { ...currentUser, pagePermissions: permissions };
         setCurrentUser(updatedUser);
