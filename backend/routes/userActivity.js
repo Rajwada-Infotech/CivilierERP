@@ -203,12 +203,9 @@ router.get("/", authMiddleware, checkPermission("UserActivity", "List", "CanView
       pages: Math.ceil(total / limit),
     });
   } catch (err) {
-    console.error("UserActivity GET / error details:", {
-      message: err.message,
-      stack: err.stack,
-      query: req.query,
-      whereClause,
-    });
+    if (process.env.NODE_ENV === "development") {
+      console.error("UserActivity error:", err.message);
+    }
     res.status(500).json({
       error: "Failed to fetch activity logs",
       details:
@@ -257,7 +254,9 @@ router.get("/stream", authMiddleware, checkPermission("UserActivity", "List", "C
         );
       }
     } catch (err) {
-      console.error("SSE data error:", err);
+      if (process.env.NODE_ENV === "development") {
+        console.error("SSE data error:", err.message);
+      }
     }
   };
 
@@ -271,7 +270,9 @@ router.get("/stream", authMiddleware, checkPermission("UserActivity", "List", "C
   try {
     await sendLatest();
   } catch (err) {
-    console.error("SSE initial send error:", err);
+    if (process.env.NODE_ENV === "development") {
+      console.error("SSE initial send error:", err.message);
+    }
   }
 
   // More frequent pings to keep connection alive (every 15s)
@@ -289,19 +290,27 @@ router.get("/stream", authMiddleware, checkPermission("UserActivity", "List", "C
 
   // Handle client disconnect
   req.on("close", () => {
-    console.log("SSE client disconnected");
+    // Silenced normal SSE disconnect
     cleanup();
   });
 
   // Handle errors
   req.on("error", (err) => {
-    console.error("SSE request error:", err);
+    if (err.code !== "ECONNRESET") {
+      if (process.env.NODE_ENV === "development") {
+        console.error("SSE request error:", err.message);
+      }
+    }
     cleanup();
   });
 
   // Handle response errors
   res.on("error", (err) => {
-    console.error("SSE response error:", err);
+    if (err.code !== "ECONNRESET") {
+      if (process.env.NODE_ENV === "development") {
+        console.error("SSE response error:", err.message);
+      }
+    }
     cleanup();
   });
 });
@@ -320,7 +329,9 @@ router.get("/session/:sessionId", authMiddleware, checkPermission("UserActivity"
 
     res.json(result.recordset.map(mapActivityRow));
   } catch (err) {
-    console.error("Session error:", err);
+    if (process.env.NODE_ENV === "development") {
+      console.error("Session error:", err.message);
+    }
     res.status(500).json({ error: "Failed to fetch session activity" });
   }
 });
@@ -449,12 +460,9 @@ router.post("/", async (req, res) => {
     const insertedId = insertResult.recordset?.[0]?.Id ?? null;
     res.json({ message: "Activity logged", id: insertedId });
   } catch (err) {
-    console.error("POST error:", {
-      message: err.message,
-      stack: err.stack,
-      body: req.body,
-      user: req.user,
-    });
+    if (process.env.NODE_ENV === "development") {
+      console.error("POST activity error:", err.message);
+    }
     res.status(500).json({
       error: "Failed to log activity",
       details:
