@@ -316,9 +316,9 @@ export const MobileNav: React.FC = () => {
     location.pathname.startsWith("/users") ||
     location.pathname.startsWith("/dba");
 
-  const isSuperAdmin = currentUser?.role === "super_admin";
-  const isDba = currentUser?.role === "dba";
-  const isAdmin = currentUser?.role === "admin" || isSuperAdmin || isDba;
+const isSuperAdmin = currentUser?.role?.toLowerCase() === "super_admin";
+const isDba = currentUser?.role?.toLowerCase() === "dba";
+const isAdmin = currentUser?.role?.toLowerCase() === "admin" || isSuperAdmin || isDba;
 
   // Admin Navigation Items
   const ADMIN_NAV_ITEMS: NavItem[] = [
@@ -939,7 +939,7 @@ const adminSetupItems = [
                         setOpen(false);
                       },
                     },
-                    ...(isAdmin
+                    ...(true
                       ? [
                           {
                             label: "Admin",
@@ -957,6 +957,7 @@ const adminSetupItems = [
                         ]
                       : []),
                   ].map((btn) => {
+console.log('🔍 MOBILE DEBUG - ROLE:', currentUser?.role, 'ISADMIN:', isAdmin);
                     const Icon = btn.icon;
                     return (
                       <button

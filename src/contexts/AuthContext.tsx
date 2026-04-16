@@ -138,7 +138,7 @@ export const AuthProvider = ({
           id: String(user.id),
           name: user.name,
           email: user.email,
-          role: user.role as UserRole,
+          role: (user.roleName || user.role || user.Role || user.role_id || 'user')?.toString().trim().toLowerCase() || 'user',
           initials: AuthUtils.getInitials(user.name),
           // FIX: use pagePermissions from login response (now sent by backend)
           pagePermissions:
@@ -148,6 +148,7 @@ export const AuthProvider = ({
               : AuthUtils.getPermissionsByRole(user.role as UserRole),
           isActive: !user.discontinue,
         };
+        console.log('🔍 AUTH DEBUG - Backend role:', user.roleName || user.role, '→ Frontend role:', appUser.role);
 
         localStorage.setItem("user", JSON.stringify(appUser));
         setCurrentUser(appUser);

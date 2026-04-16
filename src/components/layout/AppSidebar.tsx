@@ -493,6 +493,8 @@ export const AppSidebar = () => {
 
   const getModuleNavItems = (): NavItem[] => {
     switch (activeModule) {
+      case "admin":
+        return ADMIN_NAV_ITEMS;
       case "material":
         return buildMaterialNavItems();
       case "finance":
@@ -514,6 +516,7 @@ export const AppSidebar = () => {
 
   const itemsToRender = getNavItems();
 
+  const isAdminModule = activeModule === "admin";
   const isFinance =
     !isAdminPage &&
     !isSuperAdminPage &&
@@ -534,7 +537,7 @@ export const AppSidebar = () => {
     if (isSuperAdmin) return "Super Admin";
     if (isDba) return "DBA";
     if (isUserProfilePage) return "User";
-    if (isAdmin) return "Admin";
+    if (isAdminModule || isAdmin) return "Admin";
     if (isFinance) return "Finance";
     if (isMaterial) return "Material";
     if (activeModule === "followup") return "Follow-Up";
@@ -548,7 +551,7 @@ export const AppSidebar = () => {
       return "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
     if (isUserProfilePage)
       return "bg-gray-500/10 text-gray-500 border-gray-500/20";
-    if (isAdmin) return "bg-blue-500/10 text-blue-500 border-blue-500/20";
+    if (isAdminModule || isAdmin) return "bg-blue-500/10 text-blue-500 border-blue-500/20";
     if (isFinance) return "bg-primary/10 text-primary border-primary/20";
     if (isMaterial)
       return "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
@@ -560,7 +563,7 @@ export const AppSidebar = () => {
   const getDotColor = () => {
     if (isSuperAdmin) return "bg-yellow-500";
     if (isDba) return "bg-emerald-500";
-    if (isAdmin) return "bg-blue-500";
+    if (isAdminModule || isAdmin) return "bg-blue-500";
     if (isFinance) return "bg-primary";
     if (isMaterial) return "bg-emerald-500";
     return "bg-muted-foreground/40";
@@ -570,7 +573,7 @@ export const AppSidebar = () => {
     if (isSuperAdmin) return Crown;
     if (isDba) return Database;
     if (isUserProfilePage) return User;
-    if (isAdmin) return ShieldCheck;
+    if (isAdminModule || isAdmin) return ShieldCheck;
     if (isFinance) return Landmark;
     if (isMaterial) return Package;
     if (activeModule === "followup") return Calendar;
@@ -640,3 +643,4 @@ export const AppSidebar = () => {
     </aside>
   );
 };
+
