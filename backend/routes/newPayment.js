@@ -2,6 +2,7 @@ const express = require("express")
 const router = express.Router()
 const { getPool, sql } = require("../db")
 const { cache } = require("../middleware/cache")
+const { bumpCacheVersion } = require("../redis")
 
 // GET all
 router.get("/", cache("new-payment", 300), async (req, res) => {
@@ -67,6 +68,7 @@ router.post("/", async (req, res) => {
           @PCreatedAt, @PCreatedBy, @PApprovedBy
         )
       `)
+    await bumpCacheVersion("new-payment")
     res.json({ message: "Payment added successfully" })
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -101,6 +103,7 @@ router.put("/:id", async (req, res) => {
           PProject=@PProject, PCompany=@PCompany
         WHERE PPaymentID=@PPaymentID
       `)
+    await bumpCacheVersion("new-payment")
     res.json({ message: "Payment updated successfully" })
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -115,6 +118,7 @@ router.delete("/:id", async (req, res) => {
     await pool.request()
       .input("PPaymentID", sql.Int, id)
       .query("DELETE FROM dbo.NewPayment WHERE PPaymentID=@PPaymentID")
+    await bumpCacheVersion("new-payment")
     res.json({ message: "Payment deleted successfully" })
   } catch (err) {
     res.status(500).json({ error: err.message })

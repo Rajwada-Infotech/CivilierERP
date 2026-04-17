@@ -74,6 +74,10 @@ interface MasterPageProps {
     updateForm: (patch: Record<string, unknown>) => void,
     allRecords: Record<string, unknown>[],
   ) => void;
+  onFieldChange?: (
+    form: Record<string, unknown>,
+    fieldName: string,
+  ) => Record<string, unknown>;
   onCustomSave?: (
     formData: Record<string, unknown>,
     isEdit: boolean,
@@ -108,6 +112,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   onDataChange,
   onDataEvent,
   onFormChange,
+  onFieldChange,
   onCustomSave,
 }) => {
   const [data, setData] = useState<RecordWithId[]>(() =>
@@ -155,7 +160,9 @@ export const MasterPage: React.FC<MasterPageProps> = ({
     let v = value;
     if (field.uppercase && typeof v === "string") v = v.toUpperCase();
     setForm((prev) => {
-      const next = { ...prev, [name]: v };
+      const next = onFieldChange
+        ? onFieldChange({ ...prev, [name]: v }, name)
+        : { ...prev, [name]: v };
       applyPatch(next, data);
       return next;
     });
