@@ -263,8 +263,7 @@ async function decayEngagement() {
   try {
     const redis = getRedis();
     await redis.eval(`
-      local members = redis.call('Z RANGE', 'engagement:score', 0, -1, 'WITHSCORES')
-      for i = 1, #members, 2 do
+      local members = redis.call('ZRANGE', 'engagement:score', 0, -1, 'WITHSCORES')\n      for i = 1, #members, 2 do
         local score = tonumber(members[i+1])
         if score then
           redis.call('ZADD', 'engagement:score', score * 0.99, members[i])

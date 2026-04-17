@@ -1,6 +1,9 @@
 require("dotenv").config();
+const isDev = process.env.NODE_ENV === "development";
+
 const express = require("express");
 const helmet = require("helmet");
+
 const morgan = require("morgan");
 const cors = require("cors");
 const compression = require("compression");
@@ -76,7 +79,7 @@ async function startServer() {
           metrics.memoryUsage,
         );
       },
-      store: makeStore(`rl:api:${Math.floor(Date.now() / 60000)}:`),
+      store: makeStore("rl:api:"),
       skip: (req) => req.path.startsWith("/api/user-activity"),
       keyGenerator: (req) => `${req.user?.userId || ipKeyGenerator(req)}`,
     });
@@ -99,35 +102,30 @@ async function startServer() {
       next();
     });
 
-const corsOptions = {
-  origin: (origin, cb) => {
-    if (process.env.NODE_ENV === "development" && origin) {
-      console.log("CORS:", origin);
-    }
+    const corsOptions = {
+      origin: (origin, cb) => {
+        if (process.env.NODE_ENV === "development" && origin) {
+          console.log("CORS:", origin);
+        }
+        if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+          cb(null, true);
+        } else {
+          if (process.env.NODE_ENV === "development") {
+            console.log(`CORS rejected: ${origin}`);
+          }
+          cb(new Error("Not allowed by CORS"));
+        }
+      },
+      credentials: true,
+      methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+      allowedHeaders: ["Content-Type", "Authorization"],
+    };
 
-    if (!origin || ALLOWED_ORIGINS.includes(origin)) {
-      cb(null, true);
-    } else {
-      if (process.env.NODE_ENV === "development") {
-        console.log(`CORS rejected: ${origin}`);
-      }
-      cb(new Error("Not allowed by CORS"));
-    }
-  },
-  credentials: true,
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-};
+    app.use(cors(corsOptions));
+    app.use(compression());
 
-app.use(cors(corsOptions));
-
-
-app.use(compression());
-
-app.use((req, res, next) => {
-        const start = Date.now();
-        
-
+    app.use((req, res, next) => {
+      const start = Date.now();
       res.on("finish", () => {
         const duration = Date.now() - start;
         logger.info({
@@ -137,24 +135,25 @@ app.use((req, res, next) => {
           time: `${duration}ms`,
         });
       });
-
       next();
     });
 
+    // Health check — must be before auth middleware
     app.get("/", (req, res) => res.send("CivilierERP API running"));
+    app.get("/health", (req, res) => res.json({ status: "ok" }));
 
     // Rate limiters
     app.use("/api/users/login", loginLimiter);
     app.use("/api", apiLimiter);
 
-    // Public routes
+    // Public routes (no auth)
     app.use("/api/users", require("./routes/users"));
 
     // Protected routes
     const allowRoles = require("./middleware/role");
 
-    // Track active users after auth
-    app.use(authMiddleware, async (req, res, next) => {
+    // Track active users after auth (scoped to /api only)
+    app.use("/api", authMiddleware, async (req, res, next) => {
       if (req.user?.userId) {
         try {
           await pfaddActiveUser(req.user.userId);
@@ -162,110 +161,65 @@ app.use((req, res, next) => {
       }
       next();
     });
-    app.use("/api/user-rights", authMiddleware, require("./routes/userRights"));
-    app.use(
-      "/api/account-group",
-      authMiddleware,
-      require("./routes/accountGroup"),
-    );
-    app.use(
-      "/api/account-head",
-      authMiddleware,
-      require("./routes/accountHeadMaster"),
-    );
-    app.use(
-      "/api/activity-master",
-      authMiddleware,
-      require("./routes/activityMaster"),
-    );
-    app.use("/api/bank-master", authMiddleware, require("./routes/bankMaster"));
-    app.use(
-      "/api/billing-terms",
-      authMiddleware,
-      require("./routes/billingTerms"),
-    );
-    app.use("/api/card-master", authMiddleware, require("./routes/cardMaster"));
-    app.use(
-      "/api/cheque-master",
-      authMiddleware,
-      require("./routes/chequeMaster"),
-    );
-    app.use(
-      "/api/document-type",
-      authMiddleware,
-      require("./routes/documentType"),
-    );
-    app.use("/api/fin-year", authMiddleware, require("./routes/finYear"));
-    app.use(
-      "/api/general-ledger",
-      authMiddleware,
-      require("./routes/generalLedger"),
-    );
-    app.use("/api/hsn", authMiddleware, require("./routes/hsn"));
-    app.use("/api/item-groups", authMiddleware, require("./routes/itemGroup"));
-    app.use("/api/item-master", authMiddleware, require("./routes/itemMaster"));
-    app.use("/api/tds-master", authMiddleware, require("./routes/tdsMaster"));
-    app.use("/api/enterprises", authMiddleware, require("./routes/enterprise"));
-    app.use("/api/entry-type", authMiddleware, require("./routes/entryType"));
-    app.use(
-      "/api/expense-booking",
-      authMiddleware,
-      require("./routes/expenseBooking"),
-    );
-    app.use("/api/new-payment", authMiddleware, require("./routes/newPayment"));
-    app.use(
-      "/api/purchase-orders",
-      authMiddleware,
-      require("./routes/purchaseOrders"),
-    );
-    app.use("/api/tenants", authMiddleware, require("./routes/tenants"));
-    app.use(
-      "/api/dba",
-      authMiddleware,
-      allowRoles("dba", "admin"),
-      require("./routes/dba"),
-    );
-    app.use("/api/work-orders", authMiddleware, require("./routes/workOrder"));
-    app.use(
-      "/api/user-profile",
-      authMiddleware,
-      require("./routes/userProfile"),
-    );
-    app.use("/api/uom-master", authMiddleware, require("./routes/uomMaster"));
-    app.use("/api/debit-note", authMiddleware, require("./routes/debitNote"));
-    app.use("/api/tc-master", authMiddleware, require("./routes/tcMaster"));
-    app.use("/api/grns", authMiddleware, require("./routes/grns"));
-    app.use(
-      "/api/finance-dashboard",
-      authMiddleware,
-      require("./routes/financeDashboard"),
-    );
-    app.use(
-      "/api/material-dashboard",
-      authMiddleware,
-      require("./routes/materialDashboard"),
-    );
-    app.use(
-      "/api/user-activity",
-      authMiddleware,
-      require("./routes/userActivity"),
-    );
 
-    // Role Master API
-    app.use("/api/roles", require("./routes/roles"));
-    
-    app.use("/api/tasks", authMiddleware, require("./routes/tasks"));
+    // Route definitions
+    const routes = [
+      { path: "/api/user-rights",        file: "./routes/userRights" },
+      { path: "/api/account-group",      file: "./routes/accountGroup" },
+      { path: "/api/account-head",       file: "./routes/accountHeadMaster" },
+      { path: "/api/activity-master",    file: "./routes/activityMaster" },
+      { path: "/api/bank-master",        file: "./routes/bankMaster" },
+      { path: "/api/billing-terms",      file: "./routes/billingTerms" },
+      { path: "/api/card-master",        file: "./routes/cardMaster" },
+      { path: "/api/cheque-master",      file: "./routes/chequeMaster" },
+      { path: "/api/document-type",      file: "./routes/documentType" },
+      { path: "/api/fin-year",           file: "./routes/finYear" },
+      { path: "/api/general-ledger",     file: "./routes/generalLedger" },
+      { path: "/api/hsn",                file: "./routes/hsn" },
+      { path: "/api/item-groups",        file: "./routes/itemGroup" },
+      { path: "/api/item-master",        file: "./routes/itemMaster" },
+      { path: "/api/tds-master",         file: "./routes/tdsMaster" },
+      { path: "/api/enterprises",        file: "./routes/enterprise" },
+      { path: "/api/entry-type",         file: "./routes/entryType" },
+      { path: "/api/expense-booking",    file: "./routes/expenseBooking" },
+      { path: "/api/new-payment",        file: "./routes/newPayment" },
+      { path: "/api/purchase-orders",    file: "./routes/purchaseOrders" },
+      { path: "/api/tenants",            file: "./routes/tenants" },
+      { path: "/api/work-orders",        file: "./routes/workOrder" },
+      { path: "/api/user-profile",       file: "./routes/userProfile" },
+      { path: "/api/uom-master",         file: "./routes/uomMaster" },
+      { path: "/api/debit-note",         file: "./routes/debitNote" },
+      { path: "/api/tc-master",          file: "./routes/tcMaster" },
+      { path: "/api/grns",               file: "./routes/grns" },
+      { path: "/api/stock-ledger",       file: "./routes/stockLedger" },
+      { path: "/api/brs",                file: "./routes/brs" },
+      { path: "/api/finance-dashboard",  file: "./routes/financeDashboard" },
+      { path: "/api/material-dashboard", file: "./routes/materialDashboard" },
+      { path: "/api/user-activity",      file: "./routes/userActivity" },
+      { path: "/api/roles",              file: "./routes/roles" },
+      { path: "/api/business-units",     file: "./routes/businessUnit" },
+      { path: "/api/tasks",              file: "./routes/tasks" },
+    ];
 
-    app.use((err, req, res, next) => {
-      logger.error({
-        message: err.message,
-        stack: err.stack,
-      });
+    for (const { path, file } of routes) {
+      const label = path.replace("/api/", "");
+      if (isDev) console.log(`Loading route: ${label}`);
+      try {
+        app.use(path, authMiddleware, require(file));
+      } catch (err) {
+        console.error(`❌ Failed loading route: ${label} — ${err.message}`);
+        throw err;
+      }
+    }
 
-      res.status(500).json({
-        error: "Internal Server Error",
-      });
-    });
+    // DBA route with role restriction
+    if (isDev) console.log("Loading route: dba");
+    try {
+      app.use("/api/dba", authMiddleware, allowRoles("dba", "admin"), require("./routes/dba"));
+    } catch (err) {
+      console.error(`❌ Failed loading route: dba — ${err.message}`);
+      throw err;
+    }
 
     // System metrics endpoint
     app.get("/api/system/metrics", authMiddleware, async (req, res) => {
@@ -290,6 +244,15 @@ app.use((req, res, next) => {
       }
 
       res.json(metrics);
+    });
+
+    // Global error handler
+    app.use((err, req, res, next) => {
+      logger.error({
+        message: err.message,
+        stack: err.stack,
+      });
+      res.status(500).json({ error: "Internal Server Error" });
     });
 
     const PORT = process.env.PORT || 5000;

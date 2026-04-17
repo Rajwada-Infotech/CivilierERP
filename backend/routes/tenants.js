@@ -1,9 +1,10 @@
 const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
+const { cache } = require("../middleware/cache");
 
 // GET all tenants
-router.get("/", async (req, res) => {
+router.get("/", cache("tenants", 300), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool

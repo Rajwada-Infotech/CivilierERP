@@ -1,6 +1,6 @@
 const express = require("express")
 const { cache } = require("../middleware/cache");
-const { redisDelPattern } = require("../redis");
+const { redisDelPattern, bumpCacheVersion } = require("../redis");
 const router = express.Router()
 const { getPool, sql } = require("../db")
 
@@ -28,7 +28,7 @@ router.post("/", async (req, res) => {
         INSERT INTO dbo.Billing_Terms_Master (Name, Description, GST, Type, IsActive, CreatedBy, CreatedDate)
         VALUES (@Name, @Description, @GST, @Type, @IsActive, @CreatedBy, @CreatedDate)
       `)
-    await redisDelPattern("cache:billing-terms:*");
+    await bumpCacheVersion("billing-terms");
 
     res.json({ message: "Billing term added" })
   } catch (err) { res.status(500).json({ error: err.message }) }
@@ -53,7 +53,7 @@ router.put("/:id", async (req, res) => {
           IsActive=@IsActive, ModifiedBy=@ModifiedBy, ModifiedDate=@ModifiedDate
         WHERE BillingTermID=@BillingTermID
       `)
-    await redisDelPattern("cache:billing-terms:*");
+    await bumpCacheVersion("billing-terms");
 
     res.json({ message: "Billing term updated" })
   } catch (err) { res.status(500).json({ error: err.message }) }
@@ -65,7 +65,7 @@ router.delete("/:id", async (req, res) => {
     await pool.request()
       .input("BillingTermID", sql.Int, req.params.id)
       .query("DELETE FROM dbo.Billing_Terms_Master WHERE BillingTermID=@BillingTermID")
-    await redisDelPattern("cache:billing-terms:*");
+    await bumpCacheVersion("billing-terms");
 
     res.json({ message: "Billing term deleted" })
   } catch (err) { res.status(500).json({ error: err.message }) }

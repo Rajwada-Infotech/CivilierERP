@@ -1,8 +1,9 @@
 const express = require("express")
 const router = express.Router()
 const { getPool, sql } = require("../db")
+const { cache } = require("../middleware/cache")
 
-router.get("/", async (req, res) => {
+router.get("/", cache("card-master", 300), async (req, res) => {
   try {
     const pool = getPool()
     const result = await pool.request().query("SELECT * FROM dbo.card_master")
