@@ -51,6 +51,7 @@ import {
   CheckSquare,
 } from "lucide-react";
 import { BillingIcon } from "@/components/icons/BillingIcon";
+import { ADMIN_PATHS } from "@/constants/pageDefinitions";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 // ReminderItem is imported from @/hooks/useReminders
@@ -537,7 +538,6 @@ export const TopNavbar = () => {
   const [themeOpen, setThemeOpen] = useState(false);
   const [bellOpen, setBellOpen] = useState(false);
 
-  // Single useReminders instance — shared between badge, dropdown, and refresh button
   const {
     reminders,
     loading: remLoading,
@@ -546,24 +546,10 @@ export const TopNavbar = () => {
     fetched: remFetched,
   } = useReminders();
 
-  // Fetch once when bell is first opened (already fetching on mount via polling, but
-  // if the user opens before the first poll completes we trigger it explicitly)
   useEffect(() => {
     if (bellOpen && !remFetched) refreshReminders();
   }, [bellOpen, remFetched, refreshReminders]);
 
-  const ADMIN_PATHS = ["/masters/named-entry-type", "/masters/type-of-doc"];
-<<<<<<< HEAD
-  const isAdminPage =
-    location.pathname.startsWith("/admin") ||
-    location.pathname.startsWith("/users") ||
-    ADMIN_PATHS.some((p) => location.pathname.startsWith(p));
-const isSuperAdmin = currentUser?.role?.toLowerCase() === "super_admin";
-const isDba = currentUser?.role?.toLowerCase() === "dba";
-const isAdmin = currentUser?.role?.toLowerCase() === "admin" || isSuperAdmin || isDba;
-
-console.log('🔍 DEBUG - ROLE:', currentUser?.role, 'ISADMIN:', isAdmin);
-=======
   const isSuperAdmin = currentUser?.role === "super_admin";
   const isDba = currentUser?.role === "dba";
   const isAdmin = currentUser?.role === "admin" || isSuperAdmin || isDba;
@@ -572,7 +558,6 @@ console.log('🔍 DEBUG - ROLE:', currentUser?.role, 'ISADMIN:', isAdmin);
     (location.pathname.startsWith("/admin") ||
       location.pathname.startsWith("/users") ||
       ADMIN_PATHS.some((p) => location.pathname.startsWith(p)));
->>>>>>> 29d867355f6214f453259329362bf048a99aa8e9
 
   const RoleIcon = isSuperAdmin
     ? Crown
