@@ -1,9 +1,10 @@
 const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
+const { cache } = require("../middleware/cache");
 
 // GET all ledger heads
-router.get("/", async (req, res) => {
+router.get("/", cache("account-head-master", 300), async (req, res) => {
   try {
     const pool = getPool();
     let query = `SELECT

@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
+const { cache } = require("../middleware/cache");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // General Ledger Routes
@@ -38,12 +39,18 @@ router.get("/options", async (req, res) => {
 // ── GET / ─────────────────────────────────────────────────────────────────────
 // Returns all GL ledger heads joined with their account group names.
 // Supports optional ?search= and ?groupId= query filters.
-router.get("/", async (req, res) => {
+router.get("/", cache("general-ledger", 300), async (req, res) => {
   try {
     const pool = getPool();
+
+    // Sanitized pagination params
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const offset = (page - 1) * limit;
+
     const request = pool.request();
 
-    let query = `
+    let baseQuery = `
       SELECT
         lh.LHeadId,
         lh.LHeadName,
@@ -63,20 +70,37 @@ router.get("/", async (req, res) => {
       WHERE lh.LHeadType = 'GL'
     `;
 
+    let countQuery = "SELECT COUNT(*) AS total FROM dbo.AccountHeadMaster lh WHERE lh.LHeadType = 'GL'";
+
+    let whereClause = "";
+
     if (req.query.search) {
-      query += ` AND (lh.LHeadName LIKE @search OR lh.LHeadCode LIKE @search)`;
+      whereClause += " AND (lh.LHeadName LIKE @search OR lh.LHeadCode LIKE @search)";
       request.input("search", sql.NVarChar(200), `%${req.query.search}%`);
     }
 
     if (req.query.groupId) {
-      query += ` AND lh.LBelongsTo = @groupId`;
+      whereClause += " AND lh.LBelongsTo = @groupId";
       request.input("groupId", sql.Int, parseInt(req.query.groupId, 10));
     }
 
-    query += ` ORDER BY lh.LHeadName`;
+    const fullCountQuery = countQuery + whereClause;
+    const countResult = await request.query(fullCountQuery);
+    const total = parseInt(countResult.recordset[0].total);
 
-    const result = await request.query(query);
-    res.json(result.recordset);
+    const paginatedQuery = baseQuery + whereClause + ` ORDER BY lh.LHeadName OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY`;
+    request.input('offset', sql.Int, offset);
+    request.input('limit', sql.Int, limit);
+
+    const result = await request.query(paginatedQuery);
+
+    res.json({
+      data: result.recordset,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit)
+    });
   } catch (err) {
     console.error("GL GET ALL ERROR:", err.message);
     res.status(500).json({ error: err.message });

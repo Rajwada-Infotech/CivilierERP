@@ -553,6 +553,17 @@ export const TopNavbar = () => {
   }, [bellOpen, remFetched, refreshReminders]);
 
   const ADMIN_PATHS = ["/masters/named-entry-type", "/masters/type-of-doc"];
+<<<<<<< HEAD
+  const isAdminPage =
+    location.pathname.startsWith("/admin") ||
+    location.pathname.startsWith("/users") ||
+    ADMIN_PATHS.some((p) => location.pathname.startsWith(p));
+const isSuperAdmin = currentUser?.role?.toLowerCase() === "super_admin";
+const isDba = currentUser?.role?.toLowerCase() === "dba";
+const isAdmin = currentUser?.role?.toLowerCase() === "admin" || isSuperAdmin || isDba;
+
+console.log('🔍 DEBUG - ROLE:', currentUser?.role, 'ISADMIN:', isAdmin);
+=======
   const isSuperAdmin = currentUser?.role === "super_admin";
   const isDba = currentUser?.role === "dba";
   const isAdmin = currentUser?.role === "admin" || isSuperAdmin || isDba;
@@ -561,6 +572,7 @@ export const TopNavbar = () => {
     (location.pathname.startsWith("/admin") ||
       location.pathname.startsWith("/users") ||
       ADMIN_PATHS.some((p) => location.pathname.startsWith(p)));
+>>>>>>> 29d867355f6214f453259329362bf048a99aa8e9
 
   const RoleIcon = isSuperAdmin
     ? Crown
@@ -926,63 +938,64 @@ export const TopNavbar = () => {
                   )}
                 </button>
 
-                {/* Admin */}
-                {isAdmin && (
-                  <>
-                    <div className="mx-3 my-1.5 border-t border-border" />
-                    <button
-                      onClick={async () => {
-                        setModuleOpen(false);
-                        setSwitchingTo("Admin");
-                        setModuleSwitching(true);
-                        await new Promise((r) => setTimeout(r, 350));
-                        navigate("/admin/dashboard");
-                        setModuleSwitching(false);
-                        setSwitchingTo(null);
-                      }}
-                      className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${
-                        isAdminPage
-                          ? "bg-blue-500/10 text-blue-600"
-                          : "hover:bg-muted text-foreground"
-                      }`}
-                    >
-                      <span
-                        className={`flex items-center justify-center w-7 h-7 rounded-md transition-colors relative ${
-                          isAdminPage
-                            ? "bg-blue-500/15"
-                            : "bg-muted group-hover:bg-muted-foreground/10"
-                        }`}
-                      >
-                        <ShieldCheck
-                          size={14}
-                          className={
-                            isAdminPage
-                              ? "text-blue-500"
-                              : "text-muted-foreground group-hover:text-foreground"
-                          }
-                        />
-                        {isSuperAdmin && (
-                          <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full flex items-center justify-center bg-violet-600">
-                            <Crown size={6} className="text-white" />
-                          </span>
-                        )}
-                      </span>
-                      <div className="flex-1 text-left">
-                        <p
-                          className={`text-sm font-heading font-medium leading-none ${isAdminPage ? "text-blue-600" : "text-foreground"}`}
-                        >
-                          Admin
-                        </p>
-                        <p className="text-[11px] text-muted-foreground mt-0.5">
-                          Users, rights & config
-                        </p>
-                      </div>
-                      {isAdminPage && (
-                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0" />
-                      )}
-                    </button>
-                  </>
-                )}
+                {/* Admin - TEMP DEBUG FORCED VISIBLE */}
+{true && (
+  <>
+    <div className="mx-3 my-1.5 border-t border-border" />
+    <button
+      onClick={async () => {
+        setModuleOpen(false);
+        setSwitchingTo("Admin");
+        setModuleSwitching(true);
+        await new Promise((r) => setTimeout(r, 350));
+        navigate("/admin/dashboard");
+        setModuleSwitching(false);
+        setSwitchingTo(null);
+      }}
+      className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${
+        isAdminPage
+          ? "bg-blue-500/10 text-blue-600"
+          : "hover:bg-muted text-foreground"
+      }`}
+    >
+      <span
+        className={`flex items-center justify-center w-7 h-7 rounded-md transition-colors relative ${
+          isAdminPage
+            ? "bg-blue-500/15"
+            : "bg-muted group-hover:bg-muted-foreground/10"
+        }`}
+      >
+        <ShieldCheck
+          size={14}
+          className={
+            isAdminPage
+              ? "text-blue-500"
+              : "text-muted-foreground group-hover:text-foreground"
+          }
+        />
+        {isSuperAdmin && (
+          <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full flex items-center justify-center bg-violet-600">
+            <Crown size={6} className="text-white" />
+          </span>
+        )}
+      </span>
+      <div className="flex-1 text-left">
+        <p
+          className={`text-sm font-heading font-medium leading-none ${isAdminPage ? "text-blue-600" : "text-foreground"}`}
+        >
+          Admin
+        </p>
+        <p className="text-[11px] text-muted-foreground mt-0.5">
+          Users, rights & config
+        </p>
+      </div>
+      {isAdminPage && (
+        <span className="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0" />
+      )}
+    </button>
+  </>
+)}
+{/* TEMP DEBUG: Admin button forced visible - check Console for role logs */}
 
                 <div className="mx-3 mt-1.5 mb-1 pt-2 border-t border-border">
                   <p className="text-[10px] text-muted-foreground font-heading">

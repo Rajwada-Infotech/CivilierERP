@@ -163,6 +163,12 @@ export const PAGE_DEFINITIONS = [
     availableActions: ["view", "create", "edit", "delete"] as const,
   },
   {
+    key: "business-unit",
+    label: "Business Unit",
+    group: "Admin",
+    availableActions: ["view", "create", "edit", "delete"] as const,
+  },
+  {
     key: "activity-browser",
     label: "Activity Browser",
     group: "Admin",

@@ -1,6 +1,6 @@
 const express = require("express");
 const { cache } = require("../middleware/cache");
-const { redisDelPattern } = require("../redis");
+const { redisDelPattern, bumpCacheVersion } = require("../redis");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 
@@ -41,7 +41,7 @@ router.post("/", async (req, res) => {
         VALUES
           (@activity_name, @short_description, @activity_type, @group_id, @is_active, @created_by, @created_datetime)
       `);
-    await redisDelPattern("cache:activity-master:*");
+    await bumpCacheVersion("activity-master");
 
     res.json({ message: "Activity added" });
   } catch (err) {
@@ -75,7 +75,7 @@ router.put("/:id", async (req, res) => {
           updated_by=@updated_by, updated_at=@updated_at
         WHERE id=@id
       `);
-    await redisDelPattern("cache:activity-master:*");
+    await bumpCacheVersion("activity-master");
 
     res.json({ message: "Activity updated" });
   } catch (err) {
@@ -90,7 +90,7 @@ router.delete("/:id", async (req, res) => {
       .request()
       .input("id", sql.Int, req.params.id)
       .query("DELETE FROM dbo.ActivityMaster WHERE id=@id");
-    await redisDelPattern("cache:activity-master:*");
+    await bumpCacheVersion("activity-master");
 
     res.json({ message: "Activity deleted" });
   } catch (err) {

@@ -1,11 +1,16 @@
 require("dotenv").config();
+const isDev = process.env.NODE_ENV === "development";
+
 const express = require("express");
 const helmet = require("helmet");
+
 const morgan = require("morgan");
 const cors = require("cors");
+const compression = require("compression");
 const { connectDB } = require("./db");
 const authMiddleware = require("./middleware/auth");
 const rateLimit = require("express-rate-limit");
+const logger = require("./logger");
 const { ipKeyGenerator } = require("express-rate-limit");
 
 const {
@@ -72,7 +77,7 @@ async function startServer() {
           metrics.memoryUsage,
         );
       },
-      store: makeStore(`rl:api:${Math.floor(Date.now() / 60000)}:`),
+      store: makeStore("rl:api:"),
       skip: (req) => req.path.startsWith("/api/user-activity"),
       keyGenerator: (req) => `${req.user?.userId || ipKeyGenerator(req)}`,
     });
@@ -85,7 +90,7 @@ async function startServer() {
     app.use(express.json());
     app.use(express.urlencoded({ extended: true }));
     app.use(helmet());
-    app.use(morgan("dev"));
+    app.use(morgan("tiny"));
 
     app.use(async (req, res, next) => {
       try {
@@ -95,6 +100,53 @@ async function startServer() {
       next();
     });
 
+<<<<<<< HEAD
+    const corsOptions = {
+      origin: (origin, cb) => {
+        if (process.env.NODE_ENV === "development" && origin) {
+          console.log("CORS:", origin);
+        }
+        if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+          cb(null, true);
+        } else {
+          if (process.env.NODE_ENV === "development") {
+            console.log(`CORS rejected: ${origin}`);
+          }
+          cb(new Error("Not allowed by CORS"));
+        }
+      },
+      credentials: true,
+      methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+      allowedHeaders: ["Content-Type", "Authorization"],
+    };
+
+    app.use(cors(corsOptions));
+    app.use(compression());
+
+    app.use((req, res, next) => {
+      const start = Date.now();
+      res.on("finish", () => {
+        const duration = Date.now() - start;
+        logger.info({
+          method: req.method,
+          url: req.originalUrl,
+          status: res.statusCode,
+          time: `${duration}ms`,
+        });
+      });
+      next();
+    });
+
+    // Health check — must be before auth middleware
+    app.get("/", (req, res) => res.send("CivilierERP API running"));
+    app.get("/health", (req, res) => res.json({ status: "ok" }));
+
+    // Rate limiters
+    app.use("/api/users/login", loginLimiter);
+    app.use("/api", apiLimiter);
+
+    // Public routes (no auth)
+=======
     // CORS
     app.use(
       cors({
@@ -120,19 +172,89 @@ async function startServer() {
     // ====================== ROUTES ======================
 
     // Public routes
+>>>>>>> 29d867355f6214f453259329362bf048a99aa8e9
     app.use("/api/users", require("./routes/users"));
     app.use("/api/roles", require("./routes/roles"));
 
     // Global authentication for all /api routes (except the public ones above)
     app.use("/api", authMiddleware);
 
+<<<<<<< HEAD
+    // Track active users after auth (scoped to /api only)
+    app.use("/api", authMiddleware, async (req, res, next) => {
+=======
     // Active user tracking
     app.use((req, res, next) => {
+>>>>>>> 29d867355f6214f453259329362bf048a99aa8e9
       if (req.user?.userId) {
         pfaddActiveUser(req.user.userId).catch(() => {});
       }
       next();
     });
+<<<<<<< HEAD
+
+    // Route definitions
+    const routes = [
+      { path: "/api/user-rights",        file: "./routes/userRights" },
+      { path: "/api/account-group",      file: "./routes/accountGroup" },
+      { path: "/api/account-head",       file: "./routes/accountHeadMaster" },
+      { path: "/api/activity-master",    file: "./routes/activityMaster" },
+      { path: "/api/bank-master",        file: "./routes/bankMaster" },
+      { path: "/api/billing-terms",      file: "./routes/billingTerms" },
+      { path: "/api/card-master",        file: "./routes/cardMaster" },
+      { path: "/api/cheque-master",      file: "./routes/chequeMaster" },
+      { path: "/api/document-type",      file: "./routes/documentType" },
+      { path: "/api/fin-year",           file: "./routes/finYear" },
+      { path: "/api/general-ledger",     file: "./routes/generalLedger" },
+      { path: "/api/hsn",                file: "./routes/hsn" },
+      { path: "/api/item-groups",        file: "./routes/itemGroup" },
+      { path: "/api/item-master",        file: "./routes/itemMaster" },
+      { path: "/api/tds-master",         file: "./routes/tdsMaster" },
+      { path: "/api/enterprises",        file: "./routes/enterprise" },
+      { path: "/api/entry-type",         file: "./routes/entryType" },
+      { path: "/api/expense-booking",    file: "./routes/expenseBooking" },
+      { path: "/api/new-payment",        file: "./routes/newPayment" },
+      { path: "/api/purchase-orders",    file: "./routes/purchaseOrders" },
+      { path: "/api/tenants",            file: "./routes/tenants" },
+      { path: "/api/work-orders",        file: "./routes/workOrder" },
+      { path: "/api/user-profile",       file: "./routes/userProfile" },
+      { path: "/api/uom-master",         file: "./routes/uomMaster" },
+      { path: "/api/debit-note",         file: "./routes/debitNote" },
+      { path: "/api/tc-master",          file: "./routes/tcMaster" },
+      { path: "/api/grns",               file: "./routes/grns" },
+      { path: "/api/stock-ledger",       file: "./routes/stockLedger" },
+      { path: "/api/brs",                file: "./routes/brs" },
+      { path: "/api/finance-dashboard",  file: "./routes/financeDashboard" },
+      { path: "/api/material-dashboard", file: "./routes/materialDashboard" },
+      { path: "/api/user-activity",      file: "./routes/userActivity" },
+      { path: "/api/roles",              file: "./routes/roles" },
+      { path: "/api/business-units",     file: "./routes/businessUnit" },
+      { path: "/api/tasks",              file: "./routes/tasks" },
+    ];
+
+    for (const { path, file } of routes) {
+      const label = path.replace("/api/", "");
+      if (isDev) console.log(`Loading route: ${label}`);
+      try {
+        app.use(path, authMiddleware, require(file));
+      } catch (err) {
+        console.error(`❌ Failed loading route: ${label} — ${err.message}`);
+        throw err;
+      }
+    }
+
+    // DBA route with role restriction
+    if (isDev) console.log("Loading route: dba");
+    try {
+      app.use("/api/dba", authMiddleware, allowRoles("dba", "admin"), require("./routes/dba"));
+    } catch (err) {
+      console.error(`❌ Failed loading route: dba — ${err.message}`);
+      throw err;
+    }
+
+    // System metrics endpoint
+    app.get("/api/system/metrics", authMiddleware, async (req, res) => {
+=======
 
     // Protected routes
     app.use("/api/user-rights", require("./routes/userRights"));
@@ -178,6 +300,7 @@ async function startServer() {
 
     // System metrics
     app.get("/api/system/metrics", async (req, res) => {
+>>>>>>> 29d867355f6214f453259329362bf048a99aa8e9
       const metrics = await getSystemMetrics();
       const predictedRPM = await getPredictedRPM();
       metrics.predictedRPM = predictedRPM;
@@ -200,12 +323,26 @@ async function startServer() {
       res.json(metrics);
     });
 
+<<<<<<< HEAD
+    // Global error handler
+    app.use((err, req, res, next) => {
+      logger.error({
+        message: err.message,
+        stack: err.stack,
+      });
+      res.status(500).json({ error: "Internal Server Error" });
+    });
+
+    const PORT = process.env.PORT || 5000;
+    app.listen(PORT, () => logger.info(`Server running on port ${PORT}`));
+=======
     app.get("/", (req, res) => res.send("CivilierERP API running"));
 
     const PORT = process.env.PORT || 5000;
     app.listen(PORT, () => {
       console.log(`🚀 Server running on port ${PORT}`);
     });
+>>>>>>> 29d867355f6214f453259329362bf048a99aa8e9
 
     return app;
   } catch (err) {

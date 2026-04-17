@@ -1,6 +1,6 @@
 const express = require("express");
 const { cache } = require("../middleware/cache");
-const { redisDelPattern } = require("../redis");
+const { redisDelPattern, bumpCacheVersion } = require("../redis");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 
@@ -8,7 +8,26 @@ const { getPool, sql } = require("../db");
 router.get("/", cache("grns", 300), async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query(`
+
+    // Sanitized pagination params
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const offset = (page - 1) * limit;
+
+    // Total count (matching exact JOINs)
+    const countResult = await pool.request().query(`
+      SELECT COUNT(*) AS total
+      FROM GoodsReceiptNotes grn
+      LEFT JOIN dbo.AccountHeadMaster s ON grn.SupplierID = s.LHeadId
+      LEFT JOIN PurchaseOrders p ON grn.POID = p.PurchaseOrderID
+    `);
+    const total = parseInt(countResult.recordset[0].total);
+
+    // Paginated data
+    const result = await pool.request()
+      .input('offset', sql.Int, offset)
+      .input('limit', sql.Int, limit)
+      .query(`
       SELECT
         grn.GRNID,
         grn.GRNNo,
@@ -25,9 +44,16 @@ router.get("/", cache("grns", 300), async (req, res) => {
       LEFT JOIN dbo.AccountHeadMaster s ON grn.SupplierID = s.LHeadId
       LEFT JOIN PurchaseOrders p ON grn.POID = p.PurchaseOrderID
       ORDER BY grn.GRNID DESC
+      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
     `);
 
-    res.json(result.recordset);
+    res.json({
+      data: result.recordset,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit)
+    });
   } catch (err) {
     console.error("GET GRN ERROR:", err);
     res.status(500).json({
@@ -99,7 +125,7 @@ router.post("/", async (req, res) => {
     }
 
     await transaction.commit();
-    await redisDelPattern("cache:grns:*");
+    await bumpCacheVersion("grns");
 
     res.status(201).json({
       message: "GRN created successfully",
@@ -146,7 +172,7 @@ router.put("/:id", async (req, res) => {
         WHERE GRNID = @GRNID
       `);
 
-    await redisDelPattern("cache:grns:*");
+    await bumpCacheVersion("grns");
     res.json({ message: "GRN updated successfully" });
   } catch (err) {
     console.error("UPDATE GRN ERROR:", err);

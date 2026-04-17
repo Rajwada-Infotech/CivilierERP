@@ -12,7 +12,28 @@ const { getPool, sql } = require("../db");
 router.get("/", cache("work-orders", 300), async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query(`
+
+    // Sanitized pagination params
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const offset = (page - 1) * limit;
+
+    // Total count (matching GROUP BY structure)
+    const countResult = await pool.request().query(`
+      SELECT COUNT(DISTINCT h.Id) AS total
+      FROM dbo.WorkOrderHeader h
+      LEFT JOIN dbo.enterprise        ec  ON ec.id       = h.CompanyId
+      LEFT JOIN dbo.enterprise        ep  ON ep.id       = h.ProjectId
+      LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = h.ContractorId
+      LEFT JOIN dbo.WorkOrderActivities a  ON a.WorkOrderHeaderId = h.Id
+    `);
+    const total = parseInt(countResult.recordset[0].total);
+
+    // Paginated data
+    const result = await pool.request()
+      .input('offset', sql.Int, offset)
+      .input('limit', sql.Int, limit)
+      .query(`
       SELECT
         h.Id,
         h.DocumentNumber,
@@ -43,8 +64,16 @@ router.get("/", cache("work-orders", 300), async (req, res) => {
         h.CreatedBy, h.UpdatedBy,
         ec.name, ep.name, ahm.LHeadName
       ORDER BY h.CreatedAt DESC
+      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
     `);
-    res.json(result.recordset);
+
+    res.json({
+      data: result.recordset,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit)
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
