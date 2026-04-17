@@ -2,6 +2,7 @@ const express = require("express")
 const router = express.Router()
 const { getPool, sql } = require("../db")
 const { cache } = require("../middleware/cache")
+const { bumpCacheVersion } = require("../redis")
 
 router.get("/", cache("card-master", 300), async (req, res) => {
   try {
@@ -50,6 +51,7 @@ router.post("/", async (req, res) => {
           @reminder_days, @status, @created_at, @created_by
         )
       `)
+    await bumpCacheVersion("card-master")
     res.json({ message: "Card added" })
   } catch (err) { res.status(500).json({ error: err.message }) }
 })
@@ -92,6 +94,7 @@ router.put("/:id", async (req, res) => {
           status=@status, updated_at=@updated_at, updated_by=@updated_by
         WHERE id=@id
       `)
+    await bumpCacheVersion("card-master")
     res.json({ message: "Card updated" })
   } catch (err) { res.status(500).json({ error: err.message }) }
 })
@@ -102,6 +105,7 @@ router.delete("/:id", async (req, res) => {
     await pool.request()
       .input("id", sql.Int, req.params.id)
       .query("DELETE FROM dbo.card_master WHERE id=@id")
+    await bumpCacheVersion("card-master")
     res.json({ message: "Card deleted" })
   } catch (err) { res.status(500).json({ error: err.message }) }
 })

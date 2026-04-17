@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
+const { bumpCacheVersion } = require("../redis");
 
 // ====================== HELPERS ======================
 const cleanStr = (v, len = 255) => {
@@ -185,6 +186,8 @@ router.post("/", async (req, res) => {
         )
       `);
 
+    await bumpCacheVersion("bank-master");
+
     res.status(201).json(result.recordset[0]);
   } catch (err) {
     console.error("INSERT BANK ERROR:", err);
@@ -276,6 +279,8 @@ router.put("/:id", async (req, res) => {
         WHERE LHeadId = @LHeadId AND LHeadType = 'B'
       `);
 
+    await bumpCacheVersion("bank-master");
+
     res.json({ success: true, message: "Bank updated successfully" });
   } catch (err) {
     console.error("UPDATE BANK ERROR:", err);
@@ -294,6 +299,8 @@ router.delete("/:id", async (req, res) => {
         DELETE FROM dbo.AccountHeadMaster
         WHERE LHeadId = @LHeadId AND LHeadType = 'B'
       `);
+
+    await bumpCacheVersion("bank-master");
 
     res.json({ success: true, message: "Bank deleted successfully" });
   } catch (err) {

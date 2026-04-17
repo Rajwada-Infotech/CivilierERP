@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   MasterPage,
@@ -21,14 +21,16 @@ import {
 
 const PurchaseOrderMaster = () => {
   const queryClient = useQueryClient();
+  const [page, setPage] = useState(1);
+  const limit = 10;
 
   const {
     data: dbData,
     isLoading,
     error,
   } = useQuery({
-    queryKey: ["purchase-orders"],
-    queryFn: getPurchaseOrders,
+    queryKey: ["purchase-orders", page, limit],
+    queryFn: () => getPurchaseOrders({ page, limit }),
   });
 
   // Suppliers from AccountHeadMaster (type=Supplier) → { LHeadId, LHeadName }
@@ -54,7 +56,9 @@ const PurchaseOrderMaster = () => {
   const supplierOptions = suppliers.map((s) => s.name);
   const projectOptions  = projects.map((p)  => p.name);
 
-  const dbItems = Array.isArray(dbData) ? dbData : [];
+  const dbItems = dbData?.data ?? [];
+  const totalPages = Math.max(dbData?.totalPages ?? 1, 1);
+  const totalRecords = dbData?.total ?? dbItems.length;
 
   // Map DB rows → UI record
   // supplierID / projectId stored as integers in DB; display as names in UI
@@ -120,6 +124,7 @@ const PurchaseOrderMaster = () => {
         toast.success("Purchase Order deleted successfully!");
       }
       await queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
+      setPage(1);
     } catch (err: any) {
       toast.error(`Operation failed: ${err.message}`);
     }
@@ -257,6 +262,27 @@ const PurchaseOrderMaster = () => {
         onDataEvent={handleDataEvent}
         onFieldChange={handleFieldChange}
       />
+      <div className="mt-4 flex items-center justify-between rounded-lg border border-border bg-card px-4 py-3 text-sm">
+        <span className="text-muted-foreground">
+          Page {page} of {totalPages} ({totalRecords} records)
+        </span>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setPage((p) => Math.max(p - 1, 1))}
+            disabled={page <= 1}
+            className="rounded-lg border border-border px-3 py-1.5 text-sm disabled:opacity-50"
+          >
+            Previous
+          </button>
+          <button
+            onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
+            disabled={page >= totalPages}
+            className="rounded-lg border border-border px-3 py-1.5 text-sm disabled:opacity-50"
+          >
+            Next
+          </button>
+        </div>
+      </div>
     </>
   );
 };

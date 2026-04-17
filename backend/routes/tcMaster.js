@@ -2,6 +2,7 @@ const express = require("express")
 const router = express.Router()
 const { getPool, sql } = require("../db")
 const { cache } = require("../middleware/cache")
+const { bumpCacheVersion } = require("../redis")
 
 // GET all T&C records
 router.get("/", cache("tc-master", 300), async (req, res) => {
@@ -29,6 +30,7 @@ router.post("/", async (req, res) => {
         INSERT INTO dbo.TCMaster (Name, TermsAndCondition, Remarks, isActive)
         VALUES (@Name, @TermsAndCondition, @Remarks, @isActive)
       `)
+    await bumpCacheVersion("tc-master")
     res.json({ message: "T&C record added successfully" })
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -55,6 +57,7 @@ router.put("/:id", async (req, res) => {
           isActive          = @isActive
         WHERE Id = @Id
       `)
+    await bumpCacheVersion("tc-master")
     res.json({ message: "T&C record updated successfully" })
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -69,6 +72,7 @@ router.delete("/:id", async (req, res) => {
       .request()
       .input("Id", sql.Int, req.params.id)
       .query("DELETE FROM dbo.TCMaster WHERE Id = @Id")
+    await bumpCacheVersion("tc-master")
     res.json({ message: "T&C record deleted successfully" })
   } catch (err) {
     res.status(500).json({ error: err.message })

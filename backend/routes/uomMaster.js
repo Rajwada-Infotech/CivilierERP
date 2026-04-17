@@ -1,6 +1,6 @@
 const express = require("express");
 const { cache } = require("../middleware/cache");
-const { redisDelPattern } = require("../redis");
+const { bumpCacheVersion } = require("../redis");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 
@@ -57,7 +57,8 @@ router.post("/", async (req, res) => {
           (@UOMName, @UOMCode, @Symbol, @UOMType, @DecimalPlaces,
            @ConversionFactor, @IsBaseUnit, @Remarks, @IsActive, @CreatedAt)
       `);
-    await redisDelPattern("cache:uom-master:*");
+    await bumpCacheVersion("uom-master");
+    await bumpCacheVersion("stock-ledger");
 
     res.json({ message: "UOM added successfully" });
   } catch (err) {
@@ -108,7 +109,8 @@ router.put("/:id", async (req, res) => {
           IsActive         = @IsActive
         WHERE Id = @Id
       `);
-    await redisDelPattern("cache:uom-master:*");
+    await bumpCacheVersion("uom-master");
+    await bumpCacheVersion("stock-ledger");
 
     res.json({ message: "UOM updated successfully" });
   } catch (err) {
@@ -126,7 +128,8 @@ router.delete("/:id", async (req, res) => {
       .request()
       .input("Id", sql.Int, parseInt(id))
       .query("DELETE FROM dbo.UOMMaster WHERE Id = @Id");
-    await redisDelPattern("cache:uom-master:*");
+    await bumpCacheVersion("uom-master");
+    await bumpCacheVersion("stock-ledger");
 
     res.json({ message: "UOM deleted successfully" });
   } catch (err) {

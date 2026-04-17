@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
+const { bumpCacheVersion } = require("../redis");
 
 // ── GET / ─────────────────────────────────────────────────────────────────────
 // Returns all POs joined with supplier name (from AccountHeadMaster) and
@@ -127,6 +128,7 @@ router.post("/", async (req, res) => {
         )
       `);
 
+    await bumpCacheVersion("purchase-orders");
     res.status(201).json({
       message: "Purchase order created successfully",
       PurchaseOrderID: result.recordset[0].PurchaseOrderID,
@@ -202,6 +204,7 @@ router.put("/:id", async (req, res) => {
       return res.status(404).json({ error: "Purchase order not found" });
     }
 
+    await bumpCacheVersion("purchase-orders");
     res.json({ message: "Purchase order updated successfully" });
   } catch (err) {
     console.error("PUT PurchaseOrders error:", err);
@@ -224,6 +227,7 @@ router.delete("/:id", async (req, res) => {
       return res.status(404).json({ error: "Purchase order not found" });
     }
 
+    await bumpCacheVersion("purchase-orders");
     res.json({ message: "Purchase order deleted successfully" });
   } catch (err) {
     console.error("DELETE PurchaseOrders error:", err);

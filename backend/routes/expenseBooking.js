@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
+const { bumpCacheVersion } = require("../redis");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // IMPORTANT: /options MUST be declared before /:id so Express does not treat
@@ -104,6 +105,7 @@ router.post("/", async (req, res) => {
           @ECreatedAt, @EUpdatedAt, @ECreatedBy, @EApprovedBy, @ECompanyId
         )
       `);
+    await bumpCacheVersion("expense-booking");
     res.json({ message: "Expense booked successfully" });
   } catch (err) {
     console.error("EXPENSE INSERT ERROR:", err.message);
@@ -155,6 +157,7 @@ router.put("/:id", async (req, res) => {
           EStatus=@EStatus, EUpdatedAt=@EUpdatedAt, ECompanyId=@ECompanyId
         WHERE Eid=@Eid
       `);
+    await bumpCacheVersion("expense-booking");
     res.json({ message: "Expense updated successfully" });
   } catch (err) {
     console.error("EXPENSE UPDATE ERROR:", err.message);
@@ -175,6 +178,7 @@ router.delete("/:id", async (req, res) => {
       .request()
       .input("Eid", sql.Int, numericId)
       .query("DELETE FROM dbo.ExpenseBooking WHERE Eid=@Eid");
+    await bumpCacheVersion("expense-booking");
     res.json({ message: "Expense deleted successfully" });
   } catch (err) {
     console.error("EXPENSE DELETE ERROR:", err.message);

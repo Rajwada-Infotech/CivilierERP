@@ -39,6 +39,14 @@ interface LedgerForm {
   LBelongsTo: string;
 }
 
+interface PaginatedResponse<T> {
+  data: T[];
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+}
+
 const EMPTY_FORM: LedgerForm = {
   LHeadName: "",
   LHeadCode: "",
@@ -48,14 +56,47 @@ const EMPTY_FORM: LedgerForm = {
 const BASE_URL = "/api/general-ledger";
 
 // ─── API Functions ───────────────────────────────────────────────────────────
-const fetchLedgers = async (): Promise<LedgerHead[]> => {
-  const res = await fetch(BASE_URL, {
+const fetchLedgers = async ({
+  page,
+  limit,
+  search,
+  groupId,
+}: {
+  page: number;
+  limit: number;
+  search?: string;
+  groupId?: string;
+}): Promise<PaginatedResponse<LedgerHead>> => {
+  const qs = new URLSearchParams({
+    page: String(page),
+    limit: String(limit),
+  });
+  if (search?.trim()) qs.set("search", search.trim());
+  if (groupId) qs.set("groupId", groupId);
+
+  const res = await fetch(`${BASE_URL}?${qs.toString()}`, {
     headers: {
       Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
     },
   });
   if (!res.ok) throw new Error(`Failed to fetch ledgers: ${res.status}`);
-  return res.json();
+  const payload = await res.json();
+  if (Array.isArray(payload)) {
+    return {
+      data: payload,
+      page: 1,
+      limit: payload.length,
+      total: payload.length,
+      totalPages: 1,
+    };
+  }
+  return {
+    data: Array.isArray(payload?.data) ? payload.data : [],
+    page: Number(payload?.page || 1),
+    limit: Number(payload?.limit || limit),
+    total: Number(payload?.total || payload?.data?.length || 0),
+    totalPages: Number(payload?.totalPages || 1),
+  };
 };
 
 const createLedger = async (data: LedgerForm) => {
@@ -113,6 +154,24 @@ const deleteLedger = async (id: number) => {
 // ─── Component ────────────────────────────────────────────────────────────────
 const GeneralLedgerMaster: React.FC = () => {
   const qc = useQueryClient();
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [form, setForm] = useState<LedgerForm>(EMPTY_FORM);
+  const [errors, setErrors] = useState<
+    Partial<Record<keyof LedgerForm, boolean>>
+  >({});
+  const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
+  const [search, setSearch] = useState("");
+  const [filterGroup, setFilterGroup] = useState("");
+  const [page, setPage] = useState(1);
+  const limit = 10;
+  const [sortField, setSortField] = useState<
+    "LHeadName" | "LHeadCode" | "GroupName"
+  >("LHeadName");
+  const [sortAsc, setSortAsc] = useState(true);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, filterGroup]);
 
   // ── Remote data ────────────────────────────────────────────────────────────
   const { data: groupsData, isLoading: groupsLoading } = useQuery({
@@ -125,8 +184,8 @@ const GeneralLedgerMaster: React.FC = () => {
     isLoading: ledgersLoading,
     isError: ledgersError,
   } = useQuery({
-    queryKey: ["ledger-heads"],
-    queryFn: fetchLedgers,
+    queryKey: ["ledger-heads", page, limit, search, filterGroup],
+    queryFn: () => fetchLedgers({ page, limit, search, groupId: filterGroup }),
   });
 
   const accountGroups: AccountGroup[] = useMemo(() => {
@@ -140,24 +199,13 @@ const GeneralLedgerMaster: React.FC = () => {
   }, [groupsData]);
 
   const ledgers: LedgerHead[] = useMemo(
-    () => (Array.isArray(ledgersData) ? ledgersData : []),
+    () => ledgersData?.data ?? [],
     [ledgersData],
   );
+  const totalPages = Math.max(ledgersData?.totalPages ?? 1, 1);
+  const totalRecords = ledgersData?.total ?? ledgers.length;
 
   // ── Local UI state ─────────────────────────────────────────────────────────
-  const [editingId, setEditingId] = useState<number | null>(null);
-  const [form, setForm] = useState<LedgerForm>(EMPTY_FORM);
-  const [errors, setErrors] = useState<
-    Partial<Record<keyof LedgerForm, boolean>>
-  >({});
-  const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
-  const [search, setSearch] = useState("");
-  const [filterGroup, setFilterGroup] = useState("");
-  const [sortField, setSortField] = useState<
-    "LHeadName" | "LHeadCode" | "GroupName"
-  >("LHeadName");
-  const [sortAsc, setSortAsc] = useState(true);
-
   // Track whether user has manually edited the short code
   const hasManuallyEditedCode = useRef(false);
 
@@ -511,7 +559,7 @@ const GeneralLedgerMaster: React.FC = () => {
           )}
 
           <span className="ml-auto text-xs text-muted-foreground bg-muted/60 rounded-lg px-3 py-1.5">
-            {ledgers.length} Accounts
+            {totalRecords} Accounts
           </span>
         </div>
 
@@ -697,6 +745,27 @@ const GeneralLedgerMaster: React.FC = () => {
               )}
             </tbody>
           </table>
+        </div>
+        <div className="flex items-center justify-between border-t border-border px-4 py-3 text-sm">
+          <span className="text-muted-foreground">
+            Page {page} of {totalPages}
+          </span>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setPage((p) => Math.max(p - 1, 1))}
+              disabled={page <= 1}
+              className="rounded-lg border border-border px-3 py-1.5 disabled:opacity-50"
+            >
+              Previous
+            </button>
+            <button
+              onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
+              disabled={page >= totalPages}
+              className="rounded-lg border border-border px-3 py-1.5 disabled:opacity-50"
+            >
+              Next
+            </button>
+          </div>
         </div>
       </div>
     </>

@@ -1,8 +1,34 @@
 const express = require("express");
 const { cache } = require("../middleware/cache");
-const { redisDelPattern, bumpCacheVersion } = require("../redis");
+const { bumpCacheVersion } = require("../redis");
 const router = express.Router();
 const { getPool, sql } = require("../db");
+
+function parseGRNItems(grnItems) {
+  if (Array.isArray(grnItems)) return grnItems;
+  if (typeof grnItems === "string" && grnItems.trim()) return JSON.parse(grnItems);
+  return [];
+}
+
+async function insertStockLedgerEntries(transaction, grnId, grnItems) {
+  const items = parseGRNItems(grnItems);
+
+  for (const item of items) {
+    if (item.itemId && Number(item.receivedQty) > 0) {
+      await transaction
+        .request()
+        .input("ItemID", sql.NVarChar(50), item.itemId)
+        .input("Qty", sql.Decimal(18, 2), Number(item.receivedQty))
+        .input("UOM", sql.NVarChar(20), item.uom || null)
+        .input("Type", sql.NVarChar(10), "IN")
+        .input("RefType", sql.NVarChar(20), "GRN")
+        .input("RefID", sql.Int, grnId).query(`
+          INSERT INTO StockLedger (ItemID, Qty, UOM, Type, RefType, RefID, CreatedDate)
+          VALUES (@ItemID, @Qty, @UOM, @Type, @RefType, @RefID, GETDATE())
+        `);
+    }
+  }
+}
 
 // GET all GRNs
 router.get("/", cache("grns", 300), async (req, res) => {
@@ -100,32 +126,11 @@ router.post("/", async (req, res) => {
 
     const grnId = grnResult.recordset[0].GRNID;
 
-    // Parse items JSON for StockLedger entries
-    const items = Array.isArray(grnItems)
-      ? grnItems
-      : typeof grnItems === "string"
-        ? JSON.parse(grnItems)
-        : [];
-
-    // Insert Stock Ledger Entries - supports UUID itemId and uom
-    for (const item of items) {
-      if (item.itemId && item.receivedQty > 0) {
-        await transaction
-          .request()
-          .input("ItemID", sql.NVarChar(50), item.itemId)
-          .input("Qty", sql.Decimal(18, 2), item.receivedQty)
-          .input("UOM", sql.NVarChar(20), item.uom || null)
-          .input("Type", sql.NVarChar(10), "IN")
-          .input("RefType", sql.NVarChar(20), "GRN")
-          .input("RefID", sql.Int, grnId).query(`
-            INSERT INTO StockLedger (ItemID, Qty, UOM, Type, RefType, RefID, CreatedDate)
-            VALUES (@ItemID, @Qty, @UOM, @Type, @RefType, @RefID, GETDATE())
-          `);
-      }
-    }
+    await insertStockLedgerEntries(transaction, grnId, grnItems);
 
     await transaction.commit();
     await bumpCacheVersion("grns");
+    await bumpCacheVersion("stock-ledger");
 
     res.status(201).json({
       message: "GRN created successfully",
@@ -146,13 +151,16 @@ router.post("/", async (req, res) => {
 router.put("/:id", async (req, res) => {
   const { grnNo, grnDate, supplierId, poId, grnItems, status, remarks } =
     req.body;
+  const grnId = parseInt(req.params.id, 10);
 
+  const pool = getPool();
+  const transaction = pool.transaction();
   try {
-    const pool = await getPool();
+    await transaction.begin();
 
-    await pool
+    const result = await transaction
       .request()
-      .input("GRNID", sql.Int, req.params.id)
+      .input("GRNID", sql.Int, grnId)
       .input("GRNNo", sql.NVarChar(50), grnNo)
       .input("GRNDate", sql.Date, grnDate)
       .input("SupplierID", sql.Int, supplierId)
@@ -172,9 +180,24 @@ router.put("/:id", async (req, res) => {
         WHERE GRNID = @GRNID
       `);
 
+    if (result.rowsAffected[0] === 0) {
+      await transaction.rollback();
+      return res.status(404).json({ error: "GRN not found" });
+    }
+
+    await transaction
+      .request()
+      .input("RefID", sql.Int, grnId)
+      .query("DELETE FROM StockLedger WHERE RefType = 'GRN' AND RefID = @RefID");
+
+    await insertStockLedgerEntries(transaction, grnId, grnItems);
+    await transaction.commit();
+
     await bumpCacheVersion("grns");
+    await bumpCacheVersion("stock-ledger");
     res.json({ message: "GRN updated successfully" });
   } catch (err) {
+    await transaction.rollback().catch(() => {});
     console.error("UPDATE GRN ERROR:", err);
     res.status(500).json({
       error: "Failed to update GRN",
@@ -185,17 +208,35 @@ router.put("/:id", async (req, res) => {
 
 // DELETE
 router.delete("/:id", async (req, res) => {
-  try {
-    const pool = await getPool();
+  const grnId = parseInt(req.params.id, 10);
+  const pool = getPool();
+  const transaction = pool.transaction();
 
-    await pool
+  try {
+    await transaction.begin();
+
+    await transaction
       .request()
-      .input("GRNID", sql.Int, req.params.id)
+      .input("RefID", sql.Int, grnId)
+      .query("DELETE FROM StockLedger WHERE RefType = 'GRN' AND RefID = @RefID");
+
+    const result = await transaction
+      .request()
+      .input("GRNID", sql.Int, grnId)
       .query("DELETE FROM GoodsReceiptNotes WHERE GRNID = @GRNID");
 
-    await redisDelPattern("cache:grns:*");
+    if (result.rowsAffected[0] === 0) {
+      await transaction.rollback();
+      return res.status(404).json({ error: "GRN not found" });
+    }
+
+    await transaction.commit();
+
+    await bumpCacheVersion("grns");
+    await bumpCacheVersion("stock-ledger");
     res.json({ message: "GRN deleted successfully" });
   } catch (err) {
+    await transaction.rollback().catch(() => {});
     console.error("DELETE GRN ERROR:", err);
     res.status(500).json({
       error: "Failed to delete GRN",
