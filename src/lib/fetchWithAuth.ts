@@ -28,7 +28,12 @@ export async function fetchWithAuth(
 
     if (typeof window !== "undefined") {
       localStorage.removeItem("token");
-      window.location.href = "/login";
+      localStorage.removeItem("user");
+      // Use pushState + popstate instead of window.location.href to avoid a
+      // full page reload. A hard reload remounts every context provider, which
+      // fires all queries again before auth settles → infinite 401 loop.
+      window.history.pushState(null, "", "/login");
+      window.dispatchEvent(new PopStateEvent("popstate"));
     }
 
     throw new Error("Unauthorized. Please login again.");

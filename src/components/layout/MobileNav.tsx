@@ -269,10 +269,11 @@ export const MobileNav: React.FC = () => {
     (r) => r.type === "task" && r.urgency === "overdue",
   ).length;
 
-  // Background badge count
+  // Background badge count — only fire when authenticated
   useEffect(() => {
     let cancelled = false;
     const refresh = async () => {
+      if (!localStorage.getItem("token")) return; // guard: no token, no fetch
       try {
         const items = await loadReminders();
         if (!cancelled) {
@@ -710,26 +711,26 @@ const isAdmin = currentUser?.role?.toLowerCase() === "admin" || isSuperAdmin || 
       color: "text-lime-500",
     },
   ];
-const adminSetupItems = [
-  {
-    icon: Tag,
-    label: "Entry Type",
-    path: "/masters/named-entry-type",
-    color: "text-purple-400",
-  },
-  {
-    icon: FileType2,
-    label: "Type of Doc",
-    path: "/masters/type-of-doc",
-    color: "text-sky-500",
-  },
-  {
-    icon: Users,
-    label: "Role Master",
-    path: "/masters/role-master",
-    color: "text-blue-400",
-  },
-];
+  const adminSetupItems = [
+    {
+      icon: Tag,
+      label: "Entry Type",
+      path: "/masters/named-entry-type",
+      color: "text-purple-400",
+    },
+    {
+      icon: FileType2,
+      label: "Type of Doc",
+      path: "/masters/type-of-doc",
+      color: "text-sky-500",
+    },
+    {
+      icon: Users,
+      label: "Role Master",
+      path: "/masters/role-master",
+      color: "text-blue-400",
+    },
+  ];
 
   const getSetupConfig = () => {
     if (isAdminPage)

@@ -13,11 +13,36 @@ const MAX_LOGIN_ATTEMPTS = 5;
 const LOCKOUT_SECONDS = 15 * 60;
 
 // ======================
+// ROLE NORMALIZER - Root Cause Fix
+// ======================
+const normalizeRole = (role) => {
+  if (!role || typeof role !== "string") return "";
+
+  const r = role.trim().toLowerCase();
+
+  const roleMap = {
+    sa: "super_admin",
+    "super admin": "super_admin",
+    superadmin: "super_admin",
+    super_admin: "super_admin",
+
+    dba: "dba",
+    "db admin": "dba",
+    "database admin": "dba",
+    db_admin: "dba",
+
+    admin: "admin",
+    administrator: "admin",
+  };
+
+  return roleMap[r] || r.replace(/\s+/g, "_");
+};
+
+// ======================
 // LOGIN
 // ======================
 router.post("/login", async (req, res) => {
   const { email, password } = req.body;
-
   if (!email || !password) {
     return res.status(400).json({ error: "Email and password are required" });
   }
@@ -34,9 +59,7 @@ router.post("/login", async (req, res) => {
     }
 
     const pool = getPool();
-    const result = await pool
-      .request()
-      .input("email", sql.NVarChar, email)
+    const result = await pool.request().input("email", sql.NVarChar, email)
       .query(`
         SELECT u.id, u.name, u.email, u.RoleId, u.password, u.discontinue,
                r.RName AS roleName
@@ -46,7 +69,6 @@ router.post("/login", async (req, res) => {
       `);
 
     const user = result.recordset[0];
-
     if (!user) {
       await incrementLoginAttempts(attemptsKey, lockKey);
       return res.status(401).json({ error: "Invalid credentials" });
@@ -65,15 +87,18 @@ router.post("/login", async (req, res) => {
     await redisDel(attemptsKey);
     await redisDel(lockKey);
 
+    // FIXED: Normalize role
+    const normalizedRole = normalizeRole(user.roleName);
+
     const token = jwt.sign(
       {
         userId: user.id,
         roleId: user.RoleId,
-        roleName: user.roleName,
+        role: normalizedRole,
         email: user.email,
       },
       process.env.JWT_SECRET,
-      { expiresIn: "7d" }
+      { expiresIn: "7d" },
     );
 
     res.json({
@@ -85,6 +110,10 @@ router.post("/login", async (req, res) => {
         email: user.email,
         role: user.roleName,
         roleId: user.RoleId,
+<<<<<<< HEAD
+=======
+        role: normalizedRole,
+>>>>>>> 29d867355f6214f453259329362bf048a99aa8e9
       },
     });
   } catch (err) {
@@ -118,10 +147,8 @@ router.post("/logout", authMiddleware, async (req, res) => {
 });
 
 // ======================
-// USERS CRUD (RBAC FIXED)
-// ======================
-
 // GET USERS
+// ======================
 router.get(
   "/",
   authMiddleware,
@@ -137,50 +164,55 @@ router.get(
         LEFT JOIN dbo.Role r ON u.RoleId = r.RId
       `);
 
-      res.json(result.recordset);
+      // Normalize roles for frontend
+      const normalizedUsers = result.recordset.map((user) => ({
+        ...user,
+        role: normalizeRole(user.roleName),
+        roleName: user.roleName,
+      }));
+
+      res.json(normalizedUsers);
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
-  }
+  },
 );
 
+// ======================
 // CREATE USER
+// ======================
 router.post(
   "/",
   authMiddleware,
   checkPermission("Users", "List", "CanAdd"),
   async (req, res) => {
     const { name, email, RoleId, roleId, password } = req.body;
-
     if (!password) {
       return res.status(400).json({ error: "Password required" });
     }
-
     const assignedRoleId = Number(RoleId ?? roleId);
-
     try {
       const hashed = await bcrypt.hash(password, SALT_ROUNDS);
       const pool = getPool();
-
       await pool
         .request()
         .input("name", sql.NVarChar, name)
         .input("email", sql.NVarChar, email)
         .input("RoleId", sql.Int, assignedRoleId)
-        .input("password", sql.NVarChar, hashed)
-        .query(`
+        .input("password", sql.NVarChar, hashed).query(`
           INSERT INTO dbo.users (name, email, password, RoleId, created_datetime, discontinue)
           VALUES (@name, @email, @password, @RoleId, GETDATE(), 0)
         `);
-
       res.json({ message: "User created" });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
-  }
+  },
 );
 
+// ======================
 // UPDATE USER
+// ======================
 router.put(
   "/:id",
   authMiddleware,
@@ -188,57 +220,50 @@ router.put(
   async (req, res) => {
     const { id } = req.params;
     const { name, email, RoleId, roleId, discontinue } = req.body;
-
     try {
       const pool = getPool();
-
       const assignedRoleId = Number(RoleId ?? roleId);
-
       await pool
         .request()
         .input("id", sql.Int, id)
         .input("name", sql.NVarChar, name)
         .input("email", sql.NVarChar, email)
         .input("RoleId", sql.Int, assignedRoleId)
-        .input("discontinue", sql.Bit, discontinue ? 1 : 0)
-        .query(`
+        .input("discontinue", sql.Bit, discontinue ? 1 : 0).query(`
           UPDATE dbo.users
           SET name=@name, email=@email, RoleId=@RoleId, discontinue=@discontinue
           WHERE id=@id
         `);
-
       res.json({ message: "User updated" });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
-  }
+  },
 );
 
+// ======================
 // DELETE USER
+// ======================
 router.delete(
   "/:id",
   authMiddleware,
   checkPermission("Users", "List", "CanDelete"),
   async (req, res) => {
     const { id } = req.params;
-
     if (parseInt(id) === req.user?.userId) {
       return res.status(400).json({ error: "Cannot delete yourself" });
     }
-
     try {
       const pool = getPool();
-
       await pool
         .request()
         .input("id", sql.Int, id)
         .query("DELETE FROM dbo.users WHERE id=@id");
-
       res.json({ message: "User deleted" });
     } catch (err) {
       res.status(500).json({ error: err.message });
     }
-  }
+  },
 );
 
 module.exports = router;

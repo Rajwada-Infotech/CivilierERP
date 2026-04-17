@@ -12,6 +12,7 @@ const authMiddleware = require("./middleware/auth");
 const rateLimit = require("express-rate-limit");
 const logger = require("./logger");
 const { ipKeyGenerator } = require("express-rate-limit");
+
 const {
   getRedis,
   redisZScore,
@@ -42,9 +43,6 @@ async function startServer() {
   try {
     await connectDB();
 
-    // ---------------------------------------------------------------------------
-    // Build Redis-backed rate limit stores
-    // ---------------------------------------------------------------------------
     function makeStore(prefix) {
       try {
         const { RedisStore } = require("rate-limit-redis");
@@ -84,16 +82,16 @@ async function startServer() {
       keyGenerator: (req) => `${req.user?.userId || ipKeyGenerator(req)}`,
     });
 
-    // ---------------------------------------------------------------------------
     const app = express();
 
     app.disable("x-powered-by");
+
+    // ====================== MIDDLEWARE ======================
     app.use(express.json());
     app.use(express.urlencoded({ extended: true }));
     app.use(helmet());
     app.use(morgan("tiny"));
 
-    // Track global metrics on every request
     app.use(async (req, res, next) => {
       try {
         await incrGlobalRequests();
@@ -102,6 +100,7 @@ async function startServer() {
       next();
     });
 
+<<<<<<< HEAD
     const corsOptions = {
       origin: (origin, cb) => {
         if (process.env.NODE_ENV === "development" && origin) {
@@ -147,20 +146,52 @@ async function startServer() {
     app.use("/api", apiLimiter);
 
     // Public routes (no auth)
+=======
+    // CORS
+    app.use(
+      cors({
+        origin: (origin, callback) => {
+          if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+            callback(null, true);
+          } else {
+            console.warn(`CORS rejected origin: ${origin}`);
+            callback(new Error("Not allowed by CORS"));
+          }
+        },
+        credentials: true,
+        methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+        allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+        optionsSuccessStatus: 204,
+      }),
+    );
+
+    // ====================== RATE LIMITERS ======================
+    app.use("/api/users/login", loginLimiter);
+    app.use("/api", apiLimiter);
+
+    // ====================== ROUTES ======================
+
+    // Public routes
+>>>>>>> 29d867355f6214f453259329362bf048a99aa8e9
     app.use("/api/users", require("./routes/users"));
+    app.use("/api/roles", require("./routes/roles"));
 
-    // Protected routes
-    const allowRoles = require("./middleware/role");
+    // Global authentication for all /api routes (except the public ones above)
+    app.use("/api", authMiddleware);
 
+<<<<<<< HEAD
     // Track active users after auth (scoped to /api only)
     app.use("/api", authMiddleware, async (req, res, next) => {
+=======
+    // Active user tracking
+    app.use((req, res, next) => {
+>>>>>>> 29d867355f6214f453259329362bf048a99aa8e9
       if (req.user?.userId) {
-        try {
-          await pfaddActiveUser(req.user.userId);
-        } catch {}
+        pfaddActiveUser(req.user.userId).catch(() => {});
       }
       next();
     });
+<<<<<<< HEAD
 
     // Route definitions
     const routes = [
@@ -223,6 +254,53 @@ async function startServer() {
 
     // System metrics endpoint
     app.get("/api/system/metrics", authMiddleware, async (req, res) => {
+=======
+
+    // Protected routes
+    app.use("/api/user-rights", require("./routes/userRights"));
+    app.use("/api/account-group", require("./routes/accountGroup"));
+    app.use("/api/account-head", require("./routes/accountHeadMaster"));
+    app.use("/api/activity-master", require("./routes/activityMaster"));
+    app.use("/api/bank-master", require("./routes/bankMaster"));
+    app.use("/api/billing-terms", require("./routes/billingTerms"));
+    app.use("/api/card-master", require("./routes/cardMaster"));
+    app.use("/api/cheque-master", require("./routes/chequeMaster"));
+    app.use("/api/document-type", require("./routes/documentType"));
+    app.use("/api/fin-year", require("./routes/finYear"));
+    app.use("/api/general-ledger", require("./routes/generalLedger"));
+    app.use("/api/hsn", require("./routes/hsn"));
+    app.use("/api/item-groups", require("./routes/itemGroup"));
+    app.use("/api/item-master", require("./routes/itemMaster"));
+    app.use("/api/tds-master", require("./routes/tdsMaster"));
+    app.use("/api/enterprises", require("./routes/enterprise"));
+    app.use("/api/entry-type", require("./routes/entryType"));
+    app.use("/api/expense-booking", require("./routes/expenseBooking"));
+    app.use("/api/new-payment", require("./routes/newPayment"));
+    app.use("/api/purchase-orders", require("./routes/purchaseOrders"));
+    app.use("/api/tenants", require("./routes/tenants"));
+    app.use("/api/work-orders", require("./routes/workOrder"));
+    app.use("/api/user-profile", require("./routes/userProfile"));
+    app.use("/api/uom-master", require("./routes/uomMaster"));
+    app.use("/api/debit-note", require("./routes/debitNote"));
+    app.use("/api/tc-master", require("./routes/tcMaster"));
+    app.use("/api/grns", require("./routes/grns"));
+    app.use("/api/finance-dashboard", require("./routes/financeDashboard"));
+    app.use("/api/material-dashboard", require("./routes/materialDashboard"));
+    app.use("/api/admin-dashboard", require("./routes/adminDashboard"));
+    app.use("/api/user-activity", require("./routes/userActivity"));
+    app.use("/api/tasks", require("./routes/tasks"));
+
+    // Routes with extra role checks
+    const allowRoles = require("./middleware/role");
+    app.use(
+      "/api/dba",
+      allowRoles("dba", "admin", "director"),
+      require("./routes/dba"),
+    );
+
+    // System metrics
+    app.get("/api/system/metrics", async (req, res) => {
+>>>>>>> 29d867355f6214f453259329362bf048a99aa8e9
       const metrics = await getSystemMetrics();
       const predictedRPM = await getPredictedRPM();
       metrics.predictedRPM = predictedRPM;
@@ -242,10 +320,10 @@ async function startServer() {
           metrics.memoryUsage,
         );
       }
-
       res.json(metrics);
     });
 
+<<<<<<< HEAD
     // Global error handler
     app.use((err, req, res, next) => {
       logger.error({
@@ -257,6 +335,14 @@ async function startServer() {
 
     const PORT = process.env.PORT || 5000;
     app.listen(PORT, () => logger.info(`Server running on port ${PORT}`));
+=======
+    app.get("/", (req, res) => res.send("CivilierERP API running"));
+
+    const PORT = process.env.PORT || 5000;
+    app.listen(PORT, () => {
+      console.log(`🚀 Server running on port ${PORT}`);
+    });
+>>>>>>> 29d867355f6214f453259329362bf048a99aa8e9
 
     return app;
   } catch (err) {
@@ -266,7 +352,6 @@ async function startServer() {
 }
 
 const appPromise = startServer();
-
 module.exports = async (req, res) => {
   const app = await appPromise;
   return app(req, res);

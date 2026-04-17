@@ -218,7 +218,14 @@ export function useReminders(
   const [fetched, setFetched] = useState(false);
   const cancelledRef = useRef(false);
 
+  // Guard: never fire any reminder fetch if there is no auth token.
+  // Without this, all 5 reminder endpoints fire immediately on app load
+  // (before login), get 401s, and trigger fetchWithAuth's redirect → reload
+  // → all contexts remount → 401s again → infinite loop.
+  const hasToken = useCallback(() => !!localStorage.getItem("token"), []);
+
   const refresh = useCallback(async () => {
+    if (!hasToken()) return; // skip silently if not authenticated
     setLoading(true);
     try {
       const items = await fetchAllReminders();
@@ -231,7 +238,7 @@ export function useReminders(
     } finally {
       if (!cancelledRef.current) setLoading(false);
     }
-  }, []);
+  }, [hasToken]);
 
   // Mount fetch
   useEffect(() => {
@@ -242,12 +249,14 @@ export function useReminders(
     };
   }, [fetchOnMount, refresh]);
 
-  // Background polling
+  // Background polling — only while authenticated
   useEffect(() => {
     if (!pollingInterval) return;
-    const id = setInterval(refresh, pollingInterval);
+    const id = setInterval(() => {
+      if (hasToken()) refresh();
+    }, pollingInterval);
     return () => clearInterval(id);
-  }, [pollingInterval, refresh]);
+  }, [pollingInterval, refresh, hasToken]);
 
   const badgeCount = reminders.filter(
     (r) => r.urgency === "overdue" || r.urgency === "today",
