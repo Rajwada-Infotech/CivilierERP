@@ -1,13 +1,35 @@
 const express = require("express")
 const router = express.Router()
 const { getPool, sql } = require("../db")
+const { cache } = require("../middleware/cache")
 
 // GET all
-router.get("/", async (req, res) => {
+router.get("/", cache("new-payment", 300), async (req, res) => {
   try {
     const pool = getPool()
-    const result = await pool.request().query("SELECT * FROM dbo.NewPayment")
-    res.json(result.recordset)
+
+    // Sanitized pagination params
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const offset = (page - 1) * limit;
+
+    // Total count
+    const countResult = await pool.request().query("SELECT COUNT(*) AS total FROM dbo.NewPayment");
+    const total = parseInt(countResult.recordset[0].total);
+
+    // Paginated data
+    const result = await pool.request()
+      .input('offset', sql.Int, offset)
+      .input('limit', sql.Int, limit)
+      .query("SELECT * FROM dbo.NewPayment ORDER BY PPaymentID DESC OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY");
+
+    res.json({
+      data: result.recordset,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit)
+    });
   } catch (err) {
     res.status(500).json({ error: err.message })
   }

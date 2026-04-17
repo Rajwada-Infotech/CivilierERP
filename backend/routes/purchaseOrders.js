@@ -1,24 +1,44 @@
 const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
+const { cache } = require("../middleware/cache");
 
 // ── GET / ─────────────────────────────────────────────────────────────────────
 // Returns all POs joined with supplier name (from AccountHeadMaster) and
 // project name (from enterprise). Schema columns: SupplierID (FK int),
 // ProjectId (FK int). No Supplier/Company/ProjectSite text columns exist.
-router.get("/", async (req, res) => {
+router.get("/", cache("purchase-orders", 300), async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query(`
+
+    // Sanitized pagination params
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const offset = (page - 1) * limit;
+
+    // Total count (matching exact JOINs)
+    const countResult = await pool.request().query(`
+      SELECT COUNT(*) AS total
+      FROM dbo.PurchaseOrders po
+      LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = po.SupplierID
+      LEFT JOIN dbo.enterprise en ON en.id = po.ProjectId
+    `);
+    const total = parseInt(countResult.recordset[0].total);
+
+    // Paginated data
+    const result = await pool.request()
+      .input('offset', sql.Int, offset)
+      .input('limit', sql.Int, limit)
+      .query(`
       SELECT
         po.PurchaseOrderID,
         po.PurchaseOrderNo,
         po.PODate,
         po.ExpectedDeliveryDate,
         po.SupplierID,
-        ah.LHeadName      AS SupplierName,
+        ah.LHeadName AS SupplierName,
         po.ProjectId,
-        en.name           AS ProjectName,
+        en.name AS ProjectName,
         po.ItemDescription,
         po.Quantity,
         po.Unit,
@@ -34,10 +54,18 @@ router.get("/", async (req, res) => {
         po.ApprovedAt
       FROM dbo.PurchaseOrders po
       LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = po.SupplierID
-      LEFT JOIN dbo.enterprise        en ON en.id      = po.ProjectId
-      ORDER BY po.CreatedAt DESC
+      LEFT JOIN dbo.enterprise en ON en.id = po.ProjectId
+      ORDER BY po.PurchaseOrderID DESC
+      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
     `);
-    res.json(result.recordset);
+
+    res.json({
+      data: result.recordset,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit)
+    });
   } catch (err) {
     console.error("GET PurchaseOrders error:", err);
     res.status(500).json({ error: err.message });

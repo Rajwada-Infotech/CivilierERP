@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
+const { cache } = require("../middleware/cache");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // IMPORTANT: /options MUST be declared before /:id so Express does not treat
@@ -28,13 +29,32 @@ router.get("/options", async (req, res) => {
 });
 
 // GET all
-router.get("/", async (req, res) => {
+router.get("/", cache("expense-booking", 300), async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool
-      .request()
-      .query("SELECT * FROM dbo.ExpenseBooking");
-    res.json(result.recordset);
+
+    // Sanitized pagination params
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const offset = (page - 1) * limit;
+
+    // Total count
+    const countResult = await pool.request().query("SELECT COUNT(*) AS total FROM dbo.ExpenseBooking");
+    const total = parseInt(countResult.recordset[0].total);
+
+    // Paginated data
+    const result = await pool.request()
+      .input('offset', sql.Int, offset)
+      .input('limit', sql.Int, limit)
+      .query("SELECT * FROM dbo.ExpenseBooking ORDER BY Eid DESC OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY");
+
+    res.json({
+      data: result.recordset,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit)
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

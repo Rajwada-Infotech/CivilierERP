@@ -1,9 +1,12 @@
-# Remove Unnecessary TODO Lists
-Status: ✅ COMPLETE
+# brs.js Correction Task
+Current Working Directory: c:/Users/rahul/Desktop/MyWork/CivilierERP
 
-## Steps
-- [x] 1. Create this TODO.md ✅
-- [x] 2. Delete unnecessary TODO-*.md files ✅
-- [x] 3. Verify removal and complete task ✅
+## Steps from Approved Plan
+- [ ] Step 1: Edit backend/routes/brs.js - Fix \n syntax, SQL injection, combine UPDATEs with parameterization
+- [ ] Step 2: docker-compose down && docker-compose up --build (followup)
+- [ ] Step 3: Verify server starts without errors (followup)
+- [ ] Step 4: Test /auto-match endpoint (followup)
 
-**Result:** Only TODO.md remains. All other TODO-*.md files (completed checklists/artifacts) removed. Project cleaned up. No in-code TODOs found.
+## Status
+Plan approved. Starting edits.
+
