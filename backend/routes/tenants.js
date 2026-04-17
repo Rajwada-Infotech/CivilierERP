@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
+const { bumpCacheVersion } = require("../redis");
 
 // GET all tenants
 router.get("/", cache("tenants", 300), async (req, res) => {
@@ -53,6 +54,7 @@ router.post("/", async (req, res) => {
         VALUES
           (@tenant_id, @name, @domain, @admin_email, @plan, @max_users, @db_name, @server, @status, GETDATE())
       `);
+    await bumpCacheVersion("tenants");
     res.json({ message: "Tenant created", tenant_id });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -84,6 +86,7 @@ router.put("/:id", async (req, res) => {
           db_name=@db_name, server=@server, status=@status
         WHERE tenant_id=@old_id
       `);
+    await bumpCacheVersion("tenants");
     res.json({ message: "Tenant updated" });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -100,6 +103,7 @@ router.patch("/:id/status", async (req, res) => {
       .input("id", sql.NVarChar, req.params.id)
       .input("status", sql.NVarChar, status)
       .query("UPDATE dbo.tenants SET status=@status WHERE tenant_id=@id");
+    await bumpCacheVersion("tenants");
     res.json({ message: `Tenant ${status}` });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -114,6 +118,7 @@ router.delete("/:id", async (req, res) => {
       .request()
       .input("id", sql.NVarChar, req.params.id)
       .query("DELETE FROM dbo.tenants WHERE tenant_id=@id");
+    await bumpCacheVersion("tenants");
     res.json({ message: "Tenant deleted" });
   } catch (err) {
     res.status(500).json({ error: err.message });

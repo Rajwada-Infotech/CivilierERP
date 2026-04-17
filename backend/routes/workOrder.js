@@ -1,6 +1,6 @@
 const express = require("express");
 const { cache } = require("../middleware/cache");
-const { redisDelPattern } = require("../redis");
+const { bumpCacheVersion } = require("../redis");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 
@@ -80,7 +80,7 @@ router.get("/", cache("work-orders", 300), async (req, res) => {
 });
 
 // GET single work order — full nested tree (header + activities + materials)
-router.get("/:id", async (req, res) => {
+router.get("/:id", cache("work-orders", 300), async (req, res) => {
   try {
     const pool = getPool();
 
@@ -192,6 +192,7 @@ router.post("/", async (req, res) => {
           (@CompanyId, @ProjectId, @DocumentNumber, @DocumentDate, @ContractorId,
            @TotalAmount, @Remarks, @TermsAndConditions, @CreatedBy, @CreatedAt)
       `);
+    await bumpCacheVersion("work-orders");
     res
       .status(201)
       .json({ message: "Work order created", Id: result.recordset[0].Id });
@@ -236,7 +237,7 @@ router.put("/:id", async (req, res) => {
           UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt
         WHERE Id=@Id
       `);
-    await redisDelPattern("cache:work-orders:*");
+    await bumpCacheVersion("work-orders");
     res.json({ message: "Work order updated" });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -263,7 +264,7 @@ router.delete("/:id", async (req, res) => {
       .request()
       .input("Id", sql.Int, req.params.id)
       .query("DELETE FROM dbo.WorkOrderHeader WHERE Id = @Id");
-    await redisDelPattern("cache:work-orders:*");
+    await bumpCacheVersion("work-orders");
     res.json({ message: "Work order and all related records deleted" });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -275,7 +276,7 @@ router.delete("/:id", async (req, res) => {
 // =============================================
 
 // GET all activities for a header
-router.get("/:id/activities", async (req, res) => {
+router.get("/:id/activities", cache("work-orders", 300), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool
@@ -343,6 +344,7 @@ router.post("/:id/activities", async (req, res) => {
           (@WorkOrderHeaderId, @ActivityGroupId, @ActivityId, @UOMId,
            @Rate, @Area, @LabourAmount, @MaterialAmount, @GrandTotal, @Remarks, @CreatedAt)
       `);
+    await bumpCacheVersion("work-orders");
     res
       .status(201)
       .json({ message: "Activity added", Id: result.recordset[0].Id });
@@ -384,7 +386,7 @@ router.put("/:id/activities/:activityId", async (req, res) => {
           MaterialAmount=@MaterialAmount, GrandTotal=@GrandTotal, Remarks=@Remarks
         WHERE Id=@Id
       `);
-    await redisDelPattern("cache:work-orders:*");
+    await bumpCacheVersion("work-orders");
     res.json({ message: "Activity updated" });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -405,7 +407,7 @@ router.delete("/:id/activities/:activityId", async (req, res) => {
       .request()
       .input("Id", sql.Int, req.params.activityId)
       .query("DELETE FROM dbo.WorkOrderActivities WHERE Id = @Id");
-    await redisDelPattern("cache:work-orders:*");
+    await bumpCacheVersion("work-orders");
     res.json({ message: "Activity and its materials deleted" });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -417,7 +419,7 @@ router.delete("/:id/activities/:activityId", async (req, res) => {
 // =============================================
 
 // GET all materials for an activity
-router.get("/:id/activities/:activityId/materials", async (req, res) => {
+router.get("/:id/activities/:activityId/materials", cache("work-orders", 300), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool
@@ -464,6 +466,7 @@ router.post("/:id/activities/:activityId/materials", async (req, res) => {
         VALUES
           (@WorkOrderActivityId, @ItemId, @UOMId, @Quantity, @Rate, @Remarks, @CreatedBy, @CreatedAt)
       `);
+    await bumpCacheVersion("work-orders");
     res
       .status(201)
       .json({ message: "Material added", Id: result.recordset[0].Id });
@@ -495,7 +498,7 @@ router.put(
             UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt
           WHERE Id=@Id
         `);
-      await redisDelPattern("cache:work-orders:*");
+      await bumpCacheVersion("work-orders");
       res.json({ message: "Material updated" });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -513,7 +516,7 @@ router.delete(
         .request()
         .input("Id", sql.Int, req.params.materialId)
         .query("DELETE FROM dbo.WorkOrderActivityMaterials WHERE Id = @Id");
-      await redisDelPattern("cache:work-orders:*");
+      await bumpCacheVersion("work-orders");
       res.json({ message: "Material deleted" });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -729,7 +732,7 @@ router.post("/:id/save-full", async (req, res) => {
         );
     }
 
-    await redisDelPattern("cache:work-orders:*");
+    await bumpCacheVersion("work-orders");
     res.json({
       message: "Work order saved successfully",
       activityCount: safeActivityIds.length,

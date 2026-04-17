@@ -1,6 +1,6 @@
 const express = require("express");
 const { cache } = require("../middleware/cache");
-const { redisDelPattern } = require("../redis");
+const { bumpCacheVersion } = require("../redis");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 
@@ -193,6 +193,9 @@ router.post("/", async (req, res) => {
           NULL, @Parent_Id
         )
       `);
+    await bumpCacheVersion("item-master");
+    await bumpCacheVersion("stock-ledger");
+
     res.status(201).json({
       message: "Item created successfully",
       M_Id: result.recordset[0].M_Id,
@@ -270,7 +273,8 @@ router.put("/:id", async (req, res) => {
       `);
     if (result.rowsAffected[0] === 0)
       return res.status(404).json({ error: "Item not found" });
-    await redisDelPattern("cache:item-master:*");
+    await bumpCacheVersion("item-master");
+    await bumpCacheVersion("stock-ledger");
 
     res.json({ message: "Item updated successfully" });
   } catch (err) {
@@ -290,7 +294,8 @@ router.delete("/:id", async (req, res) => {
       .query("DELETE FROM dbo.Item_Master_Group WHERE M_Id = @M_Id");
     if (result.rowsAffected[0] === 0)
       return res.status(404).json({ error: "Item not found" });
-    await redisDelPattern("cache:item-master:*");
+    await bumpCacheVersion("item-master");
+    await bumpCacheVersion("stock-ledger");
 
     res.json({ message: "Item deleted successfully" });
   } catch (err) {

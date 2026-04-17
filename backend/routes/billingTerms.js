@@ -1,6 +1,6 @@
 const express = require("express")
 const { cache } = require("../middleware/cache");
-const { redisDelPattern, bumpCacheVersion } = require("../redis");
+const { bumpCacheVersion } = require("../redis");
 const router = express.Router()
 const { getPool, sql } = require("../db")
 

@@ -23,13 +23,17 @@ const {
 function cache(namespace, ttl = 300) {
   return async (req, res, next) => {
     try {
-      const queryStr = JSON.stringify(req.query || {});
+      const routeScope = JSON.stringify({
+        path: `${req.baseUrl || ""}${req.path || ""}`,
+        params: req.params || {},
+        query: req.query || {},
+      });
       const userId = req.user?.userId || "anon";
 
       const version = await getCacheVersion(namespace);
 
-      const key = `cache:${namespace}:v${version}:${userId}:${queryStr}`;
-      const baseKey = `cache:${namespace}:${userId}:${queryStr}`;
+      const key = `cache:${namespace}:v${version}:${userId}:${routeScope}`;
+      const baseKey = `cache:${namespace}:${userId}:${routeScope}`;
       const staleKey = `cache:stale:${baseKey}`;
       const lockKey = `cachelock:${key}`;
 
