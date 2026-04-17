@@ -7,13 +7,14 @@ import React, {
 } from "react";
 import { useLocation } from "react-router-dom";
 
-type Module = "finance" | "material" | "followup" | null;
+type Module = "finance" | "material" | "followup" | "admin" | null;
 
 // Single source of truth for module dashboard routes
 export const MODULE_DASHBOARD_ROUTES: Record<NonNullable<Module>, string> = {
   finance: "/",
   material: "/material",
   followup: "/followup",
+  admin: "/admin",
 };
 
 interface ModuleContextType {
@@ -47,7 +48,9 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
         ? "📦 Material"
         : activeModule === "followup"
           ? "📅 Follow-Up"
-          : "No Module Selected";
+          : activeModule === "admin"
+            ? "🔧 Admin"
+            : "No Module Selected";
 
   const setActiveModule = useCallback((m: Module) => {
     setActiveModuleState(m);
@@ -79,7 +82,7 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
 
     if (
       stored &&
-      (["finance", "material", "followup"] as Module[]).includes(stored)
+      (["finance", "material", "followup", "admin"] as Module[]).includes(stored)
     ) {
       setActiveModuleState(stored);
       return;
@@ -87,7 +90,10 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
 
     // First visit — no stored preference, infer from URL
     const pathname = location.pathname;
-    if (pathname.startsWith("/followup")) {
+    if (pathname.startsWith("/admin")) {
+      setActiveModuleState("admin");
+      localStorage.setItem("activeModule", "admin");
+    } else if (pathname.startsWith("/followup")) {
       setActiveModuleState("followup");
       localStorage.setItem("activeModule", "followup");
     } else if (pathname.startsWith("/material")) {
@@ -115,3 +121,4 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
     </ModuleContext.Provider>
   );
 };
+

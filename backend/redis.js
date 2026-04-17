@@ -1,5 +1,7 @@
+const logger = require("./logger");
 const Redis = require("ioredis");
 const LZString = require("lz-string");
+
 
 let cachedMetrics = {
   rpm: 0,
@@ -25,7 +27,7 @@ function getRedis() {
       // lazyConnect: false (default) — connects immediately, no manual .connect() needed
     });
 
-    client.on("connect", () => console.log("Redis connected"));
+    client.on("connect", () => logger.info("Redis connected"));
     client.on("error", (err) => console.error("Redis error:", err.message));
     client.on("close", () => console.warn("Redis connection closed"));
   }
@@ -261,8 +263,7 @@ async function decayEngagement() {
   try {
     const redis = getRedis();
     await redis.eval(`
-      local members = redis.call('Z RANGE', 'engagement:score', 0, -1, 'WITHSCORES')
-      for i = 1, #members, 2 do
+      local members = redis.call('ZRANGE', 'engagement:score', 0, -1, 'WITHSCORES')\n      for i = 1, #members, 2 do
         local score = tonumber(members[i+1])
         if score then
           redis.call('ZADD', 'engagement:score', score * 0.99, members[i])

@@ -138,6 +138,7 @@ const TCMaster = lazy(() => import("./pages/material/T&CMaster"));
 const UnitOfMeasurementMaster = lazy(
   () => import("./pages/material/UnitOfMeasurementMaster"),
 );
+const BusinessUnitWrapper = lazy(() => import("./pages/masters/BusinessUnitWrapper"));
 
 // Admin Pages
 const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
@@ -609,6 +610,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/masters/business-unit"
+        element={
+          <ProtectedRoute>
+            <BusinessUnitWrapper />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/masters/unit-measurement"
         element={
           <ProtectedRoute>
@@ -670,7 +679,14 @@ function AppRoutes() {
       />
 
       {/* ADMIN — bare /admin redirects to home */}
-      <Route path="/admin" element={<Navigate to="/" replace />} />
+<Route
+        path="/admin"
+        element={
+          <AdminRoute>
+            <AdminDashboard />
+          </AdminRoute>
+        }
+      />
       <Route
         path="/admin/dashboard"
         element={

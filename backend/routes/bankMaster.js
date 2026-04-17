@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
+const { cache } = require("../middleware/cache");
 
 // ====================== HELPERS ======================
 const cleanStr = (v, len = 255) => {
@@ -26,7 +27,7 @@ const cleanDecimal = (v) => {
 };
 
 // ====================== GET ALL BANKS ======================
-router.get("/", async (req, res) => {
+router.get("/", cache("bank-master", 300), async (req, res) => {
   try {
     const pool = await getPool();
     const result = await pool.request().input("type", sql.VarChar(50), "B")

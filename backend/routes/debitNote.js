@@ -1,6 +1,7 @@
 const express = require("express")
 const router = express.Router()
 const { getPool, sql } = require("../db")
+const { cache } = require("../middleware/cache")
 
 // ─── Helper: parse a value as a positive integer, or return null ──────────────
 function toInt(val) {
@@ -9,15 +10,36 @@ function toInt(val) {
 }
 
 // GET all debit notes
-router.get("/", async (req, res) => {
+router.get("/", cache("debit-note", 300), async (req, res) => {
   try {
     const pool = getPool()
-    const result = await pool.request().query(
-      `SELECT id, company_id, project_id, supplier_id, bill_id, is_active,
-              created_at, updated_at
-       FROM dbo.DebitNote`
-    )
-    res.json(result.recordset)
+
+    // Sanitized pagination params
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const offset = (page - 1) * limit;
+
+    // Total count
+    const countResult = await pool.request().query("SELECT COUNT(*) AS total FROM dbo.DebitNote");
+    const total = parseInt(countResult.recordset[0].total);
+
+    // Paginated data
+    const result = await pool.request()
+      .input('offset', sql.Int, offset)
+      .input('limit', sql.Int, limit)
+      .query(`SELECT id, company_id, project_id, supplier_id, bill_id, is_active,
+                    created_at, updated_at
+             FROM dbo.DebitNote
+             ORDER BY id DESC
+             OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY`);
+
+    res.json({
+      data: result.recordset,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit)
+    });
   } catch (err) {
     console.error("GET ERROR:", err.message)
     res.status(500).json({ error: err.message })

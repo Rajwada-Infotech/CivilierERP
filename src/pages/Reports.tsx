@@ -1,42 +1,7 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, PieChart, Pie, Cell, LineChart, Line } from "recharts";
 import { TrendingUp, FileText, IndianRupee, PieChart as PieChartIcon } from "lucide-react";
-
-const monthlyData = [
-  { month: "Oct", income: 620000, expense: 410000 },
-  { month: "Nov", income: 580000, expense: 390000 },
-  { month: "Dec", income: 710000, expense: 520000 },
-  { month: "Jan", income: 650000, expense: 480000 },
-  { month: "Feb", income: 820000, expense: 450000 },
-  { month: "Mar", income: 925000, expense: 398500 },
-];
-
-const categoryData = [
-  { name: "Material", value: 185000, color: "hsl(239, 84%, 67%)" },
-  { name: "Labour", value: 96000, color: "hsl(263, 70%, 58%)" },
-  { name: "Transport", value: 22000, color: "hsl(217, 91%, 60%)" },
-  { name: "Equipment", value: 45000, color: "hsl(174, 72%, 46%)" },
-  { name: "Admin", value: 50500, color: "hsl(340, 75%, 55%)" },
-];
-
-const cashFlowData = [
-  { month: "Oct", balance: 1200000 },
-  { month: "Nov", balance: 1390000 },
-  { month: "Dec", balance: 1580000 },
-  { month: "Jan", balance: 1750000 },
-  { month: "Feb", balance: 2120000 },
-  { month: "Mar", balance: 2646500 },
-];
-
-const topParties = [
-  { name: "Raj Builders", total: "₹4,25,000", txns: 12 },
-  { name: "Metro Hardware", total: "₹3,87,500", txns: 8 },
-  { name: "SiteCraft Engineers", total: "₹2,68,000", txns: 6 },
-  { name: "Quick Transport Co", total: "₹1,54,000", txns: 15 },
-  { name: "Bharat Steel Traders", total: "₹1,22,000", txns: 4 },
-];
-
 const Reports: React.FC = () => (
   <>
       <Breadcrumbs items={["Dashboard", "Reports"]} />

@@ -1,11 +1,12 @@
-# Fix getOverdueTasks Error in Dashboard
+# brs.js Correction Task
+Current Working Directory: c:/Users/rahul/Desktop/MyWork/CivilierERP
 
-## Steps
+## Steps from Approved Plan
+- [ ] Step 1: Edit backend/routes/brs.js - Fix \n syntax, SQL injection, combine UPDATEs with parameterization
+- [ ] Step 2: docker-compose down && docker-compose up --build (followup)
+- [ ] Step 3: Verify server starts without errors (followup)
+- [ ] Step 4: Test /auto-match endpoint (followup)
 
-- [x] 1. Add missing `getOverdueTasks` and `getDueSoonTasks` to TaskContext.tsx
-- [ ] 2. Test Dashboard.tsx loads without error  
-- [ ] 3. Verify FollowupDashboard.tsx also works
-- [ ] 4. Clean up redundant calculations in Dashboard.tsx (optional)
-- [ ] 5. Complete
+## Status
+Plan approved. Starting edits.
 
-**Status:** TaskContext ✅ fixed with date-filtering helpers. Refresh/restart dev server (`npm run dev`) and navigate to Dashboard to confirm \"getOverdueTasks is not a function\" error resolved. FollowupDashboard.tsx also fixed automatically.

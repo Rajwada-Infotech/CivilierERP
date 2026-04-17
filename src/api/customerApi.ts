@@ -1,6 +1,6 @@
 import { fetchWithAuth } from '@/lib/fetchWithAuth'
 
-const BASE = '/api/customerMaster'
+const BASE = '/api/account-head'
 
 // ─── CRUD ─────────────────────────────────────────────────────────────────────
 
