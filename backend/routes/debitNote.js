@@ -2,6 +2,7 @@ const express = require("express")
 const router = express.Router()
 const { getPool, sql } = require("../db")
 const { cache } = require("../middleware/cache")
+const { bumpCacheVersion } = require("../redis")
 
 // ─── Helper: parse a value as a positive integer, or return null ──────────────
 function toInt(val) {
@@ -84,6 +85,7 @@ router.post("/", async (req, res) => {
         VALUES
           (@company_id, @project_id, @supplier_id, @bill_id, @is_active, @created_by, @created_at)
       `)
+    await bumpCacheVersion("debit-note")
     res.json({ message: "Debit note added successfully" })
   } catch (err) {
     console.error("INSERT ERROR:", err.message)
@@ -140,6 +142,7 @@ router.put("/:id", async (req, res) => {
           updated_at  = @updated_at
         WHERE id = @id
       `)
+    await bumpCacheVersion("debit-note")
     res.json({ message: "Debit note updated successfully" })
   } catch (err) {
     console.error("UPDATE ERROR:", err.message)
@@ -159,6 +162,7 @@ router.delete("/:id", async (req, res) => {
     await pool.request()
       .input("id", sql.Int, id)
       .query("DELETE FROM dbo.DebitNote WHERE id = @id")
+    await bumpCacheVersion("debit-note")
     res.json({ message: "Debit note deleted successfully" })
   } catch (err) {
     console.error("DELETE ERROR:", err.message)

@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
+const { bumpCacheVersion } = require("../redis");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // General Ledger Routes
@@ -109,7 +110,7 @@ router.get("/", cache("general-ledger", 300), async (req, res) => {
 
 // ── GET /:id ──────────────────────────────────────────────────────────────────
 // Returns a single GL ledger head by its primary key.
-router.get("/:id", async (req, res) => {
+router.get("/:id", cache("general-ledger-detail", 180), async (req, res) => {
   const numericId = parseInt(req.params.id, 10);
   if (!Number.isFinite(numericId) || numericId <= 0) {
     return res.status(400).json({ error: "Invalid record id" });
@@ -195,6 +196,8 @@ router.post("/", async (req, res) => {
         )
       `);
 
+    await bumpCacheVersion("general-ledger");
+    await bumpCacheVersion("general-ledger-detail");
     res
       .status(201)
       .json({ message: "General ledger account created successfully" });
@@ -249,6 +252,8 @@ router.put("/:id", async (req, res) => {
       return res.status(404).json({ error: "General ledger record not found" });
     }
 
+    await bumpCacheVersion("general-ledger");
+    await bumpCacheVersion("general-ledger-detail");
     res.json({ message: "General ledger account updated successfully" });
   } catch (err) {
     console.error("GL UPDATE ERROR:", err.message);
@@ -277,6 +282,8 @@ router.delete("/:id", async (req, res) => {
       return res.status(404).json({ error: "General ledger record not found" });
     }
 
+    await bumpCacheVersion("general-ledger");
+    await bumpCacheVersion("general-ledger-detail");
     res.json({ message: "General ledger account deleted successfully" });
   } catch (err) {
     console.error("GL DELETE ERROR:", err.message);

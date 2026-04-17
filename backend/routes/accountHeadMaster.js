@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
+const { bumpCacheVersion } = require("../redis");
 
 // GET all ledger heads
 router.get("/", cache("account-head-master", 300), async (req, res) => {
@@ -87,6 +88,8 @@ router.post("/", async (req, res) => {
           @LHeadType, @CreatedBy, @CreatedAt
         )
       `);
+    await bumpCacheVersion("account-head-master");
+
     res.json({ message: "Ledger head added successfully" });
   } catch (err) {
     console.error("INSERT ERROR:", err.message);
@@ -190,6 +193,8 @@ router.put("/:id", async (req, res) => {
           isEdited           = 1
         WHERE LHeadId = @id
       `);
+    await bumpCacheVersion("account-head-master");
+
     res.json({ message: "Ledger head updated" });
   } catch (err) {
     console.error("UPDATE ERROR:", err.message);
@@ -205,6 +210,8 @@ router.delete("/:id", async (req, res) => {
       .request()
       .input("id", sql.Int, req.params.id)
       .query("DELETE FROM dbo.AccountHeadMaster WHERE LHeadId = @id");
+    await bumpCacheVersion("account-head-master");
+
     res.json({ message: "Ledger head deleted" });
   } catch (err) {
     console.error("DELETE ERROR:", err.message);

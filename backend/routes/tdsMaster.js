@@ -1,6 +1,6 @@
 const express = require("express");
 const { cache } = require("../middleware/cache");
-const { redisDelPattern } = require("../redis");
+const { bumpCacheVersion } = require("../redis");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 
@@ -28,7 +28,7 @@ router.post("/", async (req, res) => {
         INSERT INTO dbo.TDSMaster (Nature, Name, Percentage, Status, CreatedAt)
         VALUES (@Nature, @Name, @Percentage, @Status, @CreatedAt)
       `);
-    await redisDelPattern("cache:tds-master:*");
+    await bumpCacheVersion("tds-master");
 
     res.json({ message: "TDS added" });
   } catch (err) {
@@ -53,7 +53,7 @@ router.put("/:id", async (req, res) => {
           Status=@Status, UpdatedAt=@UpdatedAt
         WHERE TDSId=@TDSId
       `);
-    await redisDelPattern("cache:tds-master:*");
+    await bumpCacheVersion("tds-master");
 
     res.json({ message: "TDS updated" });
   } catch (err) {
@@ -68,7 +68,7 @@ router.delete("/:id", async (req, res) => {
       .request()
       .input("TDSId", sql.Int, req.params.id)
       .query("DELETE FROM dbo.TDSMaster WHERE TDSId=@TDSId");
-    await redisDelPattern("cache:tds-master:*");
+    await bumpCacheVersion("tds-master");
 
     res.json({ message: "TDS deleted" });
   } catch (err) {
