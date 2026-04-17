@@ -3,7 +3,6 @@ const isDev = process.env.NODE_ENV === "development";
 
 const express = require("express");
 const helmet = require("helmet");
-
 const morgan = require("morgan");
 const cors = require("cors");
 const compression = require("compression");
@@ -92,61 +91,6 @@ async function startServer() {
     app.use(helmet());
     app.use(morgan("tiny"));
 
-    app.use(async (req, res, next) => {
-      try {
-        await incrGlobalRequests();
-        await trackHourLoad();
-      } catch {}
-      next();
-    });
-
-<<<<<<< HEAD
-    const corsOptions = {
-      origin: (origin, cb) => {
-        if (process.env.NODE_ENV === "development" && origin) {
-          console.log("CORS:", origin);
-        }
-        if (!origin || ALLOWED_ORIGINS.includes(origin)) {
-          cb(null, true);
-        } else {
-          if (process.env.NODE_ENV === "development") {
-            console.log(`CORS rejected: ${origin}`);
-          }
-          cb(new Error("Not allowed by CORS"));
-        }
-      },
-      credentials: true,
-      methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-      allowedHeaders: ["Content-Type", "Authorization"],
-    };
-
-    app.use(cors(corsOptions));
-    app.use(compression());
-
-    app.use((req, res, next) => {
-      const start = Date.now();
-      res.on("finish", () => {
-        const duration = Date.now() - start;
-        logger.info({
-          method: req.method,
-          url: req.originalUrl,
-          status: res.statusCode,
-          time: `${duration}ms`,
-        });
-      });
-      next();
-    });
-
-    // Health check — must be before auth middleware
-    app.get("/", (req, res) => res.send("CivilierERP API running"));
-    app.get("/health", (req, res) => res.json({ status: "ok" }));
-
-    // Rate limiters
-    app.use("/api/users/login", loginLimiter);
-    app.use("/api", apiLimiter);
-
-    // Public routes (no auth)
-=======
     // CORS
     app.use(
       cors({
@@ -165,35 +109,52 @@ async function startServer() {
       }),
     );
 
+    app.use(compression());
+
+    // Request logger
+    app.use((req, res, next) => {
+      const start = Date.now();
+      res.on("finish", () => {
+        const duration = Date.now() - start;
+        logger.info({
+          method: req.method,
+          url: req.originalUrl,
+          status: res.statusCode,
+          time: `${duration}ms`,
+        });
+      });
+      next();
+    });
+
+    // Global request tracking
+    app.use(async (req, res, next) => {
+      try {
+        await incrGlobalRequests();
+        await trackHourLoad();
+      } catch {}
+      next();
+    });
+
     // ====================== RATE LIMITERS ======================
     app.use("/api/users/login", loginLimiter);
     app.use("/api", apiLimiter);
 
-    // ====================== ROUTES ======================
+    // ====================== PUBLIC ROUTES (no auth) ======================
+    app.get("/", (req, res) => res.send("CivilierERP API running"));
+    app.get("/health", (req, res) => res.json({ status: "ok" }));
 
-    // Public routes
->>>>>>> 29d867355f6214f453259329362bf048a99aa8e9
     app.use("/api/users", require("./routes/users"));
     app.use("/api/roles", require("./routes/roles"));
 
-    // Global authentication for all /api routes (except the public ones above)
-    app.use("/api", authMiddleware);
-
-<<<<<<< HEAD
-    // Track active users after auth (scoped to /api only)
+    // ====================== AUTH + ACTIVE USER TRACKING ======================
     app.use("/api", authMiddleware, async (req, res, next) => {
-=======
-    // Active user tracking
-    app.use((req, res, next) => {
->>>>>>> 29d867355f6214f453259329362bf048a99aa8e9
       if (req.user?.userId) {
         pfaddActiveUser(req.user.userId).catch(() => {});
       }
       next();
     });
-<<<<<<< HEAD
 
-    // Route definitions
+    // ====================== PROTECTED ROUTES ======================
     const routes = [
       { path: "/api/user-rights",        file: "./routes/userRights" },
       { path: "/api/account-group",      file: "./routes/accountGroup" },
@@ -226,8 +187,8 @@ async function startServer() {
       { path: "/api/brs",                file: "./routes/brs" },
       { path: "/api/finance-dashboard",  file: "./routes/financeDashboard" },
       { path: "/api/material-dashboard", file: "./routes/materialDashboard" },
+      { path: "/api/admin-dashboard",    file: "./routes/adminDashboard" },
       { path: "/api/user-activity",      file: "./routes/userActivity" },
-      { path: "/api/roles",              file: "./routes/roles" },
       { path: "/api/business-units",     file: "./routes/businessUnit" },
       { path: "/api/tasks",              file: "./routes/tasks" },
     ];
@@ -246,85 +207,47 @@ async function startServer() {
     // DBA route with role restriction
     if (isDev) console.log("Loading route: dba");
     try {
-      app.use("/api/dba", authMiddleware, allowRoles("dba", "admin"), require("./routes/dba"));
+      app.use(
+        "/api/dba",
+        authMiddleware,
+        require("./middleware/role")("dba", "admin", "director"),
+        require("./routes/dba"),
+      );
     } catch (err) {
       console.error(`❌ Failed loading route: dba — ${err.message}`);
       throw err;
     }
 
-    // System metrics endpoint
+    // ====================== SYSTEM METRICS ======================
     app.get("/api/system/metrics", authMiddleware, async (req, res) => {
-=======
+      try {
+        const metrics = await getSystemMetrics();
+        const predictedRPM = await getPredictedRPM();
+        metrics.predictedRPM = predictedRPM;
 
-    // Protected routes
-    app.use("/api/user-rights", require("./routes/userRights"));
-    app.use("/api/account-group", require("./routes/accountGroup"));
-    app.use("/api/account-head", require("./routes/accountHeadMaster"));
-    app.use("/api/activity-master", require("./routes/activityMaster"));
-    app.use("/api/bank-master", require("./routes/bankMaster"));
-    app.use("/api/billing-terms", require("./routes/billingTerms"));
-    app.use("/api/card-master", require("./routes/cardMaster"));
-    app.use("/api/cheque-master", require("./routes/chequeMaster"));
-    app.use("/api/document-type", require("./routes/documentType"));
-    app.use("/api/fin-year", require("./routes/finYear"));
-    app.use("/api/general-ledger", require("./routes/generalLedger"));
-    app.use("/api/hsn", require("./routes/hsn"));
-    app.use("/api/item-groups", require("./routes/itemGroup"));
-    app.use("/api/item-master", require("./routes/itemMaster"));
-    app.use("/api/tds-master", require("./routes/tdsMaster"));
-    app.use("/api/enterprises", require("./routes/enterprise"));
-    app.use("/api/entry-type", require("./routes/entryType"));
-    app.use("/api/expense-booking", require("./routes/expenseBooking"));
-    app.use("/api/new-payment", require("./routes/newPayment"));
-    app.use("/api/purchase-orders", require("./routes/purchaseOrders"));
-    app.use("/api/tenants", require("./routes/tenants"));
-    app.use("/api/work-orders", require("./routes/workOrder"));
-    app.use("/api/user-profile", require("./routes/userProfile"));
-    app.use("/api/uom-master", require("./routes/uomMaster"));
-    app.use("/api/debit-note", require("./routes/debitNote"));
-    app.use("/api/tc-master", require("./routes/tcMaster"));
-    app.use("/api/grns", require("./routes/grns"));
-    app.use("/api/finance-dashboard", require("./routes/financeDashboard"));
-    app.use("/api/material-dashboard", require("./routes/materialDashboard"));
-    app.use("/api/admin-dashboard", require("./routes/adminDashboard"));
-    app.use("/api/user-activity", require("./routes/userActivity"));
-    app.use("/api/tasks", require("./routes/tasks"));
-
-    // Routes with extra role checks
-    const allowRoles = require("./middleware/role");
-    app.use(
-      "/api/dba",
-      allowRoles("dba", "admin", "director"),
-      require("./routes/dba"),
-    );
-
-    // System metrics
-    app.get("/api/system/metrics", async (req, res) => {
->>>>>>> 29d867355f6214f453259329362bf048a99aa8e9
-      const metrics = await getSystemMetrics();
-      const predictedRPM = await getPredictedRPM();
-      metrics.predictedRPM = predictedRPM;
-
-      const topEngagedUsers = await getRedis().zrevrange(
-        "engagement:score",
-        0,
-        9,
-        "WITHSCORES",
-      );
-      metrics.topEngagedUsers = topEngagedUsers;
-
-      if (req.user) {
-        metrics.avgLimit = getDynamicLimit(
-          (await redisZScore("engagement:score", req.user.userId)) || 0,
-          predictedRPM || metrics.rpm,
-          metrics.memoryUsage,
+        const topEngagedUsers = await getRedis().zrevrange(
+          "engagement:score",
+          0,
+          9,
+          "WITHSCORES",
         );
+        metrics.topEngagedUsers = topEngagedUsers;
+
+        if (req.user) {
+          metrics.avgLimit = getDynamicLimit(
+            (await redisZScore("engagement:score", req.user.userId)) || 0,
+            predictedRPM || metrics.rpm,
+            metrics.memoryUsage,
+          );
+        }
+
+        res.json(metrics);
+      } catch (err) {
+        res.status(500).json({ error: err.message });
       }
-      res.json(metrics);
     });
 
-<<<<<<< HEAD
-    // Global error handler
+    // ====================== GLOBAL ERROR HANDLER ======================
     app.use((err, req, res, next) => {
       logger.error({
         message: err.message,
@@ -333,16 +256,9 @@ async function startServer() {
       res.status(500).json({ error: "Internal Server Error" });
     });
 
+    // ====================== START SERVER ======================
     const PORT = process.env.PORT || 5000;
     app.listen(PORT, () => logger.info(`Server running on port ${PORT}`));
-=======
-    app.get("/", (req, res) => res.send("CivilierERP API running"));
-
-    const PORT = process.env.PORT || 5000;
-    app.listen(PORT, () => {
-      console.log(`🚀 Server running on port ${PORT}`);
-    });
->>>>>>> 29d867355f6214f453259329362bf048a99aa8e9
 
     return app;
   } catch (err) {
