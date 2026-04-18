@@ -923,20 +923,21 @@ export const TopNavbar = () => {
                   )}
                 </button>
 
-                {/* Admin - TEMP DEBUG FORCED VISIBLE */}
-{true && (
-  <>
-    <div className="mx-3 my-1.5 border-t border-border" />
-    <button
-      onClick={async () => {
-        setModuleOpen(false);
-        setSwitchingTo("Admin");
-        setModuleSwitching(true);
-        await new Promise((r) => setTimeout(r, 350));
-        navigate("/admin/dashboard");
-        setModuleSwitching(false);
-        setSwitchingTo(null);
-      }}
+                {/* Admin module — only for admin/super_admin/dba roles */}
+                {isAdmin && (
+                  <>
+                    <div className="mx-3 my-1.5 border-t border-border" />
+                    <button
+                      onClick={async () => {
+                        setModuleOpen(false);
+                        setSwitchingTo("Admin");
+                        setModuleSwitching(true);
+                        await new Promise((r) => setTimeout(r, 350));
+                        setActiveModule("admin");
+                        navigate(MODULE_DASHBOARD_ROUTES.admin);
+                        setModuleSwitching(false);
+                        setSwitchingTo(null);
+                      }}
       className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${
         isAdminPage
           ? "bg-blue-500/10 text-blue-600"
@@ -971,16 +972,15 @@ export const TopNavbar = () => {
           Admin
         </p>
         <p className="text-[11px] text-muted-foreground mt-0.5">
-          Users, rights & config
-        </p>
-      </div>
-      {isAdminPage && (
-        <span className="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0" />
-      )}
-    </button>
-  </>
-)}
-{/* TEMP DEBUG: Admin button forced visible - check Console for role logs */}
+                          Users, rights & config
+                        </p>
+                      </div>
+                      {isAdminPage && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0" />
+                      )}
+                    </button>
+                  </>
+                )}
 
                 <div className="mx-3 mt-1.5 mb-1 pt-2 border-t border-border">
                   <p className="text-[10px] text-muted-foreground font-heading">
