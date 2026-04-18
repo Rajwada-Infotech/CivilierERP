@@ -44,9 +44,5 @@ export const matchBRS = (id: number) => axios.put(`/brs/${id}/match`);
 
 export const unmatchBRS = (id: number) => axios.put(`/brs/${id}/unmatch`);
 
-export const autoMatchBRS = () => axios.put("/brs/auto-match", {}, {
-  headers: {
-    Authorization: `Bearer ${localStorage.getItem("token")}`,
-  },
-}); 
+export const autoMatchBRS = () => axios.put("/brs/auto-match");
 
