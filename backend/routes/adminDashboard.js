@@ -45,7 +45,7 @@ router.get("/", allowRoles("admin", "director"), async (req, res) => {
         `),
 
         pool.request().query(`
-          SELECT TOP 5 id, name, email, createdAt
+SELECT TOP 5 id, name, email, createdAt, isActive
           FROM Users
           ORDER BY createdAt DESC
         `),

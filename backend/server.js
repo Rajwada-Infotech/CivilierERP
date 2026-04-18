@@ -144,7 +144,7 @@ async function startServer() {
     app.get("/health", (req, res) => res.json({ status: "ok" }));
 
     app.use("/api/users", require("./routes/users"));
-    app.use("/api/roles", require("./routes/roles"));
+
 
     // ====================== AUTH + ACTIVE USER TRACKING ======================
     app.use("/api", authMiddleware, async (req, res, next) => {
@@ -156,7 +156,8 @@ async function startServer() {
 
     // ====================== PROTECTED ROUTES ======================
     const routes = [
-      { path: "/api/user-rights",        file: "./routes/userRights" },
+{ path: "/api/roles",         file: "./routes/roles" },
+  { path: "/api/user-rights",        file: "./routes/userRights" },
       { path: "/api/account-group",      file: "./routes/accountGroup" },
       { path: "/api/account-head",       file: "./routes/accountHeadMaster" },
       { path: "/api/activity-master",    file: "./routes/activityMaster" },
@@ -184,7 +185,8 @@ async function startServer() {
       { path: "/api/tc-master",          file: "./routes/tcMaster" },
       { path: "/api/grns",               file: "./routes/grns" },
       { path: "/api/stock-ledger",       file: "./routes/stockLedger" },
-      { path: "/api/brs",                file: "./routes/brs" },
+{ path: "/api/brs",                file: "./routes/brs" },
+      { path: "/api/reports",             file: "./routes/reports" },
       { path: "/api/finance-dashboard",  file: "./routes/financeDashboard" },
       { path: "/api/material-dashboard", file: "./routes/materialDashboard" },
       { path: "/api/admin-dashboard",    file: "./routes/adminDashboard" },
