@@ -72,7 +72,7 @@ export const deletePurchaseOrder = (id: string) =>
 // Suppliers: AccountHeadMaster entries with LHeadType = 'Supplier'
 // Returns { LHeadId, LHeadName }
 export const getSuppliers = () =>
-  fetchWithAuth("/api/account-head?type=Supplier").then((r) => r.json());
+  fetchWithAuth("/api/account-head?type=S").then((r) => r.json());
 
 // Projects: enterprise table
 // Returns { id, name }

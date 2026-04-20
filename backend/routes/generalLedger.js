@@ -4,6 +4,47 @@ const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 
+let accountHeadColumnMetaPromise = null;
+
+async function getAccountHeadColumnMeta() {
+  if (!accountHeadColumnMetaPromise) {
+    accountHeadColumnMetaPromise = getPool()
+      .request()
+      .query(`
+        SELECT COLUMN_NAME, IS_NULLABLE
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = 'dbo'
+          AND TABLE_NAME = 'AccountHeadMaster'
+      `)
+      .then((result) => {
+        const meta = new Map();
+        result.recordset.forEach((row) => {
+          meta.set(row.COLUMN_NAME.toLowerCase(), {
+            name: row.COLUMN_NAME,
+            isNullable: row.IS_NULLABLE === "YES",
+          });
+        });
+        return meta;
+      })
+      .catch(() => new Map());
+  }
+
+  return accountHeadColumnMetaPromise;
+}
+
+const hasColumn = (meta, columnName) => meta.has(columnName.toLowerCase());
+
+const getColumnMeta = (meta, columnName) => meta.get(columnName.toLowerCase()) || null;
+
+const requireUserId = (req, res) => {
+  const userId = req.user?.userId ?? req.user?.id;
+  if (!userId) {
+    res.status(401).json({ error: "User context missing" });
+    return null;
+  }
+  return userId;
+};
+
 // ─────────────────────────────────────────────────────────────────────────────
 // General Ledger Routes
 // Base path: /api/general-ledger
@@ -160,8 +201,12 @@ router.post("/", async (req, res) => {
   }
 
   try {
+    const userId = requireUserId(req, res);
+    if (!userId) return;
+
     const pool = getPool();
-    await pool
+    const columnMeta = await getAccountHeadColumnMeta();
+    const request = pool
       .request()
       .input("LHeadName", sql.NVarChar(200), LHeadName.trim())
       .input(
@@ -179,22 +224,46 @@ router.post("/", async (req, res) => {
       .input("LHeadAddress", sql.VarChar(300), "N/A")
       .input("LHeadContactPerson", sql.VarChar(100), "N/A")
       .input("LHeadPaymentTerms", sql.NVarChar(100), "N/A")
-      .input("LBranchName", sql.VarChar(100), "Main")
-      .input("LCountry", sql.VarChar(50), "India")
-      .input("CreatedBy", sql.Int, 1)
-      .input("CreatedAt", sql.DateTime, new Date()).query(`
-        INSERT INTO dbo.AccountHeadMaster (
-          LHeadName, LHeadCode, LBelongsTo, LHeadStatus,
-          LHeadType, LHeadAddress, LHeadContactPerson,
-          LHeadPaymentTerms, LBranchName, LCountry,
-          CreatedBy, CreatedAt
-        ) VALUES (
-          @LHeadName, @LHeadCode, @LBelongsTo, @LHeadStatus,
-          @LHeadType, @LHeadAddress, @LHeadContactPerson,
-          @LHeadPaymentTerms, @LBranchName, @LCountry,
-          @CreatedBy, @CreatedAt
-        )
-      `);
+      .input(
+        "LBranchName",
+        sql.VarChar(100),
+        getColumnMeta(columnMeta, "LBranchName")?.isNullable ? null : "Main",
+      )
+      .input("LCountry", sql.VarChar(50), "India");
+
+    const insertColumns = [
+      "LHeadName",
+      "LHeadCode",
+      "LBelongsTo",
+      "LHeadStatus",
+      "LHeadType",
+      "LHeadAddress",
+      "LHeadContactPerson",
+      "LHeadPaymentTerms",
+      "LBranchName",
+      "LCountry",
+    ];
+    const insertValues = insertColumns.map((column) => `@${column}`);
+
+    if (hasColumn(columnMeta, "CreatedBy")) {
+      request.input("CreatedBy", sql.Int, userId);
+      insertColumns.push("CreatedBy");
+      insertValues.push("@CreatedBy");
+    }
+
+    if (hasColumn(columnMeta, "CreatedAt")) {
+      request.input("CreatedAt", sql.DateTime2, new Date());
+      insertColumns.push("CreatedAt");
+      insertValues.push("@CreatedAt");
+    }
+
+    await request.query(`
+      INSERT INTO dbo.AccountHeadMaster (
+        ${insertColumns.join(", ")}
+      ) VALUES (
+        ${insertValues.join(", ")}
+      )
+    `);
 
     await bumpCacheVersion("general-ledger");
     await bumpCacheVersion("general-ledger-detail");
@@ -222,8 +291,12 @@ router.put("/:id", async (req, res) => {
   }
 
   try {
+    const userId = requireUserId(req, res);
+    if (!userId) return;
+
     const pool = getPool();
-    const result = await pool
+    const columnMeta = await getAccountHeadColumnMeta();
+    const request = pool
       .request()
       .input("id", sql.Int, numericId)
       .input("LHeadName", sql.NVarChar(200), LHeadName.trim())
@@ -237,13 +310,28 @@ router.put("/:id", async (req, res) => {
         sql.Int,
         LBelongsTo ? parseInt(LBelongsTo, 10) : null,
       )
-      .input("LHeadStatus", sql.Bit, LHeadStatus !== false ? 1 : 0).query(`
+      .input("LHeadStatus", sql.Bit, LHeadStatus !== false ? 1 : 0);
+
+    const updates = [
+      "LHeadName   = @LHeadName",
+      "LHeadCode   = @LHeadCode",
+      "LBelongsTo  = @LBelongsTo",
+      "LHeadStatus = @LHeadStatus",
+      "isEdited    = 1",
+    ];
+
+    if (hasColumn(columnMeta, "UpdatedBy")) {
+      request.input("UpdatedBy", sql.Int, userId);
+      updates.push("UpdatedBy   = @UpdatedBy");
+    }
+
+    if (hasColumn(columnMeta, "UpdatedAt")) {
+      updates.push("UpdatedAt   = SYSDATETIME()");
+    }
+
+    const result = await request.query(`
         UPDATE dbo.AccountHeadMaster SET
-          LHeadName   = @LHeadName,
-          LHeadCode   = @LHeadCode,
-          LBelongsTo  = @LBelongsTo,
-          LHeadStatus = @LHeadStatus,
-          isEdited    = 1
+          ${updates.join(",\n          ")}
         WHERE LHeadId   = @id
           AND LHeadType = 'GL'
       `);
