@@ -4,6 +4,50 @@ const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 
+let accountHeadColumnMetaPromise = null;
+
+async function getAccountHeadColumnMeta() {
+  if (!accountHeadColumnMetaPromise) {
+    accountHeadColumnMetaPromise = getPool()
+      .request()
+      .query(`
+        SELECT COLUMN_NAME
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = 'dbo'
+          AND TABLE_NAME = 'AccountHeadMaster'
+      `)
+      .then((result) => {
+        const meta = new Map();
+        result.recordset.forEach((row) => {
+          meta.set(row.COLUMN_NAME.toLowerCase(), row.COLUMN_NAME);
+        });
+        return meta;
+      })
+      .catch(() => new Map());
+  }
+
+  return accountHeadColumnMetaPromise;
+}
+
+const hasColumn = (meta, columnName) => meta.has(columnName.toLowerCase());
+
+const findColumn = (meta, names, fallback = null) => {
+  for (const name of names) {
+    const match = meta.get(name.toLowerCase());
+    if (match) return match;
+  }
+  return fallback;
+};
+
+const requireUserId = (req, res) => {
+  const userId = req.user?.userId ?? req.user?.id;
+  if (!userId) {
+    res.status(401).json({ error: "User context missing" });
+    return null;
+  }
+  return userId;
+};
+
 // ====================== HELPERS ======================
 const cleanStr = (v, len = 255) => {
   if (!v || String(v).trim() === "") return null;
@@ -31,25 +75,39 @@ const cleanDecimal = (v) => {
 router.get("/", cache("bank-master", 300), async (req, res) => {
   try {
     const pool = await getPool();
+    const columnMeta = await getAccountHeadColumnMeta();
+    const companyColumn = findColumn(
+      columnMeta,
+      ["CompanyName", "companyname", "LCompanyName"],
+      "LDescription",
+    );
+    const selectColumns = [
+      "LHeadId AS BId",
+      "LHeadName AS BName",
+      "LBranchName AS BBranch",
+      "LAccountNo AS BAccountNumber",
+      "LIFSCCode AS BIfscCode",
+      "LAccountType AS BAccountType",
+      "LBankType AS BBankType",
+      "AccountHolderName AS BAccountHolderName",
+      "BankOpeningBalance AS BOpeningBalance",
+      "LHeadAddress AS BAddress",
+      "LHeadStatus AS BStatus",
+      `${companyColumn} AS BCompanyName`,
+      "LBankDetails AS BBankDetails",
+      "LHeadCode AS BCode",
+    ];
+
+    if (hasColumn(columnMeta, "CreatedBy")) selectColumns.push("CreatedBy");
+    if (hasColumn(columnMeta, "CreatedAt")) selectColumns.push("CreatedAt");
+    if (hasColumn(columnMeta, "UpdatedBy")) selectColumns.push("UpdatedBy");
+    if (hasColumn(columnMeta, "UpdatedAt")) selectColumns.push("UpdatedAt");
+    if (hasColumn(columnMeta, "ApprovedBy")) selectColumns.push("ApprovedBy");
+
     const result = await pool.request().input("type", sql.VarChar(50), "B")
       .query(`
         SELECT
-          LHeadId AS BId,
-          LHeadName AS BName,
-          LBranchName AS BBranch,
-          LAccountNo AS BAccountNumber,
-          LIFSCCode AS BIfscCode,
-          LAccountType AS BAccountType,
-          LBankType AS BBankType,
-          AccountHolderName AS BAccountHolderName,
-          BankOpeningBalance AS BOpeningBalance,
-          LHeadAddress AS BAddress,
-          LHeadStatus AS BStatus,
-          LDescription AS BCompanyName,
-          LBankDetails AS BBankDetails,
-          LHeadCode AS BCode,
-          CreatedBy,
-          CreatedAt
+          ${selectColumns.join(",\n          ")}
         FROM dbo.AccountHeadMaster
         WHERE LHeadType = @type
         ORDER BY LHeadId DESC
@@ -96,9 +154,16 @@ router.post("/", async (req, res) => {
 
   try {
     const pool = await getPool();
-    const userId = req.user?.id || req.user?.userId || 1;
+    const userId = requireUserId(req, res);
+    if (!userId) return;
+    const columnMeta = await getAccountHeadColumnMeta();
+    const companyColumn = findColumn(
+      columnMeta,
+      ["CompanyName", "companyname", "LCompanyName"],
+      "LDescription",
+    );
 
-    const result = await pool
+    const request = pool
       .request()
       // Core fields
       .input("LHeadName", sql.NVarChar(200), BName.trim())
@@ -144,24 +209,53 @@ router.post("/", async (req, res) => {
 
       // Other fields
       .input("LHeadStatus", sql.Bit, Boolean(BStatus) ? 1 : 0)
-      .input(
+      .input("LHeadPaymentTerms", sql.NVarChar(100), "N/A")
+      .input("LHeadCreditLimit", sql.Decimal(18, 2), 0);
+
+    if (companyColumn === "LDescription") {
+      request.input(
         "LDescription",
         sql.NVarChar(4000),
         cleanStr(BCompanyName, 500) || null,
-      )
-      .input("LHeadPaymentTerms", sql.NVarChar(100), "N/A")
-      .input("LHeadCreditLimit", sql.Decimal(18, 2), 0)
+      );
+    } else {
+      request.input(
+        companyColumn,
+        sql.NVarChar(500),
+        cleanStr(BCompanyName, 500) || null,
+      );
+    }
 
-      // Audit fields
-      .input("CreatedBy", sql.Int, userId)
-      .input("CreatedAt", sql.DateTime2, new Date()).query(`
+    if (hasColumn(columnMeta, "CreatedBy")) {
+      request.input("CreatedBy", sql.Int, userId);
+    }
+
+    if (hasColumn(columnMeta, "CreatedAt")) {
+      request.input("CreatedAt", sql.DateTime2, new Date());
+    }
+
+    const insertColumns = [
+      "LHeadName", "LHeadType", "LHeadCode",
+      "LBranchName", "LAccountNo", "LIFSCCode",
+      "LAccountType", "LBankType", "AccountHolderName", "BankOpeningBalance",
+      "LHeadAddress", "LHeadContactPerson", "LHeadPhone", "LHeadEmail",
+      "LHeadStatus", companyColumn, "LHeadPaymentTerms", "LHeadCreditLimit",
+    ];
+    const insertValues = insertColumns.map((column) => `@${column}`);
+
+    if (hasColumn(columnMeta, "CreatedBy")) {
+      insertColumns.push("CreatedBy");
+      insertValues.push("@CreatedBy");
+    }
+
+    if (hasColumn(columnMeta, "CreatedAt")) {
+      insertColumns.push("CreatedAt");
+      insertValues.push("@CreatedAt");
+    }
+
+    const result = await request.query(`
         INSERT INTO dbo.AccountHeadMaster (
-          LHeadName, LHeadType, LHeadCode,
-          LBranchName, LAccountNo, LIFSCCode,
-          LAccountType, LBankType, AccountHolderName, BankOpeningBalance,
-          LHeadAddress, LHeadContactPerson, LHeadPhone, LHeadEmail,
-          LHeadStatus, LDescription, LHeadPaymentTerms, LHeadCreditLimit,
-          CreatedBy, CreatedAt
+          ${insertColumns.join(", ")}
         )
         OUTPUT
           INSERTED.LHeadId AS BId,
@@ -175,14 +269,9 @@ router.post("/", async (req, res) => {
           INSERTED.BankOpeningBalance AS BOpeningBalance,
           INSERTED.LHeadAddress AS BAddress,
           INSERTED.LHeadStatus AS BStatus,
-          INSERTED.LDescription AS BCompanyName
+          INSERTED.${companyColumn} AS BCompanyName
         VALUES (
-          @LHeadName, @LHeadType, @LHeadCode,
-          @LBranchName, @LAccountNo, @LIFSCCode,
-          @LAccountType, @LBankType, @AccountHolderName, @BankOpeningBalance,
-          @LHeadAddress, @LHeadContactPerson, @LHeadPhone, @LHeadEmail,
-          @LHeadStatus, @LDescription, @LHeadPaymentTerms, @LHeadCreditLimit,
-          @CreatedBy, @CreatedAt
+          ${insertValues.join(", ")}
         )
       `);
 
@@ -224,7 +313,14 @@ router.put("/:id", async (req, res) => {
 
   try {
     const pool = await getPool();
-    const userId = req.user?.id || req.user?.userId || 1;
+    const userId = requireUserId(req, res);
+    if (!userId) return;
+    const columnMeta = await getAccountHeadColumnMeta();
+    const companyColumn = findColumn(
+      columnMeta,
+      ["CompanyName", "companyname", "LCompanyName"],
+      "LDescription",
+    );
 
     if (BIfscCode && !validateIfsc(BIfscCode)) {
       return res.status(400).json({
@@ -233,7 +329,7 @@ router.put("/:id", async (req, res) => {
       });
     }
 
-    await pool
+    const request = pool
       .request()
       .input("LHeadId", sql.Int, parseInt(id))
       .input("LHeadName", sql.NVarChar(200), cleanStr(BName, 200))
@@ -253,29 +349,51 @@ router.put("/:id", async (req, res) => {
         BOpeningBalance != null ? cleanDecimal(BOpeningBalance) : null,
       )
       .input("LHeadAddress", sql.NVarChar(300), cleanStr(BAddress, 300))
-      .input("LDescription", sql.NVarChar(4000), cleanStr(BCompanyName, 500))
       .input(
         "LHeadStatus",
         sql.Bit,
         BStatus !== undefined ? (Boolean(BStatus) ? 1 : 0) : null,
-      )
-      .input("ApprovedBy", sql.Int, userId).query(`
+      );
+
+    if (companyColumn === "LDescription") {
+      request.input("LDescription", sql.NVarChar(4000), cleanStr(BCompanyName, 500));
+    } else {
+      request.input(companyColumn, sql.NVarChar(500), cleanStr(BCompanyName, 500));
+    }
+
+    const updates = [
+      "LHeadName = COALESCE(@LHeadName, LHeadName)",
+      "LBranchName = COALESCE(@LBranchName, LBranchName)",
+      "LAccountNo = COALESCE(@LAccountNo, LAccountNo)",
+      "LIFSCCode = COALESCE(@LIFSCCode, LIFSCCode)",
+      "LAccountType = COALESCE(@LAccountType, LAccountType)",
+      "LBankType = COALESCE(@LBankType, LBankType)",
+      "AccountHolderName = COALESCE(@AccountHolderName, AccountHolderName)",
+      "BankOpeningBalance = COALESCE(@BankOpeningBalance, BankOpeningBalance)",
+      "LHeadAddress = COALESCE(@LHeadAddress, LHeadAddress)",
+      `${companyColumn} = COALESCE(@${companyColumn}, ${companyColumn})`,
+      "LHeadStatus = COALESCE(@LHeadStatus, LHeadStatus)",
+      "isEdited = 1",
+    ];
+
+    if (hasColumn(columnMeta, "UpdatedBy")) {
+      request.input("UpdatedBy", sql.Int, userId);
+      updates.push("UpdatedBy = @UpdatedBy");
+    }
+
+    if (hasColumn(columnMeta, "ApprovedBy")) {
+      request.input("ApprovedBy", sql.Int, userId);
+      updates.push("ApprovedBy = @ApprovedBy");
+    }
+
+    if (hasColumn(columnMeta, "UpdatedAt")) {
+      updates.push("UpdatedAt = SYSDATETIME()");
+    }
+
+    await request.query(`
         UPDATE dbo.AccountHeadMaster
         SET
-          LHeadName = COALESCE(@LHeadName, LHeadName),
-          LBranchName = COALESCE(@LBranchName, LBranchName),
-          LAccountNo = COALESCE(@LAccountNo, LAccountNo),
-          LIFSCCode = COALESCE(@LIFSCCode, LIFSCCode),
-          LAccountType = COALESCE(@LAccountType, LAccountType),
-          LBankType = COALESCE(@LBankType, LBankType),
-          AccountHolderName = COALESCE(@AccountHolderName, AccountHolderName),
-          BankOpeningBalance = COALESCE(@BankOpeningBalance, BankOpeningBalance),
-          LHeadAddress = COALESCE(@LHeadAddress, LHeadAddress),
-          LDescription = COALESCE(@LDescription, LDescription),
-          LHeadStatus = COALESCE(@LHeadStatus, LHeadStatus),
-          ApprovedBy = @ApprovedBy,
-          isEdited = 1,
-          UpdatedAt = SYSDATETIME()
+          ${updates.join(",\n          ")}
         WHERE LHeadId = @LHeadId AND LHeadType = 'B'
       `);
 

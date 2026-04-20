@@ -26,6 +26,11 @@ router.get("/", cache("account-group", 300), async (req, res) => {
 router.post("/", async (req, res) => {
   const { Name, Code, ParentGroupId, Status } = req.body;
   try {
+    const userId = req.user?.userId ?? req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ error: "User context missing" });
+    }
+
     const pool = getPool();
     await pool
       .request()
@@ -33,7 +38,7 @@ router.post("/", async (req, res) => {
       .input("Code", sql.NVarChar, Code || null)
       .input("ParentGroupId", sql.Int, ParentGroupId || null)
       .input("Status", sql.Bit, Status ? 1 : 0)
-      .input("CreatedBy", sql.Int, 1)
+      .input("CreatedBy", sql.Int, userId)
       .input("CreatedAt", sql.DateTime2, new Date()).query(`
         INSERT INTO dbo.AccountGroup (Name, Code, ParentGroupId, Status, CreatedBy, CreatedAt)
         VALUES (@Name, @Code, @ParentGroupId, @Status, @CreatedBy, @CreatedAt)
@@ -49,6 +54,11 @@ router.post("/", async (req, res) => {
 router.put("/:id", async (req, res) => {
   const { Name, Code, ParentGroupId, Status } = req.body;
   try {
+    const userId = req.user?.userId ?? req.user?.id;
+    if (!userId) {
+      return res.status(401).json({ error: "User context missing" });
+    }
+
     const pool = getPool();
     await pool
       .request()
@@ -57,7 +67,7 @@ router.put("/:id", async (req, res) => {
       .input("Code", sql.NVarChar, Code || null)
       .input("ParentGroupId", sql.Int, ParentGroupId || null)
       .input("Status", sql.Bit, Status ? 1 : 0)
-      .input("UpdatedBy", sql.Int, 1)
+      .input("UpdatedBy", sql.Int, userId)
       .input("UpdatedAt", sql.DateTime2, new Date()).query(`
         UPDATE dbo.AccountGroup SET
           Name=@Name, Code=@Code, ParentGroupId=@ParentGroupId,
