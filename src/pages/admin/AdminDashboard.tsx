@@ -18,8 +18,8 @@ interface AdminUser {
   id: number;
   name: string;
   email: string;
-  createdAt: string;
-  isActive: boolean;
+  created_datetime: string;
+  discontinue: number;
 }
 
 interface ActivityRow {
@@ -265,12 +265,12 @@ const fetchDashboardData = async () => {
                         </div>
                         <Badge
                           className={`ml-2 px-1.5 sm:px-2.5 py-0.5 text-xs font-semibold border-2 transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 whitespace-nowrap ${
-                            user.isActive
+                            !user.discontinue
                               ? "border-green-500 bg-transparent text-green-700 hover:bg-green-500/10"
                               : "border-red-500 bg-transparent text-red-700 hover:bg-red-500/10"
                           }`}
                         >
-{user.isActive ? "Active" : "Inactive"}
+{!user.discontinue ? "Active" : "Inactive"}
                         </Badge>
                       </li>
                     ))}
