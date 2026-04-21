@@ -25,8 +25,9 @@ module.exports = async (req, res, next) => {
     }
 
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = decoded;
-    req.token = token; // store for use in logout route
+req.user = decoded;
+    console.log("AUDIT-FIX req.user:", req.user);
+    req.token = token;
 
     // Track active user (server.js already has post-auth middleware, but reinforce)
     try {

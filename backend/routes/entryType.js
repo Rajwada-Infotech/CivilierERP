@@ -18,20 +18,20 @@ router.get("/", cache("entry-type", 300), async (req, res) => {
 // ADD
 router.post("/", async (req, res) => {
   const { Epname, EntryType, Eprefix, EDoc_N } = req.body;
-  // Fix: E_CreatedBy was set to NEWID() inline in the SQL — NEWID() returns a UUID
-  // but E_CreatedBy is an INT column (consistent with every other CreatedBy in the codebase).
-  // This caused a type mismatch error on every insert. Use the authenticated user's ID instead.
-  const createdBy = req.user?.userId || req.user?.id || 1;
   try {
+    const userEmail = req.user?.email;
+    if (!userEmail) return res.status(401).json({ error: "User context missing" });
+
     const pool = getPool();
     await pool
       .request()
-      .input("Epname", sql.NVarChar, Epname || null)
-      .input("EntryType", sql.NVarChar, EntryType || null)
-      .input("Eprefix", sql.NVarChar, Eprefix || null)
-      .input("EDoc_N", sql.Int, EDoc_N || 1)
-      .input("E_CreatedBy", sql.Int, createdBy)
-      .input("E_CreatedAt", sql.DateTime2, new Date()).query(`
+      .input("Epname",      sql.NVarChar,       Epname || null)
+      .input("EntryType",   sql.NVarChar,       EntryType || null)
+      .input("Eprefix",     sql.NVarChar,       Eprefix || null)
+      .input("EDoc_N",      sql.Int,            EDoc_N || 1)
+      .input("E_CreatedBy", sql.NVarChar(100),  userEmail)  // ✅ real email
+      .input("E_CreatedAt", sql.DateTime2,      new Date())
+      .query(`
         INSERT INTO dbo.Entry_Type
           (Epname, EntryType, Eprefix, EDoc_N, E_CreatedBy, E_CreatedAt)
         VALUES
@@ -52,11 +52,12 @@ router.put("/:id", async (req, res) => {
     const pool = getPool();
     await pool
       .request()
-      .input("E_Id", sql.UniqueIdentifier, id)
-      .input("Epname", sql.NVarChar, Epname || null)
-      .input("EntryType", sql.NVarChar, EntryType || null)
-      .input("Eprefix", sql.NVarChar, Eprefix || null)
-      .input("EDoc_N", sql.Int, EDoc_N || 1).query(`
+      .input("E_Id",      sql.UniqueIdentifier, id)
+      .input("Epname",    sql.NVarChar,         Epname || null)
+      .input("EntryType", sql.NVarChar,         EntryType || null)
+      .input("Eprefix",   sql.NVarChar,         Eprefix || null)
+      .input("EDoc_N",    sql.Int,              EDoc_N || 1)
+      .query(`
         UPDATE dbo.Entry_Type SET
           Epname=@Epname, EntryType=@EntryType,
           Eprefix=@Eprefix, EDoc_N=@EDoc_N

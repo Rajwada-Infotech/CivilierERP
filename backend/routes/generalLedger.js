@@ -36,13 +36,13 @@ const hasColumn = (meta, columnName) => meta.has(columnName.toLowerCase());
 
 const getColumnMeta = (meta, columnName) => meta.get(columnName.toLowerCase()) || null;
 
-const requireUserId = (req, res) => {
-  const userId = req.user?.userId ?? req.user?.id;
-  if (!userId) {
+const requireUserEmail = (req, res) => {
+  const email = req.user?.email;
+  if (!email) {
     res.status(401).json({ error: "User context missing" });
     return null;
   }
-  return userId;
+  return email;
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -64,7 +64,7 @@ router.get("/options", async (req, res) => {
     const result = await pool.request().query(`
       SELECT
         LHeadId   AS id,
-        LHeadName AS label,
+        ISNULL(DisplayName, LHeadName) AS label,
         LHeadCode AS code
       FROM dbo.AccountHeadMaster
       WHERE LHeadType = 'GL'
@@ -201,8 +201,8 @@ router.post("/", async (req, res) => {
   }
 
   try {
-    const userId = requireUserId(req, res);
-    if (!userId) return;
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
 
     const pool = getPool();
     const columnMeta = await getAccountHeadColumnMeta();
@@ -246,7 +246,7 @@ router.post("/", async (req, res) => {
     const insertValues = insertColumns.map((column) => `@${column}`);
 
     if (hasColumn(columnMeta, "CreatedBy")) {
-      request.input("CreatedBy", sql.Int, userId);
+      request.input("CreatedBy", sql.NVarChar(100), userEmail);
       insertColumns.push("CreatedBy");
       insertValues.push("@CreatedBy");
     }
@@ -291,8 +291,8 @@ router.put("/:id", async (req, res) => {
   }
 
   try {
-    const userId = requireUserId(req, res);
-    if (!userId) return;
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
 
     const pool = getPool();
     const columnMeta = await getAccountHeadColumnMeta();
@@ -321,7 +321,7 @@ router.put("/:id", async (req, res) => {
     ];
 
     if (hasColumn(columnMeta, "UpdatedBy")) {
-      request.input("UpdatedBy", sql.Int, userId);
+      request.input("UpdatedBy", sql.NVarChar(100), userEmail);
       updates.push("UpdatedBy   = @UpdatedBy");
     }
 

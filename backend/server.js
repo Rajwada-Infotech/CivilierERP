@@ -192,7 +192,10 @@ async function startServer() {
       { path: "/api/admin-dashboard",    file: "./routes/adminDashboard" },
       { path: "/api/user-activity",      file: "./routes/userActivity" },
       { path: "/api/business-units",     file: "./routes/businessUnit" },
-      { path: "/api/tasks",              file: "./routes/tasks" },
+      { path: "/api/cheque-leaf",       file: "./routes/chequeLeaf" },
+      { path: "/api/contractor-category", file: "./routes/contractorCategory" },
+      { path: "/api/approval-workflows", file: "./routes/approvalWorkflows" },
+      { path: "/api/tasks", file: "./routes/tasks" },
     ];
 
     for (const { path, file } of routes) {
