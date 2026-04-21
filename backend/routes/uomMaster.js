@@ -22,44 +22,39 @@ router.get("/", cache("uom-master", 300), async (req, res) => {
 
 // ADD UOM
 router.post("/", async (req, res) => {
-  console.log("POST BODY:", req.body);
   const {
-    UOMName,
-    UOMCode,
-    Symbol,
-    UOMType,
-    DecimalPlaces,
-    ConversionFactor,
-    IsBaseUnit,
-    Remarks,
-    IsActive,
+    UOMName, UOMCode, Symbol, UOMType,
+    DecimalPlaces, ConversionFactor,
+    IsBaseUnit, Remarks, IsActive,
   } = req.body;
+
+  const createdBy = req.user?.userId || null; // ✅ from JWT
 
   try {
     const pool = getPool();
     await pool
       .request()
-      .input("UOMName", sql.NVarChar(50), UOMName)
-      .input("UOMCode", sql.NVarChar(20), UOMCode)
-      .input("Symbol", sql.NVarChar(20), Symbol || null)
-      .input("UOMType", sql.NVarChar(20), UOMType || null)
-      .input("DecimalPlaces", sql.Int, DecimalPlaces ?? 0)
+      .input("UOMName",          sql.NVarChar(50),   UOMName)
+      .input("UOMCode",          sql.NVarChar(20),   UOMCode)
+      .input("Symbol",           sql.NVarChar(20),   Symbol           || null)
+      .input("UOMType",          sql.NVarChar(20),   UOMType          || null)
+      .input("DecimalPlaces",    sql.Int,            DecimalPlaces    ?? 0)
       .input("ConversionFactor", sql.Decimal(18, 6), ConversionFactor ?? null)
-      .input("IsBaseUnit", sql.Bit, IsBaseUnit ? 1 : 0)
-      .input("Remarks", sql.NVarChar(250), Remarks || null)
-      .input("IsActive", sql.Bit, IsActive !== false ? 1 : 0)
-      .input("CreatedAt", sql.DateTime, new Date())
+      .input("IsBaseUnit",       sql.Bit,            IsBaseUnit ? 1 : 0)
+      .input("Remarks",          sql.NVarChar(250),  Remarks          || null)
+      .input("IsActive",         sql.Bit,            IsActive !== false ? 1 : 0)
+      .input("CreatedBy",        sql.Int,            createdBy) // ✅ added
+      .input("CreatedAt",        sql.DateTime2(3),   new Date())
       .query(`
         INSERT INTO dbo.UOMMaster
           (UOMName, UOMCode, Symbol, UOMType, DecimalPlaces,
-           ConversionFactor, IsBaseUnit, Remarks, IsActive, CreatedAt)
+           ConversionFactor, IsBaseUnit, Remarks, IsActive, CreatedBy, CreatedAt)
         VALUES
           (@UOMName, @UOMCode, @Symbol, @UOMType, @DecimalPlaces,
-           @ConversionFactor, @IsBaseUnit, @Remarks, @IsActive, @CreatedAt)
+           @ConversionFactor, @IsBaseUnit, @Remarks, @IsActive, @CreatedBy, @CreatedAt)
       `);
     await bumpCacheVersion("uom-master");
     await bumpCacheVersion("stock-ledger");
-
     res.json({ message: "UOM added successfully" });
   } catch (err) {
     console.error("INSERT ERROR:", err.message);
@@ -71,31 +66,29 @@ router.post("/", async (req, res) => {
 router.put("/:id", async (req, res) => {
   const { id } = req.params;
   const {
-    UOMName,
-    UOMCode,
-    Symbol,
-    UOMType,
-    DecimalPlaces,
-    ConversionFactor,
-    IsBaseUnit,
-    Remarks,
-    IsActive,
+    UOMName, UOMCode, Symbol, UOMType,
+    DecimalPlaces, ConversionFactor,
+    IsBaseUnit, Remarks, IsActive,
   } = req.body;
+
+  const updatedBy = req.user?.userId || null; // ✅ from JWT
 
   try {
     const pool = getPool();
     await pool
       .request()
-      .input("Id", sql.Int, parseInt(id))
-      .input("UOMName", sql.NVarChar(50), UOMName)
-      .input("UOMCode", sql.NVarChar(20), UOMCode)
-      .input("Symbol", sql.NVarChar(20), Symbol || null)
-      .input("UOMType", sql.NVarChar(20), UOMType || null)
-      .input("DecimalPlaces", sql.Int, DecimalPlaces ?? 0)
+      .input("Id",               sql.Int,            parseInt(id))
+      .input("UOMName",          sql.NVarChar(50),   UOMName)
+      .input("UOMCode",          sql.NVarChar(20),   UOMCode)
+      .input("Symbol",           sql.NVarChar(20),   Symbol           || null)
+      .input("UOMType",          sql.NVarChar(20),   UOMType          || null)
+      .input("DecimalPlaces",    sql.Int,            DecimalPlaces    ?? 0)
       .input("ConversionFactor", sql.Decimal(18, 6), ConversionFactor ?? null)
-      .input("IsBaseUnit", sql.Bit, IsBaseUnit ? 1 : 0)
-      .input("Remarks", sql.NVarChar(250), Remarks || null)
-      .input("IsActive", sql.Bit, IsActive !== false ? 1 : 0)
+      .input("IsBaseUnit",       sql.Bit,            IsBaseUnit ? 1 : 0)
+      .input("Remarks",          sql.NVarChar(250),  Remarks          || null)
+      .input("IsActive",         sql.Bit,            IsActive !== false ? 1 : 0)
+      .input("UpdatedBy",        sql.Int,            updatedBy) // ✅ added
+      .input("UpdatedAt",        sql.DateTime2(3),   new Date())
       .query(`
         UPDATE dbo.UOMMaster SET
           UOMName          = @UOMName,
@@ -106,12 +99,13 @@ router.put("/:id", async (req, res) => {
           ConversionFactor = @ConversionFactor,
           IsBaseUnit       = @IsBaseUnit,
           Remarks          = @Remarks,
-          IsActive         = @IsActive
+          IsActive         = @IsActive,
+          UpdatedBy        = @UpdatedBy,
+          UpdatedAt        = @UpdatedAt
         WHERE Id = @Id
       `);
     await bumpCacheVersion("uom-master");
     await bumpCacheVersion("stock-ledger");
-
     res.json({ message: "UOM updated successfully" });
   } catch (err) {
     console.error("UPDATE ERROR:", err.message);
@@ -130,7 +124,6 @@ router.delete("/:id", async (req, res) => {
       .query("DELETE FROM dbo.UOMMaster WHERE Id = @Id");
     await bumpCacheVersion("uom-master");
     await bumpCacheVersion("stock-ledger");
-
     res.json({ message: "UOM deleted successfully" });
   } catch (err) {
     console.error("DELETE ERROR:", err.message);

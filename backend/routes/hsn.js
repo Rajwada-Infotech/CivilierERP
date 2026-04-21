@@ -4,12 +4,11 @@ const { bumpCacheVersion } = require("../redis");
 const router = express.Router()
 const { getPool, sql } = require("../db")
 
-// GET all HSN
 router.get("/", cache("hsn", 300), async (req, res) => {
   try {
     const pool = getPool()
     const result = await pool.request().query(
-      "SELECT HCode, HDescription, HShortDescription, HCGST, HSGST, HIGST, HStatus, HCreatedBy, HCreatedAt, HApprovedBy, HIsEdited FROM dbo.HSN"
+      "SELECT HCode, HDescription, HShortDescription, HCGST, HSGST, HIGST, HStatus, CreatedBy, CreatedAt, UpdatedBy, UpdatedAt, ApprovedBy, ApprovedAt, HIsEdited FROM dbo.HSN"
     )
     res.json(result.recordset)
   } catch (err) {
@@ -18,47 +17,40 @@ router.get("/", cache("hsn", 300), async (req, res) => {
   }
 })
 
-// ADD HSN
 router.post("/", async (req, res) => {
-  console.log("POST BODY:", req.body)
   const {
-    HCode,
-    HDescription,
-    HShortDescription,
-    HCGST,
-    HSGST,
-    HIGST,
-    HStatus,
+    HCode, HDescription, HShortDescription,
+    HCGST, HSGST, HIGST, HStatus,
   } = req.body
+
+  const createdBy = req.user?.userId || null
 
   try {
     const pool = getPool()
     await pool
       .request()
-      .input("HCode", sql.VarChar, HCode)
-      .input("HDescription", sql.NVarChar, HDescription || null)
-      .input("HShortDescription", sql.NVarChar, HShortDescription || null)
-      .input("HCGST", sql.Decimal(5, 2), HCGST || null)
-      .input("HSGST", sql.Decimal(5, 2), HSGST || null)
-      .input("HIGST", sql.Decimal(5, 2), HIGST || null)
-      .input("HStatus", sql.Bit, HStatus ? 1 : 0)
-      .input("HCreatedBy", sql.Int, 1)
-      .input("HCreatedAt", sql.DateTime, new Date())
-      .input("HApprovedBy", sql.Int, null)
-      .input("HIsEdited", sql.Bit, 0)
+      .input("HCode",             sql.VarChar,       HCode)
+      .input("HDescription",      sql.NVarChar,      HDescription      || null)
+      .input("HShortDescription", sql.NVarChar,      HShortDescription || null)
+      .input("HCGST",             sql.Decimal(5, 2), HCGST             || null)
+      .input("HSGST",             sql.Decimal(5, 2), HSGST             || null)
+      .input("HIGST",             sql.Decimal(5, 2), HIGST             || null)
+      .input("HStatus",           sql.Bit,           HStatus ? 1 : 0)
+      .input("CreatedBy",         sql.Int,           createdBy)
+      .input("CreatedAt",         sql.DateTime,      new Date())
+      .input("HIsEdited",         sql.Bit,           0)
       .query(`
         INSERT INTO dbo.HSN (
           HCode, HDescription, HShortDescription,
           HCGST, HSGST, HIGST, HStatus,
-          HCreatedBy, HCreatedAt, HApprovedBy, HIsEdited
+          CreatedBy, CreatedAt, HIsEdited
         ) VALUES (
           @HCode, @HDescription, @HShortDescription,
           @HCGST, @HSGST, @HIGST, @HStatus,
-          @HCreatedBy, @HCreatedAt, @HApprovedBy, @HIsEdited
+          @CreatedBy, @CreatedAt, @HIsEdited
         )
       `)
-    await bumpCacheVersion("hsn");
-
+    await bumpCacheVersion("hsn")
     res.json({ message: "HSN added successfully" })
   } catch (err) {
     console.error("INSERT ERROR:", err.message)
@@ -66,30 +58,29 @@ router.post("/", async (req, res) => {
   }
 })
 
-// UPDATE HSN
 router.put("/:code", async (req, res) => {
   const { code } = req.params
   const {
-    HDescription,
-    HShortDescription,
-    HCGST,
-    HSGST,
-    HIGST,
-    HStatus,
+    HDescription, HShortDescription,
+    HCGST, HSGST, HIGST, HStatus,
   } = req.body
+
+  const updatedBy = req.user?.userId || null
 
   try {
     const pool = getPool()
     await pool
       .request()
-      .input("HCode", sql.VarChar, code)
-      .input("HDescription", sql.NVarChar, HDescription || null)
-      .input("HShortDescription", sql.NVarChar, HShortDescription || null)
-      .input("HCGST", sql.Decimal(5, 2), HCGST || null)
-      .input("HSGST", sql.Decimal(5, 2), HSGST || null)
-      .input("HIGST", sql.Decimal(5, 2), HIGST || null)
-      .input("HStatus", sql.Bit, HStatus ? 1 : 0)
-      .input("HIsEdited", sql.Bit, 1)
+      .input("HCode",             sql.VarChar,       code)
+      .input("HDescription",      sql.NVarChar,      HDescription      || null)
+      .input("HShortDescription", sql.NVarChar,      HShortDescription || null)
+      .input("HCGST",             sql.Decimal(5, 2), HCGST             || null)
+      .input("HSGST",             sql.Decimal(5, 2), HSGST             || null)
+      .input("HIGST",             sql.Decimal(5, 2), HIGST             || null)
+      .input("HStatus",           sql.Bit,           HStatus ? 1 : 0)
+      .input("HIsEdited",         sql.Bit,           1)
+      .input("UpdatedBy",         sql.Int,           updatedBy)
+      .input("UpdatedAt",         sql.DateTime,      new Date())
       .query(`
         UPDATE dbo.HSN SET
           HDescription      = @HDescription,
@@ -98,11 +89,12 @@ router.put("/:code", async (req, res) => {
           HSGST             = @HSGST,
           HIGST             = @HIGST,
           HStatus           = @HStatus,
-          HIsEdited         = @HIsEdited
+          HIsEdited         = @HIsEdited,
+          UpdatedBy         = @UpdatedBy,
+          UpdatedAt         = @UpdatedAt
         WHERE HCode = @HCode
       `)
-    await bumpCacheVersion("hsn");
-
+    await bumpCacheVersion("hsn")
     res.json({ message: "HSN updated successfully" })
   } catch (err) {
     console.error("UPDATE ERROR:", err.message)
@@ -110,7 +102,6 @@ router.put("/:code", async (req, res) => {
   }
 })
 
-// DELETE HSN
 router.delete("/:code", async (req, res) => {
   const { code } = req.params
   try {
@@ -119,8 +110,7 @@ router.delete("/:code", async (req, res) => {
       .request()
       .input("HCode", sql.VarChar, code)
       .query("DELETE FROM dbo.HSN WHERE HCode = @HCode")
-    await bumpCacheVersion("hsn");
-
+    await bumpCacheVersion("hsn")
     res.json({ message: "HSN deleted successfully" })
   } catch (err) {
     console.error("DELETE ERROR:", err.message)

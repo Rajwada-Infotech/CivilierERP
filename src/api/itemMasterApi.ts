@@ -1,5 +1,3 @@
-// New API file — ItemMaster.tsx had no API layer at all (was fully hardcoded).
-
 const BASE_URL = "/api/item-master";
 
 const getAuthHeaders = () => ({
@@ -11,19 +9,20 @@ export interface DbItem {
   M_Id: string;
   M_Name: string;
   M_Description: string | null;
-  M_Type: string | null; // item type: "Service" | "Goods"
-  M_BelongsTo: string | null; // FK uniqueidentifier (optional)
-  M_Group: string | null; // short code / group code
-  M_IdentityCode: boolean; // show tax calculated
+  M_Type: string | null;
+  M_BelongsTo: string | null;      // ← stores item group M_Id (UUID)
+  M_Group: string | null;          // ← stores item group Name (string)
+  M_code: string | null;           // ← stores short code
+  M_IdentityCode: boolean;
   M_HSN: string | null;
   M_CGST: number | null;
   M_IGST: number | null;
   M_SGST: number | null;
-  M_UOM: string | null; // UOM code from UOMMaster
+  M_UOM: string | null;
   M_CreatedBy: string | null;
   M_CreatedDate: string;
   M_ApprovedBy: string | null;
-  Parent_Id: string; // FK to item group — required for items
+  Parent_Id: string;               // ← stores item group M_Id (UUID)
   ParentGroupName: string | null;
 }
 
@@ -37,7 +36,6 @@ export const addItem = async (data: Record<string, unknown>) => {
   const res = await fetch(BASE_URL, {
     method: "POST",
     headers: getAuthHeaders(),
-
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -51,7 +49,6 @@ export const updateItem = async (id: string, data: Record<string, unknown>) => {
   const res = await fetch(`${BASE_URL}/${id}`, {
     method: "PUT",
     headers: getAuthHeaders(),
-
     body: JSON.stringify(data),
   });
   if (!res.ok) {

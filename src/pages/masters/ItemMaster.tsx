@@ -6,12 +6,10 @@ import {
   Trash2,
   Check,
   X,
-  RefreshCw,
-  ChevronDown,
   Loader2,
+  ChevronDown,
 } from "lucide-react";
 import { toast } from "sonner";
-import { useHsn } from "@/contexts/HsnContext";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getItems,
@@ -22,84 +20,80 @@ import {
 } from "@/api/itemMasterApi";
 import { getItemGroups } from "@/api/itemGroupApi";
 import { getUomList } from "@/api/uomApi";
+import { getHsn } from "@/api/hsnApi";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface HsnCode {
   code: string;
   description: string;
+  cgstRate: number;
+  sgstRate: number;
+  igstRate: number;
 }
 
-// UI-facing shape (flat, easy to bind to form fields)
 interface Item {
-  _id: string; // maps to M_Id
-  itemName: string; // maps to M_Name (the item's actual name)
-  description: string; // maps to M_Description
-  itemCode: string; // maps to M_Group (the short identity code)
-  shortCode: string; // maps to M_Group as well (same field used as code)
-  itemType: "Service" | "Goods" | ""; // maps to M_Type
-  hsnCode: string; // maps to M_HSN
-  showTaxCalculated: boolean; // maps to M_IdentityCode
-  taxRate: number; // derived: M_IGST ?? (M_CGST + M_SGST) ?? 0
-  belongsTo: string; // maps to Parent_Id (the group UUID)
-  uomCode: string; // maps to M_UOM (UOM code from UOMMaster)
-  discontinue: "active" | "discontinued"; // not in DB — kept for UI only
+  _id: string;
+  itemName: string;
+  description: string;
+  shortCode: string;
+  itemType: "Service" | "Goods" | "";
+  hsnCode: string;
+  cgst: number;
+  sgst: number;
+  igst: number;
+  belongsTo: string;
+  uomCode: string;
 }
 
-// Map a DB row → UI item
 function dbToItem(row: DbItem): Item {
-  const taxRate = row.M_IGST ?? (row.M_CGST ?? 0) + (row.M_SGST ?? 0);
   return {
     _id: row.M_Id,
     itemName: row.M_Name || "",
     description: row.M_Description || "",
-    itemCode: row.M_Group || "",
-    shortCode: row.M_Group || "",
+    shortCode: row.M_code || "",           // ← M_code stores short code
     itemType: (row.M_Type as Item["itemType"]) || "",
     hsnCode: row.M_HSN || "",
-    showTaxCalculated: taxRate > 0,
-    taxRate,
-    belongsTo: row.Parent_Id || "",
+    cgst: row.M_CGST ?? 0,
+    sgst: row.M_SGST ?? 0,
+    igst: row.M_IGST ?? 0,
+    belongsTo: row.Parent_Id || "",        // ← Parent_Id stores group UUID
     uomCode: row.M_UOM || "",
-    discontinue: "active",
   };
 }
 
-// Map form state → POST/PUT payload
-function itemToPayload(form: Omit<Item, "_id">) {
-  const hasTax = form.showTaxCalculated && form.taxRate > 0;
+function itemToPayload(form: Omit<Item, "_id">, groupName: string) {
   return {
     M_Name: form.itemName,
     M_Description: form.description || form.itemName,
     M_Type: form.itemType || null,
-    M_Group: form.shortCode || null,
+    M_code: form.shortCode || null,        // ← short code → M_code
+    M_Group: groupName || null,            // ← group Name → M_Group
+    M_BelongsTo: form.belongsTo || null,   // ← group UUID → M_BelongsTo
+    Parent_Id: form.belongsTo || null,     // ← group UUID → Parent_Id
     M_HSN: form.hsnCode || null,
-    M_IdentityCode: form.showTaxCalculated ? 1 : 0,
-    // CK_Group_TaxNull: when no tax, send NULL (not 0) to satisfy the constraint
-    M_CGST: hasTax ? form.taxRate / 2 : null,
-    M_IGST: hasTax ? form.taxRate : null,
-    M_SGST: hasTax ? form.taxRate / 2 : null,
+    M_IdentityCode: (form.cgst > 0 || form.sgst > 0 || form.igst > 0) ? 1 : 0,
+    M_CGST: form.cgst || null,
+    M_SGST: form.sgst || null,
+    M_IGST: form.igst || null,
     M_UOM: form.uomCode || null,
-    M_BelongsTo: null,
-    Parent_Id: form.belongsTo || null,
   };
 }
 
 const EMPTY_FORM: Omit<Item, "_id"> = {
   itemName: "",
   description: "",
-  itemCode: "",
   shortCode: "",
   itemType: "",
   hsnCode: "",
-  showTaxCalculated: false,
-  taxRate: 0,
+  cgst: 0,
+  sgst: 0,
+  igst: 0,
   belongsTo: "",
   uomCode: "",
-  discontinue: "active",
 };
 
-// ── Searchable HSN Dropdown (unchanged from original) ─────────────────────────
+// ── Searchable HSN Dropdown ───────────────────────────────────────────────────
 const HsnDropdown: React.FC<{
   value: string;
   onChange: (code: string) => void;
@@ -142,11 +136,11 @@ const HsnDropdown: React.FC<{
           setQuery("");
           setTimeout(() => inputRef.current?.focus(), 0);
         }}
-        className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary transition-all min-w-0"
+        className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary transition-all"
       >
         {selected ? (
           <span className="flex items-center gap-2 min-w-0 overflow-hidden">
-            <span className="font-mono text-primary text-xs shrink-0 whitespace-nowrap">
+            <span className="font-mono text-primary text-xs shrink-0">
               {selected.code}
             </span>
             <span className="text-muted-foreground text-xs truncate hidden sm:block">
@@ -215,9 +209,11 @@ const HsnDropdown: React.FC<{
                     setOpen(false);
                     setQuery("");
                   }}
-                  className={`w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-muted transition-colors ${h.code === value ? "bg-primary/10" : ""}`}
+                  className={`w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-muted transition-colors ${
+                    h.code === value ? "bg-primary/10" : ""
+                  }`}
                 >
-                  <span className="font-mono text-primary shrink-0 text-xs w-[5.5rem]">
+                  <span className="font-mono text-primary shrink-0 text-xs w-[6rem]">
                     {h.code}
                   </span>
                   <span className="text-muted-foreground text-xs truncate min-w-0">
@@ -233,7 +229,7 @@ const HsnDropdown: React.FC<{
   );
 };
 
-// ── Field wrapper (unchanged) ─────────────────────────────────────────────────
+// ── Field wrapper ─────────────────────────────────────────────────────────────
 const Field = ({
   label,
   required,
@@ -257,35 +253,36 @@ const Field = ({
 );
 
 const inputCls = (err?: boolean) =>
-  `w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground ${err ? "border-destructive" : "border-border"}`;
+  `w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground ${
+    err ? "border-destructive" : "border-border"
+  }`;
 
 // ── Main Component ────────────────────────────────────────────────────────────
 const ItemMaster: React.FC = () => {
-  const { activeHsnCodes, hsnRecords } = useHsn();
   const queryClient = useQueryClient();
 
-  // ── DB queries ──────────────────────────────────────────────────────────
-  const {
-    data: dbItems = [],
-    isLoading,
-    error,
-  } = useQuery({
+  // ── Queries ──────────────────────────────────────────────────────────────
+  const { data: dbItems = [], isLoading, error } = useQuery({
     queryKey: ["item-master"],
     queryFn: getItems,
   });
 
-  // Load item groups from DB so the "Belongs To" dropdown is live
   const { data: dbGroups = [] } = useQuery({
     queryKey: ["item-groups"],
     queryFn: getItemGroups,
   });
 
-  // Load UOM master for the UOM dropdown
   const { data: dbUoms = [] } = useQuery({
     queryKey: ["uom-master"],
     queryFn: getUomList,
   });
 
+  const { data: dbHsn = [] } = useQuery({
+    queryKey: ["hsn"],
+    queryFn: getHsn,
+  });
+
+  // ── Mapped options ────────────────────────────────────────────────────────
   const itemGroups = Array.isArray(dbGroups)
     ? dbGroups.map((g: any) => ({
         id: String(g.M_Id),
@@ -303,9 +300,21 @@ const ItemMaster: React.FC = () => {
         }))
     : [];
 
+  const hsnCodes: HsnCode[] = Array.isArray(dbHsn)
+    ? dbHsn
+        .filter((h: any) => h.HStatus !== false)
+        .map((h: any) => ({
+          code: h.HCode || "",
+          description: h.HShortDescription || h.HDescription || "",
+          cgstRate: h.HCGST ?? 0,
+          sgstRate: h.HSGST ?? 0,
+          igstRate: h.HIGST ?? 0,
+        }))
+    : [];
+
   const data: Item[] = (Array.isArray(dbItems) ? dbItems : []).map(dbToItem);
 
-  // ── Local state ──────────────────────────────────────────────────────────
+  // ── Local state ───────────────────────────────────────────────────────────
   const [form, setFormState] = useState<Omit<Item, "_id">>(EMPTY_FORM);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
@@ -318,23 +327,22 @@ const ItemMaster: React.FC = () => {
       setFormState((p) => {
         const next = { ...p, [key]: val };
         if (key === "hsnCode") {
-          const hsn = hsnRecords.find((h) => h.code === val);
-          if (hsn && next.showTaxCalculated) {
-            next.taxRate = hsn.igstRate || hsn.cgstRate + hsn.sgstRate;
+          const hsn = hsnCodes.find((h) => h.code === val);
+          if (hsn) {
+            next.cgst = hsn.cgstRate ?? 0;
+            next.sgst = hsn.sgstRate ?? 0;
+            next.igst = hsn.igstRate ?? 0;
+          } else {
+            next.cgst = 0;
+            next.sgst = 0;
+            next.igst = 0;
           }
-        }
-        if (key === "showTaxCalculated" && val === true && p.hsnCode) {
-          const hsn = hsnRecords.find((h) => h.code === p.hsnCode);
-          if (hsn) next.taxRate = hsn.igstRate || hsn.cgstRate + hsn.sgstRate;
-        }
-        if (key === "showTaxCalculated" && val === false) {
-          next.taxRate = 0;
         }
         return next;
       });
       if (errors[key]) setErrors((p) => ({ ...p, [key]: false }));
     },
-    [errors, hsnRecords],
+    [errors, hsnCodes],
   );
 
   const validate = () => {
@@ -351,12 +359,16 @@ const ItemMaster: React.FC = () => {
     if (!validate()) return;
     setSaving(true);
     try {
+      // ← resolve group name from selected group id
+      const groupName =
+        itemGroups.find((g) => g.id === form.belongsTo)?.description || "";
+
       if (editingId) {
-        await updateItem(editingId, itemToPayload(form));
+        await updateItem(editingId, itemToPayload(form, groupName));
         toast.success("Item updated successfully ✓");
         setEditingId(null);
       } else {
-        await addItem(itemToPayload(form));
+        await addItem(itemToPayload(form, groupName));
         toast.success("Item saved successfully ✓");
       }
       await queryClient.invalidateQueries({ queryKey: ["item-master"] });
@@ -407,7 +419,6 @@ const ItemMaster: React.FC = () => {
       ),
   );
 
-  // ── Loading / error state ────────────────────────────────────────────────
   if (isLoading)
     return (
       <div className="p-6 text-muted-foreground flex items-center gap-2">
@@ -436,7 +447,8 @@ const ItemMaster: React.FC = () => {
         </h2>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Item Name — maps directly to M_Name */}
+
+          {/* Item Name */}
           <Field label="Item Name" required error={errors.itemName}>
             <input
               type="text"
@@ -447,7 +459,7 @@ const ItemMaster: React.FC = () => {
             />
           </Field>
 
-          {/* Short Code (used as M_Group — the item's identity code) */}
+          {/* Short Code */}
           <Field label="Short Code" required error={errors.shortCode}>
             <input
               type="text"
@@ -459,7 +471,7 @@ const ItemMaster: React.FC = () => {
             />
           </Field>
 
-          {/* Belongs To — Parent_Id, live from DB item groups */}
+          {/* Item Group */}
           <Field label="Item Group (Parent)" required error={errors.belongsTo}>
             <select
               value={form.belongsTo}
@@ -476,7 +488,7 @@ const ItemMaster: React.FC = () => {
             </select>
           </Field>
 
-          {/* UOM — live from UOMMaster */}
+          {/* UOM */}
           <Field label="Unit of Measure (UOM)">
             <select
               value={form.uomCode}
@@ -510,11 +522,11 @@ const ItemMaster: React.FC = () => {
             <HsnDropdown
               value={form.hsnCode}
               onChange={(val) => set("hsnCode", val)}
-              hsnCodes={activeHsnCodes}
+              hsnCodes={hsnCodes}
             />
           </Field>
 
-          {/* Description — optional additional notes */}
+          {/* Description */}
           <Field label="Description">
             <input
               type="text"
@@ -525,69 +537,72 @@ const ItemMaster: React.FC = () => {
             />
           </Field>
 
-          {/* Show Tax Calculated */}
-          <div className="flex flex-col gap-2 pt-5">
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() =>
-                  set("showTaxCalculated", !form.showTaxCalculated)
-                }
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${form.showTaxCalculated ? "bg-primary" : "bg-muted"}`}
-              >
-                <span
-                  className={`inline-block h-4 w-4 rounded-full bg-primary-foreground transition-transform ${form.showTaxCalculated ? "translate-x-6" : "translate-x-1"}`}
-                />
-              </button>
-              <span className="text-sm font-heading text-foreground">
-                Show Tax Calculated
-              </span>
-            </div>
-            {form.showTaxCalculated && (
-              <div className="flex items-center gap-2 mt-1">
-                {form.hsnCode ? (
-                  <div className="flex items-center gap-2">
-                    <div className="relative">
-                      <input
-                        type="number"
-                        value={form.taxRate}
-                        readOnly
-                        className="w-24 px-3 py-1.5 rounded-lg text-sm font-mono bg-muted/50 border border-border text-primary cursor-not-allowed pr-8"
-                      />
-                      <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground font-heading">
-                        %
-                      </span>
-                    </div>
-                    <span className="text-xs text-muted-foreground">
-                      auto-filled from HSN
-                    </span>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2">
-                    <div className="relative">
-                      <input
-                        type="number"
-                        min={0}
-                        max={100}
-                        step={0.5}
-                        value={form.taxRate === 0 ? "" : form.taxRate}
-                        onChange={(e) =>
-                          set("taxRate", parseFloat(e.target.value) || 0)
-                        }
-                        placeholder="0"
-                        className="w-24 px-3 py-1.5 rounded-lg text-sm font-mono bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary pr-8"
-                      />
-                      <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground font-heading">
-                        %
-                      </span>
-                    </div>
-                    <span className="text-xs text-muted-foreground">
-                      enter tax rate
-                    </span>
-                  </div>
-                )}
-              </div>
+        </div>
+
+        {/* ── Tax Rates ── */}
+        <div className="mt-4">
+          <p className="text-xs font-heading text-muted-foreground mb-2 uppercase tracking-wide">
+            Tax Rates{" "}
+            {form.hsnCode && (
+              <span className="text-primary ml-1">(auto-filled from HSN)</span>
             )}
+          </p>
+          <div className="grid grid-cols-3 gap-4">
+
+            <Field label="CGST (%)">
+              <div className="relative">
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={0.5}
+                  value={form.cgst === 0 ? "" : form.cgst}
+                  onChange={(e) => set("cgst", parseFloat(e.target.value) || 0)}
+                  placeholder="0"
+                  className={inputCls() + " pr-8"}
+                />
+                <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                  %
+                </span>
+              </div>
+            </Field>
+
+            <Field label="SGST (%)">
+              <div className="relative">
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={0.5}
+                  value={form.sgst === 0 ? "" : form.sgst}
+                  onChange={(e) => set("sgst", parseFloat(e.target.value) || 0)}
+                  placeholder="0"
+                  className={inputCls() + " pr-8"}
+                />
+                <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                  %
+                </span>
+              </div>
+            </Field>
+
+            <Field label="IGST (%)">
+              <div className="relative">
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  step={0.5}
+                  value={form.igst === 0 ? "" : form.igst}
+                  onChange={(e) => set("igst", parseFloat(e.target.value) || 0)}
+                  placeholder="0"
+                  className={inputCls() + " pr-8"}
+                />
+                <span className="absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+                  %
+                </span>
+              </div>
+            </Field>
+
           </div>
         </div>
 
@@ -629,15 +644,16 @@ const ItemMaster: React.FC = () => {
         <div className="overflow-x-auto">
           <table className="w-full text-sm min-w-[900px]">
             <colgroup>
-              <col className="w-auto" /> {/* Item Name */}
-              <col className="w-[6rem]" /> {/* Short Code */}
+              <col className="w-auto" />
+              <col className="w-[6rem]" />
               <col className="w-[10rem]" />
-              {/* Group */}
-              <col className="w-[6rem]" /> {/* UOM */}
-              <col className="w-[6rem]" /> {/* Type */}
-              <col className="w-[7rem]" /> {/* HSN */}
-              <col className="w-[4rem]" /> {/* Tax */}
-              <col className="w-[5rem]" /> {/* Actions */}
+              <col className="w-[6rem]" />
+              <col className="w-[6rem]" />
+              <col className="w-[7rem]" />
+              <col className="w-[4rem]" />
+              <col className="w-[4rem]" />
+              <col className="w-[4rem]" />
+              <col className="w-[5rem]" />
             </colgroup>
             <thead>
               <tr className="border-b border-border">
@@ -648,7 +664,9 @@ const ItemMaster: React.FC = () => {
                   "UOM",
                   "Type",
                   "HSN",
-                  "Tax",
+                  "CGST",
+                  "SGST",
+                  "IGST",
                   "",
                 ].map((h) => (
                   <th
@@ -664,7 +682,7 @@ const ItemMaster: React.FC = () => {
               {filtered.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={10}
                     className="px-4 py-8 text-center text-muted-foreground text-sm"
                   >
                     {search
@@ -685,19 +703,15 @@ const ItemMaster: React.FC = () => {
                       key={row._id}
                       className="hover:bg-muted/30 transition-colors"
                     >
-                      {/* Item Name */}
                       <td className="px-4 py-3 text-foreground max-w-[200px] truncate font-medium">
                         {row.itemName || "—"}
                       </td>
-                      {/* Short Code */}
                       <td className="px-4 py-3 font-mono text-xs">
                         {row.shortCode || "—"}
                       </td>
-                      {/* Group */}
                       <td className="px-4 py-3 text-muted-foreground text-xs">
                         {groupName || "—"}
                       </td>
-                      {/* UOM */}
                       <td className="px-4 py-3">
                         {uomLabel ? (
                           <span className="px-2 py-0.5 rounded-full text-xs font-heading bg-muted text-foreground whitespace-nowrap">
@@ -707,16 +721,18 @@ const ItemMaster: React.FC = () => {
                           <span className="text-muted-foreground">—</span>
                         )}
                       </td>
-                      {/* Type */}
                       <td className="px-4 py-3">
                         <span
-                          className={`px-2 py-0.5 rounded-full text-xs font-heading ${row.itemType === "Service" ? "bg-blue-500/10 text-blue-400" : "bg-orange-500/10 text-orange-400"}`}
+                          className={`px-2 py-0.5 rounded-full text-xs font-heading ${
+                            row.itemType === "Service"
+                              ? "bg-blue-500/10 text-blue-400"
+                              : "bg-orange-500/10 text-orange-400"
+                          }`}
                         >
                           {row.itemType || "—"}
                         </span>
                       </td>
-                      {/* HSN */}
-                      <td className="px-4 py-3 whitespace-nowrap">
+                      <td className="px-4 py-3">
                         {row.hsnCode ? (
                           <span className="font-mono text-xs text-primary">
                             {row.hsnCode}
@@ -725,19 +741,33 @@ const ItemMaster: React.FC = () => {
                           <span className="text-muted-foreground">—</span>
                         )}
                       </td>
-                      {/* Tax */}
                       <td className="px-4 py-3">
-                        {row.showTaxCalculated ? (
-                          <span className="px-2 py-0.5 rounded-full text-xs font-mono bg-primary/10 text-primary whitespace-nowrap">
-                            {row.taxRate}%
+                        {row.cgst > 0 ? (
+                          <span className="font-mono text-xs text-primary">
+                            {row.cgst}%
                           </span>
                         ) : (
-                          <span className="px-2 py-0.5 rounded-full text-xs font-heading bg-muted text-muted-foreground">
-                            No
-                          </span>
+                          <span className="text-muted-foreground">—</span>
                         )}
                       </td>
-                      {/* Actions */}
+                      <td className="px-4 py-3">
+                        {row.sgst > 0 ? (
+                          <span className="font-mono text-xs text-primary">
+                            {row.sgst}%
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        {row.igst > 0 ? (
+                          <span className="font-mono text-xs text-primary">
+                            {row.igst}%
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">—</span>
+                        )}
+                      </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-end gap-2">
                           {deleteConfirmId === row._id ? (

@@ -4,7 +4,6 @@ const { getPool, sql } = require("../db")
 const { cache } = require("../middleware/cache")
 const { bumpCacheVersion } = require("../redis")
 
-// GET all T&C records
 router.get("/", cache("tc-master", 300), async (req, res) => {
   try {
     const pool = getPool()
@@ -15,9 +14,11 @@ router.get("/", cache("tc-master", 300), async (req, res) => {
   }
 })
 
-// POST new T&C record
 router.post("/", async (req, res) => {
   const { Name, TermsAndCondition, Remarks, isActive } = req.body
+  // ✅ CreatedBy from JWT
+  const createdBy = req.user?.userId || null
+
   try {
     const pool = getPool()
     await pool
@@ -26,9 +27,11 @@ router.post("/", async (req, res) => {
       .input("TermsAndCondition", sql.NVarChar(500), TermsAndCondition || null)
       .input("Remarks",           sql.NVarChar(200), Remarks           || null)
       .input("isActive",          sql.Bit,           isActive !== false ? 1 : 0)
+      .input("CreatedBy",         sql.Int,           createdBy) // ✅ INT from JWT
+      .input("CreatedDate",       sql.DateTime2(3),  new Date())
       .query(`
-        INSERT INTO dbo.TCMaster (Name, TermsAndCondition, Remarks, isActive)
-        VALUES (@Name, @TermsAndCondition, @Remarks, @isActive)
+        INSERT INTO dbo.TCMaster (Name, TermsAndCondition, Remarks, isActive, CreatedBy, CreatedDate)
+        VALUES (@Name, @TermsAndCondition, @Remarks, @isActive, @CreatedBy, @CreatedDate)
       `)
     await bumpCacheVersion("tc-master")
     res.json({ message: "T&C record added successfully" })
@@ -37,24 +40,30 @@ router.post("/", async (req, res) => {
   }
 })
 
-// PUT update T&C record
 router.put("/:id", async (req, res) => {
   const { Name, TermsAndCondition, Remarks, isActive } = req.body
+  // ✅ UpdatedBy from JWT
+  const updatedBy = req.user?.userId || null
+
   try {
     const pool = getPool()
     await pool
       .request()
-      .input("Id",               sql.Int,           req.params.id)
-      .input("Name",             sql.NVarChar(100), Name              || null)
-      .input("TermsAndCondition",sql.NVarChar(500), TermsAndCondition || null)
-      .input("Remarks",          sql.NVarChar(200), Remarks           || null)
-      .input("isActive",         sql.Bit,           isActive !== false ? 1 : 0)
+      .input("Id",                sql.Int,           req.params.id)
+      .input("Name",              sql.NVarChar(100), Name              || null)
+      .input("TermsAndCondition", sql.NVarChar(500), TermsAndCondition || null)
+      .input("Remarks",           sql.NVarChar(200), Remarks           || null)
+      .input("isActive",          sql.Bit,           isActive !== false ? 1 : 0)
+      .input("UpdatedBy",         sql.Int,           updatedBy) // ✅ INT from JWT
+      .input("UpdatedDate",       sql.DateTime2(3),  new Date())
       .query(`
         UPDATE dbo.TCMaster SET
           Name              = @Name,
           TermsAndCondition = @TermsAndCondition,
           Remarks           = @Remarks,
-          isActive          = @isActive
+          isActive          = @isActive,
+          UpdatedBy         = @UpdatedBy,
+          UpdatedDate       = @UpdatedDate
         WHERE Id = @Id
       `)
     await bumpCacheVersion("tc-master")
@@ -64,7 +73,6 @@ router.put("/:id", async (req, res) => {
   }
 })
 
-// DELETE T&C record
 router.delete("/:id", async (req, res) => {
   try {
     const pool = getPool()
