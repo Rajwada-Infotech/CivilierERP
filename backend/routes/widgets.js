@@ -630,14 +630,14 @@ router.get("/", async (req, res) => {
               (
                 SELECT COUNT(*)
                 FROM dbo.ChequeMaster
-                WHERE Status = 1 OR Status IS NULL
+                WHERE Status IN ('Draft','Pending') OR Status IS NULL
               ) AS PendingCheques,
               (SELECT COUNT(*) FROM dbo.AccountHeadMaster WHERE LHeadType = 'S') AS SupplierCount,
               (SELECT COUNT(*) FROM dbo.AccountHeadMaster WHERE LHeadType = 'C') AS CustomerCount,
               (
                 SELECT COUNT(*)
                 FROM dbo.AccountHeadMaster
-                WHERE LHeadType = 'GL' AND ISNULL(LHeadStatus, 0) = 1
+                WHERE LHeadType = 'GL' AND ISNULL(LHeadStatus, '') != ''
               ) AS LedgerCount
           `)
         : emptyResult({
