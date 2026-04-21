@@ -133,8 +133,7 @@ router.get("/:id", cache("work-orders", 300), async (req, res) => {
         INNER JOIN dbo.WorkOrderActivities  a   ON a.Id    = m.WorkOrderActivityId
         LEFT JOIN  dbo.Item_Master_Group    img ON img.M_Id = m.ItemId
         LEFT JOIN  dbo.UOMMaster            uom ON uom.Id  = m.UOMId
-        LEFT JOIN  dbo.users                uc  ON uc.id   = m.CreatedBy
-        LEFT JOIN  dbo.users                uu  ON uu.id   = m.UpdatedBy
+        -- CreatedBy/UpdatedBy now store email directly
         WHERE a.WorkOrderHeaderId = @WorkOrderHeaderId
         ORDER BY m.WorkOrderActivityId, m.Id
       `);
@@ -182,7 +181,7 @@ router.post("/", async (req, res) => {
       .input("TotalAmount", sql.Decimal(18, 2), TotalAmount || 0)
       .input("Remarks", sql.NVarChar, Remarks || null)
       .input("TermsAndConditions", sql.NVarChar, TermsAndConditions || null)
-      .input("CreatedBy", sql.Int, CreatedBy || 1)
+      .input("CreatedBy", sql.NVarChar(100), req.user?.email || null)
       .input("CreatedAt", sql.DateTime, new Date()).query(`
         INSERT INTO dbo.WorkOrderHeader
           (CompanyId, ProjectId, DocumentNumber, DocumentDate, ContractorId,
@@ -227,7 +226,7 @@ router.put("/:id", async (req, res) => {
       .input("TotalAmount", sql.Decimal(18, 2), TotalAmount || 0)
       .input("Remarks", sql.NVarChar, Remarks || null)
       .input("TermsAndConditions", sql.NVarChar, TermsAndConditions || null)
-      .input("UpdatedBy", sql.Int, UpdatedBy || 1)
+      .input("UpdatedBy", sql.NVarChar(100), req.user?.email || null)
       .input("UpdatedAt", sql.DateTime, new Date()).query(`
         UPDATE dbo.WorkOrderHeader SET
           CompanyId=@CompanyId, ProjectId=@ProjectId,
@@ -434,8 +433,7 @@ router.get("/:id/activities/:activityId/materials", cache("work-orders", 300), a
         FROM dbo.WorkOrderActivityMaterials m
         LEFT JOIN dbo.Item_Master_Group img ON img.M_Id = m.ItemId
         LEFT JOIN dbo.UOMMaster         uom ON uom.Id   = m.UOMId
-        LEFT JOIN dbo.users             uc  ON uc.id    = m.CreatedBy
-        LEFT JOIN dbo.users             uu  ON uu.id    = m.UpdatedBy
+        -- CreatedBy/UpdatedBy now store email directly
         WHERE m.WorkOrderActivityId = @WorkOrderActivityId
         ORDER BY m.Id
       `);
@@ -458,7 +456,7 @@ router.post("/:id/activities/:activityId/materials", async (req, res) => {
       .input("Quantity", sql.Decimal(18, 2), Quantity || null)
       .input("Rate", sql.Decimal(18, 2), Rate || null)
       .input("Remarks", sql.NVarChar, Remarks || null)
-      .input("CreatedBy", sql.Int, CreatedBy || 1)
+      .input("CreatedBy", sql.NVarChar(100), req.user?.email || null)
       .input("CreatedAt", sql.DateTime2, new Date()).query(`
         INSERT INTO dbo.WorkOrderActivityMaterials
           (WorkOrderActivityId, ItemId, UOMId, Quantity, Rate, Remarks, CreatedBy, CreatedAt)
@@ -490,7 +488,7 @@ router.put(
         .input("Quantity", sql.Decimal(18, 2), Quantity || null)
         .input("Rate", sql.Decimal(18, 2), Rate || null)
         .input("Remarks", sql.NVarChar, Remarks || null)
-        .input("UpdatedBy", sql.Int, UpdatedBy || 1)
+        .input("UpdatedBy", sql.NVarChar(100), req.user?.email || null)
         .input("UpdatedAt", sql.DateTime2, new Date()).query(`
           UPDATE dbo.WorkOrderActivityMaterials SET
             ItemId=@ItemId, UOMId=@UOMId, Quantity=@Quantity,
@@ -566,7 +564,7 @@ router.post("/:id/save-full", async (req, res) => {
         sql.NVarChar,
         header.TermsAndConditions || null,
       )
-      .input("UpdatedBy", sql.Int, header.UpdatedBy || 1)
+      .input("UpdatedBy", sql.NVarChar(100), req.user?.email || null)
       .input("UpdatedAt", sql.DateTime, new Date()).query(`
         UPDATE dbo.WorkOrderHeader SET
           CompanyId=@CompanyId, ProjectId=@ProjectId,
@@ -654,7 +652,7 @@ router.post("/:id/save-full", async (req, res) => {
             .input("Quantity", sql.Decimal(18, 2), mat.Quantity || null)
             .input("Rate", sql.Decimal(18, 2), mat.Rate || null)
             .input("Remarks", sql.NVarChar, mat.Remarks || null)
-            .input("CreatedBy", sql.Int, mat.CreatedBy || 1)
+            .input("CreatedBy", sql.NVarChar(100), req.user?.email || null)
             .input("CreatedAt", sql.DateTime2, new Date()).query(`
               INSERT INTO dbo.WorkOrderActivityMaterials
                 (WorkOrderActivityId, ItemId, UOMId, Quantity, Rate, Remarks, CreatedBy, CreatedAt)
@@ -672,7 +670,7 @@ router.post("/:id/save-full", async (req, res) => {
             .input("Quantity", sql.Decimal(18, 2), mat.Quantity || null)
             .input("Rate", sql.Decimal(18, 2), mat.Rate || null)
             .input("Remarks", sql.NVarChar, mat.Remarks || null)
-            .input("UpdatedBy", sql.Int, mat.UpdatedBy || 1)
+            .input("UpdatedBy", sql.NVarChar(100), req.user?.email || null)
             .input("UpdatedAt", sql.DateTime2, new Date()).query(`
               UPDATE dbo.WorkOrderActivityMaterials SET
                 ItemId=@ItemId, UOMId=@UOMId, Quantity=@Quantity,
