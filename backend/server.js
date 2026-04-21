@@ -197,6 +197,7 @@ async function startServer() {
       { path: "/api/contractor-category", file: "./routes/contractorCategory" },
       { path: "/api/approval-workflows", file: "./routes/approvalWorkflows" },
       { path: "/api/tasks", file: "./routes/tasks" },
+      { path: "/api/widgets", file: "./routes/widgets" },
     ];
 
     for (const { path, file } of routes) {
