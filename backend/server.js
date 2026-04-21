@@ -183,6 +183,7 @@ async function startServer() {
       { path: "/api/uom-master",         file: "./routes/uomMaster" },
       { path: "/api/debit-note",         file: "./routes/debitNote" },
       { path: "/api/tc-master",          file: "./routes/tcMaster" },
+      { path: "/api/transactions", file: "./routes/transactions" },
       { path: "/api/grns",               file: "./routes/grns" },
       { path: "/api/stock-ledger",       file: "./routes/stockLedger" },
 { path: "/api/brs",                file: "./routes/brs" },

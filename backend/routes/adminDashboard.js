@@ -10,7 +10,7 @@ const CACHE_KEY = "admin_dashboard";
 const CACHE_TTL = 60; // seconds
 
 // GET /api/admin-dashboard
-router.get("/", allowRoles("admin", "director"), async (req, res) => {
+router.get("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
   try {
     // 1. Try cache first
     try {
@@ -41,13 +41,13 @@ router.get("/", allowRoles("admin", "director"), async (req, res) => {
         pool.request().query(`
           SELECT COUNT(*) AS activeUsers
           FROM Users
-          WHERE isActive = 1
+          WHERE discontinue = 0
         `),
 
         pool.request().query(`
-SELECT TOP 5 id, name, email, createdAt, isActive
+SELECT TOP 5 id, name, email, created_datetime, discontinue
           FROM Users
-          ORDER BY createdAt DESC
+          ORDER BY created_datetime DESC
         `),
       ]);
 
@@ -73,7 +73,7 @@ SELECT TOP 5 id, name, email, createdAt, isActive
     // 6. Send response
     res.json(response);
   } catch (err) {
-    console.error("Admin Dashboard Error:", err);
+    console.error("Admin Dashboard Error:", err.message, err.stack);
 
     res.status(500).json({
       success: false,
