@@ -153,19 +153,21 @@ async function loadReminders(): Promise<ReminderItem[]> {
   const push = (
     rows: any[],
     type: ReminderItem["type"],
+    idFn: (r: any) => string | number,
     titleFn: (r: any) => string,
     subtitleFn: (r: any) => string,
     dateFn: (r: any) => string,
     amtFn: (r: any) => number | undefined,
     tsFn: (r: any) => string | undefined,
   ) => {
-    rows.forEach((r) => {
+    rows.forEach((r, idx) => {
       const d = dateFn(r);
       if (!d) return;
       const urgency = classifyUrgency(d);
       if (urgency === "upcoming") return;
+      const rawId = idFn(r);
       items.push({
-        id: `${type}-${r.Id ?? r.id}`,
+        id: `${type}-${rawId ?? idx}`,
         type,
         title: titleFn(r),
         subtitle: subtitleFn(r),
@@ -181,7 +183,9 @@ async function loadReminders(): Promise<ReminderItem[]> {
     push(
       Array.isArray(d) ? d : (d.data ?? []),
       "purchase_order",
-      (r) => `PO #${r.PONumber || r.DocumentNumber || r.Id}`,
+      (r) => r.PurchaseOrderID ?? r.Id ?? r.id,
+      (r) =>
+        `PO #${r.PurchaseOrderNo || r.PONumber || r.DocumentNumber || r.PurchaseOrderID}`,
       (r) => r.SupplierName || r.VendorName || "Purchase Order",
       (r) => r.ExpectedDeliveryDate || r.DeliveryDate || r.DocumentDate,
       (r) => r.TotalAmount || r.Amount,
@@ -193,9 +197,10 @@ async function loadReminders(): Promise<ReminderItem[]> {
     push(
       Array.isArray(d) ? d : (d.data ?? []),
       "grn",
-      (r) => `GRN #${r.GRNNumber || r.DocumentNumber || r.Id}`,
+      (r) => r.GRNID ?? r.Id ?? r.id,
+      (r) => `GRN #${r.GRNNo || r.GRNNumber || r.DocumentNumber || r.GRNID}`,
       (r) => r.SupplierName || r.VendorName || "Goods Receipt",
-      (r) => r.ExpectedDate || r.ReceivedDate || r.DocumentDate,
+      (r) => r.GRNDate || r.ExpectedDate || r.ReceivedDate || r.DocumentDate,
       (r) => r.TotalAmount,
       (r) => r.TimeSlot,
     );
@@ -205,9 +210,10 @@ async function loadReminders(): Promise<ReminderItem[]> {
     push(
       Array.isArray(d) ? d : (d.data ?? []),
       "cheque",
-      (r) => `Cheque #${r.ChequeNumber || r.Id}`,
-      (r) => r.BankName || r.PartyName || "Cheque",
-      (r) => r.ChequeDate || r.DueDate || r.Date,
+      (r) => r.CId ?? r.Id ?? r.id,
+      (r) => `Cheque Lot #${r.ChequeLotNumber || r.ChequeNumber || r.CId}`,
+      (r) => r.BankName || r.AccountNumber || r.PartyName || "Cheque",
+      (r) => r.CreatedAt || r.ChequeDate || r.DueDate || r.Date,
       (r) => r.Amount,
       (r) => r.TimeSlot,
     );
@@ -217,6 +223,7 @@ async function loadReminders(): Promise<ReminderItem[]> {
     push(
       Array.isArray(d) ? d : (d.data ?? []),
       "tds",
+      (r) => r.Id ?? r.id,
       (r) => `TDS #${r.TDSCertificateNo || r.Id}`,
       (r) => r.PartyName || r.DeducteeName || "TDS Payment",
       (r) => r.DueDate || r.PaymentDate || r.Date,
