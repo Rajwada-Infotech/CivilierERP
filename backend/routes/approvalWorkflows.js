@@ -9,7 +9,7 @@ const adminOnly = allowRoles("admin", "super_admin");
 // GET all workflows
 router.get("/", authMiddleware, async (req, res) => {
   try {
-    const pool = getPool();
+    const pool = await getPool();
     const result = await pool.request().query(`
       SELECT Id AS id, Name AS name, Module AS module, Levels AS levels,
              Approvers AS approvers, Status AS status, Description AS description,
@@ -35,8 +35,8 @@ router.post("/", authMiddleware, adminOnly, async (req, res) => {
   if (!module?.trim()) return res.status(400).json({ error: "Module is required" });
 
   try {
-    const pool = getPool();
-    const approversStr = Array.isArray(approvers) ? approvers.join(",") : (approvers || "");
+    const pool = await getPool();
+    const approversStr = Array.isArray(approvers) ? approvers.join(",") : (approvers || ""); 
     await pool.request()
       .input("Name",        sql.NVarChar(100), name.trim())
       .input("Module",      sql.NVarChar(100), module.trim())
@@ -62,8 +62,9 @@ router.post("/", authMiddleware, adminOnly, async (req, res) => {
 router.put("/:id", authMiddleware, adminOnly, async (req, res) => {
   const { name, module, levels, approvers, status, description } = req.body;
   try {
-    const pool = getPool();
+    const pool = await getPool();
     const approversStr = Array.isArray(approvers) ? approvers.join(",") : (approvers || "");
+
     await pool.request()
       .input("Id",          sql.Int,           req.params.id)
       .input("Name",        sql.NVarChar(100), name?.trim() || null)
@@ -90,7 +91,7 @@ router.put("/:id", authMiddleware, adminOnly, async (req, res) => {
 // PATCH /:id/toggle — toggle Active/Inactive (admin only)
 router.patch("/:id/toggle", authMiddleware, adminOnly, async (req, res) => {
   try {
-    const pool = getPool();
+    const pool = await getPool();
     await pool.request()
       .input("Id",        sql.Int,           req.params.id)
       .input("UpdatedBy", sql.NVarChar(100), req.user?.email || null)
@@ -110,7 +111,7 @@ router.patch("/:id/toggle", authMiddleware, adminOnly, async (req, res) => {
 // DELETE (admin only)
 router.delete("/:id", authMiddleware, adminOnly, async (req, res) => {
   try {
-    const pool = getPool();
+    const pool = await getPool();
     await pool.request()
       .input("Id", sql.Int, req.params.id)
       .query("DELETE FROM dbo.ApprovalWorkflows WHERE Id=@Id");
