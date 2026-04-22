@@ -192,6 +192,15 @@ export const ActivityBrowserProvider: React.FC<{
         return;
       }
 
+      // Only privileged roles have UserActivity CanView — skip silently for user role
+      try {
+        const stored = localStorage.getItem("user");
+        const role = stored ? JSON.parse(stored)?.role : null;
+        if (!["super_admin", "admin", "dba"].includes(role)) return;
+      } catch {
+        return;
+      }
+
       try {
         setIsLoading(true);
 
@@ -251,6 +260,15 @@ export const ActivityBrowserProvider: React.FC<{
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) return;
+
+    // Only open SSE for privileged roles that have UserActivity CanView rights
+    try {
+      const stored = localStorage.getItem("user");
+      const role = stored ? JSON.parse(stored)?.role : null;
+      if (!["super_admin", "admin", "dba"].includes(role)) return;
+    } catch {
+      return;
+    }
 
     sseSourceRef.current = subscribeToActivityStream((events) => {
       setRawSessions(events.map((e, i) => normalizeEvent(e, i)));

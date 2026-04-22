@@ -7,7 +7,7 @@ import {
   changePassword,
   getUserActivity,
 } from "@/api/userProfileApi";
-import { ProfileShell } from "@/components/layout/ProfileShell";
+import { ProfileShell, ProfileSection, ProfileField, ProfileFieldGrid } from "@/components/layout/ProfileShell";
 import { toast } from "sonner";
 import {
   User,
