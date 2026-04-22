@@ -1,122 +1,54 @@
-import React, { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import React from "react";
+import { motion } from "framer-motion";
 import { useAuth } from "@/contexts/AuthContext";
-import { useModule } from "@/contexts/ModuleContext";
 import {
   TrendingUp,
-  Package,
-  Calendar,
-  ShieldCheck,
   Crown,
   Database,
-  ArrowRight,
-  BarChart3,
-  Puzzle,
-  CheckCircle2,
-  Layers,
+  ShieldCheck,
+  Activity,
+  ArrowUpRight,
+  MousePointer2,
 } from "lucide-react";
 
-// ─── Module card data ────────────────────────────────────────────────────────
+// ─── Animation Config ────────────────────────────────────────────────────────
 
-const MODULES = [
-  {
-    id: "finance" as const,
-    label: "Finance",
-    description: "Payments, ledger, BRS & trial balance",
-    icon: TrendingUp,
-    route: "/",
-    gradient: "from-violet-500/20 via-primary/10 to-indigo-500/10",
-    border: "border-primary/30 hover:border-primary/60",
-    iconBg: "bg-primary/15",
-    iconColor: "text-primary",
-    activeDot: "bg-primary",
-    activeBg: "bg-primary/10",
-    activeBorder: "border-primary/50",
-    pills: ["Payments", "BRS", "Ledger", "TDS"],
+const containerVariants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.15,
+      delayChildren: 0.1,
+    },
   },
-  {
-    id: "material" as const,
-    label: "Material",
-    description: "GRN, purchase orders & work orders",
-    icon: Package,
-    route: "/material",
-    gradient: "from-emerald-500/20 via-teal-500/10 to-green-500/10",
-    border: "border-emerald-500/30 hover:border-emerald-500/60",
-    iconBg: "bg-emerald-500/15",
-    iconColor: "text-emerald-500",
-    activeDot: "bg-emerald-500",
-    activeBg: "bg-emerald-500/10",
-    activeBorder: "border-emerald-500/50",
-    pills: ["GRN", "Purchase Orders", "Work Orders", "Expenses"],
-  },
-  {
-    id: "followup" as const,
-    label: "Follow-Up",
-    description: "Sales, agreements, CRM & reminders",
-    icon: Calendar,
-    route: "/followup",
-    gradient: "from-indigo-500/20 via-blue-500/10 to-sky-500/10",
-    border: "border-indigo-500/30 hover:border-indigo-500/60",
-    iconBg: "bg-indigo-500/15",
-    iconColor: "text-indigo-500",
-    activeDot: "bg-indigo-500",
-    activeBg: "bg-indigo-500/10",
-    activeBorder: "border-indigo-500/50",
-    pills: ["Sales", "Agreements", "Reminders", "Reports"],
-  },
-];
-
-const ADMIN_MODULE = {
-  id: "admin" as const,
-  label: "Admin",
-  description: "Users, rights, approvals & config",
-  icon: ShieldCheck,
-  route: "/admin/dashboard",
-  gradient: "from-blue-500/20 via-sky-500/10 to-cyan-500/10",
-  border: "border-blue-500/30 hover:border-blue-500/60",
-  iconBg: "bg-blue-500/15",
-  iconColor: "text-blue-500",
-  activeDot: "bg-blue-500",
-  activeBg: "bg-blue-500/10",
-  activeBorder: "border-blue-500/50",
-  pills: ["Users", "Menu Rights", "Approvals", "Activity"],
 };
 
-// ─── Greeting ─────────────────────────────────────────────────────────────────
-function getGreeting() {
-  const h = new Date().getHours();
-  if (h < 12) return "Good morning";
-  if (h < 17) return "Good afternoon";
-  return "Good evening";
-}
+const itemVariants = {
+  hidden: { y: 30, opacity: 0 },
+  visible: {
+    y: 0,
+    opacity: 1,
+    transition: { duration: 0.8, ease: [0.16, 1, 0.3, 1] },
+  },
+};
 
-// ─── Component ────────────────────────────────────────────────────────────────
+const cardHover = {
+  initial: { y: 0, scale: 1 },
+  hover: {
+    y: -5,
+    scale: 1.01,
+    transition: { duration: 0.3, ease: "easeOut" },
+  },
+};
+
 export default function Home() {
-  const navigate = useNavigate();
   const { currentUser } = useAuth();
-  const { setActiveModule, setModuleSwitching } = useModule();
-  const [hoveredId, setHoveredId] = useState<string | null>(null);
 
   const isSuperAdmin = currentUser?.role === "super_admin";
   const isDba = currentUser?.role === "dba";
   const isAdmin = currentUser?.role === "admin" || isSuperAdmin || isDba;
 
-  const modules = isAdmin ? [...MODULES, ADMIN_MODULE] : MODULES;
-
-  const RoleIcon = isSuperAdmin
-    ? Crown
-    : isDba
-      ? Database
-      : isAdmin
-        ? ShieldCheck
-        : null;
-  const roleBadgeClass = isSuperAdmin
-    ? "bg-violet-500/15 text-violet-500 border-violet-400/30"
-    : isDba
-      ? "bg-emerald-500/15 text-emerald-500 border-emerald-400/30"
-      : isAdmin
-        ? "bg-blue-500/15 text-blue-500 border-blue-400/30"
-        : "bg-muted text-muted-foreground border-border";
   const roleLabel = isSuperAdmin
     ? "Super Admin"
     : isDba
@@ -125,127 +57,123 @@ export default function Home() {
         ? "Admin"
         : "User";
 
-  const handleSelect = async (
-    mod: (typeof MODULES)[0] | typeof ADMIN_MODULE,
-  ) => {
-    setModuleSwitching(true);
-    setActiveModule(mod.id);
-    // Small delay for visual feedback
-    await new Promise((r) => setTimeout(r, 220));
-    setModuleSwitching(false);
-    navigate(mod.route);
-  };
-
   return (
-    <div className="min-h-[calc(100vh-3.5rem)] flex flex-col">
-      {/* ── Hero ──────────────────────────────────────────────────────────── */}
-      <div className="px-6 pt-10 pb-8 border-b border-border">
-        <div className="max-w-4xl">
-          {/* Role pill */}
-          {RoleIcon && (
-            <div
-              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-heading font-semibold border mb-3 ${roleBadgeClass}`}
-            >
-              <RoleIcon size={11} />
-              {roleLabel}
-            </div>
-          )}
+    <motion.div
+      initial="hidden"
+      animate="visible"
+      variants={containerVariants}
+      className="min-h-[calc(100vh-3.5rem)] bg-background flex flex-col items-center justify-center p-6"
+    >
+      {/* ── Background Glow Effects ── */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute -top-[10%] -left-[10%] w-[40%] h-[40%] bg-primary/5 blur-[120px] rounded-full" />
+        <div className="absolute -bottom-[10%] -right-[10%] w-[40%] h-[40%] bg-violet-500/5 blur-[120px] rounded-full" />
+      </div>
 
-          <h1 className="text-3xl sm:text-4xl font-heading font-bold text-foreground tracking-tight">
-            {getGreeting()},{" "}
-            <span className="gradient-text">
-              {currentUser?.name?.split(" ")[0] ?? "there"}
+      <div className="w-full max-w-6xl z-10">
+        {/* ── Hero Section ── */}
+        <motion.div
+          variants={itemVariants}
+          className="text-center mb-16 space-y-4"
+        >
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-primary/20 bg-primary/5 mb-2">
+            <span className="flex h-1.5 w-1.5 rounded-full bg-primary animate-pulse" />
+            <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-primary/80">
+              {roleLabel} Console Active
+            </span>
+          </div>
+
+          <h1 className="text-5xl md:text-7xl font-heading font-bold tracking-tight text-foreground">
+            Welcome back, <br />
+            <span className="bg-gradient-to-r from-primary via-violet-500 to-indigo-400 bg-clip-text text-transparent">
+              {currentUser?.name?.split(" ")[0] ?? "Prithwijit"}
             </span>
           </h1>
-          <p className="mt-2 text-base text-muted-foreground max-w-xl">
-            Select a module to get started. Each module gives you a focused
-            workspace for that area of operations.
+
+          <p className="text-muted-foreground text-lg md:text-xl max-w-2xl mx-auto font-light leading-relaxed">
+            Your workspace is synchronized and up to date. Here is a snapshot of
+            the current operational health.
           </p>
-        </div>
-      </div>
+        </motion.div>
 
-      {/* ── Module grid ───────────────────────────────────────────────────── */}
-      <div className="flex-1 px-6 py-8">
-        <p className="text-[11px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-4">
-          Available Modules
-        </p>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 max-w-5xl">
-          {modules.map((mod) => {
-            const Icon = mod.icon;
-            const isHovered = hoveredId === mod.id;
-            return (
-              <button
-                key={mod.id}
-                onClick={() => handleSelect(mod)}
-                onMouseEnter={() => setHoveredId(mod.id)}
-                onMouseLeave={() => setHoveredId(null)}
-                className={`group relative flex flex-col text-left p-5 rounded-2xl border bg-gradient-to-br transition-all duration-200 active:scale-[0.98] ${mod.gradient} ${mod.border}`}
-              >
-                {/* Icon */}
-                <div
-                  className={`w-11 h-11 rounded-xl flex items-center justify-center mb-4 transition-transform duration-200 ${mod.iconBg} ${isHovered ? "scale-110" : ""}`}
-                >
-                  <Icon size={22} className={mod.iconColor} />
+        {/* ── Stats Section ── */}
+        <motion.div
+          variants={itemVariants}
+          className="grid grid-cols-1 md:grid-cols-3 gap-6"
+        >
+          {[
+            {
+              label: "Pending Approvals",
+              value: "12",
+              trend: "+2 since yesterday",
+              icon: ShieldCheck,
+              color: "text-blue-500",
+              bg: "bg-blue-500/10",
+            },
+            {
+              label: "Active Orders",
+              value: "148",
+              trend: "Across all departments",
+              icon: Activity,
+              color: "text-primary",
+              bg: "bg-primary/10",
+            },
+            {
+              label: "Monthly Revenue",
+              value: "$42.5k",
+              trend: "12% increase this month",
+              icon: TrendingUp,
+              color: "text-emerald-500",
+              bg: "bg-emerald-500/10",
+            },
+          ].map((stat, i) => (
+            <motion.div
+              key={i}
+              variants={cardHover}
+              initial="initial"
+              whileHover="hover"
+              className="relative overflow-hidden group p-8 rounded-[2rem] border border-border bg-card/50 backdrop-blur-sm shadow-sm hover:shadow-xl hover:shadow-primary/5 transition-all"
+            >
+              <div className="flex justify-between items-start mb-6">
+                <div className={`p-3 rounded-2xl ${stat.bg} ${stat.color}`}>
+                  <stat.icon size={24} />
                 </div>
-
-                {/* Label + desc */}
-                <div className="flex-1">
-                  <h2 className="text-base font-heading font-semibold text-foreground mb-1">
-                    {mod.label}
-                  </h2>
-                  <p className="text-sm text-muted-foreground leading-relaxed">
-                    {mod.description}
-                  </p>
+                <div className="opacity-0 group-hover:opacity-100 transition-opacity">
+                  <ArrowUpRight size={20} className="text-muted-foreground" />
                 </div>
+              </div>
 
-                {/* Pills */}
-                <div className="flex flex-wrap gap-1.5 mt-4">
-                  {mod.pills.map((p) => (
-                    <span
-                      key={p}
-                      className="text-[10px] font-heading px-2 py-0.5 rounded-full bg-background/60 border border-border text-muted-foreground"
-                    >
-                      {p}
-                    </span>
-                  ))}
-                </div>
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
+                  {stat.label}
+                </p>
+                <h3 className="text-4xl font-bold font-heading tracking-tighter tabular-nums text-foreground">
+                  {stat.value}
+                </h3>
+                <p className="text-xs font-medium text-emerald-500 flex items-center gap-1 mt-2">
+                  {stat.trend}
+                </p>
+              </div>
 
-                {/* Arrow */}
-                <div
-                  className={`absolute top-5 right-5 w-7 h-7 rounded-full border border-border flex items-center justify-center transition-all duration-200 ${isHovered ? "bg-foreground text-background border-foreground translate-x-0.5" : "bg-transparent text-muted-foreground"}`}
-                >
-                  <ArrowRight size={13} />
-                </div>
-              </button>
-            );
-          })}
-        </div>
+              {/* Subtle background pattern */}
+              <div className="absolute -right-4 -bottom-4 opacity-[0.03] group-hover:opacity-[0.05] transition-opacity">
+                <stat.icon size={120} />
+              </div>
+            </motion.div>
+          ))}
+        </motion.div>
 
-        {/* ── Quick links ────────────────────────────────────────────────── */}
-        <div className="mt-10 max-w-5xl">
-          <p className="text-[11px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3">
-            Quick Access
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {[
-              { icon: BarChart3, label: "Reports", path: "/reports" },
-              { icon: Puzzle, label: "Widgets", path: "/widgets" },
-              { icon: CheckCircle2, label: "Tasks", path: "/tasks" },
-              { icon: Layers, label: "Records", path: "/records" },
-            ].map(({ icon: Icon, label, path }) => (
-              <button
-                key={path}
-                onClick={() => navigate(path)}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl border border-border hover:bg-muted hover:border-border/80 transition-all text-sm font-heading text-muted-foreground hover:text-foreground"
-              >
-                <Icon size={14} />
-                {label}
-              </button>
-            ))}
+        {/* ── Footer Interaction Hint ── */}
+        <motion.div
+          variants={itemVariants}
+          className="mt-16 flex justify-center"
+        >
+          <div className="flex items-center gap-3 text-muted-foreground/60 text-sm font-medium">
+            <MousePointer2 size={14} />
+            <span>Use the module switcher to explore specific modules</span>
           </div>
-        </div>
+        </motion.div>
       </div>
-    </div>
+    </motion.div>
   );
 }
