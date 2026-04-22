@@ -1,4 +1,11 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from "react";
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+} from "react";
 
 export type Theme = "dark" | "light" | "midnight" | "sepia" | "crimson";
 
@@ -6,11 +13,11 @@ const themes: Theme[] = ["dark", "light", "midnight", "sepia", "crimson"];
 
 // Dot colors that represent each theme visually
 export const THEME_DOTS: Record<Theme, { bg: string; label: string }> = {
-  dark:     { bg: "#4f46e5", label: "Dark" },
-  light:    { bg: "#a78bfa", label: "Light" },
+  dark: { bg: "#4f46e5", label: "Dark" },
+  light: { bg: "#a78bfa", label: "Light" },
   midnight: { bg: "#2dd4bf", label: "Midnight" },
-  sepia:    { bg: "#b45309", label: "Sepia" },
-  crimson:  { bg: "#be123c", label: "Crimson" },
+  sepia: { bg: "#b45309", label: "Sepia" },
+  crimson: { bg: "#be123c", label: "Crimson" },
 };
 
 interface ThemeContextType {
@@ -31,11 +38,27 @@ const getInitialTheme = (): Theme => {
   return stored && themes.includes(stored) ? stored : "dark";
 };
 
+// Apply theme to <html> element.
+// "dark" is the CSS :root default — no data-theme attribute needed.
+// All other themes use [data-theme="X"] selectors in index.css.
+function applyTheme(theme: Theme) {
+  if (theme === "dark") {
+    document.documentElement.removeAttribute("data-theme");
+  } else {
+    document.documentElement.setAttribute("data-theme", theme);
+  }
+}
+
 export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
-  const [theme, setThemeState] = useState<Theme>(getInitialTheme);
+  const [theme, setThemeState] = useState<Theme>(() => {
+    const initial = getInitialTheme();
+    // Apply synchronously before first paint to avoid flash
+    applyTheme(initial);
+    return initial;
+  });
 
   useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
+    applyTheme(theme);
     localStorage.setItem("civilier-theme", theme);
   }, [theme]);
 
@@ -43,5 +66,7 @@ export const ThemeProvider = ({ children }: { children: React.ReactNode }) => {
 
   const value = useMemo(() => ({ theme, setTheme }), [theme, setTheme]);
 
-  return <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>;
+  return (
+    <ThemeContext.Provider value={value}>{children}</ThemeContext.Provider>
+  );
 };
