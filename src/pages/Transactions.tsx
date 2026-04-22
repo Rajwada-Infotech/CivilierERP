@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { useUserMap } from "@/hooks/useUserMap";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
@@ -53,6 +54,8 @@ export default function Transactions() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const resolveUser = useUserMap();
 
   const fetchData = async () => {
     setLoading(true);
@@ -180,6 +183,7 @@ export default function Transactions() {
                   "Amount (₹)",
                   "Mode",
                   "Status",
+                "Created By",
                 ].map((h) => (
                   <th
                     key={h}
@@ -194,7 +198,7 @@ export default function Transactions() {
               {loading ? (
                 Array.from({ length: 5 }).map((_, i) => (
                   <tr key={i} className="border-b border-border">
-                    {Array.from({ length: 8 }).map((_, j) => (
+                    {Array.from({ length: 9 }).map((_, j) => (
                       <td key={j} className="px-4 py-3">
                         <div className="h-4 bg-muted rounded animate-pulse" />
                       </td>
@@ -204,7 +208,7 @@ export default function Transactions() {
               ) : transactions.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={8}
+                    colSpan={9}
                     className="px-4 py-10 text-center text-muted-foreground text-sm"
                   >
                     No transactions found.
@@ -249,6 +253,9 @@ export default function Transactions() {
                       >
                         {txn.status}
                       </span>
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
+                      {resolveUser(txn.createdBy)}
                     </td>
                   </tr>
                 ))

@@ -27,6 +27,8 @@ import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { createWorkOrder, saveFullWorkOrder } from "@/api/workOrderApi";
+import { StatusBadge } from "@/components/StatusBadge";
+import { ApprovalActions } from "@/components/ApprovalActions";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -825,6 +827,8 @@ const WorkOrderMaster: React.FC = () => {
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [savedId, setSavedId] = useState<number | null>(null);
+  const [savedStatus, setSavedStatus] = useState<string>("Draft");
 
   // ── Real API data ─────────
   const [companies, setCompanies] = useState([]);
@@ -900,6 +904,8 @@ const WorkOrderMaster: React.FC = () => {
     setGroups([EMPTY_GROUP()]);
     setErrors({});
     setSaved(false);
+    setSavedId(null);
+    setSavedStatus("Draft");
   };
 
   const validate = () => {
@@ -978,6 +984,8 @@ const WorkOrderMaster: React.FC = () => {
 
       toast.success("Work order saved successfully!");
       setSaved(true);
+      setSavedId(newHeaderId);
+      setSavedStatus("Draft");
       setForm((p) => ({ ...p, docNumber: generateDocNumber() }));
       setTimeout(() => setSaved(false), 3000);
     } catch (err: any) {
@@ -1071,6 +1079,30 @@ const WorkOrderMaster: React.FC = () => {
           </button>
         </div>
       </div>
+
+      {/* Approval actions — shown after save */}
+      {savedId && (
+        <div className="mb-5 rounded-xl border border-border bg-card px-4 py-3 flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <span className="text-sm font-medium text-muted-foreground">Approval Status:</span>
+            <StatusBadge status={savedStatus} />
+          </div>
+          <ApprovalActions
+            status={savedStatus}
+            recordId={savedId}
+            endpoint="/api/work-orders"
+            onSuccess={async () => {
+              try {
+                const res = await fetchWithAuth(`/api/work-orders/${savedId}`);
+                if (res.ok) {
+                  const data = await res.json();
+                  setSavedStatus(data.Status || data.status || savedStatus);
+                }
+              } catch { /* ignore */ }
+            }}
+          />
+        </div>
+      )}
 
       {/* Header card */}
       <div className="rounded-xl border border-border bg-card mb-5">

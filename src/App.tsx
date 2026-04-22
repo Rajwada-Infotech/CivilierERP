@@ -153,6 +153,8 @@ const ApprovalSetup = lazy(() => import("./pages/admin/ApprovalSetup"));
 const PostApprovalRights = lazy(
   () => import("./pages/admin/PostApprovalRights"),
 );
+const ApprovalInbox = lazy(() => import("./pages/admin/ApprovalInbox"));
+
 const ApiIntegrationPage = lazy(() => import("./pages/admin/ApiIntegration"));
 const SignaturePage = lazy(() => import("./pages/admin/Signature"));
 const SuperAdminProfile = lazy(() => import("./pages/admin/SuperAdminProfile"));
@@ -748,14 +750,22 @@ function AppRoutes() {
           </AdminRoute>
         }
       />
-      <Route
-        path="/admin/approval/post-rights"
-        element={
-          <AdminRoute>
-            <PostApprovalRights />
-          </AdminRoute>
-        }
-      />
+<Route
+  path="/admin/approval/post-rights"
+  element={
+    <AdminRoute>
+      <PostApprovalRights />
+    </AdminRoute>
+  }
+/>
+  <Route
+    path="/admin/approval/inbox"
+    element={
+      <AdminRoute>
+        <ApprovalInbox />
+      </AdminRoute>
+    }
+  />
       <Route
         path="/admin/api-integration"
         element={

@@ -205,6 +205,7 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
     label: "Approval",
     icon: CheckCircle2,
     children: [
+      { label: "Inbox", path: "/admin/approval/inbox" },
       { label: "Approval Setup", path: "/admin/approval/setup" },
       { label: "Post Approval Rights", path: "/admin/approval/post-rights" },
     ],

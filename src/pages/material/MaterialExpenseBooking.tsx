@@ -55,6 +55,8 @@ import {
   BadgePercent,
 } from "lucide-react";
 import { toast } from "sonner";
+import { StatusBadge } from "@/components/StatusBadge";
+import { ApprovalActions } from "@/components/ApprovalActions";
 import {
   useBillingTerms,
   type BillingTerm as MasterBillingTerm,
@@ -823,15 +825,7 @@ function RecordCard({
             {rec.supplier}
           </p>
         </div>
-        <span
-          className={
-            "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-heading shrink-0 " +
-            STATUS_STYLES[rec.status]
-          }
-        >
-          <span className="mr-1.5 h-1.5 w-1.5 rounded-full bg-current" />
-          {rec.status}
-        </span>
+        <StatusBadge status={rec.status} />
       </div>
 
       <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
@@ -876,7 +870,13 @@ function RecordCard({
             Rs.{fmt(rbd.netAmount)}
           </p>
         </div>
-        <div className="flex gap-1.5">
+        <div className="flex flex-wrap gap-1.5 items-center justify-end">
+          <ApprovalActions
+            status={rec.status}
+            recordId={rec.id}
+            endpoint="/api/expense-booking"
+            onSuccess={() => {}}
+          />
           <Button
             variant="outline"
             size="sm"
@@ -1349,18 +1349,16 @@ export default function MaterialExpenseBooking() {
                               </span>
                             </TableCell>
                             <TableCell>
-                              <span
-                                className={
-                                  "inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-heading " +
-                                  STATUS_STYLES[rec.status]
-                                }
-                              >
-                                <span className="mr-1.5 h-1.5 w-1.5 rounded-full bg-current" />
-                                {rec.status}
-                              </span>
+                              <StatusBadge status={rec.status} />
                             </TableCell>
                             <TableCell>
-                              <div className="flex gap-1.5">
+                              <div className="flex flex-wrap gap-1.5 items-center">
+                                <ApprovalActions
+                                  status={rec.status}
+                                  recordId={rec.id}
+                                  endpoint="/api/expense-booking"
+                                  onSuccess={() => {}}
+                                />
                                 <Button
                                   variant="outline"
                                   size="sm"
