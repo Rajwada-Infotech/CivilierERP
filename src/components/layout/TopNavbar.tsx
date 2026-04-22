@@ -29,7 +29,6 @@ import {
   Users,
   HardHat,
   Landmark,
-  ChevronsLeft,
   ChevronsRight,
   Package,
   Layers,
@@ -53,8 +52,39 @@ import {
 import { BillingIcon } from "@/components/icons/BillingIcon";
 import { ADMIN_PATHS } from "@/constants/pageDefinitions";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-// ReminderItem is imported from @/hooks/useReminders
+// ─── Bell jingle keyframes (injected once) ────────────────────────────────────
+
+const BELL_JINGLE_STYLE = `
+@keyframes bellJingle {
+  0%   { transform: rotate(0deg); }
+  10%  { transform: rotate(18deg); }
+  20%  { transform: rotate(-16deg); }
+  30%  { transform: rotate(14deg); }
+  40%  { transform: rotate(-10deg); }
+  50%  { transform: rotate(7deg); }
+  60%  { transform: rotate(-4deg); }
+  70%  { transform: rotate(2deg); }
+  80%  { transform: rotate(-1deg); }
+  90%  { transform: rotate(0.5deg); }
+  100% { transform: rotate(0deg); }
+}
+.bell-jingle {
+  animation: bellJingle 1s ease-in-out;
+  transform-origin: top center;
+}
+`;
+
+if (
+  typeof document !== "undefined" &&
+  !document.getElementById("bell-jingle-style")
+) {
+  const style = document.createElement("style");
+  style.id = "bell-jingle-style";
+  style.textContent = BELL_JINGLE_STYLE;
+  document.head.appendChild(style);
+}
+
+// ─── Urgency / type config ────────────────────────────────────────────────────
 
 const URGENCY_CONFIG = {
   overdue: {
@@ -90,27 +120,84 @@ const TYPE_ICON: Record<ReminderItem["type"], React.ElementType> = {
   general: Bell,
 };
 
+// ─── useClickOutside ──────────────────────────────────────────────────────────
+
+function useClickOutside(
+  ref: React.RefObject<HTMLElement>,
+  onClose: () => void,
+  open: boolean,
+) {
+  useEffect(() => {
+    if (!open) return;
+    const h = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, [ref, open, onClose]);
+}
+
+// ─── Generic Dropdown ─────────────────────────────────────────────────────────
+
+const Dropdown = ({
+  open,
+  onClose,
+  trigger,
+  children,
+  className,
+  style,
+}: {
+  open: boolean;
+  onClose: () => void;
+  trigger: React.ReactNode;
+  children: React.ReactNode;
+  className?: string;
+  style?: React.CSSProperties;
+}) => {
+  const ref = useRef<HTMLDivElement>(null);
+  useClickOutside(ref, onClose, open);
+  return (
+    <div ref={ref} className="relative shrink-0">
+      {trigger}
+      <div
+        style={style}
+        className={`absolute top-full mt-2 z-50 rounded-xl border border-border bg-card shadow-2xl transition-all duration-200 origin-top-right
+          ${open ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none"} ${className || ""}`}
+      >
+        {children}
+      </div>
+    </div>
+  );
+};
+
 // ─── Bell / Reminders Dropdown ────────────────────────────────────────────────
 
 const RemindersDropdown: React.FC<{
   open: boolean;
   onClose: () => void;
+  onToggle: () => void;
   reminders: ReminderItem[];
   loading: boolean;
   refresh: () => Promise<void>;
-}> = ({ open, onClose, reminders, loading, refresh }) => {
+  badgeCount: number;
+}> = ({ open, onClose, onToggle, reminders, loading, refresh, badgeCount }) => {
   const ref = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
+  const [jingle, setJingle] = useState(false);
+  useClickOutside(ref, onClose, open);
 
-  // Close on outside click
+  // Repeating jingle every 4.5s while badgeCount > 0
   useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
+    if (badgeCount <= 0) return;
+    // fire immediately on mount / when badge appears
+    const fire = () => {
+      setJingle(false);
+      requestAnimationFrame(() => setJingle(true));
     };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open, onClose]);
+    fire();
+    const id = setInterval(fire, 4500);
+    return () => clearInterval(id);
+  }, [badgeCount]);
 
   const urgencyCounts = reminders.reduce(
     (acc, r) => {
@@ -123,51 +210,67 @@ const RemindersDropdown: React.FC<{
     (urgencyCounts.overdue || 0) + (urgencyCounts.today || 0);
 
   return (
-    <div
-      ref={ref}
-      className={`absolute top-full mt-2 z-50 rounded-xl border border-border bg-card shadow-2xl transition-all duration-200 origin-top-right right-0
-        ${open ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none"}`}
-      style={{ width: "min(22rem, calc(100vw - 1rem))" }}
-    >
-      {/* Header */}
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-        <div className="flex items-center gap-2">
-          <Bell size={14} className="text-amber-500" />
-          <span className="text-xs font-heading font-semibold text-foreground uppercase tracking-wider">
-            Reminders
+    <div ref={ref} className="relative shrink-0">
+      {/* Trigger */}
+      <button
+        onClick={onToggle}
+        title="Reminders"
+        className={`relative p-2 rounded-md transition-all text-foreground ${open ? "bg-muted" : "hover:bg-muted"}`}
+      >
+        <Bell
+          size={17}
+          className={jingle ? "bell-jingle" : ""}
+          onAnimationEnd={() => setJingle(false)}
+        />
+        {badgeCount > 0 && (
+          <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center leading-none">
+            {badgeCount > 99 ? "99+" : badgeCount}
           </span>
-          {criticalCount > 0 && (
-            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-500 text-white leading-none">
-              {criticalCount}
-            </span>
-          )}
-        </div>
-        {/* Refresh button — calls shared hook's refresh() directly */}
-        <button
-          onClick={refresh}
-          disabled={loading}
-          title="Refresh reminders"
-          className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50"
-        >
-          <RefreshCw size={12} className={loading ? "animate-spin" : ""} />
-        </button>
-      </div>
+        )}
+      </button>
 
-      {/* Summary pills */}
-      {!loading && reminders.length > 0 && (
-        <div className="flex items-center gap-1.5 px-4 py-2 border-b border-border/60 flex-wrap">
-          {(["overdue", "today", "soon"] as const).map((u) =>
-            urgencyCounts[u] ? (
-              <span
-                key={u}
-                className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${URGENCY_CONFIG[u].className}`}
-              >
-                {urgencyCounts[u]} {URGENCY_CONFIG[u].label}
+      {/* Panel */}
+      <div
+        className={`absolute top-full mt-2 z-50 rounded-xl border border-border bg-card shadow-2xl transition-all duration-200 origin-top-right right-0
+          ${open ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none"}`}
+        style={{ width: "min(22rem, calc(100vw - 1rem))" }}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+          <div className="flex items-center gap-2">
+            <Bell size={14} className="text-amber-500" />
+            <span className="text-xs font-heading font-semibold text-foreground uppercase tracking-wider">
+              Reminders
+            </span>
+            {criticalCount > 0 && (
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-500 text-white leading-none">
+                {criticalCount}
               </span>
-            ) : null,
-          )}
+            )}
+          </div>
+          <button
+            onClick={refresh}
+            disabled={loading}
+            title="Refresh reminders"
+            className="p-1 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-50"
+          >
+            <RefreshCw size={12} className={loading ? "animate-spin" : ""} />
+          </button>
         </div>
-      )}
+
+        {!loading && reminders.length > 0 && (
+          <div className="flex items-center gap-1.5 px-4 py-2 border-b border-border/60 flex-wrap">
+            {(["overdue", "today", "soon"] as const).map((u) =>
+              urgencyCounts[u] ? (
+                <span
+                  key={u}
+                  className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${URGENCY_CONFIG[u].className}`}
+                >
+                  {urgencyCounts[u]} {URGENCY_CONFIG[u].label}
+                </span>
+              ) : null,
+            )}
+          </div>
+        )}
 
       {/* Body */}
       <div className="overflow-y-auto" style={{ maxHeight: "22rem" }}>
@@ -264,45 +367,12 @@ const RemindersDropdown: React.FC<{
         </p>
       </div>
     </div>
-  );
-};
-
-// ─── Generic Dropdown ─────────────────────────────────────────────────────────
-const Dropdown = ({
-  open,
-  onClose,
-  children,
-  className,
-  style,
-}: {
-  open: boolean;
-  onClose: () => void;
-  children: React.ReactNode;
-  className?: string;
-  style?: React.CSSProperties;
-}) => {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const h = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
-    };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [open, onClose]);
-  return (
-    <div
-      ref={ref}
-      style={style}
-      className={`absolute top-full mt-2 z-50 rounded-xl border border-border bg-card shadow-2xl transition-all duration-200 origin-top-right
-        ${open ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none"} ${className || ""}`}
-    >
-      {children}
-    </div>
+  </div>
   );
 };
 
 // ─── Setup Items ──────────────────────────────────────────────────────────────
+
 const financeSetupItems = [
   {
     icon: Layers,
@@ -404,7 +474,6 @@ const materialSetupItems = [
     color: "text-purple-500",
   },
 ];
-
 const followupSetupItems = [
   {
     icon: Calendar,
@@ -425,7 +494,6 @@ const followupSetupItems = [
     color: "text-purple-500",
   },
 ];
-
 const adminSetupItems = [
   {
     icon: Tag,
@@ -448,17 +516,21 @@ const adminSetupItems = [
 ];
 
 // ─── Setup Dropdown ───────────────────────────────────────────────────────────
+
 const SetupDropdown = ({
   open,
   onClose,
+  onToggle,
   items,
   moduleLabel,
   moduleColor,
+  setupAvailable,
   navigate,
   location,
 }: {
   open: boolean;
   onClose: () => void;
+  onToggle: () => void;
   items: {
     icon: React.ElementType;
     label: string;
@@ -467,74 +539,195 @@ const SetupDropdown = ({
   }[];
   moduleLabel: string;
   moduleColor: string;
+  setupAvailable: boolean;
   navigate: (p: string) => void;
   location: { pathname: string };
 }) => {
   const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!open) return;
-    const h = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) onClose();
-    };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [open, onClose]);
+  useClickOutside(ref, onClose, open);
   return (
-    <div
-      ref={ref}
-      className={`absolute top-full mt-2 z-50 rounded-xl border border-border bg-card shadow-2xl transition-all duration-200 origin-top-left left-0
-        ${open ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none"}`}
-      style={{ minWidth: "20rem" }}
-    >
-      <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-        <div className="flex items-center gap-2">
-          <Settings size={14} className="text-muted-foreground" />
-          <span className="text-xs font-heading font-semibold text-foreground uppercase tracking-wider">
-            Setup
+    <div ref={ref} className="relative shrink-0">
+      {/* Trigger */}
+      <button
+        onClick={onToggle}
+        title={!setupAvailable ? "Select a module to access Setup" : ""}
+        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all duration-200 whitespace-nowrap
+          ${open ? "bg-muted text-foreground" : setupAvailable ? "hover:bg-muted text-foreground" : "text-muted-foreground/40 cursor-not-allowed"}`}
+      >
+        <Settings size={15} />
+        <span>Setup</span>
+        {setupAvailable && (
+          <ChevronDown
+            size={13}
+            className={`transition-transform duration-200 ${open ? "rotate-180" : ""}`}
+          />
+        )}
+      </button>
+
+      {/* Panel */}
+      <div
+        className={`absolute top-full mt-2 z-50 rounded-xl border border-border bg-card shadow-2xl transition-all duration-200 origin-top-left left-0
+          ${open ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none"}`}
+        style={{ minWidth: "20rem" }}
+      >
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+          <div className="flex items-center gap-2">
+            <Settings size={14} className="text-muted-foreground" />
+            <span className="text-xs font-heading font-semibold text-foreground uppercase tracking-wider">
+              Setup
+            </span>
+          </div>
+          <span
+            className={`text-[10px] font-heading px-2 py-0.5 rounded-full border ${moduleColor}`}
+          >
+            {moduleLabel}
           </span>
         </div>
-        <span
-          className={`text-[10px] font-heading px-2 py-0.5 rounded-full border ${moduleColor}`}
-        >
-          {moduleLabel}
-        </span>
-      </div>
-      <div className="p-3">
-        <div className="grid grid-cols-4 gap-2">
-          {items.map(({ icon: Icon, label, path, color }) => (
-            <button
-              key={path}
-              onClick={() => {
-                navigate(path);
-                onClose();
-              }}
-              className={`group flex flex-col items-center gap-1.5 p-2.5 rounded-xl border transition-all duration-150 active:scale-95
-                ${location.pathname === path ? "border-primary/40 bg-primary/[0.06]" : "border-transparent hover:border-border hover:bg-muted/60"}`}
-            >
-              <div
-                className={`w-8 h-8 rounded-lg flex items-center justify-center bg-muted/50 group-hover:bg-muted transition-colors ${location.pathname === path ? "bg-primary/10" : ""}`}
+        <div className="p-3">
+          <div className="grid grid-cols-4 gap-2">
+            {items.map(({ icon: Icon, label, path, color }) => (
+              <button
+                key={path}
+                onClick={() => {
+                  navigate(path);
+                  onClose();
+                }}
+                className={`group flex flex-col items-center gap-1.5 p-2.5 rounded-xl border transition-all duration-150 active:scale-95
+                  ${location.pathname === path ? "border-primary/40 bg-primary/[0.06]" : "border-transparent hover:border-border hover:bg-muted/60"}`}
               >
-                <Icon size={16} className={color} />
-              </div>
-              <span className="text-[9px] font-heading text-muted-foreground group-hover:text-foreground text-center leading-tight line-clamp-2">
-                {label}
-              </span>
-            </button>
-          ))}
+                <div
+                  className={`w-8 h-8 rounded-lg flex items-center justify-center bg-muted/50 group-hover:bg-muted transition-colors ${location.pathname === path ? "bg-primary/10" : ""}`}
+                >
+                  <Icon size={16} className={color} />
+                </div>
+                <span className="text-[9px] font-heading text-muted-foreground group-hover:text-foreground text-center leading-tight line-clamp-2">
+                  {label}
+                </span>
+              </button>
+            ))}
+          </div>
         </div>
       </div>
     </div>
   );
 };
 
+// ─── Theme Options (extracted as proper component to avoid stale closure) ─────
+
+const ThemeOptions: React.FC<{
+  currentTheme: Theme;
+  setTheme: (t: Theme) => void;
+  onClose: () => void;
+}> = ({ currentTheme, setTheme, onClose }) => (
+  <>
+    <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading px-2 py-1.5 mb-0.5">
+      Appearance
+    </p>
+    {(
+      Object.entries(THEME_DOTS) as [Theme, { bg: string; label: string }][]
+    ).map(([t, { bg, label }]) => (
+      <button
+        key={t}
+        onClick={() => {
+          setTheme(t);
+          onClose();
+        }}
+        className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-heading transition-all ${currentTheme === t ? "bg-primary/10 text-primary" : "text-foreground hover:bg-muted"}`}
+      >
+        <span
+          className="w-3.5 h-3.5 rounded-full shrink-0 border border-border/50"
+          style={{ backgroundColor: bg }}
+        />
+        {label}
+        {currentTheme === t && (
+          <span className="ml-auto text-primary text-xs">✓</span>
+        )}
+      </button>
+    ))}
+  </>
+);
+
+// ─── User Menu Content (extracted as proper component) ────────────────────────
+
+const UserMenuContent: React.FC<{
+  currentUser: ReturnType<typeof useAuth>["currentUser"];
+  isSuperAdmin: boolean;
+  isDba: boolean;
+  onClose: () => void;
+  navigate: (p: string) => void;
+  handleLogout: () => void;
+}> = ({
+  currentUser,
+  isSuperAdmin,
+  isDba,
+  onClose,
+  navigate,
+  handleLogout,
+}) => (
+  <>
+    <div className="px-3 py-2 border-b border-border mb-1">
+      <p className="text-sm font-heading font-semibold text-foreground">
+        {currentUser?.name}
+      </p>
+      <p className="text-xs text-muted-foreground truncate">
+        {currentUser?.email}
+      </p>
+      <div className="mt-1.5">
+        {isSuperAdmin && (
+          <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-violet-500/10 text-violet-600">
+            Super Admin
+          </span>
+        )}
+        {currentUser?.role === "admin" && (
+          <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-blue-500/10 text-blue-600">
+            Admin
+          </span>
+        )}
+        {currentUser?.role === "dba" && (
+          <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-emerald-500/10 text-emerald-600">
+            DBA
+          </span>
+        )}
+        {currentUser?.role === "user" && (
+          <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-muted text-muted-foreground">
+            User · {currentUser.pagePermissions?.length || 0} pages
+          </span>
+        )}
+      </div>
+    </div>
+    <button
+      onMouseDown={() => {
+        onClose();
+        isSuperAdmin
+          ? navigate("/superadmin/profile")
+          : isDba
+            ? navigate("/dba/profile")
+            : currentUser?.role === "admin"
+              ? navigate("/admin/profile")
+              : navigate("/user/profile");
+      }}
+      className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted transition-colors text-foreground"
+    >
+      <User size={14} /> Profile
+    </button>
+    <button
+      onMouseDown={handleLogout}
+      className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted transition-colors text-destructive"
+    >
+      <LogOut size={14} /> Sign Out
+    </button>
+  </>
+);
+
 // ─── TopNavbar ────────────────────────────────────────────────────────────────
+
 export const TopNavbar = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { theme, setTheme } = useTheme();
   const { activeModule, setActiveModule, moduleSwitching, setModuleSwitching } =
     useModule();
-  const { currentUser, logout } = useAuth();
+  const { currentUser } = useAuth();
   const { navCollapsed, setNavCollapsed } = useNavbarCollapse();
   const { handleLogout, overlay: logoutOverlay } = useGracefulLogout();
 
@@ -619,6 +812,12 @@ export const TopNavbar = () => {
     setThemeOpen(false);
     setBellOpen(false);
   }, []);
+  const closeSetup = useCallback(() => setSetupOpen(false), []);
+  const closeModule = useCallback(() => setModuleOpen(false), []);
+  const closeTheme = useCallback(() => setThemeOpen(false), []);
+  const closeUser = useCallback(() => setUserOpen(false), []);
+  const closeBell = useCallback(() => setBellOpen(false), []);
+
   const toggleSetup = useCallback(() => {
     if (!setupConfig.available) return;
     setSetupOpen((p) => !p);
@@ -675,7 +874,7 @@ export const TopNavbar = () => {
           <LogoFull />
         </button>
 
-        {/* ── DESKTOP NAV ────────────────────────────────────────────────── */}
+        {/* ── DESKTOP NAV ──────────────────────────────────────────────── */}
         <div className="hidden md:flex items-center justify-end gap-1 min-w-0">
           {/* Collapse toggle */}
           <button
@@ -696,42 +895,22 @@ export const TopNavbar = () => {
 
           {/* Collapsible items */}
           <div
-            className={`flex items-center gap-1 transition-all duration-300 ease-in-out
-            ${navCollapsed ? "w-0 opacity-0 invisible pointer-events-none overflow-hidden" : "w-auto opacity-100 visible pointer-events-auto"}`}
+            className={`flex items-center gap-1 transition-all duration-300 ease-in-out ${navCollapsed ? "w-0 opacity-0 invisible pointer-events-none overflow-hidden" : "w-auto opacity-100 visible pointer-events-auto"}`}
           >
             {/* Setup */}
-            <div className="relative shrink-0">
-              <button
-                onClick={toggleSetup}
-                title={
-                  !setupConfig.available
-                    ? "Select a module to access Setup"
-                    : ""
-                }
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all duration-200 whitespace-nowrap
-                  ${setupOpen ? "bg-muted text-foreground" : setupConfig.available ? "hover:bg-muted text-foreground" : "text-muted-foreground/40 cursor-not-allowed"}`}
-              >
-                <Settings size={15} />
-                <span>Setup</span>
-                {setupConfig.available && (
-                  <ChevronDown
-                    size={13}
-                    className={`transition-transform duration-200 ${setupOpen ? "rotate-180" : ""}`}
-                  />
-                )}
-              </button>
-              <SetupDropdown
-                open={setupOpen}
-                onClose={() => setSetupOpen(false)}
-                items={setupConfig.items}
-                moduleLabel={setupConfig.label}
-                moduleColor={setupConfig.color}
-                navigate={navigate}
-                location={location}
-              />
-            </div>
+            <SetupDropdown
+              open={setupOpen}
+              onClose={closeSetup}
+              onToggle={toggleSetup}
+              items={setupConfig.items}
+              moduleLabel={setupConfig.label}
+              moduleColor={setupConfig.color}
+              setupAvailable={setupConfig.available}
+              navigate={navigate}
+              location={location}
+            />
 
-            {/* Reports (extracted from Widgets) */}
+            {/* Reports */}
             <button
               onClick={() => {
                 navigate("/reports");
@@ -756,533 +935,323 @@ export const TopNavbar = () => {
             </button>
 
             {/* Module selector */}
-            <div className="relative shrink-0">
+            <Dropdown
+              open={moduleOpen}
+              onClose={closeModule}
+              trigger={
+                <button
+                  onClick={toggleMod}
+                  className={navBtn(moduleOpen)}
+                  disabled={moduleSwitching}
+                >
+                  <LayoutGrid
+                    size={16}
+                    className={moduleSwitching ? "animate-spin" : ""}
+                  />
+                  <span>{switchingTo ? `${switchingTo}…` : "Module"}</span>
+                  <ChevronDown
+                    size={13}
+                    className={`transition-transform duration-200 ${moduleOpen ? "rotate-180" : ""} ${moduleSwitching ? "opacity-0" : ""}`}
+                  />
+                </button>
+              }
+              className="right-0 p-1.5"
+              style={{ minWidth: "17rem" }}
+            >
+              <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading px-3 pt-2 pb-2">
+                Switch Module
+              </p>
+
               <button
-                onClick={toggleMod}
-                className={navBtn(moduleOpen)}
-                disabled={moduleSwitching}
+                onClick={async () => {
+                  setModuleOpen(false);
+                  setSwitchingTo("Finance");
+                  setModuleSwitching(true);
+                  await new Promise((r) => setTimeout(r, 350));
+                  setActiveModule("finance");
+                  navigate(MODULE_DASHBOARD_ROUTES.finance);
+                  setModuleSwitching(false);
+                  setSwitchingTo(null);
+                }}
+                className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${activeModule === "finance" && !isAdminPage ? "bg-primary/10 text-primary" : "hover:bg-muted text-foreground"}`}
               >
-                <LayoutGrid
-                  size={16}
-                  className={moduleSwitching ? "animate-spin" : ""}
-                />
-                <span>{switchingTo ? `${switchingTo}…` : "Module"}</span>
-                <ChevronDown
-                  size={13}
-                  className={`transition-transform duration-200 ${moduleOpen ? "rotate-180" : ""} ${moduleSwitching ? "opacity-0" : ""}`}
-                />
-              </button>
-
-              <Dropdown
-                open={moduleOpen}
-                onClose={() => setModuleOpen(false)}
-                className="right-0 p-1.5"
-                style={{ minWidth: "17rem" }}
-              >
-                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading px-3 pt-2 pb-2">
-                  Switch Module
-                </p>
-
-                {/* Finance */}
-                <button
-                  onClick={async () => {
-                    setModuleOpen(false);
-                    setSwitchingTo("Finance");
-                    setModuleSwitching(true);
-                    await new Promise((r) => setTimeout(r, 350));
-                    setActiveModule("finance");
-                    navigate(MODULE_DASHBOARD_ROUTES.finance);
-                    setModuleSwitching(false);
-                    setSwitchingTo(null);
-                  }}
-                  className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${
-                    activeModule === "finance" && !isAdminPage
-                      ? "bg-primary/10 text-primary"
-                      : "hover:bg-muted text-foreground"
-                  }`}
+                <span
+                  className={`flex items-center justify-center w-7 h-7 rounded-md transition-colors ${activeModule === "finance" && !isAdminPage ? "bg-primary/15" : "bg-muted group-hover:bg-muted-foreground/10"}`}
                 >
-                  <span
-                    className={`flex items-center justify-center w-7 h-7 rounded-md transition-colors ${
+                  <TrendingUp
+                    size={14}
+                    className={
                       activeModule === "finance" && !isAdminPage
-                        ? "bg-primary/15"
-                        : "bg-muted group-hover:bg-muted-foreground/10"
-                    }`}
+                        ? "text-primary"
+                        : "text-muted-foreground group-hover:text-foreground"
+                    }
+                  />
+                </span>
+                <div className="flex-1 text-left">
+                  <p
+                    className={`text-sm font-heading font-medium leading-none ${activeModule === "finance" && !isAdminPage ? "text-primary" : "text-foreground"}`}
                   >
-                    <TrendingUp
-                      size={14}
-                      className={
-                        activeModule === "finance" && !isAdminPage
-                          ? "text-primary"
-                          : "text-muted-foreground group-hover:text-foreground"
-                      }
-                    />
-                  </span>
-                  <div className="flex-1 text-left">
-                    <p
-                      className={`text-sm font-heading font-medium leading-none ${activeModule === "finance" && !isAdminPage ? "text-primary" : "text-foreground"}`}
-                    >
-                      Finance
-                    </p>
-                    <p className="text-[11px] text-muted-foreground mt-0.5">
-                      Ledger, payments & BRS
-                    </p>
-                  </div>
-                  {activeModule === "finance" && !isAdminPage && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" />
-                  )}
-                </button>
-
-                {/* Material */}
-                <button
-                  onClick={async () => {
-                    setModuleOpen(false);
-                    setSwitchingTo("Material");
-                    setModuleSwitching(true);
-                    await new Promise((r) => setTimeout(r, 350));
-                    setActiveModule("material");
-                    navigate(MODULE_DASHBOARD_ROUTES.material);
-                    setModuleSwitching(false);
-                    setSwitchingTo(null);
-                  }}
-                  className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${
-                    activeModule === "material" && !isAdminPage
-                      ? "bg-emerald-500/10 text-emerald-600"
-                      : "hover:bg-muted text-foreground"
-                  }`}
-                >
-                  <span
-                    className={`flex items-center justify-center w-7 h-7 rounded-md transition-colors ${
-                      activeModule === "material" && !isAdminPage
-                        ? "bg-emerald-500/15"
-                        : "bg-muted group-hover:bg-muted-foreground/10"
-                    }`}
-                  >
-                    <Package
-                      size={14}
-                      className={
-                        activeModule === "material" && !isAdminPage
-                          ? "text-emerald-500"
-                          : "text-muted-foreground group-hover:text-foreground"
-                      }
-                    />
-                  </span>
-                  <div className="flex-1 text-left">
-                    <p
-                      className={`text-sm font-heading font-medium leading-none ${activeModule === "material" && !isAdminPage ? "text-emerald-600" : "text-foreground"}`}
-                    >
-                      Material
-                    </p>
-                    <p className="text-[11px] text-muted-foreground mt-0.5">
-                      GRN, PO & work orders
-                    </p>
-                  </div>
-                  {activeModule === "material" && !isAdminPage && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0" />
-                  )}
-                </button>
-
-                {/* Follow-Up */}
-                <button
-                  onClick={async () => {
-                    setModuleOpen(false);
-                    setSwitchingTo("Follow-Up");
-                    setModuleSwitching(true);
-                    await new Promise((res) => setTimeout(res, 350));
-                    setActiveModule("followup");
-                    navigate(MODULE_DASHBOARD_ROUTES.followup);
-                    setModuleSwitching(false);
-                    setSwitchingTo(null);
-                  }}
-                  className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${
-                    activeModule === "followup" && !isAdminPage
-                      ? "bg-indigo-500/10 text-indigo-600"
-                      : "hover:bg-muted text-foreground"
-                  }`}
-                >
-                  <span
-                    className={`flex items-center justify-center w-7 h-7 rounded-md transition-colors ${
-                      activeModule === "followup" && !isAdminPage
-                        ? "bg-indigo-500/15"
-                        : "bg-muted group-hover:bg-muted-foreground/10"
-                    }`}
-                  >
-                    <Calendar
-                      size={14}
-                      className={
-                        activeModule === "followup" && !isAdminPage
-                          ? "text-indigo-500"
-                          : "text-muted-foreground group-hover:text-foreground"
-                      }
-                    />
-                  </span>
-                  <div className="flex-1 text-left">
-                    <p
-                      className={`text-sm font-heading font-medium leading-none ${activeModule === "followup" && !isAdminPage ? "text-indigo-600" : "text-foreground"}`}
-                    >
-                      Follow-Up
-                    </p>
-                    <p className="text-[11px] text-muted-foreground mt-0.5">
-                      Sales, agreements & CRM
-                    </p>
-                  </div>
-                  {activeModule === "followup" && !isAdminPage && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 flex-shrink-0" />
-                  )}
-                </button>
-
-                {/* Admin module — only for admin/super_admin/dba roles */}
-                {isAdmin && (
-                  <>
-                    <div className="mx-3 my-1.5 border-t border-border" />
-                    <button
-                      onClick={async () => {
-                        setModuleOpen(false);
-                        setSwitchingTo("Admin");
-                        setModuleSwitching(true);
-                        await new Promise((r) => setTimeout(r, 350));
-                        setActiveModule("admin");
-                        navigate(MODULE_DASHBOARD_ROUTES.admin);
-                        setModuleSwitching(false);
-                        setSwitchingTo(null);
-                      }}
-                      className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${
-                        isAdminPage
-                          ? "bg-blue-500/10 text-blue-600"
-                          : "hover:bg-muted text-foreground"
-                      }`}
-                    >
-                      <span
-                        className={`flex items-center justify-center w-7 h-7 rounded-md transition-colors relative ${
-                          isAdminPage
-                            ? "bg-blue-500/15"
-                            : "bg-muted group-hover:bg-muted-foreground/10"
-                        }`}
-                      >
-                        <ShieldCheck
-                          size={14}
-                          className={
-                            isAdminPage
-                              ? "text-blue-500"
-                              : "text-muted-foreground group-hover:text-foreground"
-                          }
-                        />
-                        {isSuperAdmin && (
-                          <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full flex items-center justify-center bg-violet-600">
-                            <Crown size={6} className="text-white" />
-                          </span>
-                        )}
-                      </span>
-                      <div className="flex-1 text-left">
-                        <p
-                          className={`text-sm font-heading font-medium leading-none ${isAdminPage ? "text-blue-600" : "text-foreground"}`}
-                        >
-                          Admin
-                        </p>
-                        <p className="text-[11px] text-muted-foreground mt-0.5">
-                          Users, rights & config
-                        </p>
-                      </div>
-                      {isAdminPage && (
-                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0" />
-                      )}
-                    </button>
-                  </>
-                )}
-
-                <div className="mx-3 mt-1.5 mb-1 pt-2 border-t border-border">
-                  <p className="text-[10px] text-muted-foreground font-heading">
-                    {isAdminPage
-                      ? "Currently in Admin"
-                      : activeModule
-                        ? `Active: ${activeModule.charAt(0).toUpperCase() + activeModule.slice(1)}`
-                        : "No module selected"}
+                    Finance
+                  </p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Ledger, payments &amp; BRS
                   </p>
                 </div>
-              </Dropdown>
-            </div>
+                {activeModule === "finance" && !isAdminPage && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-primary flex-shrink-0" />
+                )}
+              </button>
+
+              <button
+                onClick={async () => {
+                  setModuleOpen(false);
+                  setSwitchingTo("Material");
+                  setModuleSwitching(true);
+                  await new Promise((r) => setTimeout(r, 350));
+                  setActiveModule("material");
+                  navigate(MODULE_DASHBOARD_ROUTES.material);
+                  setModuleSwitching(false);
+                  setSwitchingTo(null);
+                }}
+                className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${activeModule === "material" && !isAdminPage ? "bg-emerald-500/10 text-emerald-600" : "hover:bg-muted text-foreground"}`}
+              >
+                <span
+                  className={`flex items-center justify-center w-7 h-7 rounded-md transition-colors ${activeModule === "material" && !isAdminPage ? "bg-emerald-500/15" : "bg-muted group-hover:bg-muted-foreground/10"}`}
+                >
+                  <Package
+                    size={14}
+                    className={
+                      activeModule === "material" && !isAdminPage
+                        ? "text-emerald-500"
+                        : "text-muted-foreground group-hover:text-foreground"
+                    }
+                  />
+                </span>
+                <div className="flex-1 text-left">
+                  <p
+                    className={`text-sm font-heading font-medium leading-none ${activeModule === "material" && !isAdminPage ? "text-emerald-600" : "text-foreground"}`}
+                  >
+                    Material
+                  </p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    GRN, PO &amp; work orders
+                  </p>
+                </div>
+                {activeModule === "material" && !isAdminPage && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 flex-shrink-0" />
+                )}
+              </button>
+
+              <button
+                onClick={async () => {
+                  setModuleOpen(false);
+                  setSwitchingTo("Follow-Up");
+                  setModuleSwitching(true);
+                  await new Promise((res) => setTimeout(res, 350));
+                  setActiveModule("followup");
+                  navigate(MODULE_DASHBOARD_ROUTES.followup);
+                  setModuleSwitching(false);
+                  setSwitchingTo(null);
+                }}
+                className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${activeModule === "followup" && !isAdminPage ? "bg-indigo-500/10 text-indigo-600" : "hover:bg-muted text-foreground"}`}
+              >
+                <span
+                  className={`flex items-center justify-center w-7 h-7 rounded-md transition-colors ${activeModule === "followup" && !isAdminPage ? "bg-indigo-500/15" : "bg-muted group-hover:bg-muted-foreground/10"}`}
+                >
+                  <Calendar
+                    size={14}
+                    className={
+                      activeModule === "followup" && !isAdminPage
+                        ? "text-indigo-500"
+                        : "text-muted-foreground group-hover:text-foreground"
+                    }
+                  />
+                </span>
+                <div className="flex-1 text-left">
+                  <p
+                    className={`text-sm font-heading font-medium leading-none ${activeModule === "followup" && !isAdminPage ? "text-indigo-600" : "text-foreground"}`}
+                  >
+                    Follow-Up
+                  </p>
+                  <p className="text-[11px] text-muted-foreground mt-0.5">
+                    Sales, agreements &amp; CRM
+                  </p>
+                </div>
+                {activeModule === "followup" && !isAdminPage && (
+                  <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 flex-shrink-0" />
+                )}
+              </button>
+
+              {isAdmin && (
+                <>
+                  <div className="mx-3 my-1.5 border-t border-border" />
+                  <button
+                    onClick={async () => {
+                      setModuleOpen(false);
+                      setSwitchingTo("Admin");
+                      setModuleSwitching(true);
+                      await new Promise((r) => setTimeout(r, 350));
+                      setActiveModule("admin");
+                      navigate(MODULE_DASHBOARD_ROUTES.admin);
+                      setModuleSwitching(false);
+                      setSwitchingTo(null);
+                    }}
+                    className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${isAdminPage ? "bg-blue-500/10 text-blue-600" : "hover:bg-muted text-foreground"}`}
+                  >
+                    <span
+                      className={`flex items-center justify-center w-7 h-7 rounded-md transition-colors relative ${isAdminPage ? "bg-blue-500/15" : "bg-muted group-hover:bg-muted-foreground/10"}`}
+                    >
+                      <ShieldCheck
+                        size={14}
+                        className={
+                          isAdminPage
+                            ? "text-blue-500"
+                            : "text-muted-foreground group-hover:text-foreground"
+                        }
+                      />
+                      {isSuperAdmin && (
+                        <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full flex items-center justify-center bg-violet-600">
+                          <Crown size={6} className="text-white" />
+                        </span>
+                      )}
+                    </span>
+                    <div className="flex-1 text-left">
+                      <p
+                        className={`text-sm font-heading font-medium leading-none ${isAdminPage ? "text-blue-600" : "text-foreground"}`}
+                      >
+                        Admin
+                      </p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                        Users, rights &amp; config
+                      </p>
+                    </div>
+                    {isAdminPage && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0" />
+                    )}
+                  </button>
+                </>
+              )}
+
+              <div className="mx-3 mt-1.5 mb-1 pt-2 border-t border-border">
+                <p className="text-[10px] text-muted-foreground font-heading">
+                  {isAdminPage
+                    ? "Currently in Admin"
+                    : activeModule
+                      ? `Active: ${activeModule.charAt(0).toUpperCase() + activeModule.slice(1)}`
+                      : "No module selected"}
+                </p>
+              </div>
+            </Dropdown>
           </div>
 
-          {/* ── Bell ─────────────────────────────────────────────────────── */}
-          <div className="relative shrink-0">
-            <button
-              onClick={toggleBell}
-              title="Reminders"
-              className={`relative p-2 rounded-md transition-all text-foreground ${bellOpen ? "bg-muted" : "hover:bg-muted"}`}
-            >
-              <Bell size={17} />
-              {badgeCount > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center leading-none">
-                  {badgeCount > 99 ? "99+" : badgeCount}
-                </span>
-              )}
-            </button>
-            <RemindersDropdown
-              open={bellOpen}
-              onClose={() => setBellOpen(false)}
-              reminders={reminders}
-              loading={remLoading}
-              refresh={refreshReminders}
-            />
-          </div>
+          {/* Bell */}
+          <RemindersDropdown
+            open={bellOpen}
+            onClose={closeBell}
+            onToggle={toggleBell}
+            reminders={reminders}
+            loading={remLoading}
+            refresh={refreshReminders}
+            badgeCount={badgeCount}
+          />
 
           {/* Theme */}
-          <div className="relative shrink-0">
-            <button
-              onClick={toggleTheme}
-              className="p-2 rounded-md hover:bg-muted transition-all text-foreground"
-              title="Change theme"
-            >
-              <Palette size={17} />
-            </button>
-            <Dropdown
-              open={themeOpen}
-              onClose={() => setThemeOpen(false)}
-              className="right-0 w-48 p-1.5"
-            >
-              <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading px-2 py-1.5 mb-0.5">
-                Appearance
-              </p>
-              {(
-                Object.entries(THEME_DOTS) as [
-                  Theme,
-                  { bg: string; label: string },
-                ][]
-              ).map(([t, { bg, label }]) => (
-                <button
-                  key={t}
-                  onClick={() => {
-                    setTheme(t);
-                    setThemeOpen(false);
-                  }}
-                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-heading transition-all ${theme === t ? "bg-primary/10 text-primary" : "text-foreground hover:bg-muted"}`}
-                >
-                  <span
-                    className={`w-3.5 h-3.5 rounded-full shrink-0 border border-border/50 bg-[${bg}]`}
-                  />
-                  {label}
-                  {theme === t && (
-                    <span className="ml-auto text-primary text-xs">✓</span>
-                  )}
-                </button>
-              ))}
-            </Dropdown>
-          </div>
+          <Dropdown
+            open={themeOpen}
+            onClose={closeTheme}
+            trigger={
+              <button
+                onClick={toggleTheme}
+                className="p-2 rounded-md hover:bg-muted transition-all text-foreground"
+                title="Change theme"
+              >
+                <Palette size={17} />
+              </button>
+            }
+            className="right-0 w-48 p-1.5"
+          >
+            <ThemeOptions
+              currentTheme={theme}
+              setTheme={setTheme}
+              onClose={closeTheme}
+            />
+          </Dropdown>
 
           {/* User */}
-          <div className="relative shrink-0">
-            <button
-              onClick={toggleUser}
-              className="relative w-8 h-8 rounded-full gradient-accent flex items-center justify-center text-xs font-heading text-primary-foreground font-bold hover:opacity-90"
-            >
-              {currentUser?.initials || "?"}
-              {RoleIcon && (
-                <span
-                  className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center ${roleBadgeCls}`}
-                >
-                  <RoleIcon size={9} className="text-white" />
-                </span>
-              )}
-            </button>
-            <Dropdown
-              open={userOpen}
-              onClose={() => setUserOpen(false)}
-              className="right-0 w-56 p-1"
-            >
-              <div className="px-3 py-2 border-b border-border mb-1">
-                <p className="text-sm font-heading font-semibold text-foreground">
-                  {currentUser?.name}
-                </p>
-                <p className="text-xs text-muted-foreground truncate">
-                  {currentUser?.email}
-                </p>
-                <div className="mt-1.5">
-                  {isSuperAdmin && (
-                    <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-violet-500/10 text-violet-600">
-                      Super Admin
-                    </span>
-                  )}
-                  {currentUser?.role === "admin" && (
-                    <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-blue-500/10 text-blue-600">
-                      Admin
-                    </span>
-                  )}
-                  {currentUser?.role === "dba" && (
-                    <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-emerald-500/10 text-emerald-600">
-                      DBA
-                    </span>
-                  )}
-                  {currentUser?.role === "user" && (
-                    <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-muted text-muted-foreground">
-                      User · {currentUser.pagePermissions?.length || 0} pages
-                    </span>
-                  )}
-                </div>
-              </div>
+          <Dropdown
+            open={userOpen}
+            onClose={closeUser}
+            trigger={
               <button
-                onMouseDown={() => {
-                  setUserOpen(false);
-                  isSuperAdmin
-                    ? navigate("/superadmin/profile")
-                    : isDba
-                      ? navigate("/dba/profile")
-                      : currentUser?.role === "admin"
-                        ? navigate("/admin/profile")
-                        : navigate("/user/profile");
-                }}
-                className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted transition-colors text-foreground"
+                onClick={toggleUser}
+                className="relative w-8 h-8 rounded-full gradient-accent flex items-center justify-center text-xs font-heading text-primary-foreground font-bold hover:opacity-90"
               >
-                <User size={14} /> Profile
+                {currentUser?.initials || "?"}
+                {RoleIcon && (
+                  <span
+                    className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center ${roleBadgeCls}`}
+                  >
+                    <RoleIcon size={9} className="text-white" />
+                  </span>
+                )}
               </button>
-              <button
-                onMouseDown={handleLogout}
-                className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted transition-colors text-destructive"
-              >
-                <LogOut size={14} /> Sign Out
-              </button>
-            </Dropdown>
-          </div>
+            }
+            className="right-0 w-56 p-1"
+          >
+            <UserMenuContent
+              currentUser={currentUser}
+              isSuperAdmin={isSuperAdmin}
+              isDba={isDba}
+              onClose={closeUser}
+              navigate={navigate}
+              handleLogout={handleLogout}
+            />
+          </Dropdown>
         </div>
 
-        {/* ── MOBILE RIGHT ───────────────────────────────────────────────── */}
+        {/* ── MOBILE RIGHT ─────────────────────────────────────────────── */}
         <div className="flex md:hidden items-center gap-1 justify-end">
-          {/* Bell mobile */}
-          <div className="relative">
-            <button
-              onClick={toggleBell}
-              className="relative p-2 rounded-md hover:bg-muted transition-all text-foreground"
-            >
-              <Bell size={17} />
-              {badgeCount > 0 && (
-                <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-4 px-1 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center leading-none">
-                  {badgeCount > 99 ? "99+" : badgeCount}
-                </span>
-              )}
-            </button>
-            <RemindersDropdown
-              open={bellOpen}
-              onClose={() => setBellOpen(false)}
-              reminders={reminders}
-              loading={remLoading}
-              refresh={refreshReminders}
-            />
-          </div>
+          {/* Bell */}
+          <RemindersDropdown
+            open={bellOpen}
+            onClose={closeBell}
+            onToggle={toggleBell}
+            reminders={reminders}
+            loading={remLoading}
+            refresh={refreshReminders}
+            badgeCount={badgeCount}
+          />
 
-          {/* Theme mobile */}
-          <div className="relative">
-            <button
-              onClick={toggleTheme}
-              className="p-2 rounded-md hover:bg-muted transition-all text-foreground"
-              title="Change theme"
-            >
-              <Palette size={17} />
-            </button>
-            <Dropdown
-              open={themeOpen}
-              onClose={() => setThemeOpen(false)}
-              className="right-0 w-44 p-1.5"
-            >
-              <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading px-2 py-1.5 mb-0.5">
-                Appearance
-              </p>
-              {(
-                Object.entries(THEME_DOTS) as [
-                  Theme,
-                  { bg: string; label: string },
-                ][]
-              ).map(([t, { bg, label }]) => (
-                <button
-                  key={t}
-                  onClick={() => {
-                    setTheme(t);
-                    setThemeOpen(false);
-                  }}
-                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-heading transition-all ${theme === t ? "bg-primary/10 text-primary" : "text-foreground hover:bg-muted"}`}
-                >
+          {/* User */}
+          <Dropdown
+            open={userOpen}
+            onClose={closeUser}
+            trigger={
+              <button
+                onClick={toggleUser}
+                className="relative w-8 h-8 rounded-full gradient-accent flex items-center justify-center text-xs font-heading text-primary-foreground font-bold"
+              >
+                {currentUser?.initials || "?"}
+                {RoleIcon && (
                   <span
-                    className={`w-3.5 h-3.5 rounded-full shrink-0 border border-border/50 bg-[${bg}]`}
-                  />
-                  {label}
-                  {theme === t && (
-                    <span className="ml-auto text-primary text-xs">✓</span>
-                  )}
-                </button>
-              ))}
-            </Dropdown>
-          </div>
-
-          {/* User mobile */}
-          <div className="relative">
-            <button
-              onClick={toggleUser}
-              className="relative w-8 h-8 rounded-full gradient-accent flex items-center justify-center text-xs font-heading text-primary-foreground font-bold"
-            >
-              {currentUser?.initials || "?"}
-              {RoleIcon && (
-                <span
-                  className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center ${roleBadgeCls}`}
-                >
-                  <RoleIcon size={9} className="text-white" />
-                </span>
-              )}
-            </button>
-            <Dropdown
-              open={userOpen}
-              onClose={() => setUserOpen(false)}
-              className="right-0 w-56 p-1"
-            >
-              <div className="px-3 py-2 border-b border-border mb-1">
-                <p className="text-sm font-heading font-semibold text-foreground">
-                  {currentUser?.name}
-                </p>
-                <p className="text-xs text-muted-foreground truncate">
-                  {currentUser?.email}
-                </p>
-                <div className="mt-1.5">
-                  {isSuperAdmin && (
-                    <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-violet-500/10 text-violet-600">
-                      Super Admin
-                    </span>
-                  )}
-                  {currentUser?.role === "admin" && (
-                    <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-blue-500/10 text-blue-600">
-                      Admin
-                    </span>
-                  )}
-                  {currentUser?.role === "dba" && (
-                    <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-emerald-500/10 text-emerald-600">
-                      DBA
-                    </span>
-                  )}
-                  {currentUser?.role === "user" && (
-                    <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-muted text-muted-foreground">
-                      User · {currentUser.pagePermissions?.length || 0} pages
-                    </span>
-                  )}
-                </div>
-              </div>
-              <button
-                onMouseDown={() => {
-                  setUserOpen(false);
-                  isSuperAdmin
-                    ? navigate("/superadmin/profile")
-                    : isDba
-                      ? navigate("/dba/profile")
-                      : currentUser?.role === "admin"
-                        ? navigate("/admin/profile")
-                        : navigate("/user/profile");
-                }}
-                className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted transition-colors text-foreground"
-              >
-                <User size={14} /> Profile
+                    className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center ${roleBadgeCls}`}
+                  >
+                    <RoleIcon size={9} className="text-white" />
+                  </span>
+                )}
               </button>
-              <button
-                onMouseDown={handleLogout}
-                className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted transition-colors text-destructive"
-              >
-                <LogOut size={14} /> Sign Out
-              </button>
-            </Dropdown>
-          </div>
+            }
+            className="right-0 w-56 p-1"
+          >
+            <UserMenuContent
+              currentUser={currentUser}
+              isSuperAdmin={isSuperAdmin}
+              isDba={isDba}
+              onClose={closeUser}
+              navigate={navigate}
+              handleLogout={handleLogout}
+            />
+          </Dropdown>
         </div>
       </header>
     </>
