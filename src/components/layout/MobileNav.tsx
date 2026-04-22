@@ -802,7 +802,11 @@ export const MobileNav: React.FC = () => {
       <button
         onClick={() => setOpen(true)}
         aria-label="Open navigation menu"
-        className="fixed bottom-4 right-4 z-50 w-12 h-12 rounded-full gradient-accent text-primary-foreground flex items-center justify-center shadow-lg md:hidden"
+        className="fixed bottom-4 right-4 z-50 w-12 h-12 rounded-full gradient-accent text-primary-foreground flex items-center justify-center shadow-lg md:hidden safe-bottom"
+        style={{
+          bottom: "max(1rem, env(safe-area-inset-bottom, 1rem))",
+          right: "max(1rem, env(safe-area-inset-right, 1rem))",
+        }}
       >
         <Menu size={20} />
         {badgeCount > 0 && (
@@ -821,7 +825,7 @@ export const MobileNav: React.FC = () => {
           />
 
           {/* Drawer */}
-          <div className="absolute bottom-0 left-0 right-0 rounded-t-3xl bg-card border-t border-border max-h-[90vh] flex flex-col shadow-xl">
+          <div className="absolute bottom-0 left-0 right-0 rounded-t-3xl bg-card border-t border-border max-h-[92svh] flex flex-col shadow-xl">
             {/* Header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-border flex-shrink-0">
               <span className="font-heading font-semibold text-base text-foreground">
@@ -941,7 +945,7 @@ export const MobileNav: React.FC = () => {
                         setOpen(false);
                       },
                     },
-                    ...(true
+                    ...(isAdmin
                       ? [
                           {
                             label: "Admin",
@@ -959,12 +963,6 @@ export const MobileNav: React.FC = () => {
                         ]
                       : []),
                   ].map((btn) => {
-                    console.log(
-                      "🔍 MOBILE DEBUG - ROLE:",
-                      currentUser?.role,
-                      "ISADMIN:",
-                      isAdmin,
-                    );
                     const Icon = btn.icon;
                     return (
                       <button

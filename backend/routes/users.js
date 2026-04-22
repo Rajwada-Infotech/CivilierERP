@@ -82,7 +82,7 @@ router.post("/login", async (req, res) => {
     const result = await pool.request().input("email", sql.NVarChar, email)
       .query(`
         SELECT u.id, u.name, u.email, u.RoleId, u.password, u.discontinue,
-               r.RName AS roleName
+               r.RName AS roleName, u.page_permissions
         FROM dbo.users u
         LEFT JOIN dbo.Role r ON u.RoleId = r.RId
         WHERE u.email = @email
@@ -121,6 +121,19 @@ router.post("/login", async (req, res) => {
       { expiresIn: "7d" },
     );
 
+    // Parse stored page_permissions JSON (only relevant for role = 'user')
+    let pagePermissions = null;
+    if (user.page_permissions) {
+      try {
+        pagePermissions = JSON.parse(user.page_permissions);
+      } catch {
+        console.warn(
+          "[Login] Failed to parse page_permissions for user",
+          user.id,
+        );
+      }
+    }
+
     res.json({
       success: true,
       token,
@@ -130,6 +143,7 @@ router.post("/login", async (req, res) => {
         email: user.email,
         role: normalizedRole,
         roleId: user.RoleId,
+        pagePermissions, // null for privileged roles, array for 'user' role
       },
     });
   } catch (err) {
