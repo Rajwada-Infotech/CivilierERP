@@ -323,6 +323,14 @@ function AppRoutes() {
         path="/"
         element={
           <ProtectedRoute>
+            <Home />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/finance"
+        element={
+          <ProtectedRoute>
             <FinanceDashboard />
           </ProtectedRoute>
         }

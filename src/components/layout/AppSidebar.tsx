@@ -59,7 +59,7 @@ interface NavItem {
 
 // ── Finance module sidebar ──────────────────────────────────────────────────
 const buildFinanceNavItems = (overdueCount: number): NavItem[] => [
-  { label: "Amendments", icon: BarChart3, path: "/" },
+  { label: "Amendments", icon: BarChart3, path: "/finance" },
   {
     label: "Query",
     icon: Scale,
@@ -304,7 +304,7 @@ const DBA_NAV_ITEMS: NavItem[] = [
 // ── User sidebar ───────────────────────────────────────────────────────────
 const USER_NAV_ITEMS: NavItem[] = [
   { label: "My Profile", icon: User, path: "/user/profile" },
-  { label: "Dashboard", icon: BarChart3, path: "/" },
+  { label: "Dashboard", icon: BarChart3, path: "/home" },
 ];
 
 // NavButton Component
@@ -495,7 +495,7 @@ export const AppSidebar = () => {
     }
   };
 
-  const isHomePage = location.pathname === "/home";
+  const isHomePage = location.pathname === "/home" || location.pathname === "/";
 
   const getNavItems = (): NavItem[] => {
     if (isHomePage) return []; // no nav items on landing page
@@ -577,7 +577,7 @@ export const AppSidebar = () => {
 
   return (
     <aside
-      className={`fixed top-14 left-0 bottom-0 flex flex-col border-r border-sidebar-border bg-sidebar transition-[width] duration-300 ease-in-out z-40 ${
+      className={`h-full flex flex-col border-r border-sidebar-border bg-sidebar transition-[width] duration-300 ease-in-out ${
         collapsed ? "w-16" : "w-56"
       }`}
     >

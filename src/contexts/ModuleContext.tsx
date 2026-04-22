@@ -11,7 +11,7 @@ type Module = "finance" | "material" | "followup" | "admin" | null;
 
 // Single source of truth for module dashboard routes
 export const MODULE_DASHBOARD_ROUTES: Record<NonNullable<Module>, string> = {
-  finance: "/",
+  finance: "/finance",
   material: "/material",
   followup: "/followup",
   admin: "/admin/dashboard",
