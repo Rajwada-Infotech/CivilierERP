@@ -125,16 +125,24 @@ export const AuthProvider = ({
     try {
       const data = await loginUser(email, password);
 
-      localStorage.setItem("token", data.token);
-      localStorage.setItem("user", JSON.stringify(data.user));
+      const userWithInitials = {
+        ...data.user,
+        initials: AuthUtils.getInitials(data.user.name),
+      };
 
-      setCurrentUser(data.user);
+      localStorage.setItem("token", data.token);
+      localStorage.setItem("user", JSON.stringify(userWithInitials));
+
+      setCurrentUser(userWithInitials);
 
       return { success: true, role: data.user.role };
     } catch (err: any) {
       return {
         success: false,
-        error: err.response?.data?.message || "Login failed",
+        error:
+          err.response?.data?.error ||
+          err.response?.data?.message ||
+          "Login failed",
       };
     }
   }, []);
