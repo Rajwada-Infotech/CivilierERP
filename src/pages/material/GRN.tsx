@@ -15,6 +15,8 @@ import {
   FileText,
 } from "lucide-react";
 import * as grnApi from "@/api/grnApi";
+import { StatusBadge } from "@/components/StatusBadge";
+import { ApprovalActions } from "@/components/ApprovalActions";
 import type {
   GRNFormDataPayload,
   GRNItemLine,
@@ -632,29 +634,29 @@ export default function GRN() {
                         {grn.GRNDate ? new Date(grn.GRNDate).toLocaleDateString("en-IN") : "—"}
                       </td>
                       <td className="px-6 py-4">
-                        <span
-                          className={`inline-block px-3 py-1 rounded-full text-xs font-medium ${
-                            grn.Status === "Fully Received"
-                              ? "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-400"
-                              : "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400"
-                          }`}
-                        >
-                          {grn.Status || "Draft"}
-                        </span>
+                        <StatusBadge status={grn.Status || "Draft"} />
                       </td>
-                      <td className="px-6 py-4 text-right space-x-2">
-                        <button
-                          onClick={() => onEdit(grn)}
-                          className="text-primary hover:bg-primary/10 p-2 rounded transition-colors"
-                        >
-                          <Edit3 size={18} />
-                        </button>
-                        <button
-                          onClick={() => deleteMutation.mutate(String(grn.GRNID))}
-                          className="text-destructive hover:bg-destructive/10 p-2 rounded transition-colors"
-                        >
-                          <Trash2 size={18} />
-                        </button>
+                      <td className="px-6 py-4 text-right">
+                        <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                          <ApprovalActions
+                            status={grn.Status || "Draft"}
+                            recordId={Number(grn.GRNID)}
+                            endpoint="/api/grns"
+                            onSuccess={() => queryClient.invalidateQueries({ queryKey: ["grns"] })}
+                          />
+                          <button
+                            onClick={() => onEdit(grn)}
+                            className="text-primary hover:bg-primary/10 p-2 rounded transition-colors"
+                          >
+                            <Edit3 size={18} />
+                          </button>
+                          <button
+                            onClick={() => deleteMutation.mutate(String(grn.GRNID))}
+                            className="text-destructive hover:bg-destructive/10 p-2 rounded transition-colors"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -688,3 +690,4 @@ export default function GRN() {
     </>
   );
 }
+

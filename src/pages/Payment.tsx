@@ -17,6 +17,8 @@ import { toast } from "sonner";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 import { Banknote, Clock, CheckCircle2 } from "lucide-react";
+import { StatusBadge } from "@/components/StatusBadge";
+import { ApprovalActions } from "@/components/ApprovalActions";
 
 interface DbPayment {
   PPaymentID: number;
@@ -153,12 +155,12 @@ const Payment: React.FC = () => {
     amount: item.PAmount ?? "",
     docType: item.PDocType || "",
     date: item.PDate?.slice(0, 10) || "",
-    // Store as "id|name" so the select can show the name but we can extract id
     bank: item.PBankID ? `${item.PBankID}|${item.PBankName || ""}` : "",
     bankId: item.PBankID ?? "",
     bankName: item.PBankName || "",
     project: item.PProject || "",
     company: item.PCompany || "",
+    status: (item as any).Status || "Draft",
   }));
 
   const handleDataEvent = async (event: DataChangeEvent) => {
@@ -200,6 +202,17 @@ const Payment: React.FC = () => {
       <span className="font-mono text-sm">
         ₹{Number(value || 0).toLocaleString("en-IN")}
       </span>
+    ),
+    status: (value, row) => (
+      <div className="flex flex-col gap-1.5">
+        <StatusBadge status={String(value || "Draft")} />
+        <ApprovalActions
+          status={String(value || "Draft")}
+          recordId={Number(row._id)}
+          endpoint="/api/new-payment"
+          onSuccess={() => queryClient.invalidateQueries({ queryKey: ["payments"] })}
+        />
+      </div>
     ),
   };
 
@@ -311,6 +324,7 @@ const Payment: React.FC = () => {
           { key: "amount", label: "Amount" },
           { key: "bankName", label: "Bank", hideOnMobile: true },
           { key: "docType", label: "Doc Type", hideOnMobile: true },
+          { key: "status", label: "Status" },
         ]}
         columnRenderers={columnRenderers}
         initialData={mappedData}
