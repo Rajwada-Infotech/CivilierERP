@@ -4,20 +4,24 @@ const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 
+const requireUserEmail = (req, res) => {
+  const email = req.user?.email;
+  if (!email) {
+    res.status(401).json({ error: "User context missing" });
+    return null;
+  }
+  return email;
+};
+
 // ── GET / ─────────────────────────────────────────────────────────────────────
-// Returns all POs joined with supplier name (from AccountHeadMaster) and
-// project name (from enterprise). Schema columns: SupplierID (FK int),
-// ProjectId (FK int). No Supplier/Company/ProjectSite text columns exist.
 router.get("/", cache("purchase-orders", 300), async (req, res) => {
   try {
     const pool = getPool();
 
-    // Sanitized pagination params
-    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const page  = Math.max(parseInt(req.query.page)  || 1,  1);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
     const offset = (page - 1) * limit;
 
-    // Total count (matching exact JOINs)
     const countResult = await pool.request().query(`
       SELECT COUNT(*) AS total
       FROM dbo.PurchaseOrders po
@@ -26,39 +30,38 @@ router.get("/", cache("purchase-orders", 300), async (req, res) => {
     `);
     const total = parseInt(countResult.recordset[0].total);
 
-    // Paginated data
     const result = await pool.request()
-      .input('offset', sql.Int, offset)
-      .input('limit', sql.Int, limit)
+      .input("offset", sql.Int, offset)
+      .input("limit",  sql.Int, limit)
       .query(`
-      SELECT
-        po.PurchaseOrderID,
-        po.PurchaseOrderNo,
-        po.PODate,
-        po.ExpectedDeliveryDate,
-        po.SupplierID,
-        ah.LHeadName AS SupplierName,
-        po.ProjectId,
-        en.name AS ProjectName,
-        po.ItemDescription,
-        po.Quantity,
-        po.Unit,
-        po.Rate,
-        po.TotalAmount,
-        po.PaymentTerms,
-        po.Remarks,
-        po.Status,
-        po.CreatedBy,
-        po.CreatedAt,
-        po.UpdatedAt,
-        po.ApprovedBy,
-        po.ApprovedAt
-      FROM dbo.PurchaseOrders po
-      LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = po.SupplierID
-      LEFT JOIN dbo.enterprise en ON en.id = po.ProjectId
-      ORDER BY po.PurchaseOrderID DESC
-      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
-    `);
+        SELECT
+          po.PurchaseOrderID,
+          po.PurchaseOrderNo,
+          po.PODate,
+          po.ExpectedDeliveryDate,
+          po.SupplierID,
+          ah.LHeadName AS SupplierName,
+          po.ProjectId,
+          en.name AS ProjectName,
+          po.ItemDescription,
+          po.Quantity,
+          po.Unit,
+          po.Rate,
+          po.TotalAmount,
+          po.PaymentTerms,
+          po.Remarks,
+          po.Status,
+          po.CreatedBy,
+          po.CreatedAt,
+          po.UpdatedAt,
+          po.ApprovedBy,
+          po.ApprovedAt
+        FROM dbo.PurchaseOrders po
+        LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = po.SupplierID
+        LEFT JOIN dbo.enterprise en ON en.id = po.ProjectId
+        ORDER BY po.PurchaseOrderID DESC
+        OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+      `);
 
     res.json({
       data: result.recordset,
@@ -76,42 +79,34 @@ router.get("/", cache("purchase-orders", 300), async (req, res) => {
 // ── POST / ────────────────────────────────────────────────────────────────────
 router.post("/", async (req, res) => {
   const {
-    PurchaseOrderNo,
-    PODate,
-    ExpectedDeliveryDate,
-    SupplierID,
-    ProjectId,
-    ItemDescription,
-    Quantity,
-    Unit,
-    Rate,
-    TotalAmount,
-    PaymentTerms,
-    Status,
-    Remarks,
+    PurchaseOrderNo, PODate, ExpectedDeliveryDate,
+    SupplierID, ProjectId, ItemDescription,
+    Quantity, Unit, Rate, TotalAmount,
+    PaymentTerms, Status, Remarks,
   } = req.body;
 
   try {
-    const pool = getPool();
-    const userId = req.user?.id || req.user?.userId || 1;
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
 
+    const pool = getPool();
     const result = await pool
       .request()
-      .input("PurchaseOrderNo",    sql.NVarChar(100),   PurchaseOrderNo || null)
-      .input("PODate",             sql.Date,            PODate || null)
-      .input("ExpectedDeliveryDate", sql.Date,          ExpectedDeliveryDate || null)
-      .input("SupplierID",         sql.Int,             SupplierID ? parseInt(SupplierID, 10) : null)
-      .input("ProjectId",          sql.Int,             ProjectId  ? parseInt(ProjectId,  10) : null)
-      .input("ItemDescription",    sql.NVarChar(510),   ItemDescription || null)
-      .input("Quantity",           sql.Decimal(18, 2),  parseFloat(Quantity)    || 0)
-      .input("Unit",               sql.NVarChar(50),    Unit || null)
-      .input("Rate",               sql.Decimal(18, 2),  parseFloat(Rate)        || 0)
-      .input("TotalAmount",        sql.Decimal(18, 2),  parseFloat(TotalAmount) || 0)
-      .input("PaymentTerms",       sql.NVarChar(255),   PaymentTerms || null)
-      .input("Status",             sql.NVarChar(50),    Status || "Draft")
-      .input("Remarks",            sql.NVarChar(500),   Remarks || null)
-      .input("CreatedBy",          sql.Int,             userId)
-      .input("CreatedAt",          sql.DateTime2,       new Date())
+      .input("PurchaseOrderNo",      sql.NVarChar(100),  PurchaseOrderNo || null)
+      .input("PODate",               sql.Date,           PODate || null)
+      .input("ExpectedDeliveryDate", sql.Date,           ExpectedDeliveryDate || null)
+      .input("SupplierID",           sql.Int,            SupplierID ? parseInt(SupplierID, 10) : null)
+      .input("ProjectId",            sql.Int,            ProjectId  ? parseInt(ProjectId,  10) : null)
+      .input("ItemDescription",      sql.NVarChar(510),  ItemDescription || null)
+      .input("Quantity",             sql.Decimal(18, 2), parseFloat(Quantity)    || 0)
+      .input("Unit",                 sql.NVarChar(50),   Unit || null)
+      .input("Rate",                 sql.Decimal(18, 2), parseFloat(Rate)        || 0)
+      .input("TotalAmount",          sql.Decimal(18, 2), parseFloat(TotalAmount) || 0)
+      .input("PaymentTerms",         sql.NVarChar(255),  PaymentTerms || null)
+      .input("Status",               sql.NVarChar(50),   Status || "Draft")
+      .input("Remarks",              sql.NVarChar(500),  Remarks || null)
+      .input("CreatedBy",            sql.NVarChar(100),  userEmail)  // ✅ real email, was req.user.id
+      .input("CreatedAt",            sql.DateTime2,      new Date())
       .query(`
         INSERT INTO dbo.PurchaseOrders (
           PurchaseOrderNo, PODate, ExpectedDeliveryDate,
@@ -143,43 +138,35 @@ router.post("/", async (req, res) => {
 router.put("/:id", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const {
-    PurchaseOrderNo,
-    PODate,
-    ExpectedDeliveryDate,
-    SupplierID,
-    ProjectId,
-    ItemDescription,
-    Quantity,
-    Unit,
-    Rate,
-    TotalAmount,
-    PaymentTerms,
-    Status,
-    Remarks,
+    PurchaseOrderNo, PODate, ExpectedDeliveryDate,
+    SupplierID, ProjectId, ItemDescription,
+    Quantity, Unit, Rate, TotalAmount,
+    PaymentTerms, Status, Remarks,
   } = req.body;
 
   try {
-    const pool = getPool();
-    const userId = req.user?.id || req.user?.userId || 1;
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
 
+    const pool = getPool();
     const result = await pool
       .request()
-      .input("PurchaseOrderID",     sql.Int,             id)
-      .input("PurchaseOrderNo",     sql.NVarChar(100),   PurchaseOrderNo || null)
-      .input("PODate",              sql.Date,            PODate || null)
+      .input("PurchaseOrderID",      sql.Int,            id)
+      .input("PurchaseOrderNo",      sql.NVarChar(100),  PurchaseOrderNo || null)
+      .input("PODate",               sql.Date,           PODate || null)
       .input("ExpectedDeliveryDate", sql.Date,           ExpectedDeliveryDate || null)
-      .input("SupplierID",          sql.Int,             SupplierID ? parseInt(SupplierID, 10) : null)
-      .input("ProjectId",           sql.Int,             ProjectId  ? parseInt(ProjectId,  10) : null)
-      .input("ItemDescription",     sql.NVarChar(510),   ItemDescription || null)
-      .input("Quantity",            sql.Decimal(18, 2),  parseFloat(Quantity)    || 0)
-      .input("Unit",                sql.NVarChar(50),    Unit || null)
-      .input("Rate",                sql.Decimal(18, 2),  parseFloat(Rate)        || 0)
-      .input("TotalAmount",         sql.Decimal(18, 2),  parseFloat(TotalAmount) || 0)
-      .input("PaymentTerms",        sql.NVarChar(255),   PaymentTerms || null)
-      .input("Status",              sql.NVarChar(50),    Status || "Draft")
-      .input("Remarks",             sql.NVarChar(500),   Remarks || null)
-      .input("UpdatedBy",           sql.Int,             userId)
-      .input("UpdatedAt",           sql.DateTime2,       new Date())
+      .input("SupplierID",           sql.Int,            SupplierID ? parseInt(SupplierID, 10) : null)
+      .input("ProjectId",            sql.Int,            ProjectId  ? parseInt(ProjectId,  10) : null)
+      .input("ItemDescription",      sql.NVarChar(510),  ItemDescription || null)
+      .input("Quantity",             sql.Decimal(18, 2), parseFloat(Quantity)    || 0)
+      .input("Unit",                 sql.NVarChar(50),   Unit || null)
+      .input("Rate",                 sql.Decimal(18, 2), parseFloat(Rate)        || 0)
+      .input("TotalAmount",          sql.Decimal(18, 2), parseFloat(TotalAmount) || 0)
+      .input("PaymentTerms",         sql.NVarChar(255),  PaymentTerms || null)
+      .input("Status",               sql.NVarChar(50),   Status || "Draft")
+      .input("Remarks",              sql.NVarChar(500),  Remarks || null)
+      .input("UpdatedBy",            sql.NVarChar(100),  userEmail)  // ✅ real email, was req.user.id
+      .input("UpdatedAt",            sql.DateTime2,      new Date())
       .query(`
         UPDATE dbo.PurchaseOrders SET
           PurchaseOrderNo      = @PurchaseOrderNo,

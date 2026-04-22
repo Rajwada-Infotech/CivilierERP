@@ -56,8 +56,6 @@ export function formatRelative(dueDateStr: string, timeSlot?: string): string {
 }
 
 // ─── Core fetch ───────────────────────────────────────────────────────────────
-// Replaces both fetchAllReminders() in TopNavbar and loadReminders() in MobileNav.
-// Tasks are derived from /api/tasks directly — no separate /reminders endpoint.
 
 export async function fetchAllReminders(): Promise<ReminderItem[]> {
   const [poRes, grnRes, chequeRes, tdsRes, taskRes] = await Promise.allSettled([
@@ -70,70 +68,75 @@ export async function fetchAllReminders(): Promise<ReminderItem[]> {
 
   const items: ReminderItem[] = [];
 
-  // Purchase Orders
+  // ── Purchase Orders ──────────────────────────────────────────────────────────
+  // DB columns: PurchaseOrderID, PurchaseOrderNo, ExpectedDeliveryDate, TotalAmount
   if (poRes.status === "fulfilled" && poRes.value.ok) {
     const data = await poRes.value.json();
     (Array.isArray(data) ? data : (data.data ?? [])).forEach((po: any) => {
-      const d = po.ExpectedDeliveryDate || po.DeliveryDate || po.DocumentDate;
+      const d = po.ExpectedDeliveryDate || po.PODate;
       if (!d) return;
       const urgency = classifyUrgency(d);
       if (urgency === "upcoming") return;
       items.push({
-        id: `po-${po.Id ?? po.id}`,
+        id: `po-${po.PurchaseOrderID ?? po.Id ?? po.id}`,
         type: "purchase_order",
-        title: `PO #${po.PONumber || po.DocumentNumber || po.Id}`,
-        subtitle: po.SupplierName || po.VendorName || "Purchase Order",
+        title: `PO #${po.PurchaseOrderNo || po.PurchaseOrderID}`,
+        subtitle: po.SupplierName || "Purchase Order",
         dueDate: d,
-        timeSlot: po.TimeSlot || po.DeliveryTime || undefined,
         urgency,
-        amount: po.TotalAmount || po.Amount || undefined,
+        amount: po.TotalAmount || undefined,
       });
     });
   }
 
-  // GRNs
+  // ── GRNs ─────────────────────────────────────────────────────────────────────
+  // DB columns: GRNID, GRNNo, GRNDate, SupplierID, POID, GRNItems, Status, Remarks, CreatedDate
   if (grnRes.status === "fulfilled" && grnRes.value.ok) {
     const data = await grnRes.value.json();
     (Array.isArray(data) ? data : (data.data ?? [])).forEach((grn: any) => {
-      const d = grn.ExpectedDate || grn.ReceivedDate || grn.DocumentDate;
+      const d = grn.GRNDate || grn.CreatedDate;
       if (!d) return;
       const urgency = classifyUrgency(d);
       if (urgency === "upcoming") return;
       items.push({
-        id: `grn-${grn.Id ?? grn.id}`,
+        id: `grn-${grn.GRNID ?? grn.Id ?? grn.id}`,
         type: "grn",
-        title: `GRN #${grn.GRNNumber || grn.DocumentNumber || grn.Id}`,
-        subtitle: grn.SupplierName || grn.VendorName || "Goods Receipt",
+        title: `GRN #${grn.GRNNo || grn.GRNID}`,
+        subtitle: grn.SupplierName || "Goods Receipt",
         dueDate: d,
-        timeSlot: grn.TimeSlot || undefined,
         urgency,
-        amount: grn.TotalAmount || undefined,
       });
     });
   }
 
-  // Cheques
+  // ── Cheques ──────────────────────────────────────────────────────────────────
+  // DB columns: CId, CompanyId, BankId, AccountNumber, IFSCCode,
+  //             ChequeLotNumber, ChequeStartNumber, ChequeEndNumber,
+  //             Remarks, Status, CreatedBy, UpdatedBy, ApprovedBy,
+  //             CreatedAt, UpdatedAt, ApprovedAt, TotalCheques
+  // NOTE: ChequeMaster has no individual cheque date — skip date-based reminders
+  // Only include if Status is 'Pending'
   if (chequeRes.status === "fulfilled" && chequeRes.value.ok) {
     const data = await chequeRes.value.json();
     (Array.isArray(data) ? data : (data.data ?? [])).forEach((chq: any) => {
-      const d = chq.ChequeDate || chq.DueDate || chq.Date;
+      // No due date column on ChequeMaster — use CreatedAt as reference
+      const d = chq.CreatedAt;
       if (!d) return;
+      if (chq.Status !== "Pending" && chq.Status !== "Draft") return;
       const urgency = classifyUrgency(d);
       if (urgency === "upcoming") return;
       items.push({
-        id: `chq-${chq.Id ?? chq.id}`,
+        id: `chq-${chq.CId ?? chq.Id ?? chq.id}`,
         type: "cheque",
-        title: `Cheque #${chq.ChequeNumber || chq.Id}`,
-        subtitle: chq.BankName || chq.PartyName || "Cheque",
+        title: `Cheque Lot #${chq.ChequeLotNumber || chq.CId}`,
+        subtitle: chq.AccountNumber || chq.BankId || "Cheque",
         dueDate: d,
-        timeSlot: chq.TimeSlot || undefined,
         urgency,
-        amount: chq.Amount || undefined,
       });
     });
   }
 
-  // TDS
+  // ── TDS ──────────────────────────────────────────────────────────────────────
   if (tdsRes.status === "fulfilled" && tdsRes.value.ok) {
     const data = await tdsRes.value.json();
     (Array.isArray(data) ? data : (data.data ?? [])).forEach((tds: any) => {
@@ -147,14 +150,13 @@ export async function fetchAllReminders(): Promise<ReminderItem[]> {
         title: `TDS #${tds.TDSCertificateNo || tds.Id}`,
         subtitle: tds.PartyName || tds.DeducteeName || "TDS Payment",
         dueDate: d,
-        timeSlot: tds.TimeSlot || undefined,
         urgency,
         amount: tds.TDSAmount || tds.Amount || undefined,
       });
     });
   }
 
-  // Tasks — derived directly from /api/tasks, no separate endpoint
+  // ── Tasks ────────────────────────────────────────────────────────────────────
   if (taskRes.status === "fulfilled" && taskRes.value.ok) {
     const tasks: any[] = await taskRes.value.json();
     tasks.forEach((t: any) => {
@@ -185,26 +187,18 @@ export async function fetchAllReminders(): Promise<ReminderItem[]> {
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
-// Single hook used by TopNavbar, MobileNav, AppSidebar, and FollowupDashboard.
-// Handles background polling, manual refresh, and badge count in one place.
 
 interface UseRemindersOptions {
-  /** Auto-refresh interval in ms. Default 120_000 (2 min). Set 0 to disable. */
   pollingInterval?: number;
-  /** If false, fetch is deferred until refresh() is called manually. Default true. */
   fetchOnMount?: boolean;
 }
 
 interface UseRemindersResult {
   reminders: ReminderItem[];
   loading: boolean;
-  /** Number of overdue + today items — use for the bell badge. */
   badgeCount: number;
-  /** Overdue tasks only — for AppSidebar badge and FollowupDashboard. */
   overdueTaskCount: number;
-  /** Trigger a fresh fetch. The refresh button calls this directly. */
   refresh: () => Promise<void>;
-  /** True after the first successful fetch. */
   fetched: boolean;
 }
 
@@ -218,14 +212,10 @@ export function useReminders(
   const [fetched, setFetched] = useState(false);
   const cancelledRef = useRef(false);
 
-  // Guard: never fire any reminder fetch if there is no auth token.
-  // Without this, all 5 reminder endpoints fire immediately on app load
-  // (before login), get 401s, and trigger fetchWithAuth's redirect → reload
-  // → all contexts remount → 401s again → infinite loop.
   const hasToken = useCallback(() => !!localStorage.getItem("token"), []);
 
   const refresh = useCallback(async () => {
-    if (!hasToken()) return; // skip silently if not authenticated
+    if (!hasToken()) return;
     setLoading(true);
     try {
       const items = await fetchAllReminders();
@@ -240,7 +230,6 @@ export function useReminders(
     }
   }, [hasToken]);
 
-  // Mount fetch
   useEffect(() => {
     cancelledRef.current = false;
     if (fetchOnMount) refresh();
@@ -249,7 +238,6 @@ export function useReminders(
     };
   }, [fetchOnMount, refresh]);
 
-  // Background polling — only while authenticated
   useEffect(() => {
     if (!pollingInterval) return;
     const id = setInterval(() => {

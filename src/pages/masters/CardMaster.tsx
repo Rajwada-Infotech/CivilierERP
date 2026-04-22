@@ -262,11 +262,11 @@ const CardMaster: React.FC = () => {
     queryFn: getCards,
   });
   const { data: bankData, isLoading: loadingBanks } = useQuery<BankOption[]>({
-    queryKey: ["banks"],
+    queryKey: ["account-head-bank-options"],
     queryFn: getBanksForCard,
   });
   const { data: companies = [] } = useQuery<CompanyOption[]>({
-    queryKey: ["companyOptions"],
+    queryKey: ["enterprise-options"],
     queryFn: getCompanyOptions,
   });
 

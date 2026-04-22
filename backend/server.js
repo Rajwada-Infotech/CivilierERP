@@ -183,6 +183,7 @@ async function startServer() {
       { path: "/api/uom-master",         file: "./routes/uomMaster" },
       { path: "/api/debit-note",         file: "./routes/debitNote" },
       { path: "/api/tc-master",          file: "./routes/tcMaster" },
+      { path: "/api/transactions", file: "./routes/transactions" },
       { path: "/api/grns",               file: "./routes/grns" },
       { path: "/api/stock-ledger",       file: "./routes/stockLedger" },
 { path: "/api/brs",                file: "./routes/brs" },
@@ -192,7 +193,11 @@ async function startServer() {
       { path: "/api/admin-dashboard",    file: "./routes/adminDashboard" },
       { path: "/api/user-activity",      file: "./routes/userActivity" },
       { path: "/api/business-units",     file: "./routes/businessUnit" },
-      { path: "/api/tasks",              file: "./routes/tasks" },
+      { path: "/api/cheque-leaf",       file: "./routes/chequeLeaf" },
+      { path: "/api/contractor-category", file: "./routes/contractorCategory" },
+      { path: "/api/approval-workflows", file: "./routes/approvalWorkflows" },
+      { path: "/api/tasks", file: "./routes/tasks" },
+      { path: "/api/widgets", file: "./routes/widgets" },
     ];
 
     for (const { path, file } of routes) {
