@@ -139,7 +139,9 @@ const TCMaster = lazy(() => import("./pages/material/T&CMaster"));
 const UnitOfMeasurementMaster = lazy(
   () => import("./pages/material/UnitOfMeasurementMaster"),
 );
-const BusinessUnitWrapper = lazy(() => import("./pages/masters/BusinessUnitWrapper"));
+const BusinessUnitWrapper = lazy(
+  () => import("./pages/masters/BusinessUnitWrapper"),
+);
 
 // Admin Pages
 const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
@@ -611,7 +613,7 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/masters/role-master"
+        path="/admin/masters/role-master"
         element={
           <ProtectedRoute>
             <RoleMaster />
@@ -633,7 +635,7 @@ function AppRoutes() {
             <UnitOfMeasurementMaster />
           </ProtectedRoute>
         }
-      /> 
+      />
 
       {/* USER */}
       <Route
@@ -688,7 +690,7 @@ function AppRoutes() {
       />
 
       {/* ADMIN — bare /admin redirects to home */}
-<Route
+      <Route
         path="/admin"
         element={
           <AdminRoute>
