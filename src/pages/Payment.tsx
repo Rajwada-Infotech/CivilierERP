@@ -14,6 +14,8 @@ import {
   deletePayment,
 } from "@/api/newPaymentApi";
 import { toast } from "sonner";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
+
 import { Banknote, Clock, CheckCircle2 } from "lucide-react";
 
 interface DbPayment {
@@ -36,7 +38,8 @@ interface BankOption {
 
 // ── Fetch banks from API ───────────────────────────────────────────────────────
 const fetchBanks = async (): Promise<BankOption[]> => {
-  const res = await fetch("/api/bank-master");
+  const res = await fetchWithAuth("/api/bank-master");
+
   if (!res.ok) throw new Error("Failed to fetch banks");
   const data = await res.json();
   // bank-master returns array of account heads with LHeadType = 'B'
