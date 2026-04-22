@@ -9,6 +9,8 @@ import {
 } from "@/components/MasterPage";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { StatusBadge } from "@/components/StatusBadge";
+import { ApprovalActions } from "@/components/ApprovalActions";
 
 import {
   getPurchaseOrders,
@@ -56,12 +58,11 @@ const PurchaseOrderMaster = () => {
   const supplierOptions = suppliers.map((s) => s.name);
   const projectOptions  = projects.map((p)  => p.name);
 
-  const dbItems = dbData?.data ?? [];
+  const dbItems: any[] = dbData?.data ?? [];
   const totalPages = Math.max(dbData?.totalPages ?? 1, 1);
   const totalRecords = dbData?.total ?? dbItems.length;
 
   // Map DB rows → UI record
-  // supplierID / projectId stored as integers in DB; display as names in UI
   const mappedData: RecordWithId[] = dbItems.map((item) => {
     const supplierName =
       suppliers.find((s) => s.id === item.SupplierID)?.name ??
@@ -90,7 +91,7 @@ const PurchaseOrderMaster = () => {
     };
   });
 
-  // Map UI record → DB payload (resolve names back to integer FKs)
+  // Map UI record → DB payload
   const toPayload = (r: Record<string, unknown>) => {
     const supplier = suppliers.find((s) => s.name === (r.supplierName as string));
     const project  = projects.find((p)  => p.name === (r.projectName  as string));
@@ -143,6 +144,9 @@ const PurchaseOrderMaster = () => {
     return record;
   };
 
+  const refetchPOs = () =>
+    queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
+
   const columnRenderers = {
     poDate: (value: unknown) => {
       const d = new Date(String(value));
@@ -156,24 +160,21 @@ const PurchaseOrderMaster = () => {
     },
     totalAmount: (value: unknown) =>
       `₹${Number(value || 0).toLocaleString("en-IN")}`,
-    status: (value: unknown) => {
-      const s = String(value ?? "");
-      const cls: Record<string, string> = {
-        Draft:               "bg-slate-100 text-slate-500 border-slate-200",
-        Issued:              "bg-blue-50 text-blue-600 border-blue-200",
-        "Partially Received":"bg-amber-50 text-amber-600 border-amber-200",
-        Received:            "bg-green-50 text-green-700 border-green-200",
-        Closed:              "bg-muted text-muted-foreground border-border",
-      };
-      return (
-        <span
-          className={`inline-flex items-center rounded-full border px-2.5 py-1 text-[11px] font-heading ${cls[s] ?? "bg-muted text-muted-foreground border-border"}`}
-        >
-          <span className="mr-1.5 h-1.5 w-1.5 rounded-full bg-current" />
-          {s}
-        </span>
-      );
-    },
+
+    // ── Status badge + inline approval actions ───────────────────────────────
+    // Both rendered in the same cell so we don't add a duplicate Actions column
+    // (MasterPage already renders its own edit/delete Actions column on the right).
+    status: (_value: unknown, row: RecordWithId) => (
+      <div className="flex items-center gap-2 flex-wrap">
+        <StatusBadge status={String(row.status ?? "")} />
+        <ApprovalActions
+          status={String(row.status ?? "")}
+          recordId={row._id}
+          endpoint="/api/purchase-orders"
+          onSuccess={refetchPOs}
+        />
+      </div>
+    ),
   };
 
   const FIELDS: FieldDef[] = [
@@ -214,7 +215,6 @@ const PurchaseOrderMaster = () => {
       label:     "Total Amount (₹)",
       type:      "number",
       required:  true,
-      readOnly:  true,
       prefix:    "₹",
     },
     { name: "paymentTerms", label: "Payment Terms", type: "textarea" },

@@ -195,7 +195,8 @@ async function startServer() {
       { path: "/api/business-units",     file: "./routes/businessUnit" },
       { path: "/api/cheque-leaf",       file: "./routes/chequeLeaf" },
       { path: "/api/contractor-category", file: "./routes/contractorCategory" },
-      { path: "/api/approval-workflows", file: "./routes/approvalWorkflows" },
+{ path: "/api/approval-workflows", file: "./routes/approvalWorkflows" },
+      { path: "/api/approval-inbox", file: "./routes/approvalInbox" },
       { path: "/api/tasks", file: "./routes/tasks" },
       { path: "/api/widgets", file: "./routes/widgets" },
     ];
