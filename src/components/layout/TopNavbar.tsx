@@ -198,13 +198,20 @@ const RemindersDropdown: React.FC<{
                 <div
                   key={r.id}
                   onClick={() => {
-                    if (r.type === "task") {
-                      navigate(r.taskId ? `/tasks/${r.taskId}` : "/tasks");
-                      onClose();
-                    }
+                    const routes: Record<string, string> = {
+                      task: r.taskId ? `/tasks/${r.taskId}` : "/tasks",
+                      purchase_order: "/material/purchase-order",
+                      grn: "/material/grn",
+                      payment: "/payments",
+                      cheque: "/tasks",
+                      tds: "/tasks",
+                      deadline: "/tasks",
+                      general: "/tasks",
+                    };
+                    const dest = routes[r.type];
+                    if (dest) { navigate(dest); onClose(); }
                   }}
-                  className={`flex items-start gap-3 px-4 py-3 transition-colors
-                    ${r.type === "task" ? "cursor-pointer" : "cursor-default"}
+                  className={`flex items-start gap-3 px-4 py-3 transition-colors cursor-pointer
                     ${
                       r.urgency === "overdue"
                         ? "bg-red-500/5 hover:bg-red-500/10"
@@ -253,7 +260,7 @@ const RemindersDropdown: React.FC<{
       {/* Footer */}
       <div className="border-t border-border px-4 py-2.5">
         <p className="text-[10px] text-muted-foreground text-center">
-          Overdue · Today · Next 7 days · Tasks &amp; finance items
+          Tap any item to navigate · Overdue · Today · Next 7 days
         </p>
       </div>
     </div>

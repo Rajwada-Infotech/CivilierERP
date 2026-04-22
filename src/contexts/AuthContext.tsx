@@ -92,9 +92,10 @@ export const AuthProvider = ({
 
   const [users, setUsers] = useState<AppUser[]>([]);
 
-  // Fetch users from backend after login
+  // Fetch users from backend after login — only for privileged roles
   useEffect(() => {
     if (!currentUser) return;
+    if (!["admin", "super_admin", "dba"].includes(currentUser.role)) return;
 
     const token = localStorage.getItem("token");
     if (!token) return;
