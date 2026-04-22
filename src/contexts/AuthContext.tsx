@@ -104,18 +104,11 @@ export const AuthProvider = ({
 
   const [users, setUsers] = useState<AppUser[]>([]);
 
-<<<<<<< HEAD
-  // Fetch users from backend after login — only for privileged roles
-  useEffect(() => {
-    if (!currentUser) return;
-    if (!["admin", "super_admin", "dba"].includes(currentUser.role)) return;
-=======
   // Fetch users from backend — only for privileged roles that have CanView on Users
   useEffect(() => {
     if (!currentUser) return;
     const privilegedRoles = ["super_admin", "admin", "dba"];
     if (!privilegedRoles.includes(currentUser.role)) return;
->>>>>>> 67320e18799755a4dfbf3c08f2e0d0513327a309
 
     const token = localStorage.getItem("token");
     if (!token) return;
