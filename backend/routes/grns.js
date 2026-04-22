@@ -1,8 +1,15 @@
 const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
+const { transition, guardEdit } = require("../services/approvalService");
 const router = express.Router();
 const { getPool, sql } = require("../db");
+
+const requireUserEmail = (req, res) => {
+  const email = req.user?.email;
+  if (!email) { res.status(401).json({ error: "User context missing" }); return null; }
+  return email;
+};
 
 function parseGRNItems(grnItems) {
   if (Array.isArray(grnItems)) return grnItems;
@@ -150,6 +157,7 @@ router.post("/", async (req, res) => {
 // PUT - Update GRN
 router.put("/:id", async (req, res) => {
   const { grnNo, grnDate, supplierId, poId, grnItems, status, remarks } =
+  await guardEdit("goods-receipt", req.params.id);
     req.body;
   const grnId = parseInt(req.params.id, 10);
 
@@ -242,6 +250,57 @@ router.delete("/:id", async (req, res) => {
       error: "Failed to delete GRN",
       message: err.message,
     });
+  }
+});
+
+// ── PUT /:id/submit — Partially Received → Pending ────────────────────────────
+router.put("/:id/submit", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+
+    const result = await transition("goods-receipt", id, "Pending", userEmail, req.user?.role);
+    await bumpCacheVersion("goods-receipt");
+    res.json({ message: "GRN submitted for approval", ...result });
+  } catch (err) {
+    console.error("GRN submit error:", err.message);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/approve — Pending → Approved ─────────────────────────────────────
+router.put("/:id/approve", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+
+    const result = await transition("goods-receipt", id, "Approved", userEmail, req.user?.role);
+    await bumpCacheVersion("goods-receipt");
+    res.json({ message: "GRN approved", ...result });
+  } catch (err) {
+    console.error("GRN approve error:", err.message);
+    const status = err.message.includes("not authorized") ? 403 : 400;
+    res.status(status).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/reject — Pending → Rejected ──────────────────────────────────────
+router.put("/:id/reject", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { note } = req.body;
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+
+    const result = await transition("goods-receipt", id, "Rejected", userEmail, req.user?.role, note || null);
+    await bumpCacheVersion("goods-receipt");
+    res.json({ message: "GRN rejected", ...result });
+  } catch (err) {
+    console.error("GRN reject error:", err.message);
+    const status = err.message.includes("not authorized") ? 403 : 400;
+    res.status(status).json({ error: err.message });
   }
 });
 
