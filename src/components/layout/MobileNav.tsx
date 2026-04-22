@@ -317,9 +317,10 @@ export const MobileNav: React.FC = () => {
     location.pathname.startsWith("/users") ||
     location.pathname.startsWith("/dba");
 
-  const isSuperAdmin = currentUser?.role === "super_admin";
-  const isDba = currentUser?.role === "dba";
-  const isAdmin = currentUser?.role === "admin" || isSuperAdmin || isDba;
+  const isSuperAdmin = currentUser?.role?.toLowerCase() === "super_admin";
+  const isDba = currentUser?.role?.toLowerCase() === "dba";
+  const isAdmin =
+    currentUser?.role?.toLowerCase() === "admin" || isSuperAdmin || isDba;
 
   // Admin Navigation Items
   const ADMIN_NAV_ITEMS: NavItem[] = [
@@ -457,7 +458,7 @@ export const MobileNav: React.FC = () => {
 
       case "finance":
         return [
-          { label: "Amendments", icon: BarChart3, path: "/" },
+          { label: "Amendments", icon: BarChart3, path: "/finance" },
           {
             label: "Query",
             icon: Landmark,
@@ -609,7 +610,7 @@ export const MobileNav: React.FC = () => {
         ];
 
       default:
-        return [{ label: "Amendments", icon: BarChart3, path: "/" }];
+        return [{ label: "Amendments", icon: BarChart3, path: "/finance" }];
     }
   };
 
@@ -727,7 +728,7 @@ export const MobileNav: React.FC = () => {
     {
       icon: Users,
       label: "Role Master",
-      path: "/masters/role-master",
+      path: "/admin/masters/role-master",
       color: "text-blue-400",
     },
   ];
@@ -801,7 +802,11 @@ export const MobileNav: React.FC = () => {
       <button
         onClick={() => setOpen(true)}
         aria-label="Open navigation menu"
-        className="fixed bottom-4 right-4 z-50 w-12 h-12 rounded-full gradient-accent text-primary-foreground flex items-center justify-center shadow-lg md:hidden"
+        className="fixed bottom-4 right-4 z-50 w-12 h-12 rounded-full gradient-accent text-primary-foreground flex items-center justify-center shadow-lg md:hidden safe-bottom"
+        style={{
+          bottom: "max(1rem, env(safe-area-inset-bottom, 1rem))",
+          right: "max(1rem, env(safe-area-inset-right, 1rem))",
+        }}
       >
         <Menu size={20} />
         {badgeCount > 0 && (
@@ -820,7 +825,7 @@ export const MobileNav: React.FC = () => {
           />
 
           {/* Drawer */}
-          <div className="absolute bottom-0 left-0 right-0 rounded-t-3xl bg-card border-t border-border max-h-[90vh] flex flex-col shadow-xl">
+          <div className="absolute bottom-0 left-0 right-0 rounded-t-3xl bg-card border-t border-border max-h-[92svh] flex flex-col shadow-xl">
             {/* Header */}
             <div className="flex items-center justify-between px-5 py-4 border-b border-border flex-shrink-0">
               <span className="font-heading font-semibold text-base text-foreground">

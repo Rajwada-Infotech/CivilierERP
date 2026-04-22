@@ -7,6 +7,8 @@
  */
 
 const express = require("express");
+const logger = require("../logger");
+const { redisGet, redisSet, redisDel } = require("../redis");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
@@ -73,10 +75,21 @@ function mapComment(row) {
 // Admins see all tasks; regular users see only tasks assigned/created by them.
 router.get("/", async (req, res) => {
   try {
-    const pool = getPool();
-    const { role, userId } = req.user;
+    const userId = req.user.userId ?? req.user.id;
+    const { role } = req.user;
     const isAdmin =
       role === "admin" || role === "super_admin" || role === "dba";
+
+    const cacheKey = `tasks:${userId}:${isAdmin}`;
+
+    // ✅ 1. Check cache
+    const cached = await redisGet(cacheKey);
+    if (cached) {
+      logger.info("⚡ Tasks from Redis");
+      return res.json(JSON.parse(cached));
+    }
+
+    const pool = getPool();
 
     let query = `
       SELECT
@@ -102,8 +115,8 @@ router.get("/", async (req, res) => {
     query += ` ORDER BY t.CreatedAt DESC`;
     const result = await request.query(query);
 
-    // Fetch all comments for returned tasks in one query
     const taskIds = result.recordset.map((r) => r.Id);
+
     let comments = [];
     if (taskIds.length > 0) {
       const idList = taskIds.join(",");
@@ -127,7 +140,13 @@ router.get("/", async (req, res) => {
       mapTask(row, commentsByTask[row.Id] || []),
     );
 
+    // ✅ 2. Save to Redis (TTL = 60 sec)
+    await redisSet(cacheKey, JSON.stringify(tasks), 60);
+
+    console.log("📦 Tasks from DB");
+
     res.json(tasks);
+
   } catch (err) {
     console.error("GET /api/tasks error:", err);
     res.status(500).json({ error: "Failed to fetch tasks" });
@@ -140,7 +159,8 @@ router.get("/", async (req, res) => {
 router.get("/reminders", async (req, res) => {
   try {
     const pool = getPool();
-    const { role, userId } = req.user;
+    const userId = req.user.userId ?? req.user.id;
+    const { role } = req.user;
     const isAdmin =
       role === "admin" || role === "super_admin" || role === "dba";
 
@@ -199,7 +219,8 @@ router.get("/reminders", async (req, res) => {
 router.get("/:id", async (req, res) => {
   try {
     const pool = getPool();
-    const { role, userId } = req.user;
+    const userId = req.user.userId ?? req.user.id;
+    const { role } = req.user;
     const isAdmin =
       role === "admin" || role === "super_admin" || role === "dba";
     const id = parseInt(req.params.id, 10);
@@ -267,7 +288,7 @@ router.post("/", adminOnly, async (req, res) => {
         .json({ error: "title, assignedTo and dueDate are required" });
     }
 
-    const createdBy = req.user.userId;
+    const createdBy = req.user.userId ?? req.user.id;
 
     const result = await pool
       .request()
@@ -300,6 +321,10 @@ router.post("/", adminOnly, async (req, res) => {
         WHERE t.Id = @id
       `);
 
+    // 🔥 CLEAR CACHE
+    await redisDel(`tasks:${req.user.userId ?? req.user.id}:true`);
+    await redisDel(`tasks:${req.user.userId ?? req.user.id}:false`);
+
     res.status(201).json(mapTask(newTask.recordset[0], []));
   } catch (err) {
     console.error("POST /api/tasks error:", err);
@@ -311,7 +336,8 @@ router.post("/", adminOnly, async (req, res) => {
 router.put("/:id", async (req, res) => {
   try {
     const pool = getPool();
-    const { role, userId } = req.user;
+    const userId = req.user.userId ?? req.user.id;
+    const { role } = req.user;
     const isAdmin =
       role === "admin" || role === "super_admin" || role === "dba";
     const id = parseInt(req.params.id, 10);
@@ -425,6 +451,10 @@ router.put("/:id", async (req, res) => {
         ORDER BY tc.CreatedAt ASC
       `);
 
+    // 🔥 CLEAR CACHE
+    await redisDel(`tasks:${req.user.userId ?? req.user.id}:true`);
+    await redisDel(`tasks:${req.user.userId ?? req.user.id}:false`);
+
     res.json(
       mapTask(updated.recordset[0], commentsResult.recordset.map(mapComment)),
     );
@@ -449,6 +479,10 @@ router.delete("/:id", adminOnly, async (req, res) => {
     if (result.rowsAffected[0] === 0) {
       return res.status(404).json({ error: "Task not found" });
     }
+    // 🔥 CLEAR CACHE
+    await redisDel(`tasks:${req.user.userId ?? req.user.id}:true`);
+    await redisDel(`tasks:${req.user.userId ?? req.user.id}:false`);
+
     res.json({ success: true });
   } catch (err) {
     console.error("DELETE /api/tasks/:id error:", err);
@@ -468,7 +502,7 @@ router.post("/:id/comments", async (req, res) => {
       return res.status(400).json({ error: "Comment text is required" });
     }
 
-    const userId = req.user.userId;
+    const userId = req.user.userId ?? req.user.id;
 
     const result = await pool
       .request()
@@ -489,6 +523,10 @@ router.post("/:id/comments", async (req, res) => {
       .query("SELECT name FROM dbo.users WHERE id = @uid");
 
     const userName = userResult.recordset[0]?.name || "";
+
+    // 🔥 CLEAR CACHE
+    await redisDel(`tasks:${req.user.userId ?? req.user.id}:true`);
+    await redisDel(`tasks:${req.user.userId ?? req.user.id}:false`);
 
     res.status(201).json(mapComment({ ...inserted, UserName: userName }));
   } catch (err) {

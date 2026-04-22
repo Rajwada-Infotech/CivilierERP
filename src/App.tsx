@@ -82,9 +82,10 @@ function PageSkeleton() {
 
 // ─── Lazy Pages ───────────────────────────────────────────────────────────────
 // Main Pages
-const Dashboard = lazy(() => import("./pages/Dashboard"));
+const FinanceDashboard = lazy(() => import("./pages/FinanceDashboard"));
 const Reports = lazy(() => import("./pages/Reports"));
 const Widgets = lazy(() => import("./pages/Widgets"));
+const CommandCenter = lazy(() => import("./pages/CommandCenter"));
 const Tasks = lazy(() => import("./pages/Tasks"));
 const Transactions = lazy(() => import("./pages/Transactions"));
 const Payment = lazy(() => import("./pages/Payment"));
@@ -134,9 +135,13 @@ const BillingTermsMaster = lazy(
   () => import("./pages/masters/BillingTermsMaster"),
 );
 const RoleMaster = lazy(() => import("./pages/masters/RoleMaster"));
+const Home = lazy(() => import("./pages/Home"));
 const TCMaster = lazy(() => import("./pages/material/T&CMaster"));
 const UnitOfMeasurementMaster = lazy(
   () => import("./pages/material/UnitOfMeasurementMaster"),
+);
+const BusinessUnitWrapper = lazy(
+  () => import("./pages/masters/BusinessUnitWrapper"),
 );
 
 // Admin Pages
@@ -149,9 +154,13 @@ const ApprovalSetup = lazy(() => import("./pages/admin/ApprovalSetup"));
 const PostApprovalRights = lazy(
   () => import("./pages/admin/PostApprovalRights"),
 );
+const ApprovalInbox = lazy(() => import("./pages/admin/ApprovalInbox"));
+
 const ApiIntegrationPage = lazy(() => import("./pages/admin/ApiIntegration"));
 const SignaturePage = lazy(() => import("./pages/admin/Signature"));
 const SuperAdminProfile = lazy(() => import("./pages/admin/SuperAdminProfile"));
+const AdminProfile = lazy(() => import("./pages/admin/AdminProfile"));
+const DBAProfile = lazy(() => import("./pages/dba/DBAProfile"));
 const MetricsDashboard = lazy(() => import("./pages/admin/MetricsDashboard"));
 const PasswordResetPage = lazy(
   () => import("./pages/admin/security/PasswordReset"),
@@ -303,10 +312,26 @@ function AppRoutes() {
 
       {/* MAIN */}
       <Route
+        path="/home"
+        element={
+          <ProtectedRoute>
+            <Home />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/"
         element={
           <ProtectedRoute>
-            <Dashboard />
+            <Home />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/finance"
+        element={
+          <ProtectedRoute>
+            <FinanceDashboard />
           </ProtectedRoute>
         }
       />
@@ -331,6 +356,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <Widgets />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/command-center"
+        element={
+          <ProtectedRoute>
+            <CommandCenter />
           </ProtectedRoute>
         }
       />
@@ -601,10 +634,18 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/masters/role-master"
+        path="/admin/masters/role-master"
+        element={
+          <AdminRoute>
+            <RoleMaster />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/masters/business-unit"
         element={
           <ProtectedRoute>
-            <RoleMaster />
+            <BusinessUnitWrapper />
           </ProtectedRoute>
         }
       />
@@ -615,7 +656,7 @@ function AppRoutes() {
             <UnitOfMeasurementMaster />
           </ProtectedRoute>
         }
-      /> 
+      />
 
       {/* USER */}
       <Route
@@ -670,7 +711,14 @@ function AppRoutes() {
       />
 
       {/* ADMIN — bare /admin redirects to home */}
-      <Route path="/admin" element={<Navigate to="/" replace />} />
+      <Route
+        path="/admin"
+        element={
+          <AdminRoute>
+            <AdminDashboard />
+          </AdminRoute>
+        }
+      />
       <Route
         path="/admin/dashboard"
         element={
@@ -719,14 +767,22 @@ function AppRoutes() {
           </AdminRoute>
         }
       />
-      <Route
-        path="/admin/approval/post-rights"
-        element={
-          <AdminRoute>
-            <PostApprovalRights />
-          </AdminRoute>
-        }
-      />
+<Route
+  path="/admin/approval/post-rights"
+  element={
+    <AdminRoute>
+      <PostApprovalRights />
+    </AdminRoute>
+  }
+/>
+  <Route
+    path="/admin/approval/inbox"
+    element={
+      <AdminRoute>
+        <ApprovalInbox />
+      </AdminRoute>
+    }
+  />
       <Route
         path="/admin/api-integration"
         element={
@@ -747,7 +803,23 @@ function AppRoutes() {
         path="/admin/profile"
         element={
           <AdminRoute>
+            <AdminProfile />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/superadmin/profile"
+        element={
+          <AdminRoute>
             <SuperAdminProfile />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/dba/profile"
+        element={
+          <AdminRoute>
+            <DBAProfile />
           </AdminRoute>
         }
       />

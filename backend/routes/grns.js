@@ -1,14 +1,66 @@
 const express = require("express");
 const { cache } = require("../middleware/cache");
-const { redisDelPattern } = require("../redis");
+const { bumpCacheVersion } = require("../redis");
+const { transition, guardEdit } = require("../services/approvalService");
 const router = express.Router();
 const { getPool, sql } = require("../db");
+
+const requireUserEmail = (req, res) => {
+  const email = req.user?.email;
+  if (!email) { res.status(401).json({ error: "User context missing" }); return null; }
+  return email;
+};
+
+function parseGRNItems(grnItems) {
+  if (Array.isArray(grnItems)) return grnItems;
+  if (typeof grnItems === "string" && grnItems.trim()) return JSON.parse(grnItems);
+  return [];
+}
+
+async function insertStockLedgerEntries(transaction, grnId, grnItems) {
+  const items = parseGRNItems(grnItems);
+
+  for (const item of items) {
+    if (item.itemId && Number(item.receivedQty) > 0) {
+      await transaction
+        .request()
+        .input("ItemID", sql.NVarChar(50), item.itemId)
+        .input("Qty", sql.Decimal(18, 2), Number(item.receivedQty))
+        .input("UOM", sql.NVarChar(20), item.uom || null)
+        .input("Type", sql.NVarChar(10), "IN")
+        .input("RefType", sql.NVarChar(20), "GRN")
+        .input("RefID", sql.Int, grnId).query(`
+          INSERT INTO StockLedger (ItemID, Qty, UOM, Type, RefType, RefID, CreatedDate)
+          VALUES (@ItemID, @Qty, @UOM, @Type, @RefType, @RefID, GETDATE())
+        `);
+    }
+  }
+}
 
 // GET all GRNs
 router.get("/", cache("grns", 300), async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query(`
+
+    // Sanitized pagination params
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const offset = (page - 1) * limit;
+
+    // Total count (matching exact JOINs)
+    const countResult = await pool.request().query(`
+      SELECT COUNT(*) AS total
+      FROM GoodsReceiptNotes grn
+      LEFT JOIN dbo.AccountHeadMaster s ON grn.SupplierID = s.LHeadId
+      LEFT JOIN PurchaseOrders p ON grn.POID = p.PurchaseOrderID
+    `);
+    const total = parseInt(countResult.recordset[0].total);
+
+    // Paginated data
+    const result = await pool.request()
+      .input('offset', sql.Int, offset)
+      .input('limit', sql.Int, limit)
+      .query(`
       SELECT
         grn.GRNID,
         grn.GRNNo,
@@ -25,9 +77,16 @@ router.get("/", cache("grns", 300), async (req, res) => {
       LEFT JOIN dbo.AccountHeadMaster s ON grn.SupplierID = s.LHeadId
       LEFT JOIN PurchaseOrders p ON grn.POID = p.PurchaseOrderID
       ORDER BY grn.GRNID DESC
+      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
     `);
 
-    res.json(result.recordset);
+    res.json({
+      data: result.recordset,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit)
+    });
   } catch (err) {
     console.error("GET GRN ERROR:", err);
     res.status(500).json({
@@ -74,32 +133,11 @@ router.post("/", async (req, res) => {
 
     const grnId = grnResult.recordset[0].GRNID;
 
-    // Parse items JSON for StockLedger entries
-    const items = Array.isArray(grnItems)
-      ? grnItems
-      : typeof grnItems === "string"
-        ? JSON.parse(grnItems)
-        : [];
-
-    // Insert Stock Ledger Entries - supports UUID itemId and uom
-    for (const item of items) {
-      if (item.itemId && item.receivedQty > 0) {
-        await transaction
-          .request()
-          .input("ItemID", sql.NVarChar(50), item.itemId)
-          .input("Qty", sql.Decimal(18, 2), item.receivedQty)
-          .input("UOM", sql.NVarChar(20), item.uom || null)
-          .input("Type", sql.NVarChar(10), "IN")
-          .input("RefType", sql.NVarChar(20), "GRN")
-          .input("RefID", sql.Int, grnId).query(`
-            INSERT INTO StockLedger (ItemID, Qty, UOM, Type, RefType, RefID, CreatedDate)
-            VALUES (@ItemID, @Qty, @UOM, @Type, @RefType, @RefID, GETDATE())
-          `);
-      }
-    }
+    await insertStockLedgerEntries(transaction, grnId, grnItems);
 
     await transaction.commit();
-    await redisDelPattern("cache:grns:*");
+    await bumpCacheVersion("grns");
+    await bumpCacheVersion("stock-ledger");
 
     res.status(201).json({
       message: "GRN created successfully",
@@ -119,14 +157,18 @@ router.post("/", async (req, res) => {
 // PUT - Update GRN
 router.put("/:id", async (req, res) => {
   const { grnNo, grnDate, supplierId, poId, grnItems, status, remarks } =
+  await guardEdit("goods-receipt", req.params.id);
     req.body;
+  const grnId = parseInt(req.params.id, 10);
 
+  const pool = getPool();
+  const transaction = pool.transaction();
   try {
-    const pool = await getPool();
+    await transaction.begin();
 
-    await pool
+    const result = await transaction
       .request()
-      .input("GRNID", sql.Int, req.params.id)
+      .input("GRNID", sql.Int, grnId)
       .input("GRNNo", sql.NVarChar(50), grnNo)
       .input("GRNDate", sql.Date, grnDate)
       .input("SupplierID", sql.Int, supplierId)
@@ -146,9 +188,24 @@ router.put("/:id", async (req, res) => {
         WHERE GRNID = @GRNID
       `);
 
-    await redisDelPattern("cache:grns:*");
+    if (result.rowsAffected[0] === 0) {
+      await transaction.rollback();
+      return res.status(404).json({ error: "GRN not found" });
+    }
+
+    await transaction
+      .request()
+      .input("RefID", sql.Int, grnId)
+      .query("DELETE FROM StockLedger WHERE RefType = 'GRN' AND RefID = @RefID");
+
+    await insertStockLedgerEntries(transaction, grnId, grnItems);
+    await transaction.commit();
+
+    await bumpCacheVersion("grns");
+    await bumpCacheVersion("stock-ledger");
     res.json({ message: "GRN updated successfully" });
   } catch (err) {
+    await transaction.rollback().catch(() => {});
     console.error("UPDATE GRN ERROR:", err);
     res.status(500).json({
       error: "Failed to update GRN",
@@ -159,22 +216,91 @@ router.put("/:id", async (req, res) => {
 
 // DELETE
 router.delete("/:id", async (req, res) => {
-  try {
-    const pool = await getPool();
+  const grnId = parseInt(req.params.id, 10);
+  const pool = getPool();
+  const transaction = pool.transaction();
 
-    await pool
+  try {
+    await transaction.begin();
+
+    await transaction
       .request()
-      .input("GRNID", sql.Int, req.params.id)
+      .input("RefID", sql.Int, grnId)
+      .query("DELETE FROM StockLedger WHERE RefType = 'GRN' AND RefID = @RefID");
+
+    const result = await transaction
+      .request()
+      .input("GRNID", sql.Int, grnId)
       .query("DELETE FROM GoodsReceiptNotes WHERE GRNID = @GRNID");
 
-    await redisDelPattern("cache:grns:*");
+    if (result.rowsAffected[0] === 0) {
+      await transaction.rollback();
+      return res.status(404).json({ error: "GRN not found" });
+    }
+
+    await transaction.commit();
+
+    await bumpCacheVersion("grns");
+    await bumpCacheVersion("stock-ledger");
     res.json({ message: "GRN deleted successfully" });
   } catch (err) {
+    await transaction.rollback().catch(() => {});
     console.error("DELETE GRN ERROR:", err);
     res.status(500).json({
       error: "Failed to delete GRN",
       message: err.message,
     });
+  }
+});
+
+// ── PUT /:id/submit — Partially Received → Pending ────────────────────────────
+router.put("/:id/submit", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+
+    const result = await transition("goods-receipt", id, "Pending", userEmail, req.user?.role);
+    await bumpCacheVersion("goods-receipt");
+    res.json({ message: "GRN submitted for approval", ...result });
+  } catch (err) {
+    console.error("GRN submit error:", err.message);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/approve — Pending → Approved ─────────────────────────────────────
+router.put("/:id/approve", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+
+    const result = await transition("goods-receipt", id, "Approved", userEmail, req.user?.role);
+    await bumpCacheVersion("goods-receipt");
+    res.json({ message: "GRN approved", ...result });
+  } catch (err) {
+    console.error("GRN approve error:", err.message);
+    const status = err.message.includes("not authorized") ? 403 : 400;
+    res.status(status).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/reject — Pending → Rejected ──────────────────────────────────────
+router.put("/:id/reject", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { note } = req.body;
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+
+    const result = await transition("goods-receipt", id, "Rejected", userEmail, req.user?.role, note || null);
+    await bumpCacheVersion("goods-receipt");
+    res.json({ message: "GRN rejected", ...result });
+  } catch (err) {
+    console.error("GRN reject error:", err.message);
+    const status = err.message.includes("not authorized") ? 403 : 400;
+    res.status(status).json({ error: err.message });
   }
 });
 

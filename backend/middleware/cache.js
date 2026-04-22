@@ -1,4 +1,15 @@
-const { redisGet, redisSet, compress, decompress, redisLock, getCacheVersion, getSystemMetrics, incrGlobalCacheHit, incrGlobalCacheMiss, setStaleCache, getPredictedRPM } = require("../redis");
+const {
+  redisGet,
+  redisSet,
+  compress,
+  decompress,
+  redisLock,
+  getCacheVersion,
+  getSystemMetrics,
+  incrGlobalCacheHit,
+  incrGlobalCacheMiss,
+  getPredictedRPM,
+} = require("../redis");
 
 /**
  * Cache middleware for GET routes.
@@ -6,92 +17,147 @@ const { redisGet, redisSet, compress, decompress, redisLock, getCacheVersion, ge
  * Usage:
  *   router.get("/", cache("grns", 300), async (req, res) => { ... })
  *
- * @param {string} namespace   - Cache key prefix (e.g. "grns", "purchase-orders")
- * @param {number} ttl         - TTL in seconds (default 300 = 5 minutes)
+ * @param {string} namespace
+ * @param {number} ttl (optional, fallback TTL)
  */
-function cache(namespace, opts = {}) {
+function cache(namespace, ttl = 300) {
   return async (req, res, next) => {
-  const queryStr = JSON.stringify(req.query);
-  const userId = req.user?.userId || "anon";
-  const baseKey = `cache:${namespace}:${userId}:${queryStr}`;
-  const version = await getCacheVersion(namespace);
-  const key = `cache:${namespace}:v${version}:${userId}:${queryStr}`;
-  const lockKey = `cachelock:${key}`;
-  const staleKey = `cache:stale:${baseKey}`;
-
-    // Check cache
-    let cached = await redisGet(key);
-    if (cached) {
-      const originalSize = Buffer.byteLength(cached, 'utf8');
-      cached = decompress(cached) || JSON.parse(cached);
-      const decompressedSize = Buffer.byteLength(JSON.stringify(cached), 'utf8');
-      res.setHeader("X-Cache", "HIT");
-      res.setHeader("X-Cache-Size", `${originalSize} -> ${decompressedSize}`);
-      await incrGlobalCacheHit();
-      return res.json(cached);
-    }
-
-    // Stampede protection with stale fallback
-    const lockAcquired = await redisLock(lockKey, 30);
-    if (!lockAcquired) {
-      let staleCached = await redisGet(staleKey);
-      if (staleCached) {
-        const originalSize = Buffer.byteLength(staleCached, 'utf8');
-        staleCached = decompress(staleCached) || JSON.parse(staleCached);
-        const decompressedSize = Buffer.byteLength(JSON.stringify(staleCached), 'utf8');
-        res.setHeader("X-Cache", "STALE");
-        res.setHeader("X-Cache-Size", `${originalSize} -> ${decompressedSize}`);
-        await incrGlobalCacheHit(); // count stale as hit
-        return res.json(staleCached);
-      }
-      res.setHeader("Retry-After", "5");
-      return res.status(503).json({ error: "Cache stampede protection. Retry in 5s." });
-    }
-
     try {
-      // Continue to handler/DB
+      const routeScope = JSON.stringify({
+        path: `${req.baseUrl || ""}${req.path || ""}`,
+        params: req.params || {},
+        query: req.query || {},
+      });
+      const userId = req.user?.userId || "anon";
+
+      const version = await getCacheVersion(namespace);
+
+      const key = `cache:${namespace}:v${version}:${userId}:${routeScope}`;
+      const baseKey = `cache:${namespace}:${userId}:${routeScope}`;
+      const staleKey = `cache:stale:${baseKey}`;
+      const lockKey = `cachelock:${key}`;
+
+      // ===================== CACHE HIT =====================
+      let cached = await redisGet(key);
+
+      if (cached) {
+        const originalSize = Buffer.byteLength(cached, "utf8");
+
+        let data;
+        try {
+          data = decompress(cached) || JSON.parse(cached);
+        } catch {
+          data = JSON.parse(cached);
+        }
+
+        const decompressedSize = Buffer.byteLength(
+          JSON.stringify(data),
+          "utf8"
+        );
+
+        res.setHeader("X-Cache", "HIT");
+        res.setHeader(
+          "X-Cache-Size",
+          `${originalSize} -> ${decompressedSize}`
+        );
+
+        await incrGlobalCacheHit();
+        return res.json(data);
+      }
+
+      // ===================== STAMPEDE PROTECTION =====================
+      const lockAcquired = await redisLock(lockKey, 30);
+
+      if (!lockAcquired) {
+        let staleCached = await redisGet(staleKey);
+
+        if (staleCached) {
+          const originalSize = Buffer.byteLength(staleCached, "utf8");
+
+          let data;
+          try {
+            data = decompress(staleCached) || JSON.parse(staleCached);
+          } catch {
+            data = JSON.parse(staleCached);
+          }
+
+          const decompressedSize = Buffer.byteLength(
+            JSON.stringify(data),
+            "utf8"
+          );
+
+          res.setHeader("X-Cache", "STALE");
+          res.setHeader(
+            "X-Cache-Size",
+            `${originalSize} -> ${decompressedSize}`
+          );
+
+          await incrGlobalCacheHit();
+          return res.json(data);
+        }
+
+        res.setHeader("Retry-After", "5");
+        return res.status(503).json({
+          error: "Cache busy, retry in 5 seconds",
+        });
+      }
+
+      // ===================== CACHE MISS =====================
       const originalJson = res.json.bind(res);
-        res.json = async (data) => {
+
+      res.json = async (data) => {
+        try {
           const jsonStr = JSON.stringify(data);
-          const ttl = (res.statusCode >= 500 ? 30 : await getDynamicTtl());
+
+          const dynamicTtl =
+            res.statusCode >= 500 ? 30 : await getDynamicTtl();
+          const finalTtl = dynamicTtl || ttl;
+
           await incrGlobalCacheMiss();
-          
-          // Cache all responses, short TTL for errors
+
+          let valueToStore = jsonStr;
+
+          // Compress if large
           if (jsonStr.length > 1024) {
             const compressed = compress(data);
-            if (compressed) {
-              await redisSet(key, compressed, ttl);
-              await redisSet(staleKey, compressed, ttl * 2);
-              res.setHeader("X-Cache-Size", `${Buffer.byteLength(compressed, 'utf8')} -> ${jsonStr.length}`);
-            } else {
-              await redisSet(key, jsonStr, ttl);
-              await redisSet(staleKey, jsonStr, ttl * 2);
-            }
-          } else {
-            await redisSet(key, jsonStr, ttl);
-            await redisSet(staleKey, jsonStr, ttl * 2);
+            if (compressed) valueToStore = compressed;
           }
-          
-          res.setHeader("X-Cache", "MISS");
-          res.setHeader("X-Cache-TTL", `${ttl}s`);
-          return originalJson(data);
-        };
-        next();
 
-    } catch {
+          await redisSet(key, valueToStore, finalTtl);
+          await redisSet(staleKey, valueToStore, finalTtl * 2);
+
+          res.setHeader("X-Cache", "MISS");
+          res.setHeader("X-Cache-TTL", `${finalTtl}s`);
+
+        } catch (err) {
+          console.error("Cache write error:", err.message);
+        }
+
+        return originalJson(data);
+      };
+
+      next();
+    } catch (err) {
+      console.error("Cache middleware error:", err.message);
       next();
     }
   };
 }
 
+// ===================== DYNAMIC TTL =====================
 async function getDynamicTtl() {
   const metrics = await getSystemMetrics();
   const predictedRPM = await getPredictedRPM();
-  let ttl = (predictedRPM || metrics.rpm) > 10000 ? 120 : (predictedRPM || metrics.rpm) > 5000 ? 180 : 300;
-  if (metrics.memoryUsage > 0.8) ttl *= 0.5;
+
+  const rpm = predictedRPM || metrics.rpm;
+
+  let ttl = rpm > 10000 ? 120 : rpm > 5000 ? 180 : 300;
+
+  if (metrics.memoryUsage > 0.8) {
+    ttl = ttl * 0.5;
+  }
+
   return Math.max(ttl, 60);
 }
-
-module.exports = { cache };
 
 module.exports = { cache };

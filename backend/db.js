@@ -1,3 +1,4 @@
+const logger = require("./logger");
 require("dotenv").config();
 const sql = require("mssql");
 
@@ -24,12 +25,12 @@ let pool = null;
 
 async function connectDB() {
   try {
-    pool = await sql.connect(config);
-    console.log("Connected to SQL Server");
-    return pool;
+  pool = await sql.connect(config);
+  logger.info("Connected to SQL Server");
+  return pool;
   } catch (err) {
-    console.error("DB Connection Failed:", err.message);
-    throw err;
+  logger.error({ err: err.message }, "DB Connection Failed");
+  throw err;
   }
 }
 

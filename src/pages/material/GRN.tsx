@@ -15,6 +15,8 @@ import {
   FileText,
 } from "lucide-react";
 import * as grnApi from "@/api/grnApi";
+import { StatusBadge } from "@/components/StatusBadge";
+import { ApprovalActions } from "@/components/ApprovalActions";
 import type {
   GRNFormDataPayload,
   GRNItemLine,
@@ -58,6 +60,8 @@ export default function GRN() {
   const queryClient = useQueryClient();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const limit = 10;
 
   const [formData, setFormData] = useState({
     grnNo: generateGrnNo(),
@@ -74,10 +78,13 @@ export default function GRN() {
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   // ── Queries ──────────────────────────────────────────────────────────────────
-  const { data: grns = [], isLoading: loadingGrns } = useQuery({
-    queryKey: ["grns"],
-    queryFn: grnApi.getGRNs,
+  const { data: grnsPage, isLoading: loadingGrns } = useQuery({
+    queryKey: ["grns", page, limit],
+    queryFn: () => grnApi.getGRNs({ page, limit }),
   });
+  const grns = grnsPage?.data ?? [];
+  const totalPages = Math.max(grnsPage?.totalPages ?? 1, 1);
+  const totalRecords = grnsPage?.total ?? grns.length;
 
   const { data: suppliersData = [] } = useQuery({
     queryKey: ["suppliers"],
@@ -138,6 +145,7 @@ export default function GRN() {
     mutationFn: grnApi.addGRN,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["grns"] });
+      setPage(1);
       resetForm();
       toast.success("GRN created successfully");
     },
@@ -148,6 +156,7 @@ export default function GRN() {
     mutationFn: (payload: GRNFormDataPayload) => grnApi.updateGRN(editingId!, payload),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["grns"] });
+      setPage(1);
       resetForm();
       toast.success("GRN updated successfully");
     },
@@ -158,6 +167,7 @@ export default function GRN() {
     mutationFn: grnApi.deleteGRN,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["grns"] });
+      setPage(1);
       toast.success("GRN deleted successfully");
     },
     onError: (err: any) => toast.error(err.message || "Failed to delete GRN"),
@@ -624,29 +634,29 @@ export default function GRN() {
                         {grn.GRNDate ? new Date(grn.GRNDate).toLocaleDateString("en-IN") : "—"}
                       </td>
                       <td className="px-6 py-4">
-                        <span
-                          className={`inline-block px-3 py-1 rounded-full text-xs font-medium ${
-                            grn.Status === "Fully Received"
-                              ? "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-400"
-                              : "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-400"
-                          }`}
-                        >
-                          {grn.Status || "Draft"}
-                        </span>
+                        <StatusBadge status={grn.Status || "Draft"} />
                       </td>
-                      <td className="px-6 py-4 text-right space-x-2">
-                        <button
-                          onClick={() => onEdit(grn)}
-                          className="text-primary hover:bg-primary/10 p-2 rounded transition-colors"
-                        >
-                          <Edit3 size={18} />
-                        </button>
-                        <button
-                          onClick={() => deleteMutation.mutate(String(grn.GRNID))}
-                          className="text-destructive hover:bg-destructive/10 p-2 rounded transition-colors"
-                        >
-                          <Trash2 size={18} />
-                        </button>
+                      <td className="px-6 py-4 text-right">
+                        <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                          <ApprovalActions
+                            status={grn.Status || "Draft"}
+                            recordId={Number(grn.GRNID)}
+                            endpoint="/api/grns"
+                            onSuccess={() => queryClient.invalidateQueries({ queryKey: ["grns"] })}
+                          />
+                          <button
+                            onClick={() => onEdit(grn)}
+                            className="text-primary hover:bg-primary/10 p-2 rounded transition-colors"
+                          >
+                            <Edit3 size={18} />
+                          </button>
+                          <button
+                            onClick={() => deleteMutation.mutate(String(grn.GRNID))}
+                            className="text-destructive hover:bg-destructive/10 p-2 rounded transition-colors"
+                          >
+                            <Trash2 size={18} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))
@@ -654,8 +664,30 @@ export default function GRN() {
               </tbody>
             </table>
           </div>
+          <div className="flex items-center justify-between border-t border-border px-6 py-3 text-sm">
+            <span className="text-muted-foreground">
+              Page {page} of {totalPages} ({totalRecords} records)
+            </span>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setPage((p) => Math.max(p - 1, 1))}
+                disabled={page <= 1}
+                className="rounded-lg border border-border px-3 py-1.5 disabled:opacity-50"
+              >
+                Previous
+              </button>
+              <button
+                onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
+                disabled={page >= totalPages}
+                className="rounded-lg border border-border px-3 py-1.5 disabled:opacity-50"
+              >
+                Next
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     </>
   );
 }
+

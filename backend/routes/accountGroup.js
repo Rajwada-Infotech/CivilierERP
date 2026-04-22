@@ -1,6 +1,6 @@
 const express = require("express");
 const { cache } = require("../middleware/cache");
-const { redisDelPattern } = require("../redis");
+const { bumpCacheVersion } = require("../redis");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 
@@ -26,6 +26,11 @@ router.get("/", cache("account-group", 300), async (req, res) => {
 router.post("/", async (req, res) => {
   const { Name, Code, ParentGroupId, Status } = req.body;
   try {
+    const userEmail = req.user?.email;
+    if (!userEmail) {
+      return res.status(401).json({ error: "User context missing" });
+    }
+
     const pool = getPool();
     await pool
       .request()
@@ -33,12 +38,12 @@ router.post("/", async (req, res) => {
       .input("Code", sql.NVarChar, Code || null)
       .input("ParentGroupId", sql.Int, ParentGroupId || null)
       .input("Status", sql.Bit, Status ? 1 : 0)
-      .input("CreatedBy", sql.Int, 1)
+      .input("CreatedBy", sql.NVarChar(100), userEmail)
       .input("CreatedAt", sql.DateTime2, new Date()).query(`
         INSERT INTO dbo.AccountGroup (Name, Code, ParentGroupId, Status, CreatedBy, CreatedAt)
         VALUES (@Name, @Code, @ParentGroupId, @Status, @CreatedBy, @CreatedAt)
       `);
-    await redisDelPattern("cache:account-group:*");
+    await bumpCacheVersion("account-group");
 
     res.json({ message: "Account group added" });
   } catch (err) {
@@ -49,6 +54,11 @@ router.post("/", async (req, res) => {
 router.put("/:id", async (req, res) => {
   const { Name, Code, ParentGroupId, Status } = req.body;
   try {
+    const userEmail = req.user?.email;
+    if (!userEmail) {
+      return res.status(401).json({ error: "User context missing" });
+    }
+
     const pool = getPool();
     await pool
       .request()
@@ -57,14 +67,14 @@ router.put("/:id", async (req, res) => {
       .input("Code", sql.NVarChar, Code || null)
       .input("ParentGroupId", sql.Int, ParentGroupId || null)
       .input("Status", sql.Bit, Status ? 1 : 0)
-      .input("UpdatedBy", sql.Int, 1)
+      .input("UpdatedBy", sql.NVarChar(100), userEmail)
       .input("UpdatedAt", sql.DateTime2, new Date()).query(`
         UPDATE dbo.AccountGroup SET
           Name=@Name, Code=@Code, ParentGroupId=@ParentGroupId,
           Status=@Status, UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt
         WHERE AGId=@AGId
       `);
-    await redisDelPattern("cache:account-group:*");
+    await bumpCacheVersion("account-group");
 
     res.json({ message: "Account group updated" });
   } catch (err) {
@@ -79,7 +89,7 @@ router.delete("/:id", async (req, res) => {
       .request()
       .input("AGId", sql.Int, req.params.id)
       .query("DELETE FROM dbo.AccountGroup WHERE AGId=@AGId");
-    await redisDelPattern("cache:account-group:*");
+    await bumpCacheVersion("account-group");
 
     res.json({ message: "Account group deleted" });
   } catch (err) {

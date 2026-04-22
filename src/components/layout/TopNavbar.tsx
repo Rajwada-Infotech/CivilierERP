@@ -51,6 +51,7 @@ import {
   CheckSquare,
 } from "lucide-react";
 import { BillingIcon } from "@/components/icons/BillingIcon";
+import { ADMIN_PATHS } from "@/constants/pageDefinitions";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 // ReminderItem is imported from @/hooks/useReminders
@@ -126,7 +127,7 @@ const RemindersDropdown: React.FC<{
       ref={ref}
       className={`absolute top-full mt-2 z-50 rounded-xl border border-border bg-card shadow-2xl transition-all duration-200 origin-top-right right-0
         ${open ? "opacity-100 scale-100 pointer-events-auto" : "opacity-0 scale-95 pointer-events-none"}`}
-      style={{ width: "22rem" }}
+      style={{ width: "min(22rem, calc(100vw - 1rem))" }}
     >
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
@@ -434,7 +435,7 @@ const adminSetupItems = [
   {
     icon: Users,
     label: "Role Master",
-    path: "/masters/role-master",
+    path: "/admin/masters/role-master",
     color: "text-blue-400",
   },
 ];
@@ -537,7 +538,6 @@ export const TopNavbar = () => {
   const [themeOpen, setThemeOpen] = useState(false);
   const [bellOpen, setBellOpen] = useState(false);
 
-  // Single useReminders instance — shared between badge, dropdown, and refresh button
   const {
     reminders,
     loading: remLoading,
@@ -546,13 +546,10 @@ export const TopNavbar = () => {
     fetched: remFetched,
   } = useReminders();
 
-  // Fetch once when bell is first opened (already fetching on mount via polling, but
-  // if the user opens before the first poll completes we trigger it explicitly)
   useEffect(() => {
     if (bellOpen && !remFetched) refreshReminders();
   }, [bellOpen, remFetched, refreshReminders]);
 
-  const ADMIN_PATHS = ["/masters/named-entry-type", "/masters/type-of-doc"];
   const isSuperAdmin = currentUser?.role === "super_admin";
   const isDba = currentUser?.role === "dba";
   const isAdmin = currentUser?.role === "admin" || isSuperAdmin || isDba;
@@ -658,21 +655,21 @@ export const TopNavbar = () => {
   return (
     <>
       {logoutOverlay}
-      <header className="fixed top-0 left-0 right-0 h-14 z-50 flex items-center justify-between px-4 border-b border-border bg-card/80 backdrop-blur-lg">
+      <header className="fixed top-0 left-0 right-0 h-14 z-50 grid grid-cols-[auto_1fr_auto] items-center gap-2 px-3 sm:px-4 border-b border-border bg-card/80 backdrop-blur-lg">
         {/* Logo */}
         <button
           type="button"
-          onClick={() => navigate("/")}
+          onClick={() => navigate("/home")}
           title="Go to dashboard"
           aria-label="Go to dashboard"
-          className="flex items-center gap-2 hover:opacity-80 transition-opacity shrink-0"
+          className="flex items-center hover:opacity-80 transition-opacity shrink-0 min-w-0"
         >
           <span className="sr-only">Go to dashboard</span>
           <LogoFull />
         </button>
 
         {/* ── DESKTOP NAV ────────────────────────────────────────────────── */}
-        <div className="hidden md:flex items-center gap-1">
+        <div className="hidden md:flex items-center justify-end gap-1 min-w-0">
           {/* Collapse toggle */}
           <button
             onClick={() => setNavCollapsed(!navCollapsed)}
@@ -692,8 +689,8 @@ export const TopNavbar = () => {
 
           {/* Collapsible items */}
           <div
-            className={`flex items-center gap-1 transition-all duration-300 ease-in-out max-w-[700px]
-            ${navCollapsed ? "w-0 opacity-0 invisible pointer-events-none" : "w-auto opacity-100 visible pointer-events-auto"}`}
+            className={`flex items-center gap-1 transition-all duration-300 ease-in-out
+            ${navCollapsed ? "w-0 opacity-0 invisible pointer-events-none overflow-hidden" : "w-auto opacity-100 visible pointer-events-auto"}`}
           >
             {/* Setup */}
             <div className="relative shrink-0">
@@ -926,7 +923,7 @@ export const TopNavbar = () => {
                   )}
                 </button>
 
-                {/* Admin */}
+                {/* Admin module — only for admin/super_admin/dba roles */}
                 {isAdmin && (
                   <>
                     <div className="mx-3 my-1.5 border-t border-border" />
@@ -936,7 +933,8 @@ export const TopNavbar = () => {
                         setSwitchingTo("Admin");
                         setModuleSwitching(true);
                         await new Promise((r) => setTimeout(r, 350));
-                        navigate("/admin/dashboard");
+                        setActiveModule("admin");
+                        navigate(MODULE_DASHBOARD_ROUTES.admin);
                         setModuleSwitching(false);
                         setSwitchingTo(null);
                       }}
@@ -1117,9 +1115,9 @@ export const TopNavbar = () => {
                 onMouseDown={() => {
                   setUserOpen(false);
                   isSuperAdmin
-                    ? navigate("/superadmin")
+                    ? navigate("/superadmin/profile")
                     : isDba
-                      ? navigate("/dba")
+                      ? navigate("/dba/profile")
                       : currentUser?.role === "admin"
                         ? navigate("/admin/profile")
                         : navigate("/user/profile");
@@ -1139,7 +1137,7 @@ export const TopNavbar = () => {
         </div>
 
         {/* ── MOBILE RIGHT ───────────────────────────────────────────────── */}
-        <div className="flex md:hidden items-center gap-1.5">
+        <div className="flex md:hidden items-center gap-1 justify-end">
           {/* Bell mobile */}
           <div className="relative">
             <button
@@ -1160,6 +1158,49 @@ export const TopNavbar = () => {
               loading={remLoading}
               refresh={refreshReminders}
             />
+          </div>
+
+          {/* Theme mobile */}
+          <div className="relative">
+            <button
+              onClick={toggleTheme}
+              className="p-2 rounded-md hover:bg-muted transition-all text-foreground"
+              title="Change theme"
+            >
+              <Palette size={17} />
+            </button>
+            <Dropdown
+              open={themeOpen}
+              onClose={() => setThemeOpen(false)}
+              className="right-0 w-44 p-1.5"
+            >
+              <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading px-2 py-1.5 mb-0.5">
+                Appearance
+              </p>
+              {(
+                Object.entries(THEME_DOTS) as [
+                  Theme,
+                  { bg: string; label: string },
+                ][]
+              ).map(([t, { bg, label }]) => (
+                <button
+                  key={t}
+                  onClick={() => {
+                    setTheme(t);
+                    setThemeOpen(false);
+                  }}
+                  className={`w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm font-heading transition-all ${theme === t ? "bg-primary/10 text-primary" : "text-foreground hover:bg-muted"}`}
+                >
+                  <span
+                    className={`w-3.5 h-3.5 rounded-full shrink-0 border border-border/50 bg-[${bg}]`}
+                  />
+                  {label}
+                  {theme === t && (
+                    <span className="ml-auto text-primary text-xs">✓</span>
+                  )}
+                </button>
+              ))}
+            </Dropdown>
           </div>
 
           {/* User mobile */}
@@ -1189,25 +1230,47 @@ export const TopNavbar = () => {
                 <p className="text-xs text-muted-foreground truncate">
                   {currentUser?.email}
                 </p>
+                <div className="mt-1.5">
+                  {isSuperAdmin && (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-violet-500/10 text-violet-600">
+                      Super Admin
+                    </span>
+                  )}
+                  {currentUser?.role === "admin" && (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-blue-500/10 text-blue-600">
+                      Admin
+                    </span>
+                  )}
+                  {currentUser?.role === "dba" && (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-emerald-500/10 text-emerald-600">
+                      DBA
+                    </span>
+                  )}
+                  {currentUser?.role === "user" && (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full font-heading bg-muted text-muted-foreground">
+                      User · {currentUser.pagePermissions?.length || 0} pages
+                    </span>
+                  )}
+                </div>
               </div>
               <button
                 onMouseDown={() => {
                   setUserOpen(false);
                   isSuperAdmin
-                    ? navigate("/superadmin")
+                    ? navigate("/superadmin/profile")
                     : isDba
-                      ? navigate("/dba")
+                      ? navigate("/dba/profile")
                       : currentUser?.role === "admin"
                         ? navigate("/admin/profile")
                         : navigate("/user/profile");
                 }}
-                className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted text-foreground"
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted transition-colors text-foreground"
               >
                 <User size={14} /> Profile
               </button>
               <button
                 onMouseDown={handleLogout}
-                className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted text-destructive"
+                className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted transition-colors text-destructive"
               >
                 <LogOut size={14} /> Sign Out
               </button>

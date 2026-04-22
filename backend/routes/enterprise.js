@@ -1,6 +1,6 @@
 const express = require("express");
 const { cache } = require("../middleware/cache");
-const { redisDelPattern } = require("../redis");
+const { bumpCacheVersion } = require("../redis");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 
@@ -75,7 +75,7 @@ router.post("/", async (req, res) => {
           @tds_limit, @description, @gst_type, @status, @cr_code, @discontinue
         )
       `);
-    await redisDelPattern("cache:enterprises:*");
+    await bumpCacheVersion("enterprises");
 
     res.json({ message: "Enterprise added successfully" });
   } catch (err) {
@@ -144,7 +144,7 @@ router.put("/:id", async (req, res) => {
           cr_code=@cr_code, discontinue=@discontinue
         WHERE id=@id
       `);
-    await redisDelPattern("cache:enterprises:*");
+    await bumpCacheVersion("enterprises");
 
     res.json({ message: "Enterprise updated successfully" });
   } catch (err) {
@@ -161,7 +161,7 @@ router.delete("/:id", async (req, res) => {
       .request()
       .input("id", sql.Int, id)
       .query("DELETE FROM dbo.enterprise WHERE id=@id");
-    await redisDelPattern("cache:enterprises:*");
+    await bumpCacheVersion("enterprises");
 
     res.json({ message: "Enterprise deleted successfully" });
   } catch (err) {
@@ -226,12 +226,22 @@ router.post("/seed", async (req, res) => {
 router.get("/options", async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool
-      .request()
-      .query("SELECT id, name AS label FROM dbo.enterprise ORDER BY id");
+    const request = pool.request();
+
+    let query = "SELECT id, name AS label FROM dbo.enterprise";
+
+    if (req.query.type) {
+      query += " WHERE business_type = @type";
+      request.input("type", sql.NVarChar(50), req.query.type);
+    }
+
+    query += " ORDER BY name";
+
+    const result = await request.query(query);
     res.json(result.recordset);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("Enterprise options error:", err);
+    res.status(500).json({ error: "Failed to fetch enterprise options" });
   }
 });
 

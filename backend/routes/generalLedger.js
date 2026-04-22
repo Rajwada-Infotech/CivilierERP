@@ -1,6 +1,49 @@
 const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
+const { cache } = require("../middleware/cache");
+const { bumpCacheVersion } = require("../redis");
+
+let accountHeadColumnMetaPromise = null;
+
+async function getAccountHeadColumnMeta() {
+  if (!accountHeadColumnMetaPromise) {
+    accountHeadColumnMetaPromise = getPool()
+      .request()
+      .query(`
+        SELECT COLUMN_NAME, IS_NULLABLE
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = 'dbo'
+          AND TABLE_NAME = 'AccountHeadMaster'
+      `)
+      .then((result) => {
+        const meta = new Map();
+        result.recordset.forEach((row) => {
+          meta.set(row.COLUMN_NAME.toLowerCase(), {
+            name: row.COLUMN_NAME,
+            isNullable: row.IS_NULLABLE === "YES",
+          });
+        });
+        return meta;
+      })
+      .catch(() => new Map());
+  }
+
+  return accountHeadColumnMetaPromise;
+}
+
+const hasColumn = (meta, columnName) => meta.has(columnName.toLowerCase());
+
+const getColumnMeta = (meta, columnName) => meta.get(columnName.toLowerCase()) || null;
+
+const requireUserEmail = (req, res) => {
+  const email = req.user?.email;
+  if (!email) {
+    res.status(401).json({ error: "User context missing" });
+    return null;
+  }
+  return email;
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // General Ledger Routes
@@ -21,7 +64,7 @@ router.get("/options", async (req, res) => {
     const result = await pool.request().query(`
       SELECT
         LHeadId   AS id,
-        LHeadName AS label,
+        ISNULL(DisplayName, LHeadName) AS label,
         LHeadCode AS code
       FROM dbo.AccountHeadMaster
       WHERE LHeadType = 'GL'
@@ -38,12 +81,18 @@ router.get("/options", async (req, res) => {
 // ── GET / ─────────────────────────────────────────────────────────────────────
 // Returns all GL ledger heads joined with their account group names.
 // Supports optional ?search= and ?groupId= query filters.
-router.get("/", async (req, res) => {
+router.get("/", cache("general-ledger", 300), async (req, res) => {
   try {
     const pool = getPool();
+
+    // Sanitized pagination params
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const offset = (page - 1) * limit;
+
     const request = pool.request();
 
-    let query = `
+    let baseQuery = `
       SELECT
         lh.LHeadId,
         lh.LHeadName,
@@ -63,20 +112,37 @@ router.get("/", async (req, res) => {
       WHERE lh.LHeadType = 'GL'
     `;
 
+    let countQuery = "SELECT COUNT(*) AS total FROM dbo.AccountHeadMaster lh WHERE lh.LHeadType = 'GL'";
+
+    let whereClause = "";
+
     if (req.query.search) {
-      query += ` AND (lh.LHeadName LIKE @search OR lh.LHeadCode LIKE @search)`;
+      whereClause += " AND (lh.LHeadName LIKE @search OR lh.LHeadCode LIKE @search)";
       request.input("search", sql.NVarChar(200), `%${req.query.search}%`);
     }
 
     if (req.query.groupId) {
-      query += ` AND lh.LBelongsTo = @groupId`;
+      whereClause += " AND lh.LBelongsTo = @groupId";
       request.input("groupId", sql.Int, parseInt(req.query.groupId, 10));
     }
 
-    query += ` ORDER BY lh.LHeadName`;
+    const fullCountQuery = countQuery + whereClause;
+    const countResult = await request.query(fullCountQuery);
+    const total = parseInt(countResult.recordset[0].total);
 
-    const result = await request.query(query);
-    res.json(result.recordset);
+    const paginatedQuery = baseQuery + whereClause + ` ORDER BY lh.LHeadName OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY`;
+    request.input('offset', sql.Int, offset);
+    request.input('limit', sql.Int, limit);
+
+    const result = await request.query(paginatedQuery);
+
+    res.json({
+      data: result.recordset,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit)
+    });
   } catch (err) {
     console.error("GL GET ALL ERROR:", err.message);
     res.status(500).json({ error: err.message });
@@ -85,7 +151,7 @@ router.get("/", async (req, res) => {
 
 // ── GET /:id ──────────────────────────────────────────────────────────────────
 // Returns a single GL ledger head by its primary key.
-router.get("/:id", async (req, res) => {
+router.get("/:id", cache("general-ledger-detail", 180), async (req, res) => {
   const numericId = parseInt(req.params.id, 10);
   if (!Number.isFinite(numericId) || numericId <= 0) {
     return res.status(400).json({ error: "Invalid record id" });
@@ -135,8 +201,12 @@ router.post("/", async (req, res) => {
   }
 
   try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+
     const pool = getPool();
-    await pool
+    const columnMeta = await getAccountHeadColumnMeta();
+    const request = pool
       .request()
       .input("LHeadName", sql.NVarChar(200), LHeadName.trim())
       .input(
@@ -154,23 +224,49 @@ router.post("/", async (req, res) => {
       .input("LHeadAddress", sql.VarChar(300), "N/A")
       .input("LHeadContactPerson", sql.VarChar(100), "N/A")
       .input("LHeadPaymentTerms", sql.NVarChar(100), "N/A")
-      .input("LBranchName", sql.VarChar(100), "Main")
-      .input("LCountry", sql.VarChar(50), "India")
-      .input("CreatedBy", sql.Int, 1)
-      .input("CreatedAt", sql.DateTime, new Date()).query(`
-        INSERT INTO dbo.AccountHeadMaster (
-          LHeadName, LHeadCode, LBelongsTo, LHeadStatus,
-          LHeadType, LHeadAddress, LHeadContactPerson,
-          LHeadPaymentTerms, LBranchName, LCountry,
-          CreatedBy, CreatedAt
-        ) VALUES (
-          @LHeadName, @LHeadCode, @LBelongsTo, @LHeadStatus,
-          @LHeadType, @LHeadAddress, @LHeadContactPerson,
-          @LHeadPaymentTerms, @LBranchName, @LCountry,
-          @CreatedBy, @CreatedAt
-        )
-      `);
+      .input(
+        "LBranchName",
+        sql.VarChar(100),
+        getColumnMeta(columnMeta, "LBranchName")?.isNullable ? null : "Main",
+      )
+      .input("LCountry", sql.VarChar(50), "India");
 
+    const insertColumns = [
+      "LHeadName",
+      "LHeadCode",
+      "LBelongsTo",
+      "LHeadStatus",
+      "LHeadType",
+      "LHeadAddress",
+      "LHeadContactPerson",
+      "LHeadPaymentTerms",
+      "LBranchName",
+      "LCountry",
+    ];
+    const insertValues = insertColumns.map((column) => `@${column}`);
+
+    if (hasColumn(columnMeta, "CreatedBy")) {
+      request.input("CreatedBy", sql.NVarChar(100), userEmail);
+      insertColumns.push("CreatedBy");
+      insertValues.push("@CreatedBy");
+    }
+
+    if (hasColumn(columnMeta, "CreatedAt")) {
+      request.input("CreatedAt", sql.DateTime2, new Date());
+      insertColumns.push("CreatedAt");
+      insertValues.push("@CreatedAt");
+    }
+
+    await request.query(`
+      INSERT INTO dbo.AccountHeadMaster (
+        ${insertColumns.join(", ")}
+      ) VALUES (
+        ${insertValues.join(", ")}
+      )
+    `);
+
+    await bumpCacheVersion("general-ledger");
+    await bumpCacheVersion("general-ledger-detail");
     res
       .status(201)
       .json({ message: "General ledger account created successfully" });
@@ -195,8 +291,12 @@ router.put("/:id", async (req, res) => {
   }
 
   try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+
     const pool = getPool();
-    const result = await pool
+    const columnMeta = await getAccountHeadColumnMeta();
+    const request = pool
       .request()
       .input("id", sql.Int, numericId)
       .input("LHeadName", sql.NVarChar(200), LHeadName.trim())
@@ -210,13 +310,28 @@ router.put("/:id", async (req, res) => {
         sql.Int,
         LBelongsTo ? parseInt(LBelongsTo, 10) : null,
       )
-      .input("LHeadStatus", sql.Bit, LHeadStatus !== false ? 1 : 0).query(`
+      .input("LHeadStatus", sql.Bit, LHeadStatus !== false ? 1 : 0);
+
+    const updates = [
+      "LHeadName   = @LHeadName",
+      "LHeadCode   = @LHeadCode",
+      "LBelongsTo  = @LBelongsTo",
+      "LHeadStatus = @LHeadStatus",
+      "isEdited    = 1",
+    ];
+
+    if (hasColumn(columnMeta, "UpdatedBy")) {
+      request.input("UpdatedBy", sql.NVarChar(100), userEmail);
+      updates.push("UpdatedBy   = @UpdatedBy");
+    }
+
+    if (hasColumn(columnMeta, "UpdatedAt")) {
+      updates.push("UpdatedAt   = SYSDATETIME()");
+    }
+
+    const result = await request.query(`
         UPDATE dbo.AccountHeadMaster SET
-          LHeadName   = @LHeadName,
-          LHeadCode   = @LHeadCode,
-          LBelongsTo  = @LBelongsTo,
-          LHeadStatus = @LHeadStatus,
-          isEdited    = 1
+          ${updates.join(",\n          ")}
         WHERE LHeadId   = @id
           AND LHeadType = 'GL'
       `);
@@ -225,6 +340,8 @@ router.put("/:id", async (req, res) => {
       return res.status(404).json({ error: "General ledger record not found" });
     }
 
+    await bumpCacheVersion("general-ledger");
+    await bumpCacheVersion("general-ledger-detail");
     res.json({ message: "General ledger account updated successfully" });
   } catch (err) {
     console.error("GL UPDATE ERROR:", err.message);
@@ -253,6 +370,8 @@ router.delete("/:id", async (req, res) => {
       return res.status(404).json({ error: "General ledger record not found" });
     }
 
+    await bumpCacheVersion("general-ledger");
+    await bumpCacheVersion("general-ledger-detail");
     res.json({ message: "General ledger account deleted successfully" });
   } catch (err) {
     console.error("GL DELETE ERROR:", err.message);

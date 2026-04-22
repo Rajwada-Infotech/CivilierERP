@@ -388,4 +388,3 @@ const RoleMaster: React.FC = () => {
 };
 
 export default RoleMaster;
-

@@ -11,13 +11,14 @@ const checkPermission = (module, subModule, action = "CanView") => {
 
       const pool = getPool();
 
-      // 🔍 DEBUG (remove later)
-      console.log("CHECK PERMISSION:", {
-        roleId,
-        module,
-        subModule,
-        action,
-      });
+      if (process.env.DEBUG === "true") {
+        console.log("CHECK PERMISSION:", {
+          roleId,
+          module,
+          subModule,
+          action,
+        });
+      }
 
       const result = await pool.request()
         .input("RoleId", sql.Int, roleId)

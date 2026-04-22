@@ -1,6 +1,6 @@
 const express = require("express")
 const { cache } = require("../middleware/cache");
-const { redisDelPattern } = require("../redis");
+const { bumpCacheVersion } = require("../redis");
 const router = express.Router()
 const { getPool, sql } = require("../db")
 
@@ -37,7 +37,7 @@ router.post("/", async (req, res) => {
         VALUES
           (@code, @name, @description, @module, @status, @remarks, @created_by, @created_at, @updated_by, @updated_at)
       `)
-    await redisDelPattern("cache:document-type:*");
+    await bumpCacheVersion("document-type");
 
     res.json({ message: "Document type added successfully" })
   } catch (err) {
@@ -68,7 +68,7 @@ router.put("/:id", async (req, res) => {
           updated_by=@updated_by, updated_at=@updated_at
         WHERE id=@id
       `)
-    await redisDelPattern("cache:document-type:*");
+    await bumpCacheVersion("document-type");
 
     res.json({ message: "Document type updated successfully" })
   } catch (err) {
@@ -84,7 +84,7 @@ router.delete("/:id", async (req, res) => {
     await pool.request()
       .input("id", sql.Int, id)
       .query("DELETE FROM dbo.documentType WHERE id=@id")
-    await redisDelPattern("cache:document-type:*");
+    await bumpCacheVersion("document-type");
 
     res.json({ message: "Document type deleted successfully" })
   } catch (err) {
