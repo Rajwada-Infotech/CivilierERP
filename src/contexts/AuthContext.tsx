@@ -107,7 +107,6 @@ export const AuthProvider = ({
           email: u.email,
           role: u.role as UserRole,
           initials: AuthUtils.getInitials(u.name),
-          // use persisted permissions from DB, fall back to role defaults
           pagePermissions:
             Array.isArray(u.pagePermissions) && u.pagePermissions.length > 0
               ? u.pagePermissions
@@ -122,25 +121,23 @@ export const AuthProvider = ({
   }, [currentUser]);
 
   // ── LOGIN ──────────────────────────────────────────────────────────────────
-  const login = useCallback(
-    async (email: string, password: string) => {
-      try {
-        const data = await loginUser(email, password);
+  const login = useCallback(async (email: string, password: string) => {
+    try {
+      const data = await loginUser(email, password);
 
-        localStorage.setItem("token", data.token);
+      localStorage.setItem("token", data.token);
+      localStorage.setItem("user", JSON.stringify(data.user)); // ← FIX: persist user so reload works
 
-        setCurrentUser(data.user);
+      setCurrentUser(data.user);
 
-        return { success: true, role: data.user.role };
-      } catch (err: any) {
-        return {
-          success: false,
-          error: err.response?.data?.message || "Login failed",
-        };
-      }
-    },
-    [],
-  );
+      return { success: true, role: data.user.role };
+    } catch (err: any) {
+      return {
+        success: false,
+        error: err.response?.data?.message || "Login failed",
+      };
+    }
+  }, []);
 
   // ── LOGOUT ─────────────────────────────────────────────────────────────────
   const logout = useCallback(async () => {
