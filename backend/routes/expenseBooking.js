@@ -2,7 +2,14 @@ const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
+
+const requireUserEmail = (req, res) => {
+  const email = req.user?.email;
+  if (!email) { res.status(401).json({ error: "User context missing" }); return null; }
+  return email;
+};
 const { bumpCacheVersion } = require("../redis");
+const { transition, guardEdit } = require("../services/approvalService");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // IMPORTANT: /options MUST be declared before /:id so Express does not treat
@@ -116,6 +123,7 @@ router.post("/", async (req, res) => {
 // UPDATE
 router.put("/:id", async (req, res) => {
   const numericId = parseInt(req.params.id, 10);
+  await guardEdit("expense-booking", req.params.id);
   if (!Number.isFinite(numericId) || numericId <= 0) {
     return res.status(400).json({ error: "Invalid record id" });
   }
@@ -183,6 +191,57 @@ router.delete("/:id", async (req, res) => {
   } catch (err) {
     console.error("EXPENSE DELETE ERROR:", err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/submit — Draft → Pending ─────────────────────────────────────────
+router.put("/:id/submit", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+
+    const result = await transition("expense-booking", id, "Pending", userEmail, req.user?.role);
+    await bumpCacheVersion("expense-booking");
+    res.json({ message: "Expense submitted for approval", ...result });
+  } catch (err) {
+    console.error("Expense submit error:", err.message);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/approve — Pending → Approved ─────────────────────────────────────
+router.put("/:id/approve", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+
+    const result = await transition("expense-booking", id, "Approved", userEmail, req.user?.role);
+    await bumpCacheVersion("expense-booking");
+    res.json({ message: "Expense approved", ...result });
+  } catch (err) {
+    console.error("Expense approve error:", err.message);
+    const status = err.message.includes("not authorized") ? 403 : 400;
+    res.status(status).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/reject — Pending → Rejected ──────────────────────────────────────
+router.put("/:id/reject", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { note } = req.body;
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+
+    const result = await transition("expense-booking", id, "Rejected", userEmail, req.user?.role, note || null);
+    await bumpCacheVersion("expense-booking");
+    res.json({ message: "Expense rejected", ...result });
+  } catch (err) {
+    console.error("Expense reject error:", err.message);
+    const status = err.message.includes("not authorized") ? 403 : 400;
+    res.status(status).json({ error: err.message });
   }
 });
 
