@@ -209,9 +209,13 @@ router.post("/", async (req, res) => {
 
 // PUT — update header
 router.put("/:id", async (req, res) => {
+  try {
+    await guardEdit("work-orders", req.params.id);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
   const {
     CompanyId,
-  await guardEdit("work-orders", req.params.id);
     ProjectId,
     DocumentNumber,
     DocumentDate,
