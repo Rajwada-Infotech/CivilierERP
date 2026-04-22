@@ -773,7 +773,11 @@ export default function Login() {
       const result = await login(email, password);
       if (result.success) {
         const role = result.role;
-        navigate("/home", { replace: true });
+        if (role === "super_admin" || role === "admin" || role === "dba") {
+          navigate("/admin/dashboard", { replace: true });
+        } else {
+          navigate("/home", { replace: true });
+        }
       } else {
         setError(result.error || "Invalid email or password.");
       }
