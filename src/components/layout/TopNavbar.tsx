@@ -435,7 +435,7 @@ const adminSetupItems = [
   {
     icon: Users,
     label: "Role Master",
-    path: "/masters/role-master",
+    path: "/admin/masters/role-master",
     color: "text-blue-400",
   },
 ];
@@ -938,40 +938,40 @@ export const TopNavbar = () => {
                         setModuleSwitching(false);
                         setSwitchingTo(null);
                       }}
-      className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${
-        isAdminPage
-          ? "bg-blue-500/10 text-blue-600"
-          : "hover:bg-muted text-foreground"
-      }`}
-    >
-      <span
-        className={`flex items-center justify-center w-7 h-7 rounded-md transition-colors relative ${
-          isAdminPage
-            ? "bg-blue-500/15"
-            : "bg-muted group-hover:bg-muted-foreground/10"
-        }`}
-      >
-        <ShieldCheck
-          size={14}
-          className={
-            isAdminPage
-              ? "text-blue-500"
-              : "text-muted-foreground group-hover:text-foreground"
-          }
-        />
-        {isSuperAdmin && (
-          <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full flex items-center justify-center bg-violet-600">
-            <Crown size={6} className="text-white" />
-          </span>
-        )}
-      </span>
-      <div className="flex-1 text-left">
-        <p
-          className={`text-sm font-heading font-medium leading-none ${isAdminPage ? "text-blue-600" : "text-foreground"}`}
-        >
-          Admin
-        </p>
-        <p className="text-[11px] text-muted-foreground mt-0.5">
+                      className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${
+                        isAdminPage
+                          ? "bg-blue-500/10 text-blue-600"
+                          : "hover:bg-muted text-foreground"
+                      }`}
+                    >
+                      <span
+                        className={`flex items-center justify-center w-7 h-7 rounded-md transition-colors relative ${
+                          isAdminPage
+                            ? "bg-blue-500/15"
+                            : "bg-muted group-hover:bg-muted-foreground/10"
+                        }`}
+                      >
+                        <ShieldCheck
+                          size={14}
+                          className={
+                            isAdminPage
+                              ? "text-blue-500"
+                              : "text-muted-foreground group-hover:text-foreground"
+                          }
+                        />
+                        {isSuperAdmin && (
+                          <span className="absolute -top-1 -right-1 w-3 h-3 rounded-full flex items-center justify-center bg-violet-600">
+                            <Crown size={6} className="text-white" />
+                          </span>
+                        )}
+                      </span>
+                      <div className="flex-1 text-left">
+                        <p
+                          className={`text-sm font-heading font-medium leading-none ${isAdminPage ? "text-blue-600" : "text-foreground"}`}
+                        >
+                          Admin
+                        </p>
+                        <p className="text-[11px] text-muted-foreground mt-0.5">
                           Users, rights & config
                         </p>
                       </div>

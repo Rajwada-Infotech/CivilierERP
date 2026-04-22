@@ -216,20 +216,6 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
       { label: "Password Reset", path: "/admin/security/password-reset" },
     ],
   },
-  // Role Master Setup
-  {
-    label: "Setup",
-    icon: Users,
-    sections: [
-      {
-        label: "Masters",
-        icon: Package,
-        items: [
-          { label: "Role Master", path: "/masters/role-master" },
-        ],
-      },
-    ],
-  },
   {
     label: "Communicator",
     icon: MessageSquare,
@@ -552,7 +538,8 @@ export const AppSidebar = () => {
       return "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
     if (isUserProfilePage)
       return "bg-gray-500/10 text-gray-500 border-gray-500/20";
-    if (isAdminModule || isAdmin) return "bg-blue-500/10 text-blue-500 border-blue-500/20";
+    if (isAdminModule || isAdmin)
+      return "bg-blue-500/10 text-blue-500 border-blue-500/20";
     if (isFinance) return "bg-primary/10 text-primary border-primary/20";
     if (isMaterial)
       return "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
@@ -644,4 +631,3 @@ export const AppSidebar = () => {
     </aside>
   );
 };
-
