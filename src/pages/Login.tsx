@@ -773,11 +773,7 @@ export default function Login() {
       const result = await login(email, password);
       if (result.success) {
         const role = result.role;
-        // All roles land on /home first; /home redirects to role dashboards
-        if (role === "dba") navigate("/dba", { replace: true });
-        else if (role === "super_admin")
-          navigate("/superadmin", { replace: true });
-        else navigate("/home", { replace: true });
+        navigate("/home", { replace: true });
       } else {
         setError(result.error || "Invalid email or password.");
       }
