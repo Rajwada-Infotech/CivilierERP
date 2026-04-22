@@ -317,9 +317,10 @@ export const MobileNav: React.FC = () => {
     location.pathname.startsWith("/users") ||
     location.pathname.startsWith("/dba");
 
-const isSuperAdmin = currentUser?.role?.toLowerCase() === "super_admin";
-const isDba = currentUser?.role?.toLowerCase() === "dba";
-const isAdmin = currentUser?.role?.toLowerCase() === "admin" || isSuperAdmin || isDba;
+  const isSuperAdmin = currentUser?.role?.toLowerCase() === "super_admin";
+  const isDba = currentUser?.role?.toLowerCase() === "dba";
+  const isAdmin =
+    currentUser?.role?.toLowerCase() === "admin" || isSuperAdmin || isDba;
 
   // Admin Navigation Items
   const ADMIN_NAV_ITEMS: NavItem[] = [
@@ -727,7 +728,7 @@ const isAdmin = currentUser?.role?.toLowerCase() === "admin" || isSuperAdmin || 
     {
       icon: Users,
       label: "Role Master",
-      path: "/masters/role-master",
+      path: "/admin/masters/role-master",
       color: "text-blue-400",
     },
   ];
@@ -958,7 +959,12 @@ const isAdmin = currentUser?.role?.toLowerCase() === "admin" || isSuperAdmin || 
                         ]
                       : []),
                   ].map((btn) => {
-console.log('🔍 MOBILE DEBUG - ROLE:', currentUser?.role, 'ISADMIN:', isAdmin);
+                    console.log(
+                      "🔍 MOBILE DEBUG - ROLE:",
+                      currentUser?.role,
+                      "ISADMIN:",
+                      isAdmin,
+                    );
                     const Icon = btn.icon;
                     return (
                       <button

@@ -18,66 +18,42 @@ import {
   EyeOff,
   Save,
   CheckCircle2,
-  Crown,
+  Database,
   Mail,
   Calendar,
   Loader2,
-  Globe,
-  Database,
+  Server,
+  Terminal,
   Shield,
-  Bell,
-  Fingerprint,
-  Clock,
 } from "lucide-react";
-import { Switch } from "@/components/ui/switch";
 
 const inp =
   "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground placeholder:text-muted-foreground/50";
 
-const SA_PERMISSIONS = [
+const DBA_PERMISSIONS = [
+  { label: "Query Runner", desc: "Execute SQL queries against the database" },
   {
-    label: "All Admin Permissions",
-    desc: "Inherits complete administrator access",
+    label: "Schema Manager",
+    desc: "View and modify table schemas and indexes",
   },
   {
-    label: "Tenant Management",
-    desc: "Create and manage multi-tenant environments",
+    label: "Database Backups",
+    desc: "Trigger and monitor database backup jobs",
   },
+  { label: "Tenant DB Access", desc: "Access all tenant databases" },
   {
-    label: "Global Configuration",
-    desc: "System-wide settings and platform config",
+    label: "Performance Monitor",
+    desc: "View query plans and system performance metrics",
   },
+  { label: "User Lookup", desc: "View user data for debugging and support" },
+  { label: "Audit Log Access", desc: "Read full database-level audit trail" },
   {
-    label: "Role Architecture",
-    desc: "Define and restructure the role hierarchy",
-  },
-  {
-    label: "Enterprise Masters",
-    desc: "Company, Business Unit and Project management",
-  },
-  {
-    label: "Billing & Subscriptions",
-    desc: "Manage tenant billing and plan features",
-  },
-  {
-    label: "API & Integrations",
-    desc: "Connect and manage all external integrations",
-  },
-  {
-    label: "Platform Audit Log",
-    desc: "Full access to every system event across tenants",
-  },
-  {
-    label: "DBA Oversight",
-    desc: "Monitor and supervise database admin actions",
-  },
-  {
-    label: "Super Admin Delegation",
-    desc: "Grant or revoke super admin rights",
+    label: "Control Panel",
+    desc: "Access the DBA control panel and diagnostics",
   },
 ];
 
-export default function SuperAdminProfile() {
+export default function DBAProfile() {
   const { currentUser } = useAuth();
   const userId = currentUser?.id ? parseInt(currentUser.id) : 0;
 
@@ -85,11 +61,6 @@ export default function SuperAdminProfile() {
   const [nameVal, setNameVal] = useState(currentUser?.name ?? "");
   const [pw, setPw] = useState({ current: "", next: "", confirm: "" });
   const [showPw, setShowPw] = useState<Record<string, boolean>>({});
-  const [notifications, setNotifications] = useState({
-    loginAlerts: true,
-    approvals: true,
-    systemUpdates: false,
-  });
 
   const { data: profile } = useQuery({
     queryKey: ["user-profile", userId],
@@ -121,7 +92,7 @@ export default function SuperAdminProfile() {
   const pwMatch = pw.next && pw.confirm && pw.next === pw.confirm;
   const pwMismatch = pw.next && pw.confirm && pw.next !== pw.confirm;
 
-  const displayName = profile?.name ?? currentUser?.name ?? "Super Admin";
+  const displayName = profile?.name ?? currentUser?.name ?? "DBA";
   const initials = displayName
     .split(" ")
     .map((n: string) => n[0])
@@ -131,29 +102,31 @@ export default function SuperAdminProfile() {
 
   const tabs = [
     { key: "profile", label: "Profile", icon: User },
-    { key: "permissions", label: "Permissions", icon: Crown },
-    { key: "security", label: "Security", icon: Shield },
+    { key: "permissions", label: "Permissions", icon: Database },
     { key: "activity", label: "Activity", icon: Activity },
   ];
 
   return (
     <ProfileShell
-      breadcrumbs={["Admin", "Super Admin Profile"]}
+      breadcrumbs={["DBA", "My Profile"]}
       initials={initials}
       name={displayName}
       email={profile?.email ?? currentUser?.email ?? ""}
-      avatarGradient="from-violet-600 to-violet-400"
-      heroAccent="from-violet-600/20 via-violet-400/10 to-transparent"
+      avatarGradient="from-emerald-600 to-emerald-400"
+      heroAccent="from-emerald-600/20 via-emerald-400/10 to-transparent"
       roleBadge={
-        <span className="text-[10px] font-heading px-2.5 py-0.5 rounded-full border bg-violet-500/10 text-violet-600 border-violet-300/40">
-          <Crown size={9} className="inline mr-1" />
-          SUPER ADMIN
+        <span className="text-[10px] font-heading px-2.5 py-0.5 rounded-full border bg-emerald-500/10 text-emerald-600 border-emerald-300/40">
+          <Database size={9} className="inline mr-1" />
+          DBA
         </span>
       }
       stats={[
-        { label: "Permissions", value: "All" },
-        { label: "Modules", value: "All" },
-        { label: "Status", value: "Active" },
+        { label: "DB Access", value: "Full" },
+        { label: "Permissions", value: DBA_PERMISSIONS.length },
+        {
+          label: "Status",
+          value: profile?.discontinue ? "Inactive" : "Active",
+        },
       ]}
       tabs={tabs}
       activeTab={activeTab}
@@ -207,12 +180,12 @@ export default function SuperAdminProfile() {
                 <label className="text-[10px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5 block">
                   Role
                 </label>
-                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-violet-500/5 border border-violet-300/30">
-                  <Crown size={13} className="text-violet-500" />
+                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/5 border border-emerald-300/30">
+                  <Database size={13} className="text-emerald-500" />
                   <span className="text-sm font-body text-foreground">
-                    Super Administrator
+                    Database Administrator
                   </span>
-                  <Globe size={11} className="ml-auto text-violet-400" />
+                  <Server size={11} className="ml-auto text-emerald-400" />
                 </div>
               </div>
               <button
@@ -300,26 +273,26 @@ export default function SuperAdminProfile() {
         <div className="rounded-xl bg-card/80 border border-border shadow-sm overflow-hidden">
           <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-card/60">
             <div className="flex items-center gap-2">
-              <Crown size={14} className="text-violet-500" />
+              <Database size={14} className="text-emerald-500" />
               <span className="text-sm font-heading font-semibold">
-                Super Admin Permissions
+                DBA Permissions
               </span>
             </div>
-            <span className="text-[10px] font-heading px-2.5 py-0.5 rounded-full bg-violet-500/10 text-violet-600 border border-violet-300/40">
-              Unrestricted
+            <span className="text-[10px] font-heading px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-300/40">
+              DB Level Access
             </span>
           </div>
           <div className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {SA_PERMISSIONS.map((p) => (
+            {DBA_PERMISSIONS.map((p) => (
               <div
                 key={p.label}
-                className="flex items-start gap-3 p-3.5 rounded-xl bg-muted/40 border border-border hover:border-violet-300/50 transition-colors group"
+                className="flex items-start gap-3 p-3.5 rounded-xl bg-muted/40 border border-border hover:border-emerald-300/50 transition-colors group"
               >
-                <div className="mt-0.5 w-5 h-5 rounded-full bg-violet-500/15 flex items-center justify-center flex-shrink-0">
-                  <CheckCircle2 size={11} className="text-violet-600" />
+                <div className="mt-0.5 w-5 h-5 rounded-full bg-emerald-500/15 flex items-center justify-center flex-shrink-0">
+                  <Terminal size={10} className="text-emerald-600" />
                 </div>
                 <div className="min-w-0">
-                  <p className="text-xs font-heading font-semibold text-foreground group-hover:text-violet-600 transition-colors">
+                  <p className="text-xs font-heading font-semibold text-foreground group-hover:text-emerald-600 transition-colors">
                     {p.label}
                   </p>
                   <p className="text-[10px] text-muted-foreground mt-0.5 leading-relaxed">
@@ -328,114 +301,6 @@ export default function SuperAdminProfile() {
                 </div>
               </div>
             ))}
-          </div>
-        </div>
-      )}
-
-      {/* ── SECURITY TAB ─────────────────────────────────────────────────── */}
-      {activeTab === "security" && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-          <div className="rounded-xl bg-card/80 border border-border shadow-sm overflow-hidden">
-            <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border bg-card/60">
-              <Bell size={14} className="text-primary" />
-              <span className="text-sm font-heading font-semibold">
-                Notification Preferences
-              </span>
-            </div>
-            <div className="p-5 space-y-4">
-              {[
-                {
-                  key: "loginAlerts" as const,
-                  label: "Login Alerts",
-                  desc: "Notify on every login to this account",
-                },
-                {
-                  key: "approvals" as const,
-                  label: "Approval Notifications",
-                  desc: "Receive alerts for pending approvals",
-                },
-                {
-                  key: "systemUpdates" as const,
-                  label: "System Updates",
-                  desc: "Get notified about platform updates",
-                },
-              ].map(({ key, label, desc }) => (
-                <div
-                  key={key}
-                  className="flex items-center justify-between gap-4"
-                >
-                  <div>
-                    <p className="text-sm font-heading font-medium text-foreground">
-                      {label}
-                    </p>
-                    <p className="text-[11px] text-muted-foreground">{desc}</p>
-                  </div>
-                  <Switch
-                    checked={notifications[key]}
-                    onCheckedChange={(v) =>
-                      setNotifications((n) => ({ ...n, [key]: v }))
-                    }
-                  />
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="rounded-xl bg-card/80 border border-border shadow-sm overflow-hidden">
-            <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border bg-card/60">
-              <Shield size={14} className="text-primary" />
-              <span className="text-sm font-heading font-semibold">
-                Session & Security
-              </span>
-            </div>
-            <div className="p-5 space-y-3">
-              <div className="flex items-center gap-3 p-3.5 rounded-xl bg-muted/40 border border-border">
-                <div className="w-8 h-8 rounded-lg bg-emerald-500/15 flex items-center justify-center flex-shrink-0">
-                  <Clock size={14} className="text-emerald-600" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-heading font-semibold text-foreground">
-                    Current Session
-                  </p>
-                  <p className="text-[11px] text-muted-foreground">
-                    Active · Started today
-                  </p>
-                </div>
-                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse flex-shrink-0" />
-              </div>
-              <div className="flex items-center gap-3 p-3.5 rounded-xl bg-muted/40 border border-border">
-                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center flex-shrink-0">
-                  <Fingerprint size={14} className="text-primary" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-heading font-semibold text-foreground">
-                    Two-Factor Auth
-                  </p>
-                  <p className="text-[11px] text-muted-foreground">
-                    Not configured
-                  </p>
-                </div>
-                <button className="text-[11px] font-heading px-3 py-1.5 rounded-lg border border-border bg-muted hover:bg-muted/80 transition-colors text-foreground flex-shrink-0">
-                  Setup
-                </button>
-              </div>
-              <div className="flex items-center gap-3 p-3.5 rounded-xl bg-muted/40 border border-border">
-                <div className="w-8 h-8 rounded-lg bg-violet-500/10 flex items-center justify-center flex-shrink-0">
-                  <Crown size={14} className="text-violet-500" />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-xs font-heading font-semibold text-foreground">
-                    Privilege Level
-                  </p>
-                  <p className="text-[11px] text-muted-foreground">
-                    Maximum · No restrictions
-                  </p>
-                </div>
-                <span className="text-[10px] font-heading px-2 py-0.5 rounded-full bg-violet-500/10 text-violet-600 border border-violet-300/40 flex-shrink-0">
-                  SA
-                </span>
-              </div>
-            </div>
           </div>
         </div>
       )}

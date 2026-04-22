@@ -179,7 +179,7 @@ export const PAGE_DEFINITIONS = [
 export const ADMIN_PATHS = [
   "/masters/named-entry-type",
   "/masters/type-of-doc",
-  "/masters/role-master"
+  "/admin/masters/role-master",
 ] as const;
 
 // ==================== TYPES ====================
