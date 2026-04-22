@@ -767,22 +767,22 @@ function AppRoutes() {
           </AdminRoute>
         }
       />
-<Route
-  path="/admin/approval/post-rights"
-  element={
-    <AdminRoute>
-      <PostApprovalRights />
-    </AdminRoute>
-  }
-/>
-  <Route
-    path="/admin/approval/inbox"
-    element={
-      <AdminRoute>
-        <ApprovalInbox />
-      </AdminRoute>
-    }
-  />
+      <Route
+        path="/admin/approval/post-rights"
+        element={
+          <AdminRoute>
+            <PostApprovalRights />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/approval/inbox"
+        element={
+          <AdminRoute>
+            <ApprovalInbox />
+          </AdminRoute>
+        }
+      />
       <Route
         path="/admin/api-integration"
         element={
@@ -937,14 +937,14 @@ function App() {
       <Toaster richColors position="top-right" />
       <ActivityBrowserProvider>
         <AuthSessionBridge>
-          <Router
-            future={{
-              v7_startTransition: true,
-              v7_relativeSplatPath: true,
-            }}
-          >
-            <ModuleProvider>
-              <ThemeProvider>
+          <ThemeProvider>
+            <Router
+              future={{
+                v7_startTransition: true,
+                v7_relativeSplatPath: true,
+              }}
+            >
+              <ModuleProvider>
                 <FinYearProvider>
                   <HsnProvider>
                     <RecordsProvider>
@@ -960,9 +960,9 @@ function App() {
                     </RecordsProvider>
                   </HsnProvider>
                 </FinYearProvider>
-              </ThemeProvider>
-            </ModuleProvider>
-          </Router>
+              </ModuleProvider>
+            </Router>
+          </ThemeProvider>
         </AuthSessionBridge>
       </ActivityBrowserProvider>
     </QueryClientProvider>
