@@ -12,4 +12,3 @@ dist
 .nyc_output
 migrations
 worker.js  # Run separately if needed
-

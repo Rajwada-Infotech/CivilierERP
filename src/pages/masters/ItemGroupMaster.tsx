@@ -15,6 +15,8 @@ interface DbItemGroup {
   M_Name: string
   M_Description: string | null
   M_Type: string | null
+  M_code: string | null
+  M_BelongsTo: string | null
   M_Group: string | null
   M_IdentityCode: boolean | null
   M_HSN: string | null
@@ -24,20 +26,23 @@ interface DbItemGroup {
   Parent_Id: string | null
 }
 
+// ✅ M_CreatedBy removed — backend reads it from JWT token via req.user.userId
 const toPayload = (record: Record<string, unknown>) => ({
-  M_Name: record.description as string,
-  M_Description: record.description as string,
+  M_Name:         record.Name as string,
+  M_Description:  record.Description as string,
+  M_code:         (record.Code as string) || null,
+  M_Type:         null,
   M_IdentityCode: false,
-  M_Type: (record.shortCode as string) || null,
-  M_HSN: null,
-  M_CGST: null,
-  M_IGST: null,
-  M_SGST: null,
-  M_BelongsTo: null,
-  M_Group: (record.code as string) || null,
-  M_CreatedBy: 1,
-  M_ApprovedBy: null,
-  Parent_Id: null,
+  M_HSN:          null,
+  M_CGST:         null,
+  M_IGST:         null,
+  M_SGST:         null,
+  // ✅ M_BelongsTo = Item Group Name (M_Name of this group itself)
+  M_BelongsTo:    null,
+  // ✅ M_Group stays null as per your requirement
+  M_Group:        null,
+  M_ApprovedBy:   null,
+  Parent_Id:      null,
 })
 
 const ItemGroupMaster: React.FC = () => {
@@ -51,10 +56,10 @@ const ItemGroupMaster: React.FC = () => {
   const dbItems: DbItemGroup[] = Array.isArray(dbData) ? dbData : []
 
   const mappedData = dbItems.map(item => ({
-    _id: String(item.M_Id),
-    description: item.M_Name || "",
-    code: item.M_Group || "",
-    shortCode: item.M_Type || "",
+    _id:         String(item.M_Id),
+    Name:        item.M_Name        || "",
+    Description: item.M_Description || "",
+    Code:        item.M_code        || "",
   }))
 
   const handleDataEvent = async (event: DataChangeEvent) => {
@@ -67,7 +72,6 @@ const ItemGroupMaster: React.FC = () => {
         toast.error("Save failed: " + err.message)
       }
     }
-
     if (event.action === "update") {
       try {
         await updateItemGroup(event.id, toPayload(event.record))
@@ -77,7 +81,6 @@ const ItemGroupMaster: React.FC = () => {
         toast.error("Update failed: " + err.message)
       }
     }
-
     if (event.action === "delete") {
       try {
         await deleteItemGroup(event.id)
@@ -108,14 +111,14 @@ const ItemGroupMaster: React.FC = () => {
       <MasterPage
         title="Item Group"
         fields={[
-          { name: "description", label: "Description", type: "text", required: true },
-          { name: "code", label: "Code", type: "text", required: true, uppercase: true },
-          { name: "shortCode", label: "Short Code", type: "text", required: true, uppercase: true },
+          { name: "Name",        label: "Name",        type: "text", required: true },
+          { name: "Code",        label: "Code",        type: "text", required: true, uppercase: true },
+          { name: "Description", label: "Description", type: "text", required: true },
         ]}
         columns={[
-          { key: "description", label: "Description" },
-          { key: "code", label: "Code" },
-          { key: "shortCode", label: "Short Code" },
+          { key: "Name",        label: "Name" },
+          { key: "Code",        label: "Code" },
+          { key: "Description", label: "Description" },
         ]}
         initialData={mappedData}
         onDataEvent={handleDataEvent}

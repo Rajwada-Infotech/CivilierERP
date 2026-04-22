@@ -4,10 +4,6 @@ const { bumpCacheVersion } = require("../redis");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 
-// Groups are top-level rows: Parent_Id IS NULL
-// Items are child rows: Parent_Id IS NOT NULL (handled by itemMaster route)
-
-// GET all item groups (top-level only)
 router.get("/", cache("item-groups", 300), async (req, res) => {
   try {
     const pool = getPool();
@@ -16,7 +12,8 @@ router.get("/", cache("item-groups", 300), async (req, res) => {
         M_Id, M_Name, M_Description, M_Type,
         M_BelongsTo, M_Group, M_IdentityCode,
         M_HSN, M_CGST, M_IGST, M_SGST,
-        M_CreatedBy, M_CreatedDate, M_ApprovedBy, Parent_Id
+        M_CreatedBy, M_CreatedDate, M_ApprovedBy,
+        ApprovedAt, Parent_Id, M_code
       FROM dbo.Item_Master_Group
       WHERE Parent_Id IS NULL
       ORDER BY M_Name
@@ -28,18 +25,19 @@ router.get("/", cache("item-groups", 300), async (req, res) => {
   }
 });
 
-// GET single item group by ID
 router.get("/:id", async (req, res) => {
   const { id } = req.params;
   try {
     const pool = getPool();
-    const result = await pool.request().input("M_Id", sql.UniqueIdentifier, id)
+    const result = await pool.request()
+      .input("M_Id", sql.UniqueIdentifier, id)
       .query(`
         SELECT
           M_Id, M_Name, M_Description, M_Type,
           M_BelongsTo, M_Group, M_IdentityCode,
           M_HSN, M_CGST, M_IGST, M_SGST,
-          M_CreatedBy, M_CreatedDate, M_ApprovedBy, Parent_Id
+          M_CreatedBy, M_CreatedDate, M_ApprovedBy,
+          ApprovedAt, Parent_Id, M_code
         FROM dbo.Item_Master_Group
         WHERE M_Id = @M_Id AND Parent_Id IS NULL
       `);
@@ -53,56 +51,57 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-// POST — create item group (Parent_Id stays NULL — it IS the group)
 router.post("/", async (req, res) => {
   const {
-    M_Name,
-    M_Description,
-    M_Type,
-    M_BelongsTo,
-    M_Group,
-    M_IdentityCode,
-    M_HSN,
-    M_CGST,
-    M_IGST,
-    M_SGST,
+    M_Name, M_Description, M_code,
+    M_Type, M_BelongsTo, M_Group,
+    M_IdentityCode, M_HSN, M_CGST, M_IGST, M_SGST,
+    M_ApprovedBy, // ✅ fixed - was missing before
   } = req.body;
 
+  const createdBy = req.user?.userId || null; // ✅ from JWT
+
   if (!M_Name) return res.status(400).json({ error: "M_Name is required" });
-  if (!M_Type) return res.status(400).json({ error: "M_Type is required" });
 
   try {
     const pool = getPool();
     const result = await pool
       .request()
-      .input("M_Name", sql.NVarChar(200), M_Name)
-      .input("M_Description", sql.NVarChar(500), M_Description || null)
-      .input("M_Type", sql.NVarChar(50), M_Type || null)
-      .input("M_BelongsTo", sql.UniqueIdentifier, M_BelongsTo || null)
-      .input("M_Group", sql.NVarChar(200), M_Group || null)
-      .input("M_IdentityCode", sql.Bit, M_IdentityCode ? 1 : 0)
-      .input("M_HSN", sql.NVarChar(20), M_HSN || null)
-      .input("M_CGST", sql.Decimal(5, 2), M_CGST != null ? M_CGST : null)
-      .input("M_IGST", sql.Decimal(5, 2), M_IGST != null ? M_IGST : null)
-      .input("M_SGST", sql.Decimal(5, 2), M_SGST != null ? M_SGST : null)
-      .input("M_CreatedDate", sql.DateTime2(3), new Date()).query(`
+      .input("M_Name",         sql.NVarChar(200),    M_Name)
+      .input("M_Description",  sql.NVarChar(500),    M_Description || null)
+      .input("M_code",         sql.NVarChar(20),     M_code        || null)
+      .input("M_Type",         sql.NVarChar(50),     M_Type        || null)
+      .input("M_BelongsTo",    sql.UniqueIdentifier, M_BelongsTo   || null)
+      .input("M_Group",        sql.NVarChar(200),    M_Group       || null)
+      .input("M_IdentityCode", sql.Bit,              M_IdentityCode ? 1 : 0)
+      .input("M_HSN",          sql.NVarChar(20),     M_HSN         || null)
+      .input("M_CGST",         sql.Decimal(5, 2),    M_CGST        != null ? M_CGST : null)
+      .input("M_IGST",         sql.Decimal(5, 2),    M_IGST        != null ? M_IGST : null)
+      .input("M_SGST",         sql.Decimal(5, 2),    M_SGST        != null ? M_SGST : null)
+      .input("M_CreatedBy",    sql.Int,              createdBy)          // ✅ from JWT
+      .input("M_CreatedDate",  sql.DateTime2(3),     new Date())
+      .input("M_ApprovedBy",   sql.Int,              M_ApprovedBy  || null)
+      .input("ApprovedAt",     sql.DateTime2(3),     M_ApprovedBy ? new Date() : null) // ✅ set only if approved
+      .query(`
         INSERT INTO dbo.Item_Master_Group (
-          M_Id, M_Name, M_Description, M_Type,
+          M_Id, M_Name, M_Description, M_code, M_Type,
           M_BelongsTo, M_Group, M_IdentityCode,
           M_HSN, M_CGST, M_IGST, M_SGST,
-          M_CreatedBy, M_CreatedDate, Parent_Id
+          M_CreatedBy, M_CreatedDate,
+          M_ApprovedBy, ApprovedAt,
+          Parent_Id
         )
         OUTPUT INSERTED.M_Id
         VALUES (
           NEWID(),
-          @M_Name, @M_Description, @M_Type,
+          @M_Name, @M_Description, @M_code, @M_Type,
           @M_BelongsTo, @M_Group, @M_IdentityCode,
           @M_HSN, @M_CGST, @M_IGST, @M_SGST,
-          NULL, @M_CreatedDate,
+          @M_CreatedBy, @M_CreatedDate,
+          @M_ApprovedBy, @ApprovedAt,
           NULL
         )
       `);
-    // Fix: cache invalidation was missing after insert — new groups stayed stale until TTL expired
     await bumpCacheVersion("item-groups");
     await bumpCacheVersion("item-master");
     await bumpCacheVersion("stock-ledger");
@@ -116,22 +115,16 @@ router.post("/", async (req, res) => {
   }
 });
 
-// PUT — update item group
 router.put("/:id", async (req, res) => {
   const { id } = req.params;
   const {
-    M_Name,
-    M_Description,
-    M_Type,
-    M_BelongsTo,
-    M_Group,
-    M_IdentityCode,
-    M_HSN,
-    M_CGST,
-    M_IGST,
-    M_SGST,
+    M_Name, M_Description, M_code,
+    M_Type, M_BelongsTo, M_Group,
+    M_IdentityCode, M_HSN, M_CGST, M_IGST, M_SGST,
     M_ApprovedBy,
   } = req.body;
+
+  const updatedBy = req.user?.userId || null; // ✅ from JWT
 
   if (!M_Name) return res.status(400).json({ error: "M_Name is required" });
 
@@ -139,21 +132,27 @@ router.put("/:id", async (req, res) => {
     const pool = getPool();
     const result = await pool
       .request()
-      .input("M_Id", sql.UniqueIdentifier, id)
-      .input("M_Name", sql.NVarChar(200), M_Name)
-      .input("M_Description", sql.NVarChar(500), M_Description || null)
-      .input("M_Type", sql.NVarChar(50), M_Type || null)
-      .input("M_BelongsTo", sql.UniqueIdentifier, M_BelongsTo || null)
-      .input("M_Group", sql.NVarChar(200), M_Group || null)
-      .input("M_IdentityCode", sql.Bit, M_IdentityCode ? 1 : 0)
-      .input("M_HSN", sql.NVarChar(20), M_HSN || null)
-      .input("M_CGST", sql.Decimal(5, 2), M_CGST != null ? M_CGST : null)
-      .input("M_IGST", sql.Decimal(5, 2), M_IGST != null ? M_IGST : null)
-      .input("M_SGST", sql.Decimal(5, 2), M_SGST != null ? M_SGST : null)
-      .input("M_ApprovedBy", sql.UniqueIdentifier, M_ApprovedBy || null).query(`
+      .input("M_Id",           sql.UniqueIdentifier, id)
+      .input("M_Name",         sql.NVarChar(200),    M_Name)
+      .input("M_Description",  sql.NVarChar(500),    M_Description || null)
+      .input("M_code",         sql.NVarChar(20),     M_code        || null)
+      .input("M_Type",         sql.NVarChar(50),     M_Type        || null)
+      .input("M_BelongsTo",    sql.UniqueIdentifier, M_BelongsTo   || null)
+      .input("M_Group",        sql.NVarChar(200),    M_Group       || null)
+      .input("M_IdentityCode", sql.Bit,              M_IdentityCode ? 1 : 0)
+      .input("M_HSN",          sql.NVarChar(20),     M_HSN         || null)
+      .input("M_CGST",         sql.Decimal(5, 2),    M_CGST        != null ? M_CGST : null)
+      .input("M_IGST",         sql.Decimal(5, 2),    M_IGST        != null ? M_IGST : null)
+      .input("M_SGST",         sql.Decimal(5, 2),    M_SGST        != null ? M_SGST : null)
+      .input("M_UpdatedBy",    sql.Int,              updatedBy)          // ✅ from JWT
+      .input("UpdatedAt",      sql.DateTime2(3),     new Date())         // ✅ always set on update
+      .input("M_ApprovedBy",   sql.Int,              M_ApprovedBy  || null)
+      .input("ApprovedAt",     sql.DateTime2(3),     M_ApprovedBy ? new Date() : null) // ✅ set only if approved
+      .query(`
         UPDATE dbo.Item_Master_Group SET
           M_Name         = @M_Name,
           M_Description  = @M_Description,
+          M_code         = @M_code,
           M_Type         = @M_Type,
           M_BelongsTo    = @M_BelongsTo,
           M_Group        = @M_Group,
@@ -162,7 +161,10 @@ router.put("/:id", async (req, res) => {
           M_CGST         = @M_CGST,
           M_IGST         = @M_IGST,
           M_SGST         = @M_SGST,
-          M_ApprovedBy   = @M_ApprovedBy
+          M_UpdatedBy    = @M_UpdatedBy,
+          UpdatedAt      = @UpdatedAt,
+          M_ApprovedBy   = @M_ApprovedBy,
+          ApprovedAt     = @ApprovedAt
         WHERE M_Id = @M_Id AND Parent_Id IS NULL
       `);
     if (result.rowsAffected[0] === 0) {
@@ -178,32 +180,23 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-// DELETE item group (only if it has no child items)
 router.delete("/:id", async (req, res) => {
   const { id } = req.params;
   try {
     const pool = getPool();
-
-    // Guard: refuse if child items exist
     const childCheck = await pool
       .request()
       .input("Parent_Id", sql.UniqueIdentifier, id)
-      .query(
-        "SELECT COUNT(*) AS cnt FROM dbo.Item_Master_Group WHERE Parent_Id = @Parent_Id",
-      );
+      .query("SELECT COUNT(*) AS cnt FROM dbo.Item_Master_Group WHERE Parent_Id = @Parent_Id");
     if (childCheck.recordset[0].cnt > 0) {
       return res.status(409).json({
-        error:
-          "Cannot delete group — it still has items. Remove all items first.",
+        error: "Cannot delete group — it still has items. Remove all items first.",
       });
     }
-
     const result = await pool
       .request()
       .input("M_Id", sql.UniqueIdentifier, id)
-      .query(
-        "DELETE FROM dbo.Item_Master_Group WHERE M_Id = @M_Id AND Parent_Id IS NULL",
-      );
+      .query("DELETE FROM dbo.Item_Master_Group WHERE M_Id = @M_Id AND Parent_Id IS NULL");
     if (result.rowsAffected[0] === 0) {
       return res.status(404).json({ error: "Item group not found" });
     }

@@ -83,7 +83,19 @@ export const AuthProvider = ({
   const [currentUser, setCurrentUser] = useState<AppUser | null>(() => {
     try {
       const stored = localStorage.getItem("user");
-      return stored ? JSON.parse(stored) : null;
+      if (!stored) return null;
+      const parsed = JSON.parse(stored);
+      // Patch stale sessions missing required fields (pre-fix logins)
+      if (!parsed.pagePermissions || !Array.isArray(parsed.pagePermissions)) {
+        parsed.pagePermissions = AuthUtils.getPermissionsByRole(
+          parsed.role as UserRole,
+        );
+      }
+      if (!parsed.initials)
+        parsed.initials = AuthUtils.getInitials(parsed.name ?? "");
+      if (typeof parsed.isActive === "undefined") parsed.isActive = true;
+      parsed.id = String(parsed.id);
+      return parsed;
     } catch {
       localStorage.removeItem("user");
       return null;
@@ -92,10 +104,18 @@ export const AuthProvider = ({
 
   const [users, setUsers] = useState<AppUser[]>([]);
 
+<<<<<<< HEAD
   // Fetch users from backend after login — only for privileged roles
   useEffect(() => {
     if (!currentUser) return;
     if (!["admin", "super_admin", "dba"].includes(currentUser.role)) return;
+=======
+  // Fetch users from backend — only for privileged roles that have CanView on Users
+  useEffect(() => {
+    if (!currentUser) return;
+    const privilegedRoles = ["super_admin", "admin", "dba"];
+    if (!privilegedRoles.includes(currentUser.role)) return;
+>>>>>>> 67320e18799755a4dfbf3c08f2e0d0513327a309
 
     const token = localStorage.getItem("token");
     if (!token) return;
@@ -108,7 +128,6 @@ export const AuthProvider = ({
           email: u.email,
           role: u.role as UserRole,
           initials: AuthUtils.getInitials(u.name),
-          // use persisted permissions from DB, fall back to role defaults
           pagePermissions:
             Array.isArray(u.pagePermissions) && u.pagePermissions.length > 0
               ? u.pagePermissions
@@ -123,26 +142,42 @@ export const AuthProvider = ({
   }, [currentUser]);
 
   // ── LOGIN ──────────────────────────────────────────────────────────────────
-  const login = useCallback(
-    async (email: string, password: string) => {
-      try {
-        const data = await loginUser(email, password);
+  const login = useCallback(async (email: string, password: string) => {
+    try {
+      const data = await loginUser(email, password);
 
-        localStorage.setItem("token", data.token);
-        localStorage.setItem("user", JSON.stringify(data.user));
+      const userWithInitials = {
+        ...data.user,
+        id: String(data.user.id),
+        initials: AuthUtils.getInitials(data.user.name),
+        // Use DB-stored permissions for 'user' role; fall back to role-based defaults
+        // for privileged roles (super_admin / admin / dba) which always get FULL_ACCESS.
+        pagePermissions:
+          data.user.role === "user" &&
+          Array.isArray(data.user.pagePermissions) &&
+          data.user.pagePermissions.length > 0
+            ? data.user.pagePermissions
+            : AuthUtils.getPermissionsByRole(data.user.role),
+        isActive: true,
+      };
 
-        setCurrentUser(data.user);
+      localStorage.setItem("token", data.token);
+      localStorage.setItem("user", JSON.stringify(userWithInitials));
 
-        return { success: true, role: data.user.role };
-      } catch (err: any) {
-        return {
-          success: false,
-          error: err.response?.data?.message || "Login failed",
-        };
-      }
-    },
-    [],
-  );
+      setCurrentUser(userWithInitials);
+
+      return { success: true, role: data.user.role };
+    } catch (err: any) {
+      return {
+        success: false,
+        error:
+          err.response?.data?.error ||
+          err.response?.data?.message ||
+          err.message ||
+          "Login failed. Please check your credentials.",
+      };
+    }
+  }, []);
 
   // ── LOGOUT ─────────────────────────────────────────────────────────────────
   const logout = useCallback(async () => {

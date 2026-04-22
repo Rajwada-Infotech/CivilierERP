@@ -84,7 +84,7 @@ interface NavItem {
 
 // ── Finance module sidebar ──────────────────────────────────────────────────
 const buildFinanceNavItems = (overdueCount: number): NavItem[] => [
-  { label: "Amendments", icon: BarChart3, path: "/" },
+  { label: "Amendments", icon: BarChart3, path: "/finance" },
   {
     label: "Query",
     icon: Scale,
@@ -246,20 +246,6 @@ const buildAdminNavItems = (pendingCount: number): NavItem[] => [
       { label: "Password Reset", path: "/admin/security/password-reset" },
     ],
   },
-  // Role Master Setup
-  {
-    label: "Setup",
-    icon: Users,
-    sections: [
-      {
-        label: "Masters",
-        icon: Package,
-        items: [
-          { label: "Role Master", path: "/masters/role-master" },
-        ],
-      },
-    ],
-  },
   {
     label: "Communicator",
     icon: MessageSquare,
@@ -347,7 +333,7 @@ const DBA_NAV_ITEMS: NavItem[] = [
 // ── User sidebar ───────────────────────────────────────────────────────────
 const USER_NAV_ITEMS: NavItem[] = [
   { label: "My Profile", icon: User, path: "/user/profile" },
-  { label: "Dashboard", icon: BarChart3, path: "/" },
+  { label: "Dashboard", icon: BarChart3, path: "/home" },
 ];
 
 // NavButton Component
@@ -519,7 +505,8 @@ export const AppSidebar = () => {
       ADMIN_SETUP_PATHS.some((p) => location.pathname.startsWith(p)));
 
   const isSuperAdminPage =
-    hasAdminRole && location.pathname.startsWith("/superadmin");
+    currentUser?.role === "super_admin" &&
+    location.pathname.startsWith("/superadmin");
   const isDbaPage = hasAdminRole && location.pathname.startsWith("/dba");
   const isUserProfilePage = location.pathname.startsWith("/user/profile");
 
@@ -534,11 +521,14 @@ export const AppSidebar = () => {
       case "followup":
         return buildFollowupNavItems();
       default:
-        return [{ label: "Amendments", icon: BarChart3, path: "/" }];
+        return []; // no module selected — home page handles module picking
     }
   };
 
+  const isHomePage = location.pathname === "/home" || location.pathname === "/";
+
   const getNavItems = (): NavItem[] => {
+    if (isHomePage) return []; // no nav items on landing page
     if (isSuperAdminPage) return SUPER_ADMIN_NAV_ITEMS;
     if (isDbaPage) return DBA_NAV_ITEMS;
     if (isUserProfilePage) return USER_NAV_ITEMS;
@@ -583,7 +573,8 @@ export const AppSidebar = () => {
       return "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
     if (isUserProfilePage)
       return "bg-gray-500/10 text-gray-500 border-gray-500/20";
-    if (isAdminModule || isAdmin) return "bg-blue-500/10 text-blue-500 border-blue-500/20";
+    if (isAdminModule || isAdmin)
+      return "bg-blue-500/10 text-blue-500 border-blue-500/20";
     if (isFinance) return "bg-primary/10 text-primary border-primary/20";
     if (isMaterial)
       return "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
@@ -616,7 +607,7 @@ export const AppSidebar = () => {
 
   return (
     <aside
-      className={`fixed top-14 left-0 bottom-0 flex flex-col border-r border-sidebar-border bg-sidebar transition-[width] duration-300 ease-in-out z-40 ${
+      className={`h-full flex flex-col border-r border-sidebar-border bg-sidebar transition-[width] duration-300 ease-in-out ${
         collapsed ? "w-16" : "w-56"
       }`}
     >
@@ -674,4 +665,8 @@ export const AppSidebar = () => {
       </div>
     </aside>
   );
+<<<<<<< HEAD
 };
+=======
+};
+>>>>>>> 67320e18799755a4dfbf3c08f2e0d0513327a309

@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { Search, Edit, Trash2, Eye, EyeOff } from "lucide-react";
+import { Search, Edit, Trash2, Eye, EyeOff, ChevronDown } from "lucide-react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { getRoles } from "@/api/roleApi";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface User {
@@ -78,6 +79,11 @@ const Users = () => {
   const { data: allUsers = [], isLoading } = useQuery({
     queryKey: ["users"],
     queryFn: getUsers,
+  });
+
+  const { data: roles = [] } = useQuery({
+    queryKey: ["roles"],
+    queryFn: getRoles,
   });
 
   const addMutation = useMutation({
@@ -233,13 +239,27 @@ const Users = () => {
               <label className="text-xs text-muted-foreground mb-1 block">
                 Role
               </label>
-              <input
-                name="role"
-                placeholder="Role"
-                value={form.role}
-                onChange={handleChange}
-                className="w-full h-10 px-3 bg-input/70 border border-border rounded-md focus:ring-1 focus:ring-primary focus:border-primary outline-none"
-              />
+              <div className="relative">
+                <select
+                  name="role"
+                  value={form.role}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, role: e.target.value }))
+                  }
+                  className="w-full h-10 px-3 pr-9 bg-input/70 border border-border rounded-md focus:ring-1 focus:ring-primary focus:border-primary outline-none appearance-none text-sm text-foreground"
+                >
+                  <option value="">Select a role…</option>
+                  {roles.map((r) => (
+                    <option key={r.RId} value={r.RName}>
+                      {r.RName}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown
+                  size={14}
+                  className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                />
+              </div>
             </div>
             <div>
               <label className="text-xs text-muted-foreground mb-1 block">
