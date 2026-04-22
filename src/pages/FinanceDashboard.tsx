@@ -119,8 +119,12 @@ const StatCard = ({
         {value}
       </div>
       <div className="flex items-center gap-1 mt-1">
-        {trend === "up" && <ArrowUpRight size={13} className="text-emerald-500" />}
-        {trend === "down" && <ArrowDownRight size={13} className="text-destructive" />}
+        {trend === "up" && (
+          <ArrowUpRight size={13} className="text-emerald-500" />
+        )}
+        {trend === "down" && (
+          <ArrowDownRight size={13} className="text-destructive" />
+        )}
         <p className="text-xs text-muted-foreground">{sub}</p>
       </div>
     </CardContent>
@@ -141,7 +145,7 @@ const StatCardSkeleton = () => (
 );
 
 // ─── Main Dashboard ───────────────────────────────────────────────────────────
-const Dashboard = () => {
+const FinanceDashboard = () => {
   const navigate = useNavigate();
   const { currentUser } = useAuth();
   const { tasks, getOverdueTasks, getDueSoonTasks } = useTask();
@@ -149,7 +153,9 @@ const Dashboard = () => {
   const { data, isLoading, isError } = useQuery<DashboardData>({
     queryKey: ["financeDashboard"],
     queryFn: async () => {
-      const res = await fetch("/api/finance-dashboard", { headers: getAuthHeaders() });
+      const res = await fetch("/api/finance-dashboard", {
+        headers: getAuthHeaders(),
+      });
       if (!res.ok) throw new Error("Failed to fetch dashboard data");
       return res.json();
     },
@@ -160,13 +166,18 @@ const Dashboard = () => {
   // Task calculations (from old branch)
   const myTasks = React.useMemo(() => {
     if (!currentUser) return [];
-    if (currentUser.role === "super_admin" || currentUser.role === "admin") return tasks;
-    return tasks.filter((t) => t.assignedTo === currentUser.id || t.createdBy === currentUser.id);
+    if (currentUser.role === "super_admin" || currentUser.role === "admin")
+      return tasks;
+    return tasks.filter(
+      (t) => t.assignedTo === currentUser.id || t.createdBy === currentUser.id,
+    );
   }, [tasks, currentUser]);
 
   const overdueTasks = getOverdueTasks();
   const dueSoonTasks = getDueSoonTasks();
-  const openTasks = myTasks.filter((t) => t.status === "open" || t.status === "in_progress");
+  const openTasks = myTasks.filter(
+    (t) => t.status === "open" || t.status === "in_progress",
+  );
 
   const stats = data
     ? [
@@ -183,7 +194,10 @@ const Dashboard = () => {
           value: data.purchaseOrders.openCount.toString(),
           sub: `${fmt(data.purchaseOrders.openValue)} outstanding`,
           icon: ShoppingCart,
-          trend: data.purchaseOrders.openCount > 0 ? ("up" as const) : ("neutral" as const),
+          trend:
+            data.purchaseOrders.openCount > 0
+              ? ("up" as const)
+              : ("neutral" as const),
           onClick: () => navigate("/material/purchase-order"),
         },
         {
@@ -199,7 +213,10 @@ const Dashboard = () => {
           value: data.cheques.pendingCount.toString(),
           sub: `${data.cheques.totalCount} total cheques`,
           icon: BookOpen,
-          trend: data.cheques.pendingCount > 0 ? ("down" as const) : ("neutral" as const),
+          trend:
+            data.cheques.pendingCount > 0
+              ? ("down" as const)
+              : ("neutral" as const),
           onClick: () => navigate("/masters/cheque"),
         },
       ]
@@ -221,7 +238,9 @@ const Dashboard = () => {
       {/* Stat Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
         {isLoading
-          ? Array.from({ length: 4 }).map((_, i) => <StatCardSkeleton key={i} />)
+          ? Array.from({ length: 4 }).map((_, i) => (
+              <StatCardSkeleton key={i} />
+            ))
           : stats.map((s) => <StatCard key={s.label} {...s} />)}
       </div>
 
@@ -278,10 +297,14 @@ const Dashboard = () => {
             {/* Table content same as dev branch - kept as is */}
             {isLoading ? (
               <div className="p-4 space-y-3">
-                {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <Skeleton key={i} className="h-8 w-full" />
+                ))}
               </div>
             ) : (data?.recentPayments.length ?? 0) === 0 ? (
-              <div className="text-center text-muted-foreground py-10">No payments recorded yet</div>
+              <div className="text-center text-muted-foreground py-10">
+                No payments recorded yet
+              </div>
             ) : (
               <div className="overflow-x-auto">
                 <Table>
@@ -337,10 +360,14 @@ const Dashboard = () => {
             {/* Same as dev branch */}
             {isLoading ? (
               <div className="p-4 space-y-3">
-                {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-8 w-full" />)}
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <Skeleton key={i} className="h-8 w-full" />
+                ))}
               </div>
             ) : (data?.recentPOs.length ?? 0) === 0 ? (
-              <div className="text-center text-muted-foreground py-10">No purchase orders yet</div>
+              <div className="text-center text-muted-foreground py-10">
+                No purchase orders yet
+              </div>
             ) : (
               <div className="overflow-x-auto">
                 <Table>
@@ -355,7 +382,9 @@ const Dashboard = () => {
                   <TableBody>
                     {(data?.recentPOs ?? []).map((po: any) => (
                       <TableRow key={po.PurchaseOrderID}>
-                        <TableCell className="font-medium">{po.PurchaseOrderNo}</TableCell>
+                        <TableCell className="font-medium">
+                          {po.PurchaseOrderNo}
+                        </TableCell>
                         <TableCell className="truncate max-w-[140px] text-muted-foreground">
                           {po.SupplierName || "—"}
                         </TableCell>
@@ -369,8 +398,8 @@ const Dashboard = () => {
                               po.Status === "Closed"
                                 ? "border-emerald-500 text-emerald-600"
                                 : po.Status === "Approved"
-                                ? "border-blue-500 text-blue-600"
-                                : "border-amber-500 text-amber-600"
+                                  ? "border-blue-500 text-blue-600"
+                                  : "border-amber-500 text-amber-600"
                             }
                           >
                             {po.Status || "Draft"}
@@ -395,9 +424,17 @@ const Dashboard = () => {
         <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
             { label: "New Payment", icon: Receipt, path: "/payments" },
-            { label: "New PO", icon: ShoppingCart, path: "/material/purchase-order" },
+            {
+              label: "New PO",
+              icon: ShoppingCart,
+              path: "/material/purchase-order",
+            },
             { label: "New GRN", icon: Package, path: "/material/grn" },
-            { label: "Manage Suppliers", icon: Truck, path: "/masters/suppliers" },
+            {
+              label: "Manage Suppliers",
+              icon: Truck,
+              path: "/masters/suppliers",
+            },
           ].map(({ label, icon: Icon, path }) => (
             <button
               key={path}
@@ -416,4 +453,4 @@ const Dashboard = () => {
   );
 };
 
-export default Dashboard;
+export default FinanceDashboard;

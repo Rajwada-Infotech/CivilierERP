@@ -192,11 +192,20 @@ export const ActivityBrowserProvider: React.FC<{
         return;
       }
 
+<<<<<<< HEAD
       // Only admin/super_admin/dba can view activity logs
       const user = getStoredUser();
       if (!["admin", "super_admin", "dba"].includes(user.role)) {
         setRawSessions([]);
         setIsLoading(false);
+=======
+      // Only privileged roles have UserActivity CanView — skip silently for user role
+      try {
+        const stored = localStorage.getItem("user");
+        const role = stored ? JSON.parse(stored)?.role : null;
+        if (!["super_admin", "admin", "dba"].includes(role)) return;
+      } catch {
+>>>>>>> 67320e18799755a4dfbf3c08f2e0d0513327a309
         return;
       }
 
@@ -260,8 +269,19 @@ export const ActivityBrowserProvider: React.FC<{
     const token = localStorage.getItem("token");
     if (!token) return;
 
+<<<<<<< HEAD
     const user = getStoredUser();
     if (!["admin", "super_admin", "dba"].includes(user.role)) return;
+=======
+    // Only open SSE for privileged roles that have UserActivity CanView rights
+    try {
+      const stored = localStorage.getItem("user");
+      const role = stored ? JSON.parse(stored)?.role : null;
+      if (!["super_admin", "admin", "dba"].includes(role)) return;
+    } catch {
+      return;
+    }
+>>>>>>> 67320e18799755a4dfbf3c08f2e0d0513327a309
 
     sseSourceRef.current = subscribeToActivityStream((events) => {
       setRawSessions(events.map((e, i) => normalizeEvent(e, i)));

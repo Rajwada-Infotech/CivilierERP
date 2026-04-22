@@ -11,7 +11,7 @@ type Module = "finance" | "material" | "followup" | "admin" | null;
 
 // Single source of truth for module dashboard routes
 export const MODULE_DASHBOARD_ROUTES: Record<NonNullable<Module>, string> = {
-  finance: "/",
+  finance: "/finance",
   material: "/material",
   followup: "/followup",
   admin: "/admin/dashboard",
@@ -92,6 +92,10 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
     } else if (pathname.startsWith("/material")) {
       setActiveModuleState("material");
       localStorage.setItem("activeModule", "material");
+    } else if (pathname === "/home") {
+      // Landing page — clear active module so sidebar is neutral
+      setActiveModuleState(null);
+      localStorage.removeItem("activeModule");
     } else {
       // Ambiguous path — trust localStorage if valid, else default to finance
       if (stored && valid.includes(stored)) {

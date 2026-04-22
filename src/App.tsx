@@ -82,7 +82,7 @@ function PageSkeleton() {
 
 // ─── Lazy Pages ───────────────────────────────────────────────────────────────
 // Main Pages
-const Dashboard = lazy(() => import("./pages/Dashboard"));
+const FinanceDashboard = lazy(() => import("./pages/FinanceDashboard"));
 const Reports = lazy(() => import("./pages/Reports"));
 const Widgets = lazy(() => import("./pages/Widgets"));
 const CommandCenter = lazy(() => import("./pages/CommandCenter"));
@@ -135,11 +135,14 @@ const BillingTermsMaster = lazy(
   () => import("./pages/masters/BillingTermsMaster"),
 );
 const RoleMaster = lazy(() => import("./pages/masters/RoleMaster"));
+const Home = lazy(() => import("./pages/Home"));
 const TCMaster = lazy(() => import("./pages/material/T&CMaster"));
 const UnitOfMeasurementMaster = lazy(
   () => import("./pages/material/UnitOfMeasurementMaster"),
 );
-const BusinessUnitWrapper = lazy(() => import("./pages/masters/BusinessUnitWrapper"));
+const BusinessUnitWrapper = lazy(
+  () => import("./pages/masters/BusinessUnitWrapper"),
+);
 
 // Admin Pages
 const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
@@ -156,6 +159,8 @@ const ApprovalInbox = lazy(() => import("./pages/admin/ApprovalInbox"));
 const ApiIntegrationPage = lazy(() => import("./pages/admin/ApiIntegration"));
 const SignaturePage = lazy(() => import("./pages/admin/Signature"));
 const SuperAdminProfile = lazy(() => import("./pages/admin/SuperAdminProfile"));
+const AdminProfile = lazy(() => import("./pages/admin/AdminProfile"));
+const DBAProfile = lazy(() => import("./pages/dba/DBAProfile"));
 const MetricsDashboard = lazy(() => import("./pages/admin/MetricsDashboard"));
 const PasswordResetPage = lazy(
   () => import("./pages/admin/security/PasswordReset"),
@@ -307,10 +312,26 @@ function AppRoutes() {
 
       {/* MAIN */}
       <Route
+        path="/home"
+        element={
+          <ProtectedRoute>
+            <Home />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/"
         element={
           <ProtectedRoute>
-            <Dashboard />
+            <Home />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/finance"
+        element={
+          <ProtectedRoute>
+            <FinanceDashboard />
           </ProtectedRoute>
         }
       />
@@ -613,11 +634,11 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/masters/role-master"
+        path="/admin/masters/role-master"
         element={
-          <ProtectedRoute>
+          <AdminRoute>
             <RoleMaster />
-          </ProtectedRoute>
+          </AdminRoute>
         }
       />
       <Route
@@ -635,7 +656,7 @@ function AppRoutes() {
             <UnitOfMeasurementMaster />
           </ProtectedRoute>
         }
-      /> 
+      />
 
       {/* USER */}
       <Route
@@ -690,7 +711,7 @@ function AppRoutes() {
       />
 
       {/* ADMIN — bare /admin redirects to home */}
-<Route
+      <Route
         path="/admin"
         element={
           <AdminRoute>
@@ -782,7 +803,23 @@ function AppRoutes() {
         path="/admin/profile"
         element={
           <AdminRoute>
+            <AdminProfile />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/superadmin/profile"
+        element={
+          <AdminRoute>
             <SuperAdminProfile />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/dba/profile"
+        element={
+          <AdminRoute>
+            <DBAProfile />
           </AdminRoute>
         }
       />
