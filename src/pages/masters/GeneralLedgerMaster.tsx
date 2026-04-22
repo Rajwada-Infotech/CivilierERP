@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getAccountGroups } from "@/api/accountApi";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
@@ -74,11 +75,7 @@ const fetchLedgers = async ({
   if (search?.trim()) qs.set("search", search.trim());
   if (groupId) qs.set("groupId", groupId);
 
-  const res = await fetch(`${BASE_URL}?${qs.toString()}`, {
-    headers: {
-      Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
-    },
-  });
+  const res = await fetchWithAuth(`${BASE_URL}?${qs.toString()}`);
   if (!res.ok) throw new Error(`Failed to fetch ledgers: ${res.status}`);
   const payload = await res.json();
   if (Array.isArray(payload)) {
@@ -100,11 +97,10 @@ const fetchLedgers = async ({
 };
 
 const createLedger = async (data: LedgerForm) => {
-  const res = await fetch(BASE_URL, {
+  const res = await fetchWithAuth(BASE_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
     },
     body: JSON.stringify({
       LHeadName: data.LHeadName.trim(),
@@ -120,11 +116,10 @@ const createLedger = async (data: LedgerForm) => {
 };
 
 const updateLedger = async ({ id, data }: { id: number; data: LedgerForm }) => {
-  const res = await fetch(`${BASE_URL}/${id}`, {
+  const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
     },
       body: JSON.stringify({
       LHeadName: data.LHeadName.trim(),
@@ -140,9 +135,8 @@ const updateLedger = async ({ id, data }: { id: number; data: LedgerForm }) => {
 };
 
 const deleteLedger = async (id: number) => {
-  const res = await fetch(`${BASE_URL}/${id}`, {
+  const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
     method: "DELETE",
-    headers: { Authorization: `Bearer ${localStorage.getItem("token") ?? ""}` },
   });
   if (!res.ok) {
     const e = await res.json();

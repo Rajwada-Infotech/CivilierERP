@@ -11,6 +11,7 @@ export default defineConfig({
   },
   server: {
     port: 8080,
+    host: true,
     open: true,
     proxy: {
       // ── SSE route: dedicated entry BEFORE the generic /api catch-all ──────
