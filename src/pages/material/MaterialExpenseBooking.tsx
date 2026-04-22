@@ -925,7 +925,7 @@ async function apiFetch(url: string, opts?: RequestInit) {
 /** Map DB row → ExpenseRecord (frontend shape) */
 function dbToRecord(row: any): ExpenseRecord {
   return {
-    id: String(row.Eid),
+    id: String(row.Eid ?? row.eid ?? row.EID ?? ""),
     bookingReference: row.EDocNo ?? "",
     bookingDate: row.EDocDate ? row.EDocDate.slice(0, 10) : "",
     dueDate: row.EReminder ? row.EReminder.slice(0, 10) : "",

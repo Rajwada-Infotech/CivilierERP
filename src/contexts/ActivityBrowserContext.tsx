@@ -192,6 +192,14 @@ export const ActivityBrowserProvider: React.FC<{
         return;
       }
 
+      // Only admin/super_admin/dba can view activity logs
+      const user = getStoredUser();
+      if (!["admin", "super_admin", "dba"].includes(user.role)) {
+        setRawSessions([]);
+        setIsLoading(false);
+        return;
+      }
+
       try {
         setIsLoading(true);
 
@@ -251,6 +259,9 @@ export const ActivityBrowserProvider: React.FC<{
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) return;
+
+    const user = getStoredUser();
+    if (!["admin", "super_admin", "dba"].includes(user.role)) return;
 
     sseSourceRef.current = subscribeToActivityStream((events) => {
       setRawSessions(events.map((e, i) => normalizeEvent(e, i)));
