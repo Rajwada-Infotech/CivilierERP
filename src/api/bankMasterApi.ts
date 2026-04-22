@@ -64,7 +64,7 @@ export interface CompanyOption {
 }
 
 export const getCompanyOptions = async (): Promise<CompanyOption[]> => {
-  const res = await fetchWithAuth("/api/account-head/options?type=C");
+  const res = await fetchWithAuth("/api/enterprises/options");
   return handleResponse<CompanyOption[]>(res);
 };
 

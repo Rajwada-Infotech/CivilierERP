@@ -108,12 +108,8 @@ router.post("/login", async (req, res) => {
         id: user.id,
         name: user.name,
         email: user.email,
-        role: user.roleName,
-        roleId: user.RoleId,
-<<<<<<< HEAD
-=======
         role: normalizedRole,
->>>>>>> 29d867355f6214f453259329362bf048a99aa8e9
+        roleId: user.RoleId,
       },
     });
   } catch (err) {

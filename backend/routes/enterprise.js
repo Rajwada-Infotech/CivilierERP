@@ -226,12 +226,22 @@ router.post("/seed", async (req, res) => {
 router.get("/options", async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool
-      .request()
-      .query("SELECT id, name AS label FROM dbo.enterprise ORDER BY id");
+    const request = pool.request();
+
+    let query = "SELECT id, name AS label FROM dbo.enterprise";
+
+    if (req.query.type) {
+      query += " WHERE business_type = @type";
+      request.input("type", sql.NVarChar(50), req.query.type);
+    }
+
+    query += " ORDER BY name";
+
+    const result = await request.query(query);
     res.json(result.recordset);
   } catch (err) {
-    res.status(500).json({ error: err.message });
+    console.error("Enterprise options error:", err);
+    res.status(500).json({ error: "Failed to fetch enterprise options" });
   }
 });
 

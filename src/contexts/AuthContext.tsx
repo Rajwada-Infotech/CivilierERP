@@ -128,6 +128,7 @@ export const AuthProvider = ({
         const data = await loginUser(email, password);
 
         localStorage.setItem("token", data.token);
+        localStorage.setItem("user", JSON.stringify(data.user));
 
         setCurrentUser(data.user);
 

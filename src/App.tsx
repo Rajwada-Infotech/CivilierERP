@@ -85,6 +85,7 @@ function PageSkeleton() {
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Reports = lazy(() => import("./pages/Reports"));
 const Widgets = lazy(() => import("./pages/Widgets"));
+const CommandCenter = lazy(() => import("./pages/CommandCenter"));
 const Tasks = lazy(() => import("./pages/Tasks"));
 const Transactions = lazy(() => import("./pages/Transactions"));
 const Payment = lazy(() => import("./pages/Payment"));
@@ -332,6 +333,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <Widgets />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/command-center"
+        element={
+          <ProtectedRoute>
+            <CommandCenter />
           </ProtectedRoute>
         }
       />

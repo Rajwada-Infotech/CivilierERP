@@ -79,12 +79,12 @@ const BankMaster: React.FC = () => {
     isLoading,
     error,
   } = useQuery({
-    queryKey: ["banks"],
+    queryKey: ["bank-master"],
     queryFn: getBanks,
   });
 
   const { data: companies = [] } = useQuery<CompanyOption[]>({
-    queryKey: ["companyOptions"],
+    queryKey: ["enterprise-options"],
     queryFn: getCompanyOptions,
   });
 
@@ -148,7 +148,7 @@ const BankMaster: React.FC = () => {
         await addBank(toPayload(form));
         toast.success("Bank saved!");
       }
-      await queryClient.invalidateQueries({ queryKey: ["banks"] });
+      await queryClient.invalidateQueries({ queryKey: ["bank-master"] });
       setForm(EMPTY);
       setEditingId(null);
     } catch (err: any) {
@@ -179,7 +179,7 @@ const BankMaster: React.FC = () => {
     try {
       await deleteBank(id);
       toast.success("Bank deleted!");
-      await queryClient.invalidateQueries({ queryKey: ["banks"] });
+      await queryClient.invalidateQueries({ queryKey: ["bank-master"] });
       setDeleteId(null);
       if (editingId === id) {
         setEditingId(null);

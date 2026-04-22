@@ -176,6 +176,12 @@ export const PAGE_DEFINITIONS = [
   },
 ] as const;
 
+export const ADMIN_PATHS = [
+  "/masters/named-entry-type",
+  "/masters/type-of-doc",
+  "/masters/role-master"
+] as const;
+
 // ==================== TYPES ====================
 export type PageKey = (typeof PAGE_DEFINITIONS)[number]["key"];
 
