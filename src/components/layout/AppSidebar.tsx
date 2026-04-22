@@ -490,11 +490,14 @@ export const AppSidebar = () => {
       case "followup":
         return buildFollowupNavItems();
       default:
-        return [{ label: "Amendments", icon: BarChart3, path: "/" }];
+        return []; // no module selected — home page handles module picking
     }
   };
 
+  const isHomePage = location.pathname === "/home";
+
   const getNavItems = (): NavItem[] => {
+    if (isHomePage) return []; // no nav items on landing page
     if (isSuperAdminPage) return SUPER_ADMIN_NAV_ITEMS;
     if (isDbaPage) return DBA_NAV_ITEMS;
     if (isUserProfilePage) return USER_NAV_ITEMS;

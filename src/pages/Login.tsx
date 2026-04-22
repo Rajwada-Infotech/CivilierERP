@@ -24,22 +24,22 @@ const ROLE_HINTS = [
     color: "#8b5cf6",
   },
   {
-    role: "User (Active)",
-    email: "rajesh@civilier.com",
+    role: "User",
+    email: "shivam123@gmail.com",
     password: "user123",
     color: "#059669",
   },
   {
-    role: "User (Limited)",
-    email: "meena@civilier.com",
+    role: "User",
+    email: "rahul123@gmail.com",
     password: "user123",
     color: "#d97706",
   },
   {
-    role: "User (Inactive)",
-    email: "dinesh@civilier.com",
+    role: "User",
+    email: "rahul@gmail.com",
     password: "user123",
-    color: "#dc2626",
+    color: "#0ea5e9",
   },
 ];
 
@@ -773,14 +773,18 @@ export default function Login() {
       const result = await login(email, password);
       if (result.success) {
         const role = result.role;
+        // All roles land on /home first; /home redirects to role dashboards
         if (role === "dba") navigate("/dba", { replace: true });
-        else if (role === "super_admin") navigate("/superadmin", { replace: true });
-        else navigate("/", { replace: true });
+        else if (role === "super_admin")
+          navigate("/superadmin", { replace: true });
+        else navigate("/home", { replace: true });
       } else {
         setError(result.error || "Invalid email or password.");
       }
     } catch {
-      setError("Unable to connect. Please check your connection and try again.");
+      setError(
+        "Unable to connect. Please check your connection and try again.",
+      );
     } finally {
       setIsLoading(false);
     }
@@ -984,9 +988,25 @@ export default function Login() {
             >
               {isLoading ? (
                 <>
-                  <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                  <svg
+                    className="animate-spin h-4 w-4 text-white"
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8v8H4z"
+                    />
                   </svg>
                   Signing in…
                 </>

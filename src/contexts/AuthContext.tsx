@@ -143,7 +143,14 @@ export const AuthProvider = ({
         ...data.user,
         id: String(data.user.id),
         initials: AuthUtils.getInitials(data.user.name),
-        pagePermissions: AuthUtils.getPermissionsByRole(data.user.role),
+        // Use DB-stored permissions for 'user' role; fall back to role-based defaults
+        // for privileged roles (super_admin / admin / dba) which always get FULL_ACCESS.
+        pagePermissions:
+          data.user.role === "user" &&
+          Array.isArray(data.user.pagePermissions) &&
+          data.user.pagePermissions.length > 0
+            ? data.user.pagePermissions
+            : AuthUtils.getPermissionsByRole(data.user.role),
         isActive: true,
       };
 
