@@ -14,7 +14,11 @@ import {
   deletePayment,
 } from "@/api/newPaymentApi";
 import { toast } from "sonner";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
+
 import { Banknote, Clock, CheckCircle2 } from "lucide-react";
+import { StatusBadge } from "@/components/StatusBadge";
+import { ApprovalActions } from "@/components/ApprovalActions";
 
 interface DbPayment {
   PPaymentID: number;
@@ -29,17 +33,51 @@ interface DbPayment {
   PCompany: string | null;
 }
 
-const toPayload = (r: Record<string, unknown>) => ({
-  PPaymentName: (r.paymentName as string) || null,
-  PMode: (r.mode as string) || null,
-  PAmount: r.amount ? Number(r.amount) : null,
-  PDocType: (r.docType as string) || null,
-  PDate: (r.date as string) || null,
-  PBankID: r.bankId ? Number(r.bankId) : null,
-  PBankName: (r.bankName as string) || null,
-  PProject: (r.project as string) || null,
-  PCompany: (r.company as string) || null,
-});
+interface BankOption {
+  LHeadId: number;
+  LHeadName: string;
+}
+
+// ── Fetch banks from API ───────────────────────────────────────────────────────
+const fetchBanks = async (): Promise<BankOption[]> => {
+  const res = await fetchWithAuth("/api/bank-master");
+
+  if (!res.ok) throw new Error("Failed to fetch banks");
+  const data = await res.json();
+  // bank-master returns array of account heads with LHeadType = 'B'
+  return (Array.isArray(data) ? data : data.data ?? []).map((b: any) => ({
+    LHeadId: b.LHeadId,
+    LHeadName: b.LHeadName,
+  }));
+};
+
+const toPayload = (r: Record<string, unknown>) => {
+  // bankId is stored as "LHeadId|LHeadName" string from the select
+  // OR just the numeric ID if coming from existing record
+  let PBankID: number | null = null;
+  let PBankName: string | null = null;
+
+  if (r.bank && typeof r.bank === "string" && r.bank.includes("|")) {
+    const [idStr, name] = (r.bank as string).split("|");
+    PBankID = Number(idStr) || null;
+    PBankName = name || null;
+  } else if (r.bankId) {
+    PBankID = Number(r.bankId) || null;
+    PBankName = (r.bankName as string) || null;
+  }
+
+  return {
+    PPaymentName: (r.paymentName as string) || null,
+    PMode: (r.mode as string) || null,
+    PAmount: r.amount ? Number(r.amount) : null,
+    PDocType: (r.docType as string) || null,
+    PDate: (r.date as string) || null,
+    PBankID,
+    PBankName,
+    PProject: (r.project as string) || null,
+    PCompany: (r.company as string) || null,
+  };
+};
 
 // ── Mode badge renderer ────────────────────────────────────────────────────────
 function modeRenderer(value: unknown) {
@@ -97,6 +135,12 @@ const Payment: React.FC = () => {
     queryFn: getPayments,
   });
 
+  // Fetch banks for dropdown
+  const { data: banks = [] } = useQuery<BankOption[]>({
+    queryKey: ["banks-for-payment"],
+    queryFn: fetchBanks,
+  });
+
   const dbItems: DbPayment[] = Array.isArray(dbData) ? dbData : [];
 
   // ── Summary stats ────────────────────────────────────────────────────────────
@@ -111,10 +155,12 @@ const Payment: React.FC = () => {
     amount: item.PAmount ?? "",
     docType: item.PDocType || "",
     date: item.PDate?.slice(0, 10) || "",
+    bank: item.PBankID ? `${item.PBankID}|${item.PBankName || ""}` : "",
     bankId: item.PBankID ?? "",
     bankName: item.PBankName || "",
     project: item.PProject || "",
     company: item.PCompany || "",
+    status: (item as any).Status || "Draft",
   }));
 
   const handleDataEvent = async (event: DataChangeEvent) => {
@@ -157,7 +203,21 @@ const Payment: React.FC = () => {
         ₹{Number(value || 0).toLocaleString("en-IN")}
       </span>
     ),
+    status: (value, row) => (
+      <div className="flex flex-col gap-1.5">
+        <StatusBadge status={String(value || "Draft")} />
+        <ApprovalActions
+          status={String(value || "Draft")}
+          recordId={Number(row._id)}
+          endpoint="/api/new-payment"
+          onSuccess={() => queryClient.invalidateQueries({ queryKey: ["payments"] })}
+        />
+      </div>
+    ),
   };
+
+  // Build bank options as "LHeadId|LHeadName" strings so value carries both pieces
+  const bankOptions = banks.map((b) => `${b.LHeadId}|${b.LHeadName}`);
 
   if (isLoading)
     return <div className="p-6 text-muted-foreground">Loading...</div>;
@@ -248,8 +308,13 @@ const Payment: React.FC = () => {
             type: "number",
             required: true,
           },
-          { name: "bankName", label: "Bank Name", type: "text" },
-          { name: "bankId", label: "Bank ID", type: "number" },
+          {
+            // Single dropdown: value = "LHeadId|LHeadName", toPayload splits it
+            name: "bank",
+            label: "Bank",
+            type: "select",
+            options: bankOptions,
+          },
         ]}
         columns={[
           { key: "paymentName", label: "Payment Name" },
@@ -259,6 +324,7 @@ const Payment: React.FC = () => {
           { key: "amount", label: "Amount" },
           { key: "bankName", label: "Bank", hideOnMobile: true },
           { key: "docType", label: "Doc Type", hideOnMobile: true },
+          { key: "status", label: "Status" },
         ]}
         columnRenderers={columnRenderers}
         initialData={mappedData}

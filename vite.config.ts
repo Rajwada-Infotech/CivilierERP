@@ -11,6 +11,7 @@ export default defineConfig({
   },
   server: {
     port: 8080,
+    host: true,
     open: true,
     proxy: {
       // ── SSE route: dedicated entry BEFORE the generic /api catch-all ──────
@@ -25,7 +26,7 @@ export default defineConfig({
           proxy.on("error", (err, _req, res) => {
             // ECONNRESET when the browser tab closes is completely normal for
             // SSE — swallow it silently instead of spamming the console.
-            if (err.code !== "ECONNRESET") {
+            if ((err as NodeJS.ErrnoException).code !== "ECONNRESET") {
               console.log("SSE proxy error", err);
             }
             try {

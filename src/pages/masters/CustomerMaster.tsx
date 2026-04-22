@@ -26,12 +26,6 @@ const fields = [
   { name: "gst", label: "GST Number", type: "text", uppercase: true },
   { name: "pan", label: "PAN Number", type: "text", uppercase: true },
   {
-    name: "type",
-    label: "Customer Type",
-    type: "select",
-    options: ["Individual", "Company", "Government", "NGO", "Other"],
-  },
-  {
     name: "paymentTerms",
     label: "Payment Terms",
     type: "select",
@@ -71,8 +65,7 @@ const CustomerMaster: React.FC = () => {
       phone: item.LHeadPhone || "",
       email: item.LHeadEmail || "",
       gst: item.LGST || "",
-      pan: item.LDescription || "",
-      type: "Company",
+      pan: item.LHeadPan || "",
       paymentTerms: item.LHeadPaymentTerms || "",
       address: item.LHeadAddress || "",
       status: Boolean(item.LHeadStatus),
@@ -87,14 +80,15 @@ const CustomerMaster: React.FC = () => {
     LHeadPhone: r.phone || null,
     LHeadEmail: r.email || null,
     LGST: r.gst || null,
-    LDescription: r.pan || null,
+    LHeadPan: r.pan || null,
     LHeadPaymentTerms: r.paymentTerms || null,
     LHeadAddress: r.address || null,
     LHeadStatus: r.status !== false,
-    LBranchName: "Main",
+    LBranchName: null,
     LGSTState: null,
     LCountry: "India",
     LBelongsTo: null,
+    LDescription: null,
   });
 
   /* -------------------- CRUD HANDLER -------------------- */

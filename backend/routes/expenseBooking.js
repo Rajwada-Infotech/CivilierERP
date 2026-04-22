@@ -1,6 +1,15 @@
 const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
+const { cache } = require("../middleware/cache");
+
+const requireUserEmail = (req, res) => {
+  const email = req.user?.email;
+  if (!email) { res.status(401).json({ error: "User context missing" }); return null; }
+  return email;
+};
+const { bumpCacheVersion } = require("../redis");
+const { transition, guardEdit } = require("../services/approvalService");
 
 // ─────────────────────────────────────────────────────────────────────────────
 // IMPORTANT: /options MUST be declared before /:id so Express does not treat
@@ -28,13 +37,32 @@ router.get("/options", async (req, res) => {
 });
 
 // GET all
-router.get("/", async (req, res) => {
+router.get("/", cache("expense-booking", 300), async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool
-      .request()
-      .query("SELECT * FROM dbo.ExpenseBooking");
-    res.json(result.recordset);
+
+    // Sanitized pagination params
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const offset = (page - 1) * limit;
+
+    // Total count
+    const countResult = await pool.request().query("SELECT COUNT(*) AS total FROM dbo.ExpenseBooking");
+    const total = parseInt(countResult.recordset[0].total);
+
+    // Paginated data
+    const result = await pool.request()
+      .input('offset', sql.Int, offset)
+      .input('limit', sql.Int, limit)
+      .query("SELECT * FROM dbo.ExpenseBooking ORDER BY Eid DESC OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY");
+
+    res.json({
+      data: result.recordset,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit)
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -84,6 +112,7 @@ router.post("/", async (req, res) => {
           @ECreatedAt, @EUpdatedAt, @ECreatedBy, @EApprovedBy, @ECompanyId
         )
       `);
+    await bumpCacheVersion("expense-booking");
     res.json({ message: "Expense booked successfully" });
   } catch (err) {
     console.error("EXPENSE INSERT ERROR:", err.message);
@@ -94,6 +123,7 @@ router.post("/", async (req, res) => {
 // UPDATE
 router.put("/:id", async (req, res) => {
   const numericId = parseInt(req.params.id, 10);
+  await guardEdit("expense-booking", req.params.id);
   if (!Number.isFinite(numericId) || numericId <= 0) {
     return res.status(400).json({ error: "Invalid record id" });
   }
@@ -135,6 +165,7 @@ router.put("/:id", async (req, res) => {
           EStatus=@EStatus, EUpdatedAt=@EUpdatedAt, ECompanyId=@ECompanyId
         WHERE Eid=@Eid
       `);
+    await bumpCacheVersion("expense-booking");
     res.json({ message: "Expense updated successfully" });
   } catch (err) {
     console.error("EXPENSE UPDATE ERROR:", err.message);
@@ -155,10 +186,62 @@ router.delete("/:id", async (req, res) => {
       .request()
       .input("Eid", sql.Int, numericId)
       .query("DELETE FROM dbo.ExpenseBooking WHERE Eid=@Eid");
+    await bumpCacheVersion("expense-booking");
     res.json({ message: "Expense deleted successfully" });
   } catch (err) {
     console.error("EXPENSE DELETE ERROR:", err.message);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/submit — Draft → Pending ─────────────────────────────────────────
+router.put("/:id/submit", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+
+    const result = await transition("expense-booking", id, "Pending", userEmail, req.user?.role);
+    await bumpCacheVersion("expense-booking");
+    res.json({ message: "Expense submitted for approval", ...result });
+  } catch (err) {
+    console.error("Expense submit error:", err.message);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/approve — Pending → Approved ─────────────────────────────────────
+router.put("/:id/approve", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+
+    const result = await transition("expense-booking", id, "Approved", userEmail, req.user?.role);
+    await bumpCacheVersion("expense-booking");
+    res.json({ message: "Expense approved", ...result });
+  } catch (err) {
+    console.error("Expense approve error:", err.message);
+    const status = err.message.includes("not authorized") ? 403 : 400;
+    res.status(status).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/reject — Pending → Rejected ──────────────────────────────────────
+router.put("/:id/reject", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { note } = req.body;
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+
+    const result = await transition("expense-booking", id, "Rejected", userEmail, req.user?.role, note || null);
+    await bumpCacheVersion("expense-booking");
+    res.json({ message: "Expense rejected", ...result });
+  } catch (err) {
+    console.error("Expense reject error:", err.message);
+    const status = err.message.includes("not authorized") ? 403 : 400;
+    res.status(status).json({ error: err.message });
   }
 });
 

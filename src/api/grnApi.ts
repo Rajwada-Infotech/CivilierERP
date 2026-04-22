@@ -64,12 +64,60 @@ export interface GRNFormDataPayload {
   poNumber?: string;
 }
 
+export interface PaginatedResponse<T> {
+  data: T[];
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+}
+
+export interface PaginationQuery {
+  page?: number;
+  limit?: number;
+}
+
+const buildUrl = (base: string, params: Record<string, unknown> = {}) => {
+  const qs = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") {
+      qs.set(key, String(value));
+    }
+  });
+  const query = qs.toString();
+  return query ? `${base}?${query}` : base;
+};
+
+const normalizeArray = <T>(payload: any): T[] =>
+  Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : [];
+
+const normalizePaginated = <T>(payload: any): PaginatedResponse<T> => {
+  if (Array.isArray(payload)) {
+    return {
+      data: payload,
+      page: 1,
+      limit: payload.length,
+      total: payload.length,
+      totalPages: 1,
+    };
+  }
+  return {
+    data: normalizeArray<T>(payload),
+    page: Number(payload?.page || 1),
+    limit: Number(payload?.limit || payload?.data?.length || 0),
+    total: Number(payload?.total || payload?.data?.length || 0),
+    totalPages: Number(payload?.totalPages || 1),
+  };
+};
+
 // ====================== API Calls ======================
 
-export const getGRNs = async (): Promise<any[]> => {
-  const res = await fetch(BASE, { headers: getAuthHeaders() });
+export const getGRNs = async (
+  query: PaginationQuery = {},
+): Promise<PaginatedResponse<any>> => {
+  const res = await fetch(buildUrl(BASE, query), { headers: getAuthHeaders() });
   if (!res.ok) throw new Error("Failed to fetch GRNs");
-  return res.json();
+  return normalizePaginated(await res.json());
 };
 
 export const addGRN = async (data: GRNFormDataPayload) => {
@@ -128,12 +176,11 @@ export const getSuppliers = async (): Promise<Supplier[]> => {
 };
 
 export const getPurchaseOrders = async (): Promise<PurchaseOrder[]> => {
-  const res = await fetch("/api/purchase-orders", {
+  const res = await fetch(buildUrl("/api/purchase-orders", { limit: 100 }), {
     headers: getAuthHeaders(),
   });
   if (!res.ok) throw new Error("Failed to fetch Purchase Orders");
-  const data = await res.json();
-  return Array.isArray(data) ? data : [];
+  return normalizeArray<PurchaseOrder>(await res.json());
 };
 
 export const getItems = async (): Promise<Item[]> => {

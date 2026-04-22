@@ -1,17 +1,69 @@
 const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
+const { cache } = require("../middleware/cache");
+const { bumpCacheVersion } = require("../redis");
 
-router.get("/", async (req, res) => {
+let chequeColumnMetaPromise = null;
+
+async function getChequeColumnMeta() {
+  if (!chequeColumnMetaPromise) {
+    chequeColumnMetaPromise = getPool()
+      .request()
+      .query(`
+        SELECT COLUMN_NAME
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = 'dbo'
+          AND TABLE_NAME = 'ChequeMaster'
+      `)
+      .then((result) => {
+        const meta = new Set();
+        result.recordset.forEach((row) => meta.add(row.COLUMN_NAME.toLowerCase()));
+        return meta;
+      })
+      .catch(() => new Set());
+  }
+
+  return chequeColumnMetaPromise;
+}
+
+const hasColumn = (meta, columnName) => meta.has(columnName.toLowerCase());
+
+const requireUserEmail = (req, res) => {
+  const email = req.user?.email;
+  if (!email) {
+    res.status(401).json({ error: "User context missing" });
+    return null;
+  }
+  return email;
+};
+
+// GET all cheques
+// CreatedBy/UpdatedBy now store email strings directly — no JOIN needed
+router.get("/", cache("cheque-master", 300), async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query("SELECT * FROM dbo.ChequeMaster");
+    const columnMeta = await getChequeColumnMeta();
+
+    const selectColumns = ["cm.*"];
+
+    // CreatedBy/UpdatedBy store emails directly — just alias them
+    if (hasColumn(columnMeta, "createdby")) selectColumns.push("cm.CreatedBy AS CreatedByEmail");
+    if (hasColumn(columnMeta, "updatedby")) selectColumns.push("cm.UpdatedBy AS UpdatedByEmail");
+
+    const result = await pool.request().query(`
+      SELECT ${selectColumns.join(", ")}
+      FROM dbo.ChequeMaster cm
+    `);
+
     res.json(result.recordset);
   } catch (err) {
+    console.error("CHEQUE GET ERROR:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
+// POST - Create cheque lot
 router.post("/", async (req, res) => {
   const {
     CompanyId,
@@ -24,37 +76,65 @@ router.post("/", async (req, res) => {
     Remarks,
     Status,
   } = req.body;
+
   try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+
     const pool = getPool();
-    await pool
+    const columnMeta = await getChequeColumnMeta();
+
+    const request = pool
       .request()
-      .input("CompanyId", sql.Int, CompanyId || null)
-      .input("BankId", sql.Int, BankId || null)
-      .input("AccountNumber", sql.NVarChar, AccountNumber || null)
-      .input("IFSCCode", sql.NVarChar, IFSCCode || null)
-      .input("ChequeLotNumber", sql.NVarChar, ChequeLotNumber || null)
-      .input("ChequeStartNumber", sql.BigInt, ChequeStartNumber || null)
-      .input("ChequeEndNumber", sql.BigInt, ChequeEndNumber || null)
-      .input("Remarks", sql.NVarChar, Remarks || null)
-      .input("Status", sql.Bit, Status ? 1 : 0)
-      .input("CreatedBy", sql.Int, 1)
-      .input("CreatedAt", sql.DateTime2, new Date()).query(`
-        INSERT INTO dbo.ChequeMaster (
-          CompanyId, BankId, AccountNumber, IFSCCode, ChequeLotNumber,
-          ChequeStartNumber, ChequeEndNumber, Remarks,
-          Status, CreatedBy, CreatedAt
-        ) VALUES (
-          @CompanyId, @BankId, @AccountNumber, @IFSCCode, @ChequeLotNumber,
-          @ChequeStartNumber, @ChequeEndNumber, @Remarks,
-          @Status, @CreatedBy, @CreatedAt
-        )
-      `);
+      .input("CompanyId",         sql.Int,      CompanyId || null)
+      .input("BankId",            sql.Int,      BankId || null)
+      .input("AccountNumber",     sql.NVarChar, AccountNumber || null)
+      .input("IFSCCode",          sql.NVarChar, IFSCCode || null)
+      .input("ChequeLotNumber",   sql.NVarChar, ChequeLotNumber || null)
+      .input("ChequeStartNumber", sql.BigInt,   ChequeStartNumber || null)
+      .input("ChequeEndNumber",   sql.BigInt,   ChequeEndNumber || null)
+      .input("Remarks",           sql.NVarChar, Remarks || null)
+      .input("Status",            sql.Bit,      Status ? 1 : 0);
+
+    const insertColumns = [
+      "CompanyId", "BankId", "AccountNumber", "IFSCCode",
+      "ChequeLotNumber", "ChequeStartNumber", "ChequeEndNumber",
+      "Remarks", "Status",
+    ];
+    const insertValues = insertColumns.map((col) => `@${col}`);
+
+    // TotalCheques is computed as ((ChequeEndNumber - ChequeStartNumber) + 1)
+    // DB calculates it automatically — NEVER insert or update it
+
+    if (hasColumn(columnMeta, "createdby")) {
+      request.input("CreatedBy", sql.NVarChar(100), userEmail);
+      insertColumns.push("CreatedBy");
+      insertValues.push("@CreatedBy");
+    }
+
+    if (hasColumn(columnMeta, "createdat")) {
+      request.input("CreatedAt", sql.DateTime2, new Date());
+      insertColumns.push("CreatedAt");
+      insertValues.push("@CreatedAt");
+    }
+
+    await request.query(`
+      INSERT INTO dbo.ChequeMaster (
+        ${insertColumns.join(", ")}
+      ) VALUES (
+        ${insertValues.join(", ")}
+      )
+    `);
+
+    await bumpCacheVersion("cheque-master");
     res.json({ message: "Cheque lot added" });
   } catch (err) {
+    console.error("CHEQUE INSERT ERROR:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
+// PUT - Update cheque lot
 router.put("/:id", async (req, res) => {
   const {
     CompanyId,
@@ -67,36 +147,66 @@ router.put("/:id", async (req, res) => {
     Remarks,
     Status,
   } = req.body;
+
   try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+
     const pool = getPool();
-    await pool
+    const columnMeta = await getChequeColumnMeta();
+
+    const request = pool
       .request()
-      .input("CId", sql.Int, req.params.id)
-      .input("CompanyId", sql.Int, CompanyId || null)
-      .input("BankId", sql.Int, BankId || null)
-      .input("AccountNumber", sql.NVarChar, AccountNumber || null)
-      .input("IFSCCode", sql.NVarChar, IFSCCode || null)
-      .input("ChequeLotNumber", sql.NVarChar, ChequeLotNumber || null)
-      .input("ChequeStartNumber", sql.BigInt, ChequeStartNumber || null)
-      .input("ChequeEndNumber", sql.BigInt, ChequeEndNumber || null)
-      .input("Remarks", sql.NVarChar, Remarks || null)
-      .input("Status", sql.Bit, Status ? 1 : 0)
-      .input("UpdatedBy", sql.Int, 1)
-      .input("UpdatedAt", sql.DateTime2, new Date()).query(`
-        UPDATE dbo.ChequeMaster SET
-          CompanyId=@CompanyId, BankId=@BankId, AccountNumber=@AccountNumber,
-          IFSCCode=@IFSCCode, ChequeLotNumber=@ChequeLotNumber,
-          ChequeStartNumber=@ChequeStartNumber, ChequeEndNumber=@ChequeEndNumber,
-          Remarks=@Remarks, Status=@Status,
-          UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt
-        WHERE CId=@CId
-      `);
+      .input("CId",               sql.Int,      req.params.id)
+      .input("CompanyId",         sql.Int,      CompanyId || null)
+      .input("BankId",            sql.Int,      BankId || null)
+      .input("AccountNumber",     sql.NVarChar, AccountNumber || null)
+      .input("IFSCCode",          sql.NVarChar, IFSCCode || null)
+      .input("ChequeLotNumber",   sql.NVarChar, ChequeLotNumber || null)
+      .input("ChequeStartNumber", sql.BigInt,   ChequeStartNumber || null)
+      .input("ChequeEndNumber",   sql.BigInt,   ChequeEndNumber || null)
+      .input("Remarks",           sql.NVarChar, Remarks || null)
+      .input("Status",            sql.Bit,      Status ? 1 : 0);
+
+    const updates = [
+      "CompanyId=@CompanyId",
+      "BankId=@BankId",
+      "AccountNumber=@AccountNumber",
+      "IFSCCode=@IFSCCode",
+      "ChequeLotNumber=@ChequeLotNumber",
+      "ChequeStartNumber=@ChequeStartNumber",
+      "ChequeEndNumber=@ChequeEndNumber",
+      "Remarks=@Remarks",
+      "Status=@Status",
+    ];
+
+    // TotalCheques is computed — DB recalculates automatically, NEVER update it
+
+    if (hasColumn(columnMeta, "updatedby")) {
+      request.input("UpdatedBy", sql.NVarChar(100), userEmail);
+      updates.push("UpdatedBy=@UpdatedBy");
+    }
+
+    if (hasColumn(columnMeta, "updatedat")) {
+      request.input("UpdatedAt", sql.DateTime2, new Date());
+      updates.push("UpdatedAt=@UpdatedAt");
+    }
+
+    await request.query(`
+      UPDATE dbo.ChequeMaster SET
+        ${updates.join(",\n        ")}
+      WHERE CId=@CId
+    `);
+
+    await bumpCacheVersion("cheque-master");
     res.json({ message: "Cheque lot updated" });
   } catch (err) {
+    console.error("CHEQUE UPDATE ERROR:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
+// DELETE - Remove cheque lot
 router.delete("/:id", async (req, res) => {
   try {
     const pool = getPool();
@@ -104,8 +214,10 @@ router.delete("/:id", async (req, res) => {
       .request()
       .input("CId", sql.Int, req.params.id)
       .query("DELETE FROM dbo.ChequeMaster WHERE CId=@CId");
+    await bumpCacheVersion("cheque-master");
     res.json({ message: "Cheque lot deleted" });
   } catch (err) {
+    console.error("CHEQUE DELETE ERROR:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

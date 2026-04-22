@@ -16,26 +16,46 @@ const LOCKOUT_SECONDS = 15 * 60;
 // ROLE NORMALIZER - Root Cause Fix
 // ======================
 const normalizeRole = (role) => {
-  if (!role || typeof role !== "string") return "";
+  if (!role || typeof role !== "string") return "user";
 
   const r = role.trim().toLowerCase();
 
   const roleMap = {
+    // super_admin variants
     sa: "super_admin",
     "super admin": "super_admin",
     superadmin: "super_admin",
     super_admin: "super_admin",
+    "super administrator": "super_admin",
 
+    // dba variants
     dba: "dba",
     "db admin": "dba",
     "database admin": "dba",
+    "database administrator": "dba",
     db_admin: "dba",
+    "db administrator": "dba",
 
+    // admin variants
     admin: "admin",
     administrator: "admin",
+    "system admin": "admin",
+    "system administrator": "admin",
+
+    // user variants
+    user: "user",
+    "standard user": "user",
+    employee: "user",
+    staff: "user",
   };
 
-  return roleMap[r] || r.replace(/\s+/g, "_");
+  const mapped = roleMap[r];
+  if (!mapped) {
+    console.warn(
+      `[normalizeRole] Unrecognised role string: "${role}" — defaulting to "user"`,
+    );
+  }
+  return mapped || "user";
 };
 
 // ======================
@@ -62,7 +82,7 @@ router.post("/login", async (req, res) => {
     const result = await pool.request().input("email", sql.NVarChar, email)
       .query(`
         SELECT u.id, u.name, u.email, u.RoleId, u.password, u.discontinue,
-               r.RName AS roleName
+               r.RName AS roleName, u.page_permissions
         FROM dbo.users u
         LEFT JOIN dbo.Role r ON u.RoleId = r.RId
         WHERE u.email = @email
@@ -96,10 +116,24 @@ router.post("/login", async (req, res) => {
         roleId: user.RoleId,
         role: normalizedRole,
         email: user.email,
+        name: user.name,
       },
       process.env.JWT_SECRET,
       { expiresIn: "7d" },
     );
+
+    // Parse stored page_permissions JSON (only relevant for role = 'user')
+    let pagePermissions = null;
+    if (user.page_permissions) {
+      try {
+        pagePermissions = JSON.parse(user.page_permissions);
+      } catch {
+        console.warn(
+          "[Login] Failed to parse page_permissions for user",
+          user.id,
+        );
+      }
+    }
 
     res.json({
       success: true,
@@ -108,8 +142,9 @@ router.post("/login", async (req, res) => {
         id: user.id,
         name: user.name,
         email: user.email,
-        roleId: user.RoleId,
         role: normalizedRole,
+        roleId: user.RoleId,
+        pagePermissions, // null for privileged roles, array for 'user' role
       },
     });
   } catch (err) {

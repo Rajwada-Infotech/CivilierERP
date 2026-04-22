@@ -1,8 +1,15 @@
 const express = require("express");
 const { cache } = require("../middleware/cache");
-const { redisDelPattern } = require("../redis");
+const { bumpCacheVersion } = require("../redis");
+const { transition, guardEdit } = require("../services/approvalService");
 const router = express.Router();
 const { getPool, sql } = require("../db");
+
+const requireUserEmail = (req, res) => {
+  const email = req.user?.email;
+  if (!email) { res.status(401).json({ error: "User context missing" }); return null; }
+  return email;
+};
 
 // =============================================
 //  WORK ORDER HEADER  —  /api/work-orders
@@ -12,7 +19,28 @@ const { getPool, sql } = require("../db");
 router.get("/", cache("work-orders", 300), async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query(`
+
+    // Sanitized pagination params
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const offset = (page - 1) * limit;
+
+    // Total count (matching GROUP BY structure)
+    const countResult = await pool.request().query(`
+      SELECT COUNT(DISTINCT h.Id) AS total
+      FROM dbo.WorkOrderHeader h
+      LEFT JOIN dbo.enterprise        ec  ON ec.id       = h.CompanyId
+      LEFT JOIN dbo.enterprise        ep  ON ep.id       = h.ProjectId
+      LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = h.ContractorId
+      LEFT JOIN dbo.WorkOrderActivities a  ON a.WorkOrderHeaderId = h.Id
+    `);
+    const total = parseInt(countResult.recordset[0].total);
+
+    // Paginated data
+    const result = await pool.request()
+      .input('offset', sql.Int, offset)
+      .input('limit', sql.Int, limit)
+      .query(`
       SELECT
         h.Id,
         h.DocumentNumber,
@@ -43,15 +71,23 @@ router.get("/", cache("work-orders", 300), async (req, res) => {
         h.CreatedBy, h.UpdatedBy,
         ec.name, ep.name, ahm.LHeadName
       ORDER BY h.CreatedAt DESC
+      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
     `);
-    res.json(result.recordset);
+
+    res.json({
+      data: result.recordset,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit)
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
 // GET single work order — full nested tree (header + activities + materials)
-router.get("/:id", async (req, res) => {
+router.get("/:id", cache("work-orders", 300), async (req, res) => {
   try {
     const pool = getPool();
 
@@ -104,8 +140,7 @@ router.get("/:id", async (req, res) => {
         INNER JOIN dbo.WorkOrderActivities  a   ON a.Id    = m.WorkOrderActivityId
         LEFT JOIN  dbo.Item_Master_Group    img ON img.M_Id = m.ItemId
         LEFT JOIN  dbo.UOMMaster            uom ON uom.Id  = m.UOMId
-        LEFT JOIN  dbo.users                uc  ON uc.id   = m.CreatedBy
-        LEFT JOIN  dbo.users                uu  ON uu.id   = m.UpdatedBy
+        -- CreatedBy/UpdatedBy now store email directly
         WHERE a.WorkOrderHeaderId = @WorkOrderHeaderId
         ORDER BY m.WorkOrderActivityId, m.Id
       `);
@@ -153,7 +188,7 @@ router.post("/", async (req, res) => {
       .input("TotalAmount", sql.Decimal(18, 2), TotalAmount || 0)
       .input("Remarks", sql.NVarChar, Remarks || null)
       .input("TermsAndConditions", sql.NVarChar, TermsAndConditions || null)
-      .input("CreatedBy", sql.Int, CreatedBy || 1)
+      .input("CreatedBy", sql.NVarChar(100), req.user?.email || null)
       .input("CreatedAt", sql.DateTime, new Date()).query(`
         INSERT INTO dbo.WorkOrderHeader
           (CompanyId, ProjectId, DocumentNumber, DocumentDate, ContractorId,
@@ -163,6 +198,7 @@ router.post("/", async (req, res) => {
           (@CompanyId, @ProjectId, @DocumentNumber, @DocumentDate, @ContractorId,
            @TotalAmount, @Remarks, @TermsAndConditions, @CreatedBy, @CreatedAt)
       `);
+    await bumpCacheVersion("work-orders");
     res
       .status(201)
       .json({ message: "Work order created", Id: result.recordset[0].Id });
@@ -173,6 +209,11 @@ router.post("/", async (req, res) => {
 
 // PUT — update header
 router.put("/:id", async (req, res) => {
+  try {
+    await guardEdit("work-orders", req.params.id);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
   const {
     CompanyId,
     ProjectId,
@@ -197,7 +238,7 @@ router.put("/:id", async (req, res) => {
       .input("TotalAmount", sql.Decimal(18, 2), TotalAmount || 0)
       .input("Remarks", sql.NVarChar, Remarks || null)
       .input("TermsAndConditions", sql.NVarChar, TermsAndConditions || null)
-      .input("UpdatedBy", sql.Int, UpdatedBy || 1)
+      .input("UpdatedBy", sql.NVarChar(100), req.user?.email || null)
       .input("UpdatedAt", sql.DateTime, new Date()).query(`
         UPDATE dbo.WorkOrderHeader SET
           CompanyId=@CompanyId, ProjectId=@ProjectId,
@@ -207,7 +248,7 @@ router.put("/:id", async (req, res) => {
           UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt
         WHERE Id=@Id
       `);
-    await redisDelPattern("cache:work-orders:*");
+    await bumpCacheVersion("work-orders");
     res.json({ message: "Work order updated" });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -234,7 +275,7 @@ router.delete("/:id", async (req, res) => {
       .request()
       .input("Id", sql.Int, req.params.id)
       .query("DELETE FROM dbo.WorkOrderHeader WHERE Id = @Id");
-    await redisDelPattern("cache:work-orders:*");
+    await bumpCacheVersion("work-orders");
     res.json({ message: "Work order and all related records deleted" });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -246,7 +287,7 @@ router.delete("/:id", async (req, res) => {
 // =============================================
 
 // GET all activities for a header
-router.get("/:id/activities", async (req, res) => {
+router.get("/:id/activities", cache("work-orders", 300), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool
@@ -314,6 +355,7 @@ router.post("/:id/activities", async (req, res) => {
           (@WorkOrderHeaderId, @ActivityGroupId, @ActivityId, @UOMId,
            @Rate, @Area, @LabourAmount, @MaterialAmount, @GrandTotal, @Remarks, @CreatedAt)
       `);
+    await bumpCacheVersion("work-orders");
     res
       .status(201)
       .json({ message: "Activity added", Id: result.recordset[0].Id });
@@ -355,7 +397,7 @@ router.put("/:id/activities/:activityId", async (req, res) => {
           MaterialAmount=@MaterialAmount, GrandTotal=@GrandTotal, Remarks=@Remarks
         WHERE Id=@Id
       `);
-    await redisDelPattern("cache:work-orders:*");
+    await bumpCacheVersion("work-orders");
     res.json({ message: "Activity updated" });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -376,7 +418,7 @@ router.delete("/:id/activities/:activityId", async (req, res) => {
       .request()
       .input("Id", sql.Int, req.params.activityId)
       .query("DELETE FROM dbo.WorkOrderActivities WHERE Id = @Id");
-    await redisDelPattern("cache:work-orders:*");
+    await bumpCacheVersion("work-orders");
     res.json({ message: "Activity and its materials deleted" });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -388,7 +430,7 @@ router.delete("/:id/activities/:activityId", async (req, res) => {
 // =============================================
 
 // GET all materials for an activity
-router.get("/:id/activities/:activityId/materials", async (req, res) => {
+router.get("/:id/activities/:activityId/materials", cache("work-orders", 300), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool
@@ -403,8 +445,7 @@ router.get("/:id/activities/:activityId/materials", async (req, res) => {
         FROM dbo.WorkOrderActivityMaterials m
         LEFT JOIN dbo.Item_Master_Group img ON img.M_Id = m.ItemId
         LEFT JOIN dbo.UOMMaster         uom ON uom.Id   = m.UOMId
-        LEFT JOIN dbo.users             uc  ON uc.id    = m.CreatedBy
-        LEFT JOIN dbo.users             uu  ON uu.id    = m.UpdatedBy
+        -- CreatedBy/UpdatedBy now store email directly
         WHERE m.WorkOrderActivityId = @WorkOrderActivityId
         ORDER BY m.Id
       `);
@@ -427,7 +468,7 @@ router.post("/:id/activities/:activityId/materials", async (req, res) => {
       .input("Quantity", sql.Decimal(18, 2), Quantity || null)
       .input("Rate", sql.Decimal(18, 2), Rate || null)
       .input("Remarks", sql.NVarChar, Remarks || null)
-      .input("CreatedBy", sql.Int, CreatedBy || 1)
+      .input("CreatedBy", sql.NVarChar(100), req.user?.email || null)
       .input("CreatedAt", sql.DateTime2, new Date()).query(`
         INSERT INTO dbo.WorkOrderActivityMaterials
           (WorkOrderActivityId, ItemId, UOMId, Quantity, Rate, Remarks, CreatedBy, CreatedAt)
@@ -435,6 +476,7 @@ router.post("/:id/activities/:activityId/materials", async (req, res) => {
         VALUES
           (@WorkOrderActivityId, @ItemId, @UOMId, @Quantity, @Rate, @Remarks, @CreatedBy, @CreatedAt)
       `);
+    await bumpCacheVersion("work-orders");
     res
       .status(201)
       .json({ message: "Material added", Id: result.recordset[0].Id });
@@ -458,7 +500,7 @@ router.put(
         .input("Quantity", sql.Decimal(18, 2), Quantity || null)
         .input("Rate", sql.Decimal(18, 2), Rate || null)
         .input("Remarks", sql.NVarChar, Remarks || null)
-        .input("UpdatedBy", sql.Int, UpdatedBy || 1)
+        .input("UpdatedBy", sql.NVarChar(100), req.user?.email || null)
         .input("UpdatedAt", sql.DateTime2, new Date()).query(`
           UPDATE dbo.WorkOrderActivityMaterials SET
             ItemId=@ItemId, UOMId=@UOMId, Quantity=@Quantity,
@@ -466,7 +508,7 @@ router.put(
             UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt
           WHERE Id=@Id
         `);
-      await redisDelPattern("cache:work-orders:*");
+      await bumpCacheVersion("work-orders");
       res.json({ message: "Material updated" });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -484,7 +526,7 @@ router.delete(
         .request()
         .input("Id", sql.Int, req.params.materialId)
         .query("DELETE FROM dbo.WorkOrderActivityMaterials WHERE Id = @Id");
-      await redisDelPattern("cache:work-orders:*");
+      await bumpCacheVersion("work-orders");
       res.json({ message: "Material deleted" });
     } catch (err) {
       res.status(500).json({ error: err.message });
@@ -534,7 +576,7 @@ router.post("/:id/save-full", async (req, res) => {
         sql.NVarChar,
         header.TermsAndConditions || null,
       )
-      .input("UpdatedBy", sql.Int, header.UpdatedBy || 1)
+      .input("UpdatedBy", sql.NVarChar(100), req.user?.email || null)
       .input("UpdatedAt", sql.DateTime, new Date()).query(`
         UPDATE dbo.WorkOrderHeader SET
           CompanyId=@CompanyId, ProjectId=@ProjectId,
@@ -622,7 +664,7 @@ router.post("/:id/save-full", async (req, res) => {
             .input("Quantity", sql.Decimal(18, 2), mat.Quantity || null)
             .input("Rate", sql.Decimal(18, 2), mat.Rate || null)
             .input("Remarks", sql.NVarChar, mat.Remarks || null)
-            .input("CreatedBy", sql.Int, mat.CreatedBy || 1)
+            .input("CreatedBy", sql.NVarChar(100), req.user?.email || null)
             .input("CreatedAt", sql.DateTime2, new Date()).query(`
               INSERT INTO dbo.WorkOrderActivityMaterials
                 (WorkOrderActivityId, ItemId, UOMId, Quantity, Rate, Remarks, CreatedBy, CreatedAt)
@@ -640,7 +682,7 @@ router.post("/:id/save-full", async (req, res) => {
             .input("Quantity", sql.Decimal(18, 2), mat.Quantity || null)
             .input("Rate", sql.Decimal(18, 2), mat.Rate || null)
             .input("Remarks", sql.NVarChar, mat.Remarks || null)
-            .input("UpdatedBy", sql.Int, mat.UpdatedBy || 1)
+            .input("UpdatedBy", sql.NVarChar(100), req.user?.email || null)
             .input("UpdatedAt", sql.DateTime2, new Date()).query(`
               UPDATE dbo.WorkOrderActivityMaterials SET
                 ItemId=@ItemId, UOMId=@UOMId, Quantity=@Quantity,
@@ -700,13 +742,64 @@ router.post("/:id/save-full", async (req, res) => {
         );
     }
 
-    await redisDelPattern("cache:work-orders:*");
+    await bumpCacheVersion("work-orders");
     res.json({
       message: "Work order saved successfully",
       activityCount: safeActivityIds.length,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/submit — Draft → Pending ─────────────────────────────────────────
+router.put("/:id/submit", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+
+    const result = await transition("work-orders", id, "Pending", userEmail, req.user?.role);
+    await bumpCacheVersion("work-orders");
+    res.json({ message: "Work order submitted for approval", ...result });
+  } catch (err) {
+    console.error("WO submit error:", err.message);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/approve — Pending → Approved ─────────────────────────────────────
+router.put("/:id/approve", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+
+    const result = await transition("work-orders", id, "Approved", userEmail, req.user?.role);
+    await bumpCacheVersion("work-orders");
+    res.json({ message: "Work order approved", ...result });
+  } catch (err) {
+    console.error("WO approve error:", err.message);
+    const status = err.message.includes("not authorized") ? 403 : 400;
+    res.status(status).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/reject — Pending → Rejected ──────────────────────────────────────
+router.put("/:id/reject", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { note } = req.body;
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+
+    const result = await transition("work-orders", id, "Rejected", userEmail, req.user?.role, note || null);
+    await bumpCacheVersion("work-orders");
+    res.json({ message: "Work order rejected", ...result });
+  } catch (err) {
+    console.error("WO reject error:", err.message);
+    const status = err.message.includes("not authorized") ? 403 : 400;
+    res.status(status).json({ error: err.message });
   }
 });
 

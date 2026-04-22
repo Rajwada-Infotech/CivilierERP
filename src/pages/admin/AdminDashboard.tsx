@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
@@ -13,13 +14,12 @@ import { Badge } from "@/components/ui/badge";
 import { Shield, Lock } from "lucide-react";
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
-interface User {
+interface AdminUser {
   id: number;
   name: string;
   email: string;
-  role: string;
   created_datetime: string;
-  discontinue: boolean;
+  discontinue: number;
 }
 
 interface ActivityRow {
@@ -42,10 +42,7 @@ interface DashboardStats {
 }
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
-const getAuthHeaders = () => ({
-  "Content-Type": "application/json",
-  Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
-});
+
 
 const getRelativeTime = (timestamp: string) => {
   const diffMinutes = Math.floor(
@@ -83,52 +80,40 @@ export default function AdminDashboard() {
     inactiveUsers: 0,
     recentActions: 0,
   });
-  const [recentUsers, setRecentUsers] = useState<User[]>([]);
+  const [recentUsers, setRecentUsers] = useState<AdminUser[]>([]);
   const [recentActivities, setRecentActivities] = useState<ActivityRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
 
-  const fetchDashboardData = async () => {
+const fetchDashboardData = async () => {
     setLoading(true);
     setError(null);
     try {
-      // Fetch users and recent activity in parallel
-      const [usersRes, activityRes] = await Promise.all([
-        fetch("/api/users", { headers: getAuthHeaders() }),
-        fetch("/api/user-activity?limit=6&page=1", {
-          headers: getAuthHeaders(),
-        }),
+      const [dashRes, activityRes] = await Promise.all([
+        fetchWithAuth("/api/admin-dashboard"),
+        fetchWithAuth("/api/user-activity?limit=6&page=1"),
       ]);
 
-      if (!usersRes.ok) throw new Error("Failed to fetch users");
+      if (!dashRes.ok) throw new Error("Failed to fetch dashboard");
       if (!activityRes.ok) throw new Error("Failed to fetch activity log");
 
-      const users: User[] = await usersRes.json();
+      const dash: {
+        stats: { totalUsers: number; totalRoles: number; activeUsers: number };
+        recentUsers: AdminUser[];
+      } = await dashRes.json();
+
       const activityData: { data: ActivityRow[]; total: number } =
         await activityRes.json();
 
-      // Derive stats from user list
-      const activeUsers = users.filter((u) => !u.discontinue);
-      const inactiveUsers = users.filter((u) => u.discontinue);
-
       setStats({
-        totalUsers: users.length,
-        activeUsers: activeUsers.length,
-        inactiveUsers: inactiveUsers.length,
+        totalUsers: dash.stats.totalUsers,
+        activeUsers: dash.stats.activeUsers,
+        inactiveUsers: dash.stats.totalUsers - dash.stats.activeUsers,
         recentActions: activityData.total,
       });
 
-      // Most recently created 5 users (sorted by created_datetime desc)
-      const sortedUsers = [...users]
-        .sort(
-          (a, b) =>
-            new Date(b.created_datetime).getTime() -
-            new Date(a.created_datetime).getTime(),
-        )
-        .slice(0, 5);
-
-      setRecentUsers(sortedUsers);
+      setRecentUsers(dash.recentUsers);
       setRecentActivities(activityData.data);
       setLastRefreshed(new Date());
     } catch (err) {
@@ -275,7 +260,7 @@ export default function AdminDashboard() {
                         <div className="min-w-0">
                           <p className="font-medium truncate">{user.name}</p>
                           <p className="text-xs text-muted-foreground truncate">
-                            {user.role}
+                            {user.email}
                           </p>
                         </div>
                         <Badge
@@ -285,7 +270,7 @@ export default function AdminDashboard() {
                               : "border-red-500 bg-transparent text-red-700 hover:bg-red-500/10"
                           }`}
                         >
-                          {user.discontinue ? "Inactive" : "Active"}
+{!user.discontinue ? "Active" : "Inactive"}
                         </Badge>
                       </li>
                     ))}
