@@ -1,8 +1,15 @@
 const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
+const { transition, guardEdit } = require("../services/approvalService");
 const router = express.Router();
 const { getPool, sql } = require("../db");
+
+const requireUserEmail = (req, res) => {
+  const email = req.user?.email;
+  if (!email) { res.status(401).json({ error: "User context missing" }); return null; }
+  return email;
+};
 
 // =============================================
 //  WORK ORDER HEADER  —  /api/work-orders
@@ -202,6 +209,11 @@ router.post("/", async (req, res) => {
 
 // PUT — update header
 router.put("/:id", async (req, res) => {
+  try {
+    await guardEdit("work-orders", req.params.id);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
   const {
     CompanyId,
     ProjectId,
@@ -737,6 +749,57 @@ router.post("/:id/save-full", async (req, res) => {
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/submit — Draft → Pending ─────────────────────────────────────────
+router.put("/:id/submit", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+
+    const result = await transition("work-orders", id, "Pending", userEmail, req.user?.role);
+    await bumpCacheVersion("work-orders");
+    res.json({ message: "Work order submitted for approval", ...result });
+  } catch (err) {
+    console.error("WO submit error:", err.message);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/approve — Pending → Approved ─────────────────────────────────────
+router.put("/:id/approve", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+
+    const result = await transition("work-orders", id, "Approved", userEmail, req.user?.role);
+    await bumpCacheVersion("work-orders");
+    res.json({ message: "Work order approved", ...result });
+  } catch (err) {
+    console.error("WO approve error:", err.message);
+    const status = err.message.includes("not authorized") ? 403 : 400;
+    res.status(status).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/reject — Pending → Rejected ──────────────────────────────────────
+router.put("/:id/reject", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { note } = req.body;
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+
+    const result = await transition("work-orders", id, "Rejected", userEmail, req.user?.role, note || null);
+    await bumpCacheVersion("work-orders");
+    res.json({ message: "Work order rejected", ...result });
+  } catch (err) {
+    console.error("WO reject error:", err.message);
+    const status = err.message.includes("not authorized") ? 403 : 400;
+    res.status(status).json({ error: err.message });
   }
 });
 

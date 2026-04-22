@@ -3,6 +3,7 @@ const router = express.Router()
 const { getPool, sql } = require("../db")
 const { cache } = require("../middleware/cache")
 const { bumpCacheVersion } = require("../redis")
+const { transition, guardEdit } = require("../services/approvalService")
 
 const requireUserEmail = (req, res) => {
   const email = req.user?.email;
@@ -57,6 +58,8 @@ router.post("/", async (req, res) => {
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
+
+    await guardEdit("payments", req.params.id);
 
     const pool = getPool()
     await pool.request()
@@ -145,6 +148,57 @@ router.delete("/:id", async (req, res) => {
   } catch (err) {
     console.error("PAYMENT DELETE ERROR:", err.message)
     res.status(500).json({ error: err.message })
+  }
+})
+
+// ── PUT /:id/submit — Draft → Pending ─────────────────────────────────────────
+router.put("/:id/submit", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+
+    const result = await transition("payments", id, "Pending", userEmail, req.user?.role);
+    await bumpCacheVersion("payments");
+    res.json({ message: "Payment submitted for approval", ...result });
+  } catch (err) {
+    console.error("Payment submit error:", err.message);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/approve — Pending → Approved ─────────────────────────────────────
+router.put("/:id/approve", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+
+    const result = await transition("payments", id, "Approved", userEmail, req.user?.role);
+    await bumpCacheVersion("payments");
+    res.json({ message: "Payment approved", ...result });
+  } catch (err) {
+    console.error("Payment approve error:", err.message);
+    const status = err.message.includes("not authorized") ? 403 : 400;
+    res.status(status).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/reject — Pending → Rejected ──────────────────────────────────────
+router.put("/:id/reject", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { note } = req.body;
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+
+    const result = await transition("payments", id, "Rejected", userEmail, req.user?.role, note || null);
+    await bumpCacheVersion("payments");
+    res.json({ message: "Payment rejected", ...result });
+  } catch (err) {
+    console.error("Payment reject error:", err.message);
+    const status = err.message.includes("not authorized") ? 403 : 400;
+    res.status(status).json({ error: err.message });
   }
 })
 
