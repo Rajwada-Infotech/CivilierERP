@@ -51,6 +51,7 @@ import {
   CheckSquare,
 } from "lucide-react";
 import { BillingIcon } from "@/components/icons/BillingIcon";
+import { ADMIN_PATHS } from "@/constants/pageDefinitions";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 // ReminderItem is imported from @/hooks/useReminders
@@ -537,7 +538,6 @@ export const TopNavbar = () => {
   const [themeOpen, setThemeOpen] = useState(false);
   const [bellOpen, setBellOpen] = useState(false);
 
-  // Single useReminders instance — shared between badge, dropdown, and refresh button
   const {
     reminders,
     loading: remLoading,
@@ -546,24 +546,10 @@ export const TopNavbar = () => {
     fetched: remFetched,
   } = useReminders();
 
-  // Fetch once when bell is first opened (already fetching on mount via polling, but
-  // if the user opens before the first poll completes we trigger it explicitly)
   useEffect(() => {
     if (bellOpen && !remFetched) refreshReminders();
   }, [bellOpen, remFetched, refreshReminders]);
 
-  const ADMIN_PATHS = ["/masters/named-entry-type", "/masters/type-of-doc"];
-<<<<<<< HEAD
-  const isAdminPage =
-    location.pathname.startsWith("/admin") ||
-    location.pathname.startsWith("/users") ||
-    ADMIN_PATHS.some((p) => location.pathname.startsWith(p));
-const isSuperAdmin = currentUser?.role?.toLowerCase() === "super_admin";
-const isDba = currentUser?.role?.toLowerCase() === "dba";
-const isAdmin = currentUser?.role?.toLowerCase() === "admin" || isSuperAdmin || isDba;
-
-console.log('🔍 DEBUG - ROLE:', currentUser?.role, 'ISADMIN:', isAdmin);
-=======
   const isSuperAdmin = currentUser?.role === "super_admin";
   const isDba = currentUser?.role === "dba";
   const isAdmin = currentUser?.role === "admin" || isSuperAdmin || isDba;
@@ -572,7 +558,6 @@ console.log('🔍 DEBUG - ROLE:', currentUser?.role, 'ISADMIN:', isAdmin);
     (location.pathname.startsWith("/admin") ||
       location.pathname.startsWith("/users") ||
       ADMIN_PATHS.some((p) => location.pathname.startsWith(p)));
->>>>>>> 29d867355f6214f453259329362bf048a99aa8e9
 
   const RoleIcon = isSuperAdmin
     ? Crown
@@ -938,20 +923,21 @@ console.log('🔍 DEBUG - ROLE:', currentUser?.role, 'ISADMIN:', isAdmin);
                   )}
                 </button>
 
-                {/* Admin - TEMP DEBUG FORCED VISIBLE */}
-{true && (
-  <>
-    <div className="mx-3 my-1.5 border-t border-border" />
-    <button
-      onClick={async () => {
-        setModuleOpen(false);
-        setSwitchingTo("Admin");
-        setModuleSwitching(true);
-        await new Promise((r) => setTimeout(r, 350));
-        navigate("/admin/dashboard");
-        setModuleSwitching(false);
-        setSwitchingTo(null);
-      }}
+                {/* Admin module — only for admin/super_admin/dba roles */}
+                {isAdmin && (
+                  <>
+                    <div className="mx-3 my-1.5 border-t border-border" />
+                    <button
+                      onClick={async () => {
+                        setModuleOpen(false);
+                        setSwitchingTo("Admin");
+                        setModuleSwitching(true);
+                        await new Promise((r) => setTimeout(r, 350));
+                        setActiveModule("admin");
+                        navigate(MODULE_DASHBOARD_ROUTES.admin);
+                        setModuleSwitching(false);
+                        setSwitchingTo(null);
+                      }}
       className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${
         isAdminPage
           ? "bg-blue-500/10 text-blue-600"
@@ -986,16 +972,15 @@ console.log('🔍 DEBUG - ROLE:', currentUser?.role, 'ISADMIN:', isAdmin);
           Admin
         </p>
         <p className="text-[11px] text-muted-foreground mt-0.5">
-          Users, rights & config
-        </p>
-      </div>
-      {isAdminPage && (
-        <span className="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0" />
-      )}
-    </button>
-  </>
-)}
-{/* TEMP DEBUG: Admin button forced visible - check Console for role logs */}
+                          Users, rights & config
+                        </p>
+                      </div>
+                      {isAdminPage && (
+                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500 flex-shrink-0" />
+                      )}
+                    </button>
+                  </>
+                )}
 
                 <div className="mx-3 mt-1.5 mb-1 pt-2 border-t border-border">
                   <p className="text-[10px] text-muted-foreground font-heading">

@@ -68,8 +68,7 @@ router.get("/", async (req, res) => {
       pool.request().query(`
         SELECT
           COUNT(*)                            AS TotalCount,
-          COUNT(CASE WHEN Status = 1 OR Status IS NULL
-                     THEN 1 END)              AS PendingCount
+          COUNT(CASE WHEN Status = 'Draft' OR Status = 'Pending' OR Status IS NULL THEN 1 END) AS PendingCount
         FROM dbo.ChequeMaster
       `),
 

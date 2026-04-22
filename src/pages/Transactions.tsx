@@ -1,93 +1,262 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { CreditCard, ArrowUpRight, ArrowDownLeft, IndianRupee } from "lucide-react";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import {
+  CreditCard,
+  ArrowUpRight,
+  ArrowDownLeft,
+  IndianRupee,
+  RefreshCw,
+} from "lucide-react";
 
-const mockTransactions = [
-  { id: "TXN-001", date: "2025-03-18", type: "Payment", party: "Raj Builders", description: "Site concrete work - Phase 2", amount: 125000, mode: "Bank Transfer", status: "Completed" },
-  { id: "TXN-002", date: "2025-03-17", type: "Receipt", party: "ABC Developers", description: "Project milestone payment received", amount: 450000, mode: "NEFT", status: "Completed" },
-  { id: "TXN-003", date: "2025-03-17", type: "Payment", party: "Metro Hardware", description: "Steel rods & cement purchase", amount: 87500, mode: "Cheque", status: "Pending" },
-  { id: "TXN-004", date: "2025-03-16", type: "Payment", party: "Quick Transport Co", description: "Material transport charges", amount: 22000, mode: "UPI", status: "Completed" },
-  { id: "TXN-005", date: "2025-03-15", type: "Receipt", party: "XYZ Infra Ltd", description: "Advance for new project", amount: 300000, mode: "Bank Transfer", status: "Completed" },
-  { id: "TXN-006", date: "2025-03-15", type: "Journal", party: "Internal", description: "Depreciation entry - Office equipment", amount: 15000, mode: "—", status: "Posted" },
-  { id: "TXN-007", date: "2025-03-14", type: "Payment", party: "SiteCraft Engineers", description: "Electrical wiring - Block A", amount: 68000, mode: "NEFT", status: "Completed" },
-  { id: "TXN-008", date: "2025-03-13", type: "Contra", party: "Internal", description: "Cash deposited to HDFC Current A/c", amount: 200000, mode: "Cash Deposit", status: "Completed" },
-  { id: "TXN-009", date: "2025-03-12", type: "Payment", party: "Labour Wages", description: "Weekly wages - Site workers", amount: 96000, mode: "Cash", status: "Completed" },
-  { id: "TXN-010", date: "2025-03-11", type: "Receipt", party: "PQR Constructions", description: "Final settlement - Project Alpha", amount: 175000, mode: "Cheque", status: "Pending" },
-];
+interface Transaction {
+  id: string;
+  date: string;
+  type: string;
+  party: string;
+  description: string;
+  amount: number;
+  mode: string;
+  status: string;
+  createdBy?: string;
+}
 
-const summaryStats = [
-  { label: "Total Payments", value: "₹3,98,500", change: "-12%", icon: ArrowUpRight, color: "hsl(0, 72%, 51%)" },
-  { label: "Total Receipts", value: "₹9,25,000", change: "+24%", icon: ArrowDownLeft, color: "hsl(142, 71%, 45%)" },
-  { label: "Net Cash Flow", value: "₹5,26,500", change: "+18%", icon: IndianRupee, color: "hsl(var(--primary))" },
-  { label: "Pending Txns", value: "2", change: "", icon: CreditCard, color: "hsl(var(--secondary))" },
-];
+interface Summary {
+  totalPayments: number;
+  totalPOs: number;
+  netCashFlow: number;
+  pendingCount: number;
+}
 
-const Transactions: React.FC = () => (
-  <>
+const TYPE_STYLE: Record<string, string> = {
+  Payment: "bg-destructive/15 text-destructive",
+  "Purchase Order": "bg-blue-500/15 text-blue-500",
+  Receipt: "bg-green-500/15 text-green-500",
+  Journal: "bg-primary/15 text-primary",
+  Contra: "bg-secondary/15 text-secondary",
+};
+
+const STATUS_STYLE: Record<string, string> = {
+  Completed: "bg-green-500/15 text-green-500",
+  Approved: "bg-green-500/15 text-green-500",
+  Pending: "bg-yellow-500/15 text-yellow-500",
+  Draft: "bg-muted text-muted-foreground",
+  Rejected: "bg-destructive/15 text-destructive",
+  Posted: "bg-primary/15 text-primary",
+};
+
+const fmt = (n: number) =>
+  "₹" + n.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+
+export default function Transactions() {
+  const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [summary, setSummary] = useState<Summary | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchData = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await fetchWithAuth("/api/transactions");
+      if (!res.ok) throw new Error("Failed to load transactions");
+      const data = await res.json();
+      setTransactions(data.transactions);
+      setSummary(data.summary);
+    } catch (err: any) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, []);
+
+  const statCards = summary
+    ? [
+        {
+          label: "Total Payments",
+          value: fmt(summary.totalPayments),
+          icon: ArrowUpRight,
+          color: "hsl(0, 72%, 51%)",
+        },
+        {
+          label: "Total Purchase Orders",
+          value: fmt(summary.totalPOs),
+          icon: ArrowDownLeft,
+          color: "hsl(142, 71%, 45%)",
+        },
+        {
+          label: "Net Cash Flow",
+          value: fmt(Math.abs(summary.netCashFlow)),
+          icon: IndianRupee,
+          color: "hsl(var(--primary))",
+        },
+        {
+          label: "Pending Txns",
+          value: String(summary.pendingCount),
+          icon: CreditCard,
+          color: "hsl(var(--secondary))",
+        },
+      ]
+    : [];
+
+  return (
+    <>
       <Breadcrumbs items={["Dashboard", "Transactions"]} />
-    <h1 className="text-xl font-heading font-bold text-foreground mb-4">Transactions</h1>
 
-    {/* Summary Cards */}
-    <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-      {summaryStats.map((s) => (
-        <div key={s.label} className="rounded-xl bg-card border border-border p-4 flex items-center gap-4" style={{ borderLeftWidth: 3, borderLeftColor: s.color }}>
-          <div className="p-2 rounded-lg" style={{ background: `${s.color}20` }}>
-            <s.icon size={20} style={{ color: s.color }} />
-          </div>
-          <div>
-            <p className="text-xs text-muted-foreground font-heading">{s.label}</p>
-            <p className="text-base sm:text-lg font-heading font-bold text-foreground">{s.value}</p>
-            {s.change && <p className={`text-xs ${s.change.startsWith("+") ? "text-green-500" : "text-red-500"}`}>{s.change} vs last month</p>}
-          </div>
+      <div className="flex items-center justify-between mb-4">
+        <h1 className="text-xl font-heading font-bold text-foreground">
+          Transactions
+        </h1>
+        <button
+          onClick={fetchData}
+          disabled={loading}
+          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm hover:bg-accent transition disabled:opacity-50"
+        >
+          <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+          Refresh
+        </button>
+      </div>
+
+      {error && (
+        <div className="mb-4 px-4 py-3 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-sm">
+          {error}
         </div>
-      ))}
-    </div>
+      )}
 
-    {/* Transactions Table */}
-    <div className="rounded-xl bg-card border border-border overflow-hidden">
-      <div className="p-4 border-b border-border flex items-center justify-between">
-        <h2 className="font-heading font-semibold text-foreground text-sm">Recent Transactions</h2>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border">
-              {["ID", "Date", "Type", "Party", "Description", "Amount (₹)", "Mode", "Status"].map((h) => (
-                <th key={h} className="px-4 py-3 text-left text-xs font-heading text-muted-foreground font-semibold whitespace-nowrap">{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {mockTransactions.map((txn, i) => (
-              <tr key={txn.id} className={`border-b border-border transition-colors hover:bg-muted/50 ${i % 2 === 1 ? "bg-muted/20" : ""}`}>
-                <td className="px-4 py-3 text-primary font-heading text-xs">{txn.id}</td>
-                <td className="px-4 py-3 text-foreground whitespace-nowrap">{txn.date}</td>
-                <td className="px-4 py-3">
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-heading ${
-                    txn.type === "Payment" ? "bg-destructive/15 text-destructive" :
-                    txn.type === "Receipt" ? "bg-green-500/15 text-green-500" :
-                    txn.type === "Journal" ? "bg-primary/15 text-primary" :
-                    "bg-secondary/15 text-secondary"
-                  }`}>{txn.type}</span>
-                </td>
-                <td className="px-4 py-3 text-foreground font-medium whitespace-nowrap">{txn.party}</td>
-                <td className="px-4 py-3 text-muted-foreground max-w-[200px] truncate">{txn.description}</td>
-                <td className="px-4 py-3 text-foreground font-heading font-medium whitespace-nowrap">₹{txn.amount.toLocaleString("en-IN")}</td>
-                <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">{txn.mode}</td>
-                <td className="px-4 py-3">
-                  <span className={`px-2 py-0.5 rounded-full text-xs font-heading ${
-                    txn.status === "Completed" ? "bg-green-500/15 text-green-500" :
-                    txn.status === "Pending" ? "bg-yellow-500/15 text-yellow-500" :
-                    "bg-primary/15 text-primary"
-                  }`}>{txn.status}</span>
-                </td>
-              </tr>
+      {/* Summary Cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        {loading
+          ? Array.from({ length: 4 }).map((_, i) => (
+              <div
+                key={i}
+                className="rounded-xl bg-card border border-border p-4 h-20 animate-pulse"
+              />
+            ))
+          : statCards.map((s) => (
+              <div
+                key={s.label}
+                className="rounded-xl bg-card border border-border p-4 flex items-center gap-4"
+                style={{ borderLeftWidth: 3, borderLeftColor: s.color }}
+              >
+                <div
+                  className="p-2 rounded-lg"
+                  style={{ background: `${s.color}20` }}
+                >
+                  <s.icon size={20} style={{ color: s.color }} />
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground font-heading">
+                    {s.label}
+                  </p>
+                  <p className="text-base sm:text-lg font-heading font-bold text-foreground">
+                    {s.value}
+                  </p>
+                </div>
+              </div>
             ))}
-          </tbody>
-        </table>
       </div>
-    </div>
-  </>
-);
 
-export default Transactions;
+      {/* Transactions Table */}
+      <div className="rounded-xl bg-card border border-border overflow-hidden">
+        <div className="p-4 border-b border-border">
+          <h2 className="font-heading font-semibold text-foreground text-sm">
+            Recent Transactions
+          </h2>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border">
+                {[
+                  "ID",
+                  "Date",
+                  "Type",
+                  "Party",
+                  "Description",
+                  "Amount (₹)",
+                  "Mode",
+                  "Status",
+                ].map((h) => (
+                  <th
+                    key={h}
+                    className="px-4 py-3 text-left text-xs font-heading text-muted-foreground font-semibold whitespace-nowrap"
+                  >
+                    {h}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {loading ? (
+                Array.from({ length: 5 }).map((_, i) => (
+                  <tr key={i} className="border-b border-border">
+                    {Array.from({ length: 8 }).map((_, j) => (
+                      <td key={j} className="px-4 py-3">
+                        <div className="h-4 bg-muted rounded animate-pulse" />
+                      </td>
+                    ))}
+                  </tr>
+                ))
+              ) : transactions.length === 0 ? (
+                <tr>
+                  <td
+                    colSpan={8}
+                    className="px-4 py-10 text-center text-muted-foreground text-sm"
+                  >
+                    No transactions found.
+                  </td>
+                </tr>
+              ) : (
+                transactions.map((txn, i) => (
+                  <tr
+                    key={txn.id}
+                    className={`border-b border-border transition-colors hover:bg-muted/50 ${i % 2 === 1 ? "bg-muted/20" : ""}`}
+                  >
+                    <td className="px-4 py-3 text-primary font-heading text-xs">
+                      {txn.id}
+                    </td>
+                    <td className="px-4 py-3 text-foreground whitespace-nowrap">
+                      {txn.date
+                        ? new Date(txn.date).toLocaleDateString("en-IN")
+                        : "—"}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-xs font-heading ${TYPE_STYLE[txn.type] || "bg-muted text-muted-foreground"}`}
+                      >
+                        {txn.type}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-foreground font-medium whitespace-nowrap">
+                      {txn.party}
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground max-w-[200px] truncate">
+                      {txn.description}
+                    </td>
+                    <td className="px-4 py-3 text-foreground font-heading font-medium whitespace-nowrap">
+                      {fmt(txn.amount)}
+                    </td>
+                    <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
+                      {txn.mode}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-xs font-heading ${STATUS_STYLE[txn.status] || "bg-muted text-muted-foreground"}`}
+                      >
+                        {txn.status}
+                      </span>
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </>
+  );
+}

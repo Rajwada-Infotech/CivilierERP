@@ -8,7 +8,15 @@ const { bumpCacheVersion } = require("../redis")
 router.get("/", cache("tc-master", 300), async (req, res) => {
   try {
     const pool = getPool()
-    const result = await pool.request().query("SELECT * FROM dbo.TCMaster ORDER BY Id")
+    const result = await pool.request().query(`
+      SELECT t.*,
+             ISNULL(u.email, 'Unknown') AS CreatedByEmail,
+             ISNULL(u2.email, 'Unknown') AS UpdatedByEmail
+      FROM dbo.TCMaster t
+      LEFT JOIN dbo.users u ON u.id = t.CreatedBy
+      LEFT JOIN dbo.users u2 ON u2.id = t.UpdatedBy
+      ORDER BY t.Id
+    `)
     res.json(result.recordset)
   } catch (err) {
     res.status(500).json({ error: err.message })

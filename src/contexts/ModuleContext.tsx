@@ -14,7 +14,7 @@ export const MODULE_DASHBOARD_ROUTES: Record<NonNullable<Module>, string> = {
   finance: "/",
   material: "/material",
   followup: "/followup",
-  admin: "/admin",
+  admin: "/admin/dashboard",
 };
 
 interface ModuleContextType {
@@ -74,23 +74,16 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
     });
   }, []);
 
-  // Initialize activeModule ONCE on mount — prefer localStorage, then infer from pathname.
-  // We do NOT re-run this on pathname changes so that explicit module switches
-  // are never clobbered by navigation within a module.
+  // Initialize activeModule ONCE on mount.
+  //
+  // Priority: URL first for known module paths, then localStorage for
+  // ambiguous paths (/masters/*, /reports, etc.), then fallback to finance.
   useEffect(() => {
     const stored = localStorage.getItem("activeModule") as Module | null;
-
-    if (
-      stored &&
-      (["finance", "material", "followup", "admin"] as Module[]).includes(stored)
-    ) {
-      setActiveModuleState(stored);
-      return;
-    }
-
-    // First visit — no stored preference, infer from URL
     const pathname = location.pathname;
-    if (pathname.startsWith("/admin")) {
+    const valid: Module[] = ["finance", "material", "followup", "admin"];
+
+    if (pathname.startsWith("/admin") || pathname.startsWith("/users")) {
       setActiveModuleState("admin");
       localStorage.setItem("activeModule", "admin");
     } else if (pathname.startsWith("/followup")) {
@@ -100,8 +93,13 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
       setActiveModuleState("material");
       localStorage.setItem("activeModule", "material");
     } else {
-      setActiveModuleState("finance");
-      localStorage.setItem("activeModule", "finance");
+      // Ambiguous path — trust localStorage if valid, else default to finance
+      if (stored && valid.includes(stored)) {
+        setActiveModuleState(stored);
+      } else {
+        setActiveModuleState("finance");
+        localStorage.setItem("activeModule", "finance");
+      }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // intentionally run once on mount only
@@ -121,4 +119,3 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
     </ModuleContext.Provider>
   );
 };
-
