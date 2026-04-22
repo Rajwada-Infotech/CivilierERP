@@ -458,7 +458,7 @@ export const MobileNav: React.FC = () => {
 
       case "finance":
         return [
-          { label: "Amendments", icon: BarChart3, path: "/" },
+          { label: "Amendments", icon: BarChart3, path: "/finance" },
           {
             label: "Query",
             icon: Landmark,
@@ -610,7 +610,7 @@ export const MobileNav: React.FC = () => {
         ];
 
       default:
-        return [{ label: "Amendments", icon: BarChart3, path: "/" }];
+        return [{ label: "Amendments", icon: BarChart3, path: "/finance" }];
     }
   };
 
