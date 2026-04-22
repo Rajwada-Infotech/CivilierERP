@@ -156,6 +156,8 @@ const PostApprovalRights = lazy(
 const ApiIntegrationPage = lazy(() => import("./pages/admin/ApiIntegration"));
 const SignaturePage = lazy(() => import("./pages/admin/Signature"));
 const SuperAdminProfile = lazy(() => import("./pages/admin/SuperAdminProfile"));
+const AdminProfile = lazy(() => import("./pages/admin/AdminProfile"));
+const DBAProfile = lazy(() => import("./pages/dba/DBAProfile"));
 const MetricsDashboard = lazy(() => import("./pages/admin/MetricsDashboard"));
 const PasswordResetPage = lazy(
   () => import("./pages/admin/security/PasswordReset"),
@@ -613,7 +615,7 @@ function AppRoutes() {
         }
       />
       <Route
-        path="/admin/masters/role-master"
+        path="/masters/role-master"
         element={
           <ProtectedRoute>
             <RoleMaster />
@@ -774,7 +776,23 @@ function AppRoutes() {
         path="/admin/profile"
         element={
           <AdminRoute>
+            <AdminProfile />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/superadmin/profile"
+        element={
+          <AdminRoute>
             <SuperAdminProfile />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/dba/profile"
+        element={
+          <AdminRoute>
+            <DBAProfile />
           </AdminRoute>
         }
       />

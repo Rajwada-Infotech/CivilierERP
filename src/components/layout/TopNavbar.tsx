@@ -1115,9 +1115,9 @@ export const TopNavbar = () => {
                 onMouseDown={() => {
                   setUserOpen(false);
                   isSuperAdmin
-                    ? navigate("/superadmin")
+                    ? navigate("/superadmin/profile")
                     : isDba
-                      ? navigate("/dba")
+                      ? navigate("/dba/profile")
                       : currentUser?.role === "admin"
                         ? navigate("/admin/profile")
                         : navigate("/user/profile");
@@ -1192,9 +1192,9 @@ export const TopNavbar = () => {
                 onMouseDown={() => {
                   setUserOpen(false);
                   isSuperAdmin
-                    ? navigate("/superadmin")
+                    ? navigate("/superadmin/profile")
                     : isDba
-                      ? navigate("/dba")
+                      ? navigate("/dba/profile")
                       : currentUser?.role === "admin"
                         ? navigate("/admin/profile")
                         : navigate("/user/profile");
