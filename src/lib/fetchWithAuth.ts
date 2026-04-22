@@ -24,14 +24,18 @@ export async function fetchWithAuth(
   }
 
   if (response.status === 401) {
-    console.error("Unauthorized");
+    console.error("Unauthorized", url);
 
-    if (typeof window !== "undefined") {
+    // Only redirect to /login when there is genuinely no token (true session
+    // expiry). A 401 with a token present means the endpoint has a permission
+    // restriction for this role — redirect would silently log the user out.
+    // Callers handle permission-401s via their own error handling.
+    const hasToken =
+      typeof window !== "undefined" && !!localStorage.getItem("token");
+
+    if (!hasToken && typeof window !== "undefined") {
       localStorage.removeItem("token");
       localStorage.removeItem("user");
-      // Use pushState + popstate instead of window.location.href to avoid a
-      // full page reload. A hard reload remounts every context provider, which
-      // fires all queries again before auth settles → infinite 401 loop.
       window.history.pushState(null, "", "/login");
       window.dispatchEvent(new PopStateEvent("popstate"));
     }

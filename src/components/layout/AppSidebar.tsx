@@ -474,7 +474,8 @@ export const AppSidebar = () => {
       ADMIN_SETUP_PATHS.some((p) => location.pathname.startsWith(p)));
 
   const isSuperAdminPage =
-    hasAdminRole && location.pathname.startsWith("/superadmin");
+    currentUser?.role === "super_admin" &&
+    location.pathname.startsWith("/superadmin");
   const isDbaPage = hasAdminRole && location.pathname.startsWith("/dba");
   const isUserProfilePage = location.pathname.startsWith("/user/profile");
 

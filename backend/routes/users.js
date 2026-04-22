@@ -16,26 +16,46 @@ const LOCKOUT_SECONDS = 15 * 60;
 // ROLE NORMALIZER - Root Cause Fix
 // ======================
 const normalizeRole = (role) => {
-  if (!role || typeof role !== "string") return "";
+  if (!role || typeof role !== "string") return "user";
 
   const r = role.trim().toLowerCase();
 
   const roleMap = {
+    // super_admin variants
     sa: "super_admin",
     "super admin": "super_admin",
     superadmin: "super_admin",
     super_admin: "super_admin",
+    "super administrator": "super_admin",
 
+    // dba variants
     dba: "dba",
     "db admin": "dba",
     "database admin": "dba",
+    "database administrator": "dba",
     db_admin: "dba",
+    "db administrator": "dba",
 
+    // admin variants
     admin: "admin",
     administrator: "admin",
+    "system admin": "admin",
+    "system administrator": "admin",
+
+    // user variants
+    user: "user",
+    "standard user": "user",
+    employee: "user",
+    staff: "user",
   };
 
-  return roleMap[r] || r.replace(/\s+/g, "_");
+  const mapped = roleMap[r];
+  if (!mapped) {
+    console.warn(
+      `[normalizeRole] Unrecognised role string: "${role}" — defaulting to "user"`,
+    );
+  }
+  return mapped || "user";
 };
 
 // ======================

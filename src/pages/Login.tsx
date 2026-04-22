@@ -759,18 +759,30 @@ export default function Login() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [showHints, setShowHints] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   const { login } = useAuth();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isLoading) return;
     setError("");
-    const result = await login(email, password);
-    if (result.success) {
-      navigate(result.role === "dba" ? "/dba" : "/", { replace: true });
-    } else {
-      setError(result.error || "Login failed.");
+    setIsLoading(true);
+    try {
+      const result = await login(email, password);
+      if (result.success) {
+        const role = result.role;
+        if (role === "dba") navigate("/dba", { replace: true });
+        else if (role === "super_admin") navigate("/superadmin", { replace: true });
+        else navigate("/", { replace: true });
+      } else {
+        setError(result.error || "Invalid email or password.");
+      }
+    } catch {
+      setError("Unable to connect. Please check your connection and try again.");
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -961,15 +973,26 @@ export default function Login() {
 
             <motion.button
               type="submit"
-              whileHover={{ scale: 1.01, y: -1 }}
-              whileTap={{ scale: 0.98 }}
-              className="w-full py-3 rounded-lg font-semibold text-sm sm:text-base text-white shadow-md transition-shadow duration-200"
+              disabled={isLoading}
+              whileHover={isLoading ? {} : { scale: 1.01, y: -1 }}
+              whileTap={isLoading ? {} : { scale: 0.98 }}
+              className="w-full py-3 rounded-lg font-semibold text-sm sm:text-base text-white shadow-md transition-shadow duration-200 flex items-center justify-center gap-2 disabled:opacity-80 disabled:cursor-not-allowed"
               style={{
                 background: "linear-gradient(135deg,#7c3aed 0%,#5b21b6 100%)",
                 boxShadow: "0 4px 16px rgba(124,58,237,0.3)",
               }}
             >
-              Sign In
+              {isLoading ? (
+                <>
+                  <svg className="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
+                  </svg>
+                  Signing in…
+                </>
+              ) : (
+                "Sign In"
+              )}
             </motion.button>
           </motion.form>
 

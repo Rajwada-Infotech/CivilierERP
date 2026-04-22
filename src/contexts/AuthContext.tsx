@@ -83,7 +83,19 @@ export const AuthProvider = ({
   const [currentUser, setCurrentUser] = useState<AppUser | null>(() => {
     try {
       const stored = localStorage.getItem("user");
-      return stored ? JSON.parse(stored) : null;
+      if (!stored) return null;
+      const parsed = JSON.parse(stored);
+      // Patch stale sessions missing required fields (pre-fix logins)
+      if (!parsed.pagePermissions || !Array.isArray(parsed.pagePermissions)) {
+        parsed.pagePermissions = AuthUtils.getPermissionsByRole(
+          parsed.role as UserRole,
+        );
+      }
+      if (!parsed.initials)
+        parsed.initials = AuthUtils.getInitials(parsed.name ?? "");
+      if (typeof parsed.isActive === "undefined") parsed.isActive = true;
+      parsed.id = String(parsed.id);
+      return parsed;
     } catch {
       localStorage.removeItem("user");
       return null;
@@ -92,9 +104,11 @@ export const AuthProvider = ({
 
   const [users, setUsers] = useState<AppUser[]>([]);
 
-  // Fetch users from backend after login
+  // Fetch users from backend — only for privileged roles that have CanView on Users
   useEffect(() => {
     if (!currentUser) return;
+    const privilegedRoles = ["super_admin", "admin", "dba"];
+    if (!privilegedRoles.includes(currentUser.role)) return;
 
     const token = localStorage.getItem("token");
     if (!token) return;
@@ -127,7 +141,10 @@ export const AuthProvider = ({
 
       const userWithInitials = {
         ...data.user,
+        id: String(data.user.id),
         initials: AuthUtils.getInitials(data.user.name),
+        pagePermissions: AuthUtils.getPermissionsByRole(data.user.role),
+        isActive: true,
       };
 
       localStorage.setItem("token", data.token);
@@ -142,7 +159,8 @@ export const AuthProvider = ({
         error:
           err.response?.data?.error ||
           err.response?.data?.message ||
-          "Login failed",
+          err.message ||
+          "Login failed. Please check your credentials.",
       };
     }
   }, []);
