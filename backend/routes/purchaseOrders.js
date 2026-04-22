@@ -4,6 +4,8 @@ const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 
+const { transition, guardEdit } = require("../services/approvalService");
+
 const requireUserEmail = (req, res) => {
   const email = req.user?.email;
   if (!email) {
@@ -88,6 +90,8 @@ router.post("/", async (req, res) => {
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
+
+    await guardEdit("purchase-orders", id);
 
     const pool = getPool();
     const result = await pool
@@ -219,6 +223,60 @@ router.delete("/:id", async (req, res) => {
   } catch (err) {
     console.error("DELETE PurchaseOrders error:", err);
     res.status(500).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/submit — Draft → Pending ─────────────────────────────────────────
+router.put("/:id/submit", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+
+    const result = await transition("purchase-orders", id, "Pending", userEmail, req.user?.role);
+    await bumpCacheVersion("purchase-orders");
+    res.json({ message: "Purchase order submitted for approval", ...result });
+  } catch (err) {
+    console.error("PO submit error:", err.message);
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/approve — Pending → Approved ─────────────────────────────────────
+// Requires role: admin | super_admin | dba
+router.put("/:id/approve", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+
+    const result = await transition("purchase-orders", id, "Approved", userEmail, req.user?.role);
+    await bumpCacheVersion("purchase-orders");
+    res.json({ message: "Purchase order approved", ...result });
+  } catch (err) {
+    console.error("PO approve error:", err.message);
+    const status = err.message.includes("not authorized") ? 403 : 400;
+    res.status(status).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/reject — Pending → Rejected ──────────────────────────────────────
+// Requires role: admin | super_admin | dba
+// Body: { note: "Reason for rejection" }
+router.put("/:id/reject", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  const { note } = req.body;
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+
+    const result = await transition("purchase-orders", id, "Rejected", userEmail, req.user?.role, note || null);
+    await bumpCacheVersion("purchase-orders");
+    res.json({ message: "Purchase order rejected", ...result });
+  } catch (err) {
+    console.error("PO reject error:", err.message);
+    const status = err.message.includes("not authorized") ? 403 : 400;
+    res.status(status).json({ error: err.message });
   }
 });
 
