@@ -90,7 +90,7 @@ export async function fetchAllReminders(): Promise<ReminderItem[]> {
           dueDate: d,
           urgency,
           amount: obj.TotalAmount || obj.TDSAmount || obj.Amount,
-          path: `${route}/${recordId}`,
+          path: `${route}`,
         });
       });
     }
@@ -102,12 +102,12 @@ export async function fetchAllReminders(): Promise<ReminderItem[]> {
       "purchase_order",
       "PurchaseOrderID",
       "PO",
-      "/purchase-orders",
+      "/material/purchase-order",
     ),
-    process(grnRes, "grn", "GRNID", "GRN", "/grns"),
-    process(chequeRes, "cheque", "CId", "CHQ", "/cheques"),
-    process(tdsRes, "tds", "Id", "TDS", "/tds"),
-    process(woRes, "work_order", "Id", "WO", "/work-orders"),
+    process(grnRes, "grn", "GRNID", "GRN", "/material/grn"),
+    process(chequeRes, "cheque", "CId", "CHQ", "/masters/cheque"),
+    process(tdsRes, "tds", "Id", "TDS", "/masters/tds"),
+    process(woRes, "work_order", "Id", "WO", "/material/work-order"),
   ]);
 
   return items.sort((a, b) => {
