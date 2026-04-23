@@ -145,7 +145,6 @@ async function startServer() {
 
     app.use("/api/users", require("./routes/users"));
 
-
     // ====================== AUTH + ACTIVE USER TRACKING ======================
     app.use("/api", authMiddleware, async (req, res, next) => {
       if (req.user?.userId) {
@@ -156,46 +155,46 @@ async function startServer() {
 
     // ====================== PROTECTED ROUTES ======================
     const routes = [
-{ path: "/api/roles",         file: "./routes/roles" },
-  { path: "/api/user-rights",        file: "./routes/userRights" },
-      { path: "/api/account-group",      file: "./routes/accountGroup" },
-      { path: "/api/account-head",       file: "./routes/accountHeadMaster" },
-      { path: "/api/activity-master",    file: "./routes/activityMaster" },
-      { path: "/api/bank-master",        file: "./routes/bankMaster" },
-      { path: "/api/billing-terms",      file: "./routes/billingTerms" },
-      { path: "/api/card-master",        file: "./routes/cardMaster" },
-      { path: "/api/cheque-master",      file: "./routes/chequeMaster" },
-      { path: "/api/document-type",      file: "./routes/documentType" },
-      { path: "/api/fin-year",           file: "./routes/finYear" },
-      { path: "/api/general-ledger",     file: "./routes/generalLedger" },
-      { path: "/api/hsn",                file: "./routes/hsn" },
-      { path: "/api/item-groups",        file: "./routes/itemGroup" },
-      { path: "/api/item-master",        file: "./routes/itemMaster" },
-      { path: "/api/tds-master",         file: "./routes/tdsMaster" },
-      { path: "/api/enterprises",        file: "./routes/enterprise" },
-      { path: "/api/entry-type",         file: "./routes/entryType" },
-      { path: "/api/expense-booking",    file: "./routes/expenseBooking" },
-      { path: "/api/new-payment",        file: "./routes/newPayment" },
-      { path: "/api/purchase-orders",    file: "./routes/purchaseOrders" },
-      { path: "/api/tenants",            file: "./routes/tenants" },
-      { path: "/api/work-orders",        file: "./routes/workOrder" },
-      { path: "/api/user-profile",       file: "./routes/userProfile" },
-      { path: "/api/uom-master",         file: "./routes/uomMaster" },
-      { path: "/api/debit-note",         file: "./routes/debitNote" },
-      { path: "/api/tc-master",          file: "./routes/tcMaster" },
+      { path: "/api/roles", file: "./routes/roles" },
+      { path: "/api/user-rights", file: "./routes/userRights" },
+      { path: "/api/account-group", file: "./routes/accountGroup" },
+      { path: "/api/account-head", file: "./routes/accountHeadMaster" },
+      { path: "/api/activity-master", file: "./routes/activityMaster" },
+      { path: "/api/bank-master", file: "./routes/bankMaster" },
+      { path: "/api/billing-terms", file: "./routes/billingTerms" },
+      { path: "/api/card-master", file: "./routes/cardMaster" },
+      { path: "/api/cheque-master", file: "./routes/chequeMaster" },
+      { path: "/api/document-type", file: "./routes/documentType" },
+      { path: "/api/fin-year", file: "./routes/finYear" },
+      { path: "/api/general-ledger", file: "./routes/generalLedger" },
+      { path: "/api/hsn", file: "./routes/hsn" },
+      { path: "/api/item-groups", file: "./routes/itemGroup" },
+      { path: "/api/item-master", file: "./routes/itemMaster" },
+      { path: "/api/tds-master", file: "./routes/tdsMaster" },
+      { path: "/api/enterprises", file: "./routes/enterprise" },
+      { path: "/api/entry-type", file: "./routes/entryType" },
+      { path: "/api/expense-booking", file: "./routes/expenseBooking" },
+      { path: "/api/new-payment", file: "./routes/newPayment" },
+      { path: "/api/purchase-orders", file: "./routes/purchaseOrders" },
+      { path: "/api/tenants", file: "./routes/tenants" },
+      { path: "/api/work-orders", file: "./routes/workOrder" },
+      { path: "/api/user-profile", file: "./routes/userProfile" },
+      { path: "/api/uom-master", file: "./routes/uomMaster" },
+      { path: "/api/debit-note", file: "./routes/debitNote" },
+      { path: "/api/tc-master", file: "./routes/tcMaster" },
       { path: "/api/transactions", file: "./routes/transactions" },
-      { path: "/api/grns",               file: "./routes/grns" },
-      { path: "/api/stock-ledger",       file: "./routes/stockLedger" },
-{ path: "/api/brs",                file: "./routes/brs" },
-      { path: "/api/reports",             file: "./routes/reports" },
-      { path: "/api/finance-dashboard",  file: "./routes/financeDashboard" },
+      { path: "/api/grns", file: "./routes/grns" },
+      { path: "/api/stock-ledger", file: "./routes/stockLedger" },
+      { path: "/api/brs", file: "./routes/brs" },
+      { path: "/api/reports", file: "./routes/reports" },
+      { path: "/api/finance-dashboard", file: "./routes/financeDashboard" },
       { path: "/api/material-dashboard", file: "./routes/materialDashboard" },
-      { path: "/api/admin-dashboard",    file: "./routes/adminDashboard" },
-      { path: "/api/user-activity",      file: "./routes/userActivity" },
-      { path: "/api/business-units",     file: "./routes/businessUnit" },
-      { path: "/api/cheque-leaf",       file: "./routes/chequeLeaf" },
+      { path: "/api/admin-dashboard", file: "./routes/adminDashboard" },
+      { path: "/api/user-activity", file: "./routes/userActivity" },
+      { path: "/api/business-units", file: "./routes/businessUnit" },
+      { path: "/api/cheque-leaf", file: "./routes/chequeLeaf" },
       { path: "/api/contractor-category", file: "./routes/contractorCategory" },
-{ path: "/api/approval-workflows", file: "./routes/approvalWorkflows" },
+      { path: "/api/approval-workflows", file: "./routes/approvalWorkflows" },
       { path: "/api/approval-inbox", file: "./routes/approvalInbox" },
       { path: "/api/tasks", file: "./routes/tasks" },
       { path: "/api/widgets", file: "./routes/widgets" },
@@ -205,7 +204,10 @@ async function startServer() {
       const label = path.replace("/api/", "");
       if (isDev) console.log(`Loading route: ${label}`);
       try {
-        app.use(path, authMiddleware, require(file));
+        // authMiddleware is already applied globally at app.use("/api", authMiddleware, ...)
+        // above — do NOT add it again here or req.user can be double-decoded and
+        // overwritten, which breaks role-gated routes like /api/tasks/reminders.
+        app.use(path, require(file));
       } catch (err) {
         console.error(`❌ Failed loading route: ${label} — ${err.message}`);
         throw err;

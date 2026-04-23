@@ -43,6 +43,7 @@ interface AuthContextType {
   ) => Promise<void>;
   canAccessPage: (page: PageKey) => boolean;
   canDoAction: (page: PageKey, action: PageAction) => boolean;
+  updateCurrentUserName: (name: string) => void;
 }
 
 // ── CONTEXT ───────────────────────────────────────────────────────────────────
@@ -277,6 +278,19 @@ export const AuthProvider = ({
     [rawAction],
   );
 
+  const updateCurrentUserName = useCallback((name: string) => {
+    setCurrentUser((prev) => {
+      if (!prev) return prev;
+      const updated = {
+        ...prev,
+        name,
+        initials: AuthUtils.getInitials(name),
+      };
+      localStorage.setItem("user", JSON.stringify(updated));
+      return updated;
+    });
+  }, []);
+
   // ── CONTEXT VALUE ──────────────────────────────────────────────────────────
   const value = useMemo(
     () => ({
@@ -291,6 +305,7 @@ export const AuthProvider = ({
       updateUserPagePermissions,
       canAccessPage,
       canDoAction,
+      updateCurrentUserName,
     }),
     [
       currentUser,
@@ -303,6 +318,7 @@ export const AuthProvider = ({
       updateUserPagePermissions,
       canAccessPage,
       canDoAction,
+      updateCurrentUserName,
     ],
   );
 

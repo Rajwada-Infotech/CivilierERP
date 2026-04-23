@@ -1,13 +1,14 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { useTask } from "@/contexts/TaskContext";
+import { useTask, type Task } from "@/contexts/TaskContext";
 import { useAuth } from "@/contexts/AuthContext";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   ArrowLeft, CheckCircle2, Circle, Clock, AlertCircle, Send,
-  Flag, CalendarDays, User, Trash2, Edit2, ThumbsUp, ThumbsDown, Check,
+  Flag, CalendarDays, User, Trash2, Edit2, ThumbsUp, ThumbsDown, Check, Loader2,
 } from "lucide-react";
-import { motion, AnimatePresence } from "framer-motion";
+import { AnimatePresence } from "framer-motion";
 import TaskFormModal from "./TaskFormModal";
 
 const formatDate = (date: string) =>
@@ -32,35 +33,88 @@ const PRIORITY_CONFIG = {
 export default function TaskDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { tasks, closeTask, reviewTask, addComment, toggleQualityCriteria, deleteTask, updateTask } = useTask();
+  const { tasks, loading: ctxLoading, closeTask, reviewTask, addComment, toggleQualityCriteria, deleteTask, updateTask } = useTask();
   const { currentUser } = useAuth();
+
   const [comment, setComment] = useState("");
   const [showEdit, setShowEdit] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState(false);
 
-  const task = tasks.find(t => t.id === id);
+  // ── Task resolution: context first, then direct API fetch ────────────────
+  const [resolvedTask, setResolvedTask] = useState<Task | null>(null);
+  const [fetching, setFetching]         = useState(false);
+  const [fetchError, setFetchError]     = useState<string | null>(null);
 
-  if (!task) {
+  useEffect(() => {
+    if (!id) return;
+
+    // 1. Try the already-loaded context list first (instant)
+    const found = tasks.find((t) => t.id === id);
+    if (found) {
+      setResolvedTask(found);
+      setFetchError(null);
+      return;
+    }
+
+    // 2. If context is still loading, wait for it — don't fire API yet
+    if (ctxLoading) return;
+
+    // 3. Context finished loading but task not found → fetch directly by id
+    setFetching(true);
+    setFetchError(null);
+    fetchWithAuth(`/api/tasks/${id}`)
+      .then((r) => {
+        if (!r.ok) throw new Error("Task not found");
+        return r.json();
+      })
+      .then((t: Task) => setResolvedTask(t))
+      .catch((e) => setFetchError(e.message))
+      .finally(() => setFetching(false));
+  }, [id, tasks, ctxLoading]);
+
+  // Keep resolvedTask in sync when context tasks update (e.g. after comment/status change)
+  useEffect(() => {
+    if (!id) return;
+    const found = tasks.find((t) => t.id === id);
+    if (found) setResolvedTask(found);
+  }, [tasks, id]);
+
+  // ── Loading states ────────────────────────────────────────────────────────
+  if (ctxLoading || fetching) {
     return (
-              <div className="flex flex-col items-center justify-center py-32 text-center px-4">
-          <Circle size={48} className="text-muted-foreground mb-4 opacity-30" />
-          <h1 className="text-xl font-heading font-bold text-foreground mb-2">Task not found</h1>
-          <button onClick={() => navigate("/tasks")} className="text-primary text-sm hover:underline">Back to tasks</button>
-        </div>
+      <div className="flex flex-col items-center justify-center py-32 gap-3 text-muted-foreground">
+        <Loader2 size={32} className="animate-spin" />
+        <p className="text-sm font-heading">Loading task…</p>
+      </div>
     );
   }
 
-  const isAssignee = currentUser?.id === task.assignedTo;
-  const isCreator = currentUser?.id === task.createdBy;
+  if (fetchError || !resolvedTask) {
+    return (
+      <div className="flex flex-col items-center justify-center py-32 text-center px-4">
+        <Circle size={48} className="text-muted-foreground mb-4 opacity-30" />
+        <h1 className="text-xl font-heading font-bold text-foreground mb-2">Task not found</h1>
+        <p className="text-sm text-muted-foreground mb-4">{fetchError ?? "This task doesn't exist or you don't have access."}</p>
+        <button onClick={() => navigate("/tasks")} className="text-primary text-sm hover:underline">
+          ← Back to tasks
+        </button>
+      </div>
+    );
+  }
+
+  const task = resolvedTask;
+
+  const isAssignee    = currentUser?.id === task.assignedTo;
+  const isCreator     = currentUser?.id === task.createdBy;
   const isAdminOrAbove = currentUser?.role === "admin" || currentUser?.role === "super_admin";
-  const overdue = (task.status === "open" || task.status === "in_progress") && new Date(task.dueDate) < new Date();
-  const allCriteriaMet = task.qualityCriteria.length === 0 || task.qualityCriteria.every(q => q.met);
-  const metCount = task.qualityCriteria.filter(q => q.met).length;
-  const cfg = STATUS_CONFIG[task.status];
+  const overdue       = (task.status === "open" || task.status === "in_progress") && new Date(task.dueDate) < new Date();
+  const allCriteriaMet = task.qualityCriteria.length === 0 || task.qualityCriteria.every((q) => q.met);
+  const metCount      = task.qualityCriteria.filter((q) => q.met).length;
+  const cfg           = STATUS_CONFIG[task.status];
 
   const handleClose = () => {
-    if (!allCriteriaMet) { return; }
-    closeTask(task.id); // FIX: userId/userName params removed from closeTask signature
+    if (!allCriteriaMet) return;
+    closeTask(task.id);
   };
 
   const handleComment = () => {
@@ -73,7 +127,7 @@ export default function TaskDetail() {
 
   return (
     <>
-          <Breadcrumbs items={["Dashboard", "Tasks", task.title]} />
+      <Breadcrumbs items={["Dashboard", "Tasks", task.title]} />
 
       {/* Header */}
       <div className="flex items-start justify-between gap-3 mb-6">
@@ -87,14 +141,20 @@ export default function TaskDetail() {
               <span className={`flex items-center gap-1 text-xs font-heading ${PRIORITY_CONFIG[task.priority].color}`}>
                 <Flag size={11} /> {PRIORITY_CONFIG[task.priority].label}
               </span>
-              {overdue && <span className="flex items-center gap-1 text-xs text-red-400 font-heading"><AlertCircle size={11} /> Overdue</span>}
+              {overdue && (
+                <span className="flex items-center gap-1 text-xs text-red-400 font-heading">
+                  <AlertCircle size={11} /> Overdue
+                </span>
+              )}
             </div>
             <h1 className="text-lg sm:text-xl font-heading font-bold text-foreground">{task.title}</h1>
           </div>
         </div>
         {(isAdminOrAbove || isCreator) && (
           <div className="flex items-center gap-1 shrink-0">
-            <button onClick={() => setShowEdit(true)} className="p-2 rounded-lg hover:bg-muted text-primary transition-colors"><Edit2 size={15} /></button>
+            <button onClick={() => setShowEdit(true)} className="p-2 rounded-lg hover:bg-muted text-primary transition-colors">
+              <Edit2 size={15} />
+            </button>
             {deleteConfirm ? (
               <div className="flex items-center gap-1">
                 <button onClick={handleDelete} className="p-2 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"><Check size={15} /></button>
@@ -127,7 +187,7 @@ export default function TaskDetail() {
                 <div className="h-full rounded-full transition-all" style={{ width: `${(metCount / task.qualityCriteria.length) * 100}%`, background: "hsl(var(--primary))" }} />
               </div>
               <div className="space-y-2">
-                {task.qualityCriteria.map(qc => (
+                {task.qualityCriteria.map((qc) => (
                   <button key={qc.id}
                     onClick={() => (isAssignee || isAdminOrAbove) && toggleQualityCriteria(task.id, qc.id)}
                     disabled={task.status === "reviewed"}
@@ -151,7 +211,7 @@ export default function TaskDetail() {
               {task.comments.length === 0 ? (
                 <p className="text-xs text-muted-foreground">No comments yet.</p>
               ) : (
-                task.comments.map(c => (
+                task.comments.map((c) => (
                   <div key={c.id} className="flex items-start gap-3">
                     <div className="w-7 h-7 rounded-full gradient-accent flex items-center justify-center text-[10px] font-heading font-bold text-primary-foreground shrink-0">
                       {c.userInitials}
@@ -168,10 +228,13 @@ export default function TaskDetail() {
               )}
             </div>
             <div className="flex gap-2">
-              <input value={comment} onChange={e => setComment(e.target.value)}
-                onKeyDown={e => e.key === "Enter" && handleComment()}
+              <input
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleComment()}
                 placeholder="Add a comment..."
-                className="flex-1 min-w-0 px-3 py-2 rounded-lg text-sm bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary" />
+                className="flex-1 min-w-0 px-3 py-2 rounded-lg text-sm bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+              />
               <button onClick={handleComment} className="px-3 py-2 rounded-lg gradient-accent text-primary-foreground transition-all hover:-translate-y-0.5 shrink-0">
                 <Send size={14} />
               </button>
@@ -184,12 +247,12 @@ export default function TaskDetail() {
           {/* Meta */}
           <div className="rounded-xl bg-card border border-border p-4 space-y-3">
             {[
-              { label: "Assigned To",  value: task.assignedToName,                                        icon: User },
-              { label: "Created By",   value: task.createdByName,                                         icon: User },
-              { label: "Due Date",     value: formatDate(task.dueDate),                                   icon: CalendarDays },
-              ...(task.closedAt      ? [{ label: "Closed At",    value: formatDateTime(task.closedAt),    icon: CheckCircle2 }] : []),
-              ...(task.reviewedByName ? [{ label: "Reviewed By", value: task.reviewedByName,              icon: CheckCircle2 }] : []),
-              ...(task.reviewedAt    ? [{ label: "Reviewed At",  value: formatDateTime(task.reviewedAt),  icon: Clock }]        : []),
+              { label: "Assigned To",  value: task.assignedToName,  icon: User },
+              { label: "Created By",   value: task.createdByName,   icon: User },
+              { label: "Due Date",     value: formatDate(task.dueDate), icon: CalendarDays },
+              ...(task.closedAt       ? [{ label: "Closed At",   value: formatDateTime(task.closedAt!),    icon: CheckCircle2 }] : []),
+              ...(task.reviewedByName ? [{ label: "Reviewed By", value: task.reviewedByName,               icon: CheckCircle2 }] : []),
+              ...(task.reviewedAt     ? [{ label: "Reviewed At", value: formatDateTime(task.reviewedAt!),  icon: Clock }]        : []),
             ].map(({ label, value, icon: Icon }) => (
               <div key={label} className="flex items-start gap-2">
                 <Icon size={14} className="text-muted-foreground mt-0.5 shrink-0" />
