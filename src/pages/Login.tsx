@@ -692,17 +692,79 @@ function CivilScene() {
   );
 }
 
+// ── Blueprint scan line ───────────────────────────────────────────────────────
+function ScanLine() {
+  return (
+    <motion.div
+      className="absolute left-0 right-0 h-px pointer-events-none z-0"
+      style={{
+        background:
+          "linear-gradient(90deg, transparent 0%, rgba(124,58,237,0.25) 30%, rgba(167,139,250,0.5) 50%, rgba(124,58,237,0.25) 70%, transparent 100%)",
+      }}
+      initial={{ top: "0%" }}
+      animate={{ top: ["0%", "100%", "0%"] }}
+      transition={{ duration: 14, repeat: Infinity, ease: "linear" }}
+    />
+  );
+}
+
 // ── Animated hard hat particles ───────────────────────────────────────────────
 function FloatingParticles() {
   const particles = [
-    { x: "8%", delay: 0, dur: 6 },
-    { x: "18%", delay: 1.5, dur: 7 },
-    { x: "78%", delay: 0.8, dur: 5.5 },
-    { x: "88%", delay: 2, dur: 8 },
-    { x: "50%", delay: 3, dur: 6.5 },
-    { x: "35%", delay: 1, dur: 7.5 },
-    { x: "65%", delay: 2.5, dur: 5 },
+    { x: "8%", delay: 0, dur: 6, type: "brick" },
+    { x: "18%", delay: 1.5, dur: 7, type: "bolt" },
+    { x: "78%", delay: 0.8, dur: 5.5, type: "brick" },
+    { x: "88%", delay: 2, dur: 8, type: "triangle" },
+    { x: "50%", delay: 3, dur: 6.5, type: "bolt" },
+    { x: "35%", delay: 1, dur: 7.5, type: "brick" },
+    { x: "65%", delay: 2.5, dur: 5, type: "triangle" },
+    { x: "28%", delay: 4, dur: 9, type: "brick" },
+    { x: "72%", delay: 3.5, dur: 6, type: "bolt" },
+    { x: "92%", delay: 0.5, dur: 7, type: "triangle" },
+    { x: "5%", delay: 2.2, dur: 8.5, type: "bolt" },
+    { x: "58%", delay: 1.8, dur: 5.5, type: "brick" },
   ];
+
+  const renderIcon = (type: string) => {
+    if (type === "bolt") {
+      // hex bolt / nut shape
+      return (
+        <svg width="12" height="12" viewBox="0 0 12 12">
+          <polygon
+            points="6,1 10.2,3.5 10.2,8.5 6,11 1.8,8.5 1.8,3.5"
+            fill="none"
+            stroke="rgba(124,58,237,0.55)"
+            strokeWidth="1"
+          />
+          <circle cx="6" cy="6" r="2" fill="none" stroke="rgba(124,58,237,0.4)" strokeWidth="0.8" />
+        </svg>
+      );
+    }
+    if (type === "triangle") {
+      // surveyor triangle / set square
+      return (
+        <svg width="13" height="12" viewBox="0 0 13 12">
+          <polygon
+            points="6.5,1 12,11 1,11"
+            fill="none"
+            stroke="rgba(124,58,237,0.5)"
+            strokeWidth="1"
+          />
+          <line x1="6.5" y1="6" x2="6.5" y2="11" stroke="rgba(124,58,237,0.35)" strokeWidth="0.7" />
+          <line x1="6.5" y1="6" x2="12" y2="11" stroke="rgba(124,58,237,0.35)" strokeWidth="0.7" />
+        </svg>
+      );
+    }
+    // default: brick
+    return (
+      <svg width="14" height="10" viewBox="0 0 14 10">
+        <rect width="14" height="10" rx="1" fill="none" stroke="rgba(124,58,237,0.6)" strokeWidth="1.2" />
+        <line x1="7" y1="0" x2="7" y2="10" stroke="rgba(124,58,237,0.4)" strokeWidth="0.8" />
+        <line x1="0" y1="5" x2="14" y2="5" stroke="rgba(124,58,237,0.4)" strokeWidth="0.8" />
+      </svg>
+    );
+  };
+
   return (
     <div className="absolute inset-0 pointer-events-none overflow-hidden">
       {particles.map((p, i) => (
@@ -711,7 +773,7 @@ function FloatingParticles() {
           className="absolute bottom-0"
           style={{ left: p.x }}
           initial={{ y: 0, opacity: 0 }}
-          animate={{ y: [0, -180, -360], opacity: [0, 0.35, 0] }}
+          animate={{ y: [0, -220, -440], opacity: [0, 0.5, 0] }}
           transition={{
             duration: p.dur,
             delay: p.delay,
@@ -719,33 +781,7 @@ function FloatingParticles() {
             ease: "easeInOut",
           }}
         >
-          {/* tiny brick icon */}
-          <svg width="14" height="10" viewBox="0 0 14 10">
-            <rect
-              width="14"
-              height="10"
-              rx="1"
-              fill="none"
-              stroke="rgba(124,58,237,0.6)"
-              strokeWidth="1.2"
-            />
-            <line
-              x1="7"
-              y1="0"
-              x2="7"
-              y2="10"
-              stroke="rgba(124,58,237,0.4)"
-              strokeWidth="0.8"
-            />
-            <line
-              x1="0"
-              y1="5"
-              x2="14"
-              y2="5"
-              stroke="rgba(124,58,237,0.4)"
-              strokeWidth="0.8"
-            />
-          </svg>
+          {renderIcon(p.type)}
         </motion.div>
       ))}
     </div>
@@ -813,18 +849,39 @@ export default function Login() {
         />
       </div>
 
-      {/* ── Floating brick particles ── */}
+      {/* ── Blueprint scan line ── */}
+      <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
+        <ScanLine />
+      </div>
+
+      {/* ── Floating particles ── */}
       <FloatingParticles />
 
       {/* ── Ambient blobs ── */}
       <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
-        <div
+        <motion.div
           className="absolute top-[-12%] left-[-8%] w-[45%] h-[45%] rounded-full blur-[100px]"
           style={{ background: "rgba(168,85,247,0.18)" }}
+          animate={{ scale: [1, 1.12, 1], opacity: [0.18, 0.28, 0.18] }}
+          transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
         />
-        <div
+        <motion.div
           className="absolute bottom-[-12%] right-[-8%] w-[45%] h-[45%] rounded-full blur-[100px]"
           style={{ background: "rgba(139,92,246,0.14)" }}
+          animate={{ scale: [1, 1.15, 1], opacity: [0.14, 0.24, 0.14] }}
+          transition={{ duration: 10, repeat: Infinity, ease: "easeInOut", delay: 2 }}
+        />
+        <motion.div
+          className="absolute top-[40%] left-[60%] w-[30%] h-[30%] rounded-full blur-[80px]"
+          style={{ background: "rgba(109,40,217,0.1)" }}
+          animate={{ scale: [1, 1.2, 1], opacity: [0.1, 0.18, 0.1] }}
+          transition={{ duration: 7, repeat: Infinity, ease: "easeInOut", delay: 1 }}
+        />
+        <motion.div
+          className="absolute top-[10%] right-[20%] w-[20%] h-[20%] rounded-full blur-[60px]"
+          style={{ background: "rgba(196,181,253,0.12)" }}
+          animate={{ scale: [1, 1.3, 1], opacity: [0.12, 0.22, 0.12] }}
+          transition={{ duration: 9, repeat: Infinity, ease: "easeInOut", delay: 4 }}
         />
       </div>
 

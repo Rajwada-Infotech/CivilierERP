@@ -7,14 +7,16 @@ const allowRoles = require("../middleware/role");
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 
 // GET non-admin users for dropdown
+// NOTE: role column was dropped in migration 006; now derived via RoleId → dbo.Role join
 router.get("/users", authMiddleware, adminOnly, async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT id, name, role
-      FROM dbo.users
-      WHERE role NOT IN ('super_admin', 'admin', 'dba')
-      ORDER BY name
+      SELECT u.id, u.name, r.RName AS role
+      FROM dbo.users u
+      LEFT JOIN dbo.Role r ON u.RoleId = r.RId
+      WHERE LOWER(r.RName) NOT IN ('super_admin', 'admin', 'dba')
+      ORDER BY u.name
     `);
     res.json(result.recordset);
   } catch (err) {

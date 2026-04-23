@@ -1,6 +1,6 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useAuth, PAGE_DEFINITIONS } from "@/contexts/AuthContext";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getUserProfile,
   updateUserProfile,
@@ -40,8 +40,9 @@ const ACTION_COLORS: Record<string, string> = {
 };
 
 export default function UserProfile() {
-  const { currentUser, canAccessPage, canDoAction } = useAuth();
+  const { currentUser, canAccessPage, canDoAction, updateCurrentUserName } = useAuth();
   const userId = currentUser?.id ? parseInt(currentUser.id) : 0;
+  const queryClient = useQueryClient();
 
   const [activeTab, setActiveTab] = useState("profile");
   const [nameVal, setNameVal] = useState(currentUser?.name ?? "");
@@ -56,6 +57,11 @@ export default function UserProfile() {
     enabled: !!userId,
   });
 
+  // Sync nameVal when fresh profile arrives from server
+  useEffect(() => {
+    if (profile?.name) setNameVal(profile.name);
+  }, [profile?.name]);
+
   const { data: activity = [], isLoading: actLoading } = useQuery({
     queryKey: ["user-activity", userId],
     queryFn: () => getUserActivity(userId, 30),
@@ -65,6 +71,8 @@ export default function UserProfile() {
   const updateMutation = useMutation({
     mutationFn: () => updateUserProfile(userId, { name: nameVal }),
     onSuccess: () => {
+      updateCurrentUserName(nameVal);
+      queryClient.invalidateQueries({ queryKey: ["user-profile", userId] });
       toast.success("Profile updated");
       setEditingProfile(false);
     },

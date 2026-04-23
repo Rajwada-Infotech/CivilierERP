@@ -91,7 +91,6 @@ export const TaskProvider = ({ children }: { children: React.ReactNode }) => {
 
   // ── Fetch tasks ──────────────────────────────────────────────────────────
   const refetch = useCallback(async () => {
-    // Prevent unnecessary requests if user is not logged in
     if (!localStorage.getItem("token")) {
       setLoading(false);
       return;
@@ -264,17 +263,17 @@ export const TaskProvider = ({ children }: { children: React.ReactNode }) => {
   );
 
   // ── Add comment ──────────────────────────────────────────────────────────
+  // FIX: Was incorrectly calling PUT /api/tasks/:id with a `comments` body field
+  // that the backend ignores. Now correctly calls POST /api/tasks/:id/comments.
   const addComment = useCallback(
     async (
       taskId: string,
       user: { id: string; name: string; initials: string },
       text: string,
     ) => {
-      const task = tasks.find((t) => t.id === taskId);
-      if (!task) return;
-
-      const newComment: TaskComment = {
-        id: `c-${Date.now()}`,
+      // Optimistic update
+      const optimisticComment: TaskComment = {
+        id: `c-optimistic-${Date.now()}`,
         userId: user.id,
         userName: user.name,
         userInitials: user.initials,
@@ -282,30 +281,49 @@ export const TaskProvider = ({ children }: { children: React.ReactNode }) => {
         createdAt: new Date().toISOString(),
       };
 
-      // Optimistic update
       setTasks((prev) =>
         prev.map((t) =>
-          t.id === taskId ? { ...t, comments: [...t.comments, newComment] } : t,
+          t.id === taskId
+            ? { ...t, comments: [...t.comments, optimisticComment] }
+            : t,
         ),
       );
 
       try {
-        const updatedComments = [...task.comments, newComment];
-        const res = await fetchWithAuth(`/api/tasks/${taskId}`, {
-          method: "PUT",
-          body: JSON.stringify({ comments: updatedComments }),
+        const res = await fetchWithAuth(`/api/tasks/${taskId}/comments`, {
+          method: "POST",
+          body: JSON.stringify({ text }),
         });
 
-        if (!res.ok) throw new Error("Failed to add comment");
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error((err as any).error || "Failed to add comment");
+        }
 
-        const updated: Task = await res.json();
-        setTasks((prev) => prev.map((t) => (t.id === taskId ? updated : t)));
+        const savedComment: TaskComment = await res.json();
+
+        // Replace optimistic entry with the real one from the server
+        setTasks((prev) =>
+          prev.map((t) => {
+            if (t.id !== taskId) return t;
+            return {
+              ...t,
+              comments: t.comments.map((c) =>
+                c.id === optimisticComment.id ? savedComment : c,
+              ),
+            };
+          }),
+        );
       } catch (err) {
         // Revert optimistic update
         setTasks((prev) =>
-          prev.map((t) =>
-            t.id === taskId ? { ...t, comments: task.comments } : t,
-          ),
+          prev.map((t) => {
+            if (t.id !== taskId) return t;
+            return {
+              ...t,
+              comments: t.comments.filter((c) => c.id !== optimisticComment.id),
+            };
+          }),
         );
         const msg =
           err instanceof Error ? err.message : "Failed to add comment";
@@ -313,7 +331,7 @@ export const TaskProvider = ({ children }: { children: React.ReactNode }) => {
         throw err;
       }
     },
-    [tasks],
+    [],
   );
 
   // ── Toggle quality criteria ─────────────────────────────────────────────
@@ -351,32 +369,36 @@ export const TaskProvider = ({ children }: { children: React.ReactNode }) => {
     [tasks],
   );
 
-  const today = useMemo(() => new Date(), []);
-  const threeDaysFromNow = useMemo(() => {
-    const date = new Date();
-    date.setDate(date.getDate() + 3);
-    return date;
-  }, []);
-
+  // FIX: Was using useMemo(()=>new Date(),[]) which froze the date at mount time.
+  // Now computed fresh inside each callback so midnight-crossings work correctly.
   const getOverdueTasks = useCallback(() => {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
     return tasks.filter((task) => {
       const due = new Date(task.dueDate);
+      due.setHours(0, 0, 0, 0);
       return (
-        due < today && task.status !== "closed" && task.status !== "reviewed"
+        due < now && task.status !== "closed" && task.status !== "reviewed"
       );
     });
-  }, [tasks, today]);
+  }, [tasks]);
 
   const getDueSoonTasks = useCallback(() => {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const threeDaysFromNow = new Date(now);
+    threeDaysFromNow.setDate(threeDaysFromNow.getDate() + 3);
     return tasks.filter((task) => {
       const due = new Date(task.dueDate);
+      due.setHours(0, 0, 0, 0);
       return (
+        due >= now &&
         due <= threeDaysFromNow &&
         task.status !== "closed" &&
         task.status !== "reviewed"
       );
     });
-  }, [tasks, threeDaysFromNow]);
+  }, [tasks]);
 
   // ── Context Value ───────────────────────────────────────────────────────
   const value = useMemo(
