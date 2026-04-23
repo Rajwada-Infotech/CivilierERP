@@ -1,0 +1,36 @@
+import api from "./axios"; // adjust to your axios instance path
+
+export interface BillingTermRow {
+  BillingTermID: number;       // exact DB column name
+  Name: string | null;
+  Description: string | null;
+  CalculationType: string | null;
+  IsActive: boolean | number;
+}
+
+export interface BillingTermPayload {
+  Name: string;
+  Description: string;
+  CalculationType: string;
+  IsActive: boolean;
+}
+
+export const getBillingTerms = async (): Promise<BillingTermRow[]> => {
+  const { data } = await api.get("/billing-terms");
+  return data;
+};
+
+export const addBillingTerm = async (payload: BillingTermPayload): Promise<void> => {
+  await api.post("/billing-terms", payload);
+};
+
+export const updateBillingTerm = async (
+  id: number,
+  payload: BillingTermPayload
+): Promise<void> => {
+  await api.put(`/billing-terms/${id}`, payload);
+};
+
+export const deleteBillingTerm = async (id: number): Promise<void> => {
+  await api.delete(`/billing-terms/${id}`);
+};

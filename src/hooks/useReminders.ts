@@ -90,7 +90,7 @@ export async function fetchAllReminders(): Promise<ReminderItem[]> {
           dueDate: d,
           urgency,
           amount: obj.TotalAmount || obj.TDSAmount || obj.Amount,
-          path: `${route}/${recordId}`,
+          path: `${route}`,
         });
       });
     }
@@ -102,12 +102,12 @@ export async function fetchAllReminders(): Promise<ReminderItem[]> {
       "purchase_order",
       "PurchaseOrderID",
       "PO",
-      "/purchase-orders",
+      "/material/purchase-order",
     ),
-    process(grnRes, "grn", "GRNID", "GRN", "/grns"),
-    process(chequeRes, "cheque", "CId", "CHQ", "/cheques"),
-    process(tdsRes, "tds", "Id", "TDS", "/tds"),
-    process(woRes, "work_order", "Id", "WO", "/work-orders"),
+    process(grnRes, "grn", "GRNID", "GRN", "/material/grn"),
+    process(chequeRes, "cheque", "CId", "CHQ", "/masters/cheque"),
+    process(tdsRes, "tds", "Id", "TDS", "/masters/tds"),
+    process(woRes, "work_order", "Id", "WO", "/material/work-order"),
   ]);
 
   return items.sort((a, b) => {
@@ -117,7 +117,7 @@ export async function fetchAllReminders(): Promise<ReminderItem[]> {
 }
 
 export function useReminders(options: { pollingInterval?: number } = {}) {
-  const { pollingInterval = 4000 } = options;
+  const { pollingInterval = 30000 } = options; // Raised from 4s → 30s to reduce noise
   const [reminders, setReminders] = useState<ReminderItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
@@ -125,6 +125,9 @@ export function useReminders(options: { pollingInterval?: number } = {}) {
   const isFetching = useRef(false);
   const clickCount = useRef(0);
   const lockTimer = useRef<NodeJS.Timeout | null>(null);
+  // Consecutive backend-down failures — used for exponential backoff
+  const failCount = useRef(0);
+  const backoffTimer = useRef<NodeJS.Timeout | null>(null);
 
   const refresh = useCallback(
     async (isManual = false) => {
@@ -147,11 +150,16 @@ export function useReminders(options: { pollingInterval?: number } = {}) {
       }
 
       isFetching.current = true;
-      setLoading(true);
+      if (isManual) setLoading(true);
 
       try {
         const items = await fetchAllReminders();
         setReminders([...items]);
+        // Reset backoff on success
+        failCount.current = 0;
+      } catch {
+        // Count failures — backend may be offline; don't log here (fetchWithAuth already handles it)
+        failCount.current += 1;
       } finally {
         setTimeout(() => {
           setLoading(false);
@@ -164,9 +172,29 @@ export function useReminders(options: { pollingInterval?: number } = {}) {
 
   useEffect(() => {
     refresh();
-    const id = setInterval(() => refresh(false), pollingInterval);
-    return () => clearInterval(id);
-  }, [refresh, pollingInterval]);
+
+    // Adaptive polling: back off if backend is repeatedly unreachable
+    const schedule = () => {
+      const delay =
+        failCount.current > 3
+          ? Math.min(
+              pollingInterval * Math.pow(2, failCount.current - 3),
+              5 * 60 * 1000,
+            ) // max 5 min
+          : pollingInterval;
+
+      backoffTimer.current = setTimeout(() => {
+        refresh(false).finally(schedule);
+      }, delay);
+    };
+
+    schedule();
+
+    return () => {
+      if (backoffTimer.current) clearTimeout(backoffTimer.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const badgeCount = reminders.filter(
     (r) => r.urgency === "overdue" || r.urgency === "today",
