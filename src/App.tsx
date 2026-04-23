@@ -797,22 +797,22 @@ function AppRoutes() {
           </AdminRoute>
         }
       />
-<Route
-  path="/admin/approval/post-rights"
-  element={
-    <AdminRoute>
-      <PostApprovalRights />
-    </AdminRoute>
-  }
-/>
-  <Route
-    path="/admin/approval/inbox"
-    element={
-      <AdminRoute>
-        <ApprovalInbox />
-      </AdminRoute>
-    }
-  />
+      <Route
+        path="/admin/approval/post-rights"
+        element={
+          <AdminRoute>
+            <PostApprovalRights />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/approval/inbox"
+        element={
+          <AdminRoute>
+            <ApprovalInbox />
+          </AdminRoute>
+        }
+      />
       <Route
         path="/admin/api-integration"
         element={
@@ -960,39 +960,43 @@ function App() {
     return () => clearTimeout(timer);
   }, []);
 
-  if (initialLoading) return <Loader />;
-
   return (
     <QueryClientProvider client={queryClient}>
       <Toaster richColors position="top-right" />
+      {/* ActivityBrowserProvider is always mounted so AuthSessionBridge is always inside it.
+          The initialLoading gate moved inside the tree to avoid provider context being missing
+          during hot-module-reload or React strict-mode double-renders. */}
       <ActivityBrowserProvider>
         <AuthSessionBridge>
-          <Router
-            future={{
-              v7_startTransition: true,
-              v7_relativeSplatPath: true,
-            }}
-          >
-            <ModuleProvider>
-              <ThemeProvider>
-                <FinYearProvider>
-                  <HsnProvider>
-                    <RecordsProvider>
-                      <TdsProvider>
-                        <DebitNoteProvider>
-                          <BillingTermsProvider>
-                            <TaskProvider>
-                              <AppRoutes />
-                            </TaskProvider>
-                          </BillingTermsProvider>
-                        </DebitNoteProvider>
-                      </TdsProvider>
-                    </RecordsProvider>
-                  </HsnProvider>
-                </FinYearProvider>
-              </ThemeProvider>
-            </ModuleProvider>
-          </Router>
+          {initialLoading ? <Loader /> : null}
+          {initialLoading ? null : (
+            <Router
+              future={{
+                v7_startTransition: true,
+                v7_relativeSplatPath: true,
+              }}
+            >
+              <ModuleProvider>
+                <ThemeProvider>
+                  <FinYearProvider>
+                    <HsnProvider>
+                      <RecordsProvider>
+                        <TdsProvider>
+                          <DebitNoteProvider>
+                            <BillingTermsProvider>
+                              <TaskProvider>
+                                <AppRoutes />
+                              </TaskProvider>
+                            </BillingTermsProvider>
+                          </DebitNoteProvider>
+                        </TdsProvider>
+                      </RecordsProvider>
+                    </HsnProvider>
+                  </FinYearProvider>
+                </ThemeProvider>
+              </ModuleProvider>
+            </Router>
+          )}
         </AuthSessionBridge>
       </ActivityBrowserProvider>
     </QueryClientProvider>
@@ -1000,4 +1004,3 @@ function App() {
 }
 
 export default App;
-
