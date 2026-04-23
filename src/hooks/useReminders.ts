@@ -16,6 +16,7 @@ export interface ReminderItem {
   dueDate: string;
   urgency: "overdue" | "today" | "soon" | "upcoming";
   amount?: number;
+  path: string; // Dynamic navigation target
 }
 
 export function classifyUrgency(dueDateStr: string): ReminderItem["urgency"] {
@@ -63,6 +64,7 @@ export async function fetchAllReminders(): Promise<ReminderItem[]> {
     type: ReminderType,
     idKey: string,
     titlePre: string,
+    route: string,
   ) => {
     if (res.status === "fulfilled" && res.value.ok) {
       const raw = await res.value.json();
@@ -74,28 +76,38 @@ export async function fetchAllReminders(): Promise<ReminderItem[]> {
           obj.GRNDate ||
           obj.ChequeDate ||
           obj.DueDate;
-        if (!d) return;
+        const recordId = obj[idKey];
+        if (!d || !recordId) return;
+
         const urgency = classifyUrgency(d);
         if (urgency === "upcoming") return;
+
         items.push({
-          id: `${type}-${obj[idKey] || Math.random()}`,
+          id: `${type}-${recordId}`,
           type,
-          title: `${titlePre} #${obj.PurchaseOrderNo || obj.GRNNo || obj.DocumentNumber || obj[idKey]}`,
+          title: `${titlePre} #${obj.PurchaseOrderNo || obj.GRNNo || recordId}`,
           subtitle: obj.SupplierName || obj.PartyName || "Civilier System",
           dueDate: d,
           urgency,
           amount: obj.TotalAmount || obj.TDSAmount || obj.Amount,
+          path: `${route}/${recordId}`,
         });
       });
     }
   };
 
   await Promise.all([
-    process(poRes, "purchase_order", "PurchaseOrderID", "PO"),
-    process(grnRes, "grn", "GRNID", "GRN"),
-    process(chequeRes, "cheque", "CId", "CHQ"),
-    process(tdsRes, "tds", "Id", "TDS"),
-    process(woRes, "work_order", "Id", "WO"),
+    process(
+      poRes,
+      "purchase_order",
+      "PurchaseOrderID",
+      "PO",
+      "/purchase-orders",
+    ),
+    process(grnRes, "grn", "GRNID", "GRN", "/grns"),
+    process(chequeRes, "cheque", "CId", "CHQ", "/cheques"),
+    process(tdsRes, "tds", "Id", "TDS", "/tds"),
+    process(woRes, "work_order", "Id", "WO", "/work-orders"),
   ]);
 
   return items.sort((a, b) => {
@@ -105,7 +117,6 @@ export async function fetchAllReminders(): Promise<ReminderItem[]> {
 }
 
 export function useReminders(options: { pollingInterval?: number } = {}) {
-  // Polling 4000 = Automatically check the server for new data every 4 seconds.
   const { pollingInterval = 4000 } = options;
   const [reminders, setReminders] = useState<ReminderItem[]>([]);
   const [loading, setLoading] = useState(false);
@@ -127,7 +138,7 @@ export function useReminders(options: { pollingInterval?: number } = {}) {
           lockTimer.current = setTimeout(() => {
             setIsLocked(false);
             clickCount.current = 0;
-          }, 5000); // 5-second lockout
+          }, 5000);
           return;
         }
         setTimeout(() => {
@@ -142,7 +153,6 @@ export function useReminders(options: { pollingInterval?: number } = {}) {
         const items = await fetchAllReminders();
         setReminders([...items]);
       } finally {
-        // 600ms delay ensures the "Full Spin" animation completes one rotation visually
         setTimeout(() => {
           setLoading(false);
           isFetching.current = false;

@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
+import { useNavigate } from "react-router-dom"; // React Router
 import {
   Bell,
   RefreshCw,
@@ -20,6 +21,7 @@ const TYPE_META: Record<string, any> = {
 };
 
 export const ReminderBell = () => {
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("all");
   const { reminders, loading, badgeCount, refresh, isLocked } = useReminders({
@@ -27,6 +29,7 @@ export const ReminderBell = () => {
   });
   const panelRef = useRef<HTMLDivElement>(null);
 
+  // Close when clicking outside
   useEffect(() => {
     const clickOut = (e: MouseEvent) => {
       if (panelRef.current && !panelRef.current.contains(e.target as Node))
@@ -41,7 +44,6 @@ export const ReminderBell = () => {
 
   return (
     <div className="relative" ref={panelRef}>
-      {/* Animations: Jingle once every 4s | Full 360 Spin */}
       <style
         dangerouslySetInnerHTML={{
           __html: `
@@ -60,12 +62,8 @@ export const ReminderBell = () => {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
         }
-        .animate-jingle-periodic {
-          animation: periodicJingle 4s ease-in-out infinite;
-        }
-        .animate-spin-full {
-          animation: fullSpin 0.6s cubic-bezier(0.15, 0, 0, 1);
-        }
+        .animate-jingle-periodic { animation: periodicJingle 4s ease-in-out infinite; }
+        .animate-spin-full { animation: fullSpin 0.6s cubic-bezier(0.15, 0, 0, 1); }
         .no-scrollbar::-webkit-scrollbar { display: none; }
       `,
         }}
@@ -73,7 +71,7 @@ export const ReminderBell = () => {
 
       <button
         onClick={() => setOpen(!open)}
-        className="relative p-2.5 hover:bg-muted rounded-full transition-all active:scale-90"
+        className="relative p-2.5 hover:bg-muted rounded-full transition-all active:scale-95"
       >
         <Bell
           size={20}
@@ -96,17 +94,16 @@ export const ReminderBell = () => {
       {open && (
         <div className="absolute right-0 mt-3 w-80 bg-card border rounded-2xl shadow-2xl z-50 flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200 origin-top-right">
           <div className="p-4 border-b flex justify-between items-center bg-muted/20">
-            <span className="text-xs font-bold uppercase tracking-widest">
+            <span className="text-xs font-bold uppercase tracking-widest text-foreground/70">
               Reminders
             </span>
-
             <button
               onClick={(e) => {
                 e.stopPropagation();
                 if (!isLocked) refresh(true);
               }}
               disabled={loading || isLocked}
-              className={`p-1.5 rounded-md transition-all ${isLocked ? "bg-red-50 text-red-500 cursor-not-allowed" : "hover:bg-background"}`}
+              className={`p-1.5 rounded-md transition-all ${isLocked ? "bg-red-50 text-red-400" : "hover:bg-background"}`}
             >
               {isLocked ? (
                 <Lock size={14} />
@@ -131,11 +128,7 @@ export const ReminderBell = () => {
                   e.stopPropagation();
                   setFilter(t);
                 }}
-                className={`px-3 py-1 text-[10px] font-bold rounded-full border transition-all ${
-                  filter === t
-                    ? "bg-primary text-white border-primary shadow-sm"
-                    : "bg-background text-muted-foreground hover:border-muted"
-                }`}
+                className={`px-3 py-1 text-[10px] font-bold rounded-full border transition-all ${filter === t ? "bg-primary text-white border-primary shadow-sm" : "bg-background text-muted-foreground hover:border-muted"}`}
               >
                 {t === "all" ? "All" : TYPE_META[t]?.label || t.toUpperCase()}
               </button>
@@ -151,17 +144,25 @@ export const ReminderBell = () => {
               filtered.map((r) => (
                 <div
                   key={r.id}
-                  className="p-4 hover:bg-muted/40 transition-colors cursor-default"
+                  onClick={() => {
+                    setOpen(false);
+                    navigate(r.path);
+                  }}
+                  className="p-4 hover:bg-muted/50 transition-colors cursor-pointer group"
                 >
                   <div className="flex gap-3">
-                    <div className={`mt-1 ${TYPE_META[r.type]?.color}`}>
+                    <div
+                      className={`mt-1 transition-transform group-hover:scale-110 ${TYPE_META[r.type]?.color}`}
+                    >
                       {React.createElement(TYPE_META[r.type]?.icon || Package, {
                         size: 16,
                       })}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="flex justify-between font-bold text-[11px]">
-                        <span className="truncate pr-2">{r.title}</span>
+                      <div className="flex justify-between font-bold text-[11px] items-center">
+                        <span className="truncate pr-2 group-hover:text-primary transition-colors">
+                          {r.title}
+                        </span>
                         {r.amount && (
                           <span className="text-emerald-600 shrink-0">
                             ₹{r.amount.toLocaleString()}
@@ -173,11 +174,7 @@ export const ReminderBell = () => {
                       </p>
                       <div className="mt-2.5 flex gap-2 items-center">
                         <span
-                          className={`text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider ${
-                            r.urgency === "overdue"
-                              ? "bg-red-100 text-red-600"
-                              : "bg-amber-100 text-amber-600"
-                          }`}
+                          className={`text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider ${r.urgency === "overdue" ? "bg-red-100 text-red-600" : "bg-amber-100 text-amber-600"}`}
                         >
                           {formatRelative(r.dueDate)}
                         </span>
