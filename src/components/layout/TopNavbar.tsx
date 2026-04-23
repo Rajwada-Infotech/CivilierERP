@@ -743,10 +743,21 @@ export const TopNavbar = () => {
             trigger={
               <button
                 onClick={toggleUser}
-                className="relative w-8 h-8 rounded-full gradient-accent flex items-center justify-center text-xs font-heading text-primary-foreground font-bold hover:opacity-90"
+                className="relative w-8 h-8 rounded-full gradient-accent flex items-center justify-center text-xs font-heading text-primary-foreground font-bold hover:opacity-90 overflow-hidden"
               >
-                {currentUser?.initials || "?"}
-                {RoleIcon && (
+                {currentUser?.avatarUrl ? (
+                  <img src={currentUser.avatarUrl} alt={currentUser.name} className="w-full h-full object-cover rounded-full" />
+                ) : (
+                  currentUser?.initials || "?"
+                )}
+                {RoleIcon && !currentUser?.avatarUrl && (
+                  <span
+                    className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center ${roleBadgeCls}`}
+                  >
+                    <RoleIcon size={9} className="text-white" />
+                  </span>
+                )}
+                {RoleIcon && currentUser?.avatarUrl && (
                   <span
                     className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center ${roleBadgeCls}`}
                   >
@@ -780,9 +791,13 @@ export const TopNavbar = () => {
             trigger={
               <button
                 onClick={toggleUser}
-                className="relative w-8 h-8 rounded-full gradient-accent flex items-center justify-center text-xs font-heading text-primary-foreground font-bold"
+                className="relative w-8 h-8 rounded-full gradient-accent flex items-center justify-center text-xs font-heading text-primary-foreground font-bold overflow-hidden"
               >
-                {currentUser?.initials || "?"}
+                {currentUser?.avatarUrl ? (
+                  <img src={currentUser.avatarUrl} alt={currentUser.name} className="w-full h-full object-cover rounded-full" />
+                ) : (
+                  currentUser?.initials || "?"
+                )}
                 {RoleIcon && (
                   <span
                     className={`absolute -top-1 -right-1 w-4 h-4 rounded-full flex items-center justify-center ${roleBadgeCls}`}
