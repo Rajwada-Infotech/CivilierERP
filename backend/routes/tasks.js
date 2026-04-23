@@ -11,7 +11,9 @@ const logger = require("../logger");
 const { redisGet, redisSet, redisDel } = require("../redis");
 const router = express.Router();
 const { getPool, sql } = require("../db");
-const authMiddleware = require("../middleware/auth");
+// Note: authMiddleware is NOT imported here — it is already applied globally
+// at app.use("/api", authMiddleware) in server.js. Applying it again per-route
+// would double-decode the JWT and overwrite req.user, breaking role checks.
 const allowRoles = require("../middleware/role");
 
 const adminOnly = allowRoles("admin", "super_admin");
@@ -146,7 +148,6 @@ router.get("/", async (req, res) => {
     console.log("📦 Tasks from DB");
 
     res.json(tasks);
-
   } catch (err) {
     console.error("GET /api/tasks error:", err);
     res.status(500).json({ error: "Failed to fetch tasks" });
@@ -199,6 +200,7 @@ router.get("/reminders", async (req, res) => {
 
       return {
         id: `task-${row.Id}`,
+        taskId: String(row.Id), // explicit numeric id for frontend navigation
         type: "task",
         title: row.Title,
         subtitle: `Assigned to ${row.AssignedToName || "Unknown"}`,
