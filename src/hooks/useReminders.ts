@@ -3,26 +3,23 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+export type ReminderType =
+  | "cheque"
+  | "purchase_order"
+  | "work_order"
+  | "tds"
+  | "grn"
+  | "payment";
+
 export interface ReminderItem {
   id: string | number;
-  type:
-    | "payment"
-    | "deadline"
-    | "purchase_order"
-    | "grn"
-    | "cheque"
-    | "card"
-    | "tds"
-    | "task"
-    | "general";
+  type: ReminderType;
   title: string;
   subtitle: string;
   dueDate: string;
-  timeSlot?: string;
   urgency: "overdue" | "today" | "soon" | "upcoming";
   amount?: number;
-  priority?: "low" | "medium" | "high";
-  taskId?: string; // present when type === "task"
+  meta?: string;
 }
 
 // ─── Urgency classifier ───────────────────────────────────────────────────────
@@ -32,117 +29,52 @@ export function classifyUrgency(dueDateStr: string): ReminderItem["urgency"] {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   due.setHours(0, 0, 0, 0);
-  const diffDays = Math.floor((due.getTime() - today.getTime()) / 86400000);
+  const diffDays = Math.floor((due.getTime() - today.getTime()) / 86_400_000);
   if (diffDays < 0) return "overdue";
   if (diffDays === 0) return "today";
   if (diffDays <= 7) return "soon";
   return "upcoming";
 }
 
-export function formatRelative(dueDateStr: string, timeSlot?: string): string {
+export function formatRelative(dueDateStr: string): string {
   const due = new Date(dueDateStr);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   due.setHours(0, 0, 0, 0);
-  const diffDays = Math.floor((due.getTime() - today.getTime()) / 86400000);
-  const base =
-    diffDays < 0
-      ? `${Math.abs(diffDays)}d overdue`
-      : diffDays === 0
-        ? "Today"
-        : diffDays === 1
-          ? "Tomorrow"
-          : `In ${diffDays} days`;
-  return timeSlot ? `${base} · ${timeSlot}` : base;
+  const diffDays = Math.floor((due.getTime() - today.getTime()) / 86_400_000);
+  if (diffDays < 0) return `${Math.abs(diffDays)}d overdue`;
+  if (diffDays === 0) return "Due today";
+  if (diffDays === 1) return "Due tomorrow";
+  return `Due in ${diffDays}d`;
 }
 
-// ─── Role helper (reads from localStorage token payload) ──────────────────────
-
-function getCurrentRole(): string {
-  try {
-    const token = localStorage.getItem("token");
-    if (!token) return "user";
-    const payload = JSON.parse(atob(token.split(".")[1]));
-    return payload.role ?? "user";
-  } catch {
-    return "user";
-  }
+export function formatDate(dateStr: string): string {
+  return new Date(dateStr).toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
 }
 
-function isPrivileged(role: string): boolean {
-  return role === "admin" || role === "super_admin" || role === "dba";
-}
-
-// ─── Core fetch ───────────────────────────────────────────────────────────────
+// ─── Fetch ────────────────────────────────────────────────────────────────────
 
 export async function fetchAllReminders(): Promise<ReminderItem[]> {
-  const role = getCurrentRole();
-  const privileged = isPrivileged(role);
-
-  // Regular users only see their own tasks — no access to finance/material data
-  // Admins/DBA/SuperAdmin see everything including PO, GRN, TDS, cards, cheques
-  const baseEndpoints: Promise<Response | null>[] = [
-    fetchWithAuth("/api/tasks/reminders"),
-  ];
-
-  if (privileged) {
-    baseEndpoints.push(
-      fetchWithAuth("/api/purchase-orders"),
-      fetchWithAuth("/api/grns"),
-      fetchWithAuth("/api/card-master"),
-      // Cheques: no meaningful due date field exists on ChequeMaster (no ExpiryDate col)
-      // so we skip it to avoid false overdue noise from CreatedAt misuse.
-      // TDS master stores rate/percentage records, not payment schedules with due dates.
-      // Both are excluded until a proper due date column is added to those tables.
-    );
-  } else {
-    // Non-privileged users: push nulls to keep array positions stable
-    baseEndpoints.push(
-      Promise.resolve(null),
-      Promise.resolve(null),
-      Promise.resolve(null),
-    );
-  }
-
-  const [taskRes, poRes, grnRes, cardRes] =
-    await Promise.allSettled(baseEndpoints);
+  const [poRes, grnRes, chequeRes, tdsRes, woRes] = await Promise.allSettled([
+    fetchWithAuth("/api/purchase-orders"),
+    fetchWithAuth("/api/grns"),
+    fetchWithAuth("/api/cheque-master"),
+    fetchWithAuth("/api/tds-master"),
+    fetchWithAuth("/api/work-orders"),
+  ]);
 
   const items: ReminderItem[] = [];
 
-  // ── Tasks (via /api/tasks/reminders) ─────────────────────────────────────
-  // Backend returns: { id, taskId, type, title, subtitle, dueDate, urgency, priority }
-  // already filtered to open/in_progress within 7 days, scoped by user role.
-  if (taskRes.status === "fulfilled" && taskRes.value?.ok) {
-    const tasks: any[] = await taskRes.value.json();
-    tasks.forEach((t: any) => {
-      items.push({
-        id: t.id,
-        type: "task",
-        title: t.title,
-        subtitle: t.subtitle,
-        dueDate: t.dueDate,
-        urgency: t.urgency,
-        priority: t.priority,
-        taskId: t.taskId ?? String(t.id).replace(/^task-/, ""),
-      });
-    });
-  }
-
-  // ── Purchase Orders (privileged only) ────────────────────────────────────
-  // Only show POs that are not yet delivered/cancelled and have a delivery date.
-  if (poRes.status === "fulfilled" && poRes.value?.ok) {
-    const data = await poRes.value.json();
-    (Array.isArray(data) ? data : (data.data ?? [])).forEach((po: any) => {
-      // Skip completed/cancelled POs — no action needed
-      const status = (po.Status ?? "").toLowerCase();
-      if (
-        status === "delivered" ||
-        status === "cancelled" ||
-        status === "closed"
-      )
-        return;
-
-      const d = po.ExpectedDeliveryDate;
+  // Purchase Orders
+  if (poRes.status === "fulfilled" && poRes.value.ok) {
+    const raw = await poRes.value.json();
+    const list: any[] = Array.isArray(raw) ? raw : (raw.data ?? []);
+    list.forEach((po: any) => {
+      const d = po.ExpectedDeliveryDate || po.PODate;
       if (!d) return;
       const urgency = classifyUrgency(d);
       if (urgency === "upcoming") return;
@@ -154,26 +86,20 @@ export async function fetchAllReminders(): Promise<ReminderItem[]> {
         dueDate: d,
         urgency,
         amount: po.TotalAmount || undefined,
+        meta: po.ProjectName || undefined,
       });
     });
   }
 
-  // ── GRNs (privileged only) ────────────────────────────────────────────────
-  // GRNs only appear if they are still in Draft/Pending — already received ones
-  // don't need attention. GRNDate is the receipt date; only show if it's today or
-  // overdue and the GRN is not yet processed.
-  if (grnRes.status === "fulfilled" && grnRes.value?.ok) {
-    const data = await grnRes.value.json();
-    (Array.isArray(data) ? data : (data.data ?? [])).forEach((grn: any) => {
-      const status = (grn.Status ?? "").toLowerCase();
-      // Only pending/draft GRNs need attention
-      if (status !== "draft" && status !== "pending" && status !== "") return;
-
-      const d = grn.GRNDate;
+  // GRNs
+  if (grnRes.status === "fulfilled" && grnRes.value.ok) {
+    const raw = await grnRes.value.json();
+    const list: any[] = Array.isArray(raw) ? raw : (raw.data ?? []);
+    list.forEach((grn: any) => {
+      const d = grn.GRNDate || grn.CreatedDate;
       if (!d) return;
       const urgency = classifyUrgency(d);
-      // Only overdue or today — "soon" GRNs are already being processed
-      if (urgency !== "overdue" && urgency !== "today") return;
+      if (urgency === "upcoming") return;
       items.push({
         id: `grn-${grn.GRNID ?? grn.Id ?? grn.id}`,
         type: "grn",
@@ -181,58 +107,78 @@ export async function fetchAllReminders(): Promise<ReminderItem[]> {
         subtitle: grn.SupplierName || "Goods Receipt",
         dueDate: d,
         urgency,
+        amount: grn.TotalAmount || undefined,
+        meta: grn.ProjectName || undefined,
       });
     });
   }
 
-  // ── Card Expiry (privileged only) ─────────────────────────────────────────
-  // card_master stores expiry_month + expiry_year and reminder_days.
-  // We build the actual expiry date here and subtract reminder_days to get
-  // the "alert from" date.
-  if (cardRes.status === "fulfilled" && cardRes.value?.ok) {
-    const data = await cardRes.value.json();
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-
-    (Array.isArray(data) ? data : []).forEach((card: any) => {
-      if (!card.reminder_enabled) return;
-      if (!card.expiry_month || !card.expiry_year) return;
-      // Card expires at end of expiry month
-      const expiryDate = new Date(
-        2000 + parseInt(card.expiry_year, 10),
-        parseInt(card.expiry_month, 10), // month+1 day 0 = last day of expiry_month
-        0,
-      );
-      const reminderDays = card.reminder_days ?? 30;
-      // The "due date" for reminder purposes = expiry minus reminder_days
-      const alertDate = new Date(expiryDate);
-      alertDate.setDate(alertDate.getDate() - reminderDays);
-      alertDate.setHours(0, 0, 0, 0);
-
-      // Only surface if we're past the alert threshold
-      if (today < alertDate) return;
-
-      const urgency = classifyUrgency(expiryDate.toISOString().split("T")[0]);
-      // Don't show cards that expired more than 90 days ago (stale noise)
-      const daysSinceExpiry = Math.floor(
-        (today.getTime() - expiryDate.getTime()) / 86400000,
-      );
-      if (daysSinceExpiry > 90) return;
-
+  // Cheques
+  if (chequeRes.status === "fulfilled" && chequeRes.value.ok) {
+    const raw = await chequeRes.value.json();
+    const list: any[] = Array.isArray(raw) ? raw : (raw.data ?? []);
+    list.forEach((chq: any) => {
+      const d = chq.ChequeDate || chq.MaturityDate || chq.CreatedAt;
+      if (!d) return;
+      const isActive = chq.Status === 1 || chq.Status === true || chq.Status === "Pending";
+      if (!isActive) return;
+      const urgency = classifyUrgency(d);
+      if (urgency === "upcoming") return;
       items.push({
-        id: `card-${card.id}`,
-        type: "card",
-        title: `Card Expiry – ${card.card_holder_name || card.bank_name || "Card"}`,
-        subtitle: card.bank_name
-          ? `${card.bank_name} · ****${String(card.card_number ?? "").slice(-4)}`
-          : `****${String(card.card_number ?? "").slice(-4)}`,
-        dueDate: expiryDate.toISOString().split("T")[0],
+        id: `chq-${chq.CId ?? chq.Id ?? chq.id}`,
+        type: "cheque",
+        title: `Cheque Lot #${chq.ChequeLotNumber || chq.CId}`,
+        subtitle: chq.AccountNumber || "Cheque Lot",
+        dueDate: d,
         urgency,
+        meta: chq.BankId ? `Bank ${chq.BankId}` : undefined,
       });
     });
   }
 
-  // Sort: overdue → today → soon → upcoming
+  // TDS
+  if (tdsRes.status === "fulfilled" && tdsRes.value.ok) {
+    const raw = await tdsRes.value.json();
+    const list: any[] = Array.isArray(raw) ? raw : (raw.data ?? []);
+    list.forEach((tds: any) => {
+      const d = tds.DueDate || tds.PaymentDate || tds.Date;
+      if (!d) return;
+      const urgency = classifyUrgency(d);
+      if (urgency === "upcoming") return;
+      items.push({
+        id: `tds-${tds.Id ?? tds.id}`,
+        type: "tds",
+        title: `TDS #${tds.TDSCertificateNo || tds.Id}`,
+        subtitle: tds.PartyName || tds.DeducteeName || "TDS Payment",
+        dueDate: d,
+        urgency,
+        amount: tds.TDSAmount || tds.Amount || undefined,
+      });
+    });
+  }
+
+  // Work Orders
+  if (woRes.status === "fulfilled" && woRes.value.ok) {
+    const raw = await woRes.value.json();
+    const list: any[] = Array.isArray(raw) ? raw : (raw.data ?? []);
+    list.forEach((wo: any) => {
+      const d = wo.DocumentDate || wo.CreatedAt;
+      if (!d) return;
+      const urgency = classifyUrgency(d);
+      if (urgency === "upcoming") return;
+      items.push({
+        id: `wo-${wo.Id ?? wo.id}`,
+        type: "work_order",
+        title: `WO #${wo.DocumentNumber || wo.Id}`,
+        subtitle: wo.ContractorName || "Work Order",
+        dueDate: d,
+        urgency,
+        amount: wo.TotalAmount || undefined,
+        meta: wo.ProjectName || undefined,
+      });
+    });
+  }
+
   const ORDER: Record<ReminderItem["urgency"], number> = {
     overdue: 0,
     today: 1,
@@ -254,7 +200,6 @@ interface UseRemindersResult {
   reminders: ReminderItem[];
   loading: boolean;
   badgeCount: number;
-  overdueTaskCount: number;
   refresh: () => Promise<void>;
   fetched: boolean;
 }
@@ -281,7 +226,7 @@ export function useReminders(
         setFetched(true);
       }
     } catch {
-      // non-critical — bell silently fails
+      // non-critical
     } finally {
       if (!cancelledRef.current) setLoading(false);
     }
@@ -290,16 +235,12 @@ export function useReminders(
   useEffect(() => {
     cancelledRef.current = false;
     if (fetchOnMount) refresh();
-    return () => {
-      cancelledRef.current = true;
-    };
+    return () => { cancelledRef.current = true; };
   }, [fetchOnMount, refresh]);
 
   useEffect(() => {
     if (!pollingInterval) return;
-    const id = setInterval(() => {
-      if (hasToken()) refresh();
-    }, pollingInterval);
+    const id = setInterval(() => { if (hasToken()) refresh(); }, pollingInterval);
     return () => clearInterval(id);
   }, [pollingInterval, refresh, hasToken]);
 
@@ -307,9 +248,5 @@ export function useReminders(
     (r) => r.urgency === "overdue" || r.urgency === "today",
   ).length;
 
-  const overdueTaskCount = reminders.filter(
-    (r) => r.type === "task" && r.urgency === "overdue",
-  ).length;
-
-  return { reminders, loading, badgeCount, overdueTaskCount, refresh, fetched };
+  return { reminders, loading, badgeCount, refresh, fetched };
 }
