@@ -587,7 +587,8 @@ export default function ReceivedPaymentPage() {
     }
 
     const newPay: ReceivedPayment = {
-      id: `RCP${String(payments.length + 1).padStart(4, "0")}`,
+      id: "",        // will be assigned by DB
+      docNo: "",     // will be formatted after DB insert
       companyName: form.companyName,
       receivedFrom: form.receivedFrom.trim(),
       projectName: form.projectName,
@@ -629,8 +630,8 @@ export default function ReceivedPaymentPage() {
         RPEmiTotal:     newPay.emiTotal,
         RPEmiMonths:    newPay.emiMonths,
         RPEmiStartDate: newPay.emiStartDate,
-        RPEmiSchedule:  newPay.emiSchedule ?? null,
-        RPEmiPaying:    newPay.emiPaying ?? null,
+        RPEmiSchedule:  newPay.emiSchedule ? JSON.stringify(newPay.emiSchedule) : null,
+        RPEmiPaying:    newPay.emiPaying ? JSON.stringify(newPay.emiPaying) : null,
       });
       toast.success('Payment recorded successfully');
       await loadPayments(1);
