@@ -14,6 +14,8 @@ interface ProfileShellProps {
   email: string;
   roleBadge: React.ReactNode;
   avatarGradient: string;
+  avatarUrl?: string | null;
+  onAvatarClick?: () => void;
   heroAccent: string;
   heroMesh: string; // CSS gradient string for hero mesh
   accentColor: string; // e.g. "violet" | "blue" | "emerald" | "slate"
@@ -31,6 +33,8 @@ export function ProfileShell({
   email,
   roleBadge,
   avatarGradient,
+  avatarUrl,
+  onAvatarClick,
   heroMesh,
   accentColor,
   stats,
@@ -60,16 +64,35 @@ export function ProfileShell({
         {/* Content */}
         <div className="relative z-10 px-6 pt-8 pb-6 flex flex-col sm:flex-row sm:items-end gap-5">
           {/* Avatar */}
-          <div className="relative shrink-0">
+          <div className="relative shrink-0 group">
             <div
-              className="w-20 h-20 rounded-2xl flex items-center justify-center text-white text-2xl font-heading font-black shadow-2xl select-none"
+              className={`w-20 h-20 rounded-2xl flex items-center justify-center text-white text-2xl font-heading font-black shadow-2xl select-none overflow-hidden ${onAvatarClick ? "cursor-pointer" : ""}`}
               style={{
-                background: avatarGradient,
+                background: avatarUrl ? "transparent" : avatarGradient,
                 boxShadow:
                   "0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.15)",
               }}
+              onClick={onAvatarClick}
+              title={onAvatarClick ? "Click to change avatar" : undefined}
             >
-              {initials}
+              {avatarUrl ? (
+                <img
+                  src={avatarUrl}
+                  alt={name}
+                  className="w-full h-full object-cover rounded-2xl"
+                />
+              ) : (
+                initials
+              )}
+              {/* Hover overlay shown only when click handler present */}
+              {onAvatarClick && (
+                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl flex items-center justify-center">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2">
+                    <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                    <circle cx="12" cy="13" r="4" />
+                  </svg>
+                </div>
+              )}
             </div>
             {/* Online dot */}
             <span className="absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full bg-emerald-500 border-2 border-background shadow-sm" />

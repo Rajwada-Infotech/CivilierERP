@@ -45,6 +45,7 @@ export interface AppUser {
   email: string;
   role: UserRole;
   initials: string;
+  avatarUrl?: string | null;
   pagePermissions: PagePermission[];
   isActive: boolean;
 }
