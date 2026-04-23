@@ -101,14 +101,30 @@ const ActivityBrowserContext = createContext<ActivityBrowserContextType | null>(
   null,
 );
 
+// No-op fallback used when the hook is called outside the provider
+// (e.g. during hot-reload before the tree has fully mounted).
+const NOOP_CONTEXT: ActivityBrowserContextType = {
+  rawSessions: [],
+  groupedSessions: [],
+  isLoading: false,
+  dateFilters: {},
+  setDateFilters: () => {},
+  clearDateFilters: () => {},
+  activity: { data: [], total: 0, page: 1, limit: 20, pages: 0 },
+  setPage: () => {},
+  setFilters: () => {},
+  recordLogin: async () => {},
+  recordLogout: async () => {},
+  recordAction: async () => {},
+  clearAll: () => {},
+  refresh: () => {},
+};
+
 export const useActivityBrowser = () => {
   const ctx = useContext(ActivityBrowserContext);
-  if (!ctx) {
-    throw new Error(
-      "useActivityBrowser must be inside ActivityBrowserProvider",
-    );
-  }
-  return ctx;
+  // Return a safe no-op instead of throwing — this can happen during
+  // hot-module-reload before the provider tree has fully mounted.
+  return ctx ?? NOOP_CONTEXT;
 };
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────

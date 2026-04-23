@@ -35,7 +35,6 @@ import {
   Activity,
   Landmark,
   Bell,
-  RefreshCw,
   CalendarClock,
   ShoppingCart,
   TrendingUp,
@@ -66,203 +65,10 @@ interface NavItem {
   isMasters?: boolean;
 }
 
-// ─── Reminder Types & Helpers ─────────────────────────────────────────────────
-
-interface ReminderItem {
-  id: string | number;
-  type: "purchase_order" | "grn" | "cheque" | "tds" | "task" | "general";
-  title: string;
-  subtitle: string;
-  dueDate: string;
-  timeSlot?: string;
-  urgency: "overdue" | "today" | "soon" | "upcoming";
-  amount?: number;
-  taskId?: string;
-}
-
-const URGENCY_CFG = {
-  overdue: {
-    label: "Overdue",
-    cls: "bg-red-500/15 text-red-600 border-red-400/30",
-    dot: "bg-red-500",
-  },
-  today: {
-    label: "Today",
-    cls: "bg-amber-500/15 text-amber-600 border-amber-400/30",
-    dot: "bg-amber-500",
-  },
-  soon: {
-    label: "Soon",
-    cls: "bg-blue-500/15 text-blue-600 border-blue-400/30",
-    dot: "bg-blue-500",
-  },
-  upcoming: {
-    label: "Upcoming",
-    cls: "bg-muted text-muted-foreground border-border",
-    dot: "bg-muted-foreground",
-  },
-};
-
-const REM_ICON: Record<ReminderItem["type"], React.ElementType> = {
-  purchase_order: ShoppingCart,
-  grn: Package,
-  cheque: BookOpen,
-  tds: FileWarning,
-  task: CheckSquare,
-  general: Bell,
-};
-
-function classifyUrgency(d: string): ReminderItem["urgency"] {
-  const due = new Date(d);
-  due.setHours(0, 0, 0, 0);
-  const now = new Date();
-  now.setHours(0, 0, 0, 0);
-  const diff = Math.floor((due.getTime() - now.getTime()) / 86400000);
-  if (diff < 0) return "overdue";
-  if (diff === 0) return "today";
-  if (diff <= 7) return "soon";
-  return "upcoming";
-}
-
-function relLabel(d: string, ts?: string) {
-  const due = new Date(d);
-  due.setHours(0, 0, 0, 0);
-  const now = new Date();
-  now.setHours(0, 0, 0, 0);
-  const diff = Math.floor((due.getTime() - now.getTime()) / 86400000);
-  const base =
-    diff < 0
-      ? `${Math.abs(diff)}d overdue`
-      : diff === 0
-        ? "Today"
-        : diff === 1
-          ? "Tomorrow"
-          : `In ${diff}d`;
-  return ts ? `${base} · ${ts}` : base;
-}
-
-async function loadReminders(): Promise<ReminderItem[]> {
-  const [poR, grnR, chqR, tdsR, taskR] = await Promise.allSettled([
-    fetchWithAuth("/api/purchase-orders"),
-    fetchWithAuth("/api/grns"),
-    fetchWithAuth("/api/cheque-master"),
-    fetchWithAuth("/api/tds-master"),
-    fetchWithAuth("/api/tasks?scope=mine&status=open,in_progress"),
-  ]);
-  const items: ReminderItem[] = [];
-  const push = (
-    rows: any[],
-    type: ReminderItem["type"],
-    idFn: (r: any) => string | number,
-    titleFn: (r: any) => string,
-    subtitleFn: (r: any) => string,
-    dateFn: (r: any) => string,
-    amtFn: (r: any) => number | undefined,
-    tsFn: (r: any) => string | undefined,
-  ) => {
-    rows.forEach((r, idx) => {
-      const d = dateFn(r);
-      if (!d) return;
-      const urgency = classifyUrgency(d);
-      if (urgency === "upcoming") return;
-      const rawId = idFn(r);
-      items.push({
-        id: `${type}-${rawId ?? idx}`,
-        type,
-        title: titleFn(r),
-        subtitle: subtitleFn(r),
-        dueDate: d,
-        timeSlot: tsFn(r),
-        urgency,
-        amount: amtFn(r),
-      });
-    });
-  };
-  if (poR.status === "fulfilled" && poR.value.ok) {
-    const d = await poR.value.json();
-    push(
-      Array.isArray(d) ? d : (d.data ?? []),
-      "purchase_order",
-      (r) => r.PurchaseOrderID ?? r.Id ?? r.id,
-      (r) =>
-        `PO #${r.PurchaseOrderNo || r.PONumber || r.DocumentNumber || r.PurchaseOrderID}`,
-      (r) => r.SupplierName || r.VendorName || "Purchase Order",
-      (r) => r.ExpectedDeliveryDate || r.DeliveryDate || r.DocumentDate,
-      (r) => r.TotalAmount || r.Amount,
-      (r) => r.TimeSlot || r.DeliveryTime,
-    );
-  }
-  if (grnR.status === "fulfilled" && grnR.value.ok) {
-    const d = await grnR.value.json();
-    push(
-      Array.isArray(d) ? d : (d.data ?? []),
-      "grn",
-      (r) => r.GRNID ?? r.Id ?? r.id,
-      (r) => `GRN #${r.GRNNo || r.GRNNumber || r.DocumentNumber || r.GRNID}`,
-      (r) => r.SupplierName || r.VendorName || "Goods Receipt",
-      (r) => r.GRNDate || r.ExpectedDate || r.ReceivedDate || r.DocumentDate,
-      (r) => r.TotalAmount,
-      (r) => r.TimeSlot,
-    );
-  }
-  if (chqR.status === "fulfilled" && chqR.value.ok) {
-    const d = await chqR.value.json();
-    push(
-      Array.isArray(d) ? d : (d.data ?? []),
-      "cheque",
-      (r) => r.CId ?? r.Id ?? r.id,
-      (r) => `Cheque Lot #${r.ChequeLotNumber || r.ChequeNumber || r.CId}`,
-      (r) => r.BankName || r.AccountNumber || r.PartyName || "Cheque",
-      (r) => r.CreatedAt || r.ChequeDate || r.DueDate || r.Date,
-      (r) => r.Amount,
-      (r) => r.TimeSlot,
-    );
-  }
-  if (tdsR.status === "fulfilled" && tdsR.value.ok) {
-    const d = await tdsR.value.json();
-    push(
-      Array.isArray(d) ? d : (d.data ?? []),
-      "tds",
-      (r) => r.Id ?? r.id,
-      (r) => `TDS #${r.TDSCertificateNo || r.Id}`,
-      (r) => r.PartyName || r.DeducteeName || "TDS Payment",
-      (r) => r.DueDate || r.PaymentDate || r.Date,
-      (r) => r.TDSAmount || r.Amount,
-      (r) => r.TimeSlot,
-    );
-  }
-  // Tasks — from /api/tasks directly, no separate /reminders endpoint
-  if (taskR.status === "fulfilled" && taskR.value.ok) {
-    const tasks: any[] = await taskR.value.json();
-    tasks.forEach((t: any) => {
-      if (!t.dueDate) return;
-      const urgency = classifyUrgency(t.dueDate);
-      if (urgency === "upcoming") return;
-      items.push({
-        id: `task-${t.id}`,
-        type: "task",
-        title: t.title,
-        subtitle: `Assigned to ${t.assignedToName}`,
-        dueDate: t.dueDate,
-        urgency,
-        taskId: String(t.id),
-      });
-    });
-  }
-  const ORD = { overdue: 0, today: 1, soon: 2, upcoming: 3 };
-  items.sort((a, b) => ORD[a.urgency] - ORD[b.urgency]);
-  return items;
-}
-
 export const MobileNav: React.FC = () => {
   const [open, setOpen] = useState(false);
   const [groupStates, setGroupStates] = useState<Record<string, boolean>>({});
   const [setupOpen, setSetupOpen] = useState(false);
-  const [remOpen, setRemOpen] = useState(false);
-  const [reminders, setReminders] = useState<ReminderItem[]>([]);
-  const [remLoading, setRemLoading] = useState(false);
-  const [remFetched, setRemFetched] = useState(false);
-  const [badgeCount, setBadgeCount] = useState(0);
 
   const navigate = useNavigate();
   const location = useLocation();
@@ -270,54 +76,6 @@ export const MobileNav: React.FC = () => {
   const { currentUser, logout } = useAuth();
   const { activeModule, setActiveModule } = useModule();
   const { handleLogout, overlay: logoutOverlay } = useGracefulLogout();
-
-  // Overdue task count — derived from reminders once fetched, no separate context call
-  const overdueCount = reminders.filter(
-    (r) => r.type === "task" && r.urgency === "overdue",
-  ).length;
-
-  // Background badge count — only fire when authenticated
-  useEffect(() => {
-    let cancelled = false;
-    const refresh = async () => {
-      if (!localStorage.getItem("token")) return; // guard: no token, no fetch
-      try {
-        const items = await loadReminders();
-        if (!cancelled) {
-          setBadgeCount(
-            items.filter(
-              (i) => i.urgency === "overdue" || i.urgency === "today",
-            ).length,
-          );
-        }
-      } catch {
-        /* non-critical */
-      }
-    };
-    refresh();
-    const id = setInterval(refresh, 120_000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, []);
-
-  const fetchReminders = useCallback(async () => {
-    setRemLoading(true);
-    try {
-      const items = await loadReminders();
-      setReminders(items);
-      setBadgeCount(
-        items.filter((i) => i.urgency === "overdue" || i.urgency === "today")
-          .length,
-      );
-      setRemFetched(true);
-    } catch {
-      /* non-critical */
-    } finally {
-      setRemLoading(false);
-    }
-  }, []);
 
   const isAdminPage =
     location.pathname.startsWith("/admin") ||
@@ -475,7 +233,6 @@ export const MobileNav: React.FC = () => {
                 label: "Tasks",
                 path: "/tasks",
                 icon: CheckCircle2,
-                count: overdueCount,
               },
             ],
           },
@@ -816,11 +573,6 @@ export const MobileNav: React.FC = () => {
         }}
       >
         <Menu size={20} />
-        {badgeCount > 0 && (
-          <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[9px] font-bold flex items-center justify-center leading-none border-2 border-card">
-            {badgeCount > 99 ? "99+" : badgeCount}
-          </span>
-        )}
       </button>
 
       {open && (
@@ -1068,164 +820,6 @@ export const MobileNav: React.FC = () => {
                   )}
                 </div>
               )}
-
-              {/* ── Reminders Section ──────────────────────────────── */}
-              <div className="px-4 pb-2">
-                <div
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => {
-                    if (!remFetched) fetchReminders();
-                    setRemOpen((p) => !p);
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      if (!remFetched) fetchReminders();
-                      setRemOpen((p) => !p);
-                    }
-                  }}
-                  className="w-full flex items-center justify-between px-4 py-3 rounded-2xl border border-border hover:bg-muted transition-all text-sm font-heading text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-                >
-                  <div className="flex items-center gap-2">
-                    <Bell size={16} className="text-amber-500" />
-                    <span>Reminders</span>
-                    {badgeCount > 0 && (
-                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-red-500 text-white leading-none">
-                        {badgeCount}
-                      </span>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        fetchReminders();
-                      }}
-                      className="p-1 rounded-md text-muted-foreground hover:text-foreground transition-colors"
-                    >
-                      <RefreshCw
-                        size={12}
-                        className={remLoading ? "animate-spin" : ""}
-                      />
-                    </button>
-                    <ChevronDown
-                      size={15}
-                      className={`text-muted-foreground transition-transform duration-200 ${remOpen ? "rotate-180" : ""}`}
-                    />
-                  </div>
-                </div>
-
-                {remOpen && (
-                  <div className="mt-2 rounded-2xl border border-border bg-muted/20 overflow-hidden">
-                    {remLoading ? (
-                      <div className="flex items-center justify-center gap-2 py-6">
-                        <RefreshCw
-                          size={16}
-                          className="text-muted-foreground animate-spin"
-                        />
-                        <span className="text-xs text-muted-foreground">
-                          Loading…
-                        </span>
-                      </div>
-                    ) : reminders.length === 0 ? (
-                      <div className="flex flex-col items-center justify-center py-8 gap-2 text-center px-4">
-                        <CheckCircle2 size={24} className="text-emerald-500" />
-                        <p className="text-sm font-heading font-semibold text-foreground">
-                          All clear!
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          No overdue or upcoming items in the next 7 days.
-                        </p>
-                      </div>
-                    ) : (
-                      <>
-                        {/* urgency summary pills */}
-                        {(() => {
-                          const counts = reminders.reduce(
-                            (a, r) => ({
-                              ...a,
-                              [r.urgency]: (a[r.urgency] || 0) + 1,
-                            }),
-                            {} as Record<string, number>,
-                          );
-                          return (
-                            <div className="flex gap-1.5 px-3 pt-3 pb-1 flex-wrap">
-                              {(["overdue", "today", "soon"] as const).map(
-                                (u) =>
-                                  counts[u] ? (
-                                    <span
-                                      key={u}
-                                      className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${URGENCY_CFG[u].cls}`}
-                                    >
-                                      {counts[u]} {URGENCY_CFG[u].label}
-                                    </span>
-                                  ) : null,
-                              )}
-                            </div>
-                          );
-                        })()}
-                        <div className="divide-y divide-border/50 max-h-56 overflow-y-auto">
-                          {reminders.map((r) => {
-                            const Icon = REM_ICON[r.type];
-                            const cfg = URGENCY_CFG[r.urgency];
-                            return (
-                              <div
-                                key={r.id}
-                                onClick={() => {
-                                  if (r.type === "task") {
-                                    navigate(
-                                      r.taskId
-                                        ? `/tasks/${r.taskId}`
-                                        : "/tasks",
-                                    );
-                                    setOpen(false);
-                                  }
-                                }}
-                                className={`flex items-start gap-3 px-3 py-3
-                                  ${r.type === "task" ? "cursor-pointer" : "cursor-default"}
-                                  ${r.urgency === "overdue" ? "bg-red-500/5" : r.urgency === "today" ? "bg-amber-500/5" : ""}`}
-                              >
-                                <div
-                                  className={`mt-0.5 w-7 h-7 rounded-lg flex items-center justify-center shrink-0 border ${cfg.cls}`}
-                                >
-                                  <Icon size={13} />
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-start justify-between gap-1">
-                                    <p className="text-xs font-semibold text-foreground truncate">
-                                      {r.title}
-                                    </p>
-                                    {r.amount !== undefined && (
-                                      <span className="text-[10px] font-bold text-emerald-600 shrink-0">
-                                        ₹{r.amount.toLocaleString("en-IN")}
-                                      </span>
-                                    )}
-                                  </div>
-                                  <p className="text-[11px] text-muted-foreground truncate">
-                                    {r.subtitle}
-                                  </p>
-                                  <span
-                                    className={`inline-flex items-center gap-1 mt-0.5 text-[10px] font-semibold px-1.5 py-0.5 rounded-full border ${cfg.cls}`}
-                                  >
-                                    <span
-                                      className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`}
-                                    />
-                                    {relLabel(r.dueDate, r.timeSlot)}
-                                  </span>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                        <p className="text-[10px] text-muted-foreground text-center py-2 border-t border-border/60">
-                          Overdue · Today · Next 7 days
-                        </p>
-                      </>
-                    )}
-                  </div>
-                )}
-              </div>
 
               {/* ── Reports + Widgets quick links ───────────────────── */}
               <div className="px-4 pb-1 flex gap-2">
