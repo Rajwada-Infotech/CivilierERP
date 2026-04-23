@@ -1,14 +1,13 @@
 ﻿const express = require("express");
 const router = express.Router();
-const { poolPromise, sql } = require("../db");
-const { authenticateToken } = require("../middleware/auth");
+const { getPool, sql } = require("../db");
 
 router.get("/", async (req, res) => {
   try {
     const page  = Math.max(1, parseInt(req.query.page)  || 1);
     const limit = Math.min(100, parseInt(req.query.limit) || 20);
     const offset = (page - 1) * limit;
-    const pool = await poolPromise;
+    const pool = getPool();
     const countResult = await pool.request().query(`SELECT COUNT(*) AS total FROM dbo.ReceivedPayment`);
     const total = countResult.recordset[0].total;
     const result = await pool.request()
@@ -38,7 +37,7 @@ router.post("/", async (req, res) => {
       RPBankName, RPTransactionId, RPCheckNumber, RPRemarks,
       RPIsEmi, RPEmiTotal, RPEmiMonths, RPEmiStartDate, RPEmiSchedule, RPEmiPaying } = req.body;
     const createdBy = req.user?.name || req.user?.email || null;
-    const pool = await poolPromise;
+    const pool = getPool();
     const result = await pool.request()
       .input("RPCompanyName",   sql.NVarChar(255), RPCompanyName  || null)
       .input("RPReceivedFrom",  sql.NVarChar(255), RPReceivedFrom || "")
@@ -84,7 +83,7 @@ router.put("/:id", async (req, res) => {
       RPBankName, RPTransactionId, RPCheckNumber, RPRemarks,
       RPIsEmi, RPEmiTotal, RPEmiMonths, RPEmiStartDate, RPEmiSchedule, RPEmiPaying } = req.body;
     const updatedBy = req.user?.name || req.user?.email || null;
-    const pool = await poolPromise;
+    const pool = getPool();
     const result = await pool.request()
       .input("id",              sql.Int,           id)
       .input("RPCompanyName",   sql.NVarChar(255), RPCompanyName  || null)
@@ -113,7 +112,8 @@ router.put("/:id", async (req, res) => {
           RPEmiTotal=@RPEmiTotal, RPEmiMonths=@RPEmiMonths, RPEmiStartDate=@RPEmiStartDate,
           RPEmiSchedule=@RPEmiSchedule, RPEmiPaying=@RPEmiPaying,
           RPUpdatedBy=@RPUpdatedBy, RPUpdatedAt=GETDATE()
-        OUTPUT INSERTED.* WHERE RPPaymentID=@id
+        OUTPUT INSERTED.*
+        WHERE RPPaymentID=@id
       `);
     if (result.recordset.length === 0) return res.status(404).json({ error: "Not found" });
     res.json(result.recordset[0]);
@@ -126,7 +126,7 @@ router.put("/:id", async (req, res) => {
 router.delete("/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const pool = await poolPromise;
+    const pool = getPool();
     await pool.request().input("id", sql.Int, id)
       .query(`DELETE FROM dbo.ReceivedPayment WHERE RPPaymentID=@id`);
     res.json({ success: true });
@@ -141,7 +141,7 @@ router.patch("/:id/approve", async (req, res) => {
     const { id } = req.params;
     const { action, rejectionNote } = req.body;
     const actor = req.user?.name || req.user?.email || null;
-    const pool = await poolPromise;
+    const pool = getPool();
     if (action === "approve") {
       await pool.request().input("id", sql.Int, id).input("by", sql.NVarChar(150), actor)
         .query(`UPDATE dbo.ReceivedPayment SET RPStatus='Approved', RPApprovedBy=@by, RPApprovedAt=GETDATE() WHERE RPPaymentID=@id`);
