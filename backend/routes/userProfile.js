@@ -48,6 +48,7 @@ router.get("/:id/profile", async (req, res) => {
           u.name,
           u.email,
           u.RoleId,
+          u.avatar_url,
           r.RName        AS roleName,
           u.created_datetime,
           u.discontinue
@@ -69,6 +70,7 @@ router.get("/:id/profile", async (req, res) => {
       roleId: row.RoleId,
       created_datetime: row.created_datetime,
       discontinue: !!row.discontinue,
+      avatar_url: row.avatar_url || null,
     });
   } catch (err) {
     console.error("GET /user-profile/:id/profile error:", err);
@@ -179,6 +181,56 @@ router.get("/:id/activity", async (req, res) => {
   } catch (err) {
     // Activity log table may not exist — return empty gracefully
     res.json([]);
+  }
+});
+
+// ── POST upload-avatar ───────────────────────────────────────────────────────
+// Accepts a base64-encoded data URI (image/jpeg, image/png, image/webp, image/gif)
+// Max decoded size: ~400 KB (base64 string <= ~550 000 chars)
+router.post("/:id/upload-avatar", async (req, res) => {
+  if (!isSelfOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+
+  const { avatar } = req.body; // expects a data URI, e.g. "data:image/jpeg;base64,..."
+  if (!avatar) return res.status(400).json({ error: "No avatar data provided" });
+
+  // Validate it looks like a supported data URI
+  if (!/^data:image\/(jpeg|png|webp|gif);base64,/.test(avatar)) {
+    return res.status(400).json({ error: "Invalid image format. Supported: JPEG, PNG, WebP, GIF" });
+  }
+
+  // Rough size guard: base64 string > 550 000 chars ≈ > ~400 KB decoded
+  if (avatar.length > 550_000) {
+    return res.status(413).json({ error: "Image too large. Please use an image under 400 KB." });
+  }
+
+  try {
+    const pool = getPool();
+    await pool
+      .request()
+      .input("id", sql.Int, req.params.id)
+      .input("avatar_url", sql.NVarChar(sql.MAX), avatar)
+      .query("UPDATE dbo.users SET avatar_url = @avatar_url WHERE id = @id");
+    res.json({ message: "Avatar updated", avatar_url: avatar });
+  } catch (err) {
+    console.error("POST /user-profile/:id/upload-avatar error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── DELETE avatar ────────────────────────────────────────────────────────────
+router.delete("/:id/avatar", async (req, res) => {
+  if (!isSelfOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+
+  try {
+    const pool = getPool();
+    await pool
+      .request()
+      .input("id", sql.Int, req.params.id)
+      .query("UPDATE dbo.users SET avatar_url = NULL WHERE id = @id");
+    res.json({ message: "Avatar removed" });
+  } catch (err) {
+    console.error("DELETE /user-profile/:id/avatar error:", err);
+    res.status(500).json({ error: err.message });
   }
 });
 
