@@ -297,4 +297,43 @@ router.delete(
   },
 );
 
+// ======================
+// PATCH USER PAGE PERMISSIONS
+// Called by AuthContext.updateUserPagePermissions()
+// Stores the permissions JSON in dbo.users.page_permissions
+// ======================
+router.patch(
+  "/:id/permissions",
+  authMiddleware,
+  checkPermission("Users", "List", "CanEdit"),
+  async (req, res) => {
+    const { id } = req.params;
+    const { pagePermissions } = req.body;
+
+    if (!Array.isArray(pagePermissions)) {
+      return res
+        .status(400)
+        .json({ error: "pagePermissions must be an array" });
+    }
+
+    try {
+      const pool = getPool();
+      const jsonStr = JSON.stringify(pagePermissions);
+
+      await pool
+        .request()
+        .input("id", sql.Int, id)
+        .input("perms", sql.NVarChar(sql.MAX), jsonStr)
+        .query(
+          "UPDATE dbo.users SET page_permissions = @perms WHERE id = @id",
+        );
+
+      res.json({ message: "Permissions updated" });
+    } catch (err) {
+      console.error("PATCH /users/:id/permissions error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
 module.exports = router;

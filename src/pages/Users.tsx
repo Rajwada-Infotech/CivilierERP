@@ -32,7 +32,7 @@ const getUsers = async (): Promise<User[]> => {
 const addUserApi = async (user: {
   name: string;
   email: string;
-  role: string;
+  RoleId: number;
   password: string;
 }) => {
   const res = await fetch(BASE_URL, {
@@ -120,7 +120,7 @@ const Users = () => {
   const [form, setForm] = useState({
     name: "",
     email: "",
-    role: "user",
+    RoleId: 0,
     password: "",
     isActive: true,
   });
@@ -139,7 +139,7 @@ const Users = () => {
         setForm({
           name: user.name,
           email: user.email,
-          role: user.role || "user",
+          RoleId: (user as any).RoleId ?? 0,
           password: "",
           isActive: !user.discontinue,
         });
@@ -174,7 +174,7 @@ const Users = () => {
         data: {
           name: form.name.trim(),
           email: form.email.trim(),
-          role: form.role,
+          RoleId: form.RoleId,
           discontinue: !form.isActive,
         },
       });
@@ -182,7 +182,7 @@ const Users = () => {
       addMutation.mutate({
         name: form.name.trim(),
         email: form.email.trim(),
-        role: form.role,
+        RoleId: form.RoleId,
         password: form.password,
       });
     }
@@ -192,7 +192,7 @@ const Users = () => {
     setForm({
       name: "",
       email: "",
-      role: "user",
+      RoleId: 0,
       password: "",
       isActive: true,
     });
@@ -241,16 +241,16 @@ const Users = () => {
               </label>
               <div className="relative">
                 <select
-                  name="role"
-                  value={form.role}
+                  name="RoleId"
+                  value={form.RoleId}
                   onChange={(e) =>
-                    setForm((prev) => ({ ...prev, role: e.target.value }))
+                    setForm((prev) => ({ ...prev, RoleId: Number(e.target.value) }))
                   }
                   className="w-full h-10 px-3 pr-9 bg-input/70 border border-border rounded-md focus:ring-1 focus:ring-primary focus:border-primary outline-none appearance-none text-sm text-foreground"
                 >
-                  <option value="">Select a role…</option>
+                  <option value={0}>Select a role…</option>
                   {roles.map((r) => (
-                    <option key={r.RId} value={r.RName}>
+                    <option key={r.RId} value={r.RId}>
                       {r.RName}
                     </option>
                   ))}

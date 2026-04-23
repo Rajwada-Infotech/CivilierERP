@@ -883,8 +883,8 @@ export const MobileNav: React.FC = () => {
                     <button
                       onClick={() => {
                         setOpen(false);
-                        if (isSuperAdmin) navigate("/superadmin");
-                        else if (isDba) navigate("/dba");
+                        if (isSuperAdmin) navigate("/superadmin/profile");
+                        else if (isDba) navigate("/dba/profile");
                         else if (currentUser?.role === "admin")
                           navigate("/admin/profile");
                         else navigate("/user/profile");

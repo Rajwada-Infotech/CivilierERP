@@ -1,72 +1,100 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getUserProfile,
   updateUserProfile,
   changePassword,
   getUserActivity,
 } from "@/api/userProfileApi";
-import { ProfileShell, ProfileSection, ProfileField, ProfileFieldGrid } from "@/components/layout/ProfileShell";
+import {
+  ProfileShell,
+  ProfileSection,
+  ProfileField,
+  ProfileFieldGrid,
+  PasswordForm,
+} from "@/components/layout/ProfileShell";
 import { toast } from "sonner";
 import {
   User,
-  Key,
   Activity,
   Lock,
-  Eye,
-  EyeOff,
   Save,
-  CheckCircle2,
   Database,
-  Mail,
-  Calendar,
   Loader2,
   Server,
   Terminal,
   Shield,
+  HardDrive,
 } from "lucide-react";
 
 const inp =
   "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground placeholder:text-muted-foreground/50";
 
 const DBA_PERMISSIONS = [
-  { label: "Query Runner", desc: "Execute SQL queries against the database" },
+  {
+    label: "Query Runner",
+    desc: "Execute SQL queries against the database",
+    icon: Terminal,
+  },
   {
     label: "Schema Manager",
     desc: "View and modify table schemas and indexes",
+    icon: Database,
   },
   {
     label: "Database Backups",
     desc: "Trigger and monitor database backup jobs",
+    icon: HardDrive,
   },
-  { label: "Tenant DB Access", desc: "Access all tenant databases" },
+  {
+    label: "Tenant DB Access",
+    desc: "Access all tenant databases",
+    icon: Server,
+  },
   {
     label: "Performance Monitor",
     desc: "View query plans and system performance metrics",
+    icon: Activity,
   },
-  { label: "User Lookup", desc: "View user data for debugging and support" },
-  { label: "Audit Log Access", desc: "Read full database-level audit trail" },
+  {
+    label: "User Lookup",
+    desc: "View user data for debugging and support",
+    icon: User,
+  },
+  {
+    label: "Audit Log Access",
+    desc: "Read full database-level audit trail",
+    icon: Shield,
+  },
   {
     label: "Control Panel",
     desc: "Access the DBA control panel and diagnostics",
+    icon: Terminal,
   },
 ];
 
 export default function DBAProfile() {
-  const { currentUser } = useAuth();
+  const { currentUser, updateCurrentUserName } = useAuth();
   const userId = currentUser?.id ? parseInt(currentUser.id) : 0;
+  const queryClient = useQueryClient();
 
   const [activeTab, setActiveTab] = useState("profile");
   const [nameVal, setNameVal] = useState(currentUser?.name ?? "");
   const [pw, setPw] = useState({ current: "", next: "", confirm: "" });
   const [showPw, setShowPw] = useState<Record<string, boolean>>({});
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [editingPassword, setEditingPassword] = useState(false);
 
   const { data: profile } = useQuery({
     queryKey: ["user-profile", userId],
     queryFn: () => getUserProfile(userId),
     enabled: !!userId,
   });
+
+  useEffect(() => {
+    if (profile?.name) setNameVal(profile.name);
+  }, [profile?.name]);
 
   const { data: activity = [], isLoading: actLoading } = useQuery({
     queryKey: ["user-activity", userId],
@@ -76,7 +104,12 @@ export default function DBAProfile() {
 
   const updateMutation = useMutation({
     mutationFn: () => updateUserProfile(userId, { name: nameVal }),
-    onSuccess: () => toast.success("Profile updated"),
+    onSuccess: () => {
+      updateCurrentUserName(nameVal);
+      queryClient.invalidateQueries({ queryKey: ["user-profile", userId] });
+      toast.success("Profile updated");
+      setEditingProfile(false);
+    },
     onError: () => toast.error("Failed to update profile"),
   });
 
@@ -85,12 +118,10 @@ export default function DBAProfile() {
     onSuccess: () => {
       toast.success("Password changed");
       setPw({ current: "", next: "", confirm: "" });
+      setEditingPassword(false);
     },
     onError: (e: Error) => toast.error(e.message),
   });
-
-  const pwMatch = pw.next && pw.confirm && pw.next === pw.confirm;
-  const pwMismatch = pw.next && pw.confirm && pw.next !== pw.confirm;
 
   const displayName = profile?.name ?? currentUser?.name ?? "DBA";
   const initials = displayName
@@ -99,6 +130,13 @@ export default function DBAProfile() {
     .join("")
     .toUpperCase()
     .slice(0, 2);
+  const memberSince = profile?.created_datetime
+    ? new Date(profile.created_datetime).toLocaleDateString("en-IN", {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      })
+    : "—";
 
   const tabs = [
     { key: "profile", label: "Profile", icon: User },
@@ -112,11 +150,20 @@ export default function DBAProfile() {
       initials={initials}
       name={displayName}
       email={profile?.email ?? currentUser?.email ?? ""}
-      avatarGradient="from-emerald-600 to-emerald-400"
-      heroAccent="from-emerald-600/20 via-emerald-400/10 to-transparent"
+      avatarGradient="linear-gradient(135deg, #065f46 0%, #10b981 50%, #34d399 100%)"
+      heroAccent=""
+      heroMesh="radial-gradient(ellipse at 20% 40%, #064e3b 0%, transparent 55%), radial-gradient(ellipse at 80% 70%, #022c22 0%, transparent 50%), radial-gradient(ellipse at 50% 10%, #0d2e1f 0%, transparent 50%), linear-gradient(135deg, #020f09 0%, #051a10 50%, #020f09 100%)"
+      accentColor="emerald"
       roleBadge={
-        <span className="text-[10px] font-heading px-2.5 py-0.5 rounded-full border bg-emerald-500/10 text-emerald-600 border-emerald-300/40">
-          <Database size={9} className="inline mr-1" />
+        <span
+          className="inline-flex items-center gap-1.5 text-[10px] font-heading font-bold px-2.5 py-1 rounded-full border"
+          style={{
+            background: "rgba(6,95,70,0.25)",
+            borderColor: "rgba(52,211,153,0.3)",
+            color: "#6ee7b7",
+          }}
+        >
+          <Database size={9} />
           DBA
         </span>
       }
@@ -132,236 +179,304 @@ export default function DBAProfile() {
       activeTab={activeTab}
       onTabChange={setActiveTab}
     >
-      {/* ── PROFILE TAB ──────────────────────────────────────────────────── */}
+      {/* PROFILE TAB */}
       {activeTab === "profile" && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-          <div className="rounded-xl bg-card/80 border border-border shadow-sm overflow-hidden">
-            <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border bg-card/60">
-              <User size={14} className="text-primary" />
-              <span className="text-sm font-heading font-semibold">
-                Account Information
-              </span>
-            </div>
-            <div className="p-5 space-y-4">
-              <div>
-                <label className="text-[10px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5 block">
-                  Full Name
-                </label>
-                <input
-                  value={nameVal}
-                  onChange={(e) => setNameVal(e.target.value)}
-                  className={inp}
-                />
-              </div>
-              <div>
-                <label className="text-[10px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5 block flex items-center gap-1">
-                  <Mail size={10} /> Email
-                </label>
-                <input
-                  value={profile?.email ?? currentUser?.email ?? ""}
-                  disabled
-                  className={`${inp} opacity-60 cursor-not-allowed`}
-                />
-              </div>
-              <div>
-                <label className="text-[10px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5 block flex items-center gap-1">
-                  <Calendar size={10} /> Member Since
-                </label>
-                <p className="text-sm text-foreground">
-                  {profile?.created_datetime
-                    ? new Date(profile.created_datetime).toLocaleDateString(
-                        "en-IN",
-                        { day: "numeric", month: "long", year: "numeric" },
-                      )
-                    : "—"}
-                </p>
-              </div>
-              <div>
-                <label className="text-[10px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5 block">
-                  Role
-                </label>
-                <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-emerald-500/5 border border-emerald-300/30">
-                  <Database size={13} className="text-emerald-500" />
-                  <span className="text-sm font-body text-foreground">
-                    Database Administrator
-                  </span>
-                  <Server size={11} className="ml-auto text-emerald-400" />
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+          {/* Identity card */}
+          <div className="lg:col-span-1">
+            <div className="rounded-2xl border border-border bg-card overflow-hidden">
+              <div
+                className="h-16 w-full"
+                style={{
+                  background: "linear-gradient(135deg, #022c22, #065f46)",
+                }}
+              />
+              <div className="px-4 pb-4 -mt-8">
+                <div
+                  className="w-14 h-14 rounded-xl flex items-center justify-center text-white text-lg font-heading font-black shadow-lg ring-4 ring-card"
+                  style={{
+                    background: "linear-gradient(135deg, #065f46, #10b981)",
+                  }}
+                >
+                  {initials}
+                </div>
+                <div className="mt-3 space-y-1">
+                  <p className="text-sm font-heading font-bold text-foreground">
+                    {displayName}
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {profile?.email ?? currentUser?.email}
+                  </p>
+                  <div className="pt-1">
+                    <span
+                      className="text-[10px] font-heading px-2 py-0.5 rounded-full border"
+                      style={{
+                        background: "rgba(6,95,70,0.15)",
+                        borderColor: "rgba(52,211,153,0.25)",
+                        color: "#34d399",
+                      }}
+                    >
+                      Database Administrator
+                    </span>
+                  </div>
                 </div>
               </div>
-              <button
-                onClick={() => updateMutation.mutate()}
-                disabled={updateMutation.isPending}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-60 transition-all"
-              >
-                {updateMutation.isPending ? (
-                  <Loader2 size={14} className="animate-spin" />
-                ) : (
-                  <Save size={14} />
-                )}
-                Save Profile
-              </button>
+              <div className="border-t border-border px-4 py-3 space-y-2.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-muted-foreground font-heading">
+                    Member Since
+                  </span>
+                  <span className="text-foreground font-medium">
+                    {memberSince}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-muted-foreground font-heading">
+                    DB Access
+                  </span>
+                  <span className="text-emerald-500 font-bold text-[11px]">
+                    Full
+                  </span>
+                </div>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-muted-foreground font-heading">
+                    Status
+                  </span>
+                  <span
+                    className={`inline-flex items-center gap-1 text-[10px] font-heading px-2 py-0.5 rounded-full border ${
+                      profile?.discontinue
+                        ? "bg-red-500/10 text-red-500 border-red-400/30"
+                        : "bg-emerald-500/10 text-emerald-500 border-emerald-400/30"
+                    }`}
+                  >
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full ${profile?.discontinue ? "bg-red-500" : "bg-emerald-500"}`}
+                    />
+                    {profile?.discontinue ? "Inactive" : "Active"}
+                  </span>
+                </div>
+                {/* DB status block */}
+                <div
+                  className="mt-3 p-3 rounded-xl border"
+                  style={{
+                    background: "rgba(6,95,70,0.08)",
+                    borderColor: "rgba(52,211,153,0.15)",
+                  }}
+                >
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <Server size={11} className="text-emerald-500" />
+                    <span className="text-[10px] font-heading font-semibold text-emerald-500">
+                      DB Connected
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground">
+                    SQL Server · Full Access
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
 
-          <div className="rounded-xl bg-card/80 border border-border shadow-sm overflow-hidden">
-            <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border bg-card/60">
-              <Lock size={14} className="text-primary" />
-              <span className="text-sm font-heading font-semibold">
-                Change Password
-              </span>
-            </div>
-            <div className="p-5 space-y-3">
-              {(["current", "next", "confirm"] as const).map((field) => (
-                <div key={field}>
-                  <label className="text-[10px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5 block">
-                    {field === "current"
-                      ? "Current Password"
-                      : field === "next"
-                        ? "New Password"
-                        : "Confirm Password"}
-                  </label>
-                  <div className="relative">
+          {/* Forms */}
+          <div className="lg:col-span-2 space-y-4">
+            <ProfileSection
+              title="Account Information"
+              icon={User}
+              onEdit={
+                editingProfile ? undefined : () => setEditingProfile(true)
+              }
+            >
+              {!editingProfile ? (
+                <ProfileFieldGrid>
+                  <ProfileField label="Full Name" value={displayName} />
+                  <ProfileField
+                    label="Email Address"
+                    value={profile?.email ?? currentUser?.email ?? "—"}
+                  />
+                  <ProfileField label="Role" value="Database Administrator" />
+                  <ProfileField label="Member Since" value={memberSince} />
+                  <ProfileField
+                    label="Status"
+                    value={profile?.discontinue ? "Inactive" : "Active"}
+                  />
+                  <ProfileField label="DB Access Level" value="Full" />
+                </ProfileFieldGrid>
+              ) : (
+                <div className="space-y-4 max-w-md">
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5 block">
+                      Full Name
+                    </label>
                     <input
-                      type={showPw[field] ? "text" : "password"}
-                      value={pw[field]}
-                      onChange={(e) =>
-                        setPw((p) => ({ ...p, [field]: e.target.value }))
-                      }
-                      className={`${inp} pr-10 ${field === "confirm" && pwMismatch ? "border-destructive" : field === "confirm" && pwMatch ? "border-emerald-500" : ""}`}
+                      value={nameVal}
+                      onChange={(e) => setNameVal(e.target.value)}
+                      className={inp}
                     />
+                  </div>
+                  <div>
+                    <label className="text-[10px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5 block">
+                      Email (read-only)
+                    </label>
+                    <input
+                      value={profile?.email ?? currentUser?.email ?? ""}
+                      disabled
+                      className={`${inp} opacity-50 cursor-not-allowed`}
+                    />
+                  </div>
+                  <div className="flex gap-2 pt-1">
                     <button
-                      type="button"
-                      onClick={() =>
-                        setShowPw((s) => ({ ...s, [field]: !s[field] }))
-                      }
-                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      onClick={() => updateMutation.mutate()}
+                      disabled={updateMutation.isPending}
+                      className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-50 transition-all"
                     >
-                      {showPw[field] ? <EyeOff size={13} /> : <Eye size={13} />}
+                      {updateMutation.isPending ? (
+                        <Loader2 size={13} className="animate-spin" />
+                      ) : (
+                        <Save size={13} />
+                      )}
+                      Save
+                    </button>
+                    <button
+                      onClick={() => setEditingProfile(false)}
+                      className="px-4 py-2 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted transition-all"
+                    >
+                      Cancel
                     </button>
                   </div>
                 </div>
-              ))}
-              {pwMismatch && (
-                <p className="text-[11px] text-destructive">
-                  Passwords do not match
-                </p>
               )}
-              {pwMatch && (
-                <p className="text-[11px] text-emerald-600 flex items-center gap-1">
-                  <CheckCircle2 size={11} /> Passwords match
-                </p>
+            </ProfileSection>
+
+            <ProfileSection
+              title="Change Password"
+              icon={Lock}
+              onEdit={
+                editingPassword ? undefined : () => setEditingPassword(true)
+              }
+            >
+              {!editingPassword ? (
+                <ProfileFieldGrid>
+                  <ProfileField label="Password" value="••••••••••" />
+                  <ProfileField
+                    label="Two-Factor Auth"
+                    value="Not configured"
+                  />
+                  <ProfileField label="Last Login" value={memberSince} />
+                </ProfileFieldGrid>
+              ) : (
+                <PasswordForm
+                  pw={pw}
+                  setPw={setPw}
+                  showPw={showPw}
+                  setShowPw={setShowPw}
+                  isPending={pwMutation.isPending}
+                  onSubmit={() => pwMutation.mutate()}
+                  onCancel={() => setEditingPassword(false)}
+                />
               )}
-              <button
-                onClick={() => pwMutation.mutate()}
-                disabled={!pw.current || !pwMatch || pwMutation.isPending}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-60 transition-all mt-2"
-              >
-                {pwMutation.isPending ? (
-                  <Loader2 size={14} className="animate-spin" />
-                ) : (
-                  <Lock size={14} />
-                )}
-                Update Password
-              </button>
-            </div>
+            </ProfileSection>
           </div>
         </div>
       )}
 
-      {/* ── PERMISSIONS TAB ──────────────────────────────────────────────── */}
+      {/* PERMISSIONS TAB */}
       {activeTab === "permissions" && (
-        <div className="rounded-xl bg-card/80 border border-border shadow-sm overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-card/60">
-            <div className="flex items-center gap-2">
-              <Database size={14} className="text-emerald-500" />
-              <span className="text-sm font-heading font-semibold">
-                DBA Permissions
-              </span>
-            </div>
-            <span className="text-[10px] font-heading px-2.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 border border-emerald-300/40">
-              DB Level Access
+        <ProfileSection
+          title="DBA Permissions"
+          icon={Database}
+          subtitle="Database-level access and administrative tools"
+          headerRight={
+            <span
+              className="text-[10px] font-heading px-2.5 py-1 rounded-full border"
+              style={{
+                background: "rgba(6,95,70,0.12)",
+                borderColor: "rgba(52,211,153,0.25)",
+                color: "#34d399",
+              }}
+            >
+              {DBA_PERMISSIONS.length} granted
             </span>
-          </div>
-          <div className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {DBA_PERMISSIONS.map((p) => (
-              <div
-                key={p.label}
-                className="flex items-start gap-3 p-3.5 rounded-xl bg-muted/40 border border-border hover:border-emerald-300/50 transition-colors group"
-              >
-                <div className="mt-0.5 w-5 h-5 rounded-full bg-emerald-500/15 flex items-center justify-center flex-shrink-0">
-                  <Terminal size={10} className="text-emerald-600" />
+          }
+        >
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {DBA_PERMISSIONS.map((p) => {
+              const Icon = p.icon;
+              return (
+                <div
+                  key={p.label}
+                  className="group flex items-start gap-3 p-4 rounded-xl border border-border bg-muted/20 hover:bg-muted/40 hover:border-emerald-400/30 transition-all cursor-default"
+                >
+                  <div
+                    className="mt-0.5 w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+                    style={{
+                      background: "rgba(6,95,70,0.15)",
+                      border: "1px solid rgba(52,211,153,0.2)",
+                    }}
+                  >
+                    <Icon size={13} className="text-emerald-400" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-heading font-semibold text-foreground group-hover:text-emerald-400 transition-colors">
+                      {p.label}
+                    </p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5 leading-relaxed">
+                      {p.desc}
+                    </p>
+                  </div>
                 </div>
-                <div className="min-w-0">
-                  <p className="text-xs font-heading font-semibold text-foreground group-hover:text-emerald-600 transition-colors">
-                    {p.label}
-                  </p>
-                  <p className="text-[10px] text-muted-foreground mt-0.5 leading-relaxed">
-                    {p.desc}
-                  </p>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
-        </div>
+        </ProfileSection>
       )}
 
-      {/* ── ACTIVITY TAB ─────────────────────────────────────────────────── */}
+      {/* ACTIVITY TAB */}
       {activeTab === "activity" && (
-        <div className="rounded-xl bg-card/80 border border-border shadow-sm overflow-hidden">
-          <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border bg-card/60">
-            <Activity size={14} className="text-primary" />
-            <span className="text-sm font-heading font-semibold">
-              Recent Activity
-            </span>
-          </div>
+        <ProfileSection title="Recent Activity" icon={Activity} noPadding>
           {actLoading ? (
-            <div className="flex justify-center items-center py-12">
+            <div className="flex justify-center items-center py-16">
               <Loader2
                 size={24}
                 className="animate-spin text-muted-foreground"
               />
             </div>
           ) : activity.length === 0 ? (
-            <div className="py-12 text-center text-muted-foreground text-sm">
+            <div className="py-16 text-center text-muted-foreground text-sm">
               No activity recorded yet
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-muted/30 border-b border-border text-xs uppercase tracking-wide">
-                    <th className="text-left px-5 py-3 font-heading font-semibold text-muted-foreground">
-                      Time
-                    </th>
-                    <th className="text-left px-4 py-3 font-heading font-semibold text-muted-foreground">
-                      Action
-                    </th>
-                    <th className="text-left px-4 py-3 font-heading font-semibold text-muted-foreground">
-                      Module
-                    </th>
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/30">
+                  <th className="text-left px-5 py-3 text-[10px] uppercase tracking-wider font-heading text-muted-foreground">
+                    Time
+                  </th>
+                  <th className="text-left px-4 py-3 text-[10px] uppercase tracking-wider font-heading text-muted-foreground">
+                    Action
+                  </th>
+                  <th className="text-left px-4 py-3 text-[10px] uppercase tracking-wider font-heading text-muted-foreground">
+                    Module
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {activity.map((log: any, i: number) => (
+                  <tr key={i} className="hover:bg-muted/20 transition-colors">
+                    <td className="px-5 py-3 font-mono text-xs text-muted-foreground whitespace-nowrap">
+                      {new Date(log.action_time).toLocaleString("en-IN")}
+                    </td>
+                    <td className="px-4 py-3 text-foreground">{log.action}</td>
+                    <td className="px-4 py-3">
+                      <span className="text-[10px] font-heading px-2 py-0.5 rounded-full bg-muted border border-border text-muted-foreground">
+                        {log.module}
+                      </span>
+                    </td>
                   </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {activity.map((log: any, i: number) => (
-                    <tr key={i} className="hover:bg-muted/20 transition-colors">
-                      <td className="px-5 py-3 font-mono text-xs text-muted-foreground whitespace-nowrap">
-                        {new Date(log.action_time).toLocaleString("en-IN")}
-                      </td>
-                      <td className="px-4 py-3 text-foreground">
-                        {log.action}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="text-[10px] font-heading px-2 py-0.5 rounded-full bg-muted border border-border text-muted-foreground">
-                          {log.module}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                ))}
+              </tbody>
+            </table>
           )}
-        </div>
+        </ProfileSection>
       )}
     </ProfileShell>
   );
