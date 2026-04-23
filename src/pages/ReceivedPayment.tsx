@@ -47,6 +47,9 @@ import {
   addReceivedPayment,
   deleteReceivedPayment,
 } from "@/api/receivedPaymentApi";
+import { getBanks, type BankRecord } from "@/api/bankMasterApi";
+import { getEnterprises } from "@/api/enterpriseApi";
+import { getWorkOrders } from "@/api/workOrderApi";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -89,24 +92,6 @@ export type ReceivedPayment = {
 };
 
 // ─── Static Data ──────────────────────────────────────────────────────────────
-
-const COMPANIES = [
-  "Civilier Infrastructure Pvt. Ltd.",
-  "Metro Constructions Ltd.",
-  "Skyline Builders",
-  "Prime Civil Works Co.",
-];
-
-const MOCK_PROJECTS = [
-  "Project Alpha",
-  "Site Beta",
-  "Commercial Tower",
-  "Residential Complex",
-  "Infrastructure Project",
-  "Road Construction",
-  "Bridge Project",
-  "Gamma Residential",
-];
 
 const PAYMENT_MODES: PaymentMode[] = [
   "Cash",
@@ -345,67 +330,85 @@ export default function ReceivedPaymentPage() {
   const [emiSchedule, setEmiSchedule] = useState<EmiInstallment[]>([]);
   const [emiPayingNos, setEmiPayingNos] = useState<number[]>([]);
   const [emiFetching, setEmiFetching] = useState(false);
+  const [banks, setBanks] = useState<BankRecord[]>([]);
+  const [companies, setCompanies] = useState<{ id: number; name: string }[]>([]);
+  const [projects, setProjects] = useState<{ id: number; name: string }[]>([]);
+
+  // Auto-generate transaction ID: TXN-YYYYMMDD-XXXXXX
+  const generateTxnId = () => {
+    const d = new Date();
+    const datePart = d.toISOString().slice(0, 10).replace(/-/g, "");
+    const rand = Math.random().toString(36).toUpperCase().slice(2, 8);
+    return `TXN-${datePart}-${rand}`;
+  };
+
+  useEffect(() => {
+    getBanks()
+      .then((data) => setBanks(data.filter((b) => b.BStatus)))
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    getEnterprises()
+      .then((data: any[]) =>
+        setCompanies(
+          data
+            .filter((e) => !e.discontinue && e.status !== "Inactive")
+            .map((e) => ({ id: e.id, name: e.name }))
+        )
+      )
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    getWorkOrders()
+      .then((res: any) => {
+        const rows = Array.isArray(res) ? res : res.data ?? [];
+        const seen = new Set<string>();
+        const unique: { id: number; name: string }[] = [];
+        for (const wo of rows) {
+          if (wo.ProjectName && !seen.has(wo.ProjectName)) {
+            seen.add(wo.ProjectName);
+            unique.push({ id: wo.ProjectId, name: wo.ProjectName });
+          }
+        }
+        setProjects(unique);
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (form.mode === "EMI" && form.projectName) {
       setEmiFetching(true);
       setEmiSchedule([]);
       setEmiPayingNos([]);
-      setTimeout(() => {
-        const MOCK_EMI_DATA: Record<
-          string,
-          { total: number; months: number; startDate: string }
-        > = {
-          "Project Alpha": {
-            total: 480000,
-            months: 6,
-            startDate: "2024-11-01",
-          },
-          "Site Beta": { total: 1200000, months: 12, startDate: "2024-10-01" },
-          "Commercial Tower": {
-            total: 3600000,
-            months: 36,
-            startDate: "2024-09-01",
-          },
-          "Residential Complex": {
-            total: 900000,
-            months: 9,
-            startDate: "2024-12-01",
-          },
-          "Infrastructure Project": {
-            total: 720000,
-            months: 6,
-            startDate: "2024-11-15",
-          },
-          "Road Construction": {
-            total: 1800000,
-            months: 18,
-            startDate: "2024-08-01",
-          },
-          "Bridge Project": {
-            total: 2400000,
-            months: 24,
-            startDate: "2024-07-01",
-          },
-          "Gamma Residential": {
-            total: 540000,
-            months: 6,
-            startDate: "2024-12-01",
-          },
-        };
-        const d = MOCK_EMI_DATA[form.projectName] ?? {
-          total: 600000,
-          months: 6,
-          startDate: new Date().toISOString().slice(0, 10),
-        };
-        setEmiSchedule(generateEmiSchedule(d.total, d.months, d.startDate));
+      const project = projects.find((p) => p.name === form.projectName);
+      if (!project) {
         setEmiFetching(false);
-      }, 800);
+        return;
+      }
+      getWorkOrders()
+        .then((res: any) => {
+          const rows = Array.isArray(res) ? res : res.data ?? [];
+          // Find the most recent work order for this project
+          const wo = rows.find((w: any) => w.ProjectId === project.id || w.ProjectName === form.projectName);
+          if (wo && wo.TotalAmount && wo.DocumentDate) {
+            // Default to 6 months if no EMI months stored
+            const months = wo.EmiMonths ?? wo.emiMonths ?? 6;
+            const total = Number(wo.TotalAmount);
+            const startDate = wo.DocumentDate.slice(0, 10);
+            setEmiSchedule(generateEmiSchedule(total, months, startDate));
+          } else {
+            setEmiSchedule([]);
+          }
+        })
+        .catch(() => setEmiSchedule([]))
+        .finally(() => setEmiFetching(false));
     } else {
       setEmiSchedule([]);
       setEmiPayingNos([]);
     }
-  }, [form.mode, form.projectName]);
+  }, [form.mode, form.projectName, projects]);
 
   // ── API-backed data layer ────────────────────────────────────────────
   const [apiLoading, setApiLoading] = useState(false);
@@ -432,7 +435,7 @@ export default function ReceivedPaymentPage() {
             transactionId: r.RPTransactionId ?? undefined,
             checkNumber: r.RPCheckNumber ?? undefined,
             remarks: r.RPRemarks ?? undefined,
-            status: r.RPStatus === "cleared" ? "cleared" : "pending",
+            status: (r.RPStatus === "Approved" || r.RPStatus === "cleared") ? "cleared" : "pending",
             createdAt: r.RPCreatedAt,
             isEmi: Boolean(r.RPIsEmi),
             emiTotal: r.RPEmiTotal ?? undefined,
@@ -511,7 +514,7 @@ export default function ReceivedPaymentPage() {
       companyName: form.companyName,
       receivedFrom: form.receivedFrom.trim(),
       projectName: form.projectName,
-      docDate: date.toISOString(),
+      docDate: date.toISOString().slice(0, 10),
       mode: form.mode,
       amount: isEmi ? emiPayingAmount : Number(form.amount),
       bankName: form.bankName || undefined,
@@ -549,12 +552,8 @@ export default function ReceivedPaymentPage() {
         RPEmiTotal:     newPay.emiTotal,
         RPEmiMonths:    newPay.emiMonths,
         RPEmiStartDate: newPay.emiStartDate,
-        RPEmiSchedule:  newPay.emiSchedule
-          ? JSON.stringify(newPay.emiSchedule)
-          : null,
-        RPEmiPaying:    newPay.emiPaying
-          ? JSON.stringify(newPay.emiPaying)
-          : null,
+        RPEmiSchedule:  newPay.emiSchedule ?? null,
+        RPEmiPaying:    newPay.emiPaying ?? null,
       });
       toast.success('Payment recorded successfully');
       await loadPayments();
@@ -642,7 +641,10 @@ export default function ReceivedPaymentPage() {
             All inbound payments received from clients &amp; customers
           </p>
         </div>
-        <Button size="sm" onClick={() => setIsOpen(true)} className="shrink-0">
+        <Button size="sm" onClick={() => {
+          setForm({ ...EMPTY_FORM, transactionId: generateTxnId() });
+          setIsOpen(true);
+        }} className="shrink-0">
           <Plus size={15} className="mr-1" />
           Add Payment
         </Button>
@@ -895,11 +897,15 @@ export default function ReceivedPaymentPage() {
                   <SelectValue placeholder="Select company…" />
                 </SelectTrigger>
                 <SelectContent>
-                  {COMPANIES.map((c) => (
-                    <SelectItem key={c} value={c}>
-                      {c}
-                    </SelectItem>
-                  ))}
+                  {companies.length === 0 ? (
+                    <SelectItem value="__none__" disabled>No companies found</SelectItem>
+                  ) : (
+                    companies.map((c) => (
+                      <SelectItem key={c.id} value={c.name}>
+                        {c.name}
+                      </SelectItem>
+                    ))
+                  )}
                 </SelectContent>
               </Select>
             </div>
@@ -929,11 +935,15 @@ export default function ReceivedPaymentPage() {
                   <SelectValue placeholder="Select project" />
                 </SelectTrigger>
                 <SelectContent>
-                  {MOCK_PROJECTS.map((p) => (
-                    <SelectItem key={p} value={p}>
-                      {p}
-                    </SelectItem>
-                  ))}
+                  {projects.length === 0 ? (
+                    <SelectItem value="__none__" disabled>No projects found</SelectItem>
+                  ) : (
+                    projects.map((p) => (
+                      <SelectItem key={p.id} value={p.name}>
+                        {p.name}
+                      </SelectItem>
+                    ))
+                  )}
                 </SelectContent>
               </Select>
             </div>
@@ -1061,31 +1071,62 @@ export default function ReceivedPaymentPage() {
                   <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                     Bank Name
                   </label>
-                  <Input
-                    placeholder="e.g. HDFC Bank"
+                  <Select
                     value={form.bankName}
-                    onChange={(e) => setField("bankName", e.target.value)}
-                  />
+                    onValueChange={(v) => setField("bankName", v)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select bank…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {banks.length === 0 ? (
+                        <SelectItem value="__none__" disabled>
+                          No banks found
+                        </SelectItem>
+                      ) : (
+                        banks.map((b) => (
+                          <SelectItem key={b.BId} value={b.BName ?? String(b.BId)}>
+                            <span className="flex flex-col">
+                              <span>{b.BName}</span>
+                              {b.BBranch && (
+                                <span className="text-[10px] text-muted-foreground">
+                                  {b.BBranch}
+                                </span>
+                              )}
+                            </span>
+                          </SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-1.5">
                   <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                     {form.mode === "Check" ? "Check No." : "Transaction ID"}
                   </label>
-                  <Input
-                    placeholder={
-                      form.mode === "Check" ? "CHK001" : "TXN/REF ID"
-                    }
-                    value={
-                      form.mode === "Check"
-                        ? form.checkNumber
-                        : form.transactionId
-                    }
-                    onChange={(e) =>
-                      form.mode === "Check"
-                        ? setField("checkNumber", e.target.value)
-                        : setField("transactionId", e.target.value)
-                    }
-                  />
+                  {form.mode === "Check" ? (
+                    <Input
+                      placeholder="CHK001"
+                      value={form.checkNumber}
+                      onChange={(e) => setField("checkNumber", e.target.value)}
+                    />
+                  ) : (
+                    <div className="relative">
+                      <Input
+                        readOnly
+                        value={form.transactionId}
+                        className="font-mono text-xs bg-muted/40 cursor-default select-all"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setField("transactionId", generateTxnId())}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground hover:text-foreground transition-colors font-medium"
+                        title="Regenerate"
+                      >
+                        ↻
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
