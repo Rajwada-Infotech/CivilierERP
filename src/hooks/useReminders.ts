@@ -1,15 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
 export type ReminderType =
   | "cheque"
   | "purchase_order"
   | "work_order"
   | "tds"
-  | "grn"
-  | "payment";
+  | "grn";
 
 export interface ReminderItem {
   id: string | number;
@@ -19,17 +16,14 @@ export interface ReminderItem {
   dueDate: string;
   urgency: "overdue" | "today" | "soon" | "upcoming";
   amount?: number;
-  meta?: string;
 }
-
-// ─── Urgency classifier ───────────────────────────────────────────────────────
 
 export function classifyUrgency(dueDateStr: string): ReminderItem["urgency"] {
   const due = new Date(dueDateStr);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   due.setHours(0, 0, 0, 0);
-  const diffDays = Math.floor((due.getTime() - today.getTime()) / 86_400_000);
+  const diffDays = Math.floor((due.getTime() - today.getTime()) / 86400000);
   if (diffDays < 0) return "overdue";
   if (diffDays === 0) return "today";
   if (diffDays <= 7) return "soon";
@@ -41,10 +35,9 @@ export function formatRelative(dueDateStr: string): string {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   due.setHours(0, 0, 0, 0);
-  const diffDays = Math.floor((due.getTime() - today.getTime()) / 86_400_000);
+  const diffDays = Math.floor((due.getTime() - today.getTime()) / 86400000);
   if (diffDays < 0) return `${Math.abs(diffDays)}d overdue`;
   if (diffDays === 0) return "Due today";
-  if (diffDays === 1) return "Due tomorrow";
   return `Due in ${diffDays}d`;
 }
 
@@ -52,11 +45,8 @@ export function formatDate(dateStr: string): string {
   return new Date(dateStr).toLocaleDateString("en-IN", {
     day: "numeric",
     month: "short",
-    year: "numeric",
   });
 }
-
-// ─── Fetch ────────────────────────────────────────────────────────────────────
 
 export async function fetchAllReminders(): Promise<ReminderItem[]> {
   const [poRes, grnRes, chequeRes, tdsRes, woRes] = await Promise.allSettled([
@@ -68,185 +58,108 @@ export async function fetchAllReminders(): Promise<ReminderItem[]> {
   ]);
 
   const items: ReminderItem[] = [];
-
-  // Purchase Orders
-  if (poRes.status === "fulfilled" && poRes.value.ok) {
-    const raw = await poRes.value.json();
-    const list: any[] = Array.isArray(raw) ? raw : (raw.data ?? []);
-    list.forEach((po: any) => {
-      const d = po.ExpectedDeliveryDate || po.PODate;
-      if (!d) return;
-      const urgency = classifyUrgency(d);
-      if (urgency === "upcoming") return;
-      items.push({
-        id: `po-${po.PurchaseOrderID ?? po.Id ?? po.id}`,
-        type: "purchase_order",
-        title: `PO #${po.PurchaseOrderNo || po.PurchaseOrderID}`,
-        subtitle: po.SupplierName || "Purchase Order",
-        dueDate: d,
-        urgency,
-        amount: po.TotalAmount || undefined,
-        meta: po.ProjectName || undefined,
+  const process = async (
+    res: PromiseSettledResult<Response>,
+    type: ReminderType,
+    idKey: string,
+    titlePre: string,
+  ) => {
+    if (res.status === "fulfilled" && res.value.ok) {
+      const raw = await res.value.json();
+      const list = Array.isArray(raw) ? raw : (raw.data ?? []);
+      list.forEach((obj: any) => {
+        const d =
+          obj.ExpectedDeliveryDate ||
+          obj.PODate ||
+          obj.GRNDate ||
+          obj.ChequeDate ||
+          obj.DueDate;
+        if (!d) return;
+        const urgency = classifyUrgency(d);
+        if (urgency === "upcoming") return;
+        items.push({
+          id: `${type}-${obj[idKey] || Math.random()}`,
+          type,
+          title: `${titlePre} #${obj.PurchaseOrderNo || obj.GRNNo || obj.DocumentNumber || obj[idKey]}`,
+          subtitle: obj.SupplierName || obj.PartyName || "Civilier System",
+          dueDate: d,
+          urgency,
+          amount: obj.TotalAmount || obj.TDSAmount || obj.Amount,
+        });
       });
-    });
-  }
-
-  // GRNs
-  if (grnRes.status === "fulfilled" && grnRes.value.ok) {
-    const raw = await grnRes.value.json();
-    const list: any[] = Array.isArray(raw) ? raw : (raw.data ?? []);
-    list.forEach((grn: any) => {
-      const d = grn.GRNDate || grn.CreatedDate;
-      if (!d) return;
-      const urgency = classifyUrgency(d);
-      if (urgency === "upcoming") return;
-      items.push({
-        id: `grn-${grn.GRNID ?? grn.Id ?? grn.id}`,
-        type: "grn",
-        title: `GRN #${grn.GRNNo || grn.GRNID}`,
-        subtitle: grn.SupplierName || "Goods Receipt",
-        dueDate: d,
-        urgency,
-        amount: grn.TotalAmount || undefined,
-        meta: grn.ProjectName || undefined,
-      });
-    });
-  }
-
-  // Cheques
-  if (chequeRes.status === "fulfilled" && chequeRes.value.ok) {
-    const raw = await chequeRes.value.json();
-    const list: any[] = Array.isArray(raw) ? raw : (raw.data ?? []);
-    list.forEach((chq: any) => {
-      const d = chq.ChequeDate || chq.MaturityDate || chq.CreatedAt;
-      if (!d) return;
-      const isActive = chq.Status === 1 || chq.Status === true || chq.Status === "Pending";
-      if (!isActive) return;
-      const urgency = classifyUrgency(d);
-      if (urgency === "upcoming") return;
-      items.push({
-        id: `chq-${chq.CId ?? chq.Id ?? chq.id}`,
-        type: "cheque",
-        title: `Cheque Lot #${chq.ChequeLotNumber || chq.CId}`,
-        subtitle: chq.AccountNumber || "Cheque Lot",
-        dueDate: d,
-        urgency,
-        meta: chq.BankId ? `Bank ${chq.BankId}` : undefined,
-      });
-    });
-  }
-
-  // TDS
-  if (tdsRes.status === "fulfilled" && tdsRes.value.ok) {
-    const raw = await tdsRes.value.json();
-    const list: any[] = Array.isArray(raw) ? raw : (raw.data ?? []);
-    list.forEach((tds: any) => {
-      const d = tds.DueDate || tds.PaymentDate || tds.Date;
-      if (!d) return;
-      const urgency = classifyUrgency(d);
-      if (urgency === "upcoming") return;
-      items.push({
-        id: `tds-${tds.Id ?? tds.id}`,
-        type: "tds",
-        title: `TDS #${tds.TDSCertificateNo || tds.Id}`,
-        subtitle: tds.PartyName || tds.DeducteeName || "TDS Payment",
-        dueDate: d,
-        urgency,
-        amount: tds.TDSAmount || tds.Amount || undefined,
-      });
-    });
-  }
-
-  // Work Orders
-  if (woRes.status === "fulfilled" && woRes.value.ok) {
-    const raw = await woRes.value.json();
-    const list: any[] = Array.isArray(raw) ? raw : (raw.data ?? []);
-    list.forEach((wo: any) => {
-      const d = wo.DocumentDate || wo.CreatedAt;
-      if (!d) return;
-      const urgency = classifyUrgency(d);
-      if (urgency === "upcoming") return;
-      items.push({
-        id: `wo-${wo.Id ?? wo.id}`,
-        type: "work_order",
-        title: `WO #${wo.DocumentNumber || wo.Id}`,
-        subtitle: wo.ContractorName || "Work Order",
-        dueDate: d,
-        urgency,
-        amount: wo.TotalAmount || undefined,
-        meta: wo.ProjectName || undefined,
-      });
-    });
-  }
-
-  const ORDER: Record<ReminderItem["urgency"], number> = {
-    overdue: 0,
-    today: 1,
-    soon: 2,
-    upcoming: 3,
+    }
   };
-  items.sort((a, b) => ORDER[a.urgency] - ORDER[b.urgency]);
-  return items;
+
+  await Promise.all([
+    process(poRes, "purchase_order", "PurchaseOrderID", "PO"),
+    process(grnRes, "grn", "GRNID", "GRN"),
+    process(chequeRes, "cheque", "CId", "CHQ"),
+    process(tdsRes, "tds", "Id", "TDS"),
+    process(woRes, "work_order", "Id", "WO"),
+  ]);
+
+  return items.sort((a, b) => {
+    const order = { overdue: 0, today: 1, soon: 2, upcoming: 3 };
+    return order[a.urgency] - order[b.urgency];
+  });
 }
 
-// ─── Hook ─────────────────────────────────────────────────────────────────────
-
-interface UseRemindersOptions {
-  pollingInterval?: number;
-  fetchOnMount?: boolean;
-}
-
-interface UseRemindersResult {
-  reminders: ReminderItem[];
-  loading: boolean;
-  badgeCount: number;
-  refresh: () => Promise<void>;
-  fetched: boolean;
-}
-
-export function useReminders(
-  options: UseRemindersOptions = {},
-): UseRemindersResult {
-  const { pollingInterval = 120_000, fetchOnMount = true } = options;
-
+export function useReminders(options: { pollingInterval?: number } = {}) {
+  // Polling 4000 = Automatically check the server for new data every 4 seconds.
+  const { pollingInterval = 4000 } = options;
   const [reminders, setReminders] = useState<ReminderItem[]>([]);
   const [loading, setLoading] = useState(false);
-  const [fetched, setFetched] = useState(false);
-  const cancelledRef = useRef(false);
+  const [isLocked, setIsLocked] = useState(false);
 
-  const hasToken = useCallback(() => !!localStorage.getItem("token"), []);
+  const isFetching = useRef(false);
+  const clickCount = useRef(0);
+  const lockTimer = useRef<NodeJS.Timeout | null>(null);
 
-  const refresh = useCallback(async () => {
-    if (!hasToken()) return;
-    setLoading(true);
-    try {
-      const items = await fetchAllReminders();
-      if (!cancelledRef.current) {
-        setReminders(items);
-        setFetched(true);
+  const refresh = useCallback(
+    async (isManual = false) => {
+      if (isFetching.current || isLocked) return;
+
+      if (isManual) {
+        clickCount.current += 1;
+        if (clickCount.current > 5) {
+          setIsLocked(true);
+          if (lockTimer.current) clearTimeout(lockTimer.current);
+          lockTimer.current = setTimeout(() => {
+            setIsLocked(false);
+            clickCount.current = 0;
+          }, 5000); // 5-second lockout
+          return;
+        }
+        setTimeout(() => {
+          clickCount.current = 0;
+        }, 2000);
       }
-    } catch {
-      // non-critical
-    } finally {
-      if (!cancelledRef.current) setLoading(false);
-    }
-  }, [hasToken]);
+
+      isFetching.current = true;
+      setLoading(true);
+
+      try {
+        const items = await fetchAllReminders();
+        setReminders([...items]);
+      } finally {
+        // 600ms delay ensures the "Full Spin" animation completes one rotation visually
+        setTimeout(() => {
+          setLoading(false);
+          isFetching.current = false;
+        }, 600);
+      }
+    },
+    [isLocked],
+  );
 
   useEffect(() => {
-    cancelledRef.current = false;
-    if (fetchOnMount) refresh();
-    return () => { cancelledRef.current = true; };
-  }, [fetchOnMount, refresh]);
-
-  useEffect(() => {
-    if (!pollingInterval) return;
-    const id = setInterval(() => { if (hasToken()) refresh(); }, pollingInterval);
+    refresh();
+    const id = setInterval(() => refresh(false), pollingInterval);
     return () => clearInterval(id);
-  }, [pollingInterval, refresh, hasToken]);
+  }, [refresh, pollingInterval]);
 
   const badgeCount = reminders.filter(
     (r) => r.urgency === "overdue" || r.urgency === "today",
   ).length;
-
-  return { reminders, loading, badgeCount, refresh, fetched };
+  return { reminders, loading, badgeCount, refresh, isLocked };
 }
