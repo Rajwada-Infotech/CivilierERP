@@ -5,7 +5,6 @@ const bcrypt = require("bcrypt");
 
 const SALT_ROUNDS = 12;
 
-// Role normalizer (mirrors users.js)
 const normalizeRole = (role) => {
   if (!role || typeof role !== "string") return "user";
   const r = role.trim().toLowerCase();
@@ -24,7 +23,6 @@ const normalizeRole = (role) => {
   return roleMap[r] || r.replace(/\s+/g, "_");
 };
 
-// Helper: only the user themselves, or admin/super_admin/dba, can access a profile
 function isSelfOrAdmin(req) {
   const requestedId = parseInt(req.params.id, 10);
   const callerId = req.user?.userId || req.user?.id;
@@ -157,7 +155,6 @@ router.get("/:id/permissions", async (req, res) => {
       `);
     res.json(result.recordset);
   } catch (err) {
-    // Silently return empty — permissions table may not exist yet
     res.json([]);
   }
 });
@@ -181,38 +178,24 @@ router.get("/:id/activity", async (req, res) => {
       `);
     res.json(result.recordset);
   } catch (err) {
-    // Activity log table may not exist — return empty gracefully
     res.json([]);
   }
 });
 
 // ── POST upload-avatar ───────────────────────────────────────────────────────
-// Accepts a base64-encoded data URI (image/jpeg, image/png, image/webp, image/gif)
-// Max decoded size: ~400 KB (base64 string <= ~550 000 chars)
 router.post("/:id/upload-avatar", async (req, res) => {
-  console.log(
-    "AVATAR UPLOAD HIT — id:",
-    req.params.id,
-    "| body keys:",
-    Object.keys(req.body),
-    "| avatar length:",
-    req.body?.avatar?.length ?? "N/A",
-  );
-
   if (!isSelfOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
 
-  const { avatar } = req.body; // expects a data URI, e.g. "data:image/jpeg;base64,..."
+  const { avatar } = req.body;
   if (!avatar)
     return res.status(400).json({ error: "No avatar data provided" });
 
-  // Validate it looks like a supported data URI
   if (!/^data:image\/(jpeg|png|webp|gif);base64,/.test(avatar)) {
     return res
       .status(400)
       .json({ error: "Invalid image format. Supported: JPEG, PNG, WebP, GIF" });
   }
 
-  // Rough size guard: base64 string > 550 000 chars ≈ > ~400 KB decoded
   if (avatar.length > 550_000) {
     return res
       .status(413)
@@ -221,13 +204,11 @@ router.post("/:id/upload-avatar", async (req, res) => {
 
   try {
     const pool = getPool();
-    console.log("AVATAR — pool acquired, running UPDATE...");
     await pool
       .request()
       .input("id", sql.Int, req.params.id)
       .input("avatar_url", sql.NVarChar(sql.MAX), avatar)
       .query("UPDATE dbo.users SET avatar_url = @avatar_url WHERE id = @id");
-    console.log("AVATAR — UPDATE success");
     res.json({ message: "Avatar updated", avatar_url: avatar });
   } catch (err) {
     console.error("POST /user-profile/:id/upload-avatar error:", err);
