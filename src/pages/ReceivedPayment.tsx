@@ -41,11 +41,19 @@ import {
   Trash2,
   Layers,
   Check,
+  Pencil,
+  ThumbsUp,
+  ThumbsDown,
+  Loader2,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import {
   getReceivedPayments,
   addReceivedPayment,
+  updateReceivedPayment,
   deleteReceivedPayment,
+  approveReceivedPayment,
 } from "@/api/receivedPaymentApi";
 import { getBanks, type BankRecord } from "@/api/bankMasterApi";
 import { getEnterprises } from "@/api/enterpriseApi";
@@ -71,6 +79,7 @@ export type EmiInstallment = {
 
 export type ReceivedPayment = {
   id: string;
+  docNo: string;
   companyName: string;
   receivedFrom: string;
   projectName: string;
@@ -81,7 +90,7 @@ export type ReceivedPayment = {
   transactionId?: string;
   checkNumber?: string;
   remarks?: string;
-  status: "pending" | "cleared";
+  status: "Draft" | "Approved" | "Rejected";
   createdAt: string;
   isEmi?: boolean;
   emiTotal?: number;
@@ -322,6 +331,10 @@ export default function ReceivedPaymentPage() {
   const [search, setSearch] = useState("");
   const [filterMode, setFilterMode] = useState("All");
   const [filterStatus, setFilterStatus] = useState("All");
+  const [currentPage, setCurrentPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalCount, setTotalCount] = useState(0);
+  const PAGE_SIZE = 20;
 
   const [form, setForm] = useState(EMPTY_FORM);
   const [date, setDate] = useState<Date | undefined>(new Date());
@@ -412,51 +425,115 @@ export default function ReceivedPaymentPage() {
 
   // ── API-backed data layer ────────────────────────────────────────────
   const [apiLoading, setApiLoading] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [approveTarget, setApproveTarget] = useState<ReceivedPayment | null>(null);
+  const [rejectNote, setRejectNote] = useState("");
+  const [actionLoading, setActionLoading] = useState(false);
 
-  const loadPayments = React.useCallback(async () => {
+  const openEdit = (p: ReceivedPayment) => {
+    setEditingId(p.id);
+    setForm({
+      companyName: p.companyName,
+      receivedFrom: p.receivedFrom,
+      projectName: p.projectName,
+      mode: p.mode,
+      amount: String(p.amount),
+      bankName: p.bankName ?? "",
+      transactionId: p.transactionId ?? "",
+      checkNumber: p.checkNumber ?? "",
+      remarks: p.remarks ?? "",
+    });
+    setDate(p.docDate ? new Date(p.docDate) : new Date());
+    setIsOpen(true);
+  };
+
+  const handleUpdate = async () => {
+    if (!editingId) return;
+    if (!date) { toast.error("Date is required"); return; }
+    setActionLoading(true);
+    try {
+      await updateReceivedPayment(Number(editingId), {
+        RPCompanyName:   form.companyName,
+        RPReceivedFrom:  form.receivedFrom.trim(),
+        RPProjectName:   form.projectName,
+        RPDocDate:       date.toISOString().slice(0, 10),
+        RPMode:          form.mode,
+        RPAmount:        Number(form.amount),
+        RPBankName:      form.bankName || null,
+        RPTransactionId: form.transactionId || null,
+        RPCheckNumber:   form.checkNumber || null,
+        RPRemarks:       form.remarks || null,
+      });
+      toast.success("Payment updated");
+      setIsOpen(false);
+      setEditingId(null);
+      setForm(EMPTY_FORM);
+      await loadPayments(currentPage);
+    } catch (err) {
+      toast.error("Failed to update payment");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleApprove = async (action: "approve" | "reject") => {
+    if (!approveTarget) return;
+    if (action === "reject" && !rejectNote.trim()) {
+      toast.error("Rejection reason is required");
+      return;
+    }
+    setActionLoading(true);
+    try {
+      await approveReceivedPayment(Number(approveTarget.id), action, rejectNote || undefined);
+      toast.success(action === "approve" ? "Payment approved" : "Payment rejected");
+      setApproveTarget(null);
+      setRejectNote("");
+      await loadPayments(currentPage);
+    } catch (err) {
+      toast.error("Action failed");
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const loadPayments = React.useCallback(async (page = 1) => {
     setApiLoading(true);
     try {
-      // getReceivedPayments imported statically above
-      let page = 1, totalPages = 1;
-      const all: ReceivedPayment[] = [];
-      while (page <= totalPages) {
-        const res = await getReceivedPayments(page, 100);
-        totalPages = res.totalPages;
-        for (const r of res.data) {
-          all.push({
-            id: String(r.RPPaymentID),
-            companyName: r.RPCompanyName ?? '',
-            receivedFrom: r.RPReceivedFrom,
-            projectName: r.RPProjectName,
-            docDate: r.RPDocDate,
-            mode: r.RPMode as ReceivedPayment['mode'],
-            amount: Number(r.RPAmount),
-            bankName: r.RPBankName ?? undefined,
-            transactionId: r.RPTransactionId ?? undefined,
-            checkNumber: r.RPCheckNumber ?? undefined,
-            remarks: r.RPRemarks ?? undefined,
-            status: (r.RPStatus === "Approved" || r.RPStatus === "cleared") ? "cleared" : "pending",
-            createdAt: r.RPCreatedAt,
-            isEmi: Boolean(r.RPIsEmi),
-            emiTotal: r.RPEmiTotal ?? undefined,
-            emiMonths: r.RPEmiMonths ?? undefined,
-            emiStartDate: r.RPEmiStartDate ?? undefined,
-            emiSchedule: r.RPEmiSchedule ? JSON.parse(r.RPEmiSchedule) : undefined,
-            emiPaying: r.RPEmiPaying ? JSON.parse(r.RPEmiPaying) : undefined,
-          });
-        }
-        page++;
-      }
-      setPayments(all);
+      const res = await getReceivedPayments(page, PAGE_SIZE);
+      setTotalPages(res.totalPages);
+      setTotalCount(res.total);
+      setCurrentPage(page);
+      setPayments(res.data.map((r) => ({
+        id: String(r.RPPaymentID),
+        docNo: `RCP-${String(r.RPPaymentID).padStart(4, "0")}`,
+        companyName: r.RPCompanyName ?? "",
+        receivedFrom: r.RPReceivedFrom,
+        projectName: r.RPProjectName,
+        docDate: r.RPDocDate,
+        mode: r.RPMode as ReceivedPayment["mode"],
+        amount: Number(r.RPAmount),
+        bankName: r.RPBankName ?? undefined,
+        transactionId: r.RPTransactionId ?? undefined,
+        checkNumber: r.RPCheckNumber ?? undefined,
+        remarks: r.RPRemarks ?? undefined,
+        status: (r.RPStatus as ReceivedPayment["status"]) || "Draft",
+        createdAt: r.RPCreatedAt,
+        isEmi: Boolean(r.RPIsEmi),
+        emiTotal: r.RPEmiTotal ?? undefined,
+        emiMonths: r.RPEmiMonths ?? undefined,
+        emiStartDate: r.RPEmiStartDate ?? undefined,
+        emiSchedule: r.RPEmiSchedule ? JSON.parse(r.RPEmiSchedule) : undefined,
+        emiPaying: r.RPEmiPaying ? JSON.parse(r.RPEmiPaying) : undefined,
+      })));
     } catch (err) {
-      toast.error('Failed to load received payments');
+      toast.error("Failed to load received payments");
       console.error(err);
     } finally {
       setApiLoading(false);
     }
   }, []);
 
-  useEffect(() => { loadPayments(); }, [loadPayments]);
+  useEffect(() => { loadPayments(1); }, [loadPayments]);
 
 
   const setField = (key: keyof typeof EMPTY_FORM, value: string) =>
@@ -521,7 +598,7 @@ export default function ReceivedPaymentPage() {
       transactionId: form.transactionId || undefined,
       checkNumber: form.checkNumber || undefined,
       remarks: form.remarks || undefined,
-      status: "pending",
+      status: "Draft",
       createdAt: new Date().toISOString(),
       isEmi,
       emiTotal: isEmi
@@ -556,7 +633,7 @@ export default function ReceivedPaymentPage() {
         RPEmiPaying:    newPay.emiPaying ?? null,
       });
       toast.success('Payment recorded successfully');
-      await loadPayments();
+      await loadPayments(1);
     } catch (err) {
       toast.error('Failed to save payment');
       console.error(err);
@@ -574,7 +651,7 @@ export default function ReceivedPaymentPage() {
       // deleteReceivedPayment imported statically above
       await deleteReceivedPayment(Number(id));
       toast.success('Payment deleted');
-      await loadPayments();
+      await loadPayments(currentPage);
     } catch (err) {
       toast.error('Failed to delete payment');
       console.error(err);
@@ -587,15 +664,15 @@ export default function ReceivedPaymentPage() {
       p.receivedFrom.toLowerCase().includes(q) ||
       p.projectName.toLowerCase().includes(q) ||
       p.companyName.toLowerCase().includes(q) ||
-      p.id.toLowerCase().includes(q);
+      p.docNo.toLowerCase().includes(q) || p.id.includes(q);
     const matchMode = filterMode === "All" || p.mode === filterMode;
     const matchStatus = filterStatus === "All" || p.status === filterStatus;
     return matchSearch && matchMode && matchStatus;
   });
 
   const totalReceived = payments.reduce((s, p) => s + p.amount, 0);
-  const cleared = payments.filter((p) => p.status === "cleared").length;
-  const pending = payments.filter((p) => p.status === "pending").length;
+  const approved = payments.filter((p) => p.status === "Approved").length;
+  const pending = payments.filter((p) => p.status === "Draft").length;
 
   const stats = [
     {
@@ -612,7 +689,7 @@ export default function ReceivedPaymentPage() {
     },
     {
       label: "Cleared",
-      value: String(cleared),
+      value: String(approved),
       icon: CheckCircle2,
       color: "hsl(142, 71%, 45%)",
     },
@@ -703,8 +780,9 @@ export default function ReceivedPaymentPage() {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="All">All Statuses</SelectItem>
-            <SelectItem value="pending">Pending</SelectItem>
-            <SelectItem value="cleared">Cleared</SelectItem>
+            <SelectItem value="Draft">Draft</SelectItem>
+            <SelectItem value="Approved">Approved</SelectItem>
+            <SelectItem value="Rejected">Rejected</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -720,7 +798,12 @@ export default function ReceivedPaymentPage() {
           </span>
         </div>
 
-        {payments.length === 0 ? (
+        {apiLoading ? (
+          <div className="flex items-center justify-center py-20 gap-2 text-muted-foreground text-sm">
+            <Loader2 size={18} className="animate-spin" />
+            Loading payments…
+          </div>
+        ) : payments.length === 0 ? (
           <EmptyState />
         ) : filtered.length === 0 ? (
           <div className="p-10 text-center text-muted-foreground text-sm">
@@ -760,7 +843,7 @@ export default function ReceivedPaymentPage() {
                       className={`border-b border-border hover:bg-muted/50 transition-colors ${i % 2 === 1 ? "bg-muted/20" : ""}`}
                     >
                       <td className="px-4 py-3 text-primary font-heading text-xs font-medium whitespace-nowrap">
-                        {p.id}
+                        {p.docNo}
                       </td>
                       <td className="px-4 py-3 text-foreground whitespace-nowrap">
                         {format(new Date(p.docDate), "dd/MM/yyyy")}
@@ -791,19 +874,33 @@ export default function ReceivedPaymentPage() {
                         +{fmt(p.amount)}
                       </td>
                       <td className="px-4 py-3">
-                        <span
-                          className={`px-2 py-0.5 rounded-full text-xs font-heading ${p.status === "cleared" ? "bg-green-500/15 text-green-600" : "bg-yellow-500/15 text-yellow-600"}`}
-                        >
-                          {p.status.charAt(0).toUpperCase() + p.status.slice(1)}
+                        <span className={`px-2 py-0.5 rounded-full text-xs font-heading ${
+                            p.status === "Approved" ? "bg-green-500/15 text-green-600"
+                            : p.status === "Rejected" ? "bg-red-500/15 text-red-600"
+                            : "bg-yellow-500/15 text-yellow-600"
+                          }`}>
+                          {p.status}
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        <button
-                          onClick={() => deletePayment(p.id)}
-                          className="p-1.5 rounded-md text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-colors"
-                        >
-                          <Trash2 size={13} />
-                        </button>
+                        <div className="flex items-center gap-1">
+                          {p.status === "Draft" && (
+                            <button onClick={() => openEdit(p)} title="Edit"
+                              className="p-1.5 rounded-md text-muted-foreground/50 hover:text-blue-500 hover:bg-blue-500/10 transition-colors">
+                              <Pencil size={13} />
+                            </button>
+                          )}
+                          {p.status === "Draft" && (
+                            <button onClick={() => { setApproveTarget(p); setRejectNote(""); }} title="Approve / Reject"
+                              className="p-1.5 rounded-md text-muted-foreground/50 hover:text-green-500 hover:bg-green-500/10 transition-colors">
+                              <ThumbsUp size={13} />
+                            </button>
+                          )}
+                          <button onClick={() => deletePayment(p.id)} title="Delete"
+                            className="p-1.5 rounded-md text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-colors">
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -818,7 +915,7 @@ export default function ReceivedPaymentPage() {
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
                       <p className="text-xs text-primary font-heading font-medium">
-                        {p.id}
+                        {p.docNo}
                       </p>
                       <p className="text-[10px] text-muted-foreground truncate">
                         {p.companyName}
@@ -835,10 +932,12 @@ export default function ReceivedPaymentPage() {
                       <p className="text-base font-heading font-bold text-emerald-600">
                         +{fmt(p.amount)}
                       </p>
-                      <span
-                        className={`px-2 py-0.5 rounded-full text-xs font-heading ${p.status === "cleared" ? "bg-green-500/15 text-green-600" : "bg-yellow-500/15 text-yellow-600"}`}
-                      >
-                        {p.status.charAt(0).toUpperCase() + p.status.slice(1)}
+                      <span className={`px-2 py-0.5 rounded-full text-xs font-heading ${
+                          p.status === "Approved" ? "bg-green-500/15 text-green-600"
+                          : p.status === "Rejected" ? "bg-red-500/15 text-red-600"
+                          : "bg-yellow-500/15 text-yellow-600"
+                        }`}>
+                        {p.status}
                       </span>
                     </div>
                   </div>
@@ -856,12 +955,24 @@ export default function ReceivedPaymentPage() {
                         </span>
                       )}
                     </div>
-                    <button
-                      onClick={() => deletePayment(p.id)}
-                      className="p-1.5 text-muted-foreground/50 hover:text-destructive"
-                    >
-                      <Trash2 size={13} />
-                    </button>
+                    <div className="flex items-center gap-1">
+                      {p.status === "Draft" && (
+                        <button onClick={() => openEdit(p)}
+                          className="p-1.5 text-muted-foreground/50 hover:text-blue-500">
+                          <Pencil size={13} />
+                        </button>
+                      )}
+                      {p.status === "Draft" && (
+                        <button onClick={() => { setApproveTarget(p); setRejectNote(""); }}
+                          className="p-1.5 text-muted-foreground/50 hover:text-green-500">
+                          <ThumbsUp size={13} />
+                        </button>
+                      )}
+                      <button onClick={() => deletePayment(p.id)}
+                        className="p-1.5 text-muted-foreground/50 hover:text-destructive">
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -870,16 +981,100 @@ export default function ReceivedPaymentPage() {
         )}
       </div>
 
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between mt-4 px-1">
+          <span className="text-xs text-muted-foreground">
+            Showing page {currentPage} of {totalPages} · {totalCount} total entries
+          </span>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => loadPayments(currentPage - 1)}
+              disabled={currentPage <= 1 || apiLoading}
+              className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              <ChevronLeft size={14} />
+            </button>
+            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+              const pg = currentPage <= 3 ? i + 1
+                : currentPage >= totalPages - 2 ? totalPages - 4 + i
+                : currentPage - 2 + i;
+              if (pg < 1 || pg > totalPages) return null;
+              return (
+                <button key={pg} onClick={() => loadPayments(pg)}
+                  className={`w-7 h-7 rounded-md text-xs font-medium transition-colors ${pg === currentPage ? "bg-primary text-primary-foreground" : "border border-border text-muted-foreground hover:bg-muted"}`}>
+                  {pg}
+                </button>
+              );
+            })}
+            <button
+              onClick={() => loadPayments(currentPage + 1)}
+              disabled={currentPage >= totalPages || apiLoading}
+              className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              <ChevronRight size={14} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Approve / Reject Dialog */}
+      <Dialog open={!!approveTarget} onOpenChange={(open) => { if (!open) { setApproveTarget(null); setRejectNote(""); } }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ThumbsUp size={16} className="text-green-500" />
+              Approve or Reject Payment
+            </DialogTitle>
+            <DialogDescription>
+              {approveTarget?.docNo} · {approveTarget && fmt(approveTarget.amount)} · {approveTarget?.receivedFrom}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-1">
+            <p className="text-xs text-muted-foreground">
+              Approving will mark this payment as <span className="font-semibold text-green-600">Approved</span>. Rejecting requires a reason.
+            </p>
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                Rejection Reason (required if rejecting)
+              </label>
+              <Input
+                placeholder="e.g. Incorrect amount, wrong account…"
+                value={rejectNote}
+                onChange={(e) => setRejectNote(e.target.value)}
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => { setApproveTarget(null); setRejectNote(""); }}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={() => handleApprove("reject")} disabled={actionLoading} className="gap-1.5">
+              {actionLoading ? <Loader2 size={13} className="animate-spin" /> : <ThumbsDown size={13} />}
+              Reject
+            </Button>
+            <Button onClick={() => handleApprove("approve")} disabled={actionLoading} className="gap-1.5 bg-green-600 hover:bg-green-700">
+              {actionLoading ? <Loader2 size={13} className="animate-spin" /> : <ThumbsUp size={13} />}
+              Approve
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Dialog */}
-      <Dialog open={isOpen} onOpenChange={setIsOpen}>
+      <Dialog open={isOpen} onOpenChange={(open) => {
+        if (!open) { setIsOpen(false); setEditingId(null); setForm(EMPTY_FORM); setDate(new Date()); }
+      }}>
         <DialogContent className="max-w-lg max-h-[92vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <ArrowDownCircle size={18} className="text-emerald-500" />
-              Record Received Payment
+              {editingId
+                ? <><Pencil size={18} className="text-blue-500" /> Edit Payment</>
+                : <><ArrowDownCircle size={18} className="text-emerald-500" /> Record Received Payment</>
+              }
             </DialogTitle>
             <DialogDescription>
-              Log an inbound payment received from a client or customer.
+              {editingId ? "Update the payment details below." : "Log an inbound payment received from a client or customer."}
             </DialogDescription>
           </DialogHeader>
 
@@ -1148,9 +1343,9 @@ export default function ReceivedPaymentPage() {
             <Button variant="outline" onClick={() => setIsOpen(false)}>
               Cancel
             </Button>
-            <Button onClick={handleSubmit} className="gap-1.5">
-              <ArrowDownCircle size={14} />
-              Record Payment
+            <Button onClick={editingId ? handleUpdate : handleSubmit} className="gap-1.5" disabled={actionLoading}>
+              {actionLoading ? <Loader2 size={14} className="animate-spin" /> : editingId ? <Pencil size={14} /> : <ArrowDownCircle size={14} />}
+              {editingId ? "Save Changes" : "Record Payment"}
             </Button>
           </DialogFooter>
         </DialogContent>
