@@ -90,6 +90,8 @@ const Dropdown = ({
   );
 };
 
+// ─── Setup Items ──────────────────────────────────────────────────────────────
+
 const financeSetupItems = [
   {
     icon: Layers,

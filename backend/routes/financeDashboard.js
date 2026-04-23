@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const { getPool } = require("../db");
+const { cache } = require("../middleware/cache");
 
 /**
  * GET /api/finance-dashboard
@@ -16,7 +17,7 @@ const { getPool } = require("../db");
  *   - Recent payments: last 8 records
  *   - Recent POs: last 5 records
  */
-router.get("/", async (req, res) => {
+router.get("/", cache("finance-dashboard", 60), async (req, res) => {
   try {
     const pool = getPool();
 
@@ -156,3 +157,4 @@ router.get("/", async (req, res) => {
 });
 
 module.exports = router;
+
