@@ -1,59 +1,55 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   MasterPage,
   type FieldDef,
   type ColumnDef,
-  type RecordWithId,
+  type DataChangeEvent,
 } from "@/components/MasterPage";
-import { Book, Percent, Calendar, FileText, ToggleRight } from "lucide-react";
+import { Book, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import {
+  useBillingTerms,
+  type BillingTerm,
+} from "@/contexts/BillingTermsContext";
+import {
+  getBillingTerms,
+  addBillingTerm,
+  updateBillingTerm,
+  deleteBillingTerm,
+  type BillingTermRow,
+} from "@/api/billingTermsMasterApi";             // ✅ correct filename
 
-// ─── API ──────────────────────────────────────────────────────────────────────
-const BASE = "/api/billing-terms";
+// ─── Map DB row → context shape ───────────────────────────────────────────────
+const mapRow = (row: BillingTermRow): BillingTerm => ({
+  _id: String(row.BillingTermID),                 // ✅ capital ID matches DB
+  Name: row.Name ?? "",
+  Description: row.Description ?? "",
+  CalculationType:
+    (row.CalculationType as BillingTerm["CalculationType"]) ?? "Before GST",
+  IsActive: Boolean(row.IsActive),
+});
 
-const getBillingTerms = () => fetchWithAuth(BASE).then((r) => r.json());
-const addBillingTerm = (data: object) =>
-  fetchWithAuth(BASE, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  }).then((r) => r.json());
-const updateBillingTerm = (id: string, data: object) =>
-  fetchWithAuth(`${BASE}/${id}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(data),
-  }).then((r) => r.json());
-const deleteBillingTerm = (id: string) =>
-  fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" }).then((r) => r.json());
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-interface DbBillingTerm {
-  BillingTermID: number;
-  Name: string | null;
-  Description: string | null;
-  GST: string | null;
-  Type: string | null;
-  IsActive: boolean;
-}
-
-interface BillingTermDisplay extends RecordWithId {
-  name: string;
-  billType: string;
-  discountType: string;
-  discountValue: number;
-  paymentDueDays: number;
-  status: boolean;
-  description?: string;
-}
-
-// ─── COMPONENT ────────────────────────────────────────────────────────────────
+// ─── Component ────────────────────────────────────────────────────────────────
 const BillingTermsMaster: React.FC = () => {
-  // Note: Would ideally use context or query hook here for data loading/editing
-  // For now, placeholder data structure matching plan
+  const { billingTerms, setBillingTerms } = useBillingTerms();
+  const [loading, setLoading] = useState(true);
 
+  // ── Fetch on mount ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    getBillingTerms()
+      .then((rows) => setBillingTerms(rows.map(mapRow)))
+      .catch(() => toast.error("Failed to load billing terms"))
+      .finally(() => setLoading(false));
+  }, []);
+
+  // ── Refetch helper ──────────────────────────────────────────────────────────
+  const refetch = async () => {
+    const fresh = await getBillingTerms();
+    setBillingTerms(fresh.map(mapRow));
+  };
+
+  // ── Fields ──────────────────────────────────────────────────────────────────
   const fields: FieldDef[] = [
     {
       name: "Name",
@@ -62,31 +58,11 @@ const BillingTermsMaster: React.FC = () => {
       required: true,
     },
     {
-      name: "Type",
-      label: "Bill Type",
+      name: "CalculationType",
+      label: "Calculation Type",
       type: "select",
       required: true,
-      options: [
-        "Tax Invoice",
-        "Proforma Invoice",
-        "Credit Note",
-        "Debit Note",
-        "Bill of Supply",
-        "Receipt Voucher",
-        "Delivery Challan",
-        "Self Invoice",
-      ],
-    },
-    {
-      name: "GST",
-      label: "GST/Discount",
-      type: "text", // Could be number or complex
-    },
-    {
-      name: "IsActive",
-      label: "Status",
-      type: "toggle",
-      defaultValue: true,
+      options: ["Before GST", "After GST"],
     },
     {
       name: "Description",
@@ -94,39 +70,76 @@ const BillingTermsMaster: React.FC = () => {
       type: "textarea",
       fullWidth: true,
     },
+    {
+      name: "IsActive",
+      label: "Status",
+      type: "toggle",
+      defaultValue: true,
+    },
+  ];
+
+  // ── Columns ─────────────────────────────────────────────────────────────────
+  const columns: ColumnDef[] = [
+    { key: "Name", label: "Term Name" },
+    { key: "CalculationType", label: "Calculation Type" },
+    { key: "IsActive", label: "Status" },
   ];
 
   const columnRenderers = {
-    status: (value: unknown) => {
-      return (
+    IsActive: (value: unknown) => (
+      <span
+        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${
+          value
+            ? "bg-primary/10 text-primary border-primary/20"
+            : "bg-destructive/10 text-destructive border-destructive/20"
+        }`}
+      >
         <span
-          className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${
-            value
-              ? "bg-primary/10 text-primary border-primary/20"
-              : "bg-destructive/10 text-destructive border-destructive/20"
+          className={`w-1.5 h-1.5 rounded-full mr-1.5 ${
+            value ? "bg-primary" : "bg-destructive"
           }`}
-        >
-          <span
-            className={`w-1.5 h-1.5 rounded-full mr-1.5 ${value ? "bg-primary" : "bg-destructive"}`}
-          />
-          {value ? "Active" : "Inactive"}
-        </span>
-      );
-    },
+        />
+        {value ? "Active" : "Inactive"}
+      </span>
+    ),
   };
 
-  const columns: ColumnDef[] = [
-    { key: "Name", label: "Term Name" },
-    { key: "Type", label: "Bill Type" },
-    { key: "GST", label: "GST/Discount" },
-    { key: "IsActive", label: "Status", renderer: "status" },
-  ];
+  // ── Events ──────────────────────────────────────────────────────────────────
+  const handleDataEvent = async (event: DataChangeEvent) => {
+    try {
+      if (event.action === "add") {
+        const record = event.record as BillingTerm;
+        await addBillingTerm({
+          Name: record.Name,
+          Description: record.Description,
+          CalculationType: record.CalculationType,
+          IsActive: record.IsActive,
+        });
+        toast.success("Billing term added!");
+        await refetch();
 
-  const handleDataChange = (records: Record<string, unknown>[]) => {
-    toast.success("Billing terms updated successfully!");
-    // Would call updateBillingTerm here
+      } else if (event.action === "update") {
+        const record = event.record as BillingTerm;
+        await updateBillingTerm(Number(event.id), {
+          Name: record.Name,
+          Description: record.Description,
+          CalculationType: record.CalculationType,
+          IsActive: record.IsActive,
+        });
+        toast.success("Billing term updated!");
+        await refetch();
+
+      } else if (event.action === "delete") {
+        await deleteBillingTerm(Number(event.id));
+        toast.success("Billing term deleted!");
+        await refetch();
+      }
+    } catch (err: any) {
+      toast.error(err.message || "Something went wrong");
+    }
   };
 
+  // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <>
       <Breadcrumbs items={["Masters", "Billing Terms"]} />
@@ -143,14 +156,21 @@ const BillingTermsMaster: React.FC = () => {
         </p>
       </div>
 
-      <MasterPage
-        title="Billing Term"
-        fields={fields}
-        columns={columns}
-        columnRenderers={columnRenderers}
-        initialData={[]}
-        onDataChange={handleDataChange}
-      />
+      {loading ? (
+        <div className="flex items-center justify-center py-20 gap-2 text-muted-foreground">
+          <Loader2 size={18} className="animate-spin" />
+          <span className="text-sm font-heading">Loading billing terms…</span>
+        </div>
+      ) : (
+        <MasterPage
+          title="Billing Term"
+          fields={fields}
+          columns={columns}
+          columnRenderers={columnRenderers}
+          initialData={billingTerms}
+          onDataEvent={handleDataEvent}
+        />
+      )}
     </>
   );
 };
