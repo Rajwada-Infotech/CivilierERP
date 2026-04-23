@@ -1,0 +1,100 @@
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
+
+const BASE = "/api/received-payment";
+
+export interface ReceivedPaymentRecord {
+  RPPaymentID:     number;
+  RPCompanyName:   string | null;
+  RPReceivedFrom:  string;
+  RPProjectName:   string;
+  RPDocDate:       string;
+  RPMode:          string;
+  RPAmount:        number;
+  RPBankName:      string | null;
+  RPTransactionId: string | null;
+  RPCheckNumber:   string | null;
+  RPRemarks:       string | null;
+  RPIsEmi:         boolean;
+  RPEmiTotal:      number | null;
+  RPEmiMonths:     number | null;
+  RPEmiStartDate:  string | null;
+  RPEmiSchedule:   string | null;   // JSON string
+  RPEmiPaying:     string | null;   // JSON string
+  RPStatus:        string;
+  RPCreatedBy:     string | null;
+  RPCreatedAt:     string;
+  RPUpdatedBy:     string | null;
+  RPUpdatedAt:     string | null;
+  RPApprovedBy:    string | null;
+  RPApprovedAt:    string | null;
+  RPRejectedBy:    string | null;
+  RPRejectedAt:    string | null;
+  RPRejectionNote: string | null;
+}
+
+export type ReceivedPaymentPayload = Omit<
+  ReceivedPaymentRecord,
+  "RPPaymentID" | "RPCreatedAt" | "RPUpdatedAt" | "RPApprovedAt" | "RPRejectedAt"
+>;
+
+export interface PaginatedReceivedPayments {
+  data:        ReceivedPaymentRecord[];
+  page:        number;
+  totalPages:  number;
+  total:       number;
+}
+
+export async function getReceivedPayments(
+  page  = 1,
+  limit = 20
+): Promise<PaginatedReceivedPayments> {
+  const res = await fetchWithAuth(`${BASE}?page=${page}&limit=${limit}`);
+  if (!res.ok) throw new Error("Failed to fetch received payments");
+  return res.json();
+}
+
+export async function createReceivedPayment(
+  payload: Partial<ReceivedPaymentPayload>
+): Promise<ReceivedPaymentRecord> {
+  const res = await fetchWithAuth(BASE, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error("Failed to create received payment");
+  return res.json();
+}
+
+export async function updateReceivedPayment(
+  id:      number,
+  payload: Partial<ReceivedPaymentPayload>
+): Promise<ReceivedPaymentRecord> {
+  const res = await fetchWithAuth(`${BASE}/${id}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error("Failed to update received payment");
+  return res.json();
+}
+
+export async function deleteReceivedPayment(id: number): Promise<void> {
+  const res = await fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to delete received payment");
+}
+
+export async function approveReceivedPayment(
+  id:     number,
+  action: "approve" | "reject",
+  rejectionNote?: string
+): Promise<void> {
+  const res = await fetchWithAuth(`${BASE}/${id}/approve`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ action, rejectionNote }),
+  });
+  if (!res.ok) throw new Error("Approval action failed");
+}
+
+// Alias used by ReceivedPayment.tsx
+export const addReceivedPayment = createReceivedPayment;

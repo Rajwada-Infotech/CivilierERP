@@ -42,6 +42,11 @@ import {
   Layers,
   Check,
 } from "lucide-react";
+import {
+  getReceivedPayments,
+  addReceivedPayment,
+  deleteReceivedPayment,
+} from "@/api/receivedPaymentApi";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -402,15 +407,54 @@ export default function ReceivedPaymentPage() {
     }
   }, [form.mode, form.projectName]);
 
-  useEffect(() => {
-    const saved = localStorage.getItem("receivedPaymentData_v2");
-    if (saved) setPayments(JSON.parse(saved));
+  // ── API-backed data layer ────────────────────────────────────────────
+  const [apiLoading, setApiLoading] = useState(false);
+
+  const loadPayments = React.useCallback(async () => {
+    setApiLoading(true);
+    try {
+      // getReceivedPayments imported statically above
+      let page = 1, totalPages = 1;
+      const all: ReceivedPayment[] = [];
+      while (page <= totalPages) {
+        const res = await getReceivedPayments(page, 100);
+        totalPages = res.totalPages;
+        for (const r of res.data) {
+          all.push({
+            id: String(r.RPPaymentID),
+            companyName: r.RPCompanyName ?? '',
+            receivedFrom: r.RPReceivedFrom,
+            projectName: r.RPProjectName,
+            docDate: r.RPDocDate,
+            mode: r.RPMode as ReceivedPayment['mode'],
+            amount: Number(r.RPAmount),
+            bankName: r.RPBankName ?? undefined,
+            transactionId: r.RPTransactionId ?? undefined,
+            checkNumber: r.RPCheckNumber ?? undefined,
+            remarks: r.RPRemarks ?? undefined,
+            status: r.RPStatus === "cleared" ? "cleared" : "pending",
+            createdAt: r.RPCreatedAt,
+            isEmi: Boolean(r.RPIsEmi),
+            emiTotal: r.RPEmiTotal ?? undefined,
+            emiMonths: r.RPEmiMonths ?? undefined,
+            emiStartDate: r.RPEmiStartDate ?? undefined,
+            emiSchedule: r.RPEmiSchedule ? JSON.parse(r.RPEmiSchedule) : undefined,
+            emiPaying: r.RPEmiPaying ? JSON.parse(r.RPEmiPaying) : undefined,
+          });
+        }
+        page++;
+      }
+      setPayments(all);
+    } catch (err) {
+      toast.error('Failed to load received payments');
+      console.error(err);
+    } finally {
+      setApiLoading(false);
+    }
   }, []);
 
-  const persist = (updated: ReceivedPayment[]) => {
-    setPayments(updated);
-    localStorage.setItem("receivedPaymentData_v2", JSON.stringify(updated));
-  };
+  useEffect(() => { loadPayments(); }, [loadPayments]);
+
 
   const setField = (key: keyof typeof EMPTY_FORM, value: string) =>
     setForm((f) => ({ ...f, [key]: value }));
@@ -428,7 +472,7 @@ export default function ReceivedPaymentPage() {
     [emiSchedule, emiPayingNos],
   );
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!form.companyName) {
       toast.error("Company name is required");
       return;
@@ -486,8 +530,39 @@ export default function ReceivedPaymentPage() {
       emiPaying: isEmi ? emiPayingNos : undefined,
     };
 
-    persist([newPay, ...payments]);
-    toast.success(`${newPay.id} recorded successfully`);
+    // POST to API
+    // addReceivedPayment imported statically above
+    try {
+      await addReceivedPayment({
+        RPCompanyName:  newPay.companyName,
+        RPReceivedFrom: newPay.receivedFrom,
+        RPProjectName:  newPay.projectName,
+        RPDocDate:      newPay.docDate,
+        RPMode:         newPay.mode,
+        RPAmount:       newPay.amount,
+        RPBankName:     newPay.bankName,
+        RPTransactionId:newPay.transactionId,
+        RPCheckNumber:  newPay.checkNumber,
+        RPRemarks:      newPay.remarks,
+        RPStatus:       newPay.status,
+        RPIsEmi:        newPay.isEmi,
+        RPEmiTotal:     newPay.emiTotal,
+        RPEmiMonths:    newPay.emiMonths,
+        RPEmiStartDate: newPay.emiStartDate,
+        RPEmiSchedule:  newPay.emiSchedule
+          ? JSON.stringify(newPay.emiSchedule)
+          : null,
+        RPEmiPaying:    newPay.emiPaying
+          ? JSON.stringify(newPay.emiPaying)
+          : null,
+      });
+      toast.success('Payment recorded successfully');
+      await loadPayments();
+    } catch (err) {
+      toast.error('Failed to save payment');
+      console.error(err);
+      return;
+    }
     setForm(EMPTY_FORM);
     setDate(new Date());
     setEmiSchedule([]);
@@ -495,9 +570,16 @@ export default function ReceivedPaymentPage() {
     setIsOpen(false);
   };
 
-  const deletePayment = (id: string) => {
-    persist(payments.filter((p) => p.id !== id));
-    toast.success("Payment deleted");
+  const deletePayment = async (id: string) => {
+    try {
+      // deleteReceivedPayment imported statically above
+      await deleteReceivedPayment(Number(id));
+      toast.success('Payment deleted');
+      await loadPayments();
+    } catch (err) {
+      toast.error('Failed to delete payment');
+      console.error(err);
+    }
   };
 
   const filtered = payments.filter((p) => {

@@ -1,6 +1,6 @@
 import React, { useRef, useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { useRecords, RecordFileAttachment } from "@/contexts/RecordsContext";
+import { useRecords, RecordFileAttachment } from "@/hooks/useRecords";
 import { format } from "date-fns";
 import {
   Download,
@@ -140,7 +140,7 @@ function DownloadButton({ attachment }: { attachment?: RecordFileAttachment }) {
 }
 
 export default function Records() {
-  const { records, attachFile, refreshRecords } = useRecords();
+  const { records, loading, error, attachFile, refreshRecords } = useRecords();
 
   const totalPayments = records.filter((r) => r.entryType === "Payment").length;
   const totalExpenses = records.filter((r) => r.entryType === "Expense").length;
@@ -216,7 +216,16 @@ export default function Records() {
           <span className="text-xs text-muted-foreground">{records.length} entries</span>
         </div>
 
-        {records.length === 0 ? (
+        {loading ? (
+          <div className="p-10 text-center text-muted-foreground text-sm flex items-center justify-center gap-2">
+            <RefreshCw size={14} className="animate-spin" />
+            Loading records…
+          </div>
+        ) : error ? (
+          <div className="p-6 text-center text-destructive text-sm bg-destructive/5 border border-destructive/20 rounded-lg m-4">
+            Failed to load records: {error}
+          </div>
+        ) : records.length === 0 ? (
           <div className="p-10 text-center text-muted-foreground text-sm">
             No records found. Add payments or expenses first, then click Refresh.
           </div>

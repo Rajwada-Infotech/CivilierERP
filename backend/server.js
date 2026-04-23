@@ -175,6 +175,7 @@ async function startServer() {
       { path: "/api/entry-type", file: "./routes/entryType" },
       { path: "/api/expense-booking", file: "./routes/expenseBooking" },
       { path: "/api/new-payment", file: "./routes/newPayment" },
+      { path: "/api/received-payment", file: "./routes/receivedPayment" },
       { path: "/api/purchase-orders", file: "./routes/purchaseOrders" },
       { path: "/api/tenants", file: "./routes/tenants" },
       { path: "/api/work-orders", file: "./routes/workOrder" },
