@@ -6,6 +6,8 @@ import {
   updateUserProfile,
   changePassword,
   getUserActivity,
+  uploadAvatar,
+  removeAvatar,
 } from "@/api/userProfileApi";
 import {
   ProfileShell,
@@ -26,6 +28,8 @@ import {
   Loader2,
   CheckCircle2,
   LayoutGrid,
+  Camera,
+  Trash2,
 } from "lucide-react";
 
 const inp =
@@ -40,7 +44,7 @@ const ACTION_COLORS: Record<string, string> = {
 };
 
 export default function UserProfile() {
-  const { currentUser, canAccessPage, canDoAction, updateCurrentUserName } = useAuth();
+  const { currentUser, canAccessPage, canDoAction, updateCurrentUserName, updateCurrentUserAvatar } = useAuth();
   const userId = currentUser?.id ? parseInt(currentUser.id) : 0;
   const queryClient = useQueryClient();
 
@@ -50,6 +54,10 @@ export default function UserProfile() {
   const [showPw, setShowPw] = useState<Record<string, boolean>>({});
   const [editingProfile, setEditingProfile] = useState(false);
   const [editingPassword, setEditingPassword] = useState(false);
+  const [avatarModalOpen, setAvatarModalOpen] = useState(false);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const avatarInputRef = React.useRef<HTMLInputElement>(null);
 
   const { data: profile } = useQuery({
     queryKey: ["user-profile", userId],
@@ -89,6 +97,52 @@ export default function UserProfile() {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const avatarUploadMutation = useMutation({
+    mutationFn: (dataUri: string) => uploadAvatar(userId, dataUri),
+    onSuccess: (_data, dataUri) => {
+      queryClient.invalidateQueries({ queryKey: ["user-profile", userId] });
+      updateCurrentUserAvatar(dataUri);
+      toast.success("Avatar updated");
+      setAvatarModalOpen(false);
+      setAvatarPreview(null);
+      setAvatarFile(null);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const avatarRemoveMutation = useMutation({
+    mutationFn: () => removeAvatar(userId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["user-profile", userId] });
+      updateCurrentUserAvatar(null);
+      toast.success("Avatar removed");
+      setAvatarModalOpen(false);
+    },
+    onError: () => toast.error("Failed to remove avatar"),
+  });
+
+  const handleAvatarFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please select an image file");
+      return;
+    }
+    if (file.size > 400 * 1024) {
+      toast.error("Image must be under 400 KB");
+      return;
+    }
+    setAvatarFile(file);
+    const reader = new FileReader();
+    reader.onload = () => setAvatarPreview(reader.result as string);
+    reader.readAsDataURL(file);
+  };
+
+  const handleAvatarSave = () => {
+    if (!avatarPreview) return;
+    avatarUploadMutation.mutate(avatarPreview);
+  };
+
   const accessiblePages = PAGE_DEFINITIONS.filter((p) =>
     canAccessPage(p.key as any),
   );
@@ -114,11 +168,14 @@ export default function UserProfile() {
   ];
 
   return (
+    <>
     <ProfileShell
       breadcrumbs={["User", "My Profile"]}
       initials={initials}
       name={displayName}
       email={profile?.email ?? currentUser?.email ?? ""}
+      avatarUrl={profile?.avatar_url ?? null}
+      onAvatarClick={() => setAvatarModalOpen(true)}
       avatarGradient="linear-gradient(135deg, #374151 0%, #6b7280 50%, #9ca3af 100%)"
       heroAccent=""
       heroMesh="radial-gradient(ellipse at 20% 50%, #1f2937 0%, transparent 55%), radial-gradient(ellipse at 80% 20%, #111827 0%, transparent 50%), radial-gradient(ellipse at 55% 80%, #0f172a 0%, transparent 50%), linear-gradient(135deg, #0a0e16 0%, #111827 50%, #0a0e16 100%)"
@@ -154,13 +211,26 @@ export default function UserProfile() {
                 }}
               />
               <div className="px-4 pb-4 -mt-8">
-                <div
-                  className="w-14 h-14 rounded-xl flex items-center justify-center text-white text-lg font-heading font-black shadow-lg ring-4 ring-card"
-                  style={{
-                    background: "linear-gradient(135deg, #374151, #6b7280)",
-                  }}
-                >
-                  {initials}
+                <div className="flex items-end gap-3">
+                  <div
+                    className="w-14 h-14 rounded-xl flex items-center justify-center text-white text-lg font-heading font-black shadow-lg ring-4 ring-card overflow-hidden shrink-0"
+                    style={{
+                      background: profile?.avatar_url ? "transparent" : "linear-gradient(135deg, #374151, #6b7280)",
+                    }}
+                  >
+                    {profile?.avatar_url ? (
+                      <img src={profile.avatar_url} alt={displayName} className="w-full h-full object-cover" />
+                    ) : (
+                      initials
+                    )}
+                  </div>
+                  <button
+                    onClick={() => setAvatarModalOpen(true)}
+                    className="mb-0.5 flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border bg-muted hover:bg-muted/80 text-[11px] font-heading font-semibold text-muted-foreground hover:text-foreground transition-all"
+                  >
+                    <Camera size={11} />
+                    Change Photo
+                  </button>
                 </div>
                 <div className="mt-3 space-y-1">
                   <p className="text-sm font-heading font-bold text-foreground">
@@ -446,5 +516,108 @@ export default function UserProfile() {
         </ProfileSection>
       )}
     </ProfileShell>
+
+    {/* ── Avatar Upload Modal ───────────────────────────────────────────── */}
+    {avatarModalOpen && (
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        style={{ background: "rgba(0,0,0,0.7)", backdropFilter: "blur(4px)" }}
+        onClick={(e) => { if (e.target === e.currentTarget) { setAvatarModalOpen(false); setAvatarPreview(null); setAvatarFile(null); } }}
+      >
+        <div className="w-full max-w-sm rounded-2xl border border-border bg-card shadow-2xl overflow-hidden">
+          {/* Modal header */}
+          <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+            <div className="flex items-center gap-2.5">
+              <div className="w-7 h-7 rounded-lg bg-muted flex items-center justify-center">
+                <Camera size={13} className="text-muted-foreground" />
+              </div>
+              <h2 className="text-sm font-heading font-semibold text-foreground">Change Avatar</h2>
+            </div>
+            <button
+              onClick={() => { setAvatarModalOpen(false); setAvatarPreview(null); setAvatarFile(null); }}
+              className="text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
+
+          {/* Modal body */}
+          <div className="p-5 space-y-4">
+            {/* Preview */}
+            <div className="flex flex-col items-center gap-3">
+              <div
+                className="w-24 h-24 rounded-2xl overflow-hidden flex items-center justify-center text-white text-2xl font-heading font-black shadow-lg"
+                style={{
+                  background: avatarPreview ? "transparent" : (profile?.avatar_url ? "transparent" : "linear-gradient(135deg, #374151, #6b7280)"),
+                }}
+              >
+                {avatarPreview ? (
+                  <img src={avatarPreview} alt="Preview" className="w-full h-full object-cover" />
+                ) : profile?.avatar_url ? (
+                  <img src={profile.avatar_url} alt={displayName} className="w-full h-full object-cover" />
+                ) : (
+                  initials
+                )}
+              </div>
+              <p className="text-xs text-muted-foreground text-center">
+                JPEG, PNG, WebP or GIF · Max 400 KB
+              </p>
+            </div>
+
+            {/* File input (hidden) */}
+            <input
+              ref={avatarInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              className="hidden"
+              onChange={handleAvatarFileChange}
+            />
+
+            {/* Upload button */}
+            <button
+              onClick={() => avatarInputRef.current?.click()}
+              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl border-2 border-dashed border-border hover:border-primary/50 hover:bg-muted/40 text-sm font-heading font-semibold text-muted-foreground hover:text-foreground transition-all"
+            >
+              <Camera size={14} />
+              {avatarFile ? avatarFile.name : "Choose image…"}
+            </button>
+
+            {/* Action buttons */}
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={handleAvatarSave}
+                disabled={!avatarPreview || avatarUploadMutation.isPending}
+                className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 disabled:opacity-40 transition-all"
+              >
+                {avatarUploadMutation.isPending ? (
+                  <Loader2 size={13} className="animate-spin" />
+                ) : (
+                  <Save size={13} />
+                )}
+                Save Avatar
+              </button>
+
+              {profile?.avatar_url && (
+                <button
+                  onClick={() => avatarRemoveMutation.mutate()}
+                  disabled={avatarRemoveMutation.isPending}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-destructive/40 text-destructive text-sm font-semibold hover:bg-destructive/10 disabled:opacity-40 transition-all"
+                  title="Remove current avatar"
+                >
+                  {avatarRemoveMutation.isPending ? (
+                    <Loader2 size={13} className="animate-spin" />
+                  ) : (
+                    <Trash2 size={13} />
+                  )}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }
