@@ -195,7 +195,13 @@ const UserProfilePage = lazy(() => import("./pages/user/UserProfile"));
 const DBADashboard = lazy(() => import("./pages/dba/DBADashboard"));
 const ControlPanel = lazy(() => import("./pages/dba/ControlPanel"));
 const AdsManager = lazy(() => import("./pages/dba/AdsManager"));
-const FollowupDashboard = lazy(() => import("./pages/followup"));
+const FollowupDashboard = lazy(
+  () => import("./pages/followup/FollowupDashboard"),
+);
+const FollowupReminders = lazy(() => import("./pages/followup/Reminders"));
+const FollowupTasks = lazy(() => import("./pages/followup/FollowupTasks"));
+const FollowupLog = lazy(() => import("./pages/followup/FollowupLog"));
+const Amendments = lazy(() => import("./pages/material/Amendments"));
 const RemindersManager = lazy(() => import("./pages/dba/RemindersManager"));
 const PaymentLogs = lazy(() => import("./pages/dba/PaymentLogs"));
 
@@ -423,6 +429,30 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/followup/reminders"
+        element={
+          <ProtectedRoute>
+            <FollowupReminders />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/tasks"
+        element={
+          <ProtectedRoute>
+            <FollowupTasks />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/log"
+        element={
+          <ProtectedRoute>
+            <FollowupLog />
+          </ProtectedRoute>
+        }
+      />
 
       {/* MASTERS */}
       <Route
@@ -541,7 +571,7 @@ function AppRoutes() {
         path="/material/amendments"
         element={
           <ProtectedRoute>
-            <MaterialDashboard />
+            <Amendments />
           </ProtectedRoute>
         }
       />
@@ -767,22 +797,22 @@ function AppRoutes() {
           </AdminRoute>
         }
       />
-      <Route
-        path="/admin/approval/post-rights"
-        element={
-          <AdminRoute>
-            <PostApprovalRights />
-          </AdminRoute>
-        }
-      />
-      <Route
-        path="/admin/approval/inbox"
-        element={
-          <AdminRoute>
-            <ApprovalInbox />
-          </AdminRoute>
-        }
-      />
+<Route
+  path="/admin/approval/post-rights"
+  element={
+    <AdminRoute>
+      <PostApprovalRights />
+    </AdminRoute>
+  }
+/>
+  <Route
+    path="/admin/approval/inbox"
+    element={
+      <AdminRoute>
+        <ApprovalInbox />
+      </AdminRoute>
+    }
+  />
       <Route
         path="/admin/api-integration"
         element={
@@ -937,14 +967,14 @@ function App() {
       <Toaster richColors position="top-right" />
       <ActivityBrowserProvider>
         <AuthSessionBridge>
-          <ThemeProvider>
-            <Router
-              future={{
-                v7_startTransition: true,
-                v7_relativeSplatPath: true,
-              }}
-            >
-              <ModuleProvider>
+          <Router
+            future={{
+              v7_startTransition: true,
+              v7_relativeSplatPath: true,
+            }}
+          >
+            <ModuleProvider>
+              <ThemeProvider>
                 <FinYearProvider>
                   <HsnProvider>
                     <RecordsProvider>
@@ -960,9 +990,9 @@ function App() {
                     </RecordsProvider>
                   </HsnProvider>
                 </FinYearProvider>
-              </ModuleProvider>
-            </Router>
-          </ThemeProvider>
+              </ThemeProvider>
+            </ModuleProvider>
+          </Router>
         </AuthSessionBridge>
       </ActivityBrowserProvider>
     </QueryClientProvider>
@@ -970,3 +1000,4 @@ function App() {
 }
 
 export default App;
+

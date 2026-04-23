@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+﻿import React, { useEffect, useState } from "react";
 import { useUserMap } from "@/hooks/useUserMap";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -47,25 +47,31 @@ const STATUS_STYLE: Record<string, string> = {
 };
 
 const fmt = (n: number) =>
-  "₹" + n.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+  "â‚¹" + n.toLocaleString("en-IN", { maximumFractionDigits: 0 });
 
 export default function Transactions() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalRecords, setTotalRecords] = useState(0);
+  const PAGE_SIZE = 20;
 
   const resolveUser = useUserMap();
 
-  const fetchData = async () => {
+  const fetchData = async (pg = page) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetchWithAuth("/api/transactions");
+      const res = await fetchWithAuth(`/api/transactions?page=${pg}&limit=${PAGE_SIZE}`);
       if (!res.ok) throw new Error("Failed to load transactions");
       const data = await res.json();
       setTransactions(data.transactions);
       setSummary(data.summary);
+      setTotalPages(data.totalPages ?? 1);
+      setTotalRecords(data.total ?? 0);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -74,8 +80,8 @@ export default function Transactions() {
   };
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    fetchData(page);
+  }, [page]);
 
   const statCards = summary
     ? [
@@ -114,14 +120,14 @@ export default function Transactions() {
         <h1 className="text-xl font-heading font-bold text-foreground">
           Transactions
         </h1>
-        <button
-          onClick={fetchData}
-          disabled={loading}
-          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm hover:bg-accent transition disabled:opacity-50"
-        >
-          <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-          Refresh
-        </button>
+  <button
+    onClick={() => fetchData()}
+    disabled={loading}
+    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm hover:bg-accent transition disabled:opacity-50"
+  >
+    <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+    Refresh
+  </button>
       </div>
 
       {error && (
@@ -180,7 +186,7 @@ export default function Transactions() {
                   "Type",
                   "Party",
                   "Description",
-                  "Amount (₹)",
+                  "Amount (â‚¹)",
                   "Mode",
                   "Status",
                 "Created By",
@@ -226,7 +232,7 @@ export default function Transactions() {
                     <td className="px-4 py-3 text-foreground whitespace-nowrap">
                       {txn.date
                         ? new Date(txn.date).toLocaleDateString("en-IN")
-                        : "—"}
+                        : "â€”"}
                     </td>
                     <td className="px-4 py-3">
                       <span
@@ -264,6 +270,49 @@ export default function Transactions() {
           </table>
         </div>
       </div>
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between mt-4 px-1">
+          <p className="text-xs text-muted-foreground">
+            Page {page} of {totalPages} &middot; {totalRecords} total transactions
+          </p>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page === 1}
+              className="px-3 py-1.5 rounded-md text-xs border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors"
+            >
+              Previous
+            </button>
+            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+              const pg = page <= 3 ? i + 1 : page - 2 + i;
+              if (pg < 1 || pg > totalPages) return null;
+              return (
+                <button
+                  key={pg}
+                  onClick={() => setPage(pg)}
+                  className={`px-3 py-1.5 rounded-md text-xs border transition-colors ${
+                    pg === page
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"
+                  }`}
+                >
+                  {pg}
+                </button>
+              );
+            })}
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page === totalPages}
+              className="px-3 py-1.5 rounded-md text-xs border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
     </>
   );
 }
+

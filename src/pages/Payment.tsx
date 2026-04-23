@@ -125,14 +125,16 @@ function modeRenderer(value: unknown) {
 // ── Main component ─────────────────────────────────────────────────────────────
 const Payment: React.FC = () => {
   const queryClient = useQueryClient();
+  const [page, setPage] = React.useState(1);
+  const PAGE_SIZE = 20;
 
   const {
     data: dbData,
     isLoading,
     error,
   } = useQuery({
-    queryKey: ["payments"],
-    queryFn: getPayments,
+    queryKey: ["payments", page],
+    queryFn: () => getPayments(page, PAGE_SIZE),
   });
 
   // Fetch banks for dropdown
@@ -141,7 +143,9 @@ const Payment: React.FC = () => {
     queryFn: fetchBanks,
   });
 
-  const dbItems: DbPayment[] = Array.isArray(dbData) ? dbData : [];
+  const dbItems: DbPayment[] = Array.isArray(dbData?.data) ? dbData.data : [];
+  const totalPages: number = dbData?.totalPages ?? 1;
+  const totalRecords: number = dbData?.total ?? 0;
 
   // ── Summary stats ────────────────────────────────────────────────────────────
   const totalAmount = dbItems.reduce((sum, p) => sum + (p.PAmount || 0), 0);
@@ -166,9 +170,9 @@ const Payment: React.FC = () => {
   const handleDataEvent = async (event: DataChangeEvent) => {
     if (event.action === "add") {
       try {
-        await addPayment(toPayload(event.record));
+await addPayment(toPayload(event.record));
         toast.success("Payment saved!");
-        await queryClient.invalidateQueries({ queryKey: ["payments"] });
+        queryClient.invalidateQueries({ queryKey: ["payments"] });
       } catch (err: any) {
         toast.error("Save failed: " + err.message);
       }
@@ -330,8 +334,51 @@ const Payment: React.FC = () => {
         initialData={mappedData}
         onDataEvent={handleDataEvent}
       />
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between mt-4 px-1">
+          <p className="text-xs text-muted-foreground">
+            Showing page {page} of {totalPages} &middot; {totalRecords} total records
+          </p>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={page === 1}
+              className="px-3 py-1.5 rounded-md text-xs border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors"
+            >
+              Previous
+            </button>
+            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+              const pg = page <= 3 ? i + 1 : page - 2 + i;
+              if (pg < 1 || pg > totalPages) return null;
+              return (
+                <button
+                  key={pg}
+                  onClick={() => setPage(pg)}
+                  className={`px-3 py-1.5 rounded-md text-xs border transition-colors ${
+                    pg === page
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"
+                  }`}
+                >
+                  {pg}
+                </button>
+              );
+            })}
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={page === totalPages}
+              className="px-3 py-1.5 rounded-md text-xs border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors"
+            >
+              Next
+            </button>
+          </div>
+        </div>
+      )}
     </>
   );
 };
 
 export default Payment;
+

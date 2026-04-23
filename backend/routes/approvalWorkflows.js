@@ -3,11 +3,13 @@ const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const allowRoles = require("../middleware/role");
+const { cache } = require("../middleware/cache");
+const { bumpCacheVersion } = require("../redis");
 
 const adminOnly = allowRoles("admin", "super_admin");
 
 // GET all workflows
-router.get("/", authMiddleware, async (req, res) => {
+router.get("/", authMiddleware, cache("approval-workflows", 60), async (req, res) => {
   try {
     const pool = await getPool();
     const result = await pool.request().query(`

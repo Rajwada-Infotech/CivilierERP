@@ -3,6 +3,8 @@ const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { checkPermission } = require("../middleware/permissions");
+const { cache } = require("../middleware/cache");
+const { bumpCacheVersion } = require("../redis");
 
 const cleanStr = (v, len = 255) => {
   if (!v || String(v).trim() === "") return null;
@@ -17,7 +19,7 @@ function generateRoleCode(rName) {
 }
 
 // GET ALL
-router.get("/", authMiddleware, checkPermission("Rights", "Menu", "CanView"), async (req, res) => {
+router.get("/", authMiddleware, checkPermission("Rights", "Menu", "CanView"), cache("roles", 120), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`

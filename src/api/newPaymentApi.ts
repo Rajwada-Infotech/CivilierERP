@@ -1,4 +1,4 @@
-import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { fetchWithAuth } from "../lib/fetchWithAuth";
 
 const BASE_URL = "/api/new-payment";
 
@@ -11,8 +11,8 @@ async function parseError(res: Response, fallback: string) {
   }
 }
 
-export const getPayments = async () => {
-  const res = await fetchWithAuth(BASE_URL);
+export const getPayments = async (page = 1, limit = 20) => {
+  const res = await fetchWithAuth(`${BASE_URL}?page=${page}&limit=${limit}`);
   if (!res.ok) throw new Error(await parseError(res, `GET failed: ${res.status}`));
   return res.json();
 };
@@ -42,3 +42,4 @@ export const deletePayment = async (id: string) => {
   if (!res.ok) throw new Error(await parseError(res, "DELETE failed"));
   return res.json();
 };
+

@@ -1,12 +1,13 @@
 const express = require("express");
 const router = express.Router();
 const { getPool } = require("../db");
+const { cache } = require("../middleware/cache");
 
 /**
  * GET /api/material-dashboard
  * Single round-trip for all Material Dashboard stats.
  */
-router.get("/", async (req, res) => {
+router.get("/", cache("material-dashboard", 60), async (req, res) => {
   try {
     const pool = getPool();
 
