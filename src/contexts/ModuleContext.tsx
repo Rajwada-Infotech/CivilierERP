@@ -92,17 +92,20 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
     } else if (pathname.startsWith("/material")) {
       setActiveModuleState("material");
       localStorage.setItem("activeModule", "material");
-    } else if (pathname === "/home") {
-      // Landing page — clear active module so sidebar is neutral
+    } else if (pathname.startsWith("/finance") || pathname === "/finance") {
+      setActiveModuleState("finance");
+      localStorage.setItem("activeModule", "finance");
+    } else if (pathname === "/home" || pathname === "/") {
+      // Landing page after login — stay neutral, no module pre-selected
       setActiveModuleState(null);
       localStorage.removeItem("activeModule");
     } else {
-      // Ambiguous path — trust localStorage if valid, else default to finance
+      // Ambiguous path (e.g. /masters/*, /reports) — trust localStorage if valid,
+      // but do NOT force finance when there's nothing stored
       if (stored && valid.includes(stored)) {
         setActiveModuleState(stored);
       } else {
-        setActiveModuleState("finance");
-        localStorage.setItem("activeModule", "finance");
+        setActiveModuleState(null);
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

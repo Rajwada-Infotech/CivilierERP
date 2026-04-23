@@ -374,7 +374,7 @@ export const MobileNav: React.FC = () => {
         ];
 
       default:
-        return [{ label: "Amendments", icon: BarChart3, path: "/finance" }];
+        return [];
     }
   };
 
