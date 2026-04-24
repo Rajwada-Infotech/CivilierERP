@@ -1,68 +1,150 @@
 const express = require("express");
-const router = express.Router();
-const sql = require("mssql");
+const router  = express.Router();
+const sql     = require("mssql");
 
-const { cache } = require("../middleware/cache");
-const { bumpCacheVersion } = require("../redis");
+const { cache }             = require("../middleware/cache");
+const { bumpCacheVersion }  = require("../redis");
+const { getPool }           = require("../db");
 
-// ================= GET BRS =================
+// ── GET /brs/filters ─────────────────────────────────────────────────────────
+// Returns companies (LHeadType='C') and banks (LHeadType='B').
+// Banks link to their company via bank.LBelongsTo = company.LHeadName.
+// We resolve that join here so the frontend gets companyId on each bank
+// for cascading dropdowns.
+router.get("/filters", cache("brs-filters", 300), async (req, res) => {
+  try {
+    const pool = getPool();
+
+    const result = await pool.request().query(`
+      SELECT
+        b.LHeadId,
+        b.LHeadName,
+        b.LHeadType,
+        b.LBelongsTo,
+        c.LHeadId   AS CompanyId,
+        c.LHeadName AS CompanyName
+      FROM AccountHeadMaster b
+      LEFT JOIN AccountHeadMaster c
+        ON  c.LHeadType  = 'C'
+        AND c.LHeadStatus = 1
+        AND c.LHeadName  = b.LBelongsTo
+      WHERE b.LHeadType IN ('C', 'B')
+        AND b.LHeadStatus = 1
+      ORDER BY b.LHeadType, b.LHeadName
+    `);
+
+    const companies = result.recordset
+      .filter((r) => r.LHeadType === "C")
+      .map((r) => ({ id: r.LHeadId, name: r.LHeadName }));
+
+    const banks = result.recordset
+      .filter((r) => r.LHeadType === "B")
+      .map((r) => ({
+        id:        r.LHeadId,
+        name:      r.LHeadName,
+        companyId: r.CompanyId   ?? null,   // null if LBelongsTo didn't match any company
+        companyName: r.CompanyName ?? null,
+      }));
+
+    res.json({ companies, banks });
+  } catch (err) {
+    console.error("BRS filters error:", err);
+    res.status(500).json({ error: "Failed to fetch filter options" });
+  }
+});
+
+// ── GET /brs ─────────────────────────────────────────────────────────────────
+// BankReconciliation columns: BRSID, BankID, TransactionID, Amount, Type,
+//   IsMatched, BankDate, SystemDate, CreatedAt
+// NOTE: No CompanyID column — company is resolved via AccountHeadMaster JOIN.
 router.get("/", cache("brs", 120), async (req, res) => {
   try {
-    const pool = req.app.locals.db;
+    const pool = getPool();
 
-    const page = Math.max(parseInt(req.query.page) || 1, 1);
-    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const page   = Math.max(parseInt(req.query.page)  || 1,  1);
+    const limit  = Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 100);
     const offset = (page - 1) * limit;
 
-    const { bankId, fromDate, toDate } = req.query;
+    const { bankId, companyId, fromDate, toDate, status } = req.query;
 
+    // companyId filters via bank.LBelongsTo = company.LHeadName join
     let where = "WHERE 1=1";
+    if (bankId)    where += " AND b.BankID = @bankId";
+    if (companyId) where += " AND company.LHeadId = @companyId";
+    if (fromDate)  where += " AND b.BankDate >= @fromDate";
+    if (toDate)    where += " AND b.BankDate <= @toDate";
+    if (status === "reconciled") where += " AND b.IsMatched = 1";
+    if (status === "pending")    where += " AND b.IsMatched = 0";
 
-    if (bankId) where += " AND BankID = @bankId";
-    if (fromDate) where += " AND BankDate >= @fromDate";
-    if (toDate) where += " AND BankDate <= @toDate";
+    // Shared param binder
+    const bind = (r) => {
+      if (bankId)    r.input("bankId",    sql.Int,  bankId);
+      if (companyId) r.input("companyId", sql.Int,  companyId);
+      if (fromDate)  r.input("fromDate",  sql.Date, fromDate);
+      if (toDate)    r.input("toDate",    sql.Date, toDate);
+      return r;
+    };
 
-    // COUNT
-    const countReq = pool.request();
-    if (bankId) countReq.input("bankId", sql.Int, bankId);
-    if (fromDate) countReq.input("fromDate", sql.Date, fromDate);
-    if (toDate) countReq.input("toDate", sql.Date, toDate);
+    // Base FROM used in all three queries
+    const baseFrom = `
+      FROM BankReconciliation b
+      LEFT JOIN AccountHeadMaster bank
+        ON  bank.LHeadId   = b.BankID
+        AND bank.LHeadType = 'B'
+      LEFT JOIN AccountHeadMaster company
+        ON  company.LHeadType  = 'C'
+        AND company.LHeadStatus = 1
+        AND company.LHeadName  = bank.LBelongsTo
+    `;
 
-    const countResult = await countReq.query(
-      "SELECT COUNT(*) AS total FROM BankReconciliation " + where
+    // ── COUNT ─────────────────────────────────────────────────────────────────
+    const countResult = await bind(pool.request()).query(
+      `SELECT COUNT(*) AS total ${baseFrom} ${where}`
     );
-
     const total = countResult.recordset[0].total;
 
-    // DATA
-    const dataReq = pool.request();
-    if (bankId) dataReq.input("bankId", sql.Int, bankId);
-    if (fromDate) dataReq.input("fromDate", sql.Date, fromDate);
-    if (toDate) dataReq.input("toDate", sql.Date, toDate);
-
+    // ── DATA ──────────────────────────────────────────────────────────────────
+    const dataReq = bind(pool.request());
     dataReq.input("offset", sql.Int, offset);
-    dataReq.input("limit", sql.Int, limit);
+    dataReq.input("limit",  sql.Int, limit);
 
-    const dataResult = await dataReq.query(
-      "SELECT * FROM BankReconciliation " + where + " ORDER BY BankDate DESC, BRSID DESC OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY"
-    );
+    const dataResult = await dataReq.query(`
+      SELECT
+        b.BRSID,
+        b.BankID,
+        b.TransactionID,
+        b.Amount,
+        b.Type,
+        b.IsMatched,
+        b.BankDate,
+        b.SystemDate,
+        b.CreatedAt,
+        bank.LHeadName    AS BankName,
+        company.LHeadId   AS CompanyID,
+        company.LHeadName AS CompanyName
+      ${baseFrom}
+      ${where}
+      ORDER BY b.BankDate DESC, b.BRSID DESC
+      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+    `);
 
-    // SUMMARY
-    const summaryReq = pool.request();
-    if (bankId) summaryReq.input("bankId", sql.Int, bankId);
+    // ── SUMMARY ───────────────────────────────────────────────────────────────
+    const summaryResult = await bind(pool.request()).query(`
+      SELECT
+        SUM(CASE WHEN b.IsMatched = 1 THEN b.Amount ELSE 0 END) AS matched,
+        SUM(CASE WHEN b.IsMatched = 0 THEN b.Amount ELSE 0 END) AS unmatched
+      ${baseFrom}
+      ${where}
+    `);
 
-    const summaryResult = await summaryReq.query(
-      "SELECT SUM(CASE WHEN IsMatched = 1 THEN Amount ELSE 0 END) AS matched, SUM(CASE WHEN IsMatched = 0 THEN Amount ELSE 0 END) AS unmatched FROM BankReconciliation" + (bankId ? " WHERE BankID = @bankId" : "")
-    );
-
-    const matched = summaryResult.recordset[0].matched || 0;
+    const matched   = summaryResult.recordset[0].matched   || 0;
     const unmatched = summaryResult.recordset[0].unmatched || 0;
 
     res.json({
       data: dataResult.recordset,
       matched,
       unmatched,
-      difference: unmatched,
+      difference:  unmatched,
       page,
       limit,
       total,
@@ -70,29 +152,33 @@ router.get("/", cache("brs", 120), async (req, res) => {
     });
 
   } catch (err) {
-    console.error("BRS error:", err);
+    console.error("BRS list error:", err);
     res.status(500).json({ error: "Failed to fetch BRS" });
   }
 });
 
-// ================= ADD ENTRY =================
+// ── POST /brs ─────────────────────────────────────────────────────────────────
+// No CompanyID column — only BankID (company resolved via bank's LParentId)
 router.post("/", async (req, res) => {
   try {
-    const pool = req.app.locals.db;
-
+    const pool = getPool();
     const { bankId, transactionId, amount, type, bankDate, systemDate } = req.body;
 
     await pool.request()
-      .input("bankId", sql.Int, bankId)
-      .input("transactionId", sql.Int, transactionId)
-      .input("amount", sql.Decimal(18,2), amount)
-      .input("type", sql.VarChar(10), type)
-      .input("bankDate", sql.Date, bankDate)
-      .input("systemDate", sql.Date, systemDate)
-      .query("INSERT INTO BankReconciliation (BankID, TransactionID, Amount, Type, BankDate, SystemDate) VALUES (@bankId, @transactionId, @amount, @type, @bankDate, @systemDate)");
+      .input("bankId",        sql.Int,            bankId)
+      .input("transactionId", sql.Int,            transactionId)
+      .input("amount",        sql.Decimal(18, 2), amount)
+      .input("type",          sql.VarChar(10),    type)
+      .input("bankDate",      sql.Date,           bankDate)
+      .input("systemDate",    sql.Date,           systemDate)
+      .query(`
+        INSERT INTO BankReconciliation
+          (BankID, TransactionID, Amount, Type, BankDate, SystemDate)
+        VALUES
+          (@bankId, @transactionId, @amount, @type, @bankDate, @systemDate)
+      `);
 
     await bumpCacheVersion("brs");
-
     res.json({ message: "BRS entry added" });
 
   } catch (err) {
@@ -101,118 +187,95 @@ router.post("/", async (req, res) => {
   }
 });
 
-// ================= MATCH =================
+// ── PUT /brs/:id/match ────────────────────────────────────────────────────────
 router.put("/:id/match", async (req, res) => {
   try {
-    const pool = req.app.locals.db;
-
+    const pool = getPool();
     await pool.request()
       .input("id", sql.Int, req.params.id)
       .query("UPDATE BankReconciliation SET IsMatched = 1 WHERE BRSID = @id");
 
     await bumpCacheVersion("brs");
-
     res.json({ message: "Marked as matched" });
-
   } catch (err) {
     console.error("BRS match error:", err);
     res.status(500).json({ error: "Match failed" });
   }
 });
 
-// ================= UNMATCH =================
+// ── PUT /brs/:id/unmatch ──────────────────────────────────────────────────────
 router.put("/:id/unmatch", async (req, res) => {
   try {
-    const pool = req.app.locals.db;
-
+    const pool = getPool();
     await pool.request()
       .input("id", sql.Int, req.params.id)
       .query("UPDATE BankReconciliation SET IsMatched = 0 WHERE BRSID = @id");
 
     await bumpCacheVersion("brs");
-
     res.json({ message: "Marked as unmatched" });
-
   } catch (err) {
     console.error("BRS unmatch error:", err);
     res.status(500).json({ error: "Unmatch failed" });
   }
 });
 
-// ================= SMART AUTO-MATCH =================
+// ── PUT /brs/auto-match ───────────────────────────────────────────────────────
+// Pairs unmatched CREDIT/DEBIT entries with the same amount (±0.01)
 router.put("/auto-match", async (req, res) => {
-  const pool = req.app.locals.db;
+  const pool        = getPool();
   const transaction = new sql.Transaction(pool);
 
   try {
     await transaction.begin();
 
-    // Fetch unmatched
-    const unmatchedResult = await transaction.request().query(
+    const { recordset } = await transaction.request().query(
       "SELECT BRSID, Amount, Type FROM BankReconciliation WHERE IsMatched = 0 ORDER BY Amount ASC"
     );
 
-    const credits = [];
-    const debits = [];
-
-    for (const row of unmatchedResult.recordset) {
-      if (row.Type === "CREDIT") credits.push(row);
-      else if (row.Type === "DEBIT") debits.push(row);
-    }
+    const credits = recordset.filter((r) => r.Type === "CREDIT");
+    const debits  = recordset.filter((r) => r.Type === "DEBIT");
 
     const pairedCredits = new Set();
-    const pairedDebits = new Set();
-    let pairCount = 0;
+    const pairedDebits  = new Set();
 
     for (const credit of credits) {
       if (pairedCredits.has(credit.BRSID)) continue;
-
       for (const debit of debits) {
         if (pairedDebits.has(debit.BRSID)) continue;
-
         if (Math.abs(credit.Amount - debit.Amount) < 0.01) {
           pairedCredits.add(credit.BRSID);
           pairedDebits.add(debit.BRSID);
-          pairCount++;
           break;
         }
       }
     }
 
-    // Update safely (parameterized)
     const allIds = [...pairedCredits, ...pairedDebits];
-
     if (allIds.length > 0) {
-      const request = transaction.request();
-
-      allIds.forEach((id, i) => {
-        request.input("id" + i, sql.Int, id);
-      });
-
+      const req2 = transaction.request();
+      allIds.forEach((id, i) => req2.input("id" + i, sql.Int, id));
       const placeholders = allIds.map((_, i) => "@id" + i).join(",");
-
-      await request.query(
-        "UPDATE BankReconciliation SET IsMatched = 1 WHERE BRSID IN (" + placeholders + ")"
+      await req2.query(
+        `UPDATE BankReconciliation SET IsMatched = 1 WHERE BRSID IN (${placeholders})`
       );
     }
 
     await transaction.commit();
-
     await bumpCacheVersion("brs");
 
+    const pairCount = pairedCredits.size;
     res.json({
-      message: "Smart auto-match completed: " + pairCount + " pairs matched",
-      pairs: pairCount,
-      creditsLeft: credits.length - pairedCredits.size,
-      debitsLeft: debits.length - pairedDebits.size,
+      message:      `Auto-match done: ${pairCount} pair(s) reconciled`,
+      pairs:        pairCount,
+      creditsLeft:  credits.length - pairCount,
+      debitsLeft:   debits.length  - pairCount,
     });
 
   } catch (err) {
     await transaction.rollback();
-    console.error("Smart auto-match error:", err);
+    console.error("Auto-match error:", err);
     res.status(500).json({ error: "Auto-match failed" });
   }
 });
 
 module.exports = router;
-
