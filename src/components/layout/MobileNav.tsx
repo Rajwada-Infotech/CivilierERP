@@ -95,7 +95,7 @@ export const MobileNav: React.FC = () => {
       icon: Building2,
       children: [
         {
-          label: "Business Unit",
+          label: "Enterprise",
           path: "/admin/masters/business-unit",
           icon: FileText,
         },
