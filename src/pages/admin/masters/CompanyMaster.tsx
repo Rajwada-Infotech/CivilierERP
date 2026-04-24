@@ -1,8 +1,23 @@
 import React, { useState } from "react";
-import { Landmark, Plus, Pencil, Trash2, Search, Globe, Phone, Mail, FileText, ToggleLeft, ToggleRight } from "lucide-react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  Landmark,
+  Plus,
+  Pencil,
+  Trash2,
+  Search,
+  ToggleLeft,
+  ToggleRight,
+  Loader2,
+  AlertCircle,
+} from "lucide-react";
+import { toast } from "sonner";
+
+const API = "/api/company-master";
+const token = () => localStorage.getItem("token") || "";
 
 interface Company {
-  id: string;
+  id: number;
   code: string;
   name: string;
   legalName: string;
@@ -36,61 +51,194 @@ interface Company {
   logoUrl: string;
 }
 
-const CO_TYPES = ["Private Limited", "Public Limited", "LLP", "Partnership", "Proprietorship", "Section 8", "OPC"];
-const INDUSTRIES = ["Manufacturing", "IT & Technology", "Infrastructure", "Retail", "Finance", "Healthcare", "Education", "Logistics", "Real Estate", "Other"];
+const CO_TYPES = [
+  "Private Limited",
+  "Public Limited",
+  "LLP",
+  "Partnership",
+  "Proprietorship",
+  "Section 8",
+  "OPC",
+];
+const INDUSTRIES = [
+  "Manufacturing",
+  "IT & Technology",
+  "Infrastructure",
+  "Retail",
+  "Finance",
+  "Healthcare",
+  "Education",
+  "Logistics",
+  "Real Estate",
+  "Other",
+];
 const CURRENCIES = ["INR", "USD", "EUR", "GBP", "AED"];
 
-const empty: Company = {
-  id: "", code: "", name: "", legalName: "", shortName: "", type: "Private Limited",
-  industry: "Manufacturing", incorporationDate: "", cinNumber: "", panNumber: "",
-  tanNumber: "", gstNumber: "", registeredAddress: "", city: "", state: "",
-  country: "India", pincode: "", phone: "", fax: "", email: "", website: "",
-  authorizedCapital: "", paidUpCapital: "", currency: "INR", fiscalYearStart: "April",
-  auditorName: "", bankName: "", bankAccountNo: "", bankIfscCode: "",
-  isActive: true, remarks: "", logoUrl: "",
+const EMPTY: Omit<Company, "id"> = {
+  code: "",
+  name: "",
+  legalName: "",
+  shortName: "",
+  type: "Private Limited",
+  industry: "Manufacturing",
+  incorporationDate: "",
+  cinNumber: "",
+  panNumber: "",
+  tanNumber: "",
+  gstNumber: "",
+  registeredAddress: "",
+  city: "",
+  state: "",
+  country: "India",
+  pincode: "",
+  phone: "",
+  fax: "",
+  email: "",
+  website: "",
+  authorizedCapital: "",
+  paidUpCapital: "",
+  currency: "INR",
+  fiscalYearStart: "April",
+  auditorName: "",
+  bankName: "",
+  bankAccountNo: "",
+  bankIfscCode: "",
+  isActive: true,
+  remarks: "",
+  logoUrl: "",
 };
 
+async function fetchCompanies(): Promise<Company[]> {
+  const r = await fetch(API, {
+    headers: { Authorization: `Bearer ${token()}` },
+  });
+  if (!r.ok) throw new Error("Failed to load companies");
+  return r.json();
+}
+
+async function saveCompany(data: Partial<Company> & { id?: number }) {
+  const { id, ...body } = data;
+  const r = await fetch(id ? `${API}/${id}` : API, {
+    method: id ? "PUT" : "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token()}`,
+    },
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) {
+    const e = await r.json();
+    throw new Error(e.error || "Save failed");
+  }
+  return r.json();
+}
+
+async function deleteCompany(id: number) {
+  const r = await fetch(`${API}/${id}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token()}` },
+  });
+  if (!r.ok) throw new Error("Delete failed");
+}
+
 export default function CompanyMaster() {
-  const [companies, setCompanies] = useState<Company[]>([
-    { ...empty, id: "CO001", code: "MAIN", name: "Civilier ERP Pvt. Ltd.", legalName: "Civilier Enterprise Resource Planning Private Limited", shortName: "CERP", type: "Private Limited", industry: "IT & Technology", city: "Mumbai", state: "Maharashtra", isActive: true },
-  ]);
-  const [form, setForm] = useState<Company>(empty);
-  const [editId, setEditId] = useState<string | null>(null);
+  const qc = useQueryClient();
+  const {
+    data: companies = [],
+    isLoading,
+    isError,
+  } = useQuery({
+    queryKey: ["company-master"],
+    queryFn: fetchCompanies,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const saveMut = useMutation({
+    mutationFn: saveCompany,
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: ["company-master"] });
+      toast.success(vars.id ? "Company updated" : "Company created");
+      setShowForm(false);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const deleteMut = useMutation({
+    mutationFn: deleteCompany,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["company-master"] });
+      toast.success("Company deleted");
+      setDeleteConfirm(null);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const [form, setForm] = useState<Partial<Company>>({ ...EMPTY });
+  const [editId, setEditId] = useState<number | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [search, setSearch] = useState("");
-  const [activeTab, setActiveTab] = useState<"general" | "address" | "legal" | "banking">("general");
-  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState<
+    "general" | "address" | "legal" | "banking"
+  >("general");
+  const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
 
-  const filtered = companies.filter(c =>
-    c.name.toLowerCase().includes(search.toLowerCase()) ||
-    c.code.toLowerCase().includes(search.toLowerCase()) ||
-    c.city.toLowerCase().includes(search.toLowerCase())
+  const filtered = companies.filter(
+    (c) =>
+      c.name.toLowerCase().includes(search.toLowerCase()) ||
+      c.code.toLowerCase().includes(search.toLowerCase()) ||
+      (c.city || "").toLowerCase().includes(search.toLowerCase()),
   );
 
-  const openNew = () => { setForm({ ...empty, id: `CO${String(companies.length + 1).padStart(3, "0")}` }); setEditId(null); setShowForm(true); setActiveTab("general"); };
-  const openEdit = (c: Company) => { setForm({ ...c }); setEditId(c.id); setShowForm(true); setActiveTab("general"); };
+  const openNew = () => {
+    setForm({ ...EMPTY });
+    setEditId(null);
+    setShowForm(true);
+    setActiveTab("general");
+  };
+  const openEdit = (c: Company) => {
+    setForm({ ...c });
+    setEditId(c.id);
+    setShowForm(true);
+    setActiveTab("general");
+  };
   const handleSave = () => {
     if (!form.code || !form.name) return;
-    if (editId) setCompanies(prev => prev.map(c => c.id === editId ? form : c));
-    else setCompanies(prev => [...prev, form]);
-    setShowForm(false);
+    saveMut.mutate({ ...form, id: editId ?? undefined });
   };
-  const handleDelete = (id: string) => { setCompanies(prev => prev.filter(c => c.id !== id)); setDeleteConfirm(null); };
 
-  const fi = (label: string, key: keyof Company, type = "text", placeholder = "") => (
+  const fi = (
+    label: string,
+    key: keyof Company,
+    type = "text",
+    placeholder = "",
+  ) => (
     <div>
-      <label className="block text-xs font-medium text-muted-foreground mb-1">{label}</label>
-      <input type={type} value={form[key] as string} onChange={e => setForm(c => ({ ...c, [key]: e.target.value }))}
+      <label className="block text-xs font-medium text-muted-foreground mb-1">
+        {label}
+      </label>
+      <input
+        type={type}
+        value={(form[key] as string) ?? ""}
+        onChange={(e) => setForm((c) => ({ ...c, [key]: e.target.value }))}
         placeholder={placeholder || label}
-        className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all" />
+        className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all"
+      />
     </div>
   );
+
   const se = (label: string, key: keyof Company, options: string[]) => (
     <div>
-      <label className="block text-xs font-medium text-muted-foreground mb-1">{label}</label>
-      <select value={form[key] as string} onChange={e => setForm(c => ({ ...c, [key]: e.target.value }))}
-        className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary">
-        {options.map(o => <option key={o}>{o}</option>)}
+      <label className="block text-xs font-medium text-muted-foreground mb-1">
+        {label}
+      </label>
+      <select
+        value={(form[key] as string) ?? ""}
+        onChange={(e) => setForm((c) => ({ ...c, [key]: e.target.value }))}
+        className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+      >
+        {options.map((o) => (
+          <option key={o}>{o}</option>
+        ))}
       </select>
     </div>
   );
@@ -103,11 +251,18 @@ export default function CompanyMaster() {
             <Landmark size={20} className="text-emerald-500" />
           </div>
           <div>
-            <h1 className="text-xl font-heading font-semibold text-foreground">Company Master</h1>
-            <p className="text-xs text-muted-foreground">Manage company profiles, legal and banking details</p>
+            <h1 className="text-xl font-heading font-semibold text-foreground">
+              Company Master
+            </h1>
+            <p className="text-xs text-muted-foreground">
+              Manage company profiles, legal and banking details
+            </p>
           </div>
         </div>
-        <button onClick={openNew} className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground text-sm font-heading rounded-lg hover:bg-primary/90 transition-colors">
+        <button
+          onClick={openNew}
+          className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground text-sm font-heading rounded-lg hover:bg-primary/90 transition-colors"
+        >
           <Plus size={16} /> Add Company
         </button>
       </div>
@@ -116,62 +271,157 @@ export default function CompanyMaster() {
         <div className="rounded-xl border border-border bg-card overflow-hidden">
           <div className="p-4 border-b border-border flex items-center gap-3">
             <div className="relative flex-1 max-w-sm">
-              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name, code, city…"
-                className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30" />
+              <Search
+                size={15}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+              />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search by name, code, city…"
+                className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+              />
             </div>
-            <span className="text-xs text-muted-foreground">{filtered.length} compan{filtered.length !== 1 ? "ies" : "y"}</span>
+            <span className="text-xs text-muted-foreground">
+              {filtered.length} compan{filtered.length !== 1 ? "ies" : "y"}
+            </span>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr>
-                  {["Code", "Company Name", "Legal Name", "Type", "Industry", "City", "PAN", "GST", "Status", "Actions"].map(h => (
-                    <th key={h} className="px-4 py-3 text-left text-xs font-heading text-muted-foreground">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {filtered.length === 0 ? (
-                  <tr><td colSpan={10} className="px-4 py-10 text-center text-muted-foreground text-sm">No companies found</td></tr>
-                ) : filtered.map(c => (
-                  <tr key={c.id} className="hover:bg-muted/30 transition-colors">
-                    <td className="px-4 py-3 font-mono text-xs font-medium text-primary">{c.code}</td>
-                    <td className="px-4 py-3 font-medium text-foreground max-w-[180px] truncate">{c.name}</td>
-                    <td className="px-4 py-3 text-muted-foreground text-xs max-w-[160px] truncate">{c.legalName}</td>
-                    <td className="px-4 py-3"><span className="px-2 py-0.5 rounded-full text-xs bg-emerald-500/10 text-emerald-600">{c.type}</span></td>
-                    <td className="px-4 py-3 text-muted-foreground text-xs">{c.industry}</td>
-                    <td className="px-4 py-3 text-muted-foreground">{c.city}</td>
-                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{c.panNumber}</td>
-                    <td className="px-4 py-3 font-mono text-xs text-muted-foreground">{c.gstNumber}</td>
-                    <td className="px-4 py-3"><span className={`px-2 py-0.5 rounded-full text-xs font-medium ${c.isActive ? "bg-emerald-500/10 text-emerald-600" : "bg-red-500/10 text-red-500"}`}>{c.isActive ? "Active" : "Inactive"}</span></td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <button onClick={() => openEdit(c)} className="p-1.5 rounded-md hover:bg-primary/10 text-muted-foreground hover:text-primary transition-colors"><Pencil size={13} /></button>
-                        <button onClick={() => setDeleteConfirm(c.id)} className="p-1.5 rounded-md hover:bg-red-500/10 text-muted-foreground hover:text-red-500 transition-colors"><Trash2 size={13} /></button>
-                      </div>
-                    </td>
+          {isLoading && (
+            <div className="flex items-center justify-center py-16 gap-2 text-muted-foreground">
+              <Loader2 size={18} className="animate-spin" /> Loading…
+            </div>
+          )}
+          {isError && (
+            <div className="flex items-center justify-center py-16 gap-2 text-destructive">
+              <AlertCircle size={18} /> Failed to load companies
+            </div>
+          )}
+          {!isLoading && !isError && (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50">
+                  <tr>
+                    {[
+                      "Code",
+                      "Company Name",
+                      "Legal Name",
+                      "Type",
+                      "Industry",
+                      "City",
+                      "PAN",
+                      "GST",
+                      "Status",
+                      "Actions",
+                    ].map((h) => (
+                      <th
+                        key={h}
+                        className="px-4 py-3 text-left text-xs font-heading text-muted-foreground"
+                      >
+                        {h}
+                      </th>
+                    ))}
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody className="divide-y divide-border">
+                  {filtered.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={10}
+                        className="px-4 py-10 text-center text-muted-foreground text-sm"
+                      >
+                        No companies found
+                      </td>
+                    </tr>
+                  ) : (
+                    filtered.map((c) => (
+                      <tr
+                        key={c.id}
+                        className="hover:bg-muted/30 transition-colors"
+                      >
+                        <td className="px-4 py-3 font-mono text-xs font-medium text-primary">
+                          {c.code}
+                        </td>
+                        <td className="px-4 py-3 font-medium text-foreground max-w-[180px] truncate">
+                          {c.name}
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground text-xs max-w-[160px] truncate">
+                          {c.legalName}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-500/10 text-emerald-600">
+                            {c.type}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground text-xs">
+                          {c.industry}
+                        </td>
+                        <td className="px-4 py-3 text-muted-foreground">
+                          {c.city}
+                        </td>
+                        <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
+                          {c.panNumber}
+                        </td>
+                        <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
+                          {c.gstNumber}
+                        </td>
+                        <td className="px-4 py-3">
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-xs font-medium ${c.isActive ? "bg-emerald-500/10 text-emerald-600" : "bg-red-500/10 text-red-500"}`}
+                          >
+                            {c.isActive ? "Active" : "Inactive"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <button
+                              onClick={() => openEdit(c)}
+                              className="p-1.5 rounded-md hover:bg-primary/10 text-muted-foreground hover:text-primary transition-colors"
+                            >
+                              <Pencil size={13} />
+                            </button>
+                            <button
+                              onClick={() => setDeleteConfirm(c.id)}
+                              className="p-1.5 rounded-md hover:bg-red-500/10 text-muted-foreground hover:text-red-500 transition-colors"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
       )}
 
       {showForm && (
         <div className="rounded-xl border border-border bg-card overflow-hidden">
           <div className="p-4 border-b border-border flex items-center justify-between bg-muted/30">
-            <h2 className="font-heading font-semibold text-foreground">{editId ? "Edit Company" : "New Company"}</h2>
-            <button onClick={() => setShowForm(false)} className="text-xs text-muted-foreground hover:text-foreground px-3 py-1 rounded border border-border hover:bg-muted transition-colors">Cancel</button>
+            <h2 className="font-heading font-semibold text-foreground">
+              {editId ? "Edit Company" : "New Company"}
+            </h2>
+            <button
+              onClick={() => setShowForm(false)}
+              className="text-xs text-muted-foreground hover:text-foreground px-3 py-1 rounded border border-border hover:bg-muted transition-colors"
+            >
+              Cancel
+            </button>
           </div>
           <div className="flex gap-1 p-3 border-b border-border bg-muted/20">
-            {(["general", "address", "legal", "banking"] as const).map(tab => (
-              <button key={tab} onClick={() => setActiveTab(tab)}
-                className={`px-4 py-1.5 rounded-md text-xs font-heading capitalize transition-colors ${activeTab === tab ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}>
-                {tab}
-              </button>
-            ))}
+            {(["general", "address", "legal", "banking"] as const).map(
+              (tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`px-4 py-1.5 rounded-md text-xs font-heading capitalize transition-colors ${activeTab === tab ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
+                >
+                  {tab}
+                </button>
+              ),
+            )}
           </div>
           <div className="p-6">
             {activeTab === "general" && (
@@ -184,11 +434,33 @@ export default function CompanyMaster() {
                 {se("Industry", "industry", INDUSTRIES)}
                 {fi("Incorporation Date", "incorporationDate", "date")}
                 {se("Currency", "currency", CURRENCIES)}
-                {se("Fiscal Year Start", "fiscalYearStart", ["January", "April", "July", "October"])}
+                {se("Fiscal Year Start", "fiscalYearStart", [
+                  "January",
+                  "April",
+                  "July",
+                  "October",
+                ])}
                 <div className="flex items-center gap-3 pt-5">
-                  <button onClick={() => setForm(c => ({ ...c, isActive: !c.isActive }))} className="flex items-center gap-2 text-sm">
-                    {form.isActive ? <ToggleRight size={24} className="text-emerald-500" /> : <ToggleLeft size={24} className="text-muted-foreground" />}
-                    <span className={form.isActive ? "text-emerald-600 text-sm" : "text-muted-foreground text-sm"}>{form.isActive ? "Active" : "Inactive"}</span>
+                  <button
+                    onClick={() =>
+                      setForm((c) => ({ ...c, isActive: !c.isActive }))
+                    }
+                    className="flex items-center gap-2 text-sm"
+                  >
+                    {form.isActive ? (
+                      <ToggleRight size={24} className="text-emerald-500" />
+                    ) : (
+                      <ToggleLeft size={24} className="text-muted-foreground" />
+                    )}
+                    <span
+                      className={
+                        form.isActive
+                          ? "text-emerald-600 text-sm"
+                          : "text-muted-foreground text-sm"
+                      }
+                    >
+                      {form.isActive ? "Active" : "Inactive"}
+                    </span>
                   </button>
                 </div>
                 <div className="col-span-full">{fi("Remarks", "remarks")}</div>
@@ -196,15 +468,14 @@ export default function CompanyMaster() {
             )}
             {activeTab === "address" && (
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                <div className="col-span-full">{fi("Registered Address", "registeredAddress")}</div>
-                {fi("City", "city")}
-                {fi("State", "state")}
+                <div className="col-span-full">
+                  {fi("Registered Address", "registeredAddress")}
+                </div>
+                {fi("City", "city")} {fi("State", "state")}{" "}
                 {fi("Country", "country")}
-                {fi("Pincode", "pincode")}
-                {fi("Phone", "phone")}
+                {fi("Pincode", "pincode")} {fi("Phone", "phone")}{" "}
                 {fi("Fax", "fax")}
-                {fi("Email", "email", "email")}
-                {fi("Website", "website")}
+                {fi("Email", "email", "email")} {fi("Website", "website")}{" "}
                 {fi("Auditor Name", "auditorName")}
               </div>
             )}
@@ -227,25 +498,59 @@ export default function CompanyMaster() {
             )}
           </div>
           <div className="p-4 border-t border-border flex justify-end gap-3">
-            <button onClick={() => setShowForm(false)} className="px-5 py-2 text-sm rounded-lg border border-border hover:bg-muted transition-colors">Cancel</button>
-            <button onClick={handleSave} disabled={!form.code || !form.name}
-              className="px-5 py-2 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors">
+            <button
+              onClick={() => setShowForm(false)}
+              className="px-5 py-2 text-sm rounded-lg border border-border hover:bg-muted transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={!form.code || !form.name || saveMut.isPending}
+              className="px-5 py-2 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+            >
+              {saveMut.isPending && (
+                <Loader2 size={14} className="animate-spin" />
+              )}
               {editId ? "Update" : "Save"} Company
             </button>
           </div>
         </div>
       )}
 
-      {deleteConfirm && (
+      {deleteConfirm !== null && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
           <div className="bg-card border border-border rounded-xl p-6 w-80 shadow-xl">
             <div className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center"><Trash2 size={18} className="text-red-500" /></div>
-              <div><p className="font-heading font-semibold text-foreground">Delete Company?</p><p className="text-xs text-muted-foreground">This action cannot be undone.</p></div>
+              <div className="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center">
+                <Trash2 size={18} className="text-red-500" />
+              </div>
+              <div>
+                <p className="font-heading font-semibold text-foreground">
+                  Delete Company?
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  This action cannot be undone.
+                </p>
+              </div>
             </div>
             <div className="flex gap-3">
-              <button onClick={() => setDeleteConfirm(null)} className="flex-1 py-2 text-sm rounded-lg border border-border hover:bg-muted">Cancel</button>
-              <button onClick={() => handleDelete(deleteConfirm)} className="flex-1 py-2 text-sm rounded-lg bg-red-500 text-white hover:bg-red-600">Delete</button>
+              <button
+                onClick={() => setDeleteConfirm(null)}
+                className="flex-1 py-2 text-sm rounded-lg border border-border hover:bg-muted"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => deleteMut.mutate(deleteConfirm!)}
+                disabled={deleteMut.isPending}
+                className="flex-1 py-2 text-sm rounded-lg bg-red-500 text-white hover:bg-red-600 disabled:opacity-50 flex items-center justify-center gap-2"
+              >
+                {deleteMut.isPending && (
+                  <Loader2 size={13} className="animate-spin" />
+                )}{" "}
+                Delete
+              </button>
             </div>
           </div>
         </div>

@@ -1,24 +1,44 @@
 {
   "compilerOptions": {
-    "allowJs": true,
+    /* Core */
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "node",
+
+    /* Paths */
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./src/*"],
+    },
+
+    /* Frontend */
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+
+    /* Backend support */
+    "types": ["node", "vitest/globals"],
+    "resolveJsonModule": true,
+
+    /* Emit (needed for Node users) */
+    "noEmit": false,
+    "outDir": "./backend/dist",
+
+    /* Interop */
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+
+    /* Relaxed rules */
+    "strict": false,
     "noImplicitAny": false,
     "noUnusedLocals": false,
     "noUnusedParameters": false,
-    "paths": {
-      "@/*": [
-        "./src/*"
-      ]
-    },
     "skipLibCheck": true,
-    "strictNullChecks": false
+
+    /* Misc */
+    "allowJs": true,
   },
-  "files": [],
-  "references": [
-    {
-      "path": "./tsconfig.app.json"
-    },
-    {
-      "path": "./tsconfig.node.json"
-    }
-  ]
+
+  "include": ["src", "backend/**/*.ts"],
+
+  "exclude": ["node_modules", "backend/dist"],
 }

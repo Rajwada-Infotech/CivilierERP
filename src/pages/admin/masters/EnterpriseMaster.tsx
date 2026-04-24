@@ -58,6 +58,7 @@ const EnterpriseMaster: React.FC = () => {
   const { data: dbData, isLoading, error } = useQuery({
     queryKey: ["enterprises"],
     queryFn: getEnterprises,
+    staleTime: 5 * 60 * 1000,
   })
 
   const dbItems: DbEnterprise[] = Array.isArray(dbData) ? dbData : []
