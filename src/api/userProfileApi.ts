@@ -45,3 +45,22 @@ export const getUserActivity = async (id: number, limit = 50) => {
   if (!res.ok) throw new Error("Failed to fetch activity");
   return res.json();
 };
+
+export const uploadAvatar = async (id: number, dataUri: string) => {
+  const res = await fetchWithAuth(`${BASE}/${id}/upload-avatar`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ avatar: dataUri }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error ?? "Failed to upload avatar");
+  }
+  return res.json();
+};
+
+export const removeAvatar = async (id: number) => {
+  const res = await fetchWithAuth(`${BASE}/${id}/avatar`, { method: "DELETE" });
+  if (!res.ok) throw new Error("Failed to remove avatar");
+  return res.json();
+};

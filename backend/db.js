@@ -24,13 +24,17 @@ const config = {
 let pool = null;
 
 async function connectDB() {
+  logger.info({ event: "DB_CONNECT_START" }, "Connecting to database");
   try {
-  pool = await sql.connect(config);
-  logger.info("Connected to SQL Server");
-  return pool;
+    pool = await sql.connect(config);
+    logger.info({ event: "DB_CONNECTED" }, "Database connected");
+    return pool;
   } catch (err) {
-  logger.error({ err: err.message }, "DB Connection Failed");
-  throw err;
+    logger.error(
+      { event: "DB_CONNECTION_FAILED", err },
+      "Database connection failed"
+    );
+    throw err;
   }
 }
 

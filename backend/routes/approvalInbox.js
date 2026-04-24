@@ -4,7 +4,7 @@ const { getPool, sql } = require("../db");
 
 // GET /api/approval-inbox
 // Returns all records in Pending state across all 5 modules
-// Optional: ?module=purchase-orders|work-orders|payments|grns|expense-booking
+// Optional: ?module=purchase-orders|work-orders|payments|goods-receipt|expense-booking
 router.get("/", async (req, res) => {
   try {
     const pool = getPool();
@@ -25,6 +25,10 @@ router.get("/", async (req, res) => {
           NULL                     AS SupplierName,
           TotalAmount              AS Amount,
           CreatedBy,
+          ISNULL(ApprovedBy, '')   AS ApprovedBy,
+          ISNULL(CAST(ApprovedAt AS NVARCHAR), '') AS ApprovedAt,
+          ISNULL(RejectedBy, '')   AS RejectedBy,
+          ISNULL(RejectionNote, '') AS RejectionNote,
           UpdatedAt                AS LastModified
         FROM dbo.PurchaseOrders
         WHERE Status = 'Pending'
@@ -43,7 +47,11 @@ router.get("/", async (req, res) => {
           NULL                     AS ContractorName,
           NULL                     AS SupplierName,
           TotalAmount              AS Amount,
-          NULL                     AS CreatedBy,
+          CreatedBy,
+          ISNULL(ApprovedBy, '')   AS ApprovedBy,
+          ISNULL(CAST(ApprovedAt AS NVARCHAR), '') AS ApprovedAt,
+          ISNULL(RejectedBy, '')   AS RejectedBy,
+          ISNULL(RejectionNote, '') AS RejectionNote,
           UpdatedAt                AS LastModified
         FROM dbo.WorkOrderHeader
         WHERE Status = 'Pending'
@@ -62,17 +70,24 @@ router.get("/", async (req, res) => {
           NULL                     AS ContractorName,
           NULL                     AS SupplierName,
           PAmount                  AS Amount,
-          NULL                     AS CreatedBy,
-          UpdatedAt                AS LastModified
+          PCreatedBy               AS CreatedBy,
+          ISNULL(PApprovedBy, '')  AS ApprovedBy,
+          ''                       AS ApprovedAt,
+          ''                       AS RejectedBy,
+          ''                       AS RejectionNote,
+          NULL                     AS LastModified
         FROM dbo.NewPayment
         WHERE ISNULL(Status, 'Draft') = 'Pending'
       `);
     }
 
-    if (!module || module === "grns") {
+    // KEY FIX: module key is 'goods-receipt' (matches approvalService TABLE_REGISTRY)
+    // ApprovalActions will call /api/grns/:id/approve|reject which is correct
+    // But the Module field sent to frontend must match what ApprovalActions uses as endpoint prefix
+    if (!module || module === "goods-receipt") {
       queries.push(`
         SELECT
-          'grns'                   AS Module,
+          'goods-receipt'          AS Module,
           'GRN'                    AS ModuleLabel,
           CAST(GRNID AS NVARCHAR)  AS RecordId,
           GRNNo                    AS Reference,
@@ -82,6 +97,10 @@ router.get("/", async (req, res) => {
           NULL                     AS SupplierName,
           NULL                     AS Amount,
           NULL                     AS CreatedBy,
+          ISNULL(ApprovedBy, '')   AS ApprovedBy,
+          ISNULL(CAST(ApprovedAt AS NVARCHAR), '') AS ApprovedAt,
+          ISNULL(RejectedBy, '')   AS RejectedBy,
+          ISNULL(RejectionNote, '') AS RejectionNote,
           UpdatedAt                AS LastModified
         FROM dbo.GoodsReceiptNotes
         WHERE ISNULL(Status,'Draft') = 'Pending'
@@ -96,48 +115,51 @@ router.get("/", async (req, res) => {
           CAST(Eid AS NVARCHAR)    AS RecordId,
           CAST(Eid AS NVARCHAR)    AS Reference,
           NULL                     AS RecordDate,
-          ISNULL(Status, 'Draft')  AS Status,
+          ISNULL(EStatus, 'Draft') AS Status,
           NULL                     AS ContractorName,
           NULL                     AS SupplierName,
           NULL                     AS Amount,
           NULL                     AS CreatedBy,
-          NULL                     AS LastModified
+          ISNULL(CAST(EApprovedBy AS NVARCHAR), '') AS ApprovedBy,
+          ''                       AS ApprovedAt,
+          ''                       AS RejectedBy,
+          ''                       AS RejectionNote,
+          EUpdatedAt               AS LastModified
         FROM dbo.ExpenseBooking
-        WHERE ISNULL(Status, 'Draft') = 'Pending'
+        WHERE ISNULL(EStatus, 'Draft') = 'Pending'
       `);
     }
 
-    if (queries.length === 0) {
-      return res.json([]);
-    }
+    if (queries.length === 0) return res.json([]);
 
     const fullQuery = queries.join(" UNION ALL ") + " ORDER BY LastModified DESC";
     const result = await pool.request().query(fullQuery);
 
     res.json(result.recordset);
   } catch (err) {
+    console.error("approval-inbox error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// GET /api/approval-inbox/count  — lightweight badge count
+// GET /api/approval-inbox/count — lightweight badge count
 router.get("/count", async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
       SELECT
-        (SELECT COUNT(*) FROM dbo.PurchaseOrders  WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.WorkOrderHeader  WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.NewPayment       WHERE ISNULL(Status,'Draft') = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.GoodsReceiptNotes WHERE ISNULL(Status,'Draft') = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.ExpenseBooking   WHERE ISNULL(Status,'Draft') = 'Pending')
+        (SELECT COUNT(*) FROM dbo.PurchaseOrders    WHERE Status = 'Pending') +
+        (SELECT COUNT(*) FROM dbo.WorkOrderHeader    WHERE Status = 'Pending') +
+        (SELECT COUNT(*) FROM dbo.NewPayment         WHERE ISNULL(Status,'Draft') = 'Pending') +
+        (SELECT COUNT(*) FROM dbo.GoodsReceiptNotes  WHERE ISNULL(Status,'Draft') = 'Pending') +
+        (SELECT COUNT(*) FROM dbo.ExpenseBooking     WHERE ISNULL(EStatus,'Draft') = 'Pending')
       AS TotalPending
     `);
     res.json({ count: result.recordset[0].TotalPending ?? 0 });
   } catch (err) {
+    console.error("approval-inbox count error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
 module.exports = router;
-

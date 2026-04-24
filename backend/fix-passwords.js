@@ -38,7 +38,7 @@ async function run() {
   for (const user of users) {
     const plain = isPlaintext(user.password);
     console.log(
-      `  [${user.id}] ${user.email} — password ${plain ? "PLAINTEXT ⚠️" : "hashed ✓"}`,
+      `  [${user.id}] ${user.email} - password ${plain ? "PLAINTEXT [WARN]" : "hashed [OK]"}`,
     );
   }
 
@@ -54,7 +54,7 @@ async function run() {
       .input("pwd", sql.NVarChar, hashed)
       .query("UPDATE dbo.users SET password = @pwd WHERE id = @id");
 
-    console.log(`  ✅ [${user.id}] ${user.email} — hashed "${user.password}"`);
+    console.log(`  [OK] [${user.id}] ${user.email} - hashed "${user.password}"`);
   }
 
   // Also fix NULL RoleId rows — assign them to 'user' role
@@ -71,7 +71,7 @@ async function run() {
       .input("roleId", sql.Int, userRoleId)
       .query("UPDATE dbo.users SET RoleId = @roleId WHERE RoleId IS NULL");
     console.log(
-      `\n  ✅ Fixed ${nullFixed.rowsAffected[0]} users with NULL RoleId → RoleId ${userRoleId}`,
+      `\n  [OK] Fixed ${nullFixed.rowsAffected[0]} users with NULL RoleId -> RoleId ${userRoleId}`,
     );
   }
 
@@ -83,3 +83,4 @@ run().catch((err) => {
   console.error("Error:", err.message);
   process.exit(1);
 });
+

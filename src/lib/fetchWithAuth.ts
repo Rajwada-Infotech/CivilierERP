@@ -1,5 +1,3 @@
-// src/lib/fetchWithAuth.ts
-
 export async function fetchWithAuth(
   url: string,
   options: RequestInit = {},
@@ -19,17 +17,23 @@ export async function fetchWithAuth(
       },
     });
   } catch (err: any) {
-    console.error("Network error:", err);
+    // Suppress console spam for connection refused / backend not running.
+    // The hook / component that calls fetchWithAuth is responsible for
+    // showing the user a meaningful error if needed.
+    const msg: string = err?.message ?? "";
+    const isConnRefused =
+      msg.includes("Failed to fetch") ||
+      msg.includes("ERR_CONNECTION_REFUSED") ||
+      msg.includes("Network request failed");
+    if (!isConnRefused) {
+      console.error("Network error:", err);
+    }
     throw new Error("Network error. Please check your connection.");
   }
 
   if (response.status === 401) {
     console.error("Unauthorized", url);
 
-    // Only redirect to /login when there is genuinely no token (true session
-    // expiry). A 401 with a token present means the endpoint has a permission
-    // restriction for this role — redirect would silently log the user out.
-    // Callers handle permission-401s via their own error handling.
     const hasToken =
       typeof window !== "undefined" && !!localStorage.getItem("token");
 

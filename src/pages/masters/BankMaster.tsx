@@ -81,11 +81,13 @@ const BankMaster: React.FC = () => {
   } = useQuery({
     queryKey: ["bank-master"],
     queryFn: getBanks,
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: companies = [] } = useQuery<CompanyOption[]>({
     queryKey: ["enterprise-options"],
     queryFn: getCompanyOptions,
+    staleTime: 5 * 60 * 1000,
   });
 
   const dbBanks: BankRecord[] = Array.isArray(dbData) ? dbData : [];

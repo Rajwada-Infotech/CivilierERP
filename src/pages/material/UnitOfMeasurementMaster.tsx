@@ -159,6 +159,7 @@ export default function UnitOfMeasurementMaster() {
   const { data: dbData, isLoading, error } = useQuery({
     queryKey: ["uom-master"],
     queryFn: getUomList,
+    staleTime: 5 * 60 * 1000,
   });
 
   const dbItems: DbUOM[] = Array.isArray(dbData) ? dbData : [];

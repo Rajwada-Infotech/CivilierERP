@@ -123,9 +123,14 @@ router.post("/", async (req, res) => {
 // UPDATE
 router.put("/:id", async (req, res) => {
   const numericId = parseInt(req.params.id, 10);
-  await guardEdit("expense-booking", req.params.id);
   if (!Number.isFinite(numericId) || numericId <= 0) {
     return res.status(400).json({ error: "Invalid record id" });
+  }
+
+  try {
+    await guardEdit("expense-booking", req.params.id);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
   }
 
   const {

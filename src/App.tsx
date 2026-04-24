@@ -140,8 +140,8 @@ const TCMaster = lazy(() => import("./pages/material/T&CMaster"));
 const UnitOfMeasurementMaster = lazy(
   () => import("./pages/material/UnitOfMeasurementMaster"),
 );
-const BusinessUnitWrapper = lazy(
-  () => import("./pages/masters/BusinessUnitWrapper"),
+const EnterpriseMasterPage = lazy(
+  () => import("./pages/admin/masters/EnterpriseMaster"),
 );
 
 // Admin Pages
@@ -170,9 +170,6 @@ const ActivityBrowserPage = lazy(
 );
 
 // Admin Masters
-const BusinessUnitMaster = lazy(
-  () => import("./pages/admin/masters/BusinessUnitMaster"),
-);
 const ProjectMaster = lazy(() => import("./pages/admin/masters/ProjectMaster"));
 const CompanyMaster = lazy(() => import("./pages/admin/masters/CompanyMaster"));
 
@@ -195,7 +192,13 @@ const UserProfilePage = lazy(() => import("./pages/user/UserProfile"));
 const DBADashboard = lazy(() => import("./pages/dba/DBADashboard"));
 const ControlPanel = lazy(() => import("./pages/dba/ControlPanel"));
 const AdsManager = lazy(() => import("./pages/dba/AdsManager"));
-const FollowupDashboard = lazy(() => import("./pages/followup"));
+const FollowupDashboard = lazy(
+  () => import("./pages/followup/FollowupDashboard"),
+);
+const FollowupReminders = lazy(() => import("./pages/followup/Reminders"));
+const FollowupTasks = lazy(() => import("./pages/followup/FollowupTasks"));
+const FollowupLog = lazy(() => import("./pages/followup/FollowupLog"));
+const Amendments = lazy(() => import("./pages/material/Amendments"));
 const RemindersManager = lazy(() => import("./pages/dba/RemindersManager"));
 const PaymentLogs = lazy(() => import("./pages/dba/PaymentLogs"));
 
@@ -423,6 +426,30 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/followup/reminders"
+        element={
+          <ProtectedRoute>
+            <FollowupReminders />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/tasks"
+        element={
+          <ProtectedRoute>
+            <FollowupTasks />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/log"
+        element={
+          <ProtectedRoute>
+            <FollowupLog />
+          </ProtectedRoute>
+        }
+      />
 
       {/* MASTERS */}
       <Route
@@ -541,7 +568,7 @@ function AppRoutes() {
         path="/material/amendments"
         element={
           <ProtectedRoute>
-            <MaterialDashboard />
+            <Amendments />
           </ProtectedRoute>
         }
       />
@@ -645,7 +672,7 @@ function AppRoutes() {
         path="/masters/business-unit"
         element={
           <ProtectedRoute>
-            <BusinessUnitWrapper />
+            <EnterpriseMasterPage />
           </ProtectedRoute>
         }
       />
@@ -827,7 +854,7 @@ function AppRoutes() {
         path="/admin/masters/business-unit"
         element={
           <AdminRoute>
-            <BusinessUnitMaster />
+            <EnterpriseMasterPage />
           </AdminRoute>
         }
       />
@@ -930,14 +957,16 @@ function App() {
     return () => clearTimeout(timer);
   }, []);
 
-  if (initialLoading) return <Loader />;
-
   return (
     <QueryClientProvider client={queryClient}>
       <Toaster richColors position="top-right" />
+      {/* ActivityBrowserProvider is always mounted so AuthSessionBridge is always inside it.
+          The initialLoading gate moved inside the tree to avoid provider context being missing
+          during hot-module-reload or React strict-mode double-renders. */}
       <ActivityBrowserProvider>
         <AuthSessionBridge>
-          <ThemeProvider>
+          {initialLoading ? <Loader /> : null}
+          {initialLoading ? null : (
             <Router
               future={{
                 v7_startTransition: true,
@@ -945,24 +974,26 @@ function App() {
               }}
             >
               <ModuleProvider>
-                <FinYearProvider>
-                  <HsnProvider>
-                    <RecordsProvider>
-                      <TdsProvider>
-                        <DebitNoteProvider>
-                          <BillingTermsProvider>
-                            <TaskProvider>
-                              <AppRoutes />
-                            </TaskProvider>
-                          </BillingTermsProvider>
-                        </DebitNoteProvider>
-                      </TdsProvider>
-                    </RecordsProvider>
-                  </HsnProvider>
-                </FinYearProvider>
+                <ThemeProvider>
+                  <FinYearProvider>
+                    <HsnProvider>
+                      <RecordsProvider>
+                        <TdsProvider>
+                          <DebitNoteProvider>
+                            <BillingTermsProvider>
+                              <TaskProvider>
+                                <AppRoutes />
+                              </TaskProvider>
+                            </BillingTermsProvider>
+                          </DebitNoteProvider>
+                        </TdsProvider>
+                      </RecordsProvider>
+                    </HsnProvider>
+                  </FinYearProvider>
+                </ThemeProvider>
               </ModuleProvider>
             </Router>
-          </ThemeProvider>
+          )}
         </AuthSessionBridge>
       </ActivityBrowserProvider>
     </QueryClientProvider>

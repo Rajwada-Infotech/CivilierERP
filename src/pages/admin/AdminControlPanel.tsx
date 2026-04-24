@@ -1,4 +1,6 @@
 import React, { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { getUsers, addUser, updateUser, deleteUser } from "@/api/userApi";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -50,51 +52,118 @@ import {
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
 
-// ─── Mock company-scoped data ─────────────────────────────────────────────────
-const COMPANY_USERS = [
-  { id: 1, name: "Rajesh Kumar", email: "rajesh@civilier.com", role: "user", department: "Finance", status: "active", lastLogin: "2026-04-03 09:12", permissions: 14 },
-  { id: 2, name: "Meena Patel", email: "meena@civilier.com", role: "user", department: "Material", status: "active", lastLogin: "2026-04-02 14:30", permissions: 6 },
-  { id: 3, name: "Dinesh Sharma", email: "dinesh@civilier.com", role: "user", department: "Finance", status: "inactive", lastLogin: "2026-03-10 10:00", permissions: 6 },
-  { id: 4, name: "Anita Nair", email: "anita@civilier.com", role: "user", department: "Accounts", status: "active", lastLogin: "2026-04-03 11:00", permissions: 10 },
-];
-
-const DB_TABLES = [
-  { table: "dbo.users", rows: 18, lastWrite: "2026-04-03", size: "1.2 MB", status: "healthy" },
-  { table: "dbo.enterprise", rows: 1, lastWrite: "2026-03-20", size: "0.1 MB", status: "healthy" },
-  { table: "dbo.expense_booking", rows: 342, lastWrite: "2026-04-03", size: "8.4 MB", status: "healthy" },
-  { table: "dbo.payment", rows: 156, lastWrite: "2026-04-02", size: "4.2 MB", status: "healthy" },
-  { table: "dbo.purchase_orders", rows: 89, lastWrite: "2026-04-01", size: "3.1 MB", status: "warning" },
-  { table: "dbo.account_group", rows: 24, lastWrite: "2026-02-14", size: "0.3 MB", status: "healthy" },
-  { table: "dbo.hsn", rows: 512, lastWrite: "2026-03-05", size: "2.6 MB", status: "healthy" },
-];
-
-const ACTIVITY_LOG = [
-  { time: "2026-04-03 11:42", user: "Rajesh Kumar", action: "Created new expense booking #EB-0891", module: "Finance" },
-  { time: "2026-04-03 10:15", user: "Anita Nair", action: "Updated bank master - HDFC Bank details", module: "Masters" },
-  { time: "2026-04-03 09:30", user: "Meena Patel", action: "Approved purchase order #PO-0342", module: "Material" },
-  { time: "2026-04-02 17:20", user: "Admin User", action: "Reset password for Dinesh Sharma", module: "Admin" },
-  { time: "2026-04-02 15:10", user: "Rajesh Kumar", action: "Exported payment report Q1-2026", module: "Finance" },
-  { time: "2026-04-02 13:05", user: "Anita Nair", action: "Added new contractor: Sharma Constructions", module: "Masters" },
-];
-
 const DEPARTMENTS = ["Finance", "Material", "Accounts", "HR", "Operations"];
 
 export default function AdminControlPanel() {
+  const qc = useQueryClient();
   const { currentUser } = useAuth();
-  const [users, setUsers] = useState(COMPANY_USERS);
-  const [activeTab, setActiveTab] = useState<"users" | "database" | "activity">("users");
+  const [activeTab, setActiveTab] = useState<"users" | "database" | "activity">(
+    "users",
+  );
   const [addOpen, setAddOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [selectedUser, setSelectedUser] = useState<any>(null);
-  const [addForm, setAddForm] = useState({ name: "", email: "", role: "user", department: "Finance", password: "" });
+  const [addForm, setAddForm] = useState({
+    name: "",
+    email: "",
+    role: "user",
+    department: "Finance",
+    password: "",
+  });
   const [editForm, setEditForm] = useState<any>({});
   const [dbSearch, setDbSearch] = useState("");
 
+  const { data: users = [], isLoading: usersLoading } = useQuery({
+    queryKey: ["admin-users"],
+    queryFn: getUsers,
+  });
+
+  const addMutation = useMutation({
+    mutationFn: () =>
+      addUser({
+        name: addForm.name,
+        email: addForm.email,
+        role: addForm.role,
+        password: addForm.password,
+      }),
+    onSuccess: () => {
+      toast.success("User added");
+      qc.invalidateQueries({ queryKey: ["admin-users"] });
+      setAddOpen(false);
+      setAddForm({
+        name: "",
+        email: "",
+        role: "user",
+        department: "Finance",
+        password: "",
+      });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const editMutation = useMutation({
+    mutationFn: () =>
+      updateUser(editForm.id, {
+        name: editForm.name,
+        email: editForm.email,
+        role: editForm.role,
+      }),
+    onSuccess: () => {
+      toast.success("User updated");
+      qc.invalidateQueries({ queryKey: ["admin-users"] });
+      setEditOpen(false);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => deleteUser(id),
+    onSuccess: () => {
+      toast.success("User removed");
+      qc.invalidateQueries({ queryKey: ["admin-users"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const toggleStatusMutation = useMutation({
+    mutationFn: (user: any) =>
+      updateUser(user.id, { discontinue: !user.discontinue }),
+    onSuccess: () => {
+      toast.success("Status updated");
+      qc.invalidateQueries({ queryKey: ["admin-users"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   const stats = [
-    { label: "Total Users", value: users.length, icon: Users, color: "text-blue-500", bg: "bg-blue-500/10" },
-    { label: "Active", value: users.filter(u => u.status === "active").length, icon: UserCheck, color: "text-green-500", bg: "bg-green-500/10" },
-    { label: "DB Tables", value: DB_TABLES.length, icon: Database, color: "text-purple-500", bg: "bg-purple-500/10" },
-    { label: "Activities Today", value: ACTIVITY_LOG.filter(a => a.time.startsWith("2026-04-03")).length, icon: Activity, color: "text-orange-500", bg: "bg-orange-500/10" },
+    {
+      label: "Total Users",
+      value: users.length,
+      icon: Users,
+      color: "text-blue-500",
+      bg: "bg-blue-500/10",
+    },
+    {
+      label: "Active",
+      value: users.filter((u: any) => !u.discontinue).length,
+      icon: UserCheck,
+      color: "text-green-500",
+      bg: "bg-green-500/10",
+    },
+    {
+      label: "DB Tables",
+      value: 0,
+      icon: Database,
+      color: "text-purple-500",
+      bg: "bg-purple-500/10",
+    },
+    {
+      label: "Users Today",
+      value: 0,
+      icon: Activity,
+      color: "text-orange-500",
+      bg: "bg-orange-500/10",
+    },
   ];
 
   const tabs = [
@@ -103,44 +172,13 @@ export default function AdminControlPanel() {
     { key: "activity", label: "User Activity", icon: Activity },
   ];
 
-  const toggleStatus = (id: number) => {
-    setUsers(prev => prev.map(u => u.id === id ? { ...u, status: u.status === "active" ? "inactive" : "active" } : u));
-    toast.success("User status updated");
-  };
-
-  const deleteUser = (id: number) => {
-    setUsers(prev => prev.filter(u => u.id !== id));
-    toast.success("User removed");
-  };
-
   const openEdit = (user: any) => {
     setSelectedUser(user);
     setEditForm({ ...user });
     setEditOpen(true);
   };
 
-  const saveEdit = () => {
-    setUsers(prev => prev.map(u => u.id === editForm.id ? { ...editForm } : u));
-    setEditOpen(false);
-    toast.success("User updated");
-  };
-
-  const addUser = () => {
-    setUsers(prev => [...prev, {
-      ...addForm,
-      id: Date.now(),
-      status: "active",
-      lastLogin: "Never",
-      permissions: 6,
-    }]);
-    setAddOpen(false);
-    setAddForm({ name: "", email: "", role: "user", department: "Finance", password: "" });
-    toast.success("User added");
-  };
-
-  const filteredTables = DB_TABLES.filter(t =>
-    t.table.toLowerCase().includes(dbSearch.toLowerCase())
-  );
+  const filteredTables: any[] = [];
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
@@ -153,7 +191,9 @@ export default function AdminControlPanel() {
         </div>
         <div>
           <h1 className="text-xl font-bold">Admin Control Panel</h1>
-          <p className="text-sm text-muted-foreground">Company-scoped user & database management</p>
+          <p className="text-sm text-muted-foreground">
+            Company-scoped user & database management
+          </p>
         </div>
         <Badge className="ml-auto bg-blue-500/15 text-blue-600 border-blue-500/30 text-xs px-3">
           <Shield size={10} className="mr-1" /> ADMIN
@@ -162,7 +202,7 @@ export default function AdminControlPanel() {
 
       {/* Stats */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        {stats.map(s => (
+        {stats.map((s) => (
           <Card key={s.label}>
             <CardContent className="p-4 flex items-center gap-3">
               <div className={`p-2 rounded-lg ${s.bg}`}>
@@ -179,7 +219,7 @@ export default function AdminControlPanel() {
 
       {/* Tabs */}
       <div className="flex gap-1 mb-4 border-b border-border">
-        {tabs.map(tab => (
+        {tabs.map((tab) => (
           <button
             key={tab.key}
             onClick={() => setActiveTab(tab.key as any)}
@@ -204,7 +244,11 @@ export default function AdminControlPanel() {
                 <Users size={16} className="text-primary" />
                 Company Users
               </CardTitle>
-              <Button size="sm" className="h-8 text-xs gap-1" onClick={() => setAddOpen(true)}>
+              <Button
+                size="sm"
+                className="h-8 text-xs gap-1"
+                onClick={() => setAddOpen(true)}
+              >
                 <Plus size={12} /> Add User
               </Button>
             </div>
@@ -225,13 +269,17 @@ export default function AdminControlPanel() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {users.map(user => (
+                  {users.map((user) => (
                     <TableRow key={user.id} className="text-xs">
                       <TableCell className="font-medium">{user.name}</TableCell>
-                      <TableCell className="text-muted-foreground">{user.email}</TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {user.email}
+                      </TableCell>
                       <TableCell>{user.department}</TableCell>
                       <TableCell>
-                        <Badge variant="outline" className="text-[10px]">{user.role}</Badge>
+                        <Badge variant="outline" className="text-[10px]">
+                          {user.role}
+                        </Badge>
                       </TableCell>
                       <TableCell>
                         <span className="flex items-center gap-1">
@@ -239,25 +287,44 @@ export default function AdminControlPanel() {
                           {user.permissions} pages
                         </span>
                       </TableCell>
-                      <TableCell className="text-muted-foreground">{user.lastLogin}</TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {user.lastLogin}
+                      </TableCell>
                       <TableCell>
-                        <Badge className={`text-[10px] ${user.status === "active" ? "bg-green-500/15 text-green-600 border-green-500/30" : "bg-red-500/15 text-red-600 border-red-500/30"}`}>
+                        <Badge
+                          className={`text-[10px] ${!user.discontinue ? "bg-green-500/15 text-green-600 border-green-500/30" : "bg-red-500/15 text-red-600 border-red-500/30"}`}
+                        >
                           {user.status}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right">
                         <div className="flex gap-1 justify-end">
-                          <Button variant="ghost" size="icon" className="h-6 w-6" onClick={() => openEdit(user)}>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6"
+                            onClick={() => openEdit(user)}
+                          >
                             <Edit2 size={12} />
                           </Button>
                           <Button
-                            variant="ghost" size="icon"
+                            variant="ghost"
+                            size="icon"
                             className={`h-6 w-6 ${user.status === "active" ? "text-orange-500" : "text-green-500"}`}
-                            onClick={() => toggleStatus(user.id)}
+                            onClick={() => toggleStatusMutation.mutate(user)}
                           >
-                            {user.status === "active" ? <Lock size={12} /> : <Unlock size={12} />}
+                            {user.status === "active" ? (
+                              <Lock size={12} />
+                            ) : (
+                              <Unlock size={12} />
+                            )}
                           </Button>
-                          <Button variant="ghost" size="icon" className="h-6 w-6 text-red-500" onClick={() => deleteUser(user.id)}>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-6 w-6 text-red-500"
+                            onClick={() => deleteMutation.mutate(user.id)}
+                          >
                             <Trash2 size={12} />
                           </Button>
                         </div>
@@ -278,16 +345,24 @@ export default function AdminControlPanel() {
             <div className="flex items-center justify-between">
               <CardTitle className="text-base flex items-center gap-2">
                 <Database size={16} className="text-primary" />
-                Company Database · <span className="font-mono text-sm text-muted-foreground">civilier_prod</span>
+                Company Database ·{" "}
+                <span className="font-mono text-sm text-muted-foreground">
+                  civilier_prod
+                </span>
               </CardTitle>
               <div className="flex gap-2">
                 <Input
                   placeholder="Search table..."
                   value={dbSearch}
-                  onChange={e => setDbSearch(e.target.value)}
+                  onChange={(e) => setDbSearch(e.target.value)}
                   className="h-8 text-xs w-44"
                 />
-                <Button variant="outline" size="sm" className="h-8 text-xs gap-1" onClick={() => toast.success("DB refreshed")}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs gap-1"
+                  onClick={() => toast.success("DB refreshed")}
+                >
                   <RefreshCw size={12} /> Refresh
                 </Button>
               </div>
@@ -307,20 +382,35 @@ export default function AdminControlPanel() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredTables.map(t => (
+                  {filteredTables.map((t) => (
                     <TableRow key={t.table} className="text-xs">
-                      <TableCell className="font-mono text-[11px]">{t.table}</TableCell>
+                      <TableCell className="font-mono text-[11px]">
+                        {t.table}
+                      </TableCell>
                       <TableCell>{t.rows.toLocaleString()}</TableCell>
-                      <TableCell className="text-muted-foreground">{t.size}</TableCell>
-                      <TableCell className="text-muted-foreground">{t.lastWrite}</TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {t.size}
+                      </TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {t.lastWrite}
+                      </TableCell>
                       <TableCell>
-                        <Badge className={`text-[10px] ${t.status === "healthy" ? "bg-green-500/15 text-green-600 border-green-500/30" : "bg-orange-500/15 text-orange-600 border-orange-500/30"}`}>
-                          {t.status === "warning" && <AlertCircle size={9} className="mr-1" />}
+                        <Badge
+                          className={`text-[10px] ${t.status === "healthy" ? "bg-green-500/15 text-green-600 border-green-500/30" : "bg-orange-500/15 text-orange-600 border-orange-500/30"}`}
+                        >
+                          {t.status === "warning" && (
+                            <AlertCircle size={9} className="mr-1" />
+                          )}
                           {t.status}
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right">
-                        <Button variant="ghost" size="sm" className="h-6 text-[10px] gap-1" onClick={() => toast.info(`Viewing ${t.table}`)}>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 text-[10px] gap-1"
+                          onClick={() => toast.info(`Viewing ${t.table}`)}
+                        >
                           <FileText size={10} /> View
                         </Button>
                       </TableCell>
@@ -353,13 +443,18 @@ export default function AdminControlPanel() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {ACTIVITY_LOG.map((log, i) => (
+                {/* Activity data comes from /api/user-activity — see UserProfile activity tab */}
+                {[].map((log: any, i: number) => (
                   <TableRow key={i} className="text-xs">
-                    <TableCell className="font-mono text-muted-foreground">{log.time}</TableCell>
+                    <TableCell className="font-mono text-muted-foreground">
+                      {log.time}
+                    </TableCell>
                     <TableCell className="font-medium">{log.user}</TableCell>
                     <TableCell>{log.action}</TableCell>
                     <TableCell>
-                      <Badge variant="outline" className="text-[10px]">{log.module}</Badge>
+                      <Badge variant="outline" className="text-[10px]">
+                        {log.module}
+                      </Badge>
                     </TableCell>
                   </TableRow>
                 ))}
@@ -382,23 +477,55 @@ export default function AdminControlPanel() {
               { label: "Full Name", key: "name", type: "text" },
               { label: "Email", key: "email", type: "email" },
               { label: "Password", key: "password", type: "password" },
-            ].map(f => (
+            ].map((f) => (
               <div key={f.key} className="space-y-1">
                 <Label className="text-xs">{f.label}</Label>
-                <Input type={f.type} value={(addForm as any)[f.key]} onChange={e => setAddForm(p => ({ ...p, [f.key]: e.target.value }))} className="text-xs" />
+                <Input
+                  type={f.type}
+                  value={(addForm as any)[f.key]}
+                  onChange={(e) =>
+                    setAddForm((p) => ({ ...p, [f.key]: e.target.value }))
+                  }
+                  className="text-xs"
+                />
               </div>
             ))}
             <div className="space-y-1">
               <Label className="text-xs">Department</Label>
-              <Select value={addForm.department} onValueChange={v => setAddForm(p => ({ ...p, department: v }))}>
-                <SelectTrigger className="text-xs h-8"><SelectValue /></SelectTrigger>
-                <SelectContent>{DEPARTMENTS.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}</SelectContent>
+              <Select
+                value={addForm.department}
+                onValueChange={(v) =>
+                  setAddForm((p) => ({ ...p, department: v }))
+                }
+              >
+                <SelectTrigger className="text-xs h-8">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {DEPARTMENTS.map((d) => (
+                    <SelectItem key={d} value={d}>
+                      {d}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
               </Select>
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" size="sm" onClick={() => setAddOpen(false)}>Cancel</Button>
-            <Button size="sm" onClick={addUser} disabled={!addForm.name || !addForm.email}>Add User</Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setAddOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => addMutation.mutate()}
+              disabled={!addForm.name || !addForm.email}
+            >
+              Add User
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -415,23 +542,50 @@ export default function AdminControlPanel() {
             {[
               { label: "Full Name", key: "name" },
               { label: "Email", key: "email" },
-            ].map(f => (
+            ].map((f) => (
               <div key={f.key} className="space-y-1">
                 <Label className="text-xs">{f.label}</Label>
-                <Input value={editForm[f.key] || ""} onChange={e => setEditForm((p: any) => ({ ...p, [f.key]: e.target.value }))} className="text-xs" />
+                <Input
+                  value={editForm[f.key] || ""}
+                  onChange={(e) =>
+                    setEditForm((p: any) => ({ ...p, [f.key]: e.target.value }))
+                  }
+                  className="text-xs"
+                />
               </div>
             ))}
             <div className="space-y-1">
               <Label className="text-xs">Department</Label>
-              <Select value={editForm.department} onValueChange={v => setEditForm((p: any) => ({ ...p, department: v }))}>
-                <SelectTrigger className="text-xs h-8"><SelectValue /></SelectTrigger>
-                <SelectContent>{DEPARTMENTS.map(d => <SelectItem key={d} value={d}>{d}</SelectItem>)}</SelectContent>
+              <Select
+                value={editForm.department}
+                onValueChange={(v) =>
+                  setEditForm((p: any) => ({ ...p, department: v }))
+                }
+              >
+                <SelectTrigger className="text-xs h-8">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {DEPARTMENTS.map((d) => (
+                    <SelectItem key={d} value={d}>
+                      {d}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
               </Select>
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" size="sm" onClick={() => setEditOpen(false)}>Cancel</Button>
-            <Button size="sm" onClick={saveEdit}>Save</Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setEditOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button size="sm" onClick={() => editMutation.mutate()}>
+              Save
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

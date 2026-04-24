@@ -15,6 +15,9 @@ import {
   RefreshCw,
   ArrowUpRight,
   Inbox,
+  CheckCircle2,
+  XCircle,
+  User,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -30,45 +33,62 @@ interface InboxItem {
   SupplierName: string | null;
   Amount: number | null;
   CreatedBy: string | null;
+  ApprovedBy: string | null;
+  ApprovedAt: string | null;
+  RejectedBy: string | null;
+  RejectionNote: string | null;
   LastModified: string | null;
 }
 
-// ─── Config ───────────────────────────────────────────────────────────────────
+// ─── Module config ────────────────────────────────────────────────────────────
+// Module keys MUST match what approvalService.js TABLE_REGISTRY uses
+// and what the backend route file is mounted as in server.js
 
 const MODULE_CONFIG: Record<
   string,
-  { icon: React.ElementType; color: string; navPath: string }
+  { icon: React.ElementType; color: string; navPath: string; apiEndpoint: string; label: string }
 > = {
   "purchase-orders": {
     icon: Package,
     color: "text-blue-500 bg-blue-500/10",
     navPath: "/material/purchase-order",
+    apiEndpoint: "/api/purchase-orders",
+    label: "Purchase Orders",
   },
   "work-orders": {
     icon: Hammer,
     color: "text-amber-500 bg-amber-500/10",
     navPath: "/material/work-order",
+    apiEndpoint: "/api/work-order",
+    label: "Work Orders",
   },
   payments: {
     icon: Banknote,
     color: "text-emerald-500 bg-emerald-500/10",
     navPath: "/payments",
+    apiEndpoint: "/api/new-payment",
+    label: "Payments",
   },
-  grns: {
+  // KEY FIX: was "grns" — now "goods-receipt" to match approvalService TABLE_REGISTRY
+  "goods-receipt": {
     icon: Truck,
     color: "text-violet-500 bg-violet-500/10",
     navPath: "/material/grn",
+    apiEndpoint: "/api/grns",
+    label: "GRNs",
   },
   "expense-booking": {
     icon: Receipt,
     color: "text-rose-500 bg-rose-500/10",
     navPath: "/material/expense-booking",
+    apiEndpoint: "/api/expense-booking",
+    label: "Expense Bookings",
   },
 };
 
 const ALL_MODULES = Object.keys(MODULE_CONFIG);
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const fetchInbox = async (module?: string): Promise<InboxItem[]> => {
   const url = module
@@ -139,6 +159,9 @@ const InboxRow: React.FC<{
   const cfg = MODULE_CONFIG[item.Module];
   const Icon = cfg?.icon ?? ClipboardCheck;
 
+  const approvedBy = item.ApprovedBy?.trim();
+  const rejectedBy = item.RejectedBy?.trim();
+
   return (
     <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 px-4 py-3.5 border-b border-border last:border-0 hover:bg-muted/30 transition-colors group">
       {/* Module icon + label */}
@@ -176,6 +199,24 @@ const InboxRow: React.FC<{
         </p>
       </div>
 
+      {/* ApprovedBy / RejectedBy indicator */}
+      {(approvedBy || rejectedBy) && (
+        <div className="hidden lg:flex items-center gap-1.5 min-w-[140px]">
+          {approvedBy && (
+            <span className="flex items-center gap-1 text-[10px] text-emerald-600 bg-emerald-500/10 border border-emerald-400/20 px-2 py-0.5 rounded-full font-heading truncate max-w-[130px]">
+              <CheckCircle2 size={9} />
+              {approvedBy}
+            </span>
+          )}
+          {rejectedBy && (
+            <span className="flex items-center gap-1 text-[10px] text-red-600 bg-red-500/10 border border-red-400/20 px-2 py-0.5 rounded-full font-heading truncate max-w-[130px]">
+              <XCircle size={9} />
+              {rejectedBy}
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Status */}
       <div className="shrink-0">
         <StatusBadge status={item.Status} />
@@ -186,7 +227,7 @@ const InboxRow: React.FC<{
         <ApprovalActions
           status={item.Status}
           recordId={item.RecordId}
-          endpoint={`/api/${item.Module}`}
+          endpoint={cfg?.apiEndpoint ?? `/api/${item.Module}`}
           onSuccess={onActionDone}
         />
         {cfg?.navPath && (
@@ -212,22 +253,20 @@ const ApprovalInbox: React.FC = () => {
   const { data: items = [], isLoading, isRefetching, refetch } = useQuery({
     queryKey: ["approval-inbox", activeModule],
     queryFn: () => fetchInbox(activeModule ?? undefined),
-    refetchInterval: 60_000, // auto-refresh every 60s
+    refetchInterval: 60_000,
   });
 
   const handleActionDone = () => {
     queryClient.invalidateQueries({ queryKey: ["approval-inbox"] });
   };
 
-  // Per-module counts from full data (unfiltered)
+  // Unfiltered counts for tab badges
   const { data: allItems = [] } = useQuery({
     queryKey: ["approval-inbox", null],
     queryFn: () => fetchInbox(),
   });
 
-  const countFor = (mod: string) =>
-    allItems.filter((i) => i.Module === mod).length;
-
+  const countFor = (mod: string) => allItems.filter((i) => i.Module === mod).length;
   const totalCount = allItems.length;
 
   return (
@@ -277,13 +316,7 @@ const ApprovalInbox: React.FC = () => {
             <ModuleTab
               key={mod}
               module={mod}
-              label={
-                mod === "purchase-orders" ? "Purchase Orders" :
-                mod === "work-orders"     ? "Work Orders"     :
-                mod === "payments"        ? "Payments"        :
-                mod === "grns"            ? "GRNs"            :
-                "Expense Bookings"
-              }
+              label={cfg.label}
               icon={cfg.icon}
               count={countFor(mod)}
               active={activeModule === mod}
@@ -326,11 +359,12 @@ const ApprovalInbox: React.FC = () => {
         ) : (
           <>
             {/* Table header — desktop */}
-            <div className="hidden sm:grid grid-cols-[160px_100px_1fr_100px_120px_auto] gap-4 px-4 py-2.5 bg-muted/40 border-b border-border">
+            <div className="hidden sm:grid grid-cols-[160px_100px_1fr_100px_140px_120px_auto] gap-4 px-4 py-2.5 bg-muted/40 border-b border-border">
               <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Module / Ref</p>
               <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Date</p>
               <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Party</p>
               <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Amount</p>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Approved/Rejected By</p>
               <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Status</p>
               <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Actions</p>
             </div>
@@ -348,7 +382,7 @@ const ApprovalInbox: React.FC = () => {
             <div className="px-4 py-2.5 border-t border-border bg-muted/20">
               <p className="text-[11px] text-muted-foreground">
                 {items.length} record{items.length !== 1 ? "s" : ""} pending approval
-                {activeModule && ` in ${MODULE_CONFIG[activeModule] ? activeModule.replace(/-/g, " ") : activeModule}`}
+                {activeModule && ` in ${MODULE_CONFIG[activeModule]?.label ?? activeModule}`}
               </p>
             </div>
           </>
@@ -359,4 +393,3 @@ const ApprovalInbox: React.FC = () => {
 };
 
 export default ApprovalInbox;
-

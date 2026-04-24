@@ -1,30 +1,23 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+export type ReminderType =
+  | "cheque"
+  | "purchase_order"
+  | "work_order"
+  | "tds"
+  | "grn";
 
 export interface ReminderItem {
   id: string | number;
-  type:
-    | "payment"
-    | "deadline"
-    | "purchase_order"
-    | "grn"
-    | "cheque"
-    | "tds"
-    | "task"
-    | "general";
+  type: ReminderType;
   title: string;
   subtitle: string;
   dueDate: string;
-  timeSlot?: string;
   urgency: "overdue" | "today" | "soon" | "upcoming";
   amount?: number;
-  priority?: "low" | "medium" | "high";
-  taskId?: string; // present when type === "task", for direct navigation
+  path: string; // Dynamic navigation target
 }
-
-// ─── Urgency classifier ───────────────────────────────────────────────────────
 
 export function classifyUrgency(dueDateStr: string): ReminderItem["urgency"] {
   const due = new Date(dueDateStr);
@@ -38,221 +31,173 @@ export function classifyUrgency(dueDateStr: string): ReminderItem["urgency"] {
   return "upcoming";
 }
 
-export function formatRelative(dueDateStr: string, timeSlot?: string): string {
+export function formatRelative(dueDateStr: string): string {
   const due = new Date(dueDateStr);
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   due.setHours(0, 0, 0, 0);
   const diffDays = Math.floor((due.getTime() - today.getTime()) / 86400000);
-  const base =
-    diffDays < 0
-      ? `${Math.abs(diffDays)}d overdue`
-      : diffDays === 0
-        ? "Today"
-        : diffDays === 1
-          ? "Tomorrow"
-          : `In ${diffDays} days`;
-  return timeSlot ? `${base} · ${timeSlot}` : base;
+  if (diffDays < 0) return `${Math.abs(diffDays)}d overdue`;
+  if (diffDays === 0) return "Due today";
+  return `Due in ${diffDays}d`;
 }
 
-// ─── Core fetch ───────────────────────────────────────────────────────────────
+export function formatDate(dateStr: string): string {
+  return new Date(dateStr).toLocaleDateString("en-IN", {
+    day: "numeric",
+    month: "short",
+  });
+}
 
 export async function fetchAllReminders(): Promise<ReminderItem[]> {
-  const [poRes, grnRes, chequeRes, tdsRes, taskRes] = await Promise.allSettled([
+  const [poRes, grnRes, chequeRes, tdsRes, woRes] = await Promise.allSettled([
     fetchWithAuth("/api/purchase-orders"),
     fetchWithAuth("/api/grns"),
     fetchWithAuth("/api/cheque-master"),
     fetchWithAuth("/api/tds-master"),
-    fetchWithAuth("/api/tasks?scope=mine&status=open,in_progress"),
+    fetchWithAuth("/api/work-orders"),
   ]);
 
   const items: ReminderItem[] = [];
+  const process = async (
+    res: PromiseSettledResult<Response>,
+    type: ReminderType,
+    idKey: string,
+    titlePre: string,
+    route: string,
+  ) => {
+    if (res.status === "fulfilled" && res.value.ok) {
+      const raw = await res.value.json();
+      const list = Array.isArray(raw) ? raw : (raw.data ?? []);
+      list.forEach((obj: any) => {
+        const d =
+          obj.ExpectedDeliveryDate ||
+          obj.PODate ||
+          obj.GRNDate ||
+          obj.ChequeDate ||
+          obj.DueDate;
+        const recordId = obj[idKey];
+        if (!d || !recordId) return;
 
-  // ── Purchase Orders ──────────────────────────────────────────────────────────
-  // DB columns: PurchaseOrderID, PurchaseOrderNo, ExpectedDeliveryDate, TotalAmount
-  if (poRes.status === "fulfilled" && poRes.value.ok) {
-    const data = await poRes.value.json();
-    (Array.isArray(data) ? data : (data.data ?? [])).forEach((po: any) => {
-      const d = po.ExpectedDeliveryDate || po.PODate;
-      if (!d) return;
-      const urgency = classifyUrgency(d);
-      if (urgency === "upcoming") return;
-      items.push({
-        id: `po-${po.PurchaseOrderID ?? po.Id ?? po.id}`,
-        type: "purchase_order",
-        title: `PO #${po.PurchaseOrderNo || po.PurchaseOrderID}`,
-        subtitle: po.SupplierName || "Purchase Order",
-        dueDate: d,
-        urgency,
-        amount: po.TotalAmount || undefined,
+        const urgency = classifyUrgency(d);
+        if (urgency === "upcoming") return;
+
+        items.push({
+          id: `${type}-${recordId}`,
+          type,
+          title: `${titlePre} #${obj.PurchaseOrderNo || obj.GRNNo || recordId}`,
+          subtitle: obj.SupplierName || obj.PartyName || "Civilier System",
+          dueDate: d,
+          urgency,
+          amount: obj.TotalAmount || obj.TDSAmount || obj.Amount,
+          path: `${route}`,
+        });
       });
-    });
-  }
-
-  // ── GRNs ─────────────────────────────────────────────────────────────────────
-  // DB columns: GRNID, GRNNo, GRNDate, SupplierID, POID, GRNItems, Status, Remarks, CreatedDate
-  if (grnRes.status === "fulfilled" && grnRes.value.ok) {
-    const data = await grnRes.value.json();
-    (Array.isArray(data) ? data : (data.data ?? [])).forEach((grn: any) => {
-      const d = grn.GRNDate || grn.CreatedDate;
-      if (!d) return;
-      const urgency = classifyUrgency(d);
-      if (urgency === "upcoming") return;
-      items.push({
-        id: `grn-${grn.GRNID ?? grn.Id ?? grn.id}`,
-        type: "grn",
-        title: `GRN #${grn.GRNNo || grn.GRNID}`,
-        subtitle: grn.SupplierName || "Goods Receipt",
-        dueDate: d,
-        urgency,
-      });
-    });
-  }
-
-  // ── Cheques ──────────────────────────────────────────────────────────────────
-  // DB columns: CId, CompanyId, BankId, AccountNumber, IFSCCode,
-  //             ChequeLotNumber, ChequeStartNumber, ChequeEndNumber,
-  //             Remarks, Status, CreatedBy, UpdatedBy, ApprovedBy,
-  //             CreatedAt, UpdatedAt, ApprovedAt, TotalCheques
-  // NOTE: ChequeMaster has no individual cheque date — skip date-based reminders
-  // Only include if Status is 'Pending'
-  if (chequeRes.status === "fulfilled" && chequeRes.value.ok) {
-    const data = await chequeRes.value.json();
-    (Array.isArray(data) ? data : (data.data ?? [])).forEach((chq: any) => {
-      // No due date column on ChequeMaster — use CreatedAt as reference
-      const d = chq.CreatedAt;
-      if (!d) return;
-      if (chq.Status !== "Pending" && chq.Status !== "Draft") return;
-      const urgency = classifyUrgency(d);
-      if (urgency === "upcoming") return;
-      items.push({
-        id: `chq-${chq.CId ?? chq.Id ?? chq.id}`,
-        type: "cheque",
-        title: `Cheque Lot #${chq.ChequeLotNumber || chq.CId}`,
-        subtitle: chq.AccountNumber || chq.BankId || "Cheque",
-        dueDate: d,
-        urgency,
-      });
-    });
-  }
-
-  // ── TDS ──────────────────────────────────────────────────────────────────────
-  if (tdsRes.status === "fulfilled" && tdsRes.value.ok) {
-    const data = await tdsRes.value.json();
-    (Array.isArray(data) ? data : (data.data ?? [])).forEach((tds: any) => {
-      const d = tds.DueDate || tds.PaymentDate || tds.Date;
-      if (!d) return;
-      const urgency = classifyUrgency(d);
-      if (urgency === "upcoming") return;
-      items.push({
-        id: `tds-${tds.Id ?? tds.id}`,
-        type: "tds",
-        title: `TDS #${tds.TDSCertificateNo || tds.Id}`,
-        subtitle: tds.PartyName || tds.DeducteeName || "TDS Payment",
-        dueDate: d,
-        urgency,
-        amount: tds.TDSAmount || tds.Amount || undefined,
-      });
-    });
-  }
-
-  // ── Tasks ────────────────────────────────────────────────────────────────────
-  if (taskRes.status === "fulfilled" && taskRes.value.ok) {
-    const tasks: any[] = await taskRes.value.json();
-    tasks.forEach((t: any) => {
-      if (!t.dueDate) return;
-      const urgency = classifyUrgency(t.dueDate);
-      if (urgency === "upcoming") return;
-      items.push({
-        id: `task-${t.id}`,
-        type: "task",
-        title: t.title,
-        subtitle: `Assigned to ${t.assignedToName}`,
-        dueDate: t.dueDate,
-        urgency,
-        priority: t.priority,
-        taskId: String(t.id),
-      });
-    });
-  }
-
-  const ORDER: Record<ReminderItem["urgency"], number> = {
-    overdue: 0,
-    today: 1,
-    soon: 2,
-    upcoming: 3,
+    }
   };
-  items.sort((a, b) => ORDER[a.urgency] - ORDER[b.urgency]);
-  return items;
+
+  await Promise.all([
+    process(
+      poRes,
+      "purchase_order",
+      "PurchaseOrderID",
+      "PO",
+      "/material/purchase-order",
+    ),
+    process(grnRes, "grn", "GRNID", "GRN", "/material/grn"),
+    process(chequeRes, "cheque", "CId", "CHQ", "/masters/cheque"),
+    process(tdsRes, "tds", "Id", "TDS", "/masters/tds"),
+    process(woRes, "work_order", "Id", "WO", "/material/work-order"),
+  ]);
+
+  return items.sort((a, b) => {
+    const order = { overdue: 0, today: 1, soon: 2, upcoming: 3 };
+    return order[a.urgency] - order[b.urgency];
+  });
 }
 
-// ─── Hook ─────────────────────────────────────────────────────────────────────
-
-interface UseRemindersOptions {
-  pollingInterval?: number;
-  fetchOnMount?: boolean;
-}
-
-interface UseRemindersResult {
-  reminders: ReminderItem[];
-  loading: boolean;
-  badgeCount: number;
-  overdueTaskCount: number;
-  refresh: () => Promise<void>;
-  fetched: boolean;
-}
-
-export function useReminders(
-  options: UseRemindersOptions = {},
-): UseRemindersResult {
-  const { pollingInterval = 120_000, fetchOnMount = true } = options;
-
+export function useReminders(options: { pollingInterval?: number } = {}) {
+  const { pollingInterval = 30000 } = options; // Raised from 4s → 30s to reduce noise
   const [reminders, setReminders] = useState<ReminderItem[]>([]);
   const [loading, setLoading] = useState(false);
-  const [fetched, setFetched] = useState(false);
-  const cancelledRef = useRef(false);
+  const [isLocked, setIsLocked] = useState(false);
 
-  const hasToken = useCallback(() => !!localStorage.getItem("token"), []);
+  const isFetching = useRef(false);
+  const clickCount = useRef(0);
+  const lockTimer = useRef<NodeJS.Timeout | null>(null);
+  // Consecutive backend-down failures — used for exponential backoff
+  const failCount = useRef(0);
+  const backoffTimer = useRef<NodeJS.Timeout | null>(null);
 
-  const refresh = useCallback(async () => {
-    if (!hasToken()) return;
-    setLoading(true);
-    try {
-      const items = await fetchAllReminders();
-      if (!cancelledRef.current) {
-        setReminders(items);
-        setFetched(true);
+  const refresh = useCallback(
+    async (isManual = false) => {
+      if (isFetching.current || isLocked) return;
+
+      if (isManual) {
+        clickCount.current += 1;
+        if (clickCount.current > 5) {
+          setIsLocked(true);
+          if (lockTimer.current) clearTimeout(lockTimer.current);
+          lockTimer.current = setTimeout(() => {
+            setIsLocked(false);
+            clickCount.current = 0;
+          }, 5000);
+          return;
+        }
+        setTimeout(() => {
+          clickCount.current = 0;
+        }, 2000);
       }
-    } catch {
-      // non-critical — bell silently fails
-    } finally {
-      if (!cancelledRef.current) setLoading(false);
-    }
-  }, [hasToken]);
+
+      isFetching.current = true;
+      if (isManual) setLoading(true);
+
+      try {
+        const items = await fetchAllReminders();
+        setReminders([...items]);
+        // Reset backoff on success
+        failCount.current = 0;
+      } catch {
+        // Count failures — backend may be offline; don't log here (fetchWithAuth already handles it)
+        failCount.current += 1;
+      } finally {
+        setTimeout(() => {
+          setLoading(false);
+          isFetching.current = false;
+        }, 600);
+      }
+    },
+    [isLocked],
+  );
 
   useEffect(() => {
-    cancelledRef.current = false;
-    if (fetchOnMount) refresh();
-    return () => {
-      cancelledRef.current = true;
+    refresh();
+
+    // Adaptive polling: back off if backend is repeatedly unreachable
+    const schedule = () => {
+      const delay =
+        failCount.current > 3
+          ? Math.min(
+              pollingInterval * Math.pow(2, failCount.current - 3),
+              5 * 60 * 1000,
+            ) // max 5 min
+          : pollingInterval;
+
+      backoffTimer.current = setTimeout(() => {
+        refresh(false).finally(schedule);
+      }, delay);
     };
-  }, [fetchOnMount, refresh]);
 
-  useEffect(() => {
-    if (!pollingInterval) return;
-    const id = setInterval(() => {
-      if (hasToken()) refresh();
-    }, pollingInterval);
-    return () => clearInterval(id);
-  }, [pollingInterval, refresh, hasToken]);
+    schedule();
+
+    return () => {
+      if (backoffTimer.current) clearTimeout(backoffTimer.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const badgeCount = reminders.filter(
     (r) => r.urgency === "overdue" || r.urgency === "today",
   ).length;
-
-  const overdueTaskCount = reminders.filter(
-    (r) => r.type === "task" && r.urgency === "overdue",
-  ).length;
-
-  return { reminders, loading, badgeCount, overdueTaskCount, refresh, fetched };
+  return { reminders, loading, badgeCount, refresh, isLocked };
 }

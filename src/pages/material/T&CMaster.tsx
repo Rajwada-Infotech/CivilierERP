@@ -129,6 +129,7 @@ export default function TCMaster() {
   } = useQuery({
     queryKey: ["tc-master"],
     queryFn: getTCRecords,
+    staleTime: 5 * 60 * 1000,
   });
 
   const rows: RecordWithId[] = Array.isArray(dbData) ? dbData.map(toRow) : [];

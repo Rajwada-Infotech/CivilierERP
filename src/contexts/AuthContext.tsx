@@ -43,6 +43,8 @@ interface AuthContextType {
   ) => Promise<void>;
   canAccessPage: (page: PageKey) => boolean;
   canDoAction: (page: PageKey, action: PageAction) => boolean;
+  updateCurrentUserName: (name: string) => void;
+  updateCurrentUserAvatar: (avatarUrl: string | null) => void;
 }
 
 // ── CONTEXT ───────────────────────────────────────────────────────────────────
@@ -134,7 +136,33 @@ export const AuthProvider = ({
       });
   }, [currentUser]);
 
-  // ── LOGIN ──────────────────────────────────────────────────────────────────
+  // ── HYDRATE AVATAR ─────────────────────────────────────────────────────────
+  // After login or page reload, fetch avatar_url from the profile API and
+  // patch it into currentUser so the navbar shows it immediately.
+  useEffect(() => {
+    if (!currentUser?.id) return;
+    // Skip if we already have it (e.g. after updateCurrentUserAvatar was called)
+    if (currentUser.avatarUrl !== undefined) return;
+
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    fetch(`/api/user-profile/${currentUser.id}/profile`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data) return;
+        const avatarUrl = data.avatar_url ?? null;
+        setCurrentUser((prev) => {
+          if (!prev) return prev;
+          const updated = { ...prev, avatarUrl };
+          localStorage.setItem("user", JSON.stringify(updated));
+          return updated;
+        });
+      })
+      .catch(() => {/* silently ignore — avatar is cosmetic */});
+  }, [currentUser?.id]);
   const login = useCallback(async (email: string, password: string) => {
     try {
       const data = await loginUser(email, password);
@@ -277,6 +305,28 @@ export const AuthProvider = ({
     [rawAction],
   );
 
+  const updateCurrentUserName = useCallback((name: string) => {
+    setCurrentUser((prev) => {
+      if (!prev) return prev;
+      const updated = {
+        ...prev,
+        name,
+        initials: AuthUtils.getInitials(name),
+      };
+      localStorage.setItem("user", JSON.stringify(updated));
+      return updated;
+    });
+  }, []);
+
+  const updateCurrentUserAvatar = useCallback((avatarUrl: string | null) => {
+    setCurrentUser((prev) => {
+      if (!prev) return prev;
+      const updated = { ...prev, avatarUrl };
+      localStorage.setItem("user", JSON.stringify(updated));
+      return updated;
+    });
+  }, []);
+
   // ── CONTEXT VALUE ──────────────────────────────────────────────────────────
   const value = useMemo(
     () => ({
@@ -291,6 +341,8 @@ export const AuthProvider = ({
       updateUserPagePermissions,
       canAccessPage,
       canDoAction,
+      updateCurrentUserName,
+      updateCurrentUserAvatar,
     }),
     [
       currentUser,
@@ -303,6 +355,8 @@ export const AuthProvider = ({
       updateUserPagePermissions,
       canAccessPage,
       canDoAction,
+      updateCurrentUserName,
+      updateCurrentUserAvatar,
     ],
   );
 

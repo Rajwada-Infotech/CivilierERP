@@ -64,6 +64,7 @@ const HsnMaster: React.FC = () => {
   } = useQuery({
     queryKey: ["hsn"],
     queryFn: getHsn,
+    staleTime: 5 * 60 * 1000,
   });
 
   const dbItems: DbHsn[] = Array.isArray(dbData) ? dbData : [];

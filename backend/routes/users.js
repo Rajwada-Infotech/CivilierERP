@@ -236,6 +236,16 @@ router.post(
         `);
       res.json({ message: "User created" });
     } catch (err) {
+      // SQL Server unique constraint violation (error number 2627 or 2601)
+      if (
+        err.number === 2627 ||
+        err.number === 2601 ||
+        (err.message && err.message.includes("duplicate key"))
+      ) {
+        return res
+          .status(409)
+          .json({ error: "A user with this email address already exists." });
+      }
       res.status(500).json({ error: err.message });
     }
   },
@@ -253,20 +263,48 @@ router.put(
     const { name, email, RoleId, roleId, discontinue } = req.body;
     try {
       const pool = getPool();
-      const assignedRoleId = Number(RoleId ?? roleId);
-      await pool
-        .request()
-        .input("id", sql.Int, id)
-        .input("name", sql.NVarChar, name)
-        .input("email", sql.NVarChar, email)
-        .input("RoleId", sql.Int, assignedRoleId)
-        .input("discontinue", sql.Bit, discontinue ? 1 : 0).query(`
+
+      // If only `discontinue` was sent (toggle active/inactive), skip updating
+      // name/email/RoleId so we don't accidentally NULL them out.
+      const isToggleOnly =
+        discontinue !== undefined &&
+        name === undefined &&
+        email === undefined &&
+        RoleId === undefined &&
+        roleId === undefined;
+
+      if (isToggleOnly) {
+        await pool
+          .request()
+          .input("id", sql.Int, id)
+          .input("discontinue", sql.Bit, discontinue ? 1 : 0)
+          .query(`UPDATE dbo.users SET discontinue=@discontinue WHERE id=@id`);
+      } else {
+        const assignedRoleId = Number(RoleId ?? roleId);
+        await pool
+          .request()
+          .input("id", sql.Int, id)
+          .input("name", sql.NVarChar, name)
+          .input("email", sql.NVarChar, email)
+          .input("RoleId", sql.Int, assignedRoleId)
+          .input("discontinue", sql.Bit, discontinue ? 1 : 0).query(`
           UPDATE dbo.users
           SET name=@name, email=@email, RoleId=@RoleId, discontinue=@discontinue
           WHERE id=@id
         `);
+      }
+
       res.json({ message: "User updated" });
     } catch (err) {
+      if (
+        err.number === 2627 ||
+        err.number === 2601 ||
+        (err.message && err.message.includes("duplicate key"))
+      ) {
+        return res
+          .status(409)
+          .json({ error: "A user with this email address already exists." });
+      }
       res.status(500).json({ error: err.message });
     }
   },
@@ -292,6 +330,43 @@ router.delete(
         .query("DELETE FROM dbo.users WHERE id=@id");
       res.json({ message: "User deleted" });
     } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+// ======================
+// PATCH USER PAGE PERMISSIONS
+// Called by AuthContext.updateUserPagePermissions()
+// Stores the permissions JSON in dbo.users.page_permissions
+// ======================
+router.patch(
+  "/:id/permissions",
+  authMiddleware,
+  checkPermission("Users", "List", "CanEdit"),
+  async (req, res) => {
+    const { id } = req.params;
+    const { pagePermissions } = req.body;
+
+    if (!Array.isArray(pagePermissions)) {
+      return res
+        .status(400)
+        .json({ error: "pagePermissions must be an array" });
+    }
+
+    try {
+      const pool = getPool();
+      const jsonStr = JSON.stringify(pagePermissions);
+
+      await pool
+        .request()
+        .input("id", sql.Int, id)
+        .input("perms", sql.NVarChar(sql.MAX), jsonStr)
+        .query("UPDATE dbo.users SET page_permissions = @perms WHERE id = @id");
+
+      res.json({ message: "Permissions updated" });
+    } catch (err) {
+      console.error("PATCH /users/:id/permissions error:", err);
       res.status(500).json({ error: err.message });
     }
   },

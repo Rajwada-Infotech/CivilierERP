@@ -10,7 +10,9 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "dev:backend": "cd backend && nodemon server.js",
+    "dev:all": "concurrently \"vite\" \"cd backend && nodemon server.js\""
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
@@ -51,6 +53,7 @@
     "date-fns": "^3.6.0",
     "dotenv": "^17.4.2",
     "embla-carousel-react": "^8.6.0",
+    "express": "^5.2.1",
     "framer-motion": "^12.38.0",
     "input-otp": "^1.4.2",
     "lucide-react": "^0.462.0",
@@ -76,7 +79,8 @@
     "@testing-library/jest-dom": "^6.6.0",
     "@testing-library/react": "^16.0.0",
     "@types/bcryptjs": "^2.4.6",
-    "@types/node": "^22.16.5",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.6.0",
     "@types/react": "^18.3.23",
     "@types/react-dom": "^18.3.7",
     "@vitejs/plugin-react-swc": "^3.11.0",
