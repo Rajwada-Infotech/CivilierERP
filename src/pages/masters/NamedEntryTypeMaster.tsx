@@ -195,6 +195,7 @@ const NamedEntryTypeMaster: React.FC = () => {
   } = useQuery({
     queryKey: ["entry-types"],
     queryFn: getEntryTypes,
+    staleTime: 5 * 60 * 1000,
   });
 
   const dbItems: DbEntryType[] = Array.isArray(dbData) ? dbData : [];
