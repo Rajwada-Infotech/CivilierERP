@@ -38,7 +38,7 @@
     "allowJs": true,
   },
 
-  "include": ["src", "backend/**/*.ts"],
+  "include": ["src", "backend/**/*.ts", "backend/utils/loadRoutes.js"],
 
   "exclude": ["node_modules", "backend/dist"],
 }

@@ -87,7 +87,7 @@ router.get("/", async (req, res) => {
     // ✅ 1. Check cache
     const cached = await redisGet(cacheKey);
     if (cached) {
-      logger.info("⚡ Tasks from Redis");
+      logger.info({ event: "TASKS_CACHE_HIT", userId }, "Tasks served from cache");
       return res.json(JSON.parse(cached));
     }
 
@@ -145,11 +145,11 @@ router.get("/", async (req, res) => {
     // ✅ 2. Save to Redis (TTL = 60 sec)
     await redisSet(cacheKey, JSON.stringify(tasks), 60);
 
-    console.log("📦 Tasks from DB");
+    logger.info({ event: "TASKS_FETCHED", count: tasks.length, userId }, "Tasks fetched from DB");
 
     res.json(tasks);
   } catch (err) {
-    console.error("GET /api/tasks error:", err);
+    logger.error({ event: "TASKS_FETCH_FAILED", err, userId }, "Failed to fetch tasks");
     res.status(500).json({ error: "Failed to fetch tasks" });
   }
 });
@@ -212,7 +212,7 @@ router.get("/reminders", async (req, res) => {
 
     res.json(items);
   } catch (err) {
-    console.error("GET /api/tasks/reminders error:", err);
+    logger.error({ event: "TASK_REMINDERS_FETCH_FAILED", err, userId }, "Failed to fetch task reminders");
     res.status(500).json({ error: "Failed to fetch task reminders" });
   }
 });
@@ -266,7 +266,7 @@ router.get("/:id", async (req, res) => {
 
     res.json(mapTask(row, commentsResult.recordset.map(mapComment)));
   } catch (err) {
-    console.error("GET /api/tasks/:id error:", err);
+    logger.error({ event: "TASK_FETCH_FAILED", err, taskId: req.params.id, userId }, "Failed to fetch task");
     res.status(500).json({ error: "Failed to fetch task" });
   }
 });
@@ -327,9 +327,10 @@ router.post("/", adminOnly, async (req, res) => {
     await redisDel(`tasks:${req.user.userId ?? req.user.id}:true`);
     await redisDel(`tasks:${req.user.userId ?? req.user.id}:false`);
 
+    logger.info({ event: "TASK_CREATED", taskId: newId, createdBy, assignedTo, title }, "Task created");
     res.status(201).json(mapTask(newTask.recordset[0], []));
   } catch (err) {
-    console.error("POST /api/tasks error:", err);
+    logger.error({ event: "TASK_CREATE_FAILED", err, createdBy, assignedTo }, "Failed to create task");
     res.status(500).json({ error: "Failed to create task" });
   }
 });
@@ -457,11 +458,12 @@ router.put("/:id", async (req, res) => {
     await redisDel(`tasks:${req.user.userId ?? req.user.id}:true`);
     await redisDel(`tasks:${req.user.userId ?? req.user.id}:false`);
 
+    logger.info({ event: "TASK_UPDATED", taskId: id, updatedBy: userId }, "Task updated");
     res.json(
       mapTask(updated.recordset[0], commentsResult.recordset.map(mapComment)),
     );
   } catch (err) {
-    console.error("PUT /api/tasks/:id error:", err);
+    logger.error({ event: "TASK_UPDATE_FAILED", err, taskId: id, userId }, "Failed to update task");
     res.status(500).json({ error: "Failed to update task" });
   }
 });
@@ -485,9 +487,10 @@ router.delete("/:id", adminOnly, async (req, res) => {
     await redisDel(`tasks:${req.user.userId ?? req.user.id}:true`);
     await redisDel(`tasks:${req.user.userId ?? req.user.id}:false`);
 
+    logger.info({ event: "TASK_DELETED", taskId: id, deletedBy: req.user.userId ?? req.user.id }, "Task deleted");
     res.json({ success: true });
   } catch (err) {
-    console.error("DELETE /api/tasks/:id error:", err);
+    logger.error({ event: "TASK_DELETE_FAILED", err, taskId: id, userId: req.user.userId ?? req.user.id }, "Failed to delete task");
     res.status(500).json({ error: "Failed to delete task" });
   }
 });
@@ -530,9 +533,10 @@ router.post("/:id/comments", async (req, res) => {
     await redisDel(`tasks:${req.user.userId ?? req.user.id}:true`);
     await redisDel(`tasks:${req.user.userId ?? req.user.id}:false`);
 
+    logger.info({ event: "TASK_COMMENT_ADDED", taskId: id, commentId: inserted.Id, userId }, "Comment added to task");
     res.status(201).json(mapComment({ ...inserted, UserName: userName }));
   } catch (err) {
-    console.error("POST /api/tasks/:id/comments error:", err);
+    logger.error({ event: "TASK_COMMENT_FAILED", err, taskId: id, userId }, "Failed to add comment");
     res.status(500).json({ error: "Failed to add comment" });
   }
 });
