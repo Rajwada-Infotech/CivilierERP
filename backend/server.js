@@ -39,9 +39,6 @@ const ALLOWED_ORIGINS = [
   "https://civiliererp.in",
 ];
 
-// ─────────────────────────────────────────────
-//  Startup banner (dev only)
-// ─────────────────────────────────────────────
 function printBanner(port) {
   if (!isDev) return;
   logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
@@ -52,12 +49,10 @@ function printBanner(port) {
 
 async function startServer() {
   try {
-    // ── DB ──────────────────────────────────────────────────────────────────
     logger.info("[DB] Connecting to database...");
     await connectDB();
     logger.info("[OK] Database connected");
 
-    // ── Rate limiters ───────────────────────────────────────────────────────
     function makeStore(prefix) {
       try {
         const { RedisStore } = require("rate-limit-redis");
@@ -86,18 +81,20 @@ async function startServer() {
         );
         const metrics = await getSystemMetrics();
         const predictedRPM = await getPredictedRPM();
-        return getDynamicLimit(score, predictedRPM || metrics.rpm, metrics.memoryUsage);
+        return getDynamicLimit(
+          score,
+          predictedRPM || metrics.rpm,
+          metrics.memoryUsage,
+        );
       },
       store: makeStore("rl:api:"),
       skip: (req) => req.path.startsWith("/api/user-activity"),
       keyGenerator: (req) => `${req.user?.userId || ipKeyGenerator(req)}`,
     });
 
-    // ── App setup ───────────────────────────────────────────────────────────
     const app = express();
     app.disable("x-powered-by");
 
-    // Request logging + correlation ID (must be first)
     app.use(requestLogger);
     app.use((req, res, next) => {
       res.setHeader("X-Request-Id", req.id);
@@ -107,44 +104,49 @@ async function startServer() {
     app.use(express.json({ limit: "10mb" }));
     app.use(express.urlencoded({ extended: true, limit: "10mb" }));
     app.use(helmet());
-    app.use(cors({
-      origin: (origin, callback) => {
-        if (!origin || ALLOWED_ORIGINS.includes(origin)) {
-          callback(null, true);
-        } else {
-          logger.warn(`[BLOCK] CORS rejected: ${origin}`);
-          callback(new Error("Not allowed by CORS"));
-        }
-      },
-      credentials: true,
-      methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-      allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "X-Request-Id"],
-      optionsSuccessStatus: 204,
-    }));
+    app.use(
+      cors({
+        origin: (origin, callback) => {
+          if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+            callback(null, true);
+          } else {
+            logger.warn(`[BLOCK] CORS rejected: ${origin}`);
+            callback(new Error("Not allowed by CORS"));
+          }
+        },
+        credentials: true,
+        methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+        allowedHeaders: [
+          "Content-Type",
+          "Authorization",
+          "X-Requested-With",
+          "X-Request-Id",
+        ],
+        optionsSuccessStatus: 204,
+      }),
+    );
     app.use(compression());
 
-    // Global request tracking
     app.use(async (req, res, next) => {
-      try { await incrGlobalRequests(); await trackHourLoad(); } catch {}
+      try {
+        await incrGlobalRequests();
+        await trackHourLoad();
+      } catch {}
       next();
     });
 
-    // ── Rate limiters ───────────────────────────────────────────────────────
     app.use("/api/users/login", loginLimiter);
     app.use("/api", apiLimiter);
 
-    // ── Public routes (no auth) ─────────────────────────────────────────────
     app.get("/", (req, res) => res.send("CivilierERP API running"));
     app.get("/health", (req, res) => res.json({ status: "ok" }));
     app.use("/api/users", require("./routes/users"));
 
-    // ── Auth + active user tracking ─────────────────────────────────────────
     app.use("/api", authMiddleware, async (req, res, next) => {
       if (req.user?.userId) pfaddActiveUser(req.user.userId).catch(() => {});
       next();
     });
 
-    // ── Protected routes ────────────────────────────────────────────────────
     logger.info("[ROUTES] Loading routes...");
 
     const routes = [
@@ -194,6 +196,10 @@ async function startServer() {
       { path: "/api/widgets", file: "./routes/widgets" },
       { path: "/api/tenant-reminders", file: "./routes/tenantReminders" },
       { path: "/api/reminders", file: "./routes/tenantReminders" },
+      { path: "/api/company-master", file: "./routes/companyMaster" },
+      { path: "/api/project-master", file: "./routes/projectMaster" },
+      { path: "/api/signatures", file: "./routes/signatures" },
+      { path: "/api/communicator", file: "./routes/communicator" },
     ];
 
     const routeResults = await safeLoadRoutes(app, routes, {
@@ -203,7 +209,6 @@ async function startServer() {
       verbose: isDev,
     });
 
-    // DBA route — role restricted
     try {
       app.use(
         "/api/dba",
@@ -217,11 +222,9 @@ async function startServer() {
       routeResults.failed.push({ label: "dba", error: err.message });
     }
 
-    // Print clean summary
     printRoutesSummary(routeResults, logger);
     logger.info(`[OK] Routes loaded: ${routeResults.loaded.length}`);
 
-    // ── System metrics ──────────────────────────────────────────────────────
     app.get("/api/system/metrics", authMiddleware, async (req, res) => {
       try {
         const metrics = await getSystemMetrics();
@@ -229,7 +232,10 @@ async function startServer() {
         metrics.predictedRPM = predictedRPM;
 
         const topEngagedUsers = await getRedis().zrevrange(
-          "engagement:score", 0, 9, "WITHSCORES",
+          "engagement:score",
+          0,
+          9,
+          "WITHSCORES",
         );
         metrics.topEngagedUsers = topEngagedUsers;
 
@@ -247,21 +253,18 @@ async function startServer() {
       }
     });
 
-    // ── Global error handler ────────────────────────────────────────────────
     app.use((err, req, res, next) => {
       req.log.error(`
 [ERR] ERROR: ${err.message}
    -> ${req.method} ${req.url}
    -> user: ${req.user?.userId || "anonymous"}
 `);
-
       res.status(500).json({
         error: "Internal Server Error",
         requestId: req.id,
       });
     });
 
-    // ── Start ───────────────────────────────────────────────────────────────
     const PORT = process.env.PORT || 5000;
     app.listen(PORT, () => {
       printBanner(PORT);

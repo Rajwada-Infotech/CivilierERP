@@ -1,4 +1,6 @@
 import React, { useState, useRef } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,76 +19,104 @@ import {
   Plus,
   User,
   Tag,
+  Loader2,
 } from "lucide-react";
+import { toast } from "sonner";
 
 interface SignatureItem {
-  id: string;
-  name: string;
-  owner: string;
-  status: "active" | "inactive";
-  imagePreview: string;
-  addedAt: string;
+  Id: number;
+  Name: string;
+  Owner: string;
+  Status: "active" | "inactive";
+  ImageData: string;
+  AddedAt: string;
 }
 
-const INITIAL: SignatureItem[] = [
-  { id: "1", name: "John Doe Signature", owner: "John Doe", status: "active", imagePreview: "", addedAt: "12 Mar 2025" },
-  { id: "2", name: "Admin Signature", owner: "Admin User", status: "inactive", imagePreview: "", addedAt: "04 Jan 2025" },
-];
-
 export default function Signature() {
-  const [signatures, setSignatures] = useState<SignatureItem[]>(INITIAL);
-  const [formData, setFormData] = useState({ name: "", owner: "", imagePreview: "" });
-  const [editingId, setEditingId] = useState<string | null>(null);
+  const qc = useQueryClient();
+  const [formData, setFormData] = useState({
+    name: "",
+    owner: "",
+    imagePreview: "",
+  });
+  const [editingId, setEditingId] = useState<number | null>(null);
   const [dragOver, setDragOver] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const { data: signatures = [], isLoading } = useQuery<SignatureItem[]>({
+    queryKey: ["signatures"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/signatures");
+      if (!res.ok) throw new Error("Failed to load");
+      return res.json();
+    },
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const url = editingId
+        ? `/api/signatures/${editingId}`
+        : "/api/signatures";
+      const body = {
+        name: formData.name,
+        owner: formData.owner,
+        imageData: formData.imagePreview || undefined,
+      };
+      const res = await fetchWithAuth(url, {
+        method: editingId ? "PUT" : "POST",
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const e = await res.json().catch(() => ({}));
+        throw new Error(e.error || "Save failed");
+      }
+    },
+    onSuccess: () => {
+      toast.success(editingId ? "Signature updated" : "Signature added");
+      qc.invalidateQueries({ queryKey: ["signatures"] });
+      setJustSaved(true);
+      setTimeout(() => setJustSaved(false), 1600);
+      resetForm();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const toggleMutation = useMutation({
+    mutationFn: async ({ id, status }: { id: number; status: string }) => {
+      const res = await fetchWithAuth(`/api/signatures/${id}/status`, {
+        method: "PATCH",
+        body: JSON.stringify({ status }),
+      });
+      if (!res.ok) throw new Error("Failed");
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["signatures"] }),
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: async (id: number) => {
+      const res = await fetchWithAuth(`/api/signatures/${id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed");
+    },
+    onSuccess: () => {
+      toast.success("Signature deleted");
+      qc.invalidateQueries({ queryKey: ["signatures"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
   const readFile = (file: File) => {
     if (!file.type.startsWith("image/")) return;
     const reader = new FileReader();
-    reader.onload = (e) => setFormData((p) => ({ ...p, imagePreview: (e.target?.result as string) || "" }));
+    reader.onload = (e) =>
+      setFormData((p) => ({
+        ...p,
+        imagePreview: (e.target?.result as string) || "",
+      }));
     reader.readAsDataURL(file);
-  };
-
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (f) readFile(f);
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setDragOver(false);
-    const f = e.dataTransfer.files?.[0];
-    if (f) readFile(f);
-  };
-
-  const submitForm = () => {
-    if (!formData.name.trim() || !formData.owner.trim()) return;
-    if (editingId) {
-      setSignatures((prev) =>
-        prev.map((s) =>
-          s.id === editingId
-            ? { ...s, name: formData.name, owner: formData.owner, imagePreview: formData.imagePreview }
-            : s
-        )
-      );
-      setEditingId(null);
-    } else {
-      setSignatures((prev) => [
-        ...prev,
-        {
-          id: Date.now().toString(),
-          name: formData.name,
-          owner: formData.owner,
-          status: "active",
-          imagePreview: formData.imagePreview,
-          addedAt: new Date().toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }),
-        },
-      ]);
-    }
-    setJustSaved(true);
-    setTimeout(() => setJustSaved(false), 1600);
-    resetForm();
   };
 
   const resetForm = () => {
@@ -96,42 +126,31 @@ export default function Signature() {
   };
 
   const startEditing = (sig: SignatureItem) => {
-    setEditingId(sig.id);
-    setFormData({ name: sig.name, owner: sig.owner, imagePreview: sig.imagePreview });
+    setEditingId(sig.Id);
+    setFormData({
+      name: sig.Name,
+      owner: sig.Owner,
+      imagePreview: sig.ImageData ?? "",
+    });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const cancelEditing = () => {
-    resetForm();
-  };
-
-  const deleteSig = (id: string) => {
-    setSignatures((prev) => prev.filter((s) => s.id !== id));
-    if (editingId === id) resetForm();
-  };
-
-  const toggleStatus = (id: string) =>
-    setSignatures((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, status: s.status === "active" ? "inactive" : "active" } : s))
-    );
-
   const isEditing = editingId !== null;
-  const activeCount = signatures.filter((s) => s.status === "active").length;
+  const activeCount = signatures.filter((s) => s.Status === "active").length;
 
   return (
     <>
       <Breadcrumbs items={["Admin", "Signatures"]} />
-
       <div className="space-y-8">
-
-        {/* ── Page title ── */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-9 h-9 rounded-xl bg-primary/10 flex items-center justify-center">
               <PenLine size={17} className="text-primary" />
             </div>
             <div>
-              <h1 className="text-xl font-heading font-bold text-foreground">Digital Signatures</h1>
+              <h1 className="text-xl font-heading font-bold text-foreground">
+                Digital Signatures
+              </h1>
               <p className="text-xs font-body text-muted-foreground mt-0.5">
                 Manage signatures used for document approvals
               </p>
@@ -147,13 +166,13 @@ export default function Signature() {
           </div>
         </div>
 
-        {/* ── Upload / Edit Form ── */}
         <div className="rounded-2xl border border-border bg-card overflow-hidden">
-          {/* Form header */}
           <div className="flex items-center gap-2.5 px-6 py-4 border-b border-border bg-muted/30">
-            {isEditing
-              ? <Edit3 size={14} className="text-primary" />
-              : <UploadCloud size={14} className="text-primary" />}
+            {isEditing ? (
+              <Edit3 size={14} className="text-primary" />
+            ) : (
+              <UploadCloud size={14} className="text-primary" />
+            )}
             <span className="text-sm font-heading font-semibold text-foreground">
               {isEditing ? "Edit Signature" : "Add New Signature"}
             </span>
@@ -163,96 +182,112 @@ export default function Signature() {
               </Badge>
             )}
           </div>
-
           <div className="p-6">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-              {/* Left — fields */}
               <div className="space-y-4">
-                {/* Signature Name */}
                 <div className="space-y-1.5">
                   <Label
                     htmlFor="sig-name"
                     className="flex items-center gap-1.5 text-[11px] font-heading uppercase tracking-widest text-muted-foreground"
                   >
-                    <Tag size={10} />
-                    Signature Name <span className="text-destructive">*</span>
+                    <Tag size={10} /> Signature Name{" "}
+                    <span className="text-destructive">*</span>
                   </Label>
                   <Input
                     id="sig-name"
                     placeholder="e.g. CEO Approval Signature"
                     value={formData.name}
-                    onChange={(e) => setFormData((p) => ({ ...p, name: e.target.value }))}
+                    onChange={(e) =>
+                      setFormData((p) => ({ ...p, name: e.target.value }))
+                    }
                     className="font-body"
                   />
                 </div>
-
-                {/* Owner */}
                 <div className="space-y-1.5">
                   <Label
                     htmlFor="sig-owner"
                     className="flex items-center gap-1.5 text-[11px] font-heading uppercase tracking-widest text-muted-foreground"
                   >
-                    <User size={10} />
-                    Owner <span className="text-destructive">*</span>
+                    <User size={10} /> Owner{" "}
+                    <span className="text-destructive">*</span>
                   </Label>
                   <Input
                     id="sig-owner"
                     placeholder="e.g. John Doe"
                     value={formData.owner}
-                    onChange={(e) => setFormData((p) => ({ ...p, owner: e.target.value }))}
+                    onChange={(e) =>
+                      setFormData((p) => ({ ...p, owner: e.target.value }))
+                    }
                     className="font-body"
                   />
                 </div>
-
-                {/* Action buttons */}
                 <div className="flex items-center gap-3 pt-2">
                   <Button
-                    onClick={submitForm}
-                    disabled={!formData.name.trim() || !formData.owner.trim()}
+                    onClick={() => saveMutation.mutate()}
+                    disabled={
+                      !formData.name.trim() ||
+                      !formData.owner.trim() ||
+                      saveMutation.isPending
+                    }
                     className="gap-2 font-heading text-sm"
                   >
-                    {justSaved ? (
-                      <><CheckCircle2 size={14} /> Saved!</>
+                    {saveMutation.isPending ? (
+                      <Loader2 size={14} className="animate-spin" />
+                    ) : justSaved ? (
+                      <CheckCircle2 size={14} />
                     ) : isEditing ? (
-                      <><Edit3 size={14} /> Update Signature</>
+                      <Edit3 size={14} />
                     ) : (
-                      <><Plus size={14} /> Add Signature</>
+                      <Plus size={14} />
                     )}
+                    {saveMutation.isPending
+                      ? "Saving…"
+                      : justSaved
+                        ? "Saved!"
+                        : isEditing
+                          ? "Update Signature"
+                          : "Add Signature"}
                   </Button>
                   {isEditing && (
-                    <Button variant="outline" onClick={cancelEditing} className="font-heading text-sm">
+                    <Button
+                      variant="outline"
+                      onClick={resetForm}
+                      className="font-heading text-sm"
+                    >
                       Cancel
                     </Button>
                   )}
                 </div>
               </div>
 
-              {/* Right — upload zone */}
               <div className="space-y-1.5">
                 <Label className="flex items-center gap-1.5 text-[11px] font-heading uppercase tracking-widest text-muted-foreground">
-                  <UploadCloud size={10} />
-                  Signature Image
+                  <UploadCloud size={10} /> Signature Image
                 </Label>
                 <div
-                  onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setDragOver(true);
+                  }}
                   onDragLeave={() => setDragOver(false)}
-                  onDrop={handleDrop}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setDragOver(false);
+                    const f = e.dataTransfer.files?.[0];
+                    if (f) readFile(f);
+                  }}
                   onClick={() => fileInputRef.current?.click()}
-                  className={`relative flex flex-col items-center justify-center w-full h-40 rounded-xl border-2 border-dashed cursor-pointer transition-all duration-200 ${
-                    dragOver
-                      ? "border-primary bg-primary/5 scale-[1.01]"
-                      : formData.imagePreview
-                      ? "border-primary/30 bg-muted/20"
-                      : "border-border hover:border-primary/50 hover:bg-muted/30"
-                  }`}
+                  className={`relative flex flex-col items-center justify-center w-full h-40 rounded-xl border-2 border-dashed cursor-pointer transition-all duration-200 ${dragOver ? "border-primary bg-primary/5 scale-[1.01]" : formData.imagePreview ? "border-primary/30 bg-muted/20" : "border-border hover:border-primary/50 hover:bg-muted/30"}`}
                 >
                   <input
                     ref={fileInputRef}
                     type="file"
                     accept="image/png,image/jpeg,image/jpg"
                     className="sr-only"
-                    onChange={handleFileUpload}
+                    onChange={(e) => {
+                      const f = e.target.files?.[0];
+                      if (f) readFile(f);
+                    }}
                   />
                   {formData.imagePreview ? (
                     <>
@@ -266,7 +301,8 @@ export default function Signature() {
                         onClick={(e) => {
                           e.stopPropagation();
                           setFormData((p) => ({ ...p, imagePreview: "" }));
-                          if (fileInputRef.current) fileInputRef.current.value = "";
+                          if (fileInputRef.current)
+                            fileInputRef.current.value = "";
                         }}
                         className="absolute top-2 right-2 w-6 h-6 rounded-full bg-destructive/90 text-white flex items-center justify-center hover:bg-destructive transition-colors"
                       >
@@ -276,13 +312,21 @@ export default function Signature() {
                   ) : (
                     <div className="flex flex-col items-center gap-2.5 text-center px-4 pointer-events-none">
                       <div className="w-11 h-11 rounded-xl bg-muted flex items-center justify-center">
-                        <UploadCloud size={20} className="text-muted-foreground/60" />
+                        <UploadCloud
+                          size={20}
+                          className="text-muted-foreground/60"
+                        />
                       </div>
                       <div>
                         <p className="text-sm font-body text-muted-foreground">
-                          <span className="font-semibold text-primary">Click to upload</span> or drag &amp; drop
+                          <span className="font-semibold text-primary">
+                            Click to upload
+                          </span>{" "}
+                          or drag &amp; drop
                         </p>
-                        <p className="text-[10px] font-body text-muted-foreground/50 mt-0.5">PNG, JPG up to 2 MB</p>
+                        <p className="text-[10px] font-body text-muted-foreground/50 mt-0.5">
+                          PNG, JPG up to 2 MB
+                        </p>
                       </div>
                     </div>
                   )}
@@ -292,7 +336,6 @@ export default function Signature() {
           </div>
         </div>
 
-        {/* ── Signature Library ── */}
         <div className="space-y-4">
           <div className="flex items-center gap-3">
             <h2 className="text-base font-heading font-semibold text-foreground">
@@ -303,12 +346,21 @@ export default function Signature() {
             </span>
           </div>
 
-          {signatures.length === 0 ? (
+          {isLoading ? (
+            <div className="flex justify-center py-16">
+              <Loader2
+                size={24}
+                className="animate-spin text-muted-foreground"
+              />
+            </div>
+          ) : signatures.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-24 rounded-2xl border-2 border-dashed border-border bg-muted/10">
               <div className="w-14 h-14 rounded-2xl bg-muted flex items-center justify-center mb-4">
                 <ImageIcon size={24} className="text-muted-foreground/40" />
               </div>
-              <p className="text-sm font-heading font-semibold text-muted-foreground">No signatures yet</p>
+              <p className="text-sm font-heading font-semibold text-muted-foreground">
+                No signatures yet
+              </p>
               <p className="text-xs font-body text-muted-foreground/60 mt-1">
                 Use the form above to add your first signature
               </p>
@@ -317,16 +369,10 @@ export default function Signature() {
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
               {signatures.map((sig) => (
                 <div
-                  key={sig.id}
-                  className={`group flex flex-col rounded-2xl border bg-card overflow-hidden transition-all duration-200 hover:shadow-xl hover:-translate-y-0.5 ${
-                    editingId === sig.id
-                      ? "border-primary shadow-lg shadow-primary/10 ring-1 ring-primary/20"
-                      : "border-border hover:border-primary/30"
-                  }`}
+                  key={sig.Id}
+                  className={`group flex flex-col rounded-2xl border bg-card overflow-hidden transition-all duration-200 hover:shadow-xl hover:-translate-y-0.5 ${editingId === sig.Id ? "border-primary shadow-lg shadow-primary/10 ring-1 ring-primary/20" : "border-border hover:border-primary/30"}`}
                 >
-                  {/* Image panel */}
                   <div className="relative h-36 bg-gradient-to-br from-muted/80 to-muted flex items-center justify-center p-4 overflow-hidden">
-                    {/* Subtle grid texture */}
                     <div
                       className="absolute inset-0 opacity-[0.04]"
                       style={{
@@ -334,10 +380,10 @@ export default function Signature() {
                           "repeating-linear-gradient(0deg,currentColor,currentColor 1px,transparent 1px,transparent 28px),repeating-linear-gradient(90deg,currentColor,currentColor 1px,transparent 1px,transparent 28px)",
                       }}
                     />
-                    {sig.imagePreview ? (
+                    {sig.ImageData ? (
                       <img
-                        src={sig.imagePreview}
-                        alt={sig.name}
+                        src={sig.ImageData}
+                        alt={sig.Name}
                         className="relative max-h-full max-w-full object-contain drop-shadow-sm"
                       />
                     ) : (
@@ -345,42 +391,41 @@ export default function Signature() {
                         <ImageIcon size={28} className="text-foreground" />
                       </div>
                     )}
-                    {/* Active dot */}
                     <span
-                      className={`absolute top-3 right-3 w-2.5 h-2.5 rounded-full ring-2 ring-card ${
-                        sig.status === "active" ? "bg-emerald-500" : "bg-muted-foreground/40"
-                      }`}
+                      className={`absolute top-3 right-3 w-2.5 h-2.5 rounded-full ring-2 ring-card ${sig.Status === "active" ? "bg-emerald-500" : "bg-muted-foreground/40"}`}
                     />
                   </div>
-
                   <Separator className="opacity-50" />
-
-                  {/* Info + controls */}
                   <div className="flex flex-col gap-3 p-4">
-                    {/* Name + owner */}
                     <div className="min-w-0">
                       <p className="text-sm font-heading font-semibold text-foreground truncate group-hover:text-primary transition-colors">
-                        {sig.name}
+                        {sig.Name}
                       </p>
                       <p className="text-xs font-body text-muted-foreground mt-0.5 truncate flex items-center gap-1.5">
                         <User size={10} className="flex-shrink-0" />
-                        {sig.owner}
+                        {sig.Owner}
                       </p>
                     </div>
-
-                    {/* Status toggle + badge + actions */}
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
                         <Switch
-                          checked={sig.status === "active"}
-                          onCheckedChange={() => toggleStatus(sig.id)}
+                          checked={sig.Status === "active"}
+                          onCheckedChange={() =>
+                            toggleMutation.mutate({
+                              id: sig.Id,
+                              status:
+                                sig.Status === "active" ? "inactive" : "active",
+                            })
+                          }
                           className="data-[state=checked]:bg-primary h-5 w-9"
                         />
                         <Badge
-                          variant={sig.status === "active" ? "default" : "secondary"}
+                          variant={
+                            sig.Status === "active" ? "default" : "secondary"
+                          }
                           className="text-[10px] font-heading uppercase tracking-wide px-2 py-0.5"
                         >
-                          {sig.status}
+                          {sig.Status}
                         </Badge>
                       </div>
                       <div className="flex gap-1">
@@ -389,25 +434,27 @@ export default function Signature() {
                           size="sm"
                           onClick={() => startEditing(sig)}
                           className="h-8 w-8 p-0 hover:bg-primary/10 hover:text-primary"
-                          title="Edit"
                         >
                           <Edit3 size={13} />
                         </Button>
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => deleteSig(sig.id)}
+                          onClick={() => deleteMutation.mutate(sig.Id)}
+                          disabled={deleteMutation.isPending}
                           className="h-8 w-8 p-0 hover:bg-destructive/10 hover:text-destructive"
-                          title="Delete"
                         >
                           <Trash2 size={13} />
                         </Button>
                       </div>
                     </div>
-
-                    {/* Added date */}
                     <p className="text-[10px] font-body text-muted-foreground/50 border-t border-border/50 pt-2.5 mt-0.5">
-                      Added {sig.addedAt}
+                      Added{" "}
+                      {new Date(sig.AddedAt).toLocaleDateString("en-GB", {
+                        day: "2-digit",
+                        month: "short",
+                        year: "numeric",
+                      })}
                     </p>
                   </div>
                 </div>
@@ -415,7 +462,6 @@ export default function Signature() {
             </div>
           )}
         </div>
-
       </div>
     </>
   );
