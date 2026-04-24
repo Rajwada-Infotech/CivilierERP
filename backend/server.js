@@ -45,17 +45,17 @@ const ALLOWED_ORIGINS = [
 function printBanner(port) {
   if (!isDev) return;
   logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-  logger.info("  🏗️  CivilierERP API");
-  logger.info(`  📡  http://localhost:${port}`);
+  logger.info("  [APP] CivilierERP API");
+  logger.info(`  [URL] http://localhost:${port}`);
   logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 }
 
 async function startServer() {
   try {
     // ── DB ──────────────────────────────────────────────────────────────────
-    logger.info("🔌 Connecting to database…");
+    logger.info("[DB] Connecting to database...");
     await connectDB();
-    logger.info("🟢 Database connected");
+    logger.info("[OK] Database connected");
 
     // ── Rate limiters ───────────────────────────────────────────────────────
     function makeStore(prefix) {
@@ -112,7 +112,7 @@ async function startServer() {
         if (!origin || ALLOWED_ORIGINS.includes(origin)) {
           callback(null, true);
         } else {
-          logger.warn(`🚫 CORS rejected: ${origin}`);
+          logger.warn(`[BLOCK] CORS rejected: ${origin}`);
           callback(new Error("Not allowed by CORS"));
         }
       },
@@ -145,7 +145,7 @@ async function startServer() {
     });
 
     // ── Protected routes ────────────────────────────────────────────────────
-    logger.info("📦 Loading routes…");
+    logger.info("[ROUTES] Loading routes...");
 
     const routes = [
       { path: "/api/roles", file: "./routes/roles" },
@@ -213,13 +213,13 @@ async function startServer() {
       );
       routeResults.loaded.push("dba");
     } catch (err) {
-      logger.error(`🔴 Route failed [dba]: ${err.message}`);
+      logger.error(`[ERR] Route failed [dba]: ${err.message}`);
       routeResults.failed.push({ label: "dba", error: err.message });
     }
 
     // Print clean summary
     printRoutesSummary(routeResults, logger);
-    logger.info(`✅ Routes loaded: ${routeResults.loaded.length}`);
+    logger.info(`[OK] Routes loaded: ${routeResults.loaded.length}`);
 
     // ── System metrics ──────────────────────────────────────────────────────
     app.get("/api/system/metrics", authMiddleware, async (req, res) => {
@@ -250,9 +250,9 @@ async function startServer() {
     // ── Global error handler ────────────────────────────────────────────────
     app.use((err, req, res, next) => {
       req.log.error(`
-🔴 ERROR: ${err.message}
-   → ${req.method} ${req.url}
-   → user: ${req.user?.userId || "anonymous"}
+[ERR] ERROR: ${err.message}
+   -> ${req.method} ${req.url}
+   -> user: ${req.user?.userId || "anonymous"}
 `);
 
       res.status(500).json({
@@ -265,12 +265,12 @@ async function startServer() {
     const PORT = process.env.PORT || 5000;
     app.listen(PORT, () => {
       printBanner(PORT);
-      logger.info(`🚀 Server ready on port ${PORT}`);
+      logger.info(`[START] Server ready on port ${PORT}`);
     });
 
     return app;
   } catch (err) {
-    logger.error(`💥 Server failed to start: ${err.message}`);
+    logger.error(`[FATAL] Server failed to start: ${err.message}`);
     process.exit(1);
   }
 }

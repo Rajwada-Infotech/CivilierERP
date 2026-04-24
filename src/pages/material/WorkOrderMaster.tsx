@@ -22,13 +22,22 @@ import {
   Package,
   Hammer,
   Receipt,
+  AlertCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
-import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { createWorkOrder, saveFullWorkOrder } from "@/api/workOrderApi";
+import {
+  createWorkOrder,
+  saveFullWorkOrder,
+  fetchCompanies,
+  fetchProjects,
+  fetchContractors,
+  fetchActivityGroups,
+  fetchActivities,
+} from "@/api/workOrderApi";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -42,6 +51,7 @@ interface MaterialItem {
 
 interface Activity {
   id: string;
+  activityId: number | null;
   name: string;
   unit: string;
   ratePerUnit: number;
@@ -51,6 +61,7 @@ interface Activity {
 
 interface ActivityGroup {
   id: string;
+  groupId: number | null;
   name: string;
   activities: Activity[];
   expanded: boolean;
@@ -66,7 +77,16 @@ interface WorkOrderForm {
   termsAndConditions: string;
 }
 
-// ─── Real API data loaded above ─
+interface DropdownOption {
+  id: number;
+  name: string;
+}
+
+interface ActivityOption {
+  id: number;
+  name: string;
+  groupId?: number;
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -86,6 +106,17 @@ const fmt = (n: number) =>
     currency: "INR",
     maximumFractionDigits: 2,
   }).format(n);
+
+// Safe array guard — always returns a real array regardless of API shape
+function ensureArray<T>(val: unknown): T[] {
+  if (Array.isArray(val)) return val as T[];
+  if (val && typeof val === "object") {
+    const obj = val as Record<string, unknown>;
+    if (Array.isArray(obj.data)) return obj.data as T[];
+    if (Array.isArray(obj.recordset)) return obj.recordset as T[];
+  }
+  return [];
+}
 
 const EMPTY_FORM = (): WorkOrderForm => ({
   companyId: "",
@@ -107,6 +138,7 @@ const EMPTY_MATERIAL = (): MaterialItem => ({
 
 const EMPTY_ACTIVITY = (): Activity => ({
   id: uid(),
+  activityId: null,
   name: "",
   unit: "Sq.Ft",
   ratePerUnit: 0,
@@ -116,6 +148,7 @@ const EMPTY_ACTIVITY = (): Activity => ({
 
 const EMPTY_GROUP = (): ActivityGroup => ({
   id: uid(),
+  groupId: null,
   name: "",
   activities: [EMPTY_ACTIVITY()],
   expanded: true,
@@ -134,6 +167,9 @@ const selectCls =
 const cellInput =
   "w-full text-sm rounded-md border border-border px-2.5 py-1.5 bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/30 transition";
 
+const cellSelect =
+  "w-full text-sm rounded-md border border-border px-2.5 py-1.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition appearance-none";
+
 const FieldLabel: React.FC<{
   children: React.ReactNode;
   required?: boolean;
@@ -142,6 +178,12 @@ const FieldLabel: React.FC<{
     {children}
     {required && <span className="text-red-500 ml-0.5">*</span>}
   </label>
+);
+
+// ─── Dropdown skeleton loader ──────────────────────────────────────────────────
+
+const SelectSkeleton: React.FC = () => (
+  <div className="w-full h-10 rounded-lg border border-border bg-muted/30 animate-pulse" />
 );
 
 // ─── Material Breakdown Modal ─────────────────────────────────────────────────
@@ -178,7 +220,6 @@ const MaterialBreakdownModal: React.FC<{
 
   return (
     <>
-      {/* Trigger */}
       <button
         type="button"
         onClick={() => setOpen(true)}
@@ -200,7 +241,6 @@ const MaterialBreakdownModal: React.FC<{
         )}
       </button>
 
-      {/* Modal */}
       {open && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
           <div
@@ -298,60 +338,38 @@ const MaterialBreakdownModal: React.FC<{
                         </div>
                         <div className="grid grid-cols-3 gap-2">
                           <div>
-                            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
-                              Qty
-                            </p>
+                            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Qty</p>
                             <input
                               type="number"
                               min={0}
                               value={mat.quantity || ""}
                               onChange={(e) =>
-                                updateMaterial(
-                                  idx,
-                                  "quantity",
-                                  parseFloat(e.target.value) || 0,
-                                )
+                                updateMaterial(idx, "quantity", parseFloat(e.target.value) || 0)
                               }
-                              placeholder={
-                                activity.area > 0 ? String(activity.area) : "0"
-                              }
+                              placeholder={activity.area > 0 ? String(activity.area) : "0"}
                               className={cellInput}
                             />
                           </div>
                           <div>
-                            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
-                              Unit
-                            </p>
+                            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Unit</p>
                             <select
                               value={mat.unit}
-                              onChange={(e) =>
-                                updateMaterial(idx, "unit", e.target.value)
-                              }
+                              onChange={(e) => updateMaterial(idx, "unit", e.target.value)}
                               className="w-full text-sm rounded-md border border-border px-2 py-1.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition appearance-none"
                             >
-                              {UNITS.map((u) => (
-                                <option key={u}>{u}</option>
-                              ))}
+                              {UNITS.map((u) => <option key={u}>{u}</option>)}
                             </select>
                           </div>
                           <div>
-                            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
-                              Price / Unit
-                            </p>
+                            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Price / Unit</p>
                             <div className="relative">
-                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
-                                ₹
-                              </span>
+                              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">₹</span>
                               <input
                                 type="number"
                                 min={0}
                                 value={mat.price || ""}
                                 onChange={(e) =>
-                                  updateMaterial(
-                                    idx,
-                                    "price",
-                                    parseFloat(e.target.value) || 0,
-                                  )
+                                  updateMaterial(idx, "price", parseFloat(e.target.value) || 0)
                                 }
                                 placeholder="0"
                                 className={`${cellInput} pl-6`}
@@ -386,28 +404,17 @@ const MaterialBreakdownModal: React.FC<{
                     {activity.materials.map((mat) => {
                       const lt = mat.quantity * mat.price;
                       return (
-                        <div
-                          key={mat.id}
-                          className="flex items-center gap-2 px-3 py-2 text-xs"
-                        >
+                        <div key={mat.id} className="flex items-center gap-2 px-3 py-2 text-xs">
                           <span className="flex-1 font-medium text-foreground truncate">
-                            {mat.name || (
-                              <span className="italic text-muted-foreground/50">
-                                Unnamed
-                              </span>
-                            )}
+                            {mat.name || <span className="italic text-muted-foreground/50">Unnamed</span>}
                           </span>
                           <span className="text-muted-foreground shrink-0">
-                            {mat.quantity > 0
-                              ? `${mat.quantity} ${mat.unit}`
-                              : "—"}
+                            {mat.quantity > 0 ? `${mat.quantity} ${mat.unit}` : "—"}
                           </span>
                           <span className="text-muted-foreground shrink-0">
                             {mat.price > 0 ? `× ₹${mat.price}` : "—"}
                           </span>
-                          <span
-                            className={`font-semibold shrink-0 w-24 text-right ${lt > 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}
-                          >
+                          <span className={`font-semibold shrink-0 w-24 text-right ${lt > 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>
                             {lt > 0 ? fmt(lt) : "—"}
                           </span>
                         </div>
@@ -417,17 +424,13 @@ const MaterialBreakdownModal: React.FC<{
                   <div className="border-t border-border bg-muted/20 divide-y divide-border/40">
                     <div className="flex items-center justify-between px-3 py-2">
                       <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <Package size={11} className="text-amber-500" />
-                        Raw Materials
+                        <Package size={11} className="text-amber-500" />Raw Materials
                       </span>
-                      <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">
-                        {fmt(materialsTotal)}
-                      </span>
+                      <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">{fmt(materialsTotal)}</span>
                     </div>
                     <div className="flex items-center justify-between px-3 py-2">
                       <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                        <Hammer size={11} className="text-blue-500" />
-                        Labour (Rate × Area)
+                        <Hammer size={11} className="text-blue-500" />Labour (Rate × Area)
                       </span>
                       <span className="text-xs font-semibold text-blue-600 dark:text-blue-400">
                         {labourTotal > 0 ? fmt(labourTotal) : "—"}
@@ -435,12 +438,9 @@ const MaterialBreakdownModal: React.FC<{
                     </div>
                     <div className="flex items-center justify-between px-3 py-2.5 bg-muted/30">
                       <span className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-                        <Receipt size={11} className="text-primary" />
-                        Activity Total
+                        <Receipt size={11} className="text-primary" />Activity Total
                       </span>
-                      <span className="text-sm font-bold text-primary">
-                        {fmt(materialsTotal + labourTotal)}
-                      </span>
+                      <span className="text-sm font-bold text-primary">{fmt(materialsTotal + labourTotal)}</span>
                     </div>
                   </div>
                 </div>
@@ -451,15 +451,13 @@ const MaterialBreakdownModal: React.FC<{
                 onClick={addMaterial}
                 className="flex items-center gap-1.5 text-sm text-primary hover:text-primary/80 font-medium px-3 py-2 rounded-lg hover:bg-primary/5 transition-colors"
               >
-                <Plus size={14} />
-                Add Material
+                <Plus size={14} />Add Material
               </button>
               <button
                 onClick={() => setOpen(false)}
                 className="flex items-center gap-1.5 text-sm font-semibold px-5 py-2 rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-opacity"
               >
-                <Check size={13} />
-                Done
+                <Check size={13} />Done
               </button>
             </div>
           </div>
@@ -475,13 +473,14 @@ const ActivityRow: React.FC<{
   activity: Activity;
   index: number;
   groupIndex: number;
-  onUpdate: (
-    field: keyof Activity,
-    value: string | number | MaterialItem[],
-  ) => void;
+  onUpdate: (field: keyof Activity, value: string | number | null | MaterialItem[]) => void;
   onDelete: () => void;
   canDelete: boolean;
-}> = ({ activity, index, groupIndex, onUpdate, onDelete, canDelete }) => {
+  activityOptions: ActivityOption[];
+  loadingActivities: boolean;
+}> = ({ activity, index, groupIndex, onUpdate, onDelete, canDelete, activityOptions, loadingActivities }) => {
+  const safeOptions = ensureArray<ActivityOption>(activityOptions);
+
   const labourTotal = activity.ratePerUnit * activity.area;
   const materialsTotal = activity.materials.reduce(
     (sum, m) => sum + m.quantity * m.price,
@@ -490,20 +489,41 @@ const ActivityRow: React.FC<{
   const activityTotal = labourTotal + materialsTotal;
   const label = `${groupIndex + 1}.${index + 1}`;
 
+  const handleActivityChange = (selectedId: string) => {
+    const found = safeOptions.find((a) => String(a.id) === selectedId);
+    onUpdate("activityId", found ? found.id : null);
+    onUpdate("name", found ? found.name : "");
+  };
+
+  const ActivitySelect = () => {
+    if (loadingActivities) {
+      return <div className={`${cellSelect} bg-muted/30 animate-pulse`} />;
+    }
+    return (
+      <select
+        value={activity.activityId !== null ? String(activity.activityId) : ""}
+        onChange={(e) => handleActivityChange(e.target.value)}
+        className={cellSelect}
+      >
+        <option value="">
+          {safeOptions.length === 0 ? "No activities available" : "Select activity…"}
+        </option>
+        {safeOptions.map((a) => (
+          <option key={a.id} value={String(a.id)}>{a.name}</option>
+        ))}
+      </select>
+    );
+  };
+
   return (
     <>
       {/* ── Mobile card ── */}
       <div className="sm:hidden rounded-lg border border-border/60 bg-muted/10 p-3 space-y-2.5">
         <div className="flex items-center gap-2">
-          <span className="text-xs font-mono text-primary font-bold shrink-0 w-8">
-            {label}
-          </span>
-          <input
-            value={activity.name}
-            onChange={(e) => onUpdate("name", e.target.value)}
-            placeholder="Activity name…"
-            className={`${cellInput} flex-1`}
-          />
+          <span className="text-xs font-mono text-primary font-bold shrink-0 w-8">{label}</span>
+          <div className="flex-1">
+            <ActivitySelect />
+          </div>
           <button
             onClick={onDelete}
             disabled={!canDelete}
@@ -514,30 +534,22 @@ const ActivityRow: React.FC<{
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
-              Unit
-            </p>
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Unit</p>
             <select
               value={activity.unit}
               onChange={(e) => onUpdate("unit", e.target.value)}
               className="w-full text-sm rounded-md border border-border px-2 py-1.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition appearance-none"
             >
-              {UNITS.map((u) => (
-                <option key={u}>{u}</option>
-              ))}
+              {UNITS.map((u) => <option key={u}>{u}</option>)}
             </select>
           </div>
           <div>
-            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
-              Area
-            </p>
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Area</p>
             <input
               type="number"
               min={0}
               value={activity.area || ""}
-              onChange={(e) =>
-                onUpdate("area", parseFloat(e.target.value) || 0)
-              }
+              onChange={(e) => onUpdate("area", parseFloat(e.target.value) || 0)}
               placeholder="0"
               className={cellInput}
             />
@@ -545,33 +557,23 @@ const ActivityRow: React.FC<{
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div>
-            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
-              Rate / Unit (Labour)
-            </p>
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Rate / Unit (Labour)</p>
             <div className="relative">
-              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
-                ₹
-              </span>
+              <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">₹</span>
               <input
                 type="number"
                 min={0}
                 value={activity.ratePerUnit || ""}
-                onChange={(e) =>
-                  onUpdate("ratePerUnit", parseFloat(e.target.value) || 0)
-                }
+                onChange={(e) => onUpdate("ratePerUnit", parseFloat(e.target.value) || 0)}
                 placeholder="0"
                 className={`${cellInput} pl-6`}
               />
             </div>
           </div>
           <div>
-            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
-              Activity Total
-            </p>
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Activity Total</p>
             <div className="flex items-center h-[34px]">
-              <span
-                className={`text-sm font-semibold ${activityTotal > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}
-              >
+              <span className={`text-sm font-semibold ${activityTotal > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}>
                 {activityTotal > 0 ? fmt(activityTotal) : "—"}
               </span>
             </div>
@@ -581,58 +583,41 @@ const ActivityRow: React.FC<{
           <div className="flex items-center gap-2 flex-wrap">
             {labourTotal > 0 && (
               <span className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800">
-                <Hammer size={9} />
-                Labour: {fmt(labourTotal)}
+                <Hammer size={9} />Labour: {fmt(labourTotal)}
               </span>
             )}
             {materialsTotal > 0 && (
               <span className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
-                <Package size={9} />
-                Materials: {fmt(materialsTotal)}
+                <Package size={9} />Materials: {fmt(materialsTotal)}
               </span>
             )}
           </div>
         )}
         <MaterialBreakdownModal
           activity={activity}
-          onUpdateMaterials={(mats) =>
-            onUpdate("materials", mats as unknown as MaterialItem[])
-          }
+          onUpdateMaterials={(mats) => onUpdate("materials", mats as unknown as MaterialItem[])}
         />
       </div>
 
       {/* ── Desktop row ── */}
       <div className="hidden sm:block rounded-lg border border-border/50 overflow-hidden">
         <div className="grid grid-cols-[48px_1fr_96px_128px_112px_auto_120px_32px] gap-2 items-center px-3 py-2.5 bg-muted/20">
-          <div className="text-xs font-mono text-primary font-semibold">
-            {label}
-          </div>
-          <input
-            value={activity.name}
-            onChange={(e) => onUpdate("name", e.target.value)}
-            placeholder="Activity name…"
-            className={cellInput}
-          />
+          <div className="text-xs font-mono text-primary font-semibold">{label}</div>
+          <ActivitySelect />
           <select
             value={activity.unit}
             onChange={(e) => onUpdate("unit", e.target.value)}
             className="w-full text-sm rounded-md border border-border px-2 py-1.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition appearance-none"
           >
-            {UNITS.map((u) => (
-              <option key={u}>{u}</option>
-            ))}
+            {UNITS.map((u) => <option key={u}>{u}</option>)}
           </select>
           <div className="relative">
-            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
-              ₹
-            </span>
+            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">₹</span>
             <input
               type="number"
               min={0}
               value={activity.ratePerUnit || ""}
-              onChange={(e) =>
-                onUpdate("ratePerUnit", parseFloat(e.target.value) || 0)
-              }
+              onChange={(e) => onUpdate("ratePerUnit", parseFloat(e.target.value) || 0)}
               placeholder="Rate"
               className={`${cellInput} pl-6`}
             />
@@ -647,14 +632,10 @@ const ActivityRow: React.FC<{
           />
           <MaterialBreakdownModal
             activity={activity}
-            onUpdateMaterials={(mats) =>
-              onUpdate("materials", mats as unknown as MaterialItem[])
-            }
+            onUpdateMaterials={(mats) => onUpdate("materials", mats as unknown as MaterialItem[])}
           />
           <div className="text-right">
-            <span
-              className={`text-sm font-semibold ${activityTotal > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}
-            >
+            <span className={`text-sm font-semibold ${activityTotal > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}>
               {activityTotal > 0 ? fmt(activityTotal) : "—"}
             </span>
           </div>
@@ -668,19 +649,15 @@ const ActivityRow: React.FC<{
         </div>
         {(labourTotal > 0 || materialsTotal > 0) && (
           <div className="flex items-center gap-3 px-3 py-1.5 bg-muted/10 border-t border-border/40 flex-wrap">
-            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mr-1">
-              Breakdown:
-            </span>
+            <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mr-1">Breakdown:</span>
             {labourTotal > 0 && (
               <span className="flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800">
-                <Hammer size={9} />
-                Labour: {fmt(labourTotal)}
+                <Hammer size={9} />Labour: {fmt(labourTotal)}
               </span>
             )}
             {materialsTotal > 0 && (
               <span className="flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
-                <Package size={9} />
-                Raw Materials: {fmt(materialsTotal)}
+                <Package size={9} />Raw Materials: {fmt(materialsTotal)}
               </span>
             )}
           </div>
@@ -690,7 +667,7 @@ const ActivityRow: React.FC<{
   );
 };
 
-// ─── Activity Group ───────────────────────────────────────────────────────────
+// ─── Activity Group Card ──────────────────────────────────────────────────────
 
 const ActivityGroupCard: React.FC<{
   group: ActivityGroup;
@@ -698,22 +675,31 @@ const ActivityGroupCard: React.FC<{
   onUpdate: (updated: ActivityGroup) => void;
   onDelete: () => void;
   canDelete: boolean;
-}> = ({ group, index, onUpdate, onDelete, canDelete }) => {
+  activityGroupOptions: DropdownOption[];
+  activityOptions: ActivityOption[];
+  loadingDropdowns: boolean;
+}> = ({ group, index, onUpdate, onDelete, canDelete, activityGroupOptions, activityOptions, loadingDropdowns }) => {
+  const safeGroupOptions = ensureArray<DropdownOption>(activityGroupOptions);
+  const safeActivityOptions = ensureArray<ActivityOption>(activityOptions);
+
   const groupLabourTotal = group.activities.reduce(
     (sum, a) => sum + a.ratePerUnit * a.area,
     0,
   );
   const groupMaterialsTotal = group.activities.reduce(
-    (sum, a) =>
-      sum + a.materials.reduce((ms, m) => ms + m.quantity * m.price, 0),
+    (sum, a) => sum + a.materials.reduce((ms, m) => ms + m.quantity * m.price, 0),
     0,
   );
   const groupTotal = groupLabourTotal + groupMaterialsTotal;
 
+  const filteredActivities = group.groupId
+    ? safeActivityOptions.filter((a) => a.groupId === group.groupId)
+    : safeActivityOptions;
+
   const updateActivity = (
     actIdx: number,
     field: keyof Activity,
-    value: string | number | MaterialItem[],
+    value: string | number | null | MaterialItem[],
   ) => {
     onUpdate({
       ...group,
@@ -727,12 +713,19 @@ const ActivityGroupCard: React.FC<{
     onUpdate({ ...group, activities: [...group.activities, EMPTY_ACTIVITY()] });
 
   const deleteActivity = (actIdx: number) =>
-    onUpdate({
-      ...group,
-      activities: group.activities.filter((_, i) => i !== actIdx),
-    });
+    onUpdate({ ...group, activities: group.activities.filter((_, i) => i !== actIdx) });
 
   const toggleExpand = () => onUpdate({ ...group, expanded: !group.expanded });
+
+  const handleGroupChange = (selectedId: string) => {
+    const found = safeGroupOptions.find((g) => String(g.id) === selectedId);
+    onUpdate({
+      ...group,
+      groupId: found ? found.id : null,
+      name: found ? found.name : "",
+      activities: [EMPTY_ACTIVITY()],
+    });
+  };
 
   return (
     <div className="rounded-xl border border-border bg-card overflow-hidden">
@@ -741,24 +734,31 @@ const ActivityGroupCard: React.FC<{
           onClick={toggleExpand}
           className="w-6 h-6 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
         >
-          {group.expanded ? (
-            <ChevronDown size={14} />
-          ) : (
-            <ChevronRight size={14} />
-          )}
+          {group.expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         </button>
         <span className="text-xs font-mono font-bold text-primary bg-primary/10 px-2 py-0.5 rounded-md shrink-0">
           {index + 1}
         </span>
-        <input
-          value={group.name}
-          onChange={(e) => onUpdate({ ...group, name: e.target.value })}
-          placeholder={`Group ${index + 1} (e.g. Structure, Finishing…)`}
-          className="flex-1 min-w-0 text-sm font-semibold bg-transparent border-none outline-none text-foreground placeholder:text-muted-foreground/40 focus:ring-0"
-        />
-        <span
-          className={`text-sm font-bold shrink-0 ${groupTotal > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}
-        >
+
+        {loadingDropdowns ? (
+          <div className="flex-1 h-8 rounded-md bg-muted/50 animate-pulse" />
+        ) : (
+          // ── FIXED: bg-transparent → bg-background to match all other dropdowns ──
+          <select
+            value={group.groupId !== null ? String(group.groupId) : ""}
+            onChange={(e) => handleGroupChange(e.target.value)}
+            className="flex-1 min-w-0 text-sm font-semibold bg-background border border-border rounded-md px-2 py-1 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition appearance-none cursor-pointer"
+          >
+            <option value="">
+              {safeGroupOptions.length === 0 ? "No groups available" : "Select group…"}
+            </option>
+            {safeGroupOptions.map((g) => (
+              <option key={g.id} value={String(g.id)}>{g.name}</option>
+            ))}
+          </select>
+        )}
+
+        <span className={`text-sm font-bold shrink-0 ${groupTotal > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}>
           {groupTotal > 0 ? fmt(groupTotal) : "₹0"}
         </span>
         <button
@@ -774,22 +774,8 @@ const ActivityGroupCard: React.FC<{
         <div className="p-3 space-y-2">
           {group.activities.length > 0 && (
             <div className="hidden sm:grid grid-cols-[48px_1fr_96px_128px_112px_auto_120px_32px] gap-2 px-3 pb-1">
-              {[
-                "#",
-                "Activity",
-                "Unit",
-                "Rate / Unit (Labour)",
-                "Area",
-                "Materials",
-                "Activity Total",
-                "",
-              ].map((h) => (
-                <div
-                  key={h}
-                  className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
-                >
-                  {h}
-                </div>
+              {["#", "Activity", "Unit", "Rate / Unit (Labour)", "Area", "Materials", "Activity Total", ""].map((h) => (
+                <div key={h} className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{h}</div>
               ))}
             </div>
           )}
@@ -802,8 +788,18 @@ const ActivityGroupCard: React.FC<{
               onUpdate={(field, value) => updateActivity(actIdx, field, value)}
               onDelete={() => deleteActivity(actIdx)}
               canDelete={group.activities.length > 1}
+              activityOptions={filteredActivities}
+              loadingActivities={loadingDropdowns}
             />
           ))}
+          {group.groupId !== null && filteredActivities.length === 0 && !loadingDropdowns && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800">
+              <AlertCircle size={13} className="text-amber-500 shrink-0" />
+              <span className="text-xs text-amber-700 dark:text-amber-400">
+                No activities found for this group. Check the database or select a different group.
+              </span>
+            </div>
+          )}
           <button
             onClick={addActivity}
             className="flex items-center gap-1.5 text-xs text-primary hover:text-primary/80 px-3 py-2 rounded-lg hover:bg-primary/5 transition-colors font-medium"
@@ -830,48 +826,50 @@ const WorkOrderMaster: React.FC = () => {
   const [savedId, setSavedId] = useState<number | null>(null);
   const [savedStatus, setSavedStatus] = useState<string>("Draft");
 
-  // ── Real API data ─────────
-  const [companies, setCompanies] = useState([]);
-  const [projects, setProjects] = useState([]);
-  const [contractors, setContractors] = useState([]);
+  // ── Dropdown states ───────────────────────────────────────────────────────
+  const [companies, setCompanies] = useState<DropdownOption[]>([]);
+  const [projects, setProjects] = useState<DropdownOption[]>([]);
+  const [contractors, setContractors] = useState<DropdownOption[]>([]);
+  const [activityGroupOptions, setActivityGroupOptions] = useState<DropdownOption[]>([]);
+  const [activityOptions, setActivityOptions] = useState<ActivityOption[]>([]);
+  const [loadingDropdowns, setLoadingDropdowns] = useState(true);
+  const [dropdownError, setDropdownError] = useState<string | null>(null);
 
   useEffect(() => {
-    const fetchData = async () => {
+    const loadDropdowns = async () => {
+      setLoadingDropdowns(true);
+      setDropdownError(null);
       try {
-        const [entRes, contrRes] = await Promise.all([
-          fetchWithAuth("/api/enterprises"),
-          fetchWithAuth("/api/account-head/options"),
+        const [comp, proj, cont, grps, acts] = await Promise.all([
+          fetchCompanies(),
+          fetchProjects(),
+          fetchContractors(),
+          fetchActivityGroups(),
+          fetchActivities(),
         ]);
-        if (entRes.ok) {
-          const enterprises = await entRes.json();
-          setCompanies(
-            enterprises.map((e: any) => ({
-              id: e.Id,
-              name: e.Name || e.CompanyName,
-            })),
-          );
-          setProjects(
-            enterprises.map((e: any) => ({
-              id: e.Id,
-              name: e.ProjectName || e.Name,
-            })),
-          );
-        }
-        if (contrRes.ok) {
-          const contractorsData = await contrRes.json();
-          setContractors(
-            contractorsData.map((c: any) => ({ id: c.id, name: c.label })),
-          );
-        }
+
+        setCompanies(ensureArray<DropdownOption>(comp));
+        setProjects(ensureArray<DropdownOption>(proj));
+        setContractors(ensureArray<DropdownOption>(cont));
+        setActivityGroupOptions(ensureArray<DropdownOption>(grps));
+        setActivityOptions(ensureArray<ActivityOption>(acts));
       } catch (err) {
         console.error("Failed to fetch dropdown data:", err);
-        toast.error("Failed to load dropdown data");
+        setDropdownError("Some dropdown data could not be loaded. You can still fill in the form.");
+        toast.error("Failed to load some dropdown data");
+        setCompanies([]);
+        setProjects([]);
+        setContractors([]);
+        setActivityGroupOptions([]);
+        setActivityOptions([]);
+      } finally {
+        setLoadingDropdowns(false);
       }
     };
-    fetchData();
+    loadDropdowns();
   }, []);
 
-  // ── Totals ──────────────────────────────────────────────────────────────────
+  // ── Totals ────────────────────────────────────────────────────────────────
   const { grandLabourTotal, grandMaterialsTotal, grandTotal } = useMemo(() => {
     let labour = 0;
     let materials = 0;
@@ -881,11 +879,7 @@ const WorkOrderMaster: React.FC = () => {
         materials += a.materials.reduce((s, m) => s + m.quantity * m.price, 0);
       }
     }
-    return {
-      grandLabourTotal: labour,
-      grandMaterialsTotal: materials,
-      grandTotal: labour + materials,
-    };
+    return { grandLabourTotal: labour, grandMaterialsTotal: materials, grandTotal: labour + materials };
   }, [groups]);
 
   const setField = (key: keyof WorkOrderForm, value: string) => {
@@ -918,7 +912,7 @@ const WorkOrderMaster: React.FC = () => {
     return Object.keys(e).length === 0;
   };
 
-  // ── SAVE — the real implementation ─────────────────────────────────────────
+  // ── SAVE ──────────────────────────────────────────────────────────────────
   const handleSave = async () => {
     if (!validate()) {
       toast.error("Please fill in all required fields.");
@@ -928,7 +922,6 @@ const WorkOrderMaster: React.FC = () => {
     try {
       const userId = parseInt(currentUser?.id ?? "1");
 
-      // Step 1: Create the header row → get new Id back
       const created = await createWorkOrder({
         CompanyId: parseInt(form.companyId),
         ProjectId: parseInt(form.projectId),
@@ -943,27 +936,21 @@ const WorkOrderMaster: React.FC = () => {
 
       const newHeaderId: number = created.Id;
 
-      // Step 2: Bulk-save activities + materials under that header
       const activities = groups.flatMap((g) =>
         g.activities.map((a) => {
           const labourAmt = a.ratePerUnit * a.area;
-          const materialAmt = a.materials.reduce(
-            (s, m) => s + m.quantity * m.price,
-            0,
-          );
+          const materialAmt = a.materials.reduce((s, m) => s + m.quantity * m.price, 0);
           return {
-            // No Id → backend will INSERT
-            ActivityGroupId: null, // wire up if you add group master later
-            ActivityId: null, // wire up if you add activity master later
-            UOMId: null, // wire up UOM master later
+            ActivityGroupId: g.groupId ?? null,
+            ActivityId: a.activityId ?? null,
+            UOMId: null,
             Rate: a.ratePerUnit || null,
             Area: a.area || null,
             LabourAmount: labourAmt || null,
             MaterialAmount: materialAmt || null,
             GrandTotal: labourAmt + materialAmt || null,
-            Remarks: a.name || null, // store activity name in Remarks until ActivityId FK is wired
+            Remarks: a.name || null,
             materials: a.materials.map((m) => ({
-              // ItemId left null until Item_Master_Group FK is wired
               UOMId: null,
               Quantity: m.quantity || null,
               Rate: m.price || null,
@@ -976,7 +963,14 @@ const WorkOrderMaster: React.FC = () => {
 
       await saveFullWorkOrder(newHeaderId, {
         header: {
+          CompanyId: parseInt(form.companyId),
+          ProjectId: parseInt(form.projectId),
+          DocumentNumber: form.docNumber,
+          DocumentDate: form.docDate,
+          ContractorId: parseInt(form.contractorId),
           TotalAmount: grandTotal,
+          Remarks: form.remarks || null,
+          TermsAndConditions: form.termsAndConditions || null,
           UpdatedBy: userId,
         },
         activities,
@@ -988,48 +982,57 @@ const WorkOrderMaster: React.FC = () => {
       setSavedStatus("Draft");
       setForm((p) => ({ ...p, docNumber: generateDocNumber() }));
       setTimeout(() => setSaved(false), 3000);
-    } catch (err: any) {
-      const msg: string = err.message || "";
+    } catch (err: unknown) {
+      const msg: string = err instanceof Error ? err.message : String(err);
       let friendly = "Something went wrong. Please try again.";
-
       if (msg.includes("UNIQUE KEY") || msg.includes("duplicate key"))
-        friendly =
-          "A work order with this document number already exists. Please reset and try again.";
+        friendly = "A work order with this document number already exists. Please reset and try again.";
       else if (msg.includes("FK_WorkOrder_Com") || msg.includes("enterprise"))
-        friendly =
-          "The selected company doesn't exist. Please select a valid company.";
+        friendly = "The selected company doesn't exist. Please select a valid company.";
       else if (msg.includes("FK_WorkOrder_Project"))
-        friendly =
-          "The selected project doesn't exist. Please select a valid project.";
-      else if (
-        msg.includes("FK_WorkOrder_Contr") ||
-        msg.includes("AccountHeadMaster")
-      )
-        friendly =
-          "The selected contractor doesn't exist. Please select a valid contractor.";
+        friendly = "The selected project doesn't exist. Please select a valid project.";
+      else if (msg.includes("FK_WorkOrder_Contr") || msg.includes("AccountHeadMaster"))
+        friendly = "The selected contractor doesn't exist. Please select a valid contractor.";
       else if (msg.includes("FK_WOA") || msg.includes("WorkOrderActivities"))
-        friendly =
-          "One or more activities could not be saved. Please check the activity details.";
-      else if (
-        msg.includes("FK_WOAM") ||
-        msg.includes("WorkOrderActivityMaterials")
-      )
-        friendly =
-          "One or more materials could not be saved. Please check the material details.";
+        friendly = "One or more activities could not be saved. Please check the activity details.";
+      else if (msg.includes("FK_WOAM") || msg.includes("WorkOrderActivityMaterials"))
+        friendly = "One or more materials could not be saved. Please check the material details.";
       else if (msg.includes("NOT NULL") || msg.includes("cannot be null"))
-        friendly =
-          "Some required fields are missing. Please fill in all required fields.";
+        friendly = "Some required fields are missing. Please fill in all required fields.";
       else if (msg.includes("FOREIGN KEY"))
-        friendly =
-          "A selected value references data that doesn't exist in the system.";
+        friendly = "A selected value references data that doesn't exist in the system.";
       else if (msg.includes("Cannot insert") || msg.includes("INSERT"))
-        friendly =
-          "Could not save the work order. Please check all fields and try again.";
-
+        friendly = "Could not save the work order. Please check all fields and try again.";
       toast.error(friendly);
     } finally {
       setSaving(false);
     }
+  };
+
+  // ─── Dropdown field renderer ─────────────────────────────────────────────
+  const renderSelect = (
+    id: string,
+    value: string,
+    onChange: (v: string) => void,
+    options: DropdownOption[],
+    placeholder: string,
+    hasError: boolean,
+  ) => {
+    if (loadingDropdowns) return <SelectSkeleton />;
+    return (
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={`${selectCls} ${hasError ? "border-red-400" : ""}`}
+      >
+        <option value="">
+          {options.length === 0 ? `No ${placeholder.toLowerCase()} found` : `${placeholder}…`}
+        </option>
+        {options.map((o) => (
+          <option key={o.id} value={String(o.id)}>{o.name}</option>
+        ))}
+      </select>
+    );
   };
 
   return (
@@ -1039,9 +1042,7 @@ const WorkOrderMaster: React.FC = () => {
       {/* Page header */}
       <div className="mb-5 flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-xl font-heading font-bold text-foreground">
-            Work Order
-          </h1>
+          <h1 className="text-xl font-heading font-bold text-foreground">Work Order</h1>
           <p className="text-xs text-muted-foreground mt-0.5 hidden sm:block">
             Create and manage work orders with activity-based cost breakdown
           </p>
@@ -1056,31 +1057,29 @@ const WorkOrderMaster: React.FC = () => {
           </button>
           <button
             onClick={handleSave}
-            disabled={saving}
+            disabled={saving || loadingDropdowns}
             className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 disabled:opacity-60 transition-opacity"
           >
             {saving ? (
-              <>
-                <span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                <span>Saving…</span>
-              </>
+              <><span className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" /><span>Saving…</span></>
             ) : saved ? (
-              <>
-                <Check size={14} />
-                <span>Saved!</span>
-              </>
+              <><Check size={14} /><span>Saved!</span></>
             ) : (
-              <>
-                <Save size={14} />
-                <span className="hidden sm:inline">Save Work Order</span>
-                <span className="sm:hidden">Save</span>
-              </>
+              <><Save size={14} /><span className="hidden sm:inline">Save Work Order</span><span className="sm:hidden">Save</span></>
             )}
           </button>
         </div>
       </div>
 
-      {/* Approval actions — shown after save */}
+      {/* Dropdown load error banner */}
+      {dropdownError && (
+        <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/20 px-4 py-3">
+          <AlertCircle size={15} className="text-amber-500 shrink-0 mt-0.5" />
+          <p className="text-sm text-amber-700 dark:text-amber-400">{dropdownError}</p>
+        </div>
+      )}
+
+      {/* Approval actions */}
       {savedId && (
         <div className="mb-5 rounded-xl border border-border bg-card px-4 py-3 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
@@ -1108,93 +1107,49 @@ const WorkOrderMaster: React.FC = () => {
       <div className="rounded-xl border border-border bg-card mb-5">
         <div className="px-4 sm:px-5 py-3.5 border-b border-border flex items-center gap-2">
           <FileText size={15} className="text-primary shrink-0" />
-          <h2 className="text-sm font-semibold text-foreground">
-            Work Order Details
-          </h2>
+          <h2 className="text-sm font-semibold text-foreground">Work Order Details</h2>
           <span className="ml-auto font-mono text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded shrink-0">
             {form.docNumber}
           </span>
         </div>
-
         <div className="p-4 sm:p-5">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-5 gap-y-4">
-            {/* Company — real data from DB */}
+
+            {/* Company */}
             <div>
               <FieldLabel required>
-                <span className="flex items-center gap-1.5">
-                  <Building2 size={11} />
-                  Company Name
-                </span>
+                <span className="flex items-center gap-1.5"><Building2 size={11} />Company Name</span>
               </FieldLabel>
-              <select
-                value={form.companyId}
-                onChange={(e) => setField("companyId", e.target.value)}
-                className={`${selectCls} ${errors.companyId ? "border-red-400" : ""}`}
-                style={{ colorScheme: "light dark" }}
-              >
-                <option value="">Select company…</option>
-                {companies.map((c: any) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-              {errors.companyId && (
-                <p className="text-xs text-red-500 mt-1">Required</p>
-              )}
+              {renderSelect("companyId", form.companyId, (v) => setField("companyId", v), companies, "Select company", errors.companyId ?? false)}
+              {errors.companyId && <p className="text-xs text-red-500 mt-1">Required</p>}
             </div>
 
-            {/* Project — real data from DB */}
+            {/* Project */}
             <div>
               <FieldLabel required>
-                <span className="flex items-center gap-1.5">
-                  <Layers size={11} />
-                  Project Name
-                </span>
+                <span className="flex items-center gap-1.5"><Layers size={11} />Project Name</span>
               </FieldLabel>
-              <select
-                value={form.projectId}
-                onChange={(e) => setField("projectId", e.target.value)}
-                className={`${selectCls} ${errors.projectId ? "border-red-400" : ""}`}
-                style={{ colorScheme: "light dark" }}
-              >
-                <option value="">Select project…</option>
-                {projects.map((p: any) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-              {errors.projectId && (
-                <p className="text-xs text-red-500 mt-1">Required</p>
-              )}
+              {renderSelect("projectId", form.projectId, (v) => setField("projectId", v), projects, "Select project", errors.projectId ?? false)}
+              {errors.projectId && <p className="text-xs text-red-500 mt-1">Required</p>}
             </div>
 
-            {/* Document Number — auto-generated, read-only */}
+            {/* Document Number */}
             <div>
               <FieldLabel>
-                <span className="flex items-center gap-1.5">
-                  <Hash size={11} />
-                  Document Number
-                </span>
+                <span className="flex items-center gap-1.5"><Hash size={11} />Document Number</span>
               </FieldLabel>
               <input
                 value={form.docNumber}
                 readOnly
                 className={`${inputCls} bg-muted/50 text-muted-foreground font-mono cursor-not-allowed`}
               />
-              <p className="text-[11px] text-muted-foreground mt-1">
-                Auto-generated
-              </p>
+              <p className="text-[11px] text-muted-foreground mt-1">Auto-generated</p>
             </div>
 
             {/* Document Date */}
             <div>
               <FieldLabel required>
-                <span className="flex items-center gap-1.5">
-                  <Calendar size={11} />
-                  Document Date
-                </span>
+                <span className="flex items-center gap-1.5"><Calendar size={11} />Document Date</span>
               </FieldLabel>
               <input
                 type="date"
@@ -1204,44 +1159,22 @@ const WorkOrderMaster: React.FC = () => {
               />
             </div>
 
-            {/* Contractor — real data from DB (AccountHeadMaster) */}
+            {/* Contractor */}
             <div>
               <FieldLabel required>
-                <span className="flex items-center gap-1.5">
-                  <User size={11} />
-                  Contractor
-                </span>
+                <span className="flex items-center gap-1.5"><User size={11} />Contractor</span>
               </FieldLabel>
-              <select
-                value={form.contractorId}
-                onChange={(e) => setField("contractorId", e.target.value)}
-                className={`${selectCls} ${errors.contractorId ? "border-red-400" : ""}`}
-                style={{ colorScheme: "light dark" }}
-              >
-                <option value="">Select contractor…</option>
-                {contractors.map((c: any) => (
-                  <option key={c.id} value={c.id}>
-                    {c.name}
-                  </option>
-                ))}
-              </select>
-              {errors.contractorId && (
-                <p className="text-xs text-red-500 mt-1">Required</p>
-              )}
+              {renderSelect("contractorId", form.contractorId, (v) => setField("contractorId", v), contractors, "Select contractor", errors.contractorId ?? false)}
+              {errors.contractorId && <p className="text-xs text-red-500 mt-1">Required</p>}
             </div>
 
-            {/* Total Amount — computed from activities, read-only */}
+            {/* Total Amount */}
             <div>
               <FieldLabel>
-                <span className="flex items-center gap-1.5">
-                  <IndianRupee size={11} />
-                  Total Amount
-                </span>
+                <span className="flex items-center gap-1.5"><IndianRupee size={11} />Total Amount</span>
               </FieldLabel>
               <div className="relative">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">
-                  ₹
-                </span>
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-sm">₹</span>
                 <input
                   readOnly
                   value={grandTotal > 0 ? grandTotal.toFixed(2) : ""}
@@ -1249,9 +1182,7 @@ const WorkOrderMaster: React.FC = () => {
                   className={`${inputCls} pl-7 bg-muted/50 text-muted-foreground cursor-not-allowed`}
                 />
               </div>
-              <p className="text-[11px] text-muted-foreground mt-1">
-                Auto-calculated from activities
-              </p>
+              <p className="text-[11px] text-muted-foreground mt-1">Auto-calculated from activities</p>
             </div>
 
             {/* Remarks */}
@@ -1285,12 +1216,9 @@ const WorkOrderMaster: React.FC = () => {
         <div className="px-4 sm:px-5 py-3.5 border-b border-border flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 min-w-0">
             <Calculator size={15} className="text-primary shrink-0" />
-            <h2 className="text-sm font-semibold text-foreground">
-              Activity Details
-            </h2>
+            <h2 className="text-sm font-semibold text-foreground">Activity Details</h2>
             <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded-full hidden sm:block">
-              {groups.length}g ·{" "}
-              {groups.reduce((s, g) => s + g.activities.length, 0)}a
+              {groups.length}g · {groups.reduce((s, g) => s + g.activities.length, 0)}a
             </span>
           </div>
           <button
@@ -1312,6 +1240,9 @@ const WorkOrderMaster: React.FC = () => {
               onUpdate={(updated) => updateGroup(idx, updated)}
               onDelete={() => deleteGroup(idx)}
               canDelete={groups.length > 1}
+              activityGroupOptions={activityGroupOptions}
+              activityOptions={activityOptions}
+              loadingDropdowns={loadingDropdowns}
             />
           ))}
         </div>
@@ -1321,30 +1252,21 @@ const WorkOrderMaster: React.FC = () => {
           <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-border/50">
             <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3">
               <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                <Package size={11} className="text-amber-500" />
-                Raw Materials
+                <Package size={11} className="text-amber-500" />Raw Materials
               </span>
-              <span className="text-base font-bold text-amber-600 dark:text-amber-400">
-                {fmt(grandMaterialsTotal)}
-              </span>
+              <span className="text-base font-bold text-amber-600 dark:text-amber-400">{fmt(grandMaterialsTotal)}</span>
             </div>
             <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3">
               <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                <Hammer size={11} className="text-blue-500" />
-                Labour
+                <Hammer size={11} className="text-blue-500" />Labour
               </span>
-              <span className="text-base font-bold text-blue-600 dark:text-blue-400">
-                {fmt(grandLabourTotal)}
-              </span>
+              <span className="text-base font-bold text-blue-600 dark:text-blue-400">{fmt(grandLabourTotal)}</span>
             </div>
             <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3 bg-muted/20">
               <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                <Receipt size={11} className="text-primary" />
-                Grand Total
+                <Receipt size={11} className="text-primary" />Grand Total
               </span>
-              <span className="text-xl font-bold text-foreground">
-                {fmt(grandTotal)}
-              </span>
+              <span className="text-xl font-bold text-foreground">{fmt(grandTotal)}</span>
             </div>
           </div>
         </div>
@@ -1356,29 +1278,19 @@ const WorkOrderMaster: React.FC = () => {
           onClick={resetAll}
           className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted transition-colors"
         >
-          <RotateCcw size={13} />
-          Reset
+          <RotateCcw size={13} />Reset
         </button>
         <button
           onClick={handleSave}
-          disabled={saving}
+          disabled={saving || loadingDropdowns}
           className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 disabled:opacity-60 transition-opacity"
         >
           {saving ? (
-            <>
-              <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-              Saving…
-            </>
+            <><span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />Saving…</>
           ) : saved ? (
-            <>
-              <Check size={14} />
-              Saved!
-            </>
+            <><Check size={14} />Saved!</>
           ) : (
-            <>
-              <Save size={14} />
-              Save Work Order
-            </>
+            <><Save size={14} />Save Work Order</>
           )}
         </button>
       </div>
