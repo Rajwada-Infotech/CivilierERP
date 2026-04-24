@@ -171,6 +171,7 @@ const GeneralLedgerMaster: React.FC = () => {
   const { data: groupsData, isLoading: groupsLoading } = useQuery({
     queryKey: ["account-groups"],
     queryFn: getAccountGroups,
+    staleTime: 5 * 60 * 1000,
   });
 
   const {

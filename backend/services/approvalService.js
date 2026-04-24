@@ -1,81 +1,114 @@
 // ============================================================
 // backend/services/approvalService.js
-// Reusable workflow engine — plugs into any transaction module.
-//
-// State machines:
-//
-//   PurchaseOrders:
-//     Draft/Issued → Pending → Approved
-//                            ↘ Rejected → Issued
-//
-//   WorkOrders / Payments / ExpenseBooking:
-//     Draft → Pending → Approved
-//                     ↘ Rejected → Draft
-//
-//   GoodsReceiptNotes:
-//     Partially Received → Fully Received → Approved
-//                        ↘ Pending → Approved / Rejected → Partially Received
-//
-// Usage:
-//   const { transition, guardEdit } = require("../services/approvalService");
 // ============================================================
 
 const { getPool, sql } = require("../db");
 
 // ─── Table registry ───────────────────────────────────────────────────────────
 const TABLE_REGISTRY = {
-  "purchase-orders": { table: "PurchaseOrders",    pk: "PurchaseOrderID" },
-  "work-orders":     { table: "WorkOrderHeader",   pk: "WorkOrderID"     },
-  "payments":        { table: "NewPayment",        pk: "PPaymentID"      },
-  "goods-receipt":   { table: "GoodsReceiptNotes", pk: "GRNId"           },
-  "expense-booking": { table: "ExpenseBooking",    pk: "ExpenseID"       },
+  "purchase-orders": {
+    table:         "PurchaseOrders",
+    pk:            "PurchaseOrderID",
+    statusCol:     "Status",
+    updatedByCol:  "UpdatedBy",
+    updatedAtCol:  "UpdatedAt",
+    approvedByCol: "ApprovedBy",
+    approvedAtCol: "ApprovedAt",
+    rejectedByCol: "RejectedBy",
+    rejectedAtCol: "RejectedAt",
+    rejectNoteCol: "RejectionNote",
+  },
+  "work-orders": {
+    table:         "WorkOrderHeader",
+    pk:            "Id",
+    statusCol:     "Status",
+    updatedByCol:  "UpdatedBy",
+    updatedAtCol:  "UpdatedAt",
+    approvedByCol: "ApprovedBy",
+    approvedAtCol: "ApprovedAt",
+    rejectedByCol: "RejectedBy",
+    rejectedAtCol: "RejectedAt",
+    rejectNoteCol: "RejectionNote",
+  },
+  "payments": {
+    table:         "NewPayment",
+    pk:            "PPaymentID",
+    statusCol:     "Status",
+    updatedByCol:  "PUpdatedBy",
+    updatedAtCol:  null,           // NewPayment has no UpdatedAt column
+    approvedByCol: "PApprovedBy",
+    approvedAtCol: null,           // no separate ApprovedAt — use Status timestamp
+    rejectedByCol: null,
+    rejectedAtCol: null,
+    rejectNoteCol: null,
+  },
+  "goods-receipt": {
+    table:         "GoodsReceiptNotes",
+    pk:            "GRNID",
+    statusCol:     "Status",
+    updatedByCol:  "UpdatedBy",
+    updatedAtCol:  "UpdatedAt",
+    approvedByCol: "ApprovedBy",
+    approvedAtCol: "ApprovedAt",
+    rejectedByCol: "RejectedBy",
+    rejectedAtCol: "RejectedAt",
+    rejectNoteCol: "RejectionNote",
+  },
+  "expense-booking": {
+    table:         "ExpenseBooking",
+    pk:            "Eid",
+    statusCol:     "EStatus",
+    updatedByCol:  null,
+    updatedAtCol:  "EUpdatedAt",
+    approvedByCol: "EApprovedBy",
+    approvedAtCol: null,
+    rejectedByCol: null,
+    rejectedAtCol: null,
+    rejectNoteCol: null,
+  },
 };
 
 // ─── State machine ────────────────────────────────────────────────────────────
 const TRANSITIONS = {
-  // PurchaseOrders — "Issued" = created internally, needs approval (confirmed Option A)
   Draft:                ["Issued", "Pending"],
   Issued:               ["Pending"],
   Pending:              ["Approved", "Rejected"],
-  Approved:             [],                          // Terminal
-  Rejected:             ["Issued", "Draft"],         // Re-submit after rejection
-
-  // GoodsReceiptNotes domain statuses
+  Approved:             [],
+  Rejected:             ["Issued", "Draft"],
   "Partially Received": ["Fully Received", "Pending"],
   "Fully Received":     ["Approved"],
 };
 
-// ─── Terminal states — guardEdit blocks edits on these ───────────────────────
-const TERMINAL_STATES = ["Approved", "Fully Received"];
+const TERMINAL_STATES  = ["Approved", "Fully Received"];
+const APPROVER_ROLES   = ["admin", "super_admin", "dba"];
 
-// ─── Roles allowed to approve / reject ───────────────────────────────────────
-const APPROVER_ROLES = ["admin", "super_admin", "dba"];
-
-// ─── Core transition function ─────────────────────────────────────────────────
+// ─── Core transition ──────────────────────────────────────────────────────────
 async function transition(moduleKey, recordId, newStatus, actor, actorRole = null, note = null) {
   const registry = TABLE_REGISTRY[moduleKey];
   if (!registry) {
     throw new Error(`Unknown module: "${moduleKey}". Add it to TABLE_REGISTRY in approvalService.js`);
   }
 
-  const { table, pk } = registry;
+  const { table, pk, statusCol, updatedByCol, updatedAtCol,
+          approvedByCol, approvedAtCol,
+          rejectedByCol, rejectedAtCol, rejectNoteCol } = registry;
+
   const id = parseInt(recordId, 10);
   if (isNaN(id)) throw new Error("Invalid record ID");
 
-  // Role check for approve/reject
   if (["Approved", "Rejected"].includes(newStatus)) {
     if (actorRole && !APPROVER_ROLES.includes(actorRole)) {
       throw new Error(`Role "${actorRole}" is not authorized to approve or reject records`);
     }
   }
 
-  const pool = await getPool();
+  const pool = getPool(); // synchronous — no await
 
   // 1. Fetch current status
   const current = await pool
     .request()
     .input("id", sql.Int, id)
-    .query(`SELECT Status FROM dbo.${table} WHERE ${pk} = @id`);
+    .query(`SELECT ${statusCol} AS Status FROM dbo.${table} WHERE ${pk} = @id`);
 
   if (!current.recordset.length) {
     throw new Error(`Record ${id} not found in ${table}`);
@@ -98,33 +131,51 @@ async function transition(moduleKey, recordId, newStatus, actor, actorRole = nul
     );
   }
 
-  // 3. Build SET clause
+  // 3. Build SET clause dynamically per table's actual columns
   const req = pool.request().input("id", sql.Int, id);
-  const setClauses = [`Status = '${newStatus}'`, `UpdatedAt = GETDATE()`];
+  const setClauses = [`${statusCol} = '${newStatus}'`];
 
-  if (actor) {
+  if (updatedAtCol) {
+    setClauses.push(`${updatedAtCol} = GETDATE()`);
+  }
+
+  if (updatedByCol && actor) {
     req.input("actor", sql.NVarChar(150), actor);
-    setClauses.push(`UpdatedBy = @actor`);
+    setClauses.push(`${updatedByCol} = @actor`);
   }
 
   if (newStatus === "Approved") {
-    req.input("approvedBy", sql.NVarChar(150), actor || null);
-    setClauses.push(`ApprovedBy = @approvedBy`, `ApprovedAt = GETDATE()`);
-    setClauses.push(`RejectedBy = NULL`, `RejectedAt = NULL`, `RejectionNote = NULL`);
+    if (approvedByCol) {
+      req.input("approvedBy", sql.NVarChar(150), actor || null);
+      setClauses.push(`${approvedByCol} = @approvedBy`);
+    }
+    if (approvedAtCol) {
+      setClauses.push(`${approvedAtCol} = GETDATE()`);
+    }
+    // Clear rejection fields if they exist
+    if (rejectedByCol) setClauses.push(`${rejectedByCol} = NULL`);
+    if (rejectedAtCol) setClauses.push(`${rejectedAtCol} = NULL`);
+    if (rejectNoteCol) setClauses.push(`${rejectNoteCol} = NULL`);
   }
 
   if (newStatus === "Rejected") {
-    req.input("rejectedBy", sql.NVarChar(150), actor || null);
-    setClauses.push(`RejectedBy = @rejectedBy`, `RejectedAt = GETDATE()`);
-    if (note) {
+    if (rejectedByCol) {
+      req.input("rejectedBy", sql.NVarChar(150), actor || null);
+      setClauses.push(`${rejectedByCol} = @rejectedBy`);
+    }
+    if (rejectedAtCol) {
+      setClauses.push(`${rejectedAtCol} = GETDATE()`);
+    }
+    if (rejectNoteCol && note) {
       req.input("rejectionNote", sql.NVarChar(500), note);
-      setClauses.push(`RejectionNote = @rejectionNote`);
+      setClauses.push(`${rejectNoteCol} = @rejectionNote`);
     }
   }
 
-  // Re-draft / re-issue after rejection — clear stale rejection fields
   if (["Draft", "Issued"].includes(newStatus)) {
-    setClauses.push(`RejectedBy = NULL`, `RejectedAt = NULL`, `RejectionNote = NULL`);
+    if (rejectedByCol) setClauses.push(`${rejectedByCol} = NULL`);
+    if (rejectedAtCol) setClauses.push(`${rejectedAtCol} = NULL`);
+    if (rejectNoteCol) setClauses.push(`${rejectNoteCol} = NULL`);
   }
 
   // 4. Execute
@@ -146,19 +197,17 @@ async function transition(moduleKey, recordId, newStatus, actor, actorRole = nul
 }
 
 // ─── Guard: block edits on terminal records ───────────────────────────────────
-// Add to every PUT/DELETE handler: await guardEdit("purchase-orders", req.params.id);
-//
 async function guardEdit(moduleKey, recordId) {
   const registry = TABLE_REGISTRY[moduleKey];
   if (!registry) return;
 
-  const { table, pk } = registry;
-  const pool = await getPool();
+  const { table, pk, statusCol } = registry;
+  const pool = getPool();
 
   const result = await pool
     .request()
     .input("id", sql.Int, parseInt(recordId, 10))
-    .query(`SELECT Status FROM dbo.${table} WHERE ${pk} = @id`);
+    .query(`SELECT ${statusCol} AS Status FROM dbo.${table} WHERE ${pk} = @id`);
 
   const status = result.recordset[0]?.Status;
   if (TERMINAL_STATES.includes(status)) {
@@ -168,24 +217,31 @@ async function guardEdit(moduleKey, recordId) {
   }
 }
 
-// ─── Helper: get full approval state of a record ──────────────────────────────
+// ─── Get full approval state ──────────────────────────────────────────────────
 async function getStatus(moduleKey, recordId) {
   const registry = TABLE_REGISTRY[moduleKey];
   if (!registry) throw new Error(`Unknown module: "${moduleKey}"`);
-  const { table, pk } = registry;
 
-  const pool = await getPool();
+  const { table, pk, statusCol, approvedByCol, approvedAtCol,
+          rejectedByCol, rejectedAtCol, rejectNoteCol } = registry;
+
+  const selectCols = [
+    `${statusCol} AS Status`,
+    approvedByCol ? `${approvedByCol} AS ApprovedBy` : `NULL AS ApprovedBy`,
+    approvedAtCol ? `${approvedAtCol} AS ApprovedAt` : `NULL AS ApprovedAt`,
+    rejectedByCol ? `${rejectedByCol} AS RejectedBy` : `NULL AS RejectedBy`,
+    rejectedAtCol ? `${rejectedAtCol} AS RejectedAt` : `NULL AS RejectedAt`,
+    rejectNoteCol ? `${rejectNoteCol} AS RejectionNote` : `NULL AS RejectionNote`,
+  ].join(", ");
+
+  const pool = getPool();
   const result = await pool
     .request()
     .input("id", sql.Int, parseInt(recordId, 10))
-    .query(
-      `SELECT Status, ApprovedBy, ApprovedAt, RejectedBy, RejectedAt, RejectionNote
-       FROM dbo.${table} WHERE ${pk} = @id`
-    );
+    .query(`SELECT ${selectCols} FROM dbo.${table} WHERE ${pk} = @id`);
 
-  if (!result.recordset.length) throw new Error(`Record not found`);
+  if (!result.recordset.length) throw new Error("Record not found");
   return result.recordset[0];
 }
 
 module.exports = { transition, guardEdit, getStatus, TABLE_REGISTRY, TERMINAL_STATES, APPROVER_ROLES };
-

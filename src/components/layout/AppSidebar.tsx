@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useModule } from "@/contexts/ModuleContext";
 import { useReminders } from "@/hooks/useReminders";
@@ -36,6 +36,31 @@ import {
   Megaphone,
   BellRing,
 } from "lucide-react";
+
+// ── Approval pending count (polls every 60 s) ────────────────────────────────
+function useApprovalCount() {
+  const [count, setCount] = useState(0);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const fetch = () => {
+    const token = localStorage.getItem("token");
+    window
+      .fetch("/api/approval-inbox/count", {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      })
+      .then((r) => (r.ok ? r.json() : Promise.reject()))
+      .then((d) => setCount(d.total ?? 0))
+      .catch(() => {});
+  };
+
+  useEffect(() => {
+    fetch();
+    timerRef.current = setInterval(fetch, 60_000);
+    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+  }, []);
+
+  return count;
+}
 
 interface SubItem {
   label: string;
@@ -173,13 +198,13 @@ const buildMaterialNavItems = (): NavItem[] => [
 ];
 
 // ── Admin sidebar ──────────────────────────────────────────────────────────
-const ADMIN_NAV_ITEMS: NavItem[] = [
+const buildAdminNavItems = (pendingCount: number): NavItem[] => [
   { label: "Transaction", icon: BarChart3, path: "/admin" },
   {
     label: "Enterprise",
     icon: Building2,
     children: [
-      { label: "Business Unit", path: "/admin/masters/business-unit" },
+      { label: "Enterprise", path: "/admin/masters/business-unit" },
       { label: "Project", path: "/admin/masters/project" },
       { label: "Company", path: "/admin/masters/company" },
     ],
@@ -205,7 +230,11 @@ const ADMIN_NAV_ITEMS: NavItem[] = [
     label: "Approval",
     icon: CheckCircle2,
     children: [
-      { label: "Inbox", path: "/admin/approval/inbox" },
+      {
+        label: "Inbox",
+        path: "/admin/approval/inbox",
+        badge: pendingCount > 0 ? pendingCount : undefined,
+      },
       { label: "Approval Setup", path: "/admin/approval/setup" },
       { label: "Post Approval Rights", path: "/admin/approval/post-rights" },
     ],
@@ -257,7 +286,7 @@ const SUPER_ADMIN_NAV_ITEMS: NavItem[] = [
     label: "Enterprise",
     icon: Globe,
     children: [
-      { label: "Business Unit", path: "/admin/masters/business-unit" },
+      { label: "Enterprise", path: "/admin/masters/business-unit" },
       { label: "Project", path: "/admin/masters/project" },
       { label: "Company", path: "/admin/masters/company" },
     ],
@@ -459,6 +488,7 @@ export const AppSidebar = () => {
   const { collapsed, setCollapsed } = useSidebarState();
   const { overdueTaskCount: overdueCount } = useReminders();
   const { currentUser } = useAuth();
+  const pendingApprovalCount = useApprovalCount();
 
   const ADMIN_SETUP_PATHS = [
     "/masters/named-entry-type",
@@ -483,7 +513,7 @@ export const AppSidebar = () => {
   const getModuleNavItems = (): NavItem[] => {
     switch (activeModule) {
       case "admin":
-        return ADMIN_NAV_ITEMS;
+        return buildAdminNavItems(pendingApprovalCount);
       case "material":
         return buildMaterialNavItems();
       case "finance":
@@ -502,7 +532,7 @@ export const AppSidebar = () => {
     if (isSuperAdminPage) return SUPER_ADMIN_NAV_ITEMS;
     if (isDbaPage) return DBA_NAV_ITEMS;
     if (isUserProfilePage) return USER_NAV_ITEMS;
-    if (isAdminPage) return ADMIN_NAV_ITEMS;
+    if (isAdminPage) return buildAdminNavItems(pendingApprovalCount);
     return getModuleNavItems();
   };
 

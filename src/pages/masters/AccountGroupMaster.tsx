@@ -128,6 +128,7 @@ function TreeRow({
   setDeleteConfirm: (id: string | null) => void;
   activeEditId: string | null;
   allGroups: AccountGroup[];
+  onViewGL: (id: string) => void;
 }) {
   const hasChildren = node.children.length > 0;
   const isExpanded = expanded.has(node._id);
@@ -136,7 +137,7 @@ function TreeRow({
   return (
     <>
       <tr
-        className={`group border-b border-border transition-colors ${
+        className={`group border-b border-border transition-colors cursor-pointer ${
           activeEditId === node._id ? "bg-primary/5" : "hover:bg-muted/30"
         }`}
       >
@@ -215,6 +216,13 @@ function TreeRow({
             >
               <Pencil size={13} />
             </button>
+            <button
+              onClick={() => onViewGL(node._id)}
+              className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-violet-500 hover:bg-violet-50 transition-colors"
+              title="View GL accounts"
+            >
+              <Layers size={13} />
+            </button>
             {deleteConfirm === node._id ? (
               <>
                 <button
@@ -274,6 +282,7 @@ const AccountGroupMaster: React.FC = () => {
   } = useQuery({
     queryKey: ["account-groups"],
     queryFn: getAccountGroups,
+    staleTime: 5 * 60 * 1000,
   });
 
   const allGroups: AccountGroup[] = useMemo(() => {
@@ -295,6 +304,25 @@ const AccountGroupMaster: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+
+  const { data: glAccounts, isLoading: glLoading } = useQuery({
+    queryKey: ["account-head", "GL", selectedGroupId],
+    queryFn: async () => {
+      if (!selectedGroupId) return [];
+      const res = await fetch(`/api/account-head?type=GL&groupId=${selectedGroupId}`, {
+        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
+      });
+      return res.json();
+    },
+    enabled: !!selectedGroupId,
+    staleTime: 60_000,
+  });
+
+  const selectedGroup = useMemo(
+    () => allGroups.find((g) => g._id === selectedGroupId) ?? null,
+    [allGroups, selectedGroupId],
+  );
 
   const toggleExpand = (id: string) =>
     setExpanded((prev) => {

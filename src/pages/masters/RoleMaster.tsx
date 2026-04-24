@@ -53,6 +53,7 @@ const RoleMaster: React.FC = () => {
   } = useQuery({
     queryKey: ["roles"],
     queryFn: getRoles,
+    staleTime: 5 * 60 * 1000,
   });
 
   const dbRoles: RoleRecord[] = Array.isArray(dbData) ? dbData : [];

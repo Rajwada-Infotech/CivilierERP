@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { Button } from "@/components/ui/button";
@@ -803,10 +804,12 @@ function RecordCard({
   rec,
   onEdit,
   onDelete,
+  onApprovalSuccess,
 }: {
   rec: ExpenseRecord;
   onEdit: () => void;
   onDelete: () => void;
+  onApprovalSuccess: () => void;
 }) {
   const rbd = computeBreakdown(
     rec.basicAmount,
@@ -875,7 +878,7 @@ function RecordCard({
             status={rec.status}
             recordId={rec.id}
             endpoint="/api/expense-booking"
-            onSuccess={() => {}}
+            onSuccess={onApprovalSuccess}
           />
           <Button
             variant="outline"
@@ -899,6 +902,58 @@ function RecordCard({
   );
 }
 
+// ─── API helpers ──────────────────────────────────────────────────────────────
+
+const API = "/api/expense-booking";
+
+async function apiFetch(url: string, opts?: RequestInit) {
+  const res = await fetchWithAuth(url, opts);
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.error ?? `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+/** Map DB row → ExpenseRecord (frontend shape) */
+function dbToRecord(row: any): ExpenseRecord {
+  return {
+    id: String(row.Eid ?? row.eid ?? row.EID ?? ""),
+    bookingReference: row.EDocNo ?? "",
+    bookingDate: row.EDocDate ? row.EDocDate.slice(0, 10) : "",
+    dueDate: row.EReminder ? row.EReminder.slice(0, 10) : "",
+    financialYear: "",
+    poId: null,
+    supplier: row.EProjectName ?? "",   // closest available field
+    projectSite: row.EProjectName ?? "",
+    materialCategory: row.EDocumentType ?? "",
+    invoiceReference: row.EDocNo ?? "",
+    basicAmount: parseFloat(row.EAmount) || 0,
+    cgstRate: 18,
+    sgstRate: 0,
+    discount: defaultDiscount(),
+    netAmount: parseFloat(row.EAmount) || 0,
+    status: (row.Status ?? row.EStatus ?? "Draft") as BookingStatus,
+    remarks: row.ERemarks ?? "",
+  };
+}
+
+/** Map form state → POST/PUT body */
+function recordToDb(form: Omit<ExpenseRecord, "id">) {
+  return {
+    EProjectName: form.supplier || form.projectSite || null,
+    EDocumentType: form.materialCategory || null,
+    EDocDate: form.bookingDate || null,
+    EAmount: form.basicAmount || null,
+    EDocNo: form.bookingReference || null,
+    EEmiPayment: false,
+    EReminder: form.dueDate || null,
+    ERemarks: form.remarks || null,
+    EStatus: form.status ?? "Draft",
+    ECompanyId: null,
+  };
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
 export default function MaterialExpenseBooking() {
@@ -907,10 +962,27 @@ export default function MaterialExpenseBooking() {
 
   const [purchaseOrders] = useState<PurchaseOrder[]>([]);
   const [records, setRecords] = useState<ExpenseRecord[]>([]);
+  const [loading, setLoading] = useState(true);
   const [view, setView] = useState<PageView>("list");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<Omit<ExpenseRecord, "id">>(blankForm());
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  // ── Fetch list from API ──
+  const fetchRecords = React.useCallback(async () => {
+    try {
+      setLoading(true);
+      const data = await apiFetch(`${API}?limit=100`);
+      setRecords((data.data ?? []).map(dbToRecord));
+    } catch (err: any) {
+      toast.error("Failed to load bookings: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => { fetchRecords(); }, [fetchRecords]);
 
   const set = <K extends keyof Omit<ExpenseRecord, "id">>(
     field: K,
@@ -919,10 +991,7 @@ export default function MaterialExpenseBooking() {
 
   const linkPO = (poNumber: string) => {
     const po = purchaseOrders.find((p) => p.poNumber === poNumber);
-    if (!po) {
-      set("poId", null);
-      return;
-    }
+    if (!po) { set("poId", null); return; }
     setForm((prev) => ({
       ...prev,
       poId: po.poNumber,
@@ -953,40 +1022,46 @@ export default function MaterialExpenseBooking() {
     setForm(blankForm());
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!form.bookingReference.trim() || !form.bookingDate) {
       toast.error("Please fill in the Booking Reference and Date.");
       return;
     }
-    if (!form.poId) {
-      toast.error("Please link a Purchase Order before saving.");
-      return;
-    }
-    const bd = computeBreakdown(
-      form.basicAmount,
-      form.cgstRate,
-      form.sgstRate,
-      form.discount,
-    );
-    const finalForm = { ...form, netAmount: bd.netAmount };
+    const bd = computeBreakdown(form.basicAmount, form.cgstRate, form.sgstRate, form.discount);
+    const body = { ...recordToDb(form), EAmount: bd.netAmount };
 
-    if (editingId) {
-      setRecords((prev) =>
-        prev.map((r) =>
-          r.id === editingId ? { id: editingId, ...finalForm } : r,
-        ),
-      );
-      toast.success("Expense booking updated.");
-    } else {
-      toast.success("Expense booking created.");
+    try {
+      setSaving(true);
+      if (editingId) {
+        await apiFetch(`${API}/${editingId}`, { method: "PUT", body: JSON.stringify(body) });
+        toast.success("Expense booking updated.");
+      } else {
+        await apiFetch(API, { method: "POST", body: JSON.stringify(body) });
+        toast.success("Expense booking created.");
+      }
+      await fetchRecords();
+      cancelForm();
+    } catch (err: any) {
+      toast.error("Save failed: " + err.message);
+    } finally {
+      setSaving(false);
     }
-    cancelForm();
   };
 
-  const handleDelete = (id: string) => {
-    setRecords((prev) => prev.filter((r) => r.id !== id));
-    setDeleteId(null);
-    toast.success("Booking deleted.");
+  const handleDelete = async (id: string) => {
+    try {
+      await apiFetch(`${API}/${id}`, { method: "DELETE" });
+      setDeleteId(null);
+      toast.success("Booking deleted.");
+      await fetchRecords();
+    } catch (err: any) {
+      toast.error("Delete failed: " + err.message);
+    }
+  };
+
+  /** Called by ApprovalActions after any status change — refetch to get live status */
+  const handleApprovalSuccess = async () => {
+    await fetchRecords();
   };
 
   return (
@@ -1049,8 +1124,9 @@ export default function MaterialExpenseBooking() {
                     size="sm"
                     className="gradient-accent"
                     onClick={handleSave}
+                    disabled={saving}
                   >
-                    {editingId ? "Update" : "Save"}
+                    {saving ? "Saving…" : editingId ? "Update" : "Save"}
                   </Button>
                 </div>
               </div>
@@ -1249,8 +1325,8 @@ export default function MaterialExpenseBooking() {
                 <Button variant="outline" onClick={cancelForm}>
                   Cancel
                 </Button>
-                <Button className="gradient-accent" onClick={handleSave}>
-                  {editingId ? "Update Booking" : "Save Booking"}
+                <Button className="gradient-accent" onClick={handleSave} disabled={saving}>
+                  {saving ? "Saving…" : editingId ? "Update Booking" : "Save Booking"}
                 </Button>
               </div>
             </CardContent>
@@ -1260,6 +1336,13 @@ export default function MaterialExpenseBooking() {
         {/* ── Bookings List ── */}
         {view === "list" && (
           <>
+            {loading && (
+              <div className="text-center py-12 text-muted-foreground text-sm">
+                Loading bookings…
+              </div>
+            )}
+            {!loading && (
+            <>
             {/* Mobile: card layout */}
             <div className="flex flex-col gap-3 sm:hidden">
               {records.length === 0 && (
@@ -1273,6 +1356,7 @@ export default function MaterialExpenseBooking() {
                   rec={rec}
                   onEdit={() => openEdit(rec)}
                   onDelete={() => setDeleteId(rec.id)}
+                  onApprovalSuccess={handleApprovalSuccess}
                 />
               ))}
             </div>
@@ -1357,7 +1441,7 @@ export default function MaterialExpenseBooking() {
                                   status={rec.status}
                                   recordId={rec.id}
                                   endpoint="/api/expense-booking"
-                                  onSuccess={() => {}}
+                                  onSuccess={handleApprovalSuccess}
                                 />
                                 <Button
                                   variant="outline"
@@ -1396,6 +1480,8 @@ export default function MaterialExpenseBooking() {
               </CardContent>
             </Card>
           </>
+            )}
+          </>
         )}
       </div>
 
@@ -1425,3 +1511,4 @@ export default function MaterialExpenseBooking() {
     </>
   );
 }
+
