@@ -260,14 +260,17 @@ const CardMaster: React.FC = () => {
   const { data: dbData, isLoading: loadingCards } = useQuery({
     queryKey: ["cards"],
     queryFn: getCards,
+    staleTime: 5 * 60 * 1000,
   });
   const { data: bankData, isLoading: loadingBanks } = useQuery<BankOption[]>({
     queryKey: ["account-head-bank-options"],
     queryFn: getBanksForCard,
+    staleTime: 5 * 60 * 1000,
   });
   const { data: companies = [] } = useQuery<CompanyOption[]>({
     queryKey: ["enterprise-options"],
     queryFn: getCompanyOptions,
+    staleTime: 5 * 60 * 1000,
   });
 
   const dbItems: DbCard[] = Array.isArray(dbData) ? dbData : [];

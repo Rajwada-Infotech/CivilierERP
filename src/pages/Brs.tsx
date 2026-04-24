@@ -42,6 +42,8 @@ export default function Brs() {
   const [loading, setLoading] = useState(false);
   const [search, setSearch] = useState("");
   const [togglingId, setTogglingId] = useState<number | null>(null);
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 20;
 
   // ================= FETCH =================
   const fetchBRS = useCallback(async () => {
@@ -73,6 +75,9 @@ export default function Brs() {
   useEffect(() => {
     fetchBRS();
   }, [fetchBRS]);
+
+  // Reset to page 1 when filters change
+  React.useEffect(() => { setPage(1); }, [search, selectedCompany, selectedBank, filterStatus]);
 
   // ================= FILTER =================
   const filteredPayments = payments.filter((p) => {
@@ -378,7 +383,7 @@ export default function Brs() {
                   </td>
                 </tr>
               ) : (
-                filteredPayments.map((p) => (
+                filteredPayments.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE).map((p) => (
                   <tr
                     key={p.id}
                     className={`transition-colors group ${
@@ -461,6 +466,50 @@ export default function Brs() {
               )}
             </tbody>
           </table>
+        )}
+
+        {/* ── Pagination ── */}
+        {filteredPayments.length > PAGE_SIZE && (
+          <div className="flex items-center justify-between px-5 py-3 border-t border-border">
+            <p className="text-xs text-muted-foreground">
+              Showing {Math.min((page - 1) * PAGE_SIZE + 1, filteredPayments.length)}–{Math.min(page * PAGE_SIZE, filteredPayments.length)} of {filteredPayments.length}
+            </p>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1}
+                className="px-3 py-1.5 rounded-lg text-xs border border-border text-muted-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Previous
+              </button>
+              {Array.from({ length: Math.ceil(filteredPayments.length / PAGE_SIZE) }, (_, i) => i + 1)
+                .filter((n) => n === 1 || n === Math.ceil(filteredPayments.length / PAGE_SIZE) || Math.abs(n - page) <= 1)
+                .map((n, i, arr) => (
+                  <React.Fragment key={n}>
+                    {i > 0 && arr[i - 1] !== n - 1 && (
+                      <span className="px-1 text-muted-foreground text-xs">…</span>
+                    )}
+                    <button
+                      onClick={() => setPage(n)}
+                      className={`w-8 h-8 rounded-lg text-xs font-medium transition-colors ${
+                        page === n
+                          ? "bg-primary text-primary-foreground"
+                          : "border border-border text-muted-foreground hover:bg-muted"
+                      }`}
+                    >
+                      {n}
+                    </button>
+                  </React.Fragment>
+                ))}
+              <button
+                onClick={() => setPage((p) => Math.min(Math.ceil(filteredPayments.length / PAGE_SIZE), p + 1))}
+                disabled={page === Math.ceil(filteredPayments.length / PAGE_SIZE)}
+                className="px-3 py-1.5 rounded-lg text-xs border border-border text-muted-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Next
+              </button>
+            </div>
+          </div>
         )}
       </div>
     </>

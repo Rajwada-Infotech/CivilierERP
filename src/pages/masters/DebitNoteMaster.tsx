@@ -273,16 +273,19 @@ const DebitNoteMaster: React.FC = () => {
   } = useQuery({
     queryKey: ["debit-notes"],
     queryFn: getDebitNotes,
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: enterpriseData } = useQuery({
     queryKey: ["enterprise-options"],
     queryFn: () => fetchWithAuth("/api/enterprises/options").then((r) => r.json()),
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: accountHeadData } = useQuery({
     queryKey: ["account-head-options"],
     queryFn: () => fetchWithAuth("/api/account-head/options").then((r) => r.json()),
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: expenseData, refetch: refetchExpenses, error: expenseError } = useQuery({
