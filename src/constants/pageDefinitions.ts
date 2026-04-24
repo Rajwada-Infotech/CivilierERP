@@ -164,7 +164,7 @@ export const PAGE_DEFINITIONS = [
   },
   {
     key: "business-unit",
-    label: "Business Unit",
+    label: "Enterprise",
     group: "Admin",
     availableActions: ["view", "create", "edit", "delete"] as const,
   },

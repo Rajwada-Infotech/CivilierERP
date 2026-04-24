@@ -187,7 +187,6 @@ async function startServer() {
       { path: "/api/material-dashboard", file: "./routes/materialDashboard" },
       { path: "/api/admin-dashboard", file: "./routes/adminDashboard" },
       { path: "/api/user-activity", file: "./routes/userActivity" },
-      { path: "/api/business-units", file: "./routes/businessUnit" },
       { path: "/api/cheque-leaf", file: "./routes/chequeLeaf" },
       { path: "/api/contractor-category", file: "./routes/contractorCategory" },
       { path: "/api/approval-workflows", file: "./routes/approvalWorkflows" },

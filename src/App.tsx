@@ -140,8 +140,8 @@ const TCMaster = lazy(() => import("./pages/material/T&CMaster"));
 const UnitOfMeasurementMaster = lazy(
   () => import("./pages/material/UnitOfMeasurementMaster"),
 );
-const BusinessUnitWrapper = lazy(
-  () => import("./pages/masters/BusinessUnitWrapper"),
+const EnterpriseMasterPage = lazy(
+  () => import("./pages/admin/masters/EnterpriseMaster"),
 );
 
 // Admin Pages
@@ -170,9 +170,6 @@ const ActivityBrowserPage = lazy(
 );
 
 // Admin Masters
-const BusinessUnitMaster = lazy(
-  () => import("./pages/admin/masters/BusinessUnitMaster"),
-);
 const ProjectMaster = lazy(() => import("./pages/admin/masters/ProjectMaster"));
 const CompanyMaster = lazy(() => import("./pages/admin/masters/CompanyMaster"));
 
@@ -675,7 +672,7 @@ function AppRoutes() {
         path="/masters/business-unit"
         element={
           <ProtectedRoute>
-            <BusinessUnitWrapper />
+            <EnterpriseMasterPage />
           </ProtectedRoute>
         }
       />
@@ -857,7 +854,7 @@ function AppRoutes() {
         path="/admin/masters/business-unit"
         element={
           <AdminRoute>
-            <BusinessUnitMaster />
+            <EnterpriseMasterPage />
           </AdminRoute>
         }
       />
