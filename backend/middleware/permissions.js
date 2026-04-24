@@ -35,12 +35,12 @@ const checkPermission = (module, subModule, action = "CanView") => {
       const permission = result.recordset[0];
 
       if (!permission) {
-        console.log("❌ No permission row found");
+        console.log("[DENIED] No permission row found");
         return res.status(403).json({ error: "Access denied (no permission)" });
       }
 
       if (Number(permission[action]) !== 1) {
-        console.log("❌ Action not allowed:", action);
+        console.log("[DENIED] Action not allowed:", action);
         return res.status(403).json({ error: "Access denied (action blocked)" });
       }
 

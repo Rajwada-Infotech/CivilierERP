@@ -78,19 +78,19 @@ function printRoutesSummary(results, logger = console) {
 
   const lines = [
     "",
-    "┌─────────────────────────────────────────┐",
-    `│        ROUTES LOADED  (${String(total).padStart(2)} total)          │`,
-    "├──────────┬──────────┬────────────────────┤",
-    `│  ✓ OK    │  ⚠ Skip  │  ✗ Failed          │`,
-    `│  ${String(loaded.length).padEnd(7)} │  ${String(skipped.length).padEnd(7)} │  ${String(failed.length).padEnd(18)}│`,
-    "└──────────┴──────────┴────────────────────┘",
+    "+-----------------------------------------+",
+    `|        ROUTES LOADED  (${String(total).padStart(2)} total)          |`,
+    "+----------+----------+--------------------+",
+    `|  [OK]    |  [WARN]  |  [FAIL]            |`,
+    `|  ${String(loaded.length).padEnd(7)} |  ${String(skipped.length).padEnd(7)} |  ${String(failed.length).padEnd(18)}|`,
+    "+----------+----------+--------------------+",
   ];
 
   if (failed.length > 0) {
     lines.push("");
     lines.push("  Failed routes:");
     failed.forEach(({ label, error }) =>
-      lines.push(`    ✗ ${label}: ${error}`)
+      lines.push(`    [FAIL] ${label}: ${error}`)
     );
   }
 
@@ -98,7 +98,7 @@ function printRoutesSummary(results, logger = console) {
     lines.push("");
     lines.push("  Skipped routes:");
     skipped.forEach(({ label, reason }) =>
-      lines.push(`    ⚠ ${label}: ${reason}`)
+      lines.push(`    [WARN] ${label}: ${reason}`)
     );
   }
 

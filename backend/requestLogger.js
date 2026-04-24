@@ -34,10 +34,10 @@ const SILENT_ROUTES = [
 ];
 
 function statusIcon(code) {
-  if (code >= 500) return "🔴";
-  if (code >= 400) return "🟠";
-  if (code >= 300) return "🟡";
-  return "🟢";
+  if (code >= 500) return "[5xx]";
+  if (code >= 400) return "[4xx]";
+  if (code >= 300) return "[3xx]";
+  return "[OK]";
 }
 
 module.exports = pinoHttp({
@@ -62,7 +62,7 @@ module.exports = pinoHttp({
   },
 
   customErrorMessage: (req, res, err) => {
-    return `🔴 ${req.method} ${req.url}  ERROR ${res.statusCode}  ${err?.message || ""}`;
+    return `[ERR] ${req.method} ${req.url}  ERROR ${res.statusCode}  ${err?.message || ""}`;
   },
 
   // Strip bulky req/res objects from the log line

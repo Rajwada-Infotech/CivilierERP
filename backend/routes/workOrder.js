@@ -12,20 +12,157 @@ const requireUserEmail = (req, res) => {
 };
 
 // =============================================
+//  META / DROPDOWN DATA  —  /api/work-orders/meta/*
+//  MUST be defined BEFORE /:id routes so Express
+//  does not parse "meta" as an integer id.
+// =============================================
+
+/**
+ * GET /api/work-orders/meta/companies
+ * Returns enterprise rows where business_type = 'C'
+ * Always returns a plain JSON array (never wrapped in an object).
+ */
+router.get("/meta/companies", cache("wo-meta-companies", 600), async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT id, name
+      FROM   dbo.enterprise
+      WHERE  business_type = 'C'
+      ORDER  BY name
+    `);
+    // Defensive: always return plain array
+    const rows = Array.isArray(result.recordset) ? result.recordset : [];
+    res.json(rows.map((r) => ({ id: r.id, name: r.name })));
+  } catch (err) {
+    console.error("[wo-meta-companies]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/work-orders/meta/projects
+ * Returns enterprise rows where business_type = 'P'
+ */
+router.get("/meta/projects", cache("wo-meta-projects", 600), async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT id, name
+      FROM   dbo.enterprise
+      WHERE  business_type = 'P'
+      ORDER  BY name
+    `);
+    const rows = Array.isArray(result.recordset) ? result.recordset : [];
+    res.json(rows.map((r) => ({ id: r.id, name: r.name })));
+  } catch (err) {
+    console.error("[wo-meta-projects]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/work-orders/meta/contractors
+ * Returns AccountHeadMaster rows where LHeadType = 'C'
+ */
+router.get("/meta/contractors", cache("wo-meta-contractors", 600), async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT LHeadId   AS id,
+             LHeadName AS name
+      FROM   dbo.AccountHeadMaster
+      WHERE  LHeadType = 'C'
+      ORDER  BY LHeadName
+    `);
+    const rows = Array.isArray(result.recordset) ? result.recordset : [];
+    res.json(rows.map((r) => ({ id: r.id, name: r.name })));
+  } catch (err) {
+    console.error("[wo-meta-contractors]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/work-orders/meta/activity-groups
+ * Returns ActivityMaster rows where activity_type = 0 (group/parent rows)
+ */
+router.get("/meta/activity-groups", cache("wo-meta-act-groups", 600), async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT id,
+             activity_name AS name
+      FROM   dbo.ActivityMaster
+      WHERE  activity_type = 0
+      ORDER  BY activity_name
+    `);
+    const rows = Array.isArray(result.recordset) ? result.recordset : [];
+    res.json(rows.map((r) => ({ id: r.id, name: r.name })));
+  } catch (err) {
+    console.error("[wo-meta-act-groups]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/work-orders/meta/activities?groupId=<id>
+ * Returns ActivityMaster rows where activity_type = 1 (leaf / billable activities).
+ * When groupId supplied, filters by parent_id = groupId.
+ *
+ * Response shape: [{ id, name, groupId }]
+ * groupId in response = parent_id in DB (the activity-group this activity belongs to).
+ */
+router.get("/meta/activities", cache("wo-meta-activities", 600), async (req, res) => {
+  try {
+    const pool = getPool();
+    const groupId = req.query.groupId ? parseInt(req.query.groupId, 10) : null;
+
+    let result;
+    if (groupId && Number.isFinite(groupId)) {
+      result = await pool
+        .request()
+        .input("GroupId", sql.Int, groupId)
+        .query(`
+          SELECT id,
+                 activity_name AS name,
+                 parent_id     AS groupId
+          FROM   dbo.ActivityMaster
+          WHERE  activity_type = 1
+          AND    parent_id     = @GroupId
+          ORDER  BY activity_name
+        `);
+    } else {
+      result = await pool.request().query(`
+        SELECT id,
+               activity_name AS name,
+               parent_id     AS groupId
+        FROM   dbo.ActivityMaster
+        WHERE  activity_type = 1
+        ORDER  BY activity_name
+      `);
+    }
+
+    const rows = Array.isArray(result.recordset) ? result.recordset : [];
+    res.json(rows.map((r) => ({ id: r.id, name: r.name, groupId: r.groupId })));
+  } catch (err) {
+    console.error("[wo-meta-activities]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// =============================================
 //  WORK ORDER HEADER  —  /api/work-orders
 // =============================================
 
-// GET all headers — joined with enterprise + contractor names
+// GET all headers — joined with enterprise + contractor names, paginated
 router.get("/", cache("work-orders", 300), async (req, res) => {
   try {
     const pool = getPool();
-
-    // Sanitized pagination params
-    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const page  = Math.max(parseInt(req.query.page)  || 1,  1);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
     const offset = (page - 1) * limit;
 
-    // Total count (matching GROUP BY structure)
     const countResult = await pool.request().query(`
       SELECT COUNT(DISTINCT h.Id) AS total
       FROM dbo.WorkOrderHeader h
@@ -36,52 +173,53 @@ router.get("/", cache("work-orders", 300), async (req, res) => {
     `);
     const total = parseInt(countResult.recordset[0].total);
 
-    // Paginated data
     const result = await pool.request()
-      .input('offset', sql.Int, offset)
-      .input('limit', sql.Int, limit)
+      .input("offset", sql.Int, offset)
+      .input("limit",  sql.Int, limit)
       .query(`
-      SELECT
-        h.Id,
-        h.DocumentNumber,
-        h.DocumentDate,
-        h.TotalAmount,
-        h.CreatedAt,
-        h.UpdatedAt,
-        ec.name       AS CompanyName,
-        h.CompanyId,
-        ep.name       AS ProjectName,
-        h.ProjectId,
-        ahm.LHeadName AS ContractorName,
-        h.ContractorId,
-        h.Remarks,
-        h.TermsAndConditions,
-        h.CreatedBy,
-        h.UpdatedBy,
-        COUNT(DISTINCT a.Id) AS ActivityCount
-      FROM dbo.WorkOrderHeader h
-      LEFT JOIN dbo.enterprise        ec  ON ec.id       = h.CompanyId
-      LEFT JOIN dbo.enterprise        ep  ON ep.id       = h.ProjectId
-      LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = h.ContractorId
-      LEFT JOIN dbo.WorkOrderActivities a  ON a.WorkOrderHeaderId = h.Id
-      GROUP BY
-        h.Id, h.DocumentNumber, h.DocumentDate, h.TotalAmount,
-        h.CreatedAt, h.UpdatedAt, h.CompanyId, h.ProjectId,
-        h.ContractorId, h.Remarks, h.TermsAndConditions,
-        h.CreatedBy, h.UpdatedBy,
-        ec.name, ep.name, ahm.LHeadName
-      ORDER BY h.CreatedAt DESC
-      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
-    `);
+        SELECT
+          h.Id,
+          h.DocumentNumber,
+          h.DocumentDate,
+          h.TotalAmount,
+          h.Status,
+          h.CreatedAt,
+          h.UpdatedAt,
+          ec.name       AS CompanyName,
+          h.CompanyId,
+          ep.name       AS ProjectName,
+          h.ProjectId,
+          ahm.LHeadName AS ContractorName,
+          h.ContractorId,
+          h.Remarks,
+          h.TermsAndConditions,
+          h.CreatedBy,
+          h.UpdatedBy,
+          COUNT(DISTINCT a.Id) AS ActivityCount
+        FROM dbo.WorkOrderHeader h
+        LEFT JOIN dbo.enterprise        ec  ON ec.id       = h.CompanyId
+        LEFT JOIN dbo.enterprise        ep  ON ep.id       = h.ProjectId
+        LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = h.ContractorId
+        LEFT JOIN dbo.WorkOrderActivities a  ON a.WorkOrderHeaderId = h.Id
+        GROUP BY
+          h.Id, h.DocumentNumber, h.DocumentDate, h.TotalAmount, h.Status,
+          h.CreatedAt, h.UpdatedAt, h.CompanyId, h.ProjectId,
+          h.ContractorId, h.Remarks, h.TermsAndConditions,
+          h.CreatedBy, h.UpdatedBy,
+          ec.name, ep.name, ahm.LHeadName
+        ORDER BY h.CreatedAt DESC
+        OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+      `);
 
     res.json({
       data: result.recordset,
       page,
       limit,
       total,
-      totalPages: Math.ceil(total / limit)
+      totalPages: Math.ceil(total / limit),
     });
   } catch (err) {
+    console.error("[GET /work-orders]", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -91,10 +229,10 @@ router.get("/:id", cache("work-orders", 300), async (req, res) => {
   try {
     const pool = getPool();
 
-    // Header with all FK lookups
     const headerResult = await pool
       .request()
-      .input("Id", sql.Int, req.params.id).query(`
+      .input("Id", sql.Int, req.params.id)
+      .query(`
         SELECT
           h.*,
           ec.name       AS CompanyName,
@@ -109,10 +247,10 @@ router.get("/:id", cache("work-orders", 300), async (req, res) => {
     if (!headerResult.recordset.length)
       return res.status(404).json({ error: "Work order not found" });
 
-    // Activities with resolved FK names
     const activitiesResult = await pool
       .request()
-      .input("WorkOrderHeaderId", sql.Int, req.params.id).query(`
+      .input("WorkOrderHeaderId", sql.Int, req.params.id)
+      .query(`
         SELECT
           a.*,
           ag.activity_name  AS ActivityGroupName,
@@ -126,26 +264,22 @@ router.get("/:id", cache("work-orders", 300), async (req, res) => {
         ORDER BY a.Id
       `);
 
-    // Materials for all activities, with resolved FK names
     const materialsResult = await pool
       .request()
-      .input("WorkOrderHeaderId", sql.Int, req.params.id).query(`
+      .input("WorkOrderHeaderId", sql.Int, req.params.id)
+      .query(`
         SELECT
           m.*,
           img.M_Name AS ItemName,
-          uom.UOMName,
-          uc.name    AS CreatedByName,
-          uu.name    AS UpdatedByName
+          uom.UOMName
         FROM dbo.WorkOrderActivityMaterials m
         INNER JOIN dbo.WorkOrderActivities  a   ON a.Id    = m.WorkOrderActivityId
-        LEFT JOIN  dbo.Item_Master_Group    img ON img.M_Id = m.ItemId
-        LEFT JOIN  dbo.UOMMaster            uom ON uom.Id  = m.UOMId
-        -- CreatedBy/UpdatedBy now store email directly
+        LEFT  JOIN dbo.Item_Master_Group    img ON img.M_Id = m.ItemId
+        LEFT  JOIN dbo.UOMMaster            uom ON uom.Id  = m.UOMId
         WHERE a.WorkOrderHeaderId = @WorkOrderHeaderId
         ORDER BY m.WorkOrderActivityId, m.Id
       `);
 
-    // Nest materials inside their activity
     const materialsMap = {};
     for (const mat of materialsResult.recordset) {
       const key = mat.WorkOrderActivityId;
@@ -159,6 +293,7 @@ router.get("/:id", cache("work-orders", 300), async (req, res) => {
 
     res.json({ ...headerResult.recordset[0], activities });
   } catch (err) {
+    console.error("[GET /work-orders/:id]", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -166,30 +301,24 @@ router.get("/:id", cache("work-orders", 300), async (req, res) => {
 // POST — create header, returns new Id
 router.post("/", async (req, res) => {
   const {
-    CompanyId,
-    ProjectId,
-    DocumentNumber,
-    DocumentDate,
-    ContractorId,
-    TotalAmount,
-    Remarks,
-    TermsAndConditions,
-    CreatedBy,
+    CompanyId, ProjectId, DocumentNumber, DocumentDate,
+    ContractorId, TotalAmount, Remarks, TermsAndConditions,
   } = req.body;
   try {
     const pool = getPool();
     const result = await pool
       .request()
-      .input("CompanyId", sql.Int, CompanyId || null)
-      .input("ProjectId", sql.Int, ProjectId || null)
-      .input("DocumentNumber", sql.NVarChar, DocumentNumber || null)
-      .input("DocumentDate", sql.Date, DocumentDate || null)
-      .input("ContractorId", sql.Int, ContractorId || null)
-      .input("TotalAmount", sql.Decimal(18, 2), TotalAmount || 0)
-      .input("Remarks", sql.NVarChar, Remarks || null)
-      .input("TermsAndConditions", sql.NVarChar, TermsAndConditions || null)
-      .input("CreatedBy", sql.NVarChar(100), req.user?.email || null)
-      .input("CreatedAt", sql.DateTime, new Date()).query(`
+      .input("CompanyId",          sql.Int,           CompanyId          || null)
+      .input("ProjectId",          sql.Int,           ProjectId          || null)
+      .input("DocumentNumber",     sql.NVarChar(100), DocumentNumber     || null)
+      .input("DocumentDate",       sql.Date,          DocumentDate       || null)
+      .input("ContractorId",       sql.Int,           ContractorId       || null)
+      .input("TotalAmount",        sql.Decimal(18,2), TotalAmount        || 0)
+      .input("Remarks",            sql.NVarChar(500), Remarks            || null)
+      .input("TermsAndConditions", sql.NVarChar(sql.MAX), TermsAndConditions || null)
+      .input("CreatedBy",          sql.NVarChar(100), req.user?.email    || null)
+      .input("CreatedAt",          sql.DateTime,      new Date())
+      .query(`
         INSERT INTO dbo.WorkOrderHeader
           (CompanyId, ProjectId, DocumentNumber, DocumentDate, ContractorId,
            TotalAmount, Remarks, TermsAndConditions, CreatedBy, CreatedAt)
@@ -199,10 +328,9 @@ router.post("/", async (req, res) => {
            @TotalAmount, @Remarks, @TermsAndConditions, @CreatedBy, @CreatedAt)
       `);
     await bumpCacheVersion("work-orders");
-    res
-      .status(201)
-      .json({ message: "Work order created", Id: result.recordset[0].Id });
+    res.status(201).json({ message: "Work order created", Id: result.recordset[0].Id });
   } catch (err) {
+    console.error("[POST /work-orders]", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -215,31 +343,25 @@ router.put("/:id", async (req, res) => {
     return res.status(400).json({ error: err.message });
   }
   const {
-    CompanyId,
-    ProjectId,
-    DocumentNumber,
-    DocumentDate,
-    ContractorId,
-    TotalAmount,
-    Remarks,
-    TermsAndConditions,
-    UpdatedBy,
+    CompanyId, ProjectId, DocumentNumber, DocumentDate,
+    ContractorId, TotalAmount, Remarks, TermsAndConditions,
   } = req.body;
   try {
     const pool = getPool();
     await pool
       .request()
-      .input("Id", sql.Int, req.params.id)
-      .input("CompanyId", sql.Int, CompanyId || null)
-      .input("ProjectId", sql.Int, ProjectId || null)
-      .input("DocumentNumber", sql.NVarChar, DocumentNumber || null)
-      .input("DocumentDate", sql.Date, DocumentDate || null)
-      .input("ContractorId", sql.Int, ContractorId || null)
-      .input("TotalAmount", sql.Decimal(18, 2), TotalAmount || 0)
-      .input("Remarks", sql.NVarChar, Remarks || null)
-      .input("TermsAndConditions", sql.NVarChar, TermsAndConditions || null)
-      .input("UpdatedBy", sql.NVarChar(100), req.user?.email || null)
-      .input("UpdatedAt", sql.DateTime, new Date()).query(`
+      .input("Id",                 sql.Int,           req.params.id)
+      .input("CompanyId",          sql.Int,           CompanyId          || null)
+      .input("ProjectId",          sql.Int,           ProjectId          || null)
+      .input("DocumentNumber",     sql.NVarChar(100), DocumentNumber     || null)
+      .input("DocumentDate",       sql.Date,          DocumentDate       || null)
+      .input("ContractorId",       sql.Int,           ContractorId       || null)
+      .input("TotalAmount",        sql.Decimal(18,2), TotalAmount        || 0)
+      .input("Remarks",            sql.NVarChar(500), Remarks            || null)
+      .input("TermsAndConditions", sql.NVarChar(sql.MAX), TermsAndConditions || null)
+      .input("UpdatedBy",          sql.NVarChar(100), req.user?.email    || null)
+      .input("UpdatedAt",          sql.DateTime,      new Date())
+      .query(`
         UPDATE dbo.WorkOrderHeader SET
           CompanyId=@CompanyId, ProjectId=@ProjectId,
           DocumentNumber=@DocumentNumber, DocumentDate=@DocumentDate,
@@ -251,6 +373,7 @@ router.put("/:id", async (req, res) => {
     await bumpCacheVersion("work-orders");
     res.json({ message: "Work order updated" });
   } catch (err) {
+    console.error("[PUT /work-orders/:id]", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -259,25 +382,21 @@ router.put("/:id", async (req, res) => {
 router.delete("/:id", async (req, res) => {
   try {
     const pool = getPool();
-    await pool.request().input("WorkOrderHeaderId", sql.Int, req.params.id)
-      .query(`
-        DELETE m FROM dbo.WorkOrderActivityMaterials m
-        INNER JOIN dbo.WorkOrderActivities a ON a.Id = m.WorkOrderActivityId
-        WHERE a.WorkOrderHeaderId = @WorkOrderHeaderId
-      `);
-    await pool
-      .request()
-      .input("WorkOrderHeaderId", sql.Int, req.params.id)
-      .query(
-        "DELETE FROM dbo.WorkOrderActivities WHERE WorkOrderHeaderId = @WorkOrderHeaderId",
-      );
-    await pool
-      .request()
-      .input("Id", sql.Int, req.params.id)
-      .query("DELETE FROM dbo.WorkOrderHeader WHERE Id = @Id");
+    await pool.request().input("WorkOrderHeaderId", sql.Int, req.params.id).query(`
+      DELETE m FROM dbo.WorkOrderActivityMaterials m
+      INNER JOIN dbo.WorkOrderActivities a ON a.Id = m.WorkOrderActivityId
+      WHERE a.WorkOrderHeaderId = @WorkOrderHeaderId
+    `);
+    await pool.request().input("WorkOrderHeaderId", sql.Int, req.params.id).query(
+      "DELETE FROM dbo.WorkOrderActivities WHERE WorkOrderHeaderId = @WorkOrderHeaderId"
+    );
+    await pool.request().input("Id", sql.Int, req.params.id).query(
+      "DELETE FROM dbo.WorkOrderHeader WHERE Id = @Id"
+    );
     await bumpCacheVersion("work-orders");
     res.json({ message: "Work order and all related records deleted" });
   } catch (err) {
+    console.error("[DELETE /work-orders/:id]", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -286,13 +405,13 @@ router.delete("/:id", async (req, res) => {
 //  ACTIVITIES  —  /api/work-orders/:id/activities
 // =============================================
 
-// GET all activities for a header
 router.get("/:id/activities", cache("work-orders", 300), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool
       .request()
-      .input("WorkOrderHeaderId", sql.Int, req.params.id).query(`
+      .input("WorkOrderHeaderId", sql.Int, req.params.id)
+      .query(`
         SELECT
           a.*,
           ag.activity_name             AS ActivityGroupName,
@@ -315,38 +434,30 @@ router.get("/:id/activities", cache("work-orders", 300), async (req, res) => {
       `);
     res.json(result.recordset);
   } catch (err) {
+    console.error("[GET /:id/activities]", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// POST — add activity to a header
 router.post("/:id/activities", async (req, res) => {
-  const {
-    ActivityGroupId,
-    ActivityId,
-    UOMId,
-    Rate,
-    Area,
-    LabourAmount,
-    MaterialAmount,
-    GrandTotal,
-    Remarks,
-  } = req.body;
+  const { ActivityGroupId, ActivityId, UOMId, Rate, Area,
+          LabourAmount, MaterialAmount, GrandTotal, Remarks } = req.body;
   try {
     const pool = getPool();
     const result = await pool
       .request()
-      .input("WorkOrderHeaderId", sql.Int, req.params.id)
-      .input("ActivityGroupId", sql.Int, ActivityGroupId || null)
-      .input("ActivityId", sql.Int, ActivityId || null)
-      .input("UOMId", sql.Int, UOMId || null)
-      .input("Rate", sql.Decimal(18, 2), Rate || null)
-      .input("Area", sql.Decimal(18, 2), Area || null)
-      .input("LabourAmount", sql.Decimal(18, 4), LabourAmount || null)
-      .input("MaterialAmount", sql.Decimal(18, 4), MaterialAmount || null)
-      .input("GrandTotal", sql.Decimal(18, 4), GrandTotal || null)
-      .input("Remarks", sql.NVarChar, Remarks || null)
-      .input("CreatedAt", sql.DateTime2, new Date()).query(`
+      .input("WorkOrderHeaderId", sql.Int,          req.params.id)
+      .input("ActivityGroupId",   sql.Int,          ActivityGroupId || null)
+      .input("ActivityId",        sql.Int,          ActivityId      || null)
+      .input("UOMId",             sql.Int,          UOMId           || null)
+      .input("Rate",              sql.Decimal(18,2),Rate            || null)
+      .input("Area",              sql.Decimal(18,2),Area            || null)
+      .input("LabourAmount",      sql.Decimal(18,4),LabourAmount    || null)
+      .input("MaterialAmount",    sql.Decimal(18,4),MaterialAmount  || null)
+      .input("GrandTotal",        sql.Decimal(18,4),GrandTotal      || null)
+      .input("Remarks",           sql.NVarChar,     Remarks         || null)
+      .input("CreatedAt",         sql.DateTime2,    new Date())
+      .query(`
         INSERT INTO dbo.WorkOrderActivities
           (WorkOrderHeaderId, ActivityGroupId, ActivityId, UOMId,
            Rate, Area, LabourAmount, MaterialAmount, GrandTotal, Remarks, CreatedAt)
@@ -356,41 +467,31 @@ router.post("/:id/activities", async (req, res) => {
            @Rate, @Area, @LabourAmount, @MaterialAmount, @GrandTotal, @Remarks, @CreatedAt)
       `);
     await bumpCacheVersion("work-orders");
-    res
-      .status(201)
-      .json({ message: "Activity added", Id: result.recordset[0].Id });
+    res.status(201).json({ message: "Activity added", Id: result.recordset[0].Id });
   } catch (err) {
+    console.error("[POST /:id/activities]", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// PUT — update an activity
 router.put("/:id/activities/:activityId", async (req, res) => {
-  const {
-    ActivityGroupId,
-    ActivityId,
-    UOMId,
-    Rate,
-    Area,
-    LabourAmount,
-    MaterialAmount,
-    GrandTotal,
-    Remarks,
-  } = req.body;
+  const { ActivityGroupId, ActivityId, UOMId, Rate, Area,
+          LabourAmount, MaterialAmount, GrandTotal, Remarks } = req.body;
   try {
     const pool = getPool();
     await pool
       .request()
-      .input("Id", sql.Int, req.params.activityId)
-      .input("ActivityGroupId", sql.Int, ActivityGroupId || null)
-      .input("ActivityId", sql.Int, ActivityId || null)
-      .input("UOMId", sql.Int, UOMId || null)
-      .input("Rate", sql.Decimal(18, 2), Rate || null)
-      .input("Area", sql.Decimal(18, 2), Area || null)
-      .input("LabourAmount", sql.Decimal(18, 4), LabourAmount || null)
-      .input("MaterialAmount", sql.Decimal(18, 4), MaterialAmount || null)
-      .input("GrandTotal", sql.Decimal(18, 4), GrandTotal || null)
-      .input("Remarks", sql.NVarChar, Remarks || null).query(`
+      .input("Id",             sql.Int,          req.params.activityId)
+      .input("ActivityGroupId",sql.Int,          ActivityGroupId || null)
+      .input("ActivityId",     sql.Int,          ActivityId      || null)
+      .input("UOMId",          sql.Int,          UOMId           || null)
+      .input("Rate",           sql.Decimal(18,2),Rate            || null)
+      .input("Area",           sql.Decimal(18,2),Area            || null)
+      .input("LabourAmount",   sql.Decimal(18,4),LabourAmount    || null)
+      .input("MaterialAmount", sql.Decimal(18,4),MaterialAmount  || null)
+      .input("GrandTotal",     sql.Decimal(18,4),GrandTotal      || null)
+      .input("Remarks",        sql.NVarChar,     Remarks         || null)
+      .query(`
         UPDATE dbo.WorkOrderActivities SET
           ActivityGroupId=@ActivityGroupId, ActivityId=@ActivityId, UOMId=@UOMId,
           Rate=@Rate, Area=@Area, LabourAmount=@LabourAmount,
@@ -400,76 +501,71 @@ router.put("/:id/activities/:activityId", async (req, res) => {
     await bumpCacheVersion("work-orders");
     res.json({ message: "Activity updated" });
   } catch (err) {
+    console.error("[PUT /:id/activities/:actId]", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// DELETE — activity + its materials
 router.delete("/:id/activities/:activityId", async (req, res) => {
   try {
     const pool = getPool();
-    await pool
-      .request()
-      .input("WorkOrderActivityId", sql.Int, req.params.activityId)
-      .query(
-        "DELETE FROM dbo.WorkOrderActivityMaterials WHERE WorkOrderActivityId = @WorkOrderActivityId",
-      );
-    await pool
-      .request()
-      .input("Id", sql.Int, req.params.activityId)
-      .query("DELETE FROM dbo.WorkOrderActivities WHERE Id = @Id");
+    await pool.request().input("WorkOrderActivityId", sql.Int, req.params.activityId).query(
+      "DELETE FROM dbo.WorkOrderActivityMaterials WHERE WorkOrderActivityId = @WorkOrderActivityId"
+    );
+    await pool.request().input("Id", sql.Int, req.params.activityId).query(
+      "DELETE FROM dbo.WorkOrderActivities WHERE Id = @Id"
+    );
     await bumpCacheVersion("work-orders");
     res.json({ message: "Activity and its materials deleted" });
   } catch (err) {
+    console.error("[DELETE /:id/activities/:actId]", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
 // =============================================
-//  MATERIALS  —  /api/work-orders/:id/activities/:activityId/materials
+//  MATERIALS
 // =============================================
 
-// GET all materials for an activity
 router.get("/:id/activities/:activityId/materials", cache("work-orders", 300), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool
       .request()
-      .input("WorkOrderActivityId", sql.Int, req.params.activityId).query(`
+      .input("WorkOrderActivityId", sql.Int, req.params.activityId)
+      .query(`
         SELECT
           m.*,
           img.M_Name AS ItemName,
-          uom.UOMName,
-          uc.name    AS CreatedByName,
-          uu.name    AS UpdatedByName
+          uom.UOMName
         FROM dbo.WorkOrderActivityMaterials m
         LEFT JOIN dbo.Item_Master_Group img ON img.M_Id = m.ItemId
         LEFT JOIN dbo.UOMMaster         uom ON uom.Id   = m.UOMId
-        -- CreatedBy/UpdatedBy now store email directly
         WHERE m.WorkOrderActivityId = @WorkOrderActivityId
         ORDER BY m.Id
       `);
     res.json(result.recordset);
   } catch (err) {
+    console.error("[GET materials]", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// POST — add material to an activity
 router.post("/:id/activities/:activityId/materials", async (req, res) => {
-  const { ItemId, UOMId, Quantity, Rate, Remarks, CreatedBy } = req.body;
+  const { ItemId, UOMId, Quantity, Rate, Remarks } = req.body;
   try {
     const pool = getPool();
     const result = await pool
       .request()
-      .input("WorkOrderActivityId", sql.Int, req.params.activityId)
-      .input("ItemId", sql.UniqueIdentifier, ItemId || null)
-      .input("UOMId", sql.Int, UOMId || null)
-      .input("Quantity", sql.Decimal(18, 2), Quantity || null)
-      .input("Rate", sql.Decimal(18, 2), Rate || null)
-      .input("Remarks", sql.NVarChar, Remarks || null)
-      .input("CreatedBy", sql.NVarChar(100), req.user?.email || null)
-      .input("CreatedAt", sql.DateTime2, new Date()).query(`
+      .input("WorkOrderActivityId", sql.Int,             req.params.activityId)
+      .input("ItemId",              sql.UniqueIdentifier, ItemId   || null)
+      .input("UOMId",               sql.Int,             UOMId    || null)
+      .input("Quantity",            sql.Decimal(18,2),   Quantity  || null)
+      .input("Rate",                sql.Decimal(18,2),   Rate      || null)
+      .input("Remarks",             sql.NVarChar,        Remarks   || null)
+      .input("CreatedBy",           sql.NVarChar(100),   req.user?.email || null)
+      .input("CreatedAt",           sql.DateTime2,       new Date())
+      .query(`
         INSERT INTO dbo.WorkOrderActivityMaterials
           (WorkOrderActivityId, ItemId, UOMId, Quantity, Rate, Remarks, CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
@@ -477,68 +573,58 @@ router.post("/:id/activities/:activityId/materials", async (req, res) => {
           (@WorkOrderActivityId, @ItemId, @UOMId, @Quantity, @Rate, @Remarks, @CreatedBy, @CreatedAt)
       `);
     await bumpCacheVersion("work-orders");
-    res
-      .status(201)
-      .json({ message: "Material added", Id: result.recordset[0].Id });
+    res.status(201).json({ message: "Material added", Id: result.recordset[0].Id });
   } catch (err) {
+    console.error("[POST materials]", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// PUT — update a material
-router.put(
-  "/:id/activities/:activityId/materials/:materialId",
-  async (req, res) => {
-    const { ItemId, UOMId, Quantity, Rate, Remarks, UpdatedBy } = req.body;
-    try {
-      const pool = getPool();
-      await pool
-        .request()
-        .input("Id", sql.Int, req.params.materialId)
-        .input("ItemId", sql.UniqueIdentifier, ItemId || null)
-        .input("UOMId", sql.Int, UOMId || null)
-        .input("Quantity", sql.Decimal(18, 2), Quantity || null)
-        .input("Rate", sql.Decimal(18, 2), Rate || null)
-        .input("Remarks", sql.NVarChar, Remarks || null)
-        .input("UpdatedBy", sql.NVarChar(100), req.user?.email || null)
-        .input("UpdatedAt", sql.DateTime2, new Date()).query(`
-          UPDATE dbo.WorkOrderActivityMaterials SET
-            ItemId=@ItemId, UOMId=@UOMId, Quantity=@Quantity,
-            Rate=@Rate, Remarks=@Remarks,
-            UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt
-          WHERE Id=@Id
-        `);
-      await bumpCacheVersion("work-orders");
-      res.json({ message: "Material updated" });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
-  },
-);
+router.put("/:id/activities/:activityId/materials/:materialId", async (req, res) => {
+  const { ItemId, UOMId, Quantity, Rate, Remarks } = req.body;
+  try {
+    const pool = getPool();
+    await pool
+      .request()
+      .input("Id",        sql.Int,             req.params.materialId)
+      .input("ItemId",    sql.UniqueIdentifier, ItemId   || null)
+      .input("UOMId",     sql.Int,             UOMId    || null)
+      .input("Quantity",  sql.Decimal(18,2),   Quantity  || null)
+      .input("Rate",      sql.Decimal(18,2),   Rate      || null)
+      .input("Remarks",   sql.NVarChar,        Remarks   || null)
+      .input("UpdatedBy", sql.NVarChar(100),   req.user?.email || null)
+      .input("UpdatedAt", sql.DateTime2,       new Date())
+      .query(`
+        UPDATE dbo.WorkOrderActivityMaterials SET
+          ItemId=@ItemId, UOMId=@UOMId, Quantity=@Quantity,
+          Rate=@Rate, Remarks=@Remarks,
+          UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt
+        WHERE Id=@Id
+      `);
+    await bumpCacheVersion("work-orders");
+    res.json({ message: "Material updated" });
+  } catch (err) {
+    console.error("[PUT materials/:id]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
-// DELETE — single material
-router.delete(
-  "/:id/activities/:activityId/materials/:materialId",
-  async (req, res) => {
-    try {
-      const pool = getPool();
-      await pool
-        .request()
-        .input("Id", sql.Int, req.params.materialId)
-        .query("DELETE FROM dbo.WorkOrderActivityMaterials WHERE Id = @Id");
-      await bumpCacheVersion("work-orders");
-      res.json({ message: "Material deleted" });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
-  },
-);
+router.delete("/:id/activities/:activityId/materials/:materialId", async (req, res) => {
+  try {
+    const pool = getPool();
+    await pool.request().input("Id", sql.Int, req.params.materialId).query(
+      "DELETE FROM dbo.WorkOrderActivityMaterials WHERE Id = @Id"
+    );
+    await bumpCacheVersion("work-orders");
+    res.json({ message: "Material deleted" });
+  } catch (err) {
+    console.error("[DELETE materials/:id]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // =============================================
 //  BULK SAVE  —  POST /api/work-orders/:id/save-full
-//  Send the entire work order tree in one shot.
-//  New rows (no Id) are inserted. Existing rows (with Id) are updated.
-//  Rows present in DB but absent from payload are deleted.
 // =============================================
 router.post("/:id/save-full", async (req, res) => {
   const headerId = parseInt(req.params.id);
@@ -547,10 +633,7 @@ router.post("/:id/save-full", async (req, res) => {
   if (!Array.isArray(activities))
     return res.status(400).json({ error: "activities must be an array" });
 
-  // Fix: keptActivityIds and keptMaterialIds were interpolated directly into SQL
-  // (NOT IN (${ids.join(",")})) without any sanitisation. A non-integer Id in the
-  // payload would corrupt the query. Enforce parseInt and filter out NaN values here
-  // so only valid positive integers ever reach the SQL string.
+  // Only keep numeric IDs that are actually positive integers
   function safeIntList(ids) {
     return ids
       .map((id) => parseInt(id, 10))
@@ -563,21 +646,18 @@ router.post("/:id/save-full", async (req, res) => {
     // 1. Update header
     await pool
       .request()
-      .input("Id", sql.Int, headerId)
-      .input("CompanyId", sql.Int, header.CompanyId || null)
-      .input("ProjectId", sql.Int, header.ProjectId || null)
-      .input("DocumentNumber", sql.NVarChar, header.DocumentNumber || null)
-      .input("DocumentDate", sql.Date, header.DocumentDate || null)
-      .input("ContractorId", sql.Int, header.ContractorId || null)
-      .input("TotalAmount", sql.Decimal(18, 2), header.TotalAmount || 0)
-      .input("Remarks", sql.NVarChar, header.Remarks || null)
-      .input(
-        "TermsAndConditions",
-        sql.NVarChar,
-        header.TermsAndConditions || null,
-      )
-      .input("UpdatedBy", sql.NVarChar(100), req.user?.email || null)
-      .input("UpdatedAt", sql.DateTime, new Date()).query(`
+      .input("Id",                 sql.Int,               headerId)
+      .input("CompanyId",          sql.Int,               header.CompanyId          || null)
+      .input("ProjectId",          sql.Int,               header.ProjectId          || null)
+      .input("DocumentNumber",     sql.NVarChar(100),     header.DocumentNumber     || null)
+      .input("DocumentDate",       sql.Date,              header.DocumentDate       || null)
+      .input("ContractorId",       sql.Int,               header.ContractorId       || null)
+      .input("TotalAmount",        sql.Decimal(18,2),     header.TotalAmount        || 0)
+      .input("Remarks",            sql.NVarChar(500),     header.Remarks            || null)
+      .input("TermsAndConditions", sql.NVarChar(sql.MAX), header.TermsAndConditions || null)
+      .input("UpdatedBy",          sql.NVarChar(100),     req.user?.email           || null)
+      .input("UpdatedAt",          sql.DateTime,          new Date())
+      .query(`
         UPDATE dbo.WorkOrderHeader SET
           CompanyId=@CompanyId, ProjectId=@ProjectId,
           DocumentNumber=@DocumentNumber, DocumentDate=@DocumentDate,
@@ -589,29 +669,26 @@ router.post("/:id/save-full", async (req, res) => {
 
     const keptActivityIds = [];
 
-    // 2. Upsert each activity
+    // 2. Upsert each activity + its materials
     for (const act of activities) {
-      let activityId = act.Id ? parseInt(act.Id, 10) : null;
-      if (activityId && !Number.isFinite(activityId)) activityId = null;
+      let activityDbId = act.Id ? parseInt(act.Id, 10) : null;
+      if (!Number.isFinite(activityDbId) || activityDbId <= 0) activityDbId = null;
 
-      if (!activityId) {
+      if (!activityDbId) {
         const r = await pool
           .request()
-          .input("WorkOrderHeaderId", sql.Int, headerId)
-          .input("ActivityGroupId", sql.Int, act.ActivityGroupId || null)
-          .input("ActivityId", sql.Int, act.ActivityId || null)
-          .input("UOMId", sql.Int, act.UOMId || null)
-          .input("Rate", sql.Decimal(18, 2), act.Rate || null)
-          .input("Area", sql.Decimal(18, 2), act.Area || null)
-          .input("LabourAmount", sql.Decimal(18, 4), act.LabourAmount || null)
-          .input(
-            "MaterialAmount",
-            sql.Decimal(18, 4),
-            act.MaterialAmount || null,
-          )
-          .input("GrandTotal", sql.Decimal(18, 4), act.GrandTotal || null)
-          .input("Remarks", sql.NVarChar, act.Remarks || null)
-          .input("CreatedAt", sql.DateTime2, new Date()).query(`
+          .input("WorkOrderHeaderId", sql.Int,          headerId)
+          .input("ActivityGroupId",   sql.Int,          act.ActivityGroupId || null)
+          .input("ActivityId",        sql.Int,          act.ActivityId      || null)
+          .input("UOMId",             sql.Int,          act.UOMId           || null)
+          .input("Rate",              sql.Decimal(18,2),act.Rate            || null)
+          .input("Area",              sql.Decimal(18,2),act.Area            || null)
+          .input("LabourAmount",      sql.Decimal(18,4),act.LabourAmount    || null)
+          .input("MaterialAmount",    sql.Decimal(18,4),act.MaterialAmount  || null)
+          .input("GrandTotal",        sql.Decimal(18,4),act.GrandTotal      || null)
+          .input("Remarks",           sql.NVarChar,     act.Remarks         || null)
+          .input("CreatedAt",         sql.DateTime2,    new Date())
+          .query(`
             INSERT INTO dbo.WorkOrderActivities
               (WorkOrderHeaderId, ActivityGroupId, ActivityId, UOMId,
                Rate, Area, LabourAmount, MaterialAmount, GrandTotal, Remarks, CreatedAt)
@@ -620,24 +697,21 @@ router.post("/:id/save-full", async (req, res) => {
               (@WorkOrderHeaderId, @ActivityGroupId, @ActivityId, @UOMId,
                @Rate, @Area, @LabourAmount, @MaterialAmount, @GrandTotal, @Remarks, @CreatedAt)
           `);
-        activityId = r.recordset[0].Id;
+        activityDbId = r.recordset[0].Id;
       } else {
         await pool
           .request()
-          .input("Id", sql.Int, activityId)
-          .input("ActivityGroupId", sql.Int, act.ActivityGroupId || null)
-          .input("ActivityId", sql.Int, act.ActivityId || null)
-          .input("UOMId", sql.Int, act.UOMId || null)
-          .input("Rate", sql.Decimal(18, 2), act.Rate || null)
-          .input("Area", sql.Decimal(18, 2), act.Area || null)
-          .input("LabourAmount", sql.Decimal(18, 4), act.LabourAmount || null)
-          .input(
-            "MaterialAmount",
-            sql.Decimal(18, 4),
-            act.MaterialAmount || null,
-          )
-          .input("GrandTotal", sql.Decimal(18, 4), act.GrandTotal || null)
-          .input("Remarks", sql.NVarChar, act.Remarks || null).query(`
+          .input("Id",             sql.Int,          activityDbId)
+          .input("ActivityGroupId",sql.Int,          act.ActivityGroupId || null)
+          .input("ActivityId",     sql.Int,          act.ActivityId      || null)
+          .input("UOMId",          sql.Int,          act.UOMId           || null)
+          .input("Rate",           sql.Decimal(18,2),act.Rate            || null)
+          .input("Area",           sql.Decimal(18,2),act.Area            || null)
+          .input("LabourAmount",   sql.Decimal(18,4),act.LabourAmount    || null)
+          .input("MaterialAmount", sql.Decimal(18,4),act.MaterialAmount  || null)
+          .input("GrandTotal",     sql.Decimal(18,4),act.GrandTotal      || null)
+          .input("Remarks",        sql.NVarChar,     act.Remarks         || null)
+          .query(`
             UPDATE dbo.WorkOrderActivities SET
               ActivityGroupId=@ActivityGroupId, ActivityId=@ActivityId, UOMId=@UOMId,
               Rate=@Rate, Area=@Area, LabourAmount=@LabourAmount,
@@ -646,44 +720,45 @@ router.post("/:id/save-full", async (req, res) => {
           `);
       }
 
-      keptActivityIds.push(activityId);
+      keptActivityIds.push(activityDbId);
       const keptMaterialIds = [];
       const materials = Array.isArray(act.materials) ? act.materials : [];
 
-      // 3. Upsert each material under this activity
       for (const mat of materials) {
-        let materialId = mat.Id ? parseInt(mat.Id, 10) : null;
-        if (materialId && !Number.isFinite(materialId)) materialId = null;
+        let materialDbId = mat.Id ? parseInt(mat.Id, 10) : null;
+        if (!Number.isFinite(materialDbId) || materialDbId <= 0) materialDbId = null;
 
-        if (!materialId) {
+        if (!materialDbId) {
           const r = await pool
             .request()
-            .input("WorkOrderActivityId", sql.Int, activityId)
-            .input("ItemId", sql.UniqueIdentifier, mat.ItemId || null)
-            .input("UOMId", sql.Int, mat.UOMId || null)
-            .input("Quantity", sql.Decimal(18, 2), mat.Quantity || null)
-            .input("Rate", sql.Decimal(18, 2), mat.Rate || null)
-            .input("Remarks", sql.NVarChar, mat.Remarks || null)
-            .input("CreatedBy", sql.NVarChar(100), req.user?.email || null)
-            .input("CreatedAt", sql.DateTime2, new Date()).query(`
+            .input("WorkOrderActivityId", sql.Int,             activityDbId)
+            .input("ItemId",              sql.UniqueIdentifier, mat.ItemId || null)
+            .input("UOMId",               sql.Int,             mat.UOMId  || null)
+            .input("Quantity",            sql.Decimal(18,2),   mat.Quantity || null)
+            .input("Rate",                sql.Decimal(18,2),   mat.Rate     || null)
+            .input("Remarks",             sql.NVarChar,        mat.Remarks  || null)
+            .input("CreatedBy",           sql.NVarChar(100),   req.user?.email || null)
+            .input("CreatedAt",           sql.DateTime2,       new Date())
+            .query(`
               INSERT INTO dbo.WorkOrderActivityMaterials
                 (WorkOrderActivityId, ItemId, UOMId, Quantity, Rate, Remarks, CreatedBy, CreatedAt)
               OUTPUT INSERTED.Id
               VALUES
                 (@WorkOrderActivityId, @ItemId, @UOMId, @Quantity, @Rate, @Remarks, @CreatedBy, @CreatedAt)
             `);
-          materialId = r.recordset[0].Id;
+          materialDbId = r.recordset[0].Id;
         } else {
           await pool
             .request()
-            .input("Id", sql.Int, materialId)
-            .input("ItemId", sql.UniqueIdentifier, mat.ItemId || null)
-            .input("UOMId", sql.Int, mat.UOMId || null)
-            .input("Quantity", sql.Decimal(18, 2), mat.Quantity || null)
-            .input("Rate", sql.Decimal(18, 2), mat.Rate || null)
-            .input("Remarks", sql.NVarChar, mat.Remarks || null)
-            .input("UpdatedBy", sql.NVarChar(100), req.user?.email || null)
-            .input("UpdatedAt", sql.DateTime2, new Date()).query(`
+            .input("Id",        sql.Int,             materialDbId)
+            .input("ItemId",    sql.UniqueIdentifier, mat.ItemId || null)
+            .input("UOMId",     sql.Int,             mat.UOMId  || null)
+            .input("Quantity",  sql.Decimal(18,2),   mat.Quantity || null)
+            .input("Rate",      sql.Decimal(18,2),   mat.Rate     || null)
+            .input("Remarks",   sql.NVarChar,        mat.Remarks  || null)
+            .input("UpdatedBy", sql.NVarChar(100),   req.user?.email || null)
+            .input("UpdatedAt", sql.DateTime2,       new Date())
+            .query(`
               UPDATE dbo.WorkOrderActivityMaterials SET
                 ItemId=@ItemId, UOMId=@UOMId, Quantity=@Quantity,
                 Rate=@Rate, Remarks=@Remarks,
@@ -691,55 +766,47 @@ router.post("/:id/save-full", async (req, res) => {
               WHERE Id=@Id
             `);
         }
-        keptMaterialIds.push(materialId);
+        keptMaterialIds.push(materialDbId);
       }
 
-      // Delete materials removed by the user for this activity
+      // Delete removed materials for this activity
       const safeMaterialIds = safeIntList(keptMaterialIds);
       if (safeMaterialIds.length > 0) {
-        await pool.request().input("WorkOrderActivityId", sql.Int, activityId)
-          .query(`
-            DELETE FROM dbo.WorkOrderActivityMaterials
-            WHERE WorkOrderActivityId = @WorkOrderActivityId
-            AND Id NOT IN (${safeMaterialIds.join(",")})
-          `);
+        await pool.request().input("WorkOrderActivityId", sql.Int, activityDbId).query(`
+          DELETE FROM dbo.WorkOrderActivityMaterials
+          WHERE WorkOrderActivityId = @WorkOrderActivityId
+          AND Id NOT IN (${safeMaterialIds.join(",")})
+        `);
       } else {
-        await pool
-          .request()
-          .input("WorkOrderActivityId", sql.Int, activityId)
-          .query(
-            "DELETE FROM dbo.WorkOrderActivityMaterials WHERE WorkOrderActivityId = @WorkOrderActivityId",
-          );
+        await pool.request().input("WorkOrderActivityId", sql.Int, activityDbId).query(
+          "DELETE FROM dbo.WorkOrderActivityMaterials WHERE WorkOrderActivityId = @WorkOrderActivityId"
+        );
       }
     }
 
-    // 4. Delete activities (and their materials) removed by the user
+    // Delete removed activities (and their materials) for this header
     const safeActivityIds = safeIntList(keptActivityIds);
     if (safeActivityIds.length > 0) {
       await pool.request().input("WorkOrderHeaderId", sql.Int, headerId).query(`
-          DELETE m FROM dbo.WorkOrderActivityMaterials m
-          INNER JOIN dbo.WorkOrderActivities a ON a.Id = m.WorkOrderActivityId
-          WHERE a.WorkOrderHeaderId = @WorkOrderHeaderId
-          AND a.Id NOT IN (${safeActivityIds.join(",")})
-        `);
+        DELETE m FROM dbo.WorkOrderActivityMaterials m
+        INNER JOIN dbo.WorkOrderActivities a ON a.Id = m.WorkOrderActivityId
+        WHERE a.WorkOrderHeaderId = @WorkOrderHeaderId
+        AND a.Id NOT IN (${safeActivityIds.join(",")})
+      `);
       await pool.request().input("WorkOrderHeaderId", sql.Int, headerId).query(`
-          DELETE FROM dbo.WorkOrderActivities
-          WHERE WorkOrderHeaderId = @WorkOrderHeaderId
-          AND Id NOT IN (${safeActivityIds.join(",")})
-        `);
+        DELETE FROM dbo.WorkOrderActivities
+        WHERE WorkOrderHeaderId = @WorkOrderHeaderId
+        AND Id NOT IN (${safeActivityIds.join(",")})
+      `);
     } else {
-      // All activities removed — wipe everything
       await pool.request().input("WorkOrderHeaderId", sql.Int, headerId).query(`
-          DELETE m FROM dbo.WorkOrderActivityMaterials m
-          INNER JOIN dbo.WorkOrderActivities a ON a.Id = m.WorkOrderActivityId
-          WHERE a.WorkOrderHeaderId = @WorkOrderHeaderId
-        `);
-      await pool
-        .request()
-        .input("WorkOrderHeaderId", sql.Int, headerId)
-        .query(
-          "DELETE FROM dbo.WorkOrderActivities WHERE WorkOrderHeaderId = @WorkOrderHeaderId",
-        );
+        DELETE m FROM dbo.WorkOrderActivityMaterials m
+        INNER JOIN dbo.WorkOrderActivities a ON a.Id = m.WorkOrderActivityId
+        WHERE a.WorkOrderHeaderId = @WorkOrderHeaderId
+      `);
+      await pool.request().input("WorkOrderHeaderId", sql.Int, headerId).query(
+        "DELETE FROM dbo.WorkOrderActivities WHERE WorkOrderHeaderId = @WorkOrderHeaderId"
+      );
     }
 
     await bumpCacheVersion("work-orders");
@@ -748,56 +815,50 @@ router.post("/:id/save-full", async (req, res) => {
       activityCount: safeActivityIds.length,
     });
   } catch (err) {
+    console.error("[POST /:id/save-full]", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ── PUT /:id/submit — Draft → Pending ─────────────────────────────────────────
+// ── Approval transitions ───────────────────────────────────────────────────────
+
 router.put("/:id/submit", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-
     const result = await transition("work-orders", id, "Pending", userEmail, req.user?.role);
     await bumpCacheVersion("work-orders");
     res.json({ message: "Work order submitted for approval", ...result });
   } catch (err) {
-    console.error("WO submit error:", err.message);
     res.status(400).json({ error: err.message });
   }
 });
 
-// ── PUT /:id/approve — Pending → Approved ─────────────────────────────────────
 router.put("/:id/approve", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-
     const result = await transition("work-orders", id, "Approved", userEmail, req.user?.role);
     await bumpCacheVersion("work-orders");
     res.json({ message: "Work order approved", ...result });
   } catch (err) {
-    console.error("WO approve error:", err.message);
     const status = err.message.includes("not authorized") ? 403 : 400;
     res.status(status).json({ error: err.message });
   }
 });
 
-// ── PUT /:id/reject — Pending → Rejected ──────────────────────────────────────
 router.put("/:id/reject", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const { note } = req.body;
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-
     const result = await transition("work-orders", id, "Rejected", userEmail, req.user?.role, note || null);
     await bumpCacheVersion("work-orders");
     res.json({ message: "Work order rejected", ...result });
   } catch (err) {
-    console.error("WO reject error:", err.message);
     const status = err.message.includes("not authorized") ? 403 : 400;
     res.status(status).json({ error: err.message });
   }
