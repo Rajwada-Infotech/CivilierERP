@@ -59,6 +59,7 @@ const TdsMaster: React.FC = () => {
   } = useQuery({
     queryKey: ["tds"],
     queryFn: getTds,
+    staleTime: 5 * 60 * 1000,
   });
 
   const dbItems: DbTds[] = Array.isArray(dbData) ? dbData : [];

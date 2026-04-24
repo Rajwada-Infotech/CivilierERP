@@ -274,6 +274,7 @@ const AccountGroupMaster: React.FC = () => {
   } = useQuery({
     queryKey: ["account-groups"],
     queryFn: getAccountGroups,
+    staleTime: 5 * 60 * 1000,
   });
 
   const allGroups: AccountGroup[] = useMemo(() => {
