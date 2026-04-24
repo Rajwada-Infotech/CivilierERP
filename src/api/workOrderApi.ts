@@ -137,12 +137,12 @@ export const fetchActivityGroups = async (): Promise<{ id: number; name: string 
 
 /**
  * Activities: ActivityMaster rows where activity_type = 1.
- * Optionally filtered by groupId (parent_id in ActivityMaster).
+ * Optionally filtered by groupId (belongsTo in ActivityMaster).
  * Backend: GET /api/work-orders/meta/activities?groupId=<id>
  */
 export const fetchActivities = async (
   groupId?: number,
-): Promise<{ id: number; name: string; groupId: number }[]> => {
+): Promise<{ id: number; name: string; groupId: number | string }[]> => {
   try {
     const url = groupId
       ? `${BASE_URL}/meta/activities?groupId=${groupId}`
@@ -214,4 +214,4 @@ export const saveFullWorkOrder = async (
     throw new Error(err.error || `Save failed: ${res.status}`);
   }
   return res.json();
-};
+};  // workOrder.ts
