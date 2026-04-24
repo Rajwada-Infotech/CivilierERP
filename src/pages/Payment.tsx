@@ -34,8 +34,8 @@ interface DbPayment {
 }
 
 interface BankOption {
-  LHeadId: number;
-  LHeadName: string;
+  BId: number;
+  BName: string;
 }
 
 // ── Fetch banks from API ───────────────────────────────────────────────────────
@@ -46,14 +46,13 @@ const fetchBanks = async (): Promise<BankOption[]> => {
   const data = await res.json();
   // bank-master returns array of account heads with LHeadType = 'B'
   return (Array.isArray(data) ? data : data.data ?? []).map((b: any) => ({
-    LHeadId: b.LHeadId,
-    LHeadName: b.LHeadName,
+    BId: b.BId,
+    BName: b.BName,
   }));
 };
 
 const toPayload = (r: Record<string, unknown>) => {
-  // bankId is stored as "LHeadId|LHeadName" string from the select
-  // OR just the numeric ID if coming from existing record
+  // bank field value is "BId|BName" from optionsProvider; split to get ID and name
   let PBankID: number | null = null;
   let PBankName: string | null = null;
 
@@ -220,8 +219,9 @@ await addPayment(toPayload(event.record));
     ),
   };
 
-  // Build bank options as "LHeadId|LHeadName" strings so value carries both pieces
-  const bankOptions = banks.map((b) => `${b.LHeadId}|${b.LHeadName}`);
+  // optionsProvider: value="BId|BName" (parsed in toPayload), label=bank name only
+  const bankOptionsProvider = () =>
+    banks.map((b) => ({ value: `${b.BId}|${b.BName}`, label: b.BName ?? "" }));
 
   if (isLoading)
     return <div className="p-6 text-muted-foreground">Loading...</div>;
@@ -313,11 +313,11 @@ await addPayment(toPayload(event.record));
             required: true,
           },
           {
-            // Single dropdown: value = "LHeadId|LHeadName", toPayload splits it
+            // optionsProvider: value="BId|BName", label=bank name only
             name: "bank",
             label: "Bank",
             type: "select",
-            options: bankOptions,
+            optionsProvider: bankOptionsProvider,
           },
         ]}
         columns={[
@@ -381,4 +381,3 @@ await addPayment(toPayload(event.record));
 };
 
 export default Payment;
-
