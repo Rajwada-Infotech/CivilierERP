@@ -265,21 +265,25 @@ const ItemMaster: React.FC = () => {
   const { data: dbItems = [], isLoading, error } = useQuery({
     queryKey: ["item-master"],
     queryFn: getItems,
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: dbGroups = [] } = useQuery({
     queryKey: ["item-groups"],
     queryFn: getItemGroups,
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: dbUoms = [] } = useQuery({
     queryKey: ["uom-master"],
     queryFn: getUomList,
+    staleTime: 5 * 60 * 1000,
   });
 
   const { data: dbHsn = [] } = useQuery({
     queryKey: ["hsn"],
     queryFn: getHsn,
+    staleTime: 5 * 60 * 1000,
   });
 
   // ── Mapped options ────────────────────────────────────────────────────────

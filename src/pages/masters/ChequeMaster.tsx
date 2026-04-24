@@ -72,14 +72,17 @@ const ChequeMaster: React.FC = () => {
   const { data: chequeData, isLoading: loadingCheques } = useQuery({
     queryKey: ["cheques"],
     queryFn: getCheques,
+    staleTime: 5 * 60 * 1000,
   });
   const { data: bankData, isLoading: loadingBanks } = useQuery<BankOption[]>({
     queryKey: ["account-head-bank-options"],
     queryFn: getBanksForCheque,
+    staleTime: 5 * 60 * 1000,
   });
   const { data: companies = [] } = useQuery<CompanyOption[]>({
     queryKey: ["enterprise-options"],
     queryFn: getCompanyOptions,
+    staleTime: 5 * 60 * 1000,
   });
 
   const dbCheques: DbCheque[] = Array.isArray(chequeData) ? chequeData : [];
