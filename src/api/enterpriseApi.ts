@@ -6,7 +6,7 @@ export interface Enterprise {
   id: number;
   name: string | null;
   short_name: string | null;
-  entity_type: string | null;        // "Enterprise" | "Company" | "Business Unit"
+  entity_type: string | null; // "Enterprise" | "Company" | "Business Unit"
   business_identity: string | null;
   business_type: string | null;
   b_sub_identity_type: string | null;
@@ -16,7 +16,6 @@ export interface Enterprise {
   date_of_establishment: string | null;
   start_date: string | null;
   start_fin_year: string | null;
-  currency: string | null;
   pan: string | null;
   cin: string | null;
   address: string | null;
@@ -30,7 +29,6 @@ export interface Enterprise {
   website: string | null;
   latitude: number | null;
   longitude: number | null;
-  tds_limit: number | null;
   description: string | null;
   gst_type: string | null;
   gst_issue_date: string | null;
@@ -41,9 +39,6 @@ export interface Enterprise {
   status: string | null;
   cr_code: string | null;
   discontinue: boolean | null;
-  fiscal_year_start: string | null;
-  cost_center: string | null;
-  profit_center: string | null;
 }
 
 async function handle<T>(res: Response): Promise<T> {
@@ -68,7 +63,10 @@ export const addEnterprise = async (data: Partial<Enterprise>) => {
   return handle(res);
 };
 
-export const updateEnterprise = async (id: string | number, data: Partial<Enterprise>) => {
+export const updateEnterprise = async (
+  id: string | number,
+  data: Partial<Enterprise>,
+) => {
   const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -83,7 +81,9 @@ export const deleteEnterprise = async (id: string | number) => {
 };
 
 export const getEnterpriseOptions = async (type?: string) => {
-  const url = type ? `${BASE_URL}/options?type=${encodeURIComponent(type)}` : `${BASE_URL}/options`;
+  const url = type
+    ? `${BASE_URL}/options?type=${encodeURIComponent(type)}`
+    : `${BASE_URL}/options`;
   const res = await fetchWithAuth(url);
   return handle<{ id: number; label: string }[]>(res);
 };
