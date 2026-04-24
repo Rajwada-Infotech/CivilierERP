@@ -29,6 +29,7 @@ const ActivityMaster: React.FC = () => {
   } = useQuery<DbActivity[]>({
     queryKey: ["activities"],
     queryFn: getActivities,
+    staleTime: 5 * 60 * 1000,
   });
 
   const dbItems: DbActivity[] = Array.isArray(dbData) ? dbData : [];

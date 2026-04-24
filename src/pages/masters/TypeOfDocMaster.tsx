@@ -43,6 +43,7 @@ const TypeOfDocMaster: React.FC = () => {
   const { data: dbData, isLoading, error } = useQuery({
     queryKey: ['document-types'],
     queryFn: getDocs,
+    staleTime: 5 * 60 * 1000,
   })
 
   const dbItems: DbDoc[] = Array.isArray(dbData) ? dbData : []
