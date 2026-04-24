@@ -468,12 +468,15 @@ const MaterialBreakdownModal: React.FC<{
 };
 
 // ─── Activity Row ─────────────────────────────────────────────────────────────
+// FIX: onUpdate now accepts Partial<Activity> to allow atomic multi-field updates.
+// This prevents the stale-closure race where two sequential onUpdate("field", val)
+// calls would cause the second to overwrite the first on re-render.
 
 const ActivityRow: React.FC<{
   activity: Activity;
   index: number;
   groupIndex: number;
-  onUpdate: (field: keyof Activity, value: string | number | null | MaterialItem[]) => void;
+  onUpdate: (patch: Partial<Activity>) => void; // ← FIXED: accepts patch object
   onDelete: () => void;
   canDelete: boolean;
   activityOptions: ActivityOption[];
@@ -489,31 +492,31 @@ const ActivityRow: React.FC<{
   const activityTotal = labourTotal + materialsTotal;
   const label = `${groupIndex + 1}.${index + 1}`;
 
+  // FIX: Single onUpdate call with both fields — eliminates the stale-closure race.
   const handleActivityChange = (selectedId: string) => {
     const found = safeOptions.find((a) => String(a.id) === selectedId);
-    onUpdate("activityId", found ? found.id : null);
-    onUpdate("name", found ? found.name : "");
+    onUpdate({
+      activityId: found ? found.id : null,
+      name: found ? found.name : "",
+    });
   };
 
-  const ActivitySelect = () => {
-    if (loadingActivities) {
-      return <div className={`${cellSelect} bg-muted/30 animate-pulse`} />;
-    }
-    return (
-      <select
-        value={activity.activityId !== null ? String(activity.activityId) : ""}
-        onChange={(e) => handleActivityChange(e.target.value)}
-        className={cellSelect}
-      >
-        <option value="">
-          {safeOptions.length === 0 ? "No activities available" : "Select activity…"}
-        </option>
-        {safeOptions.map((a) => (
-          <option key={a.id} value={String(a.id)}>{a.name}</option>
-        ))}
-      </select>
-    );
-  };
+  const activitySelectJSX = loadingActivities ? (
+    <div className={`${cellSelect} bg-muted/30 animate-pulse h-[34px]`} />
+  ) : (
+    <select
+      value={activity.activityId !== null ? String(activity.activityId) : ""}
+      onChange={(e) => handleActivityChange(e.target.value)}
+      className={cellSelect}
+    >
+      <option value="">
+        {safeOptions.length === 0 ? "No activities available" : "Select activity…"}
+      </option>
+      {safeOptions.map((a) => (
+        <option key={a.id} value={String(a.id)}>{a.name}</option>
+      ))}
+    </select>
+  );
 
   return (
     <>
@@ -522,7 +525,7 @@ const ActivityRow: React.FC<{
         <div className="flex items-center gap-2">
           <span className="text-xs font-mono text-primary font-bold shrink-0 w-8">{label}</span>
           <div className="flex-1">
-            <ActivitySelect />
+            {activitySelectJSX}
           </div>
           <button
             onClick={onDelete}
@@ -537,7 +540,7 @@ const ActivityRow: React.FC<{
             <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Unit</p>
             <select
               value={activity.unit}
-              onChange={(e) => onUpdate("unit", e.target.value)}
+              onChange={(e) => onUpdate({ unit: e.target.value })}
               className="w-full text-sm rounded-md border border-border px-2 py-1.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition appearance-none"
             >
               {UNITS.map((u) => <option key={u}>{u}</option>)}
@@ -549,7 +552,7 @@ const ActivityRow: React.FC<{
               type="number"
               min={0}
               value={activity.area || ""}
-              onChange={(e) => onUpdate("area", parseFloat(e.target.value) || 0)}
+              onChange={(e) => onUpdate({ area: parseFloat(e.target.value) || 0 })}
               placeholder="0"
               className={cellInput}
             />
@@ -564,7 +567,7 @@ const ActivityRow: React.FC<{
                 type="number"
                 min={0}
                 value={activity.ratePerUnit || ""}
-                onChange={(e) => onUpdate("ratePerUnit", parseFloat(e.target.value) || 0)}
+                onChange={(e) => onUpdate({ ratePerUnit: parseFloat(e.target.value) || 0 })}
                 placeholder="0"
                 className={`${cellInput} pl-6`}
               />
@@ -595,7 +598,7 @@ const ActivityRow: React.FC<{
         )}
         <MaterialBreakdownModal
           activity={activity}
-          onUpdateMaterials={(mats) => onUpdate("materials", mats as unknown as MaterialItem[])}
+          onUpdateMaterials={(mats) => onUpdate({ materials: mats })}
         />
       </div>
 
@@ -603,10 +606,10 @@ const ActivityRow: React.FC<{
       <div className="hidden sm:block rounded-lg border border-border/50 overflow-hidden">
         <div className="grid grid-cols-[48px_1fr_96px_128px_112px_auto_120px_32px] gap-2 items-center px-3 py-2.5 bg-muted/20">
           <div className="text-xs font-mono text-primary font-semibold">{label}</div>
-          <ActivitySelect />
+          {activitySelectJSX}
           <select
             value={activity.unit}
-            onChange={(e) => onUpdate("unit", e.target.value)}
+            onChange={(e) => onUpdate({ unit: e.target.value })}
             className="w-full text-sm rounded-md border border-border px-2 py-1.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition appearance-none"
           >
             {UNITS.map((u) => <option key={u}>{u}</option>)}
@@ -617,7 +620,7 @@ const ActivityRow: React.FC<{
               type="number"
               min={0}
               value={activity.ratePerUnit || ""}
-              onChange={(e) => onUpdate("ratePerUnit", parseFloat(e.target.value) || 0)}
+              onChange={(e) => onUpdate({ ratePerUnit: parseFloat(e.target.value) || 0 })}
               placeholder="Rate"
               className={`${cellInput} pl-6`}
             />
@@ -626,13 +629,13 @@ const ActivityRow: React.FC<{
             type="number"
             min={0}
             value={activity.area || ""}
-            onChange={(e) => onUpdate("area", parseFloat(e.target.value) || 0)}
+            onChange={(e) => onUpdate({ area: parseFloat(e.target.value) || 0 })}
             placeholder="Area"
             className={cellInput}
           />
           <MaterialBreakdownModal
             activity={activity}
-            onUpdateMaterials={(mats) => onUpdate("materials", mats as unknown as MaterialItem[])}
+            onUpdateMaterials={(mats) => onUpdate({ materials: mats })}
           />
           <div className="text-right">
             <span className={`text-sm font-semibold ${activityTotal > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}>
@@ -692,19 +695,21 @@ const ActivityGroupCard: React.FC<{
   );
   const groupTotal = groupLabourTotal + groupMaterialsTotal;
 
-  const filteredActivities = group.groupId
-    ? safeActivityOptions.filter((a) => a.groupId === group.groupId)
+  // FIX: Coerce both sides to Number to avoid string vs number type mismatch
+  // from the API (e.g. groupId "5" !== 5).
+  const filteredActivities = group.groupId !== null
+    ? safeActivityOptions.filter(
+        (a) => Number(a.groupId) === Number(group.groupId)
+      )
     : safeActivityOptions;
 
-  const updateActivity = (
-    actIdx: number,
-    field: keyof Activity,
-    value: string | number | null | MaterialItem[],
-  ) => {
+  // FIX: updateActivity now accepts a Partial<Activity> patch and merges it
+  // atomically, matching the updated ActivityRow onUpdate signature.
+  const updateActivity = (actIdx: number, patch: Partial<Activity>) => {
     onUpdate({
       ...group,
       activities: group.activities.map((a, i) =>
-        i === actIdx ? { ...a, [field]: value } : a,
+        i === actIdx ? { ...a, ...patch } : a,
       ),
     });
   };
@@ -723,6 +728,7 @@ const ActivityGroupCard: React.FC<{
       ...group,
       groupId: found ? found.id : null,
       name: found ? found.name : "",
+      // Reset activities when group changes so stale activityId values don't linger
       activities: [EMPTY_ACTIVITY()],
     });
   };
@@ -743,7 +749,6 @@ const ActivityGroupCard: React.FC<{
         {loadingDropdowns ? (
           <div className="flex-1 h-8 rounded-md bg-muted/50 animate-pulse" />
         ) : (
-          // ── FIXED: bg-transparent → bg-background to match all other dropdowns ──
           <select
             value={group.groupId !== null ? String(group.groupId) : ""}
             onChange={(e) => handleGroupChange(e.target.value)}
@@ -785,7 +790,7 @@ const ActivityGroupCard: React.FC<{
               activity={activity}
               index={actIdx}
               groupIndex={index}
-              onUpdate={(field, value) => updateActivity(actIdx, field, value)}
+              onUpdate={(patch) => updateActivity(actIdx, patch)}
               onDelete={() => deleteActivity(actIdx)}
               canDelete={group.activities.length > 1}
               activityOptions={filteredActivities}
@@ -852,7 +857,18 @@ const WorkOrderMaster: React.FC = () => {
         setProjects(ensureArray<DropdownOption>(proj));
         setContractors(ensureArray<DropdownOption>(cont));
         setActivityGroupOptions(ensureArray<DropdownOption>(grps));
-        setActivityOptions(ensureArray<ActivityOption>(acts));
+
+        // Normalise every activity's groupId to a real number so that
+        // Number(a.groupId) === Number(group.groupId) always works correctly.
+        const rawActs = ensureArray<ActivityOption>(acts);
+        setActivityOptions(
+          rawActs.map((a) => ({
+            ...a,
+            groupId: a.groupId !== undefined && a.groupId !== null
+              ? Number(a.groupId)
+              : undefined,
+          }))
+        );
       } catch (err) {
         console.error("Failed to fetch dropdown data:", err);
         setDropdownError("Some dropdown data could not be loaded. You can still fill in the form.");
