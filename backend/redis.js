@@ -27,9 +27,9 @@ function getRedis() {
       // lazyConnect: false (default) — connects immediately, no manual .connect() needed
     });
 
-    client.on("connect", () => logger.info("Redis connected"));
-    client.on("error", (err) => console.error("Redis error:", err.message));
-    client.on("close", () => console.warn("Redis connection closed"));
+    client.on("connect", () => logger.info({ event: "REDIS_CONNECTED" }, "Redis connected"));
+    client.on("error", (err) => logger.error({ event: "REDIS_ERROR", err }, "Redis error"));
+    client.on("close", () => logger.warn({ event: "REDIS_CLOSED" }, "Redis connection closed"));
   }
   return client;
 }
@@ -88,10 +88,10 @@ async function redisDelPattern(pattern) {
     `;
     const numDeleted = await redis.eval(script, 0, pattern);
     if (numDeleted > 0) {
-      console.log(`redisDelPattern: deleted ${numDeleted} keys matching ${pattern}`);
+      logger.info({ event: "REDIS_DEL_PATTERN", count: numDeleted, pattern }, "Redis pattern delete");
     }
   } catch (err) {
-    console.warn('redisDelPattern error:', err.message);
+    logger.warn({ event: "REDIS_DEL_PATTERN_ERROR", err, pattern }, "Redis pattern delete error");
   }
 }
 
@@ -212,7 +212,7 @@ async function getSystemMetrics() {
       lastUpdated: now 
     };
   } catch (err) {
-    console.warn('getSystemMetrics error:', err.message);
+    logger.warn({ event: "REDIS_METRICS_ERROR", err }, "getSystemMetrics error");
     // Preserve cache on error
   }
   return cachedMetrics;
@@ -255,7 +255,7 @@ async function cleanupInactiveUsers() {
       end
     `, 0, thirtyDaysAgo);
   } catch (err) {
-    console.warn('cleanupInactiveUsers error:', err.message);
+    logger.warn({ event: "REDIS_CLEANUP_ERROR", err }, "cleanupInactiveUsers error");
   }
 }
 
@@ -271,7 +271,7 @@ async function decayEngagement() {
       end
     `, 0);
   } catch (err) {
-    console.warn('decayEngagement error:', err.message);
+    logger.warn({ event: "REDIS_DECAY_ERROR", err }, "decayEngagement error");
   }
 }
 
