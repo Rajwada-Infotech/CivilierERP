@@ -52,6 +52,7 @@ const CustomerMaster: React.FC = () => {
   const { data, isLoading, error } = useQuery({
     queryKey: ["account-head", CUSTOMER_TYPE],
     queryFn: () => getList(CUSTOMER_TYPE),
+    staleTime: 5 * 60 * 1000,
   });
 
   /* -------------------- MAP BACKEND → FRONTEND -------------------- */

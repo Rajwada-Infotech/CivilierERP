@@ -51,6 +51,7 @@ const ItemGroupMaster: React.FC = () => {
   const { data: dbData, isLoading, error } = useQuery({
     queryKey: ["item-groups"],
     queryFn: getItemGroups,
+    staleTime: 5 * 60 * 1000,
   })
 
   const dbItems: DbItemGroup[] = Array.isArray(dbData) ? dbData : []

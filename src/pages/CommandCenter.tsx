@@ -1,22 +1,17 @@
-import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "../components/Breadcrumbs";
 import { getWidgetsDashboard, WidgetsDashboardData } from "../api/widgetsApi";
 import { LayoutDashboard, AlertTriangle, Info } from "lucide-react";
 
 const CommandCenter = () => {
-  const [data, setData] = useState<WidgetsDashboardData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data, isLoading, error } = useQuery<WidgetsDashboardData>({
+    queryKey: ["widgets-dashboard"],
+    queryFn: getWidgetsDashboard,
+    staleTime: 60_000,
+  });
 
-  useEffect(() => {
-    getWidgetsDashboard()
-      .then(setData)
-      .catch((err) => setError(err.message))
-      .finally(() => setLoading(false));
-  }, []);
-
-  if (loading) return <div className="py-20 text-center text-muted-foreground animate-pulse">Loading dashboard...</div>;
-  if (error) return <div className="py-20 text-center text-destructive">{error}</div>;
+  if (isLoading) return <div className="py-20 text-center text-muted-foreground animate-pulse">Loading dashboard...</div>;
+  if (error) return <div className="py-20 text-center text-destructive">{(error as Error).message}</div>;
   if (!data) return null;
 
   return (

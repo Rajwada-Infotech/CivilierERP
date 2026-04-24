@@ -55,6 +55,7 @@ const SupplierMaster: React.FC = () => {
   const { data, isLoading, error } = useQuery({
     queryKey: ["account-head", SUPPLIER_TYPE],
     queryFn: () => getList(SUPPLIER_TYPE),
+    staleTime: 5 * 60 * 1000,
   });
 
   const mappedData = React.useMemo(() => {

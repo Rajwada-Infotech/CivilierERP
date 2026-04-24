@@ -45,6 +45,7 @@ const FinancialYearMaster: React.FC = () => {
   } = useQuery({
     queryKey: ["fin-years"],
     queryFn: getFinYears,
+    staleTime: 5 * 60 * 1000,
   });
 
   const dbItems: DbFinYear[] = Array.isArray(dbData) ? dbData : [];

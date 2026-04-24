@@ -31,6 +31,7 @@ const CardMaster = () => {
   const { data: dbData, isLoading, error } = useQuery({
     queryKey: ['card-masters'],
     queryFn: getCardMasters,
+    staleTime: 5 * 60 * 1000,
   })
 
   const dbItems = Array.isArray(dbData) ? dbData : []
