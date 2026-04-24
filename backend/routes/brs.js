@@ -7,44 +7,43 @@ const { bumpCacheVersion }  = require("../redis");
 const { getPool }           = require("../db");
 
 // ── GET /brs/filters ─────────────────────────────────────────────────────────
-// Returns companies (LHeadType='C') and banks (LHeadType='B').
-// Banks link to their company via bank.LBelongsTo = company.LHeadName.
-// We resolve that join here so the frontend gets companyId on each bank
-// for cascading dropdowns.
+// Companies: AccountHeadMaster WHERE LHeadType='C'
+// Banks:     dbo.bankMaster (BId, BName, CompanyName)
+// Link:      bankMaster.CompanyName = AccountHeadMaster.LHeadName
 router.get("/filters", cache("brs-filters", 300), async (req, res) => {
   try {
     const pool = getPool();
 
-    const result = await pool.request().query(`
-      SELECT
-        b.LHeadId,
-        b.LHeadName,
-        b.LHeadType,
-        b.LBelongsTo,
-        c.LHeadId   AS CompanyId,
-        c.LHeadName AS CompanyName
-      FROM AccountHeadMaster b
-      LEFT JOIN AccountHeadMaster c
-        ON  c.LHeadType  = 'C'
-        AND c.LHeadStatus = 1
-        AND c.LHeadName  = b.LBelongsTo
-      WHERE b.LHeadType IN ('C', 'B')
-        AND b.LHeadStatus = 1
-      ORDER BY b.LHeadType, b.LHeadName
+    const companyResult = await pool.request().query(`
+      SELECT LHeadId AS id, LHeadName AS name
+      FROM   AccountHeadMaster
+      WHERE  LHeadType   = 'C'
+        AND  LHeadStatus = 1
+      ORDER BY LHeadName
     `);
 
-    const companies = result.recordset
-      .filter((r) => r.LHeadType === "C")
-      .map((r) => ({ id: r.LHeadId, name: r.LHeadName }));
+    const bankResult = await pool.request().query(`
+      SELECT
+        bm.BId,
+        bm.BName,
+        bm.CompanyName,
+        c.LHeadId AS CompanyId
+      FROM bankMaster bm
+      LEFT JOIN AccountHeadMaster c
+        ON  c.LHeadType   = 'C'
+        AND c.LHeadStatus = 1
+        AND c.LHeadName   = bm.CompanyName
+      ORDER BY bm.BName
+    `);
 
-    const banks = result.recordset
-      .filter((r) => r.LHeadType === "B")
-      .map((r) => ({
-        id:        r.LHeadId,
-        name:      r.LHeadName,
-        companyId: r.CompanyId   ?? null,   // null if LBelongsTo didn't match any company
-        companyName: r.CompanyName ?? null,
-      }));
+    const companies = companyResult.recordset;
+
+    const banks = bankResult.recordset.map((b) => ({
+      id:          b.BId,
+      name:        b.BName,
+      companyId:   b.CompanyId   ?? null,
+      companyName: b.CompanyName ?? null,
+    }));
 
     res.json({ companies, banks });
   } catch (err) {
@@ -54,9 +53,7 @@ router.get("/filters", cache("brs-filters", 300), async (req, res) => {
 });
 
 // ── GET /brs ─────────────────────────────────────────────────────────────────
-// BankReconciliation columns: BRSID, BankID, TransactionID, Amount, Type,
-//   IsMatched, BankDate, SystemDate, CreatedAt
-// NOTE: No CompanyID column — company is resolved via AccountHeadMaster JOIN.
+// BankReconciliation.BankID references bankMaster.BId
 router.get("/", cache("brs", 120), async (req, res) => {
   try {
     const pool = getPool();
@@ -67,16 +64,14 @@ router.get("/", cache("brs", 120), async (req, res) => {
 
     const { bankId, companyId, fromDate, toDate, status } = req.query;
 
-    // companyId filters via bank.LBelongsTo = company.LHeadName join
     let where = "WHERE 1=1";
     if (bankId)    where += " AND b.BankID = @bankId";
-    if (companyId) where += " AND company.LHeadId = @companyId";
+    if (companyId) where += " AND c.LHeadId = @companyId";
     if (fromDate)  where += " AND b.BankDate >= @fromDate";
     if (toDate)    where += " AND b.BankDate <= @toDate";
     if (status === "reconciled") where += " AND b.IsMatched = 1";
     if (status === "pending")    where += " AND b.IsMatched = 0";
 
-    // Shared param binder
     const bind = (r) => {
       if (bankId)    r.input("bankId",    sql.Int,  bankId);
       if (companyId) r.input("companyId", sql.Int,  companyId);
@@ -85,25 +80,21 @@ router.get("/", cache("brs", 120), async (req, res) => {
       return r;
     };
 
-    // Base FROM used in all three queries
     const baseFrom = `
       FROM BankReconciliation b
-      LEFT JOIN AccountHeadMaster bank
-        ON  bank.LHeadId   = b.BankID
-        AND bank.LHeadType = 'B'
-      LEFT JOIN AccountHeadMaster company
-        ON  company.LHeadType  = 'C'
-        AND company.LHeadStatus = 1
-        AND company.LHeadName  = bank.LBelongsTo
+      LEFT JOIN bankMaster bm
+        ON  bm.BId = b.BankID
+      LEFT JOIN AccountHeadMaster c
+        ON  c.LHeadType   = 'C'
+        AND c.LHeadStatus = 1
+        AND c.LHeadName   = bm.CompanyName
     `;
 
-    // ── COUNT ─────────────────────────────────────────────────────────────────
     const countResult = await bind(pool.request()).query(
       `SELECT COUNT(*) AS total ${baseFrom} ${where}`
     );
     const total = countResult.recordset[0].total;
 
-    // ── DATA ──────────────────────────────────────────────────────────────────
     const dataReq = bind(pool.request());
     dataReq.input("offset", sql.Int, offset);
     dataReq.input("limit",  sql.Int, limit);
@@ -119,16 +110,15 @@ router.get("/", cache("brs", 120), async (req, res) => {
         b.BankDate,
         b.SystemDate,
         b.CreatedAt,
-        bank.LHeadName    AS BankName,
-        company.LHeadId   AS CompanyID,
-        company.LHeadName AS CompanyName
+        bm.BName        AS BankName,
+        c.LHeadId       AS CompanyID,
+        c.LHeadName     AS CompanyName
       ${baseFrom}
       ${where}
       ORDER BY b.BankDate DESC, b.BRSID DESC
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
     `);
 
-    // ── SUMMARY ───────────────────────────────────────────────────────────────
     const summaryResult = await bind(pool.request()).query(`
       SELECT
         SUM(CASE WHEN b.IsMatched = 1 THEN b.Amount ELSE 0 END) AS matched,
@@ -158,7 +148,6 @@ router.get("/", cache("brs", 120), async (req, res) => {
 });
 
 // ── POST /brs ─────────────────────────────────────────────────────────────────
-// No CompanyID column — only BankID (company resolved via bank's LParentId)
 router.post("/", async (req, res) => {
   try {
     const pool = getPool();
@@ -220,7 +209,6 @@ router.put("/:id/unmatch", async (req, res) => {
 });
 
 // ── PUT /brs/auto-match ───────────────────────────────────────────────────────
-// Pairs unmatched CREDIT/DEBIT entries with the same amount (±0.01)
 router.put("/auto-match", async (req, res) => {
   const pool        = getPool();
   const transaction = new sql.Transaction(pool);
@@ -265,10 +253,10 @@ router.put("/auto-match", async (req, res) => {
 
     const pairCount = pairedCredits.size;
     res.json({
-      message:      `Auto-match done: ${pairCount} pair(s) reconciled`,
-      pairs:        pairCount,
-      creditsLeft:  credits.length - pairCount,
-      debitsLeft:   debits.length  - pairCount,
+      message:     `Auto-match done: ${pairCount} pair(s) reconciled`,
+      pairs:       pairCount,
+      creditsLeft: credits.length - pairCount,
+      debitsLeft:  debits.length  - pairCount,
     });
 
   } catch (err) {
