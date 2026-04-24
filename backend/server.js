@@ -199,6 +199,8 @@ async function startServer() {
       { path: "/api/approval-inbox", file: "./routes/approvalInbox" },
       { path: "/api/tasks", file: "./routes/tasks" },
       { path: "/api/widgets", file: "./routes/widgets" },
+      { path: "/api/tenant-reminders", file: "./routes/tenantReminders" },
+      { path: "/api/reminders", file: "./routes/tenantReminders" },
     ];
 
     for (const { path, file } of routes) {

@@ -43,17 +43,31 @@ const requireUserEmail = (req, res) => {
 router.get("/", cache("cheque-master", 300), async (req, res) => {
   try {
     const pool = getPool();
-    const columnMeta = await getChequeColumnMeta();
-
-    const selectColumns = ["cm.*"];
-
-    // CreatedBy/UpdatedBy store emails directly — just alias them
-    if (hasColumn(columnMeta, "createdby")) selectColumns.push("cm.CreatedBy AS CreatedByEmail");
-    if (hasColumn(columnMeta, "updatedby")) selectColumns.push("cm.UpdatedBy AS UpdatedByEmail");
 
     const result = await pool.request().query(`
-      SELECT ${selectColumns.join(", ")}
+      SELECT
+        cm.CId,
+        cm.CompanyId,
+        cm.BankId,
+        cm.AccountNumber,
+        cm.IFSCCode,
+        cm.ChequeLotNumber,
+        cm.ChequeStartNumber,
+        cm.ChequeEndNumber,
+        cm.TotalCheques,
+        cm.Remarks,
+        cm.Status,
+        cm.CreatedBy,
+        cm.UpdatedBy,
+        cm.ApprovedBy,
+        cm.CreatedAt,
+        cm.UpdatedAt,
+        cm.ApprovedAt,
+        bm.BName        AS BankName,
+        bm.BBranch      AS BankBranch,
+        bm.BAccountType AS BankAccountType
       FROM dbo.ChequeMaster cm
+      LEFT JOIN dbo.BankMaster bm ON cm.BankId = bm.BId
     `);
 
     res.json(result.recordset);
