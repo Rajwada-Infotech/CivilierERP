@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   FolderKanban,
@@ -23,25 +24,16 @@ interface Project {
   businessUnit: string;
   clientName: string;
   clientCode: string;
-  projectManager: string;
   teamSize: string;
   startDate: string;
   endDate: string;
-  estimatedCost: string;
-  approvedBudget: string;
   currency: string;
-  billingType: string;
-  contractValue: string;
   status: string;
   priority: string;
   location: string;
   description: string;
   remarks: string;
   isActive: boolean;
-  costCenter: string;
-  profitCenter: string;
-  wbsCode: string;
-  percentComplete: string;
 }
 
 const PROJECT_TYPES = [
@@ -52,13 +44,6 @@ const PROJECT_TYPES = [
   "Consulting",
   "Research",
   "Maintenance",
-];
-const BILLING_TYPES = [
-  "Fixed Price",
-  "Time & Material",
-  "Cost Plus",
-  "Milestone Based",
-  "Retainer",
 ];
 const STATUSES = ["Planning", "Active", "On Hold", "Completed", "Cancelled"];
 const PRIORITIES = ["Low", "Medium", "High", "Critical"];
@@ -72,25 +57,16 @@ const empty: Project = {
   businessUnit: "",
   clientName: "",
   clientCode: "",
-  projectManager: "",
   teamSize: "",
   startDate: "",
   endDate: "",
-  estimatedCost: "",
-  approvedBudget: "",
   currency: "INR",
-  billingType: "Fixed Price",
-  contractValue: "",
   status: "Planning",
   priority: "Medium",
   location: "",
   description: "",
   remarks: "",
   isActive: true,
-  costCenter: "",
-  profitCenter: "",
-  wbsCode: "",
-  percentComplete: "0",
 };
 
 function rowToForm(row: any): Project {
@@ -103,27 +79,16 @@ function rowToForm(row: any): Project {
     businessUnit: row.BusinessUnit ?? "",
     clientName: row.ClientName ?? "",
     clientCode: row.ClientCode ?? "",
-    projectManager: row.ProjectManager ?? "",
     teamSize: row.TeamSize != null ? String(row.TeamSize) : "",
     startDate: row.StartDate ? row.StartDate.slice(0, 10) : "",
     endDate: row.EndDate ? row.EndDate.slice(0, 10) : "",
-    estimatedCost: row.EstimatedCost != null ? String(row.EstimatedCost) : "",
-    approvedBudget:
-      row.ApprovedBudget != null ? String(row.ApprovedBudget) : "",
     currency: row.Currency ?? "INR",
-    billingType: row.BillingType ?? "Fixed Price",
-    contractValue: row.ContractValue != null ? String(row.ContractValue) : "",
     status: row.Status ?? "Planning",
     priority: row.Priority ?? "Medium",
     location: row.Location ?? "",
     description: row.Description ?? "",
     remarks: row.Remarks ?? "",
     isActive: row.IsActive !== 0,
-    costCenter: row.CostCenter ?? "",
-    profitCenter: row.ProfitCenter ?? "",
-    wbsCode: row.WBSCode ?? "",
-    percentComplete:
-      row.PercentComplete != null ? String(row.PercentComplete) : "0",
   };
 }
 
@@ -133,9 +98,7 @@ export default function ProjectMaster() {
   const [editId, setEditId] = useState<number | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [search, setSearch] = useState("");
-  const [activeTab, setActiveTab] = useState<
-    "general" | "timeline" | "financial" | "tracking"
-  >("general");
+  const [activeTab, setActiveTab] = useState<"general" | "timeline" | "financial">("general");
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
 
   const { data: projects = [], isLoading } = useQuery({
@@ -145,6 +108,12 @@ export default function ProjectMaster() {
       if (!res.ok) throw new Error("Failed to load");
       return res.json();
     },
+  });
+
+  // Fetch Business Units from enterprise master
+  const { data: businessUnits = [] } = useQuery({
+    queryKey: ["enterprise-options", "Business Unit"],
+    queryFn: () => getEnterpriseOptions("Business Unit"),
   });
 
   const saveMutation = useMutation({
@@ -219,6 +188,7 @@ export default function ProjectMaster() {
       />
     </div>
   );
+
   const se = (label: string, key: keyof Project, options: string[]) => (
     <div key={key}>
       <label className="block text-xs font-medium text-muted-foreground mb-1">
@@ -305,8 +275,6 @@ export default function ProjectMaster() {
                         "Type",
                         "Status",
                         "Priority",
-                        "Manager",
-                        "% Done",
                         "Active",
                         "Actions",
                       ].map((h) => (
@@ -323,7 +291,7 @@ export default function ProjectMaster() {
                     {filtered.length === 0 ? (
                       <tr>
                         <td
-                          colSpan={10}
+                          colSpan={8}
                           className="px-4 py-10 text-center text-muted-foreground text-sm"
                         >
                           No projects found
@@ -360,12 +328,6 @@ export default function ProjectMaster() {
                             >
                               {p.Priority}
                             </span>
-                          </td>
-                          <td className="px-4 py-3 text-xs text-muted-foreground">
-                            {p.ProjectManager}
-                          </td>
-                          <td className="px-4 py-3 text-xs text-muted-foreground">
-                            {p.PercentComplete ?? 0}%
                           </td>
                           <td className="px-4 py-3">
                             <span
@@ -419,29 +381,47 @@ export default function ProjectMaster() {
               </button>
             </div>
             <div className="flex gap-1 p-3 border-b border-border bg-muted/20">
-              {(["general", "timeline", "financial", "tracking"] as const).map(
-                (tab) => (
-                  <button
-                    key={tab}
-                    onClick={() => setActiveTab(tab)}
-                    className={`px-4 py-1.5 rounded-md text-xs font-heading capitalize transition-colors ${activeTab === tab ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
-                  >
-                    {tab}
-                  </button>
-                ),
-              )}
+              {(["general", "timeline", "financial"] as const).map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`px-4 py-1.5 rounded-md text-xs font-heading capitalize transition-colors ${activeTab === tab ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
+                >
+                  {tab}
+                </button>
+              ))}
             </div>
             <div className="p-6">
               {activeTab === "general" && (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                  {fi("Project Code *", "code", "text", "e.g. PRJ-001")}{" "}
+                  {fi("Project Code *", "code", "text", "e.g. PRJ-001")}
                   {fi("Project Name *", "name")}
-                  {fi("Short Name", "shortName")}{" "}
+                  {fi("Short Name", "shortName")}
                   {se("Type", "type", PROJECT_TYPES)}
-                  {fi("Business Unit", "businessUnit")}{" "}
+
+                  {/* Business Unit — dropdown from enterprise master */}
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">
+                      Business Unit
+                    </label>
+                    <select
+                      value={form.businessUnit}
+                      onChange={(e) =>
+                        setForm((p) => ({ ...p, businessUnit: e.target.value }))
+                      }
+                      className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                    >
+                      <option value="">Select Business Unit</option>
+                      {(businessUnits as any[]).map((bu: any) => (
+                        <option key={bu.id ?? bu.Id ?? bu.name} value={bu.name ?? bu.Name}>
+                          {bu.name ?? bu.Name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
                   {fi("Client Name", "clientName")}
-                  {fi("Client Code", "clientCode")}{" "}
-                  {fi("Project Manager", "projectManager")}
+                  {fi("Client Code", "clientCode")}
                   {fi("Location", "location")}
                   <div className="flex items-center gap-3 pt-5">
                     <button
@@ -453,10 +433,7 @@ export default function ProjectMaster() {
                       {form.isActive ? (
                         <ToggleRight size={24} className="text-emerald-500" />
                       ) : (
-                        <ToggleLeft
-                          size={24}
-                          className="text-muted-foreground"
-                        />
+                        <ToggleLeft size={24} className="text-muted-foreground" />
                       )}
                       <span
                         className={
@@ -479,28 +456,16 @@ export default function ProjectMaster() {
               )}
               {activeTab === "timeline" && (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                  {fi("Start Date", "startDate", "date")}{" "}
+                  {fi("Start Date", "startDate", "date")}
                   {fi("End Date", "endDate", "date")}
-                  {se("Status", "status", STATUSES)}{" "}
+                  {se("Status", "status", STATUSES)}
                   {se("Priority", "priority", PRIORITIES)}
                   {fi("Team Size", "teamSize", "number")}
                 </div>
               )}
               {activeTab === "financial" && (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                  {se("Currency", "currency", CURRENCIES)}{" "}
-                  {se("Billing Type", "billingType", BILLING_TYPES)}
-                  {fi("Estimated Cost", "estimatedCost", "number")}{" "}
-                  {fi("Approved Budget", "approvedBudget", "number")}
-                  {fi("Contract Value", "contractValue", "number")}
-                </div>
-              )}
-              {activeTab === "tracking" && (
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                  {fi("Cost Center", "costCenter")}{" "}
-                  {fi("Profit Center", "profitCenter")}
-                  {fi("WBS Code", "wbsCode")}{" "}
-                  {fi("% Complete", "percentComplete", "number")}
+                  {se("Currency", "currency", CURRENCIES)}
                 </div>
               )}
             </div>
