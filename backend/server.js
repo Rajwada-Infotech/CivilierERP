@@ -3,14 +3,15 @@ const isDev = process.env.NODE_ENV === "development";
 
 const express = require("express");
 const helmet = require("helmet");
-const morgan = require("morgan");
 const cors = require("cors");
 const compression = require("compression");
 const { connectDB } = require("./db");
 const authMiddleware = require("./middleware/auth");
 const rateLimit = require("express-rate-limit");
 const logger = require("./logger");
+const requestLogger = require("./requestLogger");
 const { ipKeyGenerator } = require("express-rate-limit");
+const { safeLoadRoutes, printRoutesSummary } = require("./utils/loadRoutes");
 
 const {
   getRedis,
@@ -38,10 +39,25 @@ const ALLOWED_ORIGINS = [
   "https://civiliererp.in",
 ];
 
+// ─────────────────────────────────────────────
+//  Startup banner (dev only)
+// ─────────────────────────────────────────────
+function printBanner(port) {
+  if (!isDev) return;
+  logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+  logger.info("  🏗️  CivilierERP API");
+  logger.info(`  📡  http://localhost:${port}`);
+  logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+}
+
 async function startServer() {
   try {
+    // ── DB ──────────────────────────────────────────────────────────────────
+    logger.info("🔌 Connecting to database…");
     await connectDB();
+    logger.info("🟢 Database connected");
 
+    // ── Rate limiters ───────────────────────────────────────────────────────
     function makeStore(prefix) {
       try {
         const { RedisStore } = require("rate-limit-redis");
@@ -70,90 +86,67 @@ async function startServer() {
         );
         const metrics = await getSystemMetrics();
         const predictedRPM = await getPredictedRPM();
-        return getDynamicLimit(
-          score,
-          predictedRPM || metrics.rpm,
-          metrics.memoryUsage,
-        );
+        return getDynamicLimit(score, predictedRPM || metrics.rpm, metrics.memoryUsage);
       },
       store: makeStore("rl:api:"),
       skip: (req) => req.path.startsWith("/api/user-activity"),
       keyGenerator: (req) => `${req.user?.userId || ipKeyGenerator(req)}`,
     });
 
+    // ── App setup ───────────────────────────────────────────────────────────
     const app = express();
-
     app.disable("x-powered-by");
 
-    // ====================== MIDDLEWARE ======================
+    // Request logging + correlation ID (must be first)
+    app.use(requestLogger);
+    app.use((req, res, next) => {
+      res.setHeader("X-Request-Id", req.id);
+      next();
+    });
+
     app.use(express.json({ limit: "10mb" }));
     app.use(express.urlencoded({ extended: true, limit: "10mb" }));
     app.use(helmet());
-    app.use(morgan("tiny"));
-
-    // CORS
-    app.use(
-      cors({
-        origin: (origin, callback) => {
-          if (!origin || ALLOWED_ORIGINS.includes(origin)) {
-            callback(null, true);
-          } else {
-            console.warn(`CORS rejected origin: ${origin}`);
-            callback(new Error("Not allowed by CORS"));
-          }
-        },
-        credentials: true,
-        methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-        allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
-        optionsSuccessStatus: 204,
-      }),
-    );
-
+    app.use(cors({
+      origin: (origin, callback) => {
+        if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+          callback(null, true);
+        } else {
+          logger.warn(`🚫 CORS rejected: ${origin}`);
+          callback(new Error("Not allowed by CORS"));
+        }
+      },
+      credentials: true,
+      methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+      allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With", "X-Request-Id"],
+      optionsSuccessStatus: 204,
+    }));
     app.use(compression());
-
-    // Request logger
-    app.use((req, res, next) => {
-      const start = Date.now();
-      res.on("finish", () => {
-        const duration = Date.now() - start;
-        logger.info({
-          method: req.method,
-          url: req.originalUrl,
-          status: res.statusCode,
-          time: `${duration}ms`,
-        });
-      });
-      next();
-    });
 
     // Global request tracking
     app.use(async (req, res, next) => {
-      try {
-        await incrGlobalRequests();
-        await trackHourLoad();
-      } catch {}
+      try { await incrGlobalRequests(); await trackHourLoad(); } catch {}
       next();
     });
 
-    // ====================== RATE LIMITERS ======================
+    // ── Rate limiters ───────────────────────────────────────────────────────
     app.use("/api/users/login", loginLimiter);
     app.use("/api", apiLimiter);
 
-    // ====================== PUBLIC ROUTES (no auth) ======================
+    // ── Public routes (no auth) ─────────────────────────────────────────────
     app.get("/", (req, res) => res.send("CivilierERP API running"));
     app.get("/health", (req, res) => res.json({ status: "ok" }));
-
     app.use("/api/users", require("./routes/users"));
 
-    // ====================== AUTH + ACTIVE USER TRACKING ======================
+    // ── Auth + active user tracking ─────────────────────────────────────────
     app.use("/api", authMiddleware, async (req, res, next) => {
-      if (req.user?.userId) {
-        pfaddActiveUser(req.user.userId).catch(() => {});
-      }
+      if (req.user?.userId) pfaddActiveUser(req.user.userId).catch(() => {});
       next();
     });
 
-    // ====================== PROTECTED ROUTES ======================
+    // ── Protected routes ────────────────────────────────────────────────────
+    logger.info("📦 Loading routes…");
+
     const routes = [
       { path: "/api/roles", file: "./routes/roles" },
       { path: "/api/user-rights", file: "./routes/userRights" },
@@ -203,22 +196,14 @@ async function startServer() {
       { path: "/api/reminders", file: "./routes/tenantReminders" },
     ];
 
-    for (const { path, file } of routes) {
-      const label = path.replace("/api/", "");
-      if (isDev) console.log(`Loading route: ${label}`);
-      try {
-        // authMiddleware is already applied globally at app.use("/api", authMiddleware, ...)
-        // above — do NOT add it again here or req.user can be double-decoded and
-        // overwritten, which breaks role-gated routes like /api/tasks/reminders.
-        app.use(path, require(file));
-      } catch (err) {
-        console.error(`❌ Failed loading route: ${label} — ${err.message}`);
-        throw err;
-      }
-    }
+    const routeResults = await safeLoadRoutes(app, routes, {
+      baseDir: __dirname,
+      logger,
+      failFast: false,
+      verbose: isDev,
+    });
 
-    // DBA route with role restriction
-    if (isDev) console.log("Loading route: dba");
+    // DBA route — role restricted
     try {
       app.use(
         "/api/dba",
@@ -226,12 +211,17 @@ async function startServer() {
         require("./middleware/role")("dba", "admin", "director"),
         require("./routes/dba"),
       );
+      routeResults.loaded.push("dba");
     } catch (err) {
-      console.error(`❌ Failed loading route: dba — ${err.message}`);
-      throw err;
+      logger.error(`🔴 Route failed [dba]: ${err.message}`);
+      routeResults.failed.push({ label: "dba", error: err.message });
     }
 
-    // ====================== SYSTEM METRICS ======================
+    // Print clean summary
+    printRoutesSummary(routeResults, logger);
+    logger.info(`✅ Routes loaded: ${routeResults.loaded.length}`);
+
+    // ── System metrics ──────────────────────────────────────────────────────
     app.get("/api/system/metrics", authMiddleware, async (req, res) => {
       try {
         const metrics = await getSystemMetrics();
@@ -239,10 +229,7 @@ async function startServer() {
         metrics.predictedRPM = predictedRPM;
 
         const topEngagedUsers = await getRedis().zrevrange(
-          "engagement:score",
-          0,
-          9,
-          "WITHSCORES",
+          "engagement:score", 0, 9, "WITHSCORES",
         );
         metrics.topEngagedUsers = topEngagedUsers;
 
@@ -260,22 +247,30 @@ async function startServer() {
       }
     });
 
-    // ====================== GLOBAL ERROR HANDLER ======================
+    // ── Global error handler ────────────────────────────────────────────────
     app.use((err, req, res, next) => {
-      logger.error({
-        message: err.message,
-        stack: err.stack,
+      req.log.error(`
+🔴 ERROR: ${err.message}
+   → ${req.method} ${req.url}
+   → user: ${req.user?.userId || "anonymous"}
+`);
+
+      res.status(500).json({
+        error: "Internal Server Error",
+        requestId: req.id,
       });
-      res.status(500).json({ error: "Internal Server Error" });
     });
 
-    // ====================== START SERVER ======================
+    // ── Start ───────────────────────────────────────────────────────────────
     const PORT = process.env.PORT || 5000;
-    app.listen(PORT, () => logger.info(`Server running on port ${PORT}`));
+    app.listen(PORT, () => {
+      printBanner(PORT);
+      logger.info(`🚀 Server ready on port ${PORT}`);
+    });
 
     return app;
   } catch (err) {
-    console.error("Failed to start server:", err.message);
+    logger.error(`💥 Server failed to start: ${err.message}`);
     process.exit(1);
   }
 }
