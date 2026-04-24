@@ -108,10 +108,10 @@ router.get("/meta/activity-groups", cache("wo-meta-act-groups", 600), async (req
 /**
  * GET /api/work-orders/meta/activities?groupId=<id>
  * Returns ActivityMaster rows where activity_type = 1 (leaf / billable activities).
- * When groupId supplied, filters by parent_id = groupId.
+ * When groupId supplied, filters by belongsTo = groupId (nvarchar comparison).
  *
  * Response shape: [{ id, name, groupId }]
- * groupId in response = parent_id in DB (the activity-group this activity belongs to).
+ * groupId in response = group_id in DB (the activity-group this activity belongs to).
  */
 router.get("/meta/activities", cache("wo-meta-activities", 600), async (req, res) => {
   try {
@@ -122,21 +122,21 @@ router.get("/meta/activities", cache("wo-meta-activities", 600), async (req, res
     if (groupId && Number.isFinite(groupId)) {
       result = await pool
         .request()
-        .input("GroupId", sql.Int, groupId)
+        .input("BelongsTo", sql.NVarChar(200), String(groupId))
         .query(`
           SELECT id,
                  activity_name AS name,
-                 parent_id     AS groupId
+                 belongsTo     AS groupId
           FROM   dbo.ActivityMaster
           WHERE  activity_type = 1
-          AND    parent_id     = @GroupId
+          AND    belongsTo     = @BelongsTo
           ORDER  BY activity_name
         `);
     } else {
       result = await pool.request().query(`
         SELECT id,
                activity_name AS name,
-               parent_id     AS groupId
+               belongsTo     AS groupId
         FROM   dbo.ActivityMaster
         WHERE  activity_type = 1
         ORDER  BY activity_name
