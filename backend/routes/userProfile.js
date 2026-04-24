@@ -142,6 +142,8 @@ router.post("/:id/change-password", async (req, res) => {
 });
 
 // ── GET permissions ──────────────────────────────────────────────────────────
+// FIX Bug #4: was querying non-existent dbo.user_page_permissions
+// Repointed to dbo.UserPageRightsJson which is the actual table (migration 014)
 router.get("/:id/permissions", async (req, res) => {
   if (!isSelfOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
 
@@ -149,17 +151,29 @@ router.get("/:id/permissions", async (req, res) => {
     const pool = getPool();
     const result = await pool.request().input("id", sql.Int, req.params.id)
       .query(`
-        SELECT page_key, actions
-        FROM dbo.user_page_permissions
-        WHERE user_id = @id
+        SELECT RightsJson
+        FROM dbo.UserPageRightsJson
+        WHERE UserId = @id AND IsActive = 1
       `);
-    res.json(result.recordset);
+
+    const row = result.recordset[0];
+    let rightsJson = [];
+    try {
+      rightsJson = row?.RightsJson ? JSON.parse(row.RightsJson) : [];
+    } catch {
+      rightsJson = [];
+    }
+
+    res.json(rightsJson);
   } catch (err) {
+    console.error("GET /user-profile/:id/permissions error:", err);
     res.json([]);
   }
 });
 
 // ── GET activity log ─────────────────────────────────────────────────────────
+// FIX Bug #5: was querying dbo.user_activity_log (wrong casing + wrong columns)
+// Corrected to dbo.UserActivityLog with actual column names from migration 003
 router.get("/:id/activity", async (req, res) => {
   if (!isSelfOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
 
@@ -168,16 +182,19 @@ router.get("/:id/activity", async (req, res) => {
     const pool = getPool();
     const result = await pool
       .request()
-      .input("id", sql.Int, req.params.id)
+      .input("id", sql.NVarChar(50), String(req.params.id))
       .input("limit", sql.Int, limit).query(`
         SELECT TOP (@limit)
-          id, user_id, action, module, page_key, action_time, ip_address
-        FROM dbo.user_activity_log
-        WHERE user_id = @id
-        ORDER BY action_time DESC
+          Id, UserId, UserName, UserEmail, UserRole,
+          EventType, ActionType, Resource,
+          IpAddress, SessionId, CreatedAt
+        FROM dbo.UserActivityLog
+        WHERE UserId = @id
+        ORDER BY CreatedAt DESC
       `);
     res.json(result.recordset);
   } catch (err) {
+    console.error("GET /user-profile/:id/activity error:", err);
     res.json([]);
   }
 });

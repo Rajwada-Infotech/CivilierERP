@@ -23,30 +23,30 @@ router.get("/", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
     }
 
     // 2. DB connection
-    const pool = await getPool();
+    const pool = getPool();
 
     // 3. Run queries in parallel
     const [usersResult, rolesResult, activeUsersResult, recentUsersResult] =
       await Promise.all([
         pool.request().query(`
           SELECT COUNT(*) AS totalUsers
-          FROM Users
+          FROM dbo.users
         `),
 
         pool.request().query(`
           SELECT COUNT(*) AS totalRoles
-          FROM Role
+          FROM dbo.Role
         `),
 
         pool.request().query(`
           SELECT COUNT(*) AS activeUsers
-          FROM Users
+          FROM dbo.users
           WHERE discontinue = 0
         `),
 
         pool.request().query(`
-SELECT TOP 5 id, name, email, created_datetime, discontinue
-          FROM Users
+          SELECT TOP 5 id, name, email, created_datetime, discontinue
+          FROM dbo.users
           ORDER BY created_datetime DESC
         `),
       ]);
