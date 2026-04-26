@@ -1,16 +1,21 @@
 require("dotenv").config();
+
 const isDev = process.env.NODE_ENV === "development";
 
 const express = require("express");
 const helmet = require("helmet");
 const cors = require("cors");
 const compression = require("compression");
+
 const { connectDB } = require("./db");
 const authMiddleware = require("./middleware/auth");
 const rateLimit = require("express-rate-limit");
+const { RedisStore } = require("rate-limit-redis");
+
 const logger = require("./logger");
 const requestLogger = require("./requestLogger");
 const { ipKeyGenerator } = require("express-rate-limit");
+
 const { safeLoadRoutes, printRoutesSummary } = require("./utils/loadRoutes");
 
 const {
@@ -42,9 +47,18 @@ const ALLOWED_ORIGINS = [
 function printBanner(port) {
   if (!isDev) return;
   logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-  logger.info("  [APP] CivilierERP API");
-  logger.info(`  [URL] http://localhost:${port}`);
+  logger.info(" [APP] CivilierERP API");
+  logger.info(` [URL] http://localhost:${port}`);
   logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+}
+
+// Helper to create Redis-backed rate limit store (safe with lazyConnect)
+function makeStore(prefix) {
+  return new RedisStore({
+    prefix,
+    // Proper async wrapper for ioredis + lazyConnect
+    sendCommand: (...args) => getRedis().then((client) => client.call(...args)),
+  });
 }
 
 async function startServer() {
@@ -53,49 +67,53 @@ async function startServer() {
     await connectDB();
     logger.info("[OK] Database connected");
 
-    function makeStore(prefix) {
-      try {
-        const { RedisStore } = require("rate-limit-redis");
-        return new RedisStore({
-          prefix,
-          sendCommand: (...args) => getRedis().call(...args),
-        });
-      } catch {
-        return undefined;
-      }
-    }
-
+    // Rate limiters
     const loginLimiter = rateLimit({
       windowMs: 15 * 60 * 1000,
       max: 10,
       message: { error: "Too many login attempts. Try again later." },
       store: makeStore("rl:login:"),
+      standardHeaders: true,
+      legacyHeaders: false,
     });
 
     const apiLimiter = rateLimit({
       windowMs: 60 * 1000,
       max: async (req) => {
-        if (!req.user || !req.user.userId) return 1000;
-        const score = Number(
-          (await redisZScore("engagement:score", req.user.userId)) || 0,
-        );
-        const metrics = await getSystemMetrics();
-        const predictedRPM = await getPredictedRPM();
-        return getDynamicLimit(
-          score,
-          predictedRPM || metrics.rpm,
-          metrics.memoryUsage,
-        );
+        if (!req.user?.userId) return 1000;
+
+        try {
+          const score = Number(
+            (await redisZScore("engagement:score", req.user.userId)) || 0,
+          );
+          const metrics = await getSystemMetrics();
+          const predictedRPM = await getPredictedRPM();
+
+          return getDynamicLimit(
+            score,
+            predictedRPM || metrics.rpm,
+            metrics.memoryUsage,
+          );
+        } catch (err) {
+          logger.warn(
+            { event: "RATE_LIMIT_FALLBACK", err },
+            "Using default limit due to Redis issue",
+          );
+          return 500; // safe fallback
+        }
       },
       store: makeStore("rl:api:"),
       skip: (req) => req.path.startsWith("/api/user-activity"),
       keyGenerator: (req) => `${req.user?.userId || ipKeyGenerator(req)}`,
+      standardHeaders: true,
+      legacyHeaders: false,
     });
 
     const app = express();
-    app.disable("x-powered-by");
 
+    app.disable("x-powered-by");
     app.use(requestLogger);
+
     app.use((req, res, next) => {
       res.setHeader("X-Request-Id", req.id);
       next();
@@ -103,6 +121,7 @@ async function startServer() {
 
     app.use(express.json({ limit: "10mb" }));
     app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+
     app.use(helmet());
     app.use(
       cors({
@@ -125,25 +144,30 @@ async function startServer() {
         optionsSuccessStatus: 204,
       }),
     );
+
     app.use(compression());
 
+    // Global request tracking (non-blocking)
     app.use(async (req, res, next) => {
-      try {
-        await incrGlobalRequests();
-        await trackHourLoad();
-      } catch {}
+      incrGlobalRequests().catch(() => {});
+      trackHourLoad().catch(() => {});
       next();
     });
 
+    // Apply limiters
     app.use("/api/users/login", loginLimiter);
     app.use("/api", apiLimiter);
 
     app.get("/", (req, res) => res.send("CivilierERP API running"));
     app.get("/health", (req, res) => res.json({ status: "ok" }));
+
     app.use("/api/users", require("./routes/users"));
 
+    // Active user tracking (after auth)
     app.use("/api", authMiddleware, async (req, res, next) => {
-      if (req.user?.userId) pfaddActiveUser(req.user.userId).catch(() => {});
+      if (req.user?.userId) {
+        pfaddActiveUser(req.user.userId).catch(() => {});
+      }
       next();
     });
 
@@ -208,6 +232,7 @@ async function startServer() {
       verbose: isDev,
     });
 
+    // DBA route (admin only)
     try {
       app.use(
         "/api/dba",
@@ -224,18 +249,17 @@ async function startServer() {
     printRoutesSummary(routeResults, logger);
     logger.info(`[OK] Routes loaded: ${routeResults.loaded.length}`);
 
+    // System metrics endpoint
     app.get("/api/system/metrics", authMiddleware, async (req, res) => {
       try {
         const metrics = await getSystemMetrics();
         const predictedRPM = await getPredictedRPM();
         metrics.predictedRPM = predictedRPM;
 
-        const topEngagedUsers = await getRedis().zrevrange(
-          "engagement:score",
-          0,
-          9,
-          "WITHSCORES",
+        const topEngagedUsers = await getRedis().then((r) =>
+          r.zrevrange("engagement:score", 0, 9, "WITHSCORES"),
         );
+
         metrics.topEngagedUsers = topEngagedUsers;
 
         if (req.user) {
@@ -248,12 +272,14 @@ async function startServer() {
 
         res.json(metrics);
       } catch (err) {
-        res.status(500).json({ error: err.message });
+        logger.error({ event: "METRICS_ERROR", err });
+        res.status(500).json({ error: "Failed to fetch metrics" });
       }
     });
 
+    // Global error handler
     app.use((err, req, res, next) => {
-      req.log.error(`
+      req.log?.error(`
 [ERR] ERROR: ${err.message}
    -> ${req.method} ${req.url}
    -> user: ${req.user?.userId || "anonymous"}
@@ -265,6 +291,7 @@ async function startServer() {
     });
 
     const PORT = process.env.PORT || 5000;
+
     app.listen(PORT, () => {
       printBanner(PORT);
       logger.info(`[START] Server ready on port ${PORT}`);
@@ -277,7 +304,9 @@ async function startServer() {
   }
 }
 
+// For Vercel / serverless compatibility
 const appPromise = startServer();
+
 module.exports = async (req, res) => {
   const app = await appPromise;
   return app(req, res);

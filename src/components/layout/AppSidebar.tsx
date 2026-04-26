@@ -4,7 +4,6 @@ import { useModule } from "@/contexts/ModuleContext";
 import { useReminders } from "@/hooks/useReminders";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSidebarState } from "./AppLayout";
-
 import {
   TrendingUp,
   BarChart3,
@@ -56,7 +55,9 @@ function useApprovalCount() {
   useEffect(() => {
     fetch();
     timerRef.current = setInterval(fetch, 60_000);
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
   }, []);
 
   return count;
@@ -84,7 +85,7 @@ interface NavItem {
 
 // ── Finance module sidebar ──────────────────────────────────────────────────
 const buildFinanceNavItems = (overdueCount: number): NavItem[] => [
-  { label: "Amendments", icon: BarChart3, path: "/finance" },
+  { label: "Amendments", icon: BarChart3, path: "/finance" }, // ← Changed here
   {
     label: "Query",
     icon: Scale,
@@ -178,7 +179,7 @@ const buildFollowupNavItems = (): NavItem[] => [
 
 // ── Material module sidebar ──────────────────────────────────────────────────
 const buildMaterialNavItems = (): NavItem[] => [
-  { label: "Amendments", icon: BarChart3, path: "/material/amendments" },
+  { label: "Amendments", icon: BarChart3, path: "/material" }, // ← Changed here
   {
     label: "Transaction",
     icon: Receipt,
@@ -347,7 +348,6 @@ const NavButton = ({
   isActive: boolean;
 }) => {
   const navigate = useNavigate();
-
   return (
     <button
       onClick={() => item.path && navigate(item.path)}
@@ -377,7 +377,6 @@ const NavGroup = ({
   const navigate = useNavigate();
   const location = useLocation();
   const [open, setOpen] = useState(hasActiveChild);
-
   const [openSections, setOpenSections] = useState<Record<string, boolean>>(
     () => {
       const init: Record<string, boolean> = {};
@@ -456,7 +455,6 @@ const NavGroup = ({
                   <ChevronDown size={11} />
                 )}
               </button>
-
               {openSections[section.label] && (
                 <div className="ml-4 mt-0.5 space-y-0.5">
                   {section.items.map((child: SubItem) => (
@@ -507,6 +505,7 @@ export const AppSidebar = () => {
   const isSuperAdminPage =
     currentUser?.role === "super_admin" &&
     location.pathname.startsWith("/superadmin");
+
   const isDbaPage = hasAdminRole && location.pathname.startsWith("/dba");
   const isUserProfilePage = location.pathname.startsWith("/user/profile");
 
@@ -521,14 +520,14 @@ export const AppSidebar = () => {
       case "followup":
         return buildFollowupNavItems();
       default:
-        return []; // no module selected — home page handles module picking
+        return [];
     }
   };
 
   const isHomePage = location.pathname === "/home" || location.pathname === "/";
 
   const getNavItems = (): NavItem[] => {
-    if (isHomePage) return []; // no nav items on landing page
+    if (isHomePage) return [];
     if (isSuperAdminPage) return SUPER_ADMIN_NAV_ITEMS;
     if (isDbaPage) return DBA_NAV_ITEMS;
     if (isUserProfilePage) return USER_NAV_ITEMS;
@@ -545,12 +544,14 @@ export const AppSidebar = () => {
     !isDbaPage &&
     !isUserProfilePage &&
     activeModule === "finance";
+
   const isMaterial =
     !isAdminPage &&
     !isSuperAdminPage &&
     !isDbaPage &&
     !isUserProfilePage &&
     activeModule === "material";
+
   const isAdmin = isAdminPage;
   const isSuperAdmin = isSuperAdminPage;
   const isDba = isDbaPage;
