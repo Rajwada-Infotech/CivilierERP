@@ -16,16 +16,12 @@ import {
   ArrowDownRight,
   RefreshCw,
   TrendingUp,
-  TrendingDown,
   AlertCircle,
-  CheckCircle2,
-  Clock,
   ClipboardList,
   Ruler,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
 interface DashboardData {
   items: { count: number; groupCount: number };
   grns: {
@@ -79,7 +75,6 @@ interface DashboardData {
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
 const fmt = (n: number) =>
   new Intl.NumberFormat("en-IN", {
     style: "currency",
@@ -99,7 +94,6 @@ const fmtDate = (d: string | null) =>
     : "—";
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
-
 const statusColors: Record<string, string> = {
   Approved: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
   Closed: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
@@ -125,7 +119,6 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 // ─── Stat Card ────────────────────────────────────────────────────────────────
-
 function StatCard({
   label,
   value,
@@ -148,7 +141,11 @@ function StatCard({
   return (
     <div
       onClick={onClick}
-      className={`rounded-xl border border-border bg-card p-5 flex flex-col gap-3 transition-all duration-200 ${onClick ? "cursor-pointer hover:shadow-md hover:-translate-y-0.5 hover:border-primary/20" : ""}`}
+      className={`rounded-xl border border-border bg-card p-5 flex flex-col gap-3 transition-all duration-200 ${
+        onClick
+          ? "cursor-pointer hover:shadow-md hover:-translate-y-0.5 hover:border-primary/20"
+          : ""
+      }`}
     >
       <div className="flex items-center justify-between">
         <span className="text-xs font-heading uppercase tracking-widest text-muted-foreground">
@@ -192,7 +189,6 @@ function StatSkeleton() {
 }
 
 // ─── Section header ───────────────────────────────────────────────────────────
-
 function SectionHeader({
   icon: Icon,
   title,
@@ -232,7 +228,6 @@ function SectionHeader({
 }
 
 // ─── Empty state ──────────────────────────────────────────────────────────────
-
 function EmptyState({ label }: { label: string }) {
   return (
     <div className="flex flex-col items-center justify-center py-10 text-muted-foreground">
@@ -243,7 +238,6 @@ function EmptyState({ label }: { label: string }) {
 }
 
 // ─── Table skeleton ───────────────────────────────────────────────────────────
-
 function TableSkeleton({ rows = 4, cols = 4 }) {
   return (
     <div className="p-4 space-y-2">
@@ -259,7 +253,6 @@ function TableSkeleton({ rows = 4, cols = 4 }) {
 }
 
 // ─── Breakdowns ───────────────────────────────────────────────────────────────
-
 function StatusBreakdown({
   data,
   label,
@@ -283,6 +276,7 @@ function StatusBreakdown({
                 : r.Status === "Rejected" || r.Status === "Cancelled"
                   ? "bg-red-500"
                   : "bg-blue-500";
+
           return (
             <div key={r.Status} className="space-y-0.5">
               <div className="flex items-center justify-between text-xs">
@@ -308,7 +302,6 @@ function StatusBreakdown({
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
-
 export default function MaterialDashboard() {
   const navigate = useNavigate();
 
@@ -322,8 +315,7 @@ export default function MaterialDashboard() {
           throw new Error(errBody?.error || `HTTP ${res.status}`);
         }
         const raw = await res.json();
-        // Normalise: fill missing keys so the component never crashes
-        // even if the backend is still on an older response shape.
+
         return {
           items: raw.items ?? { count: 0, groupCount: 0 },
           grns: raw.grns ?? {
@@ -387,7 +379,7 @@ export default function MaterialDashboard() {
           iconColor: "text-emerald-600",
           iconBg: "bg-emerald-500/10",
           trend: "neutral" as const,
-          onClick: () => navigate("/material/items"),
+          onClick: () => navigate("/masters/items"), // Correct route
         },
         {
           label: "GRNs This Month",
@@ -453,9 +445,8 @@ export default function MaterialDashboard() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Material"]} />
-
       <div className="p-6 space-y-6">
-        {/* ── Header ── */}
+        {/* Header */}
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-xl font-heading font-bold text-foreground">
@@ -485,14 +476,14 @@ export default function MaterialDashboard() {
           </div>
         )}
 
-        {/* ── Stat Cards ── */}
+        {/* Stat Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
           {isLoading
             ? Array.from({ length: 6 }).map((_, i) => <StatSkeleton key={i} />)
             : statCards.map((s) => <StatCard key={s.label} {...s} />)}
         </div>
 
-        {/* ── Summary Strip ── */}
+        {/* Summary Strip */}
         {data && (
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
             {[
@@ -537,9 +528,9 @@ export default function MaterialDashboard() {
           </div>
         )}
 
-        {/* ── Recent GRNs + Recent POs ── */}
+        {/* Recent GRNs + Recent POs */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* GRNs */}
+          {/* Recent GRNs */}
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="p-4 border-b border-border">
               <SectionHeader
@@ -600,7 +591,7 @@ export default function MaterialDashboard() {
             )}
           </div>
 
-          {/* POs */}
+          {/* Recent Purchase Orders */}
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="p-4 border-b border-border">
               <SectionHeader
@@ -662,9 +653,9 @@ export default function MaterialDashboard() {
           </div>
         </div>
 
-        {/* ── Recent Work Orders + Recent Expenses ── */}
+        {/* Recent Work Orders + Recent Expenses */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Work Orders */}
+          {/* Recent Work Orders */}
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="p-4 border-b border-border">
               <SectionHeader
@@ -725,7 +716,7 @@ export default function MaterialDashboard() {
             )}
           </div>
 
-          {/* Expenses */}
+          {/* Recent Expense Bookings */}
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="p-4 border-b border-border">
               <SectionHeader
@@ -787,9 +778,9 @@ export default function MaterialDashboard() {
           </div>
         </div>
 
-        {/* ── Status Breakdowns + Top Items ── */}
+        {/* Status Breakdowns + Top Items */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* PO Breakdown */}
+          {/* PO Status Breakdown */}
           <div className="rounded-xl border border-border bg-card p-5">
             <SectionHeader
               icon={ShoppingCart}
@@ -810,7 +801,7 @@ export default function MaterialDashboard() {
             )}
           </div>
 
-          {/* WO Breakdown */}
+          {/* WO Status Breakdown */}
           <div className="rounded-xl border border-border bg-card p-5">
             <SectionHeader
               icon={HardHat}
@@ -831,7 +822,7 @@ export default function MaterialDashboard() {
             )}
           </div>
 
-          {/* Top Items by Stock */}
+          {/* Top Items */}
           <div className="rounded-xl border border-border bg-card p-5">
             <SectionHeader icon={Package} title="Top Items by Receipts" />
             {isLoading ? (
@@ -876,10 +867,10 @@ export default function MaterialDashboard() {
           </div>
         </div>
 
-        {/* ── Quick Actions ── */}
+        {/* Quick Actions (without Amendments) */}
         <div className="rounded-xl border border-border bg-card p-5">
           <SectionHeader icon={BarChart3} title="Quick Actions" />
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
             {[
               {
                 label: "New GRN",
@@ -908,13 +899,6 @@ export default function MaterialDashboard() {
                 path: "/material/expense-booking",
                 color: "text-red-600",
                 bg: "bg-red-500/10",
-              },
-              {
-                label: "Amendments",
-                icon: ClipboardList,
-                path: "/material/amendments",
-                color: "text-teal-600",
-                bg: "bg-teal-500/10",
               },
               {
                 label: "UOM Master",
