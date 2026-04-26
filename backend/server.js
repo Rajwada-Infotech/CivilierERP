@@ -211,6 +211,7 @@ async function startServer() {
       { path: "/api/project-master", file: "./routes/projectMaster" },
       { path: "/api/signatures", file: "./routes/signatures" },
       { path: "/api/communicator", file: "./routes/communicator" },
+      { path: "/api/menu-master", file: "./routes/menuMaster" },
     ];
 
     const routeResults = await safeLoadRoutes(app, routes, {

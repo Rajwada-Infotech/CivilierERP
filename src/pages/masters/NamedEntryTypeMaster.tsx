@@ -12,6 +12,7 @@ import {
   updateEntryType,
   deleteEntryType,
 } from "@/api/entryTypeApi";
+import { getMenuMasters } from "@/api/menuMasterApi";
 import { toast } from "sonner";
 import { Tag } from "lucide-react";
 
@@ -205,6 +206,15 @@ const NamedEntryTypeMaster: React.FC = () => {
     staleTime: 10 * 60 * 1000,
   });
 
+  // Fetch Menu Master entries (for Entry Type dropdown)
+  const { data: menuMasterData = [] } = useQuery({
+    queryKey: ["menuMaster"],
+    queryFn: getMenuMasters,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+    throwOnError: false,
+  });
+
   const dbItems: DbEntryType[] = Array.isArray(dbData) ? dbData : [];
 
   const projectOptions = useMemo(() => {
@@ -219,6 +229,14 @@ const NamedEntryTypeMaster: React.FC = () => {
       })
       .sort((a, b) => a.localeCompare(b));
   }, [projectsData]);
+
+  // Dynamic entry type options from Menu Master
+  const entryTypeOptions = useMemo(() => {
+    const fallback = ["Received", "Invoice", "Payment", "BOQ", "Purchase Order", "Work Order"];
+    if (!Array.isArray(menuMasterData) || menuMasterData.length === 0) return fallback;
+    const options = menuMasterData.map((m: any) => m?.Name).filter(Boolean) as string[];
+    return options.length > 0 ? options : fallback;
+  }, [menuMasterData]);
 
   const mappedData = useMemo(() => {
     return dbItems.map((item) => ({
@@ -371,14 +389,7 @@ const NamedEntryTypeMaster: React.FC = () => {
             label: "Entry Type",
             type: "select",
             required: true,
-            options: [
-              "Received",
-              "Invoice",
-              "Payment",
-              "BOQ",
-              "Purchase Order",
-              "Work Order",
-            ],
+            options: entryTypeOptions,
           },
           {
             name: "prefixGroup",
