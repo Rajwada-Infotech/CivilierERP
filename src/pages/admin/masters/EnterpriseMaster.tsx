@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Building2,
@@ -8,6 +8,8 @@ import {
   Search,
   ToggleLeft,
   ToggleRight,
+  Upload,
+  X,
 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
@@ -59,6 +61,7 @@ const empty: Partial<Enterprise> = {
   date_of_establishment: "",
   status: "Active",
   discontinue: false,
+  logo: null,
 };
 
 type Tab = "general" | "address" | "legal";
@@ -68,6 +71,35 @@ const ENTITY_COLORS: Record<string, string> = {
   Company: "bg-blue-500/10 text-blue-600",
   "Business Unit": "bg-amber-500/10 text-amber-600",
 };
+
+// Logo avatar shown in the table beside enterprise name
+function LogoAvatar({
+  logo,
+  name,
+  size = "sm",
+}: {
+  logo?: string | null;
+  name: string;
+  size?: "sm" | "md";
+}) {
+  const dim = size === "sm" ? "w-7 h-7 text-xs" : "w-10 h-10 text-sm";
+  if (logo) {
+    return (
+      <img
+        src={logo}
+        alt={name}
+        className={`${dim} rounded-lg object-contain border border-border bg-muted/30 flex-shrink-0`}
+      />
+    );
+  }
+  return (
+    <div
+      className={`${dim} rounded-lg bg-blue-500/10 text-blue-600 font-heading font-bold flex items-center justify-center flex-shrink-0`}
+    >
+      {name.charAt(0).toUpperCase()}
+    </div>
+  );
+}
 
 export default function EnterpriseMaster() {
   const queryClient = useQueryClient();
@@ -88,6 +120,8 @@ export default function EnterpriseMaster() {
   const [tab, setTab] = useState<Tab>("general");
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
+  const [logoPreview, setLogoPreview] = useState<string>("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const filtered = (rows as Enterprise[]).filter(
     (r) =>
@@ -99,6 +133,7 @@ export default function EnterpriseMaster() {
   const openNew = () => {
     setForm({ ...empty });
     setEditId(null);
+    setLogoPreview("");
     setShowForm(true);
     setTab("general");
   };
@@ -111,9 +146,32 @@ export default function EnterpriseMaster() {
       date_of_entry: r.date_of_entry?.slice(0, 10) || "",
       date_of_establishment: r.date_of_establishment?.slice(0, 10) || "",
     });
+    setLogoPreview(r.logo || "");
     setEditId(r.id);
     setShowForm(true);
     setTab("general");
+  };
+
+  const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error("Logo must be under 2 MB");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = reader.result as string;
+      setLogoPreview(base64);
+      setForm((f) => ({ ...f, logo: base64 }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const removeLogo = () => {
+    setLogoPreview("");
+    setForm((f) => ({ ...f, logo: null }));
+    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   const handleSave = async () => {
@@ -257,6 +315,7 @@ export default function EnterpriseMaster() {
                 <thead className="bg-muted/50">
                   <tr>
                     {[
+                      "Logo",
                       "Name",
                       "Short Name",
                       "Type",
@@ -279,7 +338,7 @@ export default function EnterpriseMaster() {
                   {filtered.length === 0 ? (
                     <tr>
                       <td
-                        colSpan={8}
+                        colSpan={9}
                         className="px-4 py-10 text-center text-muted-foreground text-sm"
                       >
                         No records found
@@ -291,6 +350,9 @@ export default function EnterpriseMaster() {
                         key={r.id}
                         className="hover:bg-muted/30 transition-colors"
                       >
+                        <td className="px-4 py-3">
+                          <LogoAvatar logo={r.logo} name={r.name || "?"} />
+                        </td>
                         <td className="px-4 py-3 font-medium text-foreground">
                           {r.name}
                         </td>
@@ -352,9 +414,19 @@ export default function EnterpriseMaster() {
       {showForm && (
         <div className="rounded-xl border border-border bg-card overflow-hidden">
           <div className="p-4 border-b border-border flex items-center justify-between bg-muted/30">
-            <h2 className="font-heading font-semibold text-foreground">
-              {editId ? "Edit Enterprise" : "New Enterprise"}
-            </h2>
+            <div className="flex items-center gap-3">
+              {/* Live logo preview in form header */}
+              <LogoAvatar
+                logo={logoPreview || null}
+                name={form.name || "?"}
+                size="md"
+              />
+              <h2 className="font-heading font-semibold text-foreground">
+                {editId
+                  ? `Edit — ${form.name || "Enterprise"}`
+                  : "New Enterprise"}
+              </h2>
+            </div>
             <button
               onClick={() => setShowForm(false)}
               className="text-xs text-muted-foreground hover:text-foreground px-3 py-1 rounded border border-border hover:bg-muted transition-colors"
@@ -380,6 +452,57 @@ export default function EnterpriseMaster() {
             {/* General */}
             {tab === "general" && (
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                {/* Logo upload — full width */}
+                <div className="col-span-full">
+                  <label className="block text-xs font-medium text-muted-foreground mb-2">
+                    Enterprise Logo
+                  </label>
+                  <div className="flex items-center gap-4">
+                    {logoPreview ? (
+                      <div className="relative group">
+                        <img
+                          src={logoPreview}
+                          alt="Logo preview"
+                          className="w-16 h-16 rounded-xl object-contain border border-border bg-muted/30"
+                        />
+                        <button
+                          onClick={removeLogo}
+                          className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                        >
+                          <X size={11} />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="w-16 h-16 rounded-xl border-2 border-dashed border-border bg-muted/20 flex items-center justify-center">
+                        <Building2
+                          size={20}
+                          className="text-muted-foreground/40"
+                        />
+                      </div>
+                    )}
+                    <div>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*"
+                        onChange={handleLogoChange}
+                        className="hidden"
+                        id="enterprise-logo-input"
+                      />
+                      <label
+                        htmlFor="enterprise-logo-input"
+                        className="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border border-border hover:bg-muted cursor-pointer transition-colors"
+                      >
+                        <Upload size={13} />
+                        {logoPreview ? "Change Logo" : "Upload Logo"}
+                      </label>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        PNG, JPG, SVG · Max 2 MB
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
                 {field("Name *", "name", "text", "Full legal name")}
                 {field("Short Name", "short_name", "text", "Abbreviated name")}
                 {sel("Type", "entity_type", ENTITY_TYPES)}
