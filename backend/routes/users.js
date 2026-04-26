@@ -71,11 +71,16 @@ router.post("/login", async (req, res) => {
   const attemptsKey = `login:attempts:${email.toLowerCase()}`;
 
   try {
-    const locked = await redisGet(lockKey);
-    if (locked) {
-      return res.status(429).json({
-        error: "Too many attempts. Try again later.",
-      });
+    // Redis may be unavailable — never let a cache check block login
+    try {
+      const locked = await redisGet(lockKey);
+      if (locked) {
+        return res.status(429).json({
+          error: "Too many attempts. Try again later.",
+        });
+      }
+    } catch {
+      // Redis down — skip lockout check, proceed to DB auth
     }
 
     const pool = getPool();
@@ -104,8 +109,10 @@ router.post("/login", async (req, res) => {
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
-    await redisDel(attemptsKey);
-    await redisDel(lockKey);
+    try {
+      await redisDel(attemptsKey);
+      await redisDel(lockKey);
+    } catch {}
 
     // FIXED: Normalize role
     const normalizedRole = normalizeRole(user.roleName);
@@ -367,6 +374,40 @@ router.patch(
       res.json({ message: "Permissions updated" });
     } catch (err) {
       console.error("PATCH /users/:id/permissions error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+// ======================
+// RESET USER PASSWORD (admin action — no current password required)
+// ======================
+router.patch(
+  "/:id/reset-password",
+  authMiddleware,
+  checkPermission("Users", "List", "CanEdit"),
+  async (req, res) => {
+    const { id } = req.params;
+    const { new_password } = req.body;
+
+    if (!new_password || new_password.length < 6) {
+      return res
+        .status(400)
+        .json({ error: "Password must be at least 6 characters" });
+    }
+
+    try {
+      const pool = getPool();
+      const hashed = await bcrypt.hash(new_password, SALT_ROUNDS);
+      await pool
+        .request()
+        .input("id", sql.Int, id)
+        .input("password", sql.NVarChar, hashed)
+        .query("UPDATE dbo.users SET password = @password WHERE id = @id");
+
+      res.json({ message: "Password reset successfully" });
+    } catch (err) {
+      console.error("PATCH /users/:id/reset-password error:", err);
       res.status(500).json({ error: err.message });
     }
   },

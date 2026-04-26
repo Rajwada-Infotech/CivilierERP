@@ -17,8 +17,10 @@ const {
  * Usage:
  *   router.get("/", cache("grns", 300), async (req, res) => { ... })
  *
- * @param {string} namespace
- * @param {number} ttl (optional, fallback TTL)
+ * Behaviour when Redis is unavailable:
+ *   - All cache operations fail silently and return null/undefined.
+ *   - getDynamicTtl() catches its own errors and returns the fallback TTL.
+ *   - The route handler always runs — Redis being down never produces a 500.
  */
 function cache(namespace, ttl = 300) {
   return async (req, res, next) => {
@@ -30,6 +32,7 @@ function cache(namespace, ttl = 300) {
       });
       const userId = req.user?.userId || "anon";
 
+      // getCacheVersion returns 0 (safe fallback) when Redis is down
       const version = await getCacheVersion(namespace);
 
       const key = `cache:${namespace}:v${version}:${userId}:${routeScope}`;
@@ -37,12 +40,10 @@ function cache(namespace, ttl = 300) {
       const staleKey = `cache:stale:${baseKey}`;
       const lockKey = `cachelock:${key}`;
 
-      // ===================== CACHE HIT =====================
-      let cached = await redisGet(key);
+      // ─── CACHE HIT ───────────────────────────────────────────────────────────
+      const cached = await redisGet(key); // returns null when Redis is down
 
       if (cached) {
-        const originalSize = Buffer.byteLength(cached, "utf8");
-
         let data;
         try {
           data = decompress(cached) || JSON.parse(cached);
@@ -50,30 +51,26 @@ function cache(namespace, ttl = 300) {
           data = JSON.parse(cached);
         }
 
-        const decompressedSize = Buffer.byteLength(
-          JSON.stringify(data),
-          "utf8"
-        );
-
         res.setHeader("X-Cache", "HIT");
-        res.setHeader(
-          "X-Cache-Size",
-          `${originalSize} -> ${decompressedSize}`
-        );
-
         await incrGlobalCacheHit();
         return res.json(data);
       }
 
-      // ===================== STAMPEDE PROTECTION =====================
+      // ─── STAMPEDE PROTECTION ─────────────────────────────────────────────────
+      // redisLock returns null when Redis is down, which is treated the same as
+      // "lock acquired" — we just skip the stale path and serve fresh.
       const lockAcquired = await redisLock(lockKey, 30);
 
+      if (lockAcquired === null) {
+        // Redis is down — skip straight to the route handler
+        return next();
+      }
+
       if (!lockAcquired) {
-        let staleCached = await redisGet(staleKey);
+        // Another process is already refreshing — try stale first
+        const staleCached = await redisGet(staleKey);
 
         if (staleCached) {
-          const originalSize = Buffer.byteLength(staleCached, "utf8");
-
           let data;
           try {
             data = decompress(staleCached) || JSON.parse(staleCached);
@@ -81,43 +78,33 @@ function cache(namespace, ttl = 300) {
             data = JSON.parse(staleCached);
           }
 
-          const decompressedSize = Buffer.byteLength(
-            JSON.stringify(data),
-            "utf8"
-          );
-
           res.setHeader("X-Cache", "STALE");
-          res.setHeader(
-            "X-Cache-Size",
-            `${originalSize} -> ${decompressedSize}`
-          );
-
           await incrGlobalCacheHit();
           return res.json(data);
         }
 
+        // No stale either — ask client to retry briefly
         res.setHeader("Retry-After", "5");
-        return res.status(503).json({
-          error: "Cache busy, retry in 5 seconds",
-        });
+        return res
+          .status(503)
+          .json({ error: "Cache busy, retry in 5 seconds" });
       }
 
-      // ===================== CACHE MISS =====================
+      // ─── CACHE MISS — intercept res.json to populate cache on the way out ───
       const originalJson = res.json.bind(res);
 
       res.json = async (data) => {
         try {
           const jsonStr = JSON.stringify(data);
 
+          // getDynamicTtl is fully guarded — it never throws
           const dynamicTtl =
-            res.statusCode >= 500 ? 30 : await getDynamicTtl();
+            res.statusCode >= 500 ? 30 : await getDynamicTtl(ttl);
           const finalTtl = dynamicTtl || ttl;
 
           await incrGlobalCacheMiss();
 
           let valueToStore = jsonStr;
-
-          // Compress if large
           if (jsonStr.length > 1024) {
             const compressed = compress(data);
             if (compressed) valueToStore = compressed;
@@ -128,9 +115,10 @@ function cache(namespace, ttl = 300) {
 
           res.setHeader("X-Cache", "MISS");
           res.setHeader("X-Cache-TTL", `${finalTtl}s`);
-
         } catch (err) {
-          console.error("Cache write error:", err.message);
+          // Cache write failed (Redis down, serialisation error, etc.)
+          // Log and continue — the response still goes out to the client.
+          console.error("[cache] write error:", err.message);
         }
 
         return originalJson(data);
@@ -138,26 +126,28 @@ function cache(namespace, ttl = 300) {
 
       next();
     } catch (err) {
-      console.error("Cache middleware error:", err.message);
+      // The cache layer must never break the route
+      console.error("[cache] middleware error:", err.message);
       next();
     }
   };
 }
 
-// ===================== DYNAMIC TTL =====================
-async function getDynamicTtl() {
-  const metrics = await getSystemMetrics();
-  const predictedRPM = await getPredictedRPM();
-
-  const rpm = predictedRPM || metrics.rpm;
-
-  let ttl = rpm > 10000 ? 120 : rpm > 5000 ? 180 : 300;
-
-  if (metrics.memoryUsage > 0.8) {
-    ttl = ttl * 0.5;
+// ─── DYNAMIC TTL ─────────────────────────────────────────────────────────────
+// Previously this could throw when Redis was unavailable, crashing any route
+// that used the cache() middleware (e.g. financeDashboard).
+// Now it always returns a safe number.
+async function getDynamicTtl(fallback = 300) {
+  try {
+    const metrics = await getSystemMetrics();
+    const predictedRPM = await getPredictedRPM();
+    const rpm = predictedRPM || metrics.rpm;
+    let ttl = rpm > 10000 ? 120 : rpm > 5000 ? 180 : 300;
+    if (metrics.memoryUsage > 0.8) ttl = Math.floor(ttl * 0.5);
+    return Math.max(ttl, 60);
+  } catch {
+    return fallback;
   }
-
-  return Math.max(ttl, 60);
 }
 
 module.exports = { cache };

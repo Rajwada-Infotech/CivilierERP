@@ -1,4 +1,6 @@
 import React, { useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -52,27 +54,26 @@ type AccessLevel = "read" | "read_write" | "full";
 type AccessStatus = "active" | "suspended" | "expired" | "trial";
 
 interface TenantAccess {
-  id: string;
-  tenantId: string;
-  tenantName: string;
-  dbName: string;
+  tenant_id: string;
+  name: string;
+  db_name: string;
   server: string;
-  accessLevel: AccessLevel;
-  features: string[];
-  grantedOn: string;
-  expiresOn: string;
-  daysRemaining: number;
-  status: AccessStatus;
-  isTrial: boolean;
-  trialEndsOn?: string;
-  paidAmount: number;
   plan: "starter" | "growth" | "enterprise";
-  maxUsers: number;
-  storageLimit: string;
-  storageUsed: string;
+  max_users: number;
+  access_level: AccessLevel;
+  features: string | null;
+  granted_on: string;
+  expires_on: string;
+  days_remaining: number;
+  status: AccessStatus;
+  is_trial: boolean;
+  trial_ends_on?: string;
+  paid_amount: number;
+  storage_limit: string;
+  storage_used: string;
+  created_at: string;
 }
 
-// ─── Mock Data ───────────────────────────────────────────────────────────────
 const FEATURES_BY_PLAN: Record<string, string[]> = {
   starter: ["DB Read Access", "Query Console", "Basic Reporting"],
   growth: [
@@ -93,118 +94,6 @@ const FEATURES_BY_PLAN: Record<string, string[]> = {
     "Priority Support",
   ],
 };
-
-const initialAccesses: TenantAccess[] = [
-  {
-    id: "ACC-001",
-    tenantId: "T-001",
-    tenantName: "Civilier Constructions Pvt Ltd",
-    dbName: "civilier_prod",
-    server: "sql-prod-01",
-    accessLevel: "full",
-    features: FEATURES_BY_PLAN.enterprise,
-    grantedOn: "2026-01-01",
-    expiresOn: "2026-12-31",
-    daysRemaining: 272,
-    status: "active",
-    isTrial: false,
-    paidAmount: 84000,
-    plan: "enterprise",
-    maxUsers: 50,
-    storageLimit: "50 GB",
-    storageUsed: "2.8 GB",
-  },
-  {
-    id: "ACC-002",
-    tenantId: "T-002",
-    tenantName: "Buildtech Infrastructure Ltd",
-    dbName: "buildtech_prod",
-    server: "sql-prod-01",
-    accessLevel: "read_write",
-    features: FEATURES_BY_PLAN.growth,
-    grantedOn: "2026-02-15",
-    expiresOn: "2026-05-15",
-    daysRemaining: 42,
-    status: "active",
-    isTrial: false,
-    paidAmount: 18000,
-    plan: "growth",
-    maxUsers: 20,
-    storageLimit: "20 GB",
-    storageUsed: "1.1 GB",
-  },
-  {
-    id: "ACC-003",
-    tenantId: "T-003",
-    tenantName: "Apex Realty Developers",
-    dbName: "apex_prod",
-    server: "sql-prod-02",
-    accessLevel: "read",
-    features: FEATURES_BY_PLAN.starter,
-    grantedOn: "2025-12-01",
-    expiresOn: "2026-03-01",
-    daysRemaining: -33,
-    status: "expired",
-    isTrial: false,
-    paidAmount: 9000,
-    plan: "starter",
-    maxUsers: 5,
-    storageLimit: "5 GB",
-    storageUsed: "0.4 GB",
-  },
-  {
-    id: "ACC-004",
-    tenantId: "T-004",
-    tenantName: "Metro Projects Group",
-    dbName: "metro_prod",
-    server: "sql-prod-02",
-    accessLevel: "read_write",
-    features: FEATURES_BY_PLAN.growth,
-    grantedOn: "2026-03-01",
-    expiresOn: "2026-06-01",
-    daysRemaining: 59,
-    status: "active",
-    isTrial: false,
-    paidAmount: 18000,
-    plan: "growth",
-    maxUsers: 20,
-    storageLimit: "20 GB",
-    storageUsed: "1.9 GB",
-  },
-];
-
-const ALL_TENANTS = [
-  {
-    id: "T-001",
-    name: "Civilier Constructions Pvt Ltd",
-    dbName: "civilier_prod",
-    server: "sql-prod-01",
-  },
-  {
-    id: "T-002",
-    name: "Buildtech Infrastructure Ltd",
-    dbName: "buildtech_prod",
-    server: "sql-prod-01",
-  },
-  {
-    id: "T-003",
-    name: "Apex Realty Developers",
-    dbName: "apex_prod",
-    server: "sql-prod-02",
-  },
-  {
-    id: "T-004",
-    name: "Metro Projects Group",
-    dbName: "metro_prod",
-    server: "sql-prod-02",
-  },
-  {
-    id: "T-005",
-    name: "Urban Edge Builders",
-    dbName: "urbanedge_prod",
-    server: "sql-prod-03",
-  },
-];
 
 const PLAN_CONFIG = {
   starter: {
@@ -247,7 +136,37 @@ const ACCESS_LEVEL_CONFIG = {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function ControlPanel() {
-  const [accesses, setAccesses] = useState<TenantAccess[]>(initialAccesses);
+  const queryClient = useQueryClient();
+
+  const { data: accesses = [], refetch } = useQuery<TenantAccess[]>({
+    queryKey: ["dba-control-panel"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/dba/control-panel");
+      if (!res.ok) throw new Error("Failed to load tenants");
+      return res.json();
+    },
+  });
+
+  const patchTenant = useMutation({
+    mutationFn: async ({
+      tenantId,
+      body,
+    }: {
+      tenantId: string;
+      body: Record<string, unknown>;
+    }) => {
+      const res = await fetchWithAuth(`/api/dba/control-panel/${tenantId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error("Update failed");
+      return res.json();
+    },
+    onSuccess: () =>
+      queryClient.invalidateQueries({ queryKey: ["dba-control-panel"] }),
+  });
+
   const [selectedAccess, setSelectedAccess] = useState<TenantAccess | null>(
     null,
   );
@@ -300,11 +219,15 @@ export default function ControlPanel() {
   };
 
   const handleGrant = () => {
-    const tenant = ALL_TENANTS.find((t) => t.id === grantForm.tenantId);
-    if (!tenant) {
+    if (!grantForm.tenantId) {
       toast.error("Please select a tenant");
       return;
     }
+    const tenant = {
+      name:
+        accesses.find((t) => t.tenant_id === grantForm.tenantId)?.name ??
+        grantForm.tenantId,
+    };
     if (!grantForm.isTrial && !grantForm.paidAmount) {
       toast.error("Please enter the amount paid");
       return;
@@ -320,30 +243,21 @@ export default function ControlPanel() {
 
     const days = Math.floor((expires.getTime() - now.getTime()) / 86400000);
 
-    const newAccess: TenantAccess = {
-      id: `ACC-00${accesses.length + 1}`,
-      tenantId: tenant.id,
-      tenantName: tenant.name,
-      dbName: tenant.dbName,
-      server: tenant.server,
-      accessLevel: grantForm.isTrial ? "read" : grantForm.accessLevel,
-      features: FEATURES_BY_PLAN[grantForm.plan],
-      grantedOn: now.toISOString().split("T")[0],
-      expiresOn: expires.toISOString().split("T")[0],
-      daysRemaining: days,
-      status: grantForm.isTrial ? "trial" : "active",
-      isTrial: grantForm.isTrial,
-      trialEndsOn: grantForm.isTrial
-        ? expires.toISOString().split("T")[0]
-        : undefined,
-      paidAmount: grantForm.isTrial ? 0 : parseInt(grantForm.paidAmount || "0"),
-      plan: grantForm.plan,
-      maxUsers: grantForm.isTrial ? 3 : parseInt(grantForm.maxUsers),
-      storageLimit: grantForm.isTrial ? "1 GB" : grantForm.storageLimit,
-      storageUsed: "0 GB",
-    };
+    patchTenant.mutate(
+      {
+        tenantId: grantForm.tenantId,
+        body: {
+          access_level: grantForm.isTrial ? "read" : grantForm.accessLevel,
+          status: grantForm.isTrial ? "trial" : "active",
+          expires_on: expires.toISOString().split("T")[0],
+          paid_amount: grantForm.isTrial
+            ? 0
+            : parseInt(grantForm.paidAmount || "0"),
+        },
+      },
+      { onSuccess: () => refetch() },
+    );
 
-    setAccesses((prev) => [...prev, newAccess]);
     setGrantOpen(false);
 
     toast.success(
@@ -367,30 +281,38 @@ export default function ControlPanel() {
   };
 
   const handleRevoke = (access: TenantAccess) => {
-    setAccesses((prev) =>
-      prev.map((a) => (a.id === access.id ? { ...a, status: "suspended" } : a)),
+    patchTenant.mutate(
+      { tenantId: access.tenant_id, body: { status: "suspended" } },
+      {
+        onSuccess: () => {
+          setRevokeTarget(null);
+          toast.success(`Access suspended for ${access.name}`);
+        },
+        onError: () => toast.error("Failed to suspend access"),
+      },
     );
-    setRevokeTarget(null);
-    toast.success(`Access suspended for ${access.tenantName}`);
   };
 
   const handleReactivate = (access: TenantAccess) => {
-    setAccesses((prev) =>
-      prev.map((a) => (a.id === access.id ? { ...a, status: "active" } : a)),
+    patchTenant.mutate(
+      { tenantId: access.tenant_id, body: { status: "active" } },
+      {
+        onSuccess: () => toast.success(`Access reactivated for ${access.name}`),
+        onError: () => toast.error("Failed to reactivate access"),
+      },
     );
-    toast.success(`Access reactivated for ${access.tenantName}`);
   };
 
   const stats = {
     total: accesses.length,
     active: accesses.filter((a) => a.status === "active").length,
     expiringSoon: accesses.filter(
-      (a) => a.daysRemaining > 0 && a.daysRemaining <= 30,
+      (a) => a.days_remaining > 0 && a.days_remaining <= 30,
     ).length,
     expired: accesses.filter(
-      (a) => a.status === "expired" || a.daysRemaining < 0,
+      (a) => a.status === "expired" || a.days_remaining < 0,
     ).length,
-    totalRevenue: accesses.reduce((s, a) => s + a.paidAmount, 0),
+    totalRevenue: accesses.reduce((s, a) => s + (a.paid_amount || 0), 0),
   };
 
   return (
@@ -514,10 +436,10 @@ export default function ControlPanel() {
                   const SC =
                     statusConfig[acc.status as keyof typeof statusConfig];
                   const PL = PLAN_CONFIG[acc.plan];
-                  const AL = ACCESS_LEVEL_CONFIG[acc.accessLevel];
+                  const AL = ACCESS_LEVEL_CONFIG[acc.access_level];
                   const storagePercent = Math.round(
-                    (parseFloat(acc.storageUsed) /
-                      parseFloat(acc.storageLimit)) *
+                    (parseFloat(acc.storage_used) /
+                      parseFloat(acc.storage_limit)) *
                       100,
                   );
 
@@ -525,15 +447,15 @@ export default function ControlPanel() {
                     <TableRow key={acc.id} className="text-xs">
                       <TableCell>
                         <div className="font-medium text-[11px]">
-                          {acc.tenantName}
+                          {acc.name}
                         </div>
                         <div className="text-muted-foreground font-mono text-[10px]">
-                          {acc.tenantId}
+                          {acc.tenant_id}
                         </div>
                       </TableCell>
                       <TableCell>
                         <div className="font-mono text-[10px] text-primary">
-                          {acc.dbName}
+                          {acc.db_name}
                         </div>
                         <div className="text-muted-foreground text-[10px]">
                           {acc.server}
@@ -550,22 +472,22 @@ export default function ControlPanel() {
                         </Badge>
                       </TableCell>
                       <TableCell className="font-mono text-[10px] text-muted-foreground">
-                        {acc.expiresOn}
+                        {acc.expires_on}
                       </TableCell>
                       <TableCell>
                         <span
-                          className={`font-bold text-[11px] ${getDaysColor(acc.daysRemaining)}`}
+                          className={`font-bold text-[11px] ${getDaysColor(acc.days_remaining)}`}
                         >
-                          {acc.daysRemaining < 0
-                            ? `${Math.abs(acc.daysRemaining)}d overdue`
-                            : `${acc.daysRemaining}d`}
+                          {acc.days_remaining < 0
+                            ? `${Math.abs(acc.days_remaining)}d overdue`
+                            : `${acc.days_remaining}d`}
                         </span>
-                        {acc.daysRemaining > 0 && (
+                        {acc.days_remaining > 0 && (
                           <div className="w-16 h-1 bg-muted rounded-full mt-1">
                             <div
-                              className={`h-1 rounded-full ${acc.daysRemaining > 60 ? "bg-green-500" : acc.daysRemaining > 30 ? "bg-yellow-500" : "bg-red-500"}`}
+                              className={`h-1 rounded-full ${acc.days_remaining > 60 ? "bg-green-500" : acc.days_remaining > 30 ? "bg-yellow-500" : "bg-red-500"}`}
                               style={{
-                                width: `${Math.min((acc.daysRemaining / 365) * 100, 100)}%`,
+                                width: `${Math.min((acc.days_remaining / 365) * 100, 100)}%`,
                               }}
                             />
                           </div>
@@ -573,7 +495,7 @@ export default function ControlPanel() {
                       </TableCell>
                       <TableCell>
                         <div className="text-[10px]">
-                          {acc.storageUsed} / {acc.storageLimit}
+                          {acc.storage_used} / {acc.storage_limit}
                         </div>
                         <div className="w-16 h-1 bg-muted rounded-full mt-1">
                           <div
@@ -587,7 +509,7 @@ export default function ControlPanel() {
                           <Badge className={`text-[10px] ${SC.color}`}>
                             {acc.status}
                           </Badge>
-                          {acc.isTrial && (
+                          {acc.is_trial && (
                             <Badge className="text-[9px] bg-violet-500/10 text-violet-600 border-violet-500/20 w-fit">
                               Trial
                             </Badge>
@@ -653,16 +575,14 @@ export default function ControlPanel() {
                   <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
                     Tenant
                   </p>
-                  <p className="text-xs font-medium">
-                    {selectedAccess.tenantName}
-                  </p>
+                  <p className="text-xs font-medium">{selectedAccess.name}</p>
                 </div>
                 <div className="space-y-1">
                   <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
                     Database
                   </p>
                   <p className="text-xs font-mono text-primary">
-                    {selectedAccess.dbName}
+                    {selectedAccess.db_name}
                   </p>
                 </div>
                 <div className="space-y-1">
@@ -680,9 +600,9 @@ export default function ControlPanel() {
                     Access Level
                   </p>
                   <Badge
-                    className={`text-[10px] ${ACCESS_LEVEL_CONFIG[selectedAccess.accessLevel].color}`}
+                    className={`text-[10px] ${ACCESS_LEVEL_CONFIG[selectedAccess.access_level].color}`}
                   >
-                    {ACCESS_LEVEL_CONFIG[selectedAccess.accessLevel].label}
+                    {ACCESS_LEVEL_CONFIG[selectedAccess.access_level].label}
                   </Badge>
                 </div>
                 <div className="space-y-1">
@@ -690,7 +610,7 @@ export default function ControlPanel() {
                     Granted On
                   </p>
                   <p className="text-xs font-mono">
-                    {selectedAccess.grantedOn}
+                    {selectedAccess.granted_on}
                   </p>
                 </div>
                 <div className="space-y-1">
@@ -698,23 +618,23 @@ export default function ControlPanel() {
                     Expires On
                   </p>
                   <p
-                    className={`text-xs font-mono font-bold ${getDaysColor(selectedAccess.daysRemaining)}`}
+                    className={`text-xs font-mono font-bold ${getDaysColor(selectedAccess.days_remaining)}`}
                   >
-                    {selectedAccess.expiresOn}
+                    {selectedAccess.expires_on}
                   </p>
                 </div>
                 <div className="space-y-1">
                   <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
                     Max Users
                   </p>
-                  <p className="text-xs">{selectedAccess.maxUsers} users</p>
+                  <p className="text-xs">{selectedAccess.max_users} users</p>
                 </div>
                 <div className="space-y-1">
                   <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
                     Amount Paid
                   </p>
                   <p className="text-xs font-bold text-green-600">
-                    ₹{selectedAccess.paidAmount.toLocaleString()}
+                    ₹{selectedAccess.paid_amount.toLocaleString()}
                   </p>
                 </div>
               </div>
@@ -723,18 +643,18 @@ export default function ControlPanel() {
                 <div className="flex justify-between text-[10px]">
                   <span className="text-muted-foreground">Access Duration</span>
                   <span
-                    className={`font-bold ${getDaysColor(selectedAccess.daysRemaining)}`}
+                    className={`font-bold ${getDaysColor(selectedAccess.days_remaining)}`}
                   >
-                    {selectedAccess.daysRemaining > 0
-                      ? `${selectedAccess.daysRemaining} days remaining`
-                      : `${Math.abs(selectedAccess.daysRemaining)} days overdue`}
+                    {selectedAccess.days_remaining > 0
+                      ? `${selectedAccess.days_remaining} days remaining`
+                      : `${Math.abs(selectedAccess.days_remaining)} days overdue`}
                   </span>
                 </div>
                 <div className="h-2 bg-muted rounded-full overflow-hidden">
                   <div
-                    className={`h-full rounded-full transition-all ${selectedAccess.daysRemaining > 60 ? "bg-green-500" : selectedAccess.daysRemaining > 30 ? "bg-yellow-500" : "bg-red-500"}`}
+                    className={`h-full rounded-full transition-all ${selectedAccess.days_remaining > 60 ? "bg-green-500" : selectedAccess.days_remaining > 30 ? "bg-yellow-500" : "bg-red-500"}`}
                     style={{
-                      width: `${Math.max(0, Math.min((selectedAccess.daysRemaining / 365) * 100, 100))}%`,
+                      width: `${Math.max(0, Math.min((selectedAccess.days_remaining / 365) * 100, 100))}%`,
                     }}
                   />
                 </div>
@@ -745,7 +665,10 @@ export default function ControlPanel() {
                   Included Features
                 </p>
                 <div className="flex flex-wrap gap-1.5">
-                  {selectedAccess.features.map((f, i) => (
+                  {(Array.isArray(selectedAccess.features)
+                    ? selectedAccess.features
+                    : JSON.parse(selectedAccess.features || "[]")
+                  ).map((f, i) => (
                     <span
                       key={i}
                       className="flex items-center gap-1 bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 rounded-full px-2 py-0.5 text-[10px]"
@@ -792,8 +715,12 @@ export default function ControlPanel() {
                   <SelectValue placeholder="Select tenant..." />
                 </SelectTrigger>
                 <SelectContent>
-                  {ALL_TENANTS.map((t) => (
-                    <SelectItem key={t.id} value={t.id} className="text-xs">
+                  {accesses.map((t) => (
+                    <SelectItem
+                      key={t.id}
+                      value={t.tenant_id}
+                      className="text-xs"
+                    >
                       {t.name}
                     </SelectItem>
                   ))}
@@ -1029,10 +956,10 @@ export default function ControlPanel() {
             </DialogTitle>
           </DialogHeader>
           <p className="text-xs text-muted-foreground py-2">
-            This will immediately suspend{" "}
-            <strong>{revokeTarget?.tenantName}</strong>'s access to{" "}
+            This will immediately suspend <strong>{revokeTarget?.name}</strong>
+            's access to{" "}
             <span className="font-mono text-primary">
-              {revokeTarget?.dbName}
+              {revokeTarget?.db_name}
             </span>
             . You can reactivate later.
           </p>

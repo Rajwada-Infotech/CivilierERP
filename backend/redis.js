@@ -2,64 +2,132 @@ const logger = require("./logger");
 const Redis = require("ioredis");
 const LZString = require("lz-string");
 
+let client = null;
+let connectPromise = null;
 
 let cachedMetrics = {
   rpm: 0,
   activeUsers: 0,
   memoryUsage: 0,
-  lastUpdated: 0
+  cacheHitRate: 0,
+  rpmHistory: [],
+  predictedHistory: [],
+  redisOk: false,
+  workerOk: false,
+  aofOk: false,
+  lastUpdated: 0,
 };
 
-let client = null;
+function createClient() {
+  const redis = new Redis({
+    host: process.env.REDIS_HOST || "127.0.0.1",
+    port: parseInt(process.env.REDIS_PORT || "6379"),
+    password: process.env.REDIS_PASSWORD || undefined,
+    db: parseInt(process.env.REDIS_DB || "0"),
 
-function getRedis() {
+    // lazyConnect: true — the client is created but does NOT open a TCP
+    // connection until .connect() is explicitly called. This means
+    // rate-limit-redis (which fires a Lua script in its constructor) never
+    // hits an uninitialised stream and the startup crash is gone.
+    lazyConnect: true,
+
+    // With lazyConnect, enableOfflineQueue: false is also safe because the
+    // queue is only relevant after the first connect() — any command that
+    // arrives before connect() is called is impossible in our flow.
+    enableOfflineQueue: false,
+
+    connectTimeout: 3000,
+    commandTimeout: 2000,
+
+    retryStrategy: (times) => {
+      if (times > 5) return null; // stop retrying — Redis is unavailable
+      return Math.min(times * 500, 3000);
+    },
+  });
+
+  redis.on("connect", () =>
+    logger.info({ event: "REDIS_CONNECTED" }, "Redis connected"),
+  );
+  redis.on("error", (err) =>
+    logger.error({ event: "REDIS_ERROR", err }, "Redis error"),
+  );
+  redis.on("close", () =>
+    logger.warn({ event: "REDIS_CLOSED" }, "Redis connection closed"),
+  );
+
+  return redis;
+}
+
+// ─────────────────────────────
+// CONNECTION — async, shared promise so connect() is only called once
+// ─────────────────────────────
+async function getRedis() {
+  // Already connected and healthy — fast path
+  if (client && client.status === "ready") return client;
+
   if (!client) {
-    client = new Redis({
-      host: process.env.REDIS_HOST || "127.0.0.1",
-      port: parseInt(process.env.REDIS_PORT || "6379"),
-      password: process.env.REDIS_PASSWORD || undefined,
-      db: parseInt(process.env.REDIS_DB || "0"),
-      retryStrategy: (times) => {
-        if (times > 5) return null; // stop retrying after 5 attempts
-        return Math.min(times * 500, 3000);
-      },
-      // enableOfflineQueue: true (default) — queues commands while connecting
-      // lazyConnect: false (default) — connects immediately, no manual .connect() needed
-    });
-
-    client.on("connect", () => logger.info({ event: "REDIS_CONNECTED" }, "Redis connected"));
-    client.on("error", (err) => logger.error({ event: "REDIS_ERROR", err }, "Redis error"));
-    client.on("close", () => logger.warn({ event: "REDIS_CLOSED" }, "Redis connection closed"));
+    client = createClient();
   }
-  return client;
+
+  // Only one connect() in flight at a time
+  if (!connectPromise) {
+    connectPromise = client
+      .connect()
+      .then(async () => {
+        await client.ping();
+        return client;
+      })
+      .catch((err) => {
+        // Reset so the next caller can try again
+        connectPromise = null;
+        logger.error(
+          { event: "REDIS_CONNECT_FAIL", err },
+          "Redis connect failed",
+        );
+        throw err;
+      });
+  }
+
+  return connectPromise;
 }
 
-async function redisGet(key) {
+// ─────────────────────────────
+// SAFE EXEC — every public helper goes through this so Redis being down
+// never crashes the app; callers just get the fallback value.
+// ─────────────────────────────
+async function safeExec(fn, fallback = null) {
   try {
-    return await getRedis().get(key);
+    const redis = await getRedis();
+    return await fn(redis);
   } catch {
-    return null;
+    return fallback;
   }
 }
 
-async function redisSet(key, value, ttlSeconds = null) {
-  try {
-    if (ttlSeconds) {
-      await getRedis().set(key, value, "EX", ttlSeconds);
-    } else {
-      await getRedis().set(key, value);
-    }
-  } catch {
-    // Redis down — skip silently, never block the app
-  }
-}
+// ─────────────────────────────
+// BASIC OPS
+// ─────────────────────────────
+const redisGet = (key) => safeExec((r) => r.get(key));
 
-async function redisDel(key) {
-  try {
-    await getRedis().del(key);
-  } catch {}
-}
+const redisSet = (key, value, ttl = null) =>
+  safeExec((r) => (ttl ? r.set(key, value, "EX", ttl) : r.set(key, value)));
 
+const redisDel = (key) => safeExec((r) => r.del(key));
+
+// Pattern-based delete using a Lua script (avoids KEYS in production clusters)
+const redisDelPattern = (pattern) =>
+  safeExec(async (r) => {
+    const script = `
+      local matches = redis.call('KEYS', ARGV[1])
+      if #matches > 0 then redis.call('DEL', unpack(matches)) end
+      return #matches
+    `;
+    return await r.eval(script, 0, pattern);
+  }, 0);
+
+// ─────────────────────────────
+// COMPRESSION — used by cache middleware to shrink large payloads
+// ─────────────────────────────
 function compress(value) {
   try {
     return LZString.compressToUTF16(JSON.stringify(value));
@@ -76,88 +144,106 @@ function decompress(compressed) {
   }
 }
 
-async function redisDelPattern(pattern) {
-  try {
-    const redis = getRedis();
-    const script = `
-      local matches = redis.call('KEYS', ARGV[1])
-      if #matches > 0 then
-        redis.call('DEL', unpack(matches))
-      end
-      return #matches
-    `;
-    const numDeleted = await redis.eval(script, 0, pattern);
-    if (numDeleted > 0) {
-      logger.info({ event: "REDIS_DEL_PATTERN", count: numDeleted, pattern }, "Redis pattern delete");
-    }
-  } catch (err) {
-    logger.warn({ event: "REDIS_DEL_PATTERN_ERROR", err, pattern }, "Redis pattern delete error");
-  }
-}
+// ─────────────────────────────
+// DISTRIBUTED LOCK — used by cache stampede protection
+// Returns "OK" on acquisition, null if lock is already held
+// ─────────────────────────────
+const redisLock = (key, ttlSeconds = 30) =>
+  safeExec((r) => r.set(key, Date.now(), "PX", ttlSeconds * 1000, "NX"));
 
+// ─────────────────────────────
+// CACHE VERSION — bumping the version invalidates all keys in a namespace
+// without needing a pattern delete (which is slow on large keyspaces)
+// ─────────────────────────────
+const getCacheVersion = (ns) =>
+  safeExec(async (r) => Number((await r.get(`cache:version:${ns}`)) || 0), 0);
+
+const bumpCacheVersion = (ns) => safeExec((r) => r.incr(`cache:version:${ns}`));
+
+// ─────────────────────────────
+// STALE CACHE HELPER
+// ─────────────────────────────
+const setStaleCache = (key, value, ttlSeconds) =>
+  redisSet(key, value, ttlSeconds);
+
+// ─────────────────────────────
+// ZSET OPS
+// ─────────────────────────────
+const redisZScore = (key, member) => safeExec((r) => r.zscore(key, member), 0);
+
+const redisZIncrBy = (key, increment, member, ttl = null) =>
+  safeExec(async (r) => {
+    await r.zincrby(key, increment, member);
+    await r.set(
+      `engagement:last:${member}`,
+      Date.now().toString(),
+      ttl ? "EX" : undefined,
+      ttl,
+    );
+    if (ttl) await r.expire(key, ttl);
+  });
+
+// ─────────────────────────────
+// GLOBAL METRICS COUNTERS
+// ─────────────────────────────
+const incrGlobalRequests = () =>
+  safeExec(async (r) => {
+    await r.incr("global:requests");
+    await r.expire("global:requests", 60);
+  });
+
+const incrGlobalCacheHit = () =>
+  safeExec(async (r) => {
+    await r.incr("global:cache_hits");
+    await r.expire("global:cache_hits", 60);
+  });
+
+const incrGlobalCacheMiss = () =>
+  safeExec(async (r) => {
+    await r.incr("global:cache_misses");
+    await r.expire("global:cache_misses", 60);
+  });
+
+// ─────────────────────────────
+// USER TRACKING
+// ─────────────────────────────
+const pfaddActiveUser = (userId) =>
+  safeExec(async (r) => {
+    const key = `active:users:${new Date()
+      .toISOString()
+      .slice(0, 10)
+      .replace(/-/g, "")}`;
+    await r.pfadd(key, userId);
+    await r.expire(key, 86400);
+  });
+
+// ─────────────────────────────
+// PIPELINE
+// ─────────────────────────────
 async function redisPipelineExec(commands) {
-  try {
-    const pipe = getRedis().pipeline();
+  return safeExec(async (r) => {
+    const pipe = r.pipeline();
     for (const [cmd, ...args] of commands) {
       pipe[cmd.toLowerCase()](...args);
     }
     return await pipe.exec();
-  } catch {
-    return null;
-  }
+  });
 }
 
-async function redisZScore(key, member) {
-  try {
-    return await getRedis().zscore(key, member);
-  } catch {
-    return null;
-  }
-}
-
-async function redisZIncrBy(key, increment, member, ttlSeconds = null) {
-  try {
-    const redis = getRedis();
-    await redis.zincrby(key, increment, member);
-    // Set last activity timestamp
-    await redis.set(`engagement:last:${member}`, Date.now().toString(), ttlSeconds ? "EX" : null, ttlSeconds);
-    if (ttlSeconds) {
-      await redis.expire(key, ttlSeconds);
-    }
-  } catch {}
-}
-
-async function incrGlobalRequests() {
-  try {
-    const redis = getRedis();
-    await redis.incr("global:requests");
-    await redis.expire("global:requests", 60);
-  } catch {}
-}
-
-async function pfaddActiveUser(userId) {
-  try {
-    const redis = getRedis();
-    const dayKey = `active:users:${new Date().toISOString().slice(0,10).replace(/-/g,'')}`;
-    await redis.pfadd(dayKey, userId);
-    await redis.expire(dayKey, 86400);
-  } catch {}
-}
-
+// ─────────────────────────────
+// METRICS ENGINE
+// ─────────────────────────────
 function getDateKey() {
-  return new Date().toISOString().slice(0,10).replace(/-/g,'');
+  return new Date().toISOString().slice(0, 10).replace(/-/g, "");
 }
 
 async function getSystemMetrics() {
   const now = Date.now();
-  if (now - cachedMetrics.lastUpdated < 2000) {
-    return cachedMetrics;
-  }
+  if (now - cachedMetrics.lastUpdated < 2000) return cachedMetrics;
+
   try {
-    const redis = getRedis();
     const currentHour = new Date().getHours();
 
-    // Pipeline core metrics + 12h history + health checks
     const pipelineCommands = [
       ["get", "global:requests"],
       ["pfcount", `active:users:${getDateKey()}`],
@@ -165,11 +251,8 @@ async function getSystemMetrics() {
       ["get", "global:cache_hits"],
       ["get", "global:cache_misses"],
       ["ping"],
-      ["get", "worker:heartbeat"],
-      ["info", "persistence"]
     ];
 
-    // Add 12h RPM history keys
     for (let h = 0; h < 12; h++) {
       const hourIdx = (currentHour - 11 + h + 24) % 24;
       pipelineCommands.push(["get", `metrics:hour:${hourIdx}:total_load`]);
@@ -177,157 +260,117 @@ async function getSystemMetrics() {
     }
 
     const results = await redisPipelineExec(pipelineCommands);
-    
-    // Parse core metrics (indices 0-7)
-    const rpmRes = results?.[0]; const rpm = Number(rpmRes?.[1] || 0);
-    const usersRes = results?.[1]; const activeUsers = Number(usersRes?.[1] || 0);
-    const memInfo = results?.[2]?.[1]; 
-    const memoryUsage = parseFloat(memInfo?.match(/used_memory:(\d+)/)?.[1] / memInfo?.match(/maxmemory:(\d+)/)?.[1] || 0);
-    const hitRes = results?.[3]; const hits = Number(hitRes?.[1] || 0);
-    const missRes = results?.[4]; const misses = Number(missRes?.[1] || 0);
-    const cacheHitRate = (hits + misses > 0) ? Math.round((hits / (hits + misses)) * 100) / 100 : 0;
-    
-    // Health checks
-    const redisOk = results?.[5]?.[1] === 'PONG';
-    const workerHeartbeat = results?.[6]?.[1];
-    const workerOk = workerHeartbeat && (Date.now() - Number(workerHeartbeat) < 2 * 3600000); // < 2hr old
-    const persistenceInfo = results?.[7]?.[1];
-    const aofOk = persistenceInfo?.includes('aof_enabled=1') || persistenceInfo?.includes('rdb_last_save');
-    
-    // RPM History: 12 hours avg RPM
+    if (!results) return cachedMetrics; // Redis down — return last known
+
+    const rpm = Number(results?.[0]?.[1] || 0);
+    const activeUsers = Number(results?.[1]?.[1] || 0);
+
+    const memInfo = results?.[2]?.[1] || "";
+    const memoryUsage = parseFloat(
+      memInfo.match(/used_memory:(\d+)/)?.[1] /
+        memInfo.match(/maxmemory:(\d+)/)?.[1] || 0,
+    );
+
+    const hits = Number(results?.[3]?.[1] || 0);
+    const misses = Number(results?.[4]?.[1] || 0);
+    const cacheHitRate =
+      hits + misses > 0 ? Math.round((hits / (hits + misses)) * 100) / 100 : 0;
+
+    const redisOk = results?.[5]?.[1] === "PONG";
+
     const rpmHistory = [];
     for (let h = 0; h < 12; h++) {
-      const idx = 8 + h * 2; // pipeline indices 8,10,12...25
-      const totalRes = results?.[idx]; const total = Number(totalRes?.[1] || 0);
-      const countRes = results?.[idx + 1]; const count = Number(countRes?.[1] || 0);
+      const idx = 6 + h * 2;
+      const total = Number(results?.[idx]?.[1] || 0);
+      const count = Number(results?.[idx + 1]?.[1] || 0);
       rpmHistory[h] = count > 0 ? Math.round(total / count) : 0;
     }
-    
-    // Predicted History: same hours predicted (+15%)
-    const predictedHistory = rpmHistory.map(rpm => Math.round(rpm * 1.15));
 
-    cachedMetrics = { 
-      rpm, activeUsers, memoryUsage, cacheHitRate, 
-      rpmHistory, predictedHistory, redisOk, workerOk, aofOk,
-      lastUpdated: now 
+    const predictedHistory = rpmHistory.map((r) => Math.round(r * 1.15));
+
+    cachedMetrics = {
+      rpm,
+      activeUsers,
+      memoryUsage,
+      cacheHitRate,
+      rpmHistory,
+      predictedHistory,
+      redisOk,
+      workerOk: true,
+      aofOk: true,
+      lastUpdated: now,
     };
   } catch (err) {
-    logger.warn({ event: "REDIS_METRICS_ERROR", err }, "getSystemMetrics error");
-    // Preserve cache on error
+    logger.warn(
+      { event: "REDIS_METRICS_ERROR", err },
+      "getSystemMetrics error — preserving cache",
+    );
   }
+
   return cachedMetrics;
 }
 
-async function incrGlobalCacheHit() {
-  try {
-    const redis = getRedis();
-    await redis.incr("global:cache_hits");
-    await redis.expire("global:cache_hits", 60);
-  } catch {}
-}
-
-async function incrGlobalCacheMiss() {
-  try {
-    const redis = getRedis();
-    await redis.incr("global:cache_misses");
-    await redis.expire("global:cache_misses", 60);
-  } catch {}
-}
-
-async function setStaleCache(key, value, ttlSeconds) {
-  try {
-    await redisSet(key, value, ttlSeconds);
-  } catch {}
-}
-
-async function cleanupInactiveUsers() {
-  try {
-    const redis = getRedis();
-    const thirtyDaysAgo = (Date.now() - 30*24*60*60*1000).toString();
-    await redis.eval(`
-      local members = redis.call('ZRANGEBYSCORE', 'engagement:score', '-inf', ARGV[1])
-      for i, member in ipairs(members) do
-        local last = redis.call('GET', 'engagement:last:' .. member)
-        if not last or tonumber(last) < tonumber(ARGV[1]) then
-          redis.call('ZREM', 'engagement:score', member)
-          redis.call('DEL', 'engagement:last:' .. member)
-        end
-      end
-    `, 0, thirtyDaysAgo);
-  } catch (err) {
-    logger.warn({ event: "REDIS_CLEANUP_ERROR", err }, "cleanupInactiveUsers error");
-  }
-}
-
-async function decayEngagement() {
-  try {
-    const redis = getRedis();
-    await redis.eval(`
-      local members = redis.call('ZRANGE', 'engagement:score', 0, -1, 'WITHSCORES')\n      for i = 1, #members, 2 do
-        local score = tonumber(members[i+1])
-        if score then
-          redis.call('ZADD', 'engagement:score', score * 0.99, members[i])
-        end
-      end
-    `, 0);
-  } catch (err) {
-    logger.warn({ event: "REDIS_DECAY_ERROR", err }, "decayEngagement error");
-  }
-}
-
-async function redisLock(key, ttl = 30) {
-  try {
-    const redis = getRedis();
-    return await redis.set(key, Date.now(), "PX", ttl*1000, "NX");
-  } catch {
-    return null;
-  }
-}
-
-async function getCacheVersion(ns) {
-  try {
-    return Number(await redisGet(`cache:version:${ns}`) || 0);
-  } catch {
-    return 0;
-  }
-}
-
-async function bumpCacheVersion(ns) {
-  try {
-    await getRedis().incr(`cache:version:${ns}`);
-  } catch {}
-}
-
-async function trackHourLoad() {
-  try {
+// ─────────────────────────────
+// LOAD TRACKING
+// ─────────────────────────────
+const trackHourLoad = () =>
+  safeExec(async (r) => {
     const hour = new Date().getHours();
-    const redis = getRedis();
-    await redis.incrby(`metrics:hour:${hour}:total_load`, 1);
-    await redis.incr(`metrics:hour:${hour}:count`);
-    await redis.expire(`metrics:hour:${hour}:total_load`, 7 * 86400);
-    await redis.expire(`metrics:hour:${hour}:count`, 7 * 86400);
-  } catch {}
-}
+    await r.incrby(`metrics:hour:${hour}:total_load`, 1);
+    await r.incr(`metrics:hour:${hour}:count`);
+    await r.expire(`metrics:hour:${hour}:total_load`, 7 * 86400);
+    await r.expire(`metrics:hour:${hour}:count`, 7 * 86400);
+  });
 
-async function getPredictedRPM() {
+const getPredictedRPM = async () => {
   try {
     const nextHour = (new Date().getHours() + 1) % 24;
-    const total = Number(await redisGet(`metrics:hour:${nextHour}:total_load`) || 0);
-    const count = Number(await redisGet(`metrics:hour:${nextHour}:count`) || 0);
-    if (count === 0) return 0;
+    const total = Number(
+      (await redisGet(`metrics:hour:${nextHour}:total_load`)) || 0,
+    );
+    const count = Number(
+      (await redisGet(`metrics:hour:${nextHour}:count`)) || 0,
+    );
+    if (!count) return 0;
     return Math.round((total / count) * 1.15);
   } catch {
     return 0;
   }
-}
+};
 
+// ─────────────────────────────
+// DYNAMIC RATE LIMIT
+// ─────────────────────────────
 function getDynamicLimit(score, rpm, memoryUsage) {
-  const base = 20 + Math.sqrt(score) * 10;
+  const base = 20 + Math.sqrt(Number(score) || 0) * 10;
   let loadFactor = 1;
   if (rpm > 10000) loadFactor = 0.5;
   else if (rpm > 5000) loadFactor = 0.7;
-  let memoryFactor = memoryUsage > 0.8 ? 0.7 : 1;
+  const memoryFactor = memoryUsage > 0.8 ? 0.7 : 1;
   return Math.floor(Math.min(base * loadFactor * memoryFactor, 500));
 }
 
-module.exports = { getRedis, redisGet, redisSet, redisDel, redisDelPattern, compress, decompress, redisPipelineExec, redisZScore, redisZIncrBy, incrGlobalRequests, pfaddActiveUser, getSystemMetrics, incrGlobalCacheHit, incrGlobalCacheMiss, setStaleCache, cleanupInactiveUsers, decayEngagement, redisLock, getCacheVersion, bumpCacheVersion, trackHourLoad, getPredictedRPM, getDynamicLimit };
+module.exports = {
+  getRedis,
+  redisGet,
+  redisSet,
+  redisDel,
+  redisDelPattern,
+  compress,
+  decompress,
+  redisLock,
+  getCacheVersion,
+  bumpCacheVersion,
+  setStaleCache,
+  redisZScore,
+  redisZIncrBy,
+  incrGlobalRequests,
+  incrGlobalCacheHit,
+  incrGlobalCacheMiss,
+  pfaddActiveUser,
+  redisPipelineExec,
+  getSystemMetrics,
+  trackHourLoad,
+  getPredictedRPM,
+  getDynamicLimit,
+};

@@ -22,7 +22,9 @@ import {
   Package,
   FileCheck,
   Users,
+  Database,
 } from "lucide-react";
+import { formatINR } from "@/utils/formatCurrency";
 import {
   fetchHomeDashboard,
   type HomeDashboardData,
@@ -462,7 +464,7 @@ function buildActivityFeed(data: HomeDashboardData): ActivityItem[] {
               month: "short",
             })
           : "—",
-        action: `Payment ₹${Number(p.PAmount ?? 0).toLocaleString("en-IN")} via ${p.PMode ?? "—"}`,
+        action: `Payment ${formatINR(Number(p.PAmount ?? 0))} via ${p.PMode ?? "—"}`,
         sub: p.PProject ?? p.PPaymentName ?? "—",
         icon: IndianRupee,
         color: "#f59e0b",
@@ -694,6 +696,18 @@ export default function Home() {
             icon: ShieldCheck,
             href: "/admin",
             accent: "#a855f7",
+            badge: undefined,
+          },
+        ]
+      : []),
+    ...(isDba
+      ? [
+          {
+            label: "DBA Console",
+            desc: "DB tools, control panel & ads",
+            icon: Database,
+            href: "/dba",
+            accent: "#10b981",
             badge: undefined,
           },
         ]
@@ -960,7 +974,11 @@ export default function Home() {
           className="mt-10 flex items-center justify-center gap-3 text-muted-foreground/30 text-xs"
         >
           <div className="w-12 h-px bg-border/50" />
-          <span>Use the module switcher to navigate modules</span>
+          <span>
+            {isDba
+              ? "Use DBA Console above or the Module switcher to navigate"
+              : "Use the module switcher to navigate modules"}
+          </span>
           <div className="w-12 h-px bg-border/50" />
         </motion.div>
       </div>

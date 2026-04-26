@@ -174,12 +174,19 @@ export const PAGE_DEFINITIONS = [
     group: "Admin",
     availableActions: ["view"] as const,
   },
+  {
+    key: "menu-type-master",
+    label: "Menu Type Master",
+    group: "Admin",
+    availableActions: ["view", "create", "edit", "delete"] as const,
+  },
 ] as const;
 
 export const ADMIN_PATHS = [
   "/masters/named-entry-type",
   "/masters/type-of-doc",
   "/admin/masters/role-master",
+  "/admin/masters/menu-types",
 ] as const;
 
 // ==================== TYPES ====================
