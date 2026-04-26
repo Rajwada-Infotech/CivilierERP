@@ -1,4 +1,4 @@
-import React, { useRef } from "react";
+import React, { useRef, useMemo } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   MasterPage,
@@ -16,12 +16,21 @@ import {
 import { toast } from "sonner";
 import { Tag } from "lucide-react";
 
+// ── Types ─────────────────────────────────────────────────────────────────────
 interface DbEntryType {
   E_Id: string;
   Epname: string | null;
   EntryType: string | null;
   Eprefix: string | null;
   EDoc_N: number | null;
+}
+
+interface Project {
+  Id?: number | string;
+  Name?: string;
+  name?: string;
+  Code?: string;
+  code?: string;
 }
 
 interface PrefixGroupValue {
@@ -67,7 +76,7 @@ function nextSerial(
   return maxSerial + 1;
 }
 
-// ── Prefix renderer factory ───────────────────────────────────────────────────
+// ── Renderers ─────────────────────────────────────────────────────────────────
 function makePrefixRenderer(projectNameRef: React.RefObject<string>) {
   return function PrefixFieldRenderer({
     value,
@@ -77,7 +86,6 @@ function makePrefixRenderer(projectNameRef: React.RefObject<string>) {
     value: PrefixGroupValue | "";
     onChange: (v: PrefixGroupValue) => void;
     error: boolean;
-    field: FieldDef;
   }) {
     const groupVal: PrefixGroupValue =
       value && typeof value === "object"
@@ -112,6 +120,7 @@ function makePrefixRenderer(projectNameRef: React.RefObject<string>) {
             </button>
           ))}
         </div>
+
         <div className="relative">
           <Tag
             size={13}
@@ -132,12 +141,12 @@ function makePrefixRenderer(projectNameRef: React.RefObject<string>) {
                 ? "Auto-generated from project initials"
                 : "Enter custom prefix"
             }
-            className={`w-full pl-8 pr-3 py-2 rounded-lg text-sm font-body bg-muted border transition-all
-              focus:outline-none focus:ring-2 focus:ring-primary text-foreground
+            className={`w-full pl-8 pr-3 py-2 rounded-lg text-sm font-body bg-muted border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground
               ${groupVal.mode === "auto" ? "opacity-60 cursor-not-allowed" : ""}
               ${error ? "border-destructive" : "border-border"}`}
           />
         </div>
+
         {groupVal.mode === "auto" && projectNameRef.current && (
           <p className="text-[11px] text-primary mt-1">
             Generated from:{" "}
@@ -157,21 +166,10 @@ function makePrefixRenderer(projectNameRef: React.RefObject<string>) {
   };
 }
 
-// ── Doc number preview renderer ───────────────────────────────────────────────
-function DocNumberRenderer({
-  value,
-}: {
-  value: unknown;
-  onChange: (v: unknown) => void;
-  error: boolean;
-  field: FieldDef;
-}) {
+function DocNumberRenderer({ value }: { value: unknown }) {
   const docNum = typeof value === "string" ? value : "";
   return (
-    <div
-      className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border
-      text-foreground opacity-60 cursor-not-allowed min-h-[38px] flex items-center"
-    >
+    <div className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border text-foreground opacity-60 cursor-not-allowed min-h-[38px] flex items-center">
       {docNum ? (
         <span className="font-mono tracking-wide">{docNum}</span>
       ) : (
@@ -183,44 +181,105 @@ function DocNumberRenderer({
   );
 }
 
-// ── Main component ─────────────────────────────────────────────────────────────
+// ── Main Component ────────────────────────────────────────────────────────────
 const NamedEntryTypeMaster: React.FC = () => {
   const queryClient = useQueryClient();
   const { finYears } = useFinYear();
 
+  // Fetch Entry Types
   const {
     data: dbData,
-    isLoading,
-    error,
+    isLoading: isEntryTypesLoading,
+    error: entryTypesError,
   } = useQuery({
     queryKey: ["entry-types"],
     queryFn: getEntryTypes,
     staleTime: 5 * 60 * 1000,
   });
 
-  const dbItems: DbEntryType[] = Array.isArray(dbData) ? dbData : [];
+  // Fetch Projects (Fixed 401 + Compatible with MasterPage)
+  const {
+    data: projectsData = [],
+    isLoading: isProjectsLoading,
+    error: projectsError,
+  } = useQuery({
+    queryKey: ["project-master"],
+    queryFn: async () => {
+      const token =
+        localStorage.getItem("token") ||
+        localStorage.getItem("accessToken") ||
+        localStorage.getItem("authToken");
 
-  // Map DB rows → MasterPage format
-  // EDoc_N is the running serial; reconstruct finYear from documentNumber if needed
-  const mappedData = dbItems.map((item) => {
-    const prefix = item.Eprefix || "";
-    const serial = item.EDoc_N ?? 1;
-    // We don't store finYear in DB — derive from FinYearContext current year
-    const finYear = finYears.find((fy) => fy.isActive)?.year || "";
-    return {
-      _id: item.E_Id,
-      projectName: item.Epname || "",
-      entryType: item.EntryType || "",
-      prefix,
-      prefixMode: "auto" as const,
-      serialNumber: serial,
-      finYear,
-      documentNumber: buildDocNumber(prefix, serial, finYear),
-      status: true,
-    };
+      if (!token)
+        throw new Error("No authentication token found. Please login again.");
+
+      const res = await fetch("/api/project-master", {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+      });
+
+      if (res.status === 401)
+        throw new Error("Session expired. Please login again.");
+      if (!res.ok) throw new Error(`Failed to fetch projects: ${res.status}`);
+
+      return res.json() as Promise<Project[]>;
+    },
+    staleTime: 10 * 60 * 1000,
+    retry: 1,
   });
 
-  // ── Handlers ────────────────────────────────────────────────────────────────
+  const dbItems: DbEntryType[] = Array.isArray(dbData) ? dbData : [];
+
+  // Project Options - Now simple strings (MasterPage expects string[])
+  const projectOptions = useMemo(() => {
+    if (!Array.isArray(projectsData) || projectsData.length === 0) {
+      return ["No projects available"];
+    }
+
+    return projectsData
+      .filter((p: any) => p?.Name || p?.name)
+      .map((p: any) => {
+        const name = p.Name || p.name || "";
+        const code = p.Code || p.code || "";
+        return code ? `${code} - ${name}` : name;
+      })
+      .sort((a, b) => a.localeCompare(b));
+  }, [projectsData]);
+
+  const activeFinYearOptions = useMemo(() => {
+    return finYears
+      .sort((a, b) => b.year.localeCompare(a.year))
+      .map((fy) => fy.year);
+  }, [finYears]);
+
+  // Mapped Data for Table
+  const mappedData = useMemo(() => {
+    const currentFinYear = finYears.find((fy) => fy.isActive)?.year || "";
+
+    return dbItems.map((item) => ({
+      _id: item.E_Id,
+      projectName: item.Epname || "",
+      entryType: item.EntryType || "Payment",
+      prefix: item.Eprefix || "",
+      prefixMode: "auto" as const,
+      serialNumber: item.EDoc_N ?? 1,
+      finYear: currentFinYear,
+      documentNumber: buildDocNumber(
+        item.Eprefix || "",
+        item.EDoc_N ?? 1,
+        currentFinYear,
+      ),
+      status: true,
+    }));
+  }, [dbItems, finYears]);
+
+  const projectNameRef = useRef<string>("");
+  const PrefixRenderer = useRef(makePrefixRenderer(projectNameRef)).current;
+
+  // ── Payload Builder ───────────────────────────────────────────────────────
   const toPayload = (
     record: Record<string, unknown>,
     allRecords: Record<string, unknown>[],
@@ -229,11 +288,13 @@ const NamedEntryTypeMaster: React.FC = () => {
     const projectName = (record.projectName as string) || "";
     const finYear = (record.finYear as string) || "";
     const prefixGroup = record.prefixGroup as PrefixGroupValue | undefined;
+
     const mode = prefixGroup?.mode ?? "auto";
     const prefixStr =
       mode === "auto"
         ? autoPrefix(projectName)
         : (prefixGroup?.customPrefix ?? "").trim();
+
     const serial = isEdit
       ? ((record.serialNumber as number) ?? 1)
       : nextSerial(allRecords, prefixStr, finYear);
@@ -246,46 +307,27 @@ const NamedEntryTypeMaster: React.FC = () => {
     };
   };
 
+  // ── Handlers ──────────────────────────────────────────────────────────────
   const handleDataEvent = async (event: DataChangeEvent) => {
-    if (event.action === "add") {
-      try {
+    try {
+      if (event.action === "add") {
         await addEntryType(toPayload(event.record, event.records, false));
-        toast.success("Entry type saved!");
-        await queryClient.invalidateQueries({ queryKey: ["entry-types"] });
-      } catch (err: any) {
-        toast.error("Save failed: " + err.message);
-      }
-    }
-    if (event.action === "update") {
-      try {
+        toast.success("Entry type added successfully!");
+      } else if (event.action === "update") {
         await updateEntryType(
           event.id,
           toPayload(event.record, event.records, true),
         );
-        toast.success("Entry type updated!");
-        await queryClient.invalidateQueries({ queryKey: ["entry-types"] });
-      } catch (err: any) {
-        toast.error("Update failed: " + err.message);
-      }
-    }
-    if (event.action === "delete") {
-      try {
+        toast.success("Entry type updated successfully!");
+      } else if (event.action === "delete") {
         await deleteEntryType(event.id);
-        toast.success("Entry type deleted!");
-        await queryClient.invalidateQueries({ queryKey: ["entry-types"] });
-      } catch (err: any) {
-        toast.error("Delete failed: " + err.message);
+        toast.success("Entry type deleted successfully!");
       }
+      await queryClient.invalidateQueries({ queryKey: ["entry-types"] });
+    } catch (err: any) {
+      toast.error(`Operation failed: ${err.message}`);
     }
   };
-
-  // ── Form change & custom save (keep existing logic intact) ──────────────────
-  const projectNameRef = useRef<string>("");
-  const PrefixRenderer = useRef(makePrefixRenderer(projectNameRef)).current;
-
-  const activeFinYearOptions = finYears
-    .sort((a, b) => b.year.localeCompare(a.year))
-    .map((fy) => fy.year);
 
   const handleFormChange = (
     form: Record<string, unknown>,
@@ -303,10 +345,13 @@ const NamedEntryTypeMaster: React.FC = () => {
       mode === "auto"
         ? autoPrefix(projectName)
         : (prefixGroup?.customPrefix ?? "").trim();
+
     const serial = nextSerial(allRecords, prefixStr, finYear);
     const docNum = buildDocNumber(prefixStr, serial, finYear);
 
-    if (form.documentNumber !== docNum) updateForm({ documentNumber: docNum });
+    if (form.documentNumber !== docNum) {
+      updateForm({ documentNumber: docNum });
+    }
   };
 
   const handleCustomSave = (
@@ -317,6 +362,7 @@ const NamedEntryTypeMaster: React.FC = () => {
     const projectName = (formData.projectName as string) || "";
     const finYear = (formData.finYear as string) || "";
     const prefixGroup = formData.prefixGroup as PrefixGroupValue | undefined;
+
     const mode = prefixGroup?.mode ?? "auto";
     const prefixStr =
       mode === "auto"
@@ -341,10 +387,34 @@ const NamedEntryTypeMaster: React.FC = () => {
     };
   };
 
-  if (isLoading)
-    return <div className="p-6 text-muted-foreground">Loading...</div>;
-  if (error)
-    return <div className="p-6 text-red-500">Failed to load entry types.</div>;
+  // Loading & Error States
+  if (isEntryTypesLoading || isProjectsLoading) {
+    return (
+      <div className="p-8 flex flex-col items-center justify-center min-h-[400px] text-muted-foreground">
+        <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full mb-4" />
+        <p>Loading Named Entry Types and Projects...</p>
+      </div>
+    );
+  }
+
+  if (entryTypesError || projectsError) {
+    return (
+      <div className="p-8 text-red-500 bg-red-50 dark:bg-red-950/30 rounded-xl border border-red-200 mt-8">
+        <h2 className="font-semibold mb-2">Failed to Load Data</h2>
+        <p>
+          {projectsError?.message ||
+            entryTypesError?.message ||
+            "Unknown error occurred"}
+        </p>
+        <button
+          onClick={() => window.location.reload()}
+          className="mt-4 px-5 py-2 bg-red-600 text-white rounded-lg text-sm hover:bg-red-700"
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -354,6 +424,7 @@ const NamedEntryTypeMaster: React.FC = () => {
       <h1 className="text-xl font-heading font-bold text-foreground mb-4">
         Named Entry Type Master
       </h1>
+
       <MasterPage
         title="Named Entry Type"
         fields={[
@@ -362,8 +433,8 @@ const NamedEntryTypeMaster: React.FC = () => {
             label: "Project Name",
             type: "select",
             required: true,
-options: ["Loading from /api/enterprises..."], // TODO: Dynamic API fetch in MasterPage wrapper
-
+            options: projectOptions, // ← Simple string array (Important!)
+            placeholder: "Select a project",
           },
           {
             name: "entryType",
