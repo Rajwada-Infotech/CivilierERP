@@ -851,7 +851,9 @@ export default function Login() {
       const result = await login(email, password);
       if (result.success) {
         const role = result.role;
-        if (role === "super_admin" || role === "admin" || role === "dba") {
+        if (role === "dba") {
+          navigate("/dba", { replace: true });
+        } else if (role === "super_admin" || role === "admin") {
           navigate("/admin/dashboard", { replace: true });
         } else {
           navigate("/home", { replace: true });

@@ -1,4 +1,6 @@
 import React, { useState, useRef } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -79,111 +81,6 @@ interface Ad {
   creatives: Creative[];
 }
 
-const MOCK_CREATIVES: Creative[] = [
-  {
-    id: "CR-001",
-    name: "civilier_banner_1080x400.png",
-    type: "banner",
-    size: "184 KB",
-    uploadedOn: "2026-03-01",
-    status: "approved",
-  },
-  {
-    id: "CR-002",
-    name: "civilier_promo_video_30s.mp4",
-    type: "video",
-    size: "12.4 MB",
-    uploadedOn: "2026-03-01",
-    status: "approved",
-  },
-  {
-    id: "CR-003",
-    name: "civilier_square_banner.jpg",
-    type: "banner",
-    size: "96 KB",
-    uploadedOn: "2026-03-10",
-    status: "pending",
-  },
-];
-
-const ADS_DATA: Ad[] = [
-  {
-    id: "AD-001",
-    tenantId: "T-001",
-    tenantName: "Civilier Constructions Pvt Ltd",
-    title: "Civilier — India's Trusted ERP for Builders",
-    description:
-      "Streamline your construction business with real-time project tracking, billing, and compliance.",
-    budget: 50000,
-    spent: 32500,
-    impressions: 182000,
-    clicks: 4320,
-    status: "active",
-    startDate: "2026-03-01",
-    endDate: "2026-04-30",
-    category: "Brand Awareness",
-    creatives: MOCK_CREATIVES,
-  },
-  {
-    id: "AD-002",
-    tenantId: "T-002",
-    tenantName: "Buildtech Infrastructure Ltd",
-    title: "Buildtech — Smart Infrastructure ERP",
-    description:
-      "Manage tenders, projects, and procurement from a single dashboard.",
-    budget: 20000,
-    spent: 20000,
-    impressions: 94000,
-    clicks: 1870,
-    status: "completed",
-    startDate: "2026-02-01",
-    endDate: "2026-03-15",
-    category: "Lead Generation",
-    creatives: [
-      {
-        id: "CR-004",
-        name: "buildtech_banner.png",
-        type: "banner",
-        size: "220 KB",
-        uploadedOn: "2026-02-01",
-        status: "approved",
-      },
-    ],
-  },
-  {
-    id: "AD-003",
-    tenantId: "T-004",
-    tenantName: "Metro Projects Group",
-    title: "Metro — Urban Construction Leaders",
-    description: "Join Metro's network of 200+ urban projects across India.",
-    budget: 30000,
-    spent: 4200,
-    impressions: 21000,
-    clicks: 540,
-    status: "active",
-    startDate: "2026-04-01",
-    endDate: "2026-05-31",
-    category: "Brand Awareness",
-    creatives: [],
-  },
-  {
-    id: "AD-004",
-    tenantId: "T-003",
-    tenantName: "Apex Realty Developers",
-    title: "Apex — Premium Realty Solutions",
-    description: "Discover luxury residential and commercial properties.",
-    budget: 15000,
-    spent: 0,
-    impressions: 0,
-    clicks: 0,
-    status: "pending",
-    startDate: "2026-04-10",
-    endDate: "2026-05-10",
-    category: "Promotions",
-    creatives: [],
-  },
-];
-
 const STATUS_CONFIG = {
   active: {
     color: "bg-green-500/15 text-green-600 border-green-500/30",
@@ -219,7 +116,58 @@ const CREATIVE_STATUS_CONFIG = {
 };
 
 export default function AdsManager() {
-  const [ads, setAds] = useState<Ad[]>(ADS_DATA);
+  const queryClient = useQueryClient();
+
+  const { data: ads = [], refetch } = useQuery<Ad[]>({
+    queryKey: ["dba-ads"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/dba/ads");
+      if (!res.ok) throw new Error("Failed to load ads");
+      const rows = await res.json();
+      // Normalize DB snake_case to component shape
+      return rows.map((r: any) => ({
+        id: String(r.Id),
+        tenantId: r.tenant_id ?? "",
+        tenantName: r.tenant_name ?? "",
+        title: r.title,
+        description: r.description ?? "",
+        budget: Number(r.budget) || 0,
+        spent: Number(r.spent) || 0,
+        impressions: Number(r.impressions) || 0,
+        clicks: Number(r.clicks) || 0,
+        status: r.status as AdStatus,
+        startDate: r.start_date ? r.start_date.split("T")[0] : "",
+        endDate: r.end_date ? r.end_date.split("T")[0] : "",
+        category: r.category ?? "",
+        creatives: [],
+      }));
+    },
+  });
+
+  const toggleStatusMutation = useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: string }) => {
+      const res = await fetchWithAuth(`/api/dba/ads/${id}/status`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      if (!res.ok) throw new Error("Failed to update status");
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["dba-ads"] }),
+  });
+
+  const createAdMutation = useMutation({
+    mutationFn: async (body: Record<string, unknown>) => {
+      const res = await fetchWithAuth("/api/dba/ads", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error("Failed to create ad");
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["dba-ads"] }),
+  });
+
   const [selectedAd, setSelectedAd] = useState<Ad | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
@@ -264,15 +212,18 @@ export default function AdsManager() {
   );
 
   const handleToggle = (ad: Ad) => {
-    setAds((prev) =>
-      prev.map((a) =>
-        a.id === ad.id
-          ? { ...a, status: a.status === "active" ? "paused" : "active" }
-          : a,
-      ),
-    );
-    toast.success(
-      ad.status === "active" ? `"${ad.title}" paused` : `"${ad.title}" resumed`,
+    const newStatus = ad.status === "active" ? "paused" : "active";
+    toggleStatusMutation.mutate(
+      { id: ad.id, status: newStatus },
+      {
+        onSuccess: () =>
+          toast.success(
+            ad.status === "active"
+              ? `"${ad.title}" paused`
+              : `"${ad.title}" resumed`,
+          ),
+        onError: () => toast.error("Failed to update status"),
+      },
     );
   };
 
@@ -288,26 +239,23 @@ export default function AdsManager() {
       return;
     }
 
-    const newAd: Ad = {
-      id: `AD-00${ads.length + 1}`,
-      tenantId: form.tenantId,
-      tenantName: form.tenantName,
-      title: form.title,
-      description: form.description,
-      budget: parseInt(form.budget),
-      spent: 0,
-      impressions: 0,
-      clicks: 0,
-      status: "pending",
-      startDate: form.startDate,
-      endDate: form.endDate,
-      category: form.category,
-      creatives: [],
-    };
-
-    setAds((prev) => [...prev, newAd]);
+    createAdMutation.mutate(
+      {
+        tenant_id: form.tenantId,
+        title: form.title,
+        description: form.description,
+        budget: parseInt(form.budget),
+        start_date: form.startDate,
+        end_date: form.endDate,
+        category: form.category,
+      },
+      {
+        onSuccess: () =>
+          toast.success("Campaign created! Tenant will be contacted."),
+        onError: () => toast.error("Failed to create campaign"),
+      },
+    );
     setCreateOpen(false);
-    toast.success("Campaign created! Tenant will be contacted.");
 
     setForm({
       tenantId: "T-001",
