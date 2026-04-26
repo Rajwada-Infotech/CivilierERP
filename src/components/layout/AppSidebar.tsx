@@ -56,7 +56,9 @@ function useApprovalCount() {
   useEffect(() => {
     fetch();
     timerRef.current = setInterval(fetch, 60_000);
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
   }, []);
 
   return count;
@@ -84,7 +86,7 @@ interface NavItem {
 
 // ── Finance module sidebar ──────────────────────────────────────────────────
 const buildFinanceNavItems = (overdueCount: number): NavItem[] => [
-  { label: "Amendments", icon: BarChart3, path: "/finance" },
+  { label: "Finance Dashboard", icon: BarChart3, path: "/finance" },
   {
     label: "Query",
     icon: Scale,
@@ -178,7 +180,7 @@ const buildFollowupNavItems = (): NavItem[] => [
 
 // ── Material module sidebar ──────────────────────────────────────────────────
 const buildMaterialNavItems = (): NavItem[] => [
-  { label: "Amendments", icon: BarChart3, path: "/material/amendments" },
+  { label: "Material Dashboard", icon: BarChart3, path: "/material" },
   {
     label: "Transaction",
     icon: Receipt,

@@ -71,11 +71,16 @@ router.post("/login", async (req, res) => {
   const attemptsKey = `login:attempts:${email.toLowerCase()}`;
 
   try {
-    const locked = await redisGet(lockKey);
-    if (locked) {
-      return res.status(429).json({
-        error: "Too many attempts. Try again later.",
-      });
+    // Redis may be unavailable — never let a cache check block login
+    try {
+      const locked = await redisGet(lockKey);
+      if (locked) {
+        return res.status(429).json({
+          error: "Too many attempts. Try again later.",
+        });
+      }
+    } catch {
+      // Redis down — skip lockout check, proceed to DB auth
     }
 
     const pool = getPool();
@@ -104,8 +109,10 @@ router.post("/login", async (req, res) => {
       return res.status(401).json({ error: "Invalid credentials" });
     }
 
-    await redisDel(attemptsKey);
-    await redisDel(lockKey);
+    try {
+      await redisDel(attemptsKey);
+      await redisDel(lockKey);
+    } catch {}
 
     // FIXED: Normalize role
     const normalizedRole = normalizeRole(user.roleName);
