@@ -8,7 +8,7 @@ import {
   type AppUser,
 } from "@/contexts/AuthContext";
 
-import { getUsersForRights } from "@/api/userApi";
+import { getUsersForRights, getUserPermissions } from "@/api/userApi";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   ShieldCheck,
@@ -212,6 +212,7 @@ export default function PostApprovalRights() {
   const [pendingPermissions, setPending] = useState<PagePermission[]>([]);
   const [deletingUserId, setDeletingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [permLoading, setPermLoading] = useState(false);
   const [userFilter, setUserFilter] = useState<string>("all");
 
   // ── Dropdown users fetched directly from the users table ─────────────────
@@ -685,16 +686,46 @@ export default function PostApprovalRights() {
               </Label>
               <select
                 value={selectedUser?.id ?? ""}
-                onChange={(e) => {
-                  const u = allUsers.find((u) => u.id === e.target.value);
-                  if (u) {
-                    setSelectedUser(u);
+                onChange={async (e) => {
+                  const raw = dropdownUsers.find(
+                    (u) => String(u.id) === e.target.value,
+                  );
+                  if (!raw) {
+                    setSelectedUser(null);
+                    setPending([]);
+                    return;
+                  }
+
+                  // Build an AppUser shell from the API-fetched dropdown record,
+                  // then load that user's stored permissions from the DB.
+                  setPermLoading(true);
+                  try {
+                    const perms = await getUserPermissions(raw.id);
+                    const shell: AppUser = {
+                      id: String(raw.id),
+                      name: raw.name,
+                      email: "",
+                      role: raw.role as AppUser["role"],
+                      initials: raw.name
+                        .split(" ")
+                        .map((w) => w[0])
+                        .join("")
+                        .toUpperCase()
+                        .slice(0, 2),
+                      pagePermissions: perms,
+                      isActive: true,
+                    };
+                    setSelectedUser(shell);
                     setPending(
-                      (u.pagePermissions ?? []).map((p) => ({
+                      perms.map((p) => ({
                         page: p.page,
                         actions: [...p.actions],
                       })),
                     );
+                  } catch {
+                    toast.error("Failed to load user permissions");
+                  } finally {
+                    setPermLoading(false);
                   }
                 }}
                 className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-0 cursor-pointer"
@@ -710,7 +741,14 @@ export default function PostApprovalRights() {
 
             {/* Permissions list */}
             <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
-              {selectedUser ? (
+              {permLoading ? (
+                <div className="flex flex-col items-center justify-center h-48 text-center gap-3">
+                  <span className="w-6 h-6 border-2 border-primary/30 border-t-primary rounded-full animate-spin" />
+                  <p className="text-sm text-muted-foreground">
+                    Loading permissions…
+                  </p>
+                </div>
+              ) : selectedUser ? (
                 Object.entries(pageGroups).map(([group, pages]) => (
                   <PermGroup
                     key={group}
@@ -744,7 +782,7 @@ export default function PostApprovalRights() {
                   size="sm"
                   className="gap-1.5 gradient-accent"
                   onClick={handleSave}
-                  disabled={!selectedUser || saving}
+                  disabled={!selectedUser || saving || permLoading}
                 >
                   {saving ? (
                     <span className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
