@@ -20,7 +20,6 @@ const requireUserEmail = (req, res) => {
 /**
  * GET /api/work-orders/meta/companies
  * Returns enterprise rows where business_type = 'C'
- * Always returns a plain JSON array (never wrapped in an object).
  */
 router.get("/meta/companies", cache("wo-meta-companies", 600), async (req, res) => {
   try {
@@ -31,7 +30,6 @@ router.get("/meta/companies", cache("wo-meta-companies", 600), async (req, res) 
       WHERE  business_type = 'C'
       ORDER  BY name
     `);
-    // Defensive: always return plain array
     const rows = Array.isArray(result.recordset) ? result.recordset : [];
     res.json(rows.map((r) => ({ id: r.id, name: r.name })));
   } catch (err) {
@@ -109,9 +107,7 @@ router.get("/meta/activity-groups", cache("wo-meta-act-groups", 600), async (req
  * GET /api/work-orders/meta/activities?groupId=<id>
  * Returns ActivityMaster rows where activity_type = 1 (leaf / billable activities).
  * When groupId supplied, filters by belongsTo = groupId (nvarchar comparison).
- *
  * Response shape: [{ id, name, groupId }]
- * groupId in response = group_id in DB (the activity-group this activity belongs to).
  */
 router.get("/meta/activities", cache("wo-meta-activities", 600), async (req, res) => {
   try {
@@ -147,6 +143,28 @@ router.get("/meta/activities", cache("wo-meta-activities", 600), async (req, res
     res.json(rows.map((r) => ({ id: r.id, name: r.name, groupId: r.groupId })));
   } catch (err) {
     console.error("[wo-meta-activities]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/**
+ * GET /api/work-orders/meta/uoms
+ * Returns all UOMMaster rows for the activity Unit dropdown.
+ * Response shape: [{ id, name }]
+ */
+router.get("/meta/uoms", cache("wo-meta-uoms", 600), async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT Id      AS id,
+             UOMName AS name
+      FROM   dbo.UOMMaster
+      ORDER  BY UOMName
+    `);
+    const rows = Array.isArray(result.recordset) ? result.recordset : [];
+    res.json(rows.map((r) => ({ id: r.id, name: r.name })));
+  } catch (err) {
+    console.error("[wo-meta-uoms]", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -308,16 +326,16 @@ router.post("/", async (req, res) => {
     const pool = getPool();
     const result = await pool
       .request()
-      .input("CompanyId",          sql.Int,           CompanyId          || null)
-      .input("ProjectId",          sql.Int,           ProjectId          || null)
-      .input("DocumentNumber",     sql.NVarChar(100), DocumentNumber     || null)
-      .input("DocumentDate",       sql.Date,          DocumentDate       || null)
-      .input("ContractorId",       sql.Int,           ContractorId       || null)
-      .input("TotalAmount",        sql.Decimal(18,2), TotalAmount        || 0)
-      .input("Remarks",            sql.NVarChar(500), Remarks            || null)
+      .input("CompanyId",          sql.Int,               CompanyId          || null)
+      .input("ProjectId",          sql.Int,               ProjectId          || null)
+      .input("DocumentNumber",     sql.NVarChar(100),     DocumentNumber     || null)
+      .input("DocumentDate",       sql.Date,              DocumentDate       || null)
+      .input("ContractorId",       sql.Int,               ContractorId       || null)
+      .input("TotalAmount",        sql.Decimal(18,2),     TotalAmount        || 0)
+      .input("Remarks",            sql.NVarChar(500),     Remarks            || null)
       .input("TermsAndConditions", sql.NVarChar(sql.MAX), TermsAndConditions || null)
-      .input("CreatedBy",          sql.NVarChar(100), req.user?.email    || null)
-      .input("CreatedAt",          sql.DateTime,      new Date())
+      .input("CreatedBy",          sql.NVarChar(100),     req.user?.email    || null)
+      .input("CreatedAt",          sql.DateTime,          new Date())
       .query(`
         INSERT INTO dbo.WorkOrderHeader
           (CompanyId, ProjectId, DocumentNumber, DocumentDate, ContractorId,
@@ -350,17 +368,17 @@ router.put("/:id", async (req, res) => {
     const pool = getPool();
     await pool
       .request()
-      .input("Id",                 sql.Int,           req.params.id)
-      .input("CompanyId",          sql.Int,           CompanyId          || null)
-      .input("ProjectId",          sql.Int,           ProjectId          || null)
-      .input("DocumentNumber",     sql.NVarChar(100), DocumentNumber     || null)
-      .input("DocumentDate",       sql.Date,          DocumentDate       || null)
-      .input("ContractorId",       sql.Int,           ContractorId       || null)
-      .input("TotalAmount",        sql.Decimal(18,2), TotalAmount        || 0)
-      .input("Remarks",            sql.NVarChar(500), Remarks            || null)
+      .input("Id",                 sql.Int,               req.params.id)
+      .input("CompanyId",          sql.Int,               CompanyId          || null)
+      .input("ProjectId",          sql.Int,               ProjectId          || null)
+      .input("DocumentNumber",     sql.NVarChar(100),     DocumentNumber     || null)
+      .input("DocumentDate",       sql.Date,              DocumentDate       || null)
+      .input("ContractorId",       sql.Int,               ContractorId       || null)
+      .input("TotalAmount",        sql.Decimal(18,2),     TotalAmount        || 0)
+      .input("Remarks",            sql.NVarChar(500),     Remarks            || null)
       .input("TermsAndConditions", sql.NVarChar(sql.MAX), TermsAndConditions || null)
-      .input("UpdatedBy",          sql.NVarChar(100), req.user?.email    || null)
-      .input("UpdatedAt",          sql.DateTime,      new Date())
+      .input("UpdatedBy",          sql.NVarChar(100),     req.user?.email    || null)
+      .input("UpdatedAt",          sql.DateTime,          new Date())
       .query(`
         UPDATE dbo.WorkOrderHeader SET
           CompanyId=@CompanyId, ProjectId=@ProjectId,
@@ -439,31 +457,42 @@ router.get("/:id/activities", cache("work-orders", 300), async (req, res) => {
   }
 });
 
+// POST — add single activity.
+// Fetches DocumentNumber from the header first and stores it as DocNo (FK).
 router.post("/:id/activities", async (req, res) => {
   const { ActivityGroupId, ActivityId, UOMId, Rate, Area,
           LabourAmount, MaterialAmount, GrandTotal, Remarks } = req.body;
   try {
     const pool = getPool();
+
+    // Fetch the header's DocumentNumber to populate the DocNo FK column
+    const headerRow = await pool
+      .request()
+      .input("HeaderId", sql.Int, req.params.id)
+      .query("SELECT DocumentNumber FROM dbo.WorkOrderHeader WHERE Id = @HeaderId");
+    const docNo = headerRow.recordset[0]?.DocumentNumber || null;
+
     const result = await pool
       .request()
-      .input("WorkOrderHeaderId", sql.Int,          req.params.id)
-      .input("ActivityGroupId",   sql.Int,          ActivityGroupId || null)
-      .input("ActivityId",        sql.Int,          ActivityId      || null)
-      .input("UOMId",             sql.Int,          UOMId           || null)
-      .input("Rate",              sql.Decimal(18,2),Rate            || null)
-      .input("Area",              sql.Decimal(18,2),Area            || null)
-      .input("LabourAmount",      sql.Decimal(18,4),LabourAmount    || null)
-      .input("MaterialAmount",    sql.Decimal(18,4),MaterialAmount  || null)
-      .input("GrandTotal",        sql.Decimal(18,4),GrandTotal      || null)
-      .input("Remarks",           sql.NVarChar,     Remarks         || null)
-      .input("CreatedAt",         sql.DateTime2,    new Date())
+      .input("WorkOrderHeaderId", sql.Int,           req.params.id)
+      .input("DocNo",             sql.NVarChar(100), docNo)
+      .input("ActivityGroupId",   sql.Int,           ActivityGroupId || null)
+      .input("ActivityId",        sql.Int,           ActivityId      || null)
+      .input("UOMId",             sql.Int,           UOMId           || null)
+      .input("Rate",              sql.Decimal(18,2), Rate            || null)
+      .input("Area",              sql.Decimal(18,2), Area            || null)
+      .input("LabourAmount",      sql.Decimal(18,4), LabourAmount    || null)
+      .input("MaterialAmount",    sql.Decimal(18,4), MaterialAmount  || null)
+      .input("GrandTotal",        sql.Decimal(18,4), GrandTotal      || null)
+      .input("Remarks",           sql.NVarChar,      Remarks         || null)
+      .input("CreatedAt",         sql.DateTime2,     new Date())
       .query(`
         INSERT INTO dbo.WorkOrderActivities
-          (WorkOrderHeaderId, ActivityGroupId, ActivityId, UOMId,
+          (WorkOrderHeaderId, DocNo, ActivityGroupId, ActivityId, UOMId,
            Rate, Area, LabourAmount, MaterialAmount, GrandTotal, Remarks, CreatedAt)
         OUTPUT INSERTED.Id
         VALUES
-          (@WorkOrderHeaderId, @ActivityGroupId, @ActivityId, @UOMId,
+          (@WorkOrderHeaderId, @DocNo, @ActivityGroupId, @ActivityId, @UOMId,
            @Rate, @Area, @LabourAmount, @MaterialAmount, @GrandTotal, @Remarks, @CreatedAt)
       `);
     await bumpCacheVersion("work-orders");
@@ -481,16 +510,16 @@ router.put("/:id/activities/:activityId", async (req, res) => {
     const pool = getPool();
     await pool
       .request()
-      .input("Id",             sql.Int,          req.params.activityId)
-      .input("ActivityGroupId",sql.Int,          ActivityGroupId || null)
-      .input("ActivityId",     sql.Int,          ActivityId      || null)
-      .input("UOMId",          sql.Int,          UOMId           || null)
-      .input("Rate",           sql.Decimal(18,2),Rate            || null)
-      .input("Area",           sql.Decimal(18,2),Area            || null)
-      .input("LabourAmount",   sql.Decimal(18,4),LabourAmount    || null)
-      .input("MaterialAmount", sql.Decimal(18,4),MaterialAmount  || null)
-      .input("GrandTotal",     sql.Decimal(18,4),GrandTotal      || null)
-      .input("Remarks",        sql.NVarChar,     Remarks         || null)
+      .input("Id",              sql.Int,           req.params.activityId)
+      .input("ActivityGroupId", sql.Int,           ActivityGroupId || null)
+      .input("ActivityId",      sql.Int,           ActivityId      || null)
+      .input("UOMId",           sql.Int,           UOMId           || null)
+      .input("Rate",            sql.Decimal(18,2), Rate            || null)
+      .input("Area",            sql.Decimal(18,2), Area            || null)
+      .input("LabourAmount",    sql.Decimal(18,4), LabourAmount    || null)
+      .input("MaterialAmount",  sql.Decimal(18,4), MaterialAmount  || null)
+      .input("GrandTotal",      sql.Decimal(18,4), GrandTotal      || null)
+      .input("Remarks",         sql.NVarChar,      Remarks         || null)
       .query(`
         UPDATE dbo.WorkOrderActivities SET
           ActivityGroupId=@ActivityGroupId, ActivityId=@ActivityId, UOMId=@UOMId,
@@ -557,14 +586,14 @@ router.post("/:id/activities/:activityId/materials", async (req, res) => {
     const pool = getPool();
     const result = await pool
       .request()
-      .input("WorkOrderActivityId", sql.Int,             req.params.activityId)
+      .input("WorkOrderActivityId", sql.Int,              req.params.activityId)
       .input("ItemId",              sql.UniqueIdentifier, ItemId   || null)
-      .input("UOMId",               sql.Int,             UOMId    || null)
-      .input("Quantity",            sql.Decimal(18,2),   Quantity  || null)
-      .input("Rate",                sql.Decimal(18,2),   Rate      || null)
-      .input("Remarks",             sql.NVarChar,        Remarks   || null)
-      .input("CreatedBy",           sql.NVarChar(100),   req.user?.email || null)
-      .input("CreatedAt",           sql.DateTime2,       new Date())
+      .input("UOMId",               sql.Int,              UOMId    || null)
+      .input("Quantity",            sql.Decimal(18,2),    Quantity  || null)
+      .input("Rate",                sql.Decimal(18,2),    Rate      || null)
+      .input("Remarks",             sql.NVarChar,         Remarks   || null)
+      .input("CreatedBy",           sql.NVarChar(100),    req.user?.email || null)
+      .input("CreatedAt",           sql.DateTime2,        new Date())
       .query(`
         INSERT INTO dbo.WorkOrderActivityMaterials
           (WorkOrderActivityId, ItemId, UOMId, Quantity, Rate, Remarks, CreatedBy, CreatedAt)
@@ -586,14 +615,14 @@ router.put("/:id/activities/:activityId/materials/:materialId", async (req, res)
     const pool = getPool();
     await pool
       .request()
-      .input("Id",        sql.Int,             req.params.materialId)
+      .input("Id",        sql.Int,              req.params.materialId)
       .input("ItemId",    sql.UniqueIdentifier, ItemId   || null)
-      .input("UOMId",     sql.Int,             UOMId    || null)
-      .input("Quantity",  sql.Decimal(18,2),   Quantity  || null)
-      .input("Rate",      sql.Decimal(18,2),   Rate      || null)
-      .input("Remarks",   sql.NVarChar,        Remarks   || null)
-      .input("UpdatedBy", sql.NVarChar(100),   req.user?.email || null)
-      .input("UpdatedAt", sql.DateTime2,       new Date())
+      .input("UOMId",     sql.Int,              UOMId    || null)
+      .input("Quantity",  sql.Decimal(18,2),    Quantity  || null)
+      .input("Rate",      sql.Decimal(18,2),    Rate      || null)
+      .input("Remarks",   sql.NVarChar,         Remarks   || null)
+      .input("UpdatedBy", sql.NVarChar(100),    req.user?.email || null)
+      .input("UpdatedAt", sql.DateTime2,        new Date())
       .query(`
         UPDATE dbo.WorkOrderActivityMaterials SET
           ItemId=@ItemId, UOMId=@UOMId, Quantity=@Quantity,
@@ -667,50 +696,61 @@ router.post("/:id/save-full", async (req, res) => {
         WHERE Id=@Id
       `);
 
+    // 2. Re-fetch DocumentNumber (after possible update) to use as DocNo FK
+    //    in every activity INSERT below.
+    const hdrRow = await pool
+      .request()
+      .input("HId", sql.Int, headerId)
+      .query("SELECT DocumentNumber FROM dbo.WorkOrderHeader WHERE Id = @HId");
+    const docNo = hdrRow.recordset[0]?.DocumentNumber || null;
+
     const keptActivityIds = [];
 
-    // 2. Upsert each activity + its materials
+    // 3. Upsert each activity + its materials
     for (const act of activities) {
       let activityDbId = act.Id ? parseInt(act.Id, 10) : null;
       if (!Number.isFinite(activityDbId) || activityDbId <= 0) activityDbId = null;
 
       if (!activityDbId) {
+        // INSERT — include DocNo FK so the FK constraint is satisfied
         const r = await pool
           .request()
-          .input("WorkOrderHeaderId", sql.Int,          headerId)
-          .input("ActivityGroupId",   sql.Int,          act.ActivityGroupId || null)
-          .input("ActivityId",        sql.Int,          act.ActivityId      || null)
-          .input("UOMId",             sql.Int,          act.UOMId           || null)
-          .input("Rate",              sql.Decimal(18,2),act.Rate            || null)
-          .input("Area",              sql.Decimal(18,2),act.Area            || null)
-          .input("LabourAmount",      sql.Decimal(18,4),act.LabourAmount    || null)
-          .input("MaterialAmount",    sql.Decimal(18,4),act.MaterialAmount  || null)
-          .input("GrandTotal",        sql.Decimal(18,4),act.GrandTotal      || null)
-          .input("Remarks",           sql.NVarChar,     act.Remarks         || null)
-          .input("CreatedAt",         sql.DateTime2,    new Date())
+          .input("WorkOrderHeaderId", sql.Int,           headerId)
+          .input("DocNo",             sql.NVarChar(100), docNo)
+          .input("ActivityGroupId",   sql.Int,           act.ActivityGroupId || null)
+          .input("ActivityId",        sql.Int,           act.ActivityId      || null)
+          .input("UOMId",             sql.Int,           act.UOMId           || null)
+          .input("Rate",              sql.Decimal(18,2), act.Rate            || null)
+          .input("Area",              sql.Decimal(18,2), act.Area            || null)
+          .input("LabourAmount",      sql.Decimal(18,4), act.LabourAmount    || null)
+          .input("MaterialAmount",    sql.Decimal(18,4), act.MaterialAmount  || null)
+          .input("GrandTotal",        sql.Decimal(18,4), act.GrandTotal      || null)
+          .input("Remarks",           sql.NVarChar,      act.Remarks         || null)
+          .input("CreatedAt",         sql.DateTime2,     new Date())
           .query(`
             INSERT INTO dbo.WorkOrderActivities
-              (WorkOrderHeaderId, ActivityGroupId, ActivityId, UOMId,
+              (WorkOrderHeaderId, DocNo, ActivityGroupId, ActivityId, UOMId,
                Rate, Area, LabourAmount, MaterialAmount, GrandTotal, Remarks, CreatedAt)
             OUTPUT INSERTED.Id
             VALUES
-              (@WorkOrderHeaderId, @ActivityGroupId, @ActivityId, @UOMId,
+              (@WorkOrderHeaderId, @DocNo, @ActivityGroupId, @ActivityId, @UOMId,
                @Rate, @Area, @LabourAmount, @MaterialAmount, @GrandTotal, @Remarks, @CreatedAt)
           `);
         activityDbId = r.recordset[0].Id;
       } else {
+        // UPDATE — DocNo doesn't change on subsequent saves
         await pool
           .request()
-          .input("Id",             sql.Int,          activityDbId)
-          .input("ActivityGroupId",sql.Int,          act.ActivityGroupId || null)
-          .input("ActivityId",     sql.Int,          act.ActivityId      || null)
-          .input("UOMId",          sql.Int,          act.UOMId           || null)
-          .input("Rate",           sql.Decimal(18,2),act.Rate            || null)
-          .input("Area",           sql.Decimal(18,2),act.Area            || null)
-          .input("LabourAmount",   sql.Decimal(18,4),act.LabourAmount    || null)
-          .input("MaterialAmount", sql.Decimal(18,4),act.MaterialAmount  || null)
-          .input("GrandTotal",     sql.Decimal(18,4),act.GrandTotal      || null)
-          .input("Remarks",        sql.NVarChar,     act.Remarks         || null)
+          .input("Id",              sql.Int,           activityDbId)
+          .input("ActivityGroupId", sql.Int,           act.ActivityGroupId || null)
+          .input("ActivityId",      sql.Int,           act.ActivityId      || null)
+          .input("UOMId",           sql.Int,           act.UOMId           || null)
+          .input("Rate",            sql.Decimal(18,2), act.Rate            || null)
+          .input("Area",            sql.Decimal(18,2), act.Area            || null)
+          .input("LabourAmount",    sql.Decimal(18,4), act.LabourAmount    || null)
+          .input("MaterialAmount",  sql.Decimal(18,4), act.MaterialAmount  || null)
+          .input("GrandTotal",      sql.Decimal(18,4), act.GrandTotal      || null)
+          .input("Remarks",         sql.NVarChar,      act.Remarks         || null)
           .query(`
             UPDATE dbo.WorkOrderActivities SET
               ActivityGroupId=@ActivityGroupId, ActivityId=@ActivityId, UOMId=@UOMId,
@@ -731,14 +771,14 @@ router.post("/:id/save-full", async (req, res) => {
         if (!materialDbId) {
           const r = await pool
             .request()
-            .input("WorkOrderActivityId", sql.Int,             activityDbId)
+            .input("WorkOrderActivityId", sql.Int,              activityDbId)
             .input("ItemId",              sql.UniqueIdentifier, mat.ItemId || null)
-            .input("UOMId",               sql.Int,             mat.UOMId  || null)
-            .input("Quantity",            sql.Decimal(18,2),   mat.Quantity || null)
-            .input("Rate",                sql.Decimal(18,2),   mat.Rate     || null)
-            .input("Remarks",             sql.NVarChar,        mat.Remarks  || null)
-            .input("CreatedBy",           sql.NVarChar(100),   req.user?.email || null)
-            .input("CreatedAt",           sql.DateTime2,       new Date())
+            .input("UOMId",               sql.Int,              mat.UOMId  || null)
+            .input("Quantity",            sql.Decimal(18,2),    mat.Quantity || null)
+            .input("Rate",                sql.Decimal(18,2),    mat.Rate     || null)
+            .input("Remarks",             sql.NVarChar,         mat.Remarks  || null)
+            .input("CreatedBy",           sql.NVarChar(100),    req.user?.email || null)
+            .input("CreatedAt",           sql.DateTime2,        new Date())
             .query(`
               INSERT INTO dbo.WorkOrderActivityMaterials
                 (WorkOrderActivityId, ItemId, UOMId, Quantity, Rate, Remarks, CreatedBy, CreatedAt)
@@ -750,14 +790,14 @@ router.post("/:id/save-full", async (req, res) => {
         } else {
           await pool
             .request()
-            .input("Id",        sql.Int,             materialDbId)
+            .input("Id",        sql.Int,              materialDbId)
             .input("ItemId",    sql.UniqueIdentifier, mat.ItemId || null)
-            .input("UOMId",     sql.Int,             mat.UOMId  || null)
-            .input("Quantity",  sql.Decimal(18,2),   mat.Quantity || null)
-            .input("Rate",      sql.Decimal(18,2),   mat.Rate     || null)
-            .input("Remarks",   sql.NVarChar,        mat.Remarks  || null)
-            .input("UpdatedBy", sql.NVarChar(100),   req.user?.email || null)
-            .input("UpdatedAt", sql.DateTime2,       new Date())
+            .input("UOMId",     sql.Int,              mat.UOMId  || null)
+            .input("Quantity",  sql.Decimal(18,2),    mat.Quantity || null)
+            .input("Rate",      sql.Decimal(18,2),    mat.Rate     || null)
+            .input("Remarks",   sql.NVarChar,         mat.Remarks  || null)
+            .input("UpdatedBy", sql.NVarChar(100),    req.user?.email || null)
+            .input("UpdatedAt", sql.DateTime2,        new Date())
             .query(`
               UPDATE dbo.WorkOrderActivityMaterials SET
                 ItemId=@ItemId, UOMId=@UOMId, Quantity=@Quantity,
