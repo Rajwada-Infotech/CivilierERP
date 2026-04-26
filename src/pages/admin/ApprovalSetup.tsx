@@ -6,6 +6,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { useForm } from "react-hook-form";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   CheckCircle, Shield, Users, AlertCircle,
   Plus, Edit, Trash2, Search,
@@ -48,40 +49,38 @@ interface Workflow {
   createdAt: string;
 }
 
-// ── API helpers ────────────────────────────────────────────────────────────────
+// ── API helpers — all use fetchWithAuth so the JWT is always sent ──────────────
 const API = "/api/approval-workflows";
 
 async function fetchWorkflows(): Promise<Workflow[]> {
-  const res = await fetch(API);
+  const res = await fetchWithAuth(API);
   if (!res.ok) throw new Error("Failed to fetch workflows");
   return res.json();
 }
 
 async function apiCreate(body: object) {
-  const res = await fetch(API, {
+  const res = await fetchWithAuth(API, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error((await res.json()).error || "Failed to create");
 }
 
 async function apiUpdate(id: number, body: object) {
-  const res = await fetch(`${API}/${id}`, {
+  const res = await fetchWithAuth(`${API}/${id}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error((await res.json()).error || "Failed to update");
 }
 
 async function apiToggle(id: number) {
-  const res = await fetch(`${API}/${id}/toggle`, { method: "PATCH" });
+  const res = await fetchWithAuth(`${API}/${id}/toggle`, { method: "PATCH" });
   if (!res.ok) throw new Error("Failed to toggle");
 }
 
 async function apiDelete(id: number) {
-  const res = await fetch(`${API}/${id}`, { method: "DELETE" });
+  const res = await fetchWithAuth(`${API}/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error("Failed to delete");
 }
 
@@ -112,17 +111,18 @@ const MODULE_OPTIONS = [
 // ── Main component ─────────────────────────────────────────────────────────────
 export default function ApprovalSetup() {
   const queryClient = useQueryClient();
-  const [openCreate, setOpenCreate]         = useState(false);
-  const [openEdit, setOpenEdit]             = useState(false);
+  const [openCreate, setOpenCreate]           = useState(false);
+  const [openEdit, setOpenEdit]               = useState(false);
   const [editingWorkflow, setEditingWorkflow] = useState<Workflow | null>(null);
-  const [searchTerm, setSearchTerm]         = useState("");
-  const [statusFilter, setStatusFilter]     = useState<"all" | "Active" | "Inactive">("all");
+  const [searchTerm, setSearchTerm]           = useState("");
+  const [statusFilter, setStatusFilter]       = useState<"all" | "Active" | "Inactive">("all");
   const { canDoAction } = useAuth() as any;
 
-  // ── Fetch from real API ──────────────────────────────────────────────────────
   const { data: workflows = [], isLoading } = useQuery<Workflow[]>({
     queryKey: ["approval-workflows"],
     queryFn: fetchWorkflows,
+    staleTime: 30_000,          // don't refetch for 30s after a successful load
+    refetchOnWindowFocus: false, // stop refetching every tab switch
   });
 
   const createForm = useForm<FormData>({
@@ -146,7 +146,7 @@ export default function ApprovalSetup() {
     });
   }, [workflows, searchTerm, statusFilter]);
 
-  // ── Handlers ─────────────────────────────────────────────────────────────────
+  // ── Handlers ──────────────────────────────────────────────────────────────────
   const onCreateSubmit = useCallback(async (data: FormData) => {
     try {
       await apiCreate(data);
@@ -207,7 +207,7 @@ export default function ApprovalSetup() {
     setOpenEdit(true);
   }, [editForm]);
 
-  // ── Shared form fields ────────────────────────────────────────────────────────
+  // ── Shared form fields ─────────────────────────────────────────────────────────
   const renderFormFields = (form: typeof createForm) => (
     <>
       <FormField control={form.control} name="name" render={({ field }) => (
@@ -286,7 +286,17 @@ export default function ApprovalSetup() {
     </>
   );
 
-  if (isLoading) return <div className="p-6 text-muted-foreground">Loading...</div>;
+  if (isLoading) return (
+    <div className="p-6 space-y-4 animate-pulse">
+      <div className="h-6 w-48 bg-muted rounded" />
+      <div className="grid grid-cols-4 gap-4">
+        {Array.from({ length: 4 }).map((_, i) => (
+          <div key={i} className="h-24 bg-muted rounded-xl" />
+        ))}
+      </div>
+      <div className="h-64 bg-muted rounded-xl" />
+    </div>
+  );
 
   return (
     <>
@@ -365,7 +375,9 @@ export default function ApprovalSetup() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">
-              {workflows.length ? Math.round(workflows.reduce((a, b) => a + b.levels, 0) / workflows.length) : 0}
+              {workflows.length
+                ? Math.round(workflows.reduce((a, b) => a + b.levels, 0) / workflows.length)
+                : 0}
             </div>
           </CardContent>
         </Card>
