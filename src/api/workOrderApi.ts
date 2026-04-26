@@ -3,7 +3,6 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 const BASE_URL = "/api/work-orders";
 
 // ── Shared safe-array helper ──────────────────────────────────────────────────
-// Handles: plain array, { data: [] }, { recordset: [] }, or any non-array shape
 function safeArray<T>(raw: unknown): T[] {
   if (Array.isArray(raw)) return raw as T[];
   if (raw && typeof raw === "object") {
@@ -14,7 +13,7 @@ function safeArray<T>(raw: unknown): T[] {
   return [];
 }
 
-// ── Header CRUD ──────────────────────────────────────────────────────────────
+// ── Header CRUD ───────────────────────────────────────────────────────────────
 
 export const getWorkOrders = async () => {
   const res = await fetchWithAuth(BASE_URL);
@@ -42,10 +41,7 @@ export const createWorkOrder = async (data: Record<string, unknown>) => {
   return res.json();
 };
 
-export const updateWorkOrder = async (
-  id: number,
-  data: Record<string, unknown>,
-) => {
+export const updateWorkOrder = async (id: number, data: Record<string, unknown>) => {
   const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -71,75 +67,38 @@ export const deleteWorkOrder = async (id: number) => {
 
 // ── Dropdown data fetchers ────────────────────────────────────────────────────
 
-/**
- * Companies: enterprise rows where business_type = 'C'
- * Backend: GET /api/work-orders/meta/companies
- */
 export const fetchCompanies = async (): Promise<{ id: number; name: string }[]> => {
   try {
     const res = await fetchWithAuth(`${BASE_URL}/meta/companies`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const raw = await res.json();
-    return safeArray<{ id: number; name: string }>(raw);
-  } catch (err) {
-    console.error("[workOrderApi] fetchCompanies failed:", err);
-    return [];
-  }
+    return safeArray<{ id: number; name: string }>(await res.json());
+  } catch (err) { console.error("[workOrderApi] fetchCompanies failed:", err); return []; }
 };
 
-/**
- * Projects: enterprise rows where business_type = 'P'
- * Backend: GET /api/work-orders/meta/projects
- */
 export const fetchProjects = async (): Promise<{ id: number; name: string }[]> => {
   try {
     const res = await fetchWithAuth(`${BASE_URL}/meta/projects`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const raw = await res.json();
-    return safeArray<{ id: number; name: string }>(raw);
-  } catch (err) {
-    console.error("[workOrderApi] fetchProjects failed:", err);
-    return [];
-  }
+    return safeArray<{ id: number; name: string }>(await res.json());
+  } catch (err) { console.error("[workOrderApi] fetchProjects failed:", err); return []; }
 };
 
-/**
- * Contractors: AccountHeadMaster rows where LHeadType = 'C'
- * Backend: GET /api/work-orders/meta/contractors
- */
 export const fetchContractors = async (): Promise<{ id: number; name: string }[]> => {
   try {
     const res = await fetchWithAuth(`${BASE_URL}/meta/contractors`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const raw = await res.json();
-    return safeArray<{ id: number; name: string }>(raw);
-  } catch (err) {
-    console.error("[workOrderApi] fetchContractors failed:", err);
-    return [];
-  }
+    return safeArray<{ id: number; name: string }>(await res.json());
+  } catch (err) { console.error("[workOrderApi] fetchContractors failed:", err); return []; }
 };
 
-/**
- * Activity groups: ActivityMaster rows where activity_type = 0
- * Backend: GET /api/work-orders/meta/activity-groups
- */
 export const fetchActivityGroups = async (): Promise<{ id: number; name: string }[]> => {
   try {
     const res = await fetchWithAuth(`${BASE_URL}/meta/activity-groups`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const raw = await res.json();
-    return safeArray<{ id: number; name: string }>(raw);
-  } catch (err) {
-    console.error("[workOrderApi] fetchActivityGroups failed:", err);
-    return [];
-  }
+    return safeArray<{ id: number; name: string }>(await res.json());
+  } catch (err) { console.error("[workOrderApi] fetchActivityGroups failed:", err); return []; }
 };
 
-/**
- * Activities: ActivityMaster rows where activity_type = 1.
- * Optionally filtered by groupId (belongsTo in ActivityMaster).
- * Backend: GET /api/work-orders/meta/activities?groupId=<id>
- */
 export const fetchActivities = async (
   groupId?: number,
 ): Promise<{ id: number; name: string; groupId: number | string }[]> => {
@@ -149,20 +108,29 @@ export const fetchActivities = async (
       : `${BASE_URL}/meta/activities`;
     const res = await fetchWithAuth(url);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    const raw = await res.json();
-    return safeArray<{ id: number; name: string; groupId: number }>(raw);
-  } catch (err) {
-    console.error("[workOrderApi] fetchActivities failed:", err);
-    return [];
-  }
+    return safeArray<{ id: number; name: string; groupId: number }>(await res.json());
+  } catch (err) { console.error("[workOrderApi] fetchActivities failed:", err); return []; }
 };
 
-// ── Bulk save (header + all activities + all materials in one shot) ────────────
+/**
+ * Items from Item_Master_Group — used for the Material Name dropdown.
+ * id is a UUID string (uniqueidentifier), name is M_Name.
+ */
+export const fetchItems = async (): Promise<{ id: string; name: string }[]> => {
+  try {
+    const res = await fetchWithAuth(`${BASE_URL}/meta/items`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return safeArray<{ id: string; name: string }>(await res.json());
+  } catch (err) { console.error("[workOrderApi] fetchItems failed:", err); return []; }
+};
+
+// ── Bulk save ─────────────────────────────────────────────────────────────────
 
 export interface MaterialPayload {
   Id?: number;
+  /** UUID string — uniqueidentifier FK to Item_Master_Group.M_Id */
   ItemId?: string;
-  UOMId?: number;
+  UOMId?: number | null;
   Quantity?: number;
   Rate?: number;
   Remarks?: string;
@@ -199,10 +167,7 @@ export interface WorkOrderFullPayload {
   activities: ActivityPayload[];
 }
 
-export const saveFullWorkOrder = async (
-  id: number,
-  payload: WorkOrderFullPayload,
-) => {
+export const saveFullWorkOrder = async (id: number, payload: WorkOrderFullPayload) => {
   const res = await fetchWithAuth(`${BASE_URL}/${id}/save-full`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -214,4 +179,4 @@ export const saveFullWorkOrder = async (
     throw new Error(err.error || `Save failed: ${res.status}`);
   }
   return res.json();
-};  // workOrder.ts
+};
