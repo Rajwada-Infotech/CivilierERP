@@ -19,6 +19,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Banknote, Clock, CheckCircle2 } from "lucide-react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
+import { formatINR } from "@/utils/formatCurrency";
 
 interface DbPayment {
   PPaymentID: number;
@@ -38,16 +39,33 @@ interface BankOption {
   BName: string;
 }
 
+// Project shape returned by the updated GET /api/project-master (includes CompanyName)
+interface ProjectOption {
+  Id: number;
+  Name: string;
+  CompanyName: string | null;
+}
+
 // ── Fetch banks from API ───────────────────────────────────────────────────────
 const fetchBanks = async (): Promise<BankOption[]> => {
   const res = await fetchWithAuth("/api/bank-master");
-
   if (!res.ok) throw new Error("Failed to fetch banks");
   const data = await res.json();
-  // bank-master returns array of account heads with LHeadType = 'B'
   return (Array.isArray(data) ? data : data.data ?? []).map((b: any) => ({
     BId: b.BId,
     BName: b.BName,
+  }));
+};
+
+// ── Fetch projects from API (now includes CompanyName via JOIN) ────────────────
+const fetchProjects = async (): Promise<ProjectOption[]> => {
+  const res = await fetchWithAuth("/api/project-master");
+  if (!res.ok) throw new Error("Failed to fetch projects");
+  const data = await res.json();
+  return (Array.isArray(data) ? data : []).map((p: any) => ({
+    Id: p.Id,
+    Name: p.Name ?? "",
+    CompanyName: p.CompanyName ?? "",
   }));
 };
 
@@ -142,6 +160,12 @@ const Payment: React.FC = () => {
     queryFn: fetchBanks,
   });
 
+  // Fetch projects for dropdown (includes CompanyName from backend JOIN)
+  const { data: projects = [] } = useQuery<ProjectOption[]>({
+    queryKey: ["projects-for-payment"],
+    queryFn: fetchProjects,
+  });
+
   const dbItems: DbPayment[] = Array.isArray(dbData?.data) ? dbData.data : [];
   const totalPages: number = dbData?.totalPages ?? 1;
   const totalRecords: number = dbData?.total ?? 0;
@@ -169,7 +193,7 @@ const Payment: React.FC = () => {
   const handleDataEvent = async (event: DataChangeEvent) => {
     if (event.action === "add") {
       try {
-await addPayment(toPayload(event.record));
+        await addPayment(toPayload(event.record));
         toast.success("Payment saved!");
         queryClient.invalidateQueries({ queryKey: ["payments"] });
       } catch (err: any) {
@@ -203,7 +227,7 @@ await addPayment(toPayload(event.record));
     mode: (value) => modeRenderer(value),
     amount: (value) => (
       <span className="font-mono text-sm">
-        ₹{Number(value || 0).toLocaleString("en-IN")}
+        {formatINR(Number(value || 0))}
       </span>
     ),
     status: (value, row) => (
@@ -219,9 +243,29 @@ await addPayment(toPayload(event.record));
     ),
   };
 
-  // optionsProvider: value="BId|BName" (parsed in toPayload), label=bank name only
+  // optionsProvider for banks: value="BId|BName" (parsed in toPayload), label=bank name only
   const bankOptionsProvider = () =>
     banks.map((b) => ({ value: `${b.BId}|${b.BName}`, label: b.BName ?? "" }));
+
+  // optionsProvider for projects: value=project Name (stored as PProject), label=project name
+  // Using Name as value so it matches how PProject is stored in DB as a string
+  const projectOptionsProvider = () =>
+    projects.map((p) => ({ value: p.Name, label: p.Name }));
+
+  // onFieldChange: when "project" changes, auto-fill "company" from the loaded projects list
+  const handleFieldChange = (
+    form: Record<string, unknown>,
+    fieldName: string,
+  ): Record<string, unknown> => {
+    if (fieldName === "project") {
+      const selected = projects.find((p) => p.Name === form.project);
+      return {
+        ...form,
+        company: selected?.CompanyName ?? "",
+      };
+    }
+    return form;
+  };
 
   if (isLoading)
     return <div className="p-6 text-muted-foreground">Loading...</div>;
@@ -244,7 +288,7 @@ await addPayment(toPayload(event.record));
           <div>
             <p className="text-[11px] text-muted-foreground">Total</p>
             <p className="text-base font-bold">
-              ₹{totalAmount.toLocaleString("en-IN")}
+              {formatINR(totalAmount)}
             </p>
           </div>
         </div>
@@ -270,6 +314,7 @@ await addPayment(toPayload(event.record));
 
       <MasterPage
         title="Payment"
+        onFieldChange={handleFieldChange}
         fields={[
           {
             name: "paymentName",
@@ -282,15 +327,24 @@ await addPayment(toPayload(event.record));
             label: "Project",
             type: "select",
             required: true,
-            options: [
-              "Civilier Infrastructure Pvt Ltd",
-              "Apex Constructions Ltd",
-              "SiteCraft Engineers",
-              "Raj Builders & Co",
-              "Metro Rail Project",
-            ],
+            // Dynamic from API — no more hardcoded list
+            optionsProvider: projectOptionsProvider,
           },
-          { name: "company", label: "Company", type: "text" },
+          {
+            name: "company",
+            label: "Company",
+            type: "text",
+            // Read-only via custom render — auto-filled when project is selected
+            render: ({ value }) => (
+              <input
+                type="text"
+                value={(value as string) || ""}
+                readOnly
+                placeholder="Auto-filled on project select"
+                className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted/40 border border-border text-muted-foreground cursor-not-allowed"
+              />
+            ),
+          },
           {
             name: "mode",
             label: "Payment Mode",
@@ -313,7 +367,6 @@ await addPayment(toPayload(event.record));
             required: true,
           },
           {
-            // optionsProvider: value="BId|BName", label=bank name only
             name: "bank",
             label: "Bank",
             type: "select",

@@ -14,6 +14,7 @@ import {
   Receipt,
   CreditCard,
 } from "lucide-react";
+import { formatINR } from "@/utils/formatCurrency";
 
 function fileIcon(type?: string) {
   if (!type) return <File size={14} className="text-muted-foreground" />;
@@ -167,7 +168,7 @@ export default function Records() {
     },
     {
       label: "Total Amount",
-      value: `₹${totalAmount.toLocaleString("en-IN")}`,
+      value: formatINR(totalAmount),
       icon: IndianRupee,
       color: "hsl(142, 71%, 45%)",
     },
@@ -277,7 +278,7 @@ export default function Records() {
                         {record.project}
                       </td>
                       <td className="px-4 py-3 text-foreground font-heading font-medium whitespace-nowrap">
-                        ₹{record.amount.toLocaleString("en-IN")}
+                        {formatINR(record.amount)}
                       </td>
                       <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
                         {record.mode || record.docType || "—"}
@@ -327,7 +328,7 @@ export default function Records() {
                     <div className="flex flex-col items-end gap-1 shrink-0">
                       {entryBadge(record.entryType)}
                       <p className="text-sm font-heading font-bold text-foreground">
-                        ₹{record.amount.toLocaleString("en-IN")}
+                        {formatINR(record.amount)}
                       </p>
                     </div>
                   </div>

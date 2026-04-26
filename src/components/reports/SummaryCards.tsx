@@ -1,5 +1,6 @@
 import React from "react";
 import { TrendingUp, FileText, IndianRupee, PieChart as PieChartIcon } from "lucide-react";
+import { formatINR } from "@/utils/formatCurrency";
 
 interface ReportsSummary {
   totalIncome: number;
@@ -8,8 +9,7 @@ interface ReportsSummary {
   transactionCount: number;
 }
 
-const fmt = (n: number) =>
-  "₹" + n.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+const fmt = (n: number) => formatINR(n);
 
 interface SummaryCardsProps {
   summary: ReportsSummary;

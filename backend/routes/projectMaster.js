@@ -7,12 +7,36 @@ const allowRoles = require("../middleware/role");
 router.use(authMiddleware);
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 
-// GET all
+// GET all — includes CompanyName via enterprise JOIN
 router.get("/", async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT * FROM dbo.ProjectMaster WHERE IsDeleted=0 ORDER BY CreatedAt DESC
+      SELECT
+        p.Id,
+        p.Code,
+        p.Name,
+        p.ShortName,
+        p.Type,
+        p.BusinessUnit,
+        p.ClientName,
+        p.ClientCode,
+        p.TeamSize,
+        p.StartDate,
+        p.EndDate,
+        p.Currency,
+        p.Status,
+        p.Priority,
+        p.Location,
+        p.Description,
+        p.Remarks,
+        p.IsActive,
+        p.EnterpriseId,
+        e.name AS CompanyName
+      FROM dbo.ProjectMaster p
+      LEFT JOIN dbo.enterprise e ON p.EnterpriseId = e.id
+      WHERE p.IsDeleted = 0
+      ORDER BY p.CreatedAt DESC
     `);
     res.json(result.recordset);
   } catch (err) {
@@ -166,7 +190,6 @@ router.delete("/:id", adminOnly, async (req, res) => {
   try {
     await transaction.begin();
 
-    // Soft delete ProjectMaster and remove from enterprise
     await transaction
       .request()
       .input("Id", sql.Int, parseInt(req.params.id))
