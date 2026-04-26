@@ -1,18 +1,12 @@
-// ============================================================
-// backend/services/approvalService.js
-// ============================================================
-
 const { getPool, sql } = require("../db");
 
-// ─── Table registry ───────────────────────────────────────────────────────────
-// All columns confirmed from DB screenshot (migration verification query)
 const TABLE_REGISTRY = {
   "purchase-orders": {
-    table:         "PurchaseOrders",
-    pk:            "PurchaseOrderID",
-    statusCol:     "Status",
-    updatedByCol:  "UpdatedBy",
-    updatedAtCol:  "UpdatedAt",
+    table: "PurchaseOrders",
+    pk: "PurchaseOrderID",
+    statusCol: "Status",
+    updatedByCol: "UpdatedBy",
+    updatedAtCol: "UpdatedAt",
     approvedByCol: "ApprovedBy",
     approvedAtCol: "ApprovedAt",
     rejectedByCol: "RejectedBy",
@@ -20,23 +14,23 @@ const TABLE_REGISTRY = {
     rejectNoteCol: "RejectionNote",
   },
   "work-orders": {
-    table:         "WorkOrderHeader",
-    pk:            "Id",
-    statusCol:     "Status",
-    updatedByCol:  "UpdatedBy",
-    updatedAtCol:  "UpdatedAt",
+    table: "WorkOrderHeader",
+    pk: "Id",
+    statusCol: "Status",
+    updatedByCol: "UpdatedBy",
+    updatedAtCol: "UpdatedAt",
     approvedByCol: "ApprovedBy",
     approvedAtCol: "ApprovedAt",
     rejectedByCol: "RejectedBy",
     rejectedAtCol: "RejectedAt",
     rejectNoteCol: "RejectionNote",
   },
-  "payments": {
-    table:         "NewPayment",
-    pk:            "PPaymentID",
-    statusCol:     "Status",
-    updatedByCol:  "UpdatedBy",
-    updatedAtCol:  "UpdatedAt",
+  payments: {
+    table: "NewPayment",
+    pk: "PPaymentID",
+    statusCol: "Status",
+    updatedByCol: "UpdatedBy",
+    updatedAtCol: "UpdatedAt",
     approvedByCol: "ApprovedBy",
     approvedAtCol: "ApprovedAt",
     rejectedByCol: "RejectedBy",
@@ -44,11 +38,11 @@ const TABLE_REGISTRY = {
     rejectNoteCol: "RejectionNote",
   },
   "goods-receipt": {
-    table:         "GoodsReceiptNotes",
-    pk:            "GRNID",
-    statusCol:     "Status",
-    updatedByCol:  "UpdatedBy",
-    updatedAtCol:  "UpdatedAt",
+    table: "GoodsReceiptNotes",
+    pk: "GRNID",
+    statusCol: "Status",
+    updatedByCol: "UpdatedBy",
+    updatedAtCol: "UpdatedAt",
     approvedByCol: "ApprovedBy",
     approvedAtCol: "ApprovedAt",
     rejectedByCol: "RejectedBy",
@@ -56,11 +50,11 @@ const TABLE_REGISTRY = {
     rejectNoteCol: "RejectionNote",
   },
   "expense-booking": {
-    table:         "ExpenseBooking",
-    pk:            "Eid",
-    statusCol:     "EStatus",
-    updatedByCol:  "UpdatedBy",
-    updatedAtCol:  "UpdatedAt",
+    table: "ExpenseBooking",
+    pk: "Eid",
+    statusCol: "EStatus",
+    updatedByCol: "UpdatedBy",
+    updatedAtCol: "UpdatedAt",
     approvedByCol: "ApprovedBy",
     approvedAtCol: "ApprovedAt",
     rejectedByCol: "RejectedBy",
@@ -71,33 +65,51 @@ const TABLE_REGISTRY = {
 
 // ─── State machine ────────────────────────────────────────────────────────────
 const TRANSITIONS = {
-  Draft:                ["Issued", "Pending"],
-  Issued:               ["Pending"],
-  Pending:              ["Approved", "Rejected"],
-  Approved:             [],
-  Rejected:             ["Issued", "Draft"],
+  Draft: ["Issued", "Pending"],
+  Issued: ["Pending"],
+  Pending: ["Approved", "Rejected"],
+  Approved: [],
+  Rejected: ["Issued", "Draft"],
   "Partially Received": ["Fully Received", "Pending"],
-  "Fully Received":     ["Approved"],
+  "Fully Received": ["Approved"],
 };
 
 const TERMINAL_STATES = ["Approved", "Fully Received"];
-const APPROVER_ROLES  = ["admin", "super_admin", "dba"];
+const APPROVER_ROLES = ["admin", "super_admin", "dba"];
 
 // ─── Core transition ──────────────────────────────────────────────────────────
-async function transition(moduleKey, recordId, newStatus, actor, actorRole = null, note = null) {
+async function transition(
+  moduleKey,
+  recordId,
+  newStatus,
+  actor,
+  actorRole = null,
+  note = null,
+) {
   const registry = TABLE_REGISTRY[moduleKey];
   if (!registry) throw new Error(`Unknown module: "${moduleKey}"`);
 
-  const { table, pk, statusCol, updatedByCol, updatedAtCol,
-          approvedByCol, approvedAtCol,
-          rejectedByCol, rejectedAtCol, rejectNoteCol } = registry;
+  const {
+    table,
+    pk,
+    statusCol,
+    updatedByCol,
+    updatedAtCol,
+    approvedByCol,
+    approvedAtCol,
+    rejectedByCol,
+    rejectedAtCol,
+    rejectNoteCol,
+  } = registry;
 
   const id = parseInt(recordId, 10);
   if (isNaN(id)) throw new Error("Invalid record ID");
 
   if (["Approved", "Rejected"].includes(newStatus)) {
     if (actorRole && !APPROVER_ROLES.includes(actorRole)) {
-      throw new Error(`Role "${actorRole}" is not authorized to approve or reject`);
+      throw new Error(
+        `Role "${actorRole}" is not authorized to approve or reject`,
+      );
     }
   }
 
@@ -109,16 +121,18 @@ async function transition(moduleKey, recordId, newStatus, actor, actorRole = nul
     .input("id", sql.Int, id)
     .query(`SELECT ${statusCol} AS Status FROM dbo.${table} WHERE ${pk} = @id`);
 
-  if (!current.recordset.length) throw new Error(`Record ${id} not found in ${table}`);
+  if (!current.recordset.length)
+    throw new Error(`Record ${id} not found in ${table}`);
 
   const currentStatus = current.recordset[0].Status;
 
   // 2. Validate transition
   const allowed = TRANSITIONS[currentStatus];
-  if (!allowed) throw new Error(`Status "${currentStatus}" not in state machine`);
+  if (!allowed)
+    throw new Error(`Status "${currentStatus}" not in state machine`);
   if (!allowed.includes(newStatus)) {
     throw new Error(
-      `Cannot transition "${currentStatus}" → "${newStatus}". Allowed: ${allowed.join(", ") || "none"}`
+      `Cannot transition "${currentStatus}" → "${newStatus}". Allowed: ${allowed.join(", ") || "none"}`,
     );
   }
 
@@ -158,9 +172,19 @@ async function transition(moduleKey, recordId, newStatus, actor, actorRole = nul
   }
 
   // 4. Execute
-  await req.query(`UPDATE dbo.${table} SET ${set.join(", ")} WHERE ${pk} = @id`);
+  await req.query(
+    `UPDATE dbo.${table} SET ${set.join(", ")} WHERE ${pk} = @id`,
+  );
 
-  return { success: true, module: moduleKey, recordId: id, from: currentStatus, to: newStatus, actor, timestamp: new Date().toISOString() };
+  return {
+    success: true,
+    module: moduleKey,
+    recordId: id,
+    from: currentStatus,
+    to: newStatus,
+    actor,
+    timestamp: new Date().toISOString(),
+  };
 }
 
 // ─── Guard: block edits on terminal records ───────────────────────────────────
@@ -169,11 +193,15 @@ async function guardEdit(moduleKey, recordId) {
   if (!registry) return;
   const { table, pk, statusCol } = registry;
   const pool = getPool();
-  const result = await pool.request().input("id", sql.Int, parseInt(recordId, 10))
+  const result = await pool
+    .request()
+    .input("id", sql.Int, parseInt(recordId, 10))
     .query(`SELECT ${statusCol} AS Status FROM dbo.${table} WHERE ${pk} = @id`);
   const status = result.recordset[0]?.Status;
   if (TERMINAL_STATES.includes(status)) {
-    throw new Error(`This record is finalized (${status}) and cannot be edited.`);
+    throw new Error(
+      `This record is finalized (${status}) and cannot be edited.`,
+    );
   }
 }
 
@@ -181,9 +209,20 @@ async function guardEdit(moduleKey, recordId) {
 async function getStatus(moduleKey, recordId) {
   const registry = TABLE_REGISTRY[moduleKey];
   if (!registry) throw new Error(`Unknown module: "${moduleKey}"`);
-  const { table, pk, statusCol, approvedByCol, approvedAtCol, rejectedByCol, rejectedAtCol, rejectNoteCol } = registry;
+  const {
+    table,
+    pk,
+    statusCol,
+    approvedByCol,
+    approvedAtCol,
+    rejectedByCol,
+    rejectedAtCol,
+    rejectNoteCol,
+  } = registry;
   const pool = getPool();
-  const result = await pool.request().input("id", sql.Int, parseInt(recordId, 10)).query(`
+  const result = await pool
+    .request()
+    .input("id", sql.Int, parseInt(recordId, 10)).query(`
     SELECT
       ${statusCol}     AS Status,
       ${approvedByCol} AS ApprovedBy,
@@ -197,4 +236,11 @@ async function getStatus(moduleKey, recordId) {
   return result.recordset[0];
 }
 
-module.exports = { transition, guardEdit, getStatus, TABLE_REGISTRY, TERMINAL_STATES, APPROVER_ROLES };
+module.exports = {
+  transition,
+  guardEdit,
+  getStatus,
+  TABLE_REGISTRY,
+  TERMINAL_STATES,
+  APPROVER_ROLES,
+};
