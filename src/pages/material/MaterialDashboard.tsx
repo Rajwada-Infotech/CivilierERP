@@ -312,12 +312,15 @@ function StatusBreakdown({
 export default function MaterialDashboard() {
   const navigate = useNavigate();
 
-  const { data, isLoading, isError, refetch, isFetching } =
+  const { data, isLoading, isError, error, refetch, isFetching } =
     useQuery<DashboardData>({
       queryKey: ["materialDashboard"],
       queryFn: async () => {
         const res = await fetchWithAuth("/api/material-dashboard");
-        if (!res.ok) throw new Error("Failed to fetch material dashboard");
+        if (!res.ok) {
+          const errBody = await res.json().catch(() => ({}));
+          throw new Error(errBody?.error || `HTTP ${res.status}`);
+        }
         const raw = await res.json();
         // Normalise: fill missing keys so the component never crashes
         // even if the backend is still on an older response shape.
@@ -367,8 +370,10 @@ export default function MaterialDashboard() {
           topItems: raw.topItems ?? [],
         } as DashboardData;
       },
-      staleTime: 60_000,
-      refetchOnWindowFocus: false,
+      staleTime: 0,
+      refetchOnWindowFocus: true,
+      refetchInterval: 30_000,
+      retry: 1,
     });
 
   // ── Stat cards config ────────────────────────────────────────────────
@@ -471,10 +476,12 @@ export default function MaterialDashboard() {
           </button>
         </div>
 
-        {isError && (
+        {isError && !data && (
           <div className="px-4 py-3 rounded-lg bg-red-500/10 text-red-600 text-sm border border-red-500/20 flex items-center gap-2">
             <AlertCircle size={15} />
-            Failed to load dashboard data. Please refresh.
+            Failed to load dashboard data
+            {(error as Error)?.message ? `: ${(error as Error).message}` : ""}.
+            Please refresh.
           </div>
         )}
 

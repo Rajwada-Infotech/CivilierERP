@@ -74,10 +74,14 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
     });
   }, []);
 
-  // Initialize activeModule ONCE on mount.
+  // Sync activeModule with the current URL.
+  //
+  // Runs on mount AND whenever the pathname changes so that navigating to
+  // /home after login always clears the module, even though ModuleProvider
+  // stays mounted across the whole session.
   //
   // Priority: URL first for known module paths, then localStorage for
-  // ambiguous paths (/masters/*, /reports, etc.), then fallback to finance.
+  // ambiguous paths (/masters/*, /reports, etc.), then null.
   useEffect(() => {
     const stored = localStorage.getItem("activeModule") as Module | null;
     const pathname = location.pathname;
@@ -96,20 +100,19 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
       setActiveModuleState("finance");
       localStorage.setItem("activeModule", "finance");
     } else if (pathname === "/home" || pathname === "/") {
-      // Landing page after login — stay neutral, no module pre-selected
+      // Landing page after login — always neutral, no module pre-selected
       setActiveModuleState(null);
       localStorage.removeItem("activeModule");
     } else {
       // Ambiguous path (e.g. /masters/*, /reports) — trust localStorage if valid,
-      // but do NOT force finance when there's nothing stored
+      // but do NOT force a module when there's nothing stored
       if (stored && valid.includes(stored)) {
         setActiveModuleState(stored);
       } else {
         setActiveModuleState(null);
       }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []); // intentionally run once on mount only
+  }, [location.pathname]); // re-run on every navigation
 
   return (
     <ModuleContext.Provider

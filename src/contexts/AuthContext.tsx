@@ -161,7 +161,9 @@ export const AuthProvider = ({
           return updated;
         });
       })
-      .catch(() => {/* silently ignore — avatar is cosmetic */});
+      .catch(() => {
+        /* silently ignore — avatar is cosmetic */
+      });
   }, [currentUser?.id]);
   const login = useCallback(async (email: string, password: string) => {
     try {
@@ -219,6 +221,7 @@ export const AuthProvider = ({
     localStorage.removeItem("token");
     localStorage.removeItem("user");
     localStorage.removeItem("currentSessionId");
+    localStorage.removeItem("activeModule");
     setCurrentUser(null);
     setUsers([]);
   }, [currentUser, onLogoutSuccess, recordLogout]);

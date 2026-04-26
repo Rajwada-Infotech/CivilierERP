@@ -1,19 +1,33 @@
 const express = require("express");
 const router = express.Router();
 const { getPool } = require("../db");
-const { cache } = require("../middleware/cache");
-const authMiddleware = require("../middleware/auth");
-
-router.use(authMiddleware);
+// authMiddleware is applied globally in server.js for all /api/* routes —
+// do NOT add it here again or every request runs auth twice.
 
 /**
  * GET /api/material-dashboard
  * Single round-trip for all Material Dashboard stats.
- * Covers: Items, GRNs, POs, Work Orders, Expenses, Stock, UOM, T&C
+ * Each query is wrapped individually so one failing table never kills
+ * the whole response — the frontend always gets a valid JSON shape.
  */
-router.get("/", cache("material-dashboard", 60), async (req, res) => {
+router.get("/", async (req, res) => {
   try {
     const pool = getPool();
+
+    // Safe query helper — returns null on error instead of throwing
+    const safeQuery = async (sql) => {
+      try {
+        return await pool.request().query(sql);
+      } catch (err) {
+        console.error(
+          "MATERIAL DASHBOARD QUERY ERROR:",
+          err.message,
+          "\nSQL:",
+          sql.trim().slice(0, 120),
+        );
+        return null;
+      }
+    };
 
     const [
       itemStats,
@@ -32,7 +46,7 @@ router.get("/", cache("material-dashboard", 60), async (req, res) => {
       topItems,
     ] = await Promise.all([
       // ── Items + Groups ──────────────────────────────────────────────
-      pool.request().query(`
+      safeQuery(`
         SELECT
           COUNT(CASE WHEN Parent_Id IS NOT NULL OR M_IdentityCode = 1 THEN 1 END) AS ItemCount,
           COUNT(CASE WHEN Parent_Id IS NULL AND M_IdentityCode = 0 THEN 1 END)    AS GroupCount
@@ -40,7 +54,7 @@ router.get("/", cache("material-dashboard", 60), async (req, res) => {
       `),
 
       // ── GRNs ────────────────────────────────────────────────────────
-      pool.request().query(`
+      safeQuery(`
         SELECT
           COUNT(*)  AS TotalCount,
           COUNT(CASE WHEN YEAR(GRNDate)  = YEAR(GETDATE())
@@ -54,7 +68,7 @@ router.get("/", cache("material-dashboard", 60), async (req, res) => {
       `),
 
       // ── Purchase Orders ──────────────────────────────────────────────
-      pool.request().query(`
+      safeQuery(`
         SELECT
           COUNT(*)                                                             AS TotalCount,
           COUNT(CASE WHEN ISNULL(Status,'') NOT IN ('Closed','Rejected') THEN 1 END) AS OpenCount,
@@ -67,7 +81,7 @@ router.get("/", cache("material-dashboard", 60), async (req, res) => {
       `),
 
       // ── Work Orders ──────────────────────────────────────────────────
-      pool.request().query(`
+      safeQuery(`
         SELECT
           COUNT(*) AS TotalCount,
           COUNT(CASE WHEN ISNULL(Status,'') NOT IN ('Closed','Cancelled') THEN 1 END) AS OpenCount,
@@ -78,7 +92,7 @@ router.get("/", cache("material-dashboard", 60), async (req, res) => {
       `),
 
       // ── Material Expenses ────────────────────────────────────────────
-      pool.request().query(`
+      safeQuery(`
         SELECT
           COUNT(*) AS TotalCount,
           COUNT(CASE WHEN ISNULL(EStatus,'') = 'Pending'  THEN 1 END) AS PendingCount,
@@ -89,7 +103,7 @@ router.get("/", cache("material-dashboard", 60), async (req, res) => {
       `),
 
       // ── Stock Ledger ─────────────────────────────────────────────────
-      pool.request().query(`
+      safeQuery(`
         SELECT
           COUNT(*) AS TotalEntries,
           ISNULL(SUM(CASE WHEN Type='IN'  THEN Qty ELSE 0 END), 0) AS TotalIn,
@@ -99,12 +113,12 @@ router.get("/", cache("material-dashboard", 60), async (req, res) => {
       `),
 
       // ── UOM count ────────────────────────────────────────────────────
-      pool.request().query(`
+      safeQuery(`
         SELECT COUNT(*) AS TotalUOM FROM dbo.UOMMaster
       `),
 
       // ── Recent GRNs (last 6) ─────────────────────────────────────────
-      pool.request().query(`
+      safeQuery(`
         SELECT TOP 6
           grn.GRNID, grn.GRNNo, grn.GRNDate, grn.Status,
           grn.TotalAmount,
@@ -117,7 +131,7 @@ router.get("/", cache("material-dashboard", 60), async (req, res) => {
       `),
 
       // ── Recent POs (last 6) ──────────────────────────────────────────
-      pool.request().query(`
+      safeQuery(`
         SELECT TOP 6
           po.PurchaseOrderID, po.PurchaseOrderNo, po.PODate,
           po.TotalAmount, po.Status,
@@ -130,7 +144,7 @@ router.get("/", cache("material-dashboard", 60), async (req, res) => {
       `),
 
       // ── Recent Work Orders (last 6) ──────────────────────────────────
-      pool.request().query(`
+      safeQuery(`
         SELECT TOP 6
           h.Id, h.DocumentNumber, h.DocumentDate, h.TotalAmount, h.Status,
           ec.name AS CompanyName,
@@ -144,7 +158,7 @@ router.get("/", cache("material-dashboard", 60), async (req, res) => {
       `),
 
       // ── Recent Expenses (last 6) ─────────────────────────────────────
-      pool.request().query(`
+      safeQuery(`
         SELECT TOP 6
           Eid, EDocNo, EDocDate, EAmount, EStatus,
           EProjectName, EDocumentType, ECreatedAt
@@ -153,7 +167,7 @@ router.get("/", cache("material-dashboard", 60), async (req, res) => {
       `),
 
       // ── PO Status Breakdown ──────────────────────────────────────────
-      pool.request().query(`
+      safeQuery(`
         SELECT
           ISNULL(Status, 'Draft') AS Status,
           COUNT(*) AS Count,
@@ -163,7 +177,7 @@ router.get("/", cache("material-dashboard", 60), async (req, res) => {
       `),
 
       // ── WO Status Breakdown ──────────────────────────────────────────
-      pool.request().query(`
+      safeQuery(`
         SELECT
           ISNULL(Status, 'Draft') AS Status,
           COUNT(*) AS Count,
@@ -173,7 +187,7 @@ router.get("/", cache("material-dashboard", 60), async (req, res) => {
       `),
 
       // ── Top 5 Items by GRN receipts ──────────────────────────────────
-      pool.request().query(`
+      safeQuery(`
         SELECT TOP 5
           sl.ItemID,
           img.M_Name AS ItemName,
@@ -188,14 +202,14 @@ router.get("/", cache("material-dashboard", 60), async (req, res) => {
       `),
     ]);
 
-    // ?? {} guards against empty tables returning undefined for recordset[0]
-    const it = itemStats.recordset[0] ?? {};
-    const gr = grnStats.recordset[0] ?? {};
-    const po = poStats.recordset[0] ?? {};
-    const wo = woStats.recordset[0] ?? {};
-    const ex = expenseStats.recordset[0] ?? {};
-    const st = stockStats.recordset[0] ?? {};
-    const um = uomStats.recordset[0] ?? {};
+    // ?? {} guards against null (failed query) or empty tables
+    const it = itemStats?.recordset[0] ?? {};
+    const gr = grnStats?.recordset[0] ?? {};
+    const po = poStats?.recordset[0] ?? {};
+    const wo = woStats?.recordset[0] ?? {};
+    const ex = expenseStats?.recordset[0] ?? {};
+    const st = stockStats?.recordset[0] ?? {};
+    const um = uomStats?.recordset[0] ?? {};
 
     res.json({
       items: {
@@ -237,16 +251,16 @@ router.get("/", cache("material-dashboard", 60), async (req, res) => {
         uniqueItems: st.UniqueItems ?? 0,
       },
       uom: { total: um.TotalUOM ?? 0 },
-      recentGRNs: recentGRNs.recordset,
-      recentPOs: recentPOs.recordset,
-      recentWOs: recentWOs.recordset,
-      recentExpenses: recentExpenses.recordset,
-      poStatusBreakdown: poStatusBreakdown.recordset,
-      woStatusBreakdown: woStatusBreakdown.recordset,
-      topItems: topItems.recordset,
+      recentGRNs: recentGRNs?.recordset ?? [],
+      recentPOs: recentPOs?.recordset ?? [],
+      recentWOs: recentWOs?.recordset ?? [],
+      recentExpenses: recentExpenses?.recordset ?? [],
+      poStatusBreakdown: poStatusBreakdown?.recordset ?? [],
+      woStatusBreakdown: woStatusBreakdown?.recordset ?? [],
+      topItems: topItems?.recordset ?? [],
     });
   } catch (err) {
-    console.error("MATERIAL DASHBOARD ERROR:", err.message);
+    console.error("MATERIAL DASHBOARD FATAL ERROR:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
