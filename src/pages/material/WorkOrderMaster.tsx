@@ -53,7 +53,8 @@ interface Activity {
   id: string;
   activityId: number | null;
   name: string;
-  unit: string;
+  uomId: number | null;   // ID stored for DB save
+  unit: string;           // display name shown in UI
   ratePerUnit: number;
   area: number;
   materials: MaterialItem[];
@@ -140,7 +141,8 @@ const EMPTY_ACTIVITY = (): Activity => ({
   id: uid(),
   activityId: null,
   name: "",
-  unit: "Sq.Ft",
+  uomId: null,
+  unit: "",
   ratePerUnit: 0,
   area: 0,
   materials: [],
@@ -153,8 +155,6 @@ const EMPTY_GROUP = (): ActivityGroup => ({
   activities: [EMPTY_ACTIVITY()],
   expanded: true,
 });
-
-const UNITS = ["Sq.Ft", "Sq.M", "RMT", "Nos", "Kg", "MT", "CUM", "CFT"];
 
 // ─── Shared styles ────────────────────────────────────────────────────────────
 
@@ -190,8 +190,9 @@ const SelectSkeleton: React.FC = () => (
 
 const MaterialBreakdownModal: React.FC<{
   activity: Activity;
+  uomOptions: DropdownOption[];
   onUpdateMaterials: (materials: MaterialItem[]) => void;
-}> = ({ activity, onUpdateMaterials }) => {
+}> = ({ activity, uomOptions, onUpdateMaterials }) => {
   const [open, setOpen] = useState(false);
 
   const materialsTotal = activity.materials.reduce(
@@ -217,6 +218,11 @@ const MaterialBreakdownModal: React.FC<{
 
   const deleteMaterial = (idx: number) =>
     onUpdateMaterials(activity.materials.filter((_, i) => i !== idx));
+
+  // Material unit options: use UOM master names if available, else fall back to hardcoded list
+  const matUnitOptions = uomOptions.length > 0
+    ? uomOptions.map((u) => u.name)
+    : ["Sq.Ft", "Sq.M", "RMT", "Nos", "Kg", "MT", "CUM", "CFT"];
 
   return (
     <>
@@ -278,7 +284,7 @@ const MaterialBreakdownModal: React.FC<{
                 <span className="text-foreground font-medium">Area:</span>
                 {activity.area > 0 ? (
                   <span className="font-semibold text-primary">
-                    {activity.area} {activity.unit}
+                    {activity.area} {activity.unit || "—"}
                   </span>
                 ) : (
                   <span className="italic text-muted-foreground/50">
@@ -357,7 +363,7 @@ const MaterialBreakdownModal: React.FC<{
                               onChange={(e) => updateMaterial(idx, "unit", e.target.value)}
                               className="w-full text-sm rounded-md border border-border px-2 py-1.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition appearance-none"
                             >
-                              {UNITS.map((u) => <option key={u}>{u}</option>)}
+                              {matUnitOptions.map((u) => <option key={u}>{u}</option>)}
                             </select>
                           </div>
                           <div>
@@ -468,21 +474,20 @@ const MaterialBreakdownModal: React.FC<{
 };
 
 // ─── Activity Row ─────────────────────────────────────────────────────────────
-// FIX: onUpdate now accepts Partial<Activity> to allow atomic multi-field updates.
-// This prevents the stale-closure race where two sequential onUpdate("field", val)
-// calls would cause the second to overwrite the first on re-render.
 
 const ActivityRow: React.FC<{
   activity: Activity;
   index: number;
   groupIndex: number;
-  onUpdate: (patch: Partial<Activity>) => void; // ← FIXED: accepts patch object
+  onUpdate: (patch: Partial<Activity>) => void;
   onDelete: () => void;
   canDelete: boolean;
   activityOptions: ActivityOption[];
+  uomOptions: DropdownOption[];
   loadingActivities: boolean;
-}> = ({ activity, index, groupIndex, onUpdate, onDelete, canDelete, activityOptions, loadingActivities }) => {
+}> = ({ activity, index, groupIndex, onUpdate, onDelete, canDelete, activityOptions, uomOptions, loadingActivities }) => {
   const safeOptions = ensureArray<ActivityOption>(activityOptions);
+  const safeUomOptions = ensureArray<DropdownOption>(uomOptions);
 
   const labourTotal = activity.ratePerUnit * activity.area;
   const materialsTotal = activity.materials.reduce(
@@ -492,12 +497,21 @@ const ActivityRow: React.FC<{
   const activityTotal = labourTotal + materialsTotal;
   const label = `${groupIndex + 1}.${index + 1}`;
 
-  // FIX: Single onUpdate call with both fields — eliminates the stale-closure race.
+  // Single onUpdate call with both fields — eliminates stale-closure race
   const handleActivityChange = (selectedId: string) => {
     const found = safeOptions.find((a) => String(a.id) === selectedId);
     onUpdate({
       activityId: found ? found.id : null,
       name: found ? found.name : "",
+    });
+  };
+
+  // UOM change: store both id (for DB) and name (for display)
+  const handleUomChange = (selectedId: string) => {
+    const found = safeUomOptions.find((u) => String(u.id) === selectedId);
+    onUpdate({
+      uomId: found ? found.id : null,
+      unit: found ? found.name : "",
     });
   };
 
@@ -514,6 +528,23 @@ const ActivityRow: React.FC<{
       </option>
       {safeOptions.map((a) => (
         <option key={a.id} value={String(a.id)}>{a.name}</option>
+      ))}
+    </select>
+  );
+
+  const uomSelectJSX = loadingActivities ? (
+    <div className={`${cellSelect} bg-muted/30 animate-pulse h-[34px]`} />
+  ) : (
+    <select
+      value={activity.uomId !== null ? String(activity.uomId) : ""}
+      onChange={(e) => handleUomChange(e.target.value)}
+      className="w-full text-sm rounded-md border border-border px-2 py-1.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition appearance-none"
+    >
+      <option value="">
+        {safeUomOptions.length === 0 ? "No UOMs" : "Select unit…"}
+      </option>
+      {safeUomOptions.map((u) => (
+        <option key={u.id} value={String(u.id)}>{u.name}</option>
       ))}
     </select>
   );
@@ -538,13 +569,7 @@ const ActivityRow: React.FC<{
         <div className="grid grid-cols-2 gap-2">
           <div>
             <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Unit</p>
-            <select
-              value={activity.unit}
-              onChange={(e) => onUpdate({ unit: e.target.value })}
-              className="w-full text-sm rounded-md border border-border px-2 py-1.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition appearance-none"
-            >
-              {UNITS.map((u) => <option key={u}>{u}</option>)}
-            </select>
+            {uomSelectJSX}
           </div>
           <div>
             <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">Area</p>
@@ -598,22 +623,17 @@ const ActivityRow: React.FC<{
         )}
         <MaterialBreakdownModal
           activity={activity}
+          uomOptions={uomOptions}
           onUpdateMaterials={(mats) => onUpdate({ materials: mats })}
         />
       </div>
 
       {/* ── Desktop row ── */}
       <div className="hidden sm:block rounded-lg border border-border/50 overflow-hidden">
-        <div className="grid grid-cols-[48px_1fr_96px_128px_112px_auto_120px_32px] gap-2 items-center px-3 py-2.5 bg-muted/20">
+        <div className="grid grid-cols-[48px_1fr_120px_128px_112px_auto_120px_32px] gap-2 items-center px-3 py-2.5 bg-muted/20">
           <div className="text-xs font-mono text-primary font-semibold">{label}</div>
           {activitySelectJSX}
-          <select
-            value={activity.unit}
-            onChange={(e) => onUpdate({ unit: e.target.value })}
-            className="w-full text-sm rounded-md border border-border px-2 py-1.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition appearance-none"
-          >
-            {UNITS.map((u) => <option key={u}>{u}</option>)}
-          </select>
+          {uomSelectJSX}
           <div className="relative">
             <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">₹</span>
             <input
@@ -635,6 +655,7 @@ const ActivityRow: React.FC<{
           />
           <MaterialBreakdownModal
             activity={activity}
+            uomOptions={uomOptions}
             onUpdateMaterials={(mats) => onUpdate({ materials: mats })}
           />
           <div className="text-right">
@@ -680,8 +701,9 @@ const ActivityGroupCard: React.FC<{
   canDelete: boolean;
   activityGroupOptions: DropdownOption[];
   activityOptions: ActivityOption[];
+  uomOptions: DropdownOption[];
   loadingDropdowns: boolean;
-}> = ({ group, index, onUpdate, onDelete, canDelete, activityGroupOptions, activityOptions, loadingDropdowns }) => {
+}> = ({ group, index, onUpdate, onDelete, canDelete, activityGroupOptions, activityOptions, uomOptions, loadingDropdowns }) => {
   const safeGroupOptions = ensureArray<DropdownOption>(activityGroupOptions);
   const safeActivityOptions = ensureArray<ActivityOption>(activityOptions);
 
@@ -695,16 +717,13 @@ const ActivityGroupCard: React.FC<{
   );
   const groupTotal = groupLabourTotal + groupMaterialsTotal;
 
-  // FIX: Coerce both sides to Number to avoid string vs number type mismatch
-  // from the API (e.g. groupId "5" !== 5).
+  // Coerce both sides to Number to avoid string vs number type mismatch
   const filteredActivities = group.groupId !== null
     ? safeActivityOptions.filter(
         (a) => Number(a.groupId) === Number(group.groupId)
       )
     : safeActivityOptions;
 
-  // FIX: updateActivity now accepts a Partial<Activity> patch and merges it
-  // atomically, matching the updated ActivityRow onUpdate signature.
   const updateActivity = (actIdx: number, patch: Partial<Activity>) => {
     onUpdate({
       ...group,
@@ -778,7 +797,7 @@ const ActivityGroupCard: React.FC<{
       {group.expanded && (
         <div className="p-3 space-y-2">
           {group.activities.length > 0 && (
-            <div className="hidden sm:grid grid-cols-[48px_1fr_96px_128px_112px_auto_120px_32px] gap-2 px-3 pb-1">
+            <div className="hidden sm:grid grid-cols-[48px_1fr_120px_128px_112px_auto_120px_32px] gap-2 px-3 pb-1">
               {["#", "Activity", "Unit", "Rate / Unit (Labour)", "Area", "Materials", "Activity Total", ""].map((h) => (
                 <div key={h} className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{h}</div>
               ))}
@@ -794,6 +813,7 @@ const ActivityGroupCard: React.FC<{
               onDelete={() => deleteActivity(actIdx)}
               canDelete={group.activities.length > 1}
               activityOptions={filteredActivities}
+              uomOptions={uomOptions}
               loadingActivities={loadingDropdowns}
             />
           ))}
@@ -837,6 +857,7 @@ const WorkOrderMaster: React.FC = () => {
   const [contractors, setContractors] = useState<DropdownOption[]>([]);
   const [activityGroupOptions, setActivityGroupOptions] = useState<DropdownOption[]>([]);
   const [activityOptions, setActivityOptions] = useState<ActivityOption[]>([]);
+  const [uomOptions, setUomOptions] = useState<DropdownOption[]>([]);
   const [loadingDropdowns, setLoadingDropdowns] = useState(true);
   const [dropdownError, setDropdownError] = useState<string | null>(null);
 
@@ -845,21 +866,23 @@ const WorkOrderMaster: React.FC = () => {
       setLoadingDropdowns(true);
       setDropdownError(null);
       try {
-        const [comp, proj, cont, grps, acts] = await Promise.all([
+        // Fetch UOMs from the new meta endpoint alongside all other dropdowns
+        const [comp, proj, cont, grps, acts, uomsRaw] = await Promise.all([
           fetchCompanies(),
           fetchProjects(),
           fetchContractors(),
           fetchActivityGroups(),
           fetchActivities(),
+          fetchWithAuth("/api/work-orders/meta/uoms").then((r) => r.ok ? r.json() : []),
         ]);
 
         setCompanies(ensureArray<DropdownOption>(comp));
         setProjects(ensureArray<DropdownOption>(proj));
         setContractors(ensureArray<DropdownOption>(cont));
         setActivityGroupOptions(ensureArray<DropdownOption>(grps));
+        setUomOptions(ensureArray<DropdownOption>(uomsRaw));
 
-        // Normalise every activity's groupId to a real number so that
-        // Number(a.groupId) === Number(group.groupId) always works correctly.
+        // Normalise every activity's groupId to a real number
         const rawActs = ensureArray<ActivityOption>(acts);
         setActivityOptions(
           rawActs.map((a) => ({
@@ -878,6 +901,7 @@ const WorkOrderMaster: React.FC = () => {
         setContractors([]);
         setActivityGroupOptions([]);
         setActivityOptions([]);
+        setUomOptions([]);
       } finally {
         setLoadingDropdowns(false);
       }
@@ -952,6 +976,7 @@ const WorkOrderMaster: React.FC = () => {
 
       const newHeaderId: number = created.Id;
 
+      // Build activities payload — UOMId is now the numeric id from UOMMaster
       const activities = groups.flatMap((g) =>
         g.activities.map((a) => {
           const labourAmt = a.ratePerUnit * a.area;
@@ -959,7 +984,7 @@ const WorkOrderMaster: React.FC = () => {
           return {
             ActivityGroupId: g.groupId ?? null,
             ActivityId: a.activityId ?? null,
-            UOMId: null,
+            UOMId: a.uomId ?? null,           // ← real UOMId from UOMMaster
             Rate: a.ratePerUnit || null,
             Area: a.area || null,
             LabourAmount: labourAmt || null,
@@ -1258,6 +1283,7 @@ const WorkOrderMaster: React.FC = () => {
               canDelete={groups.length > 1}
               activityGroupOptions={activityGroupOptions}
               activityOptions={activityOptions}
+              uomOptions={uomOptions}
               loadingDropdowns={loadingDropdowns}
             />
           ))}
