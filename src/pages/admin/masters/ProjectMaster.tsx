@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { getEnterpriseOptions } from "@/api/enterpriseApi";
@@ -12,11 +12,14 @@ import {
   Loader2,
   ToggleLeft,
   ToggleRight,
+  Upload,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 
 interface Project {
   Id?: number;
+  enterpriseId?: number | string;
   code: string;
   name: string;
   shortName: string;
@@ -34,6 +37,7 @@ interface Project {
   description: string;
   remarks: string;
   isActive: boolean;
+  projectImage?: string | File | null;
 }
 
 const PROJECT_TYPES = [
@@ -54,6 +58,7 @@ const empty: Project = {
   name: "",
   shortName: "",
   type: "Construction",
+  enterpriseId: "",
   businessUnit: "",
   clientName: "",
   clientCode: "",
@@ -67,11 +72,13 @@ const empty: Project = {
   description: "",
   remarks: "",
   isActive: true,
+  projectImage: null,
 };
 
 function rowToForm(row: any): Project {
   return {
     Id: row.Id,
+    enterpriseId: row.EnterpriseId,
     code: row.Code ?? "",
     name: row.Name ?? "",
     shortName: row.ShortName ?? "",
@@ -89,6 +96,7 @@ function rowToForm(row: any): Project {
     description: row.Description ?? "",
     remarks: row.Remarks ?? "",
     isActive: row.IsActive !== 0,
+    projectImage: row.ProjectImage || null,
   };
 }
 
@@ -98,44 +106,70 @@ export default function ProjectMaster() {
   const [editId, setEditId] = useState<number | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [search, setSearch] = useState("");
-  const [activeTab, setActiveTab] = useState<"general" | "timeline" | "financial">("general");
+  const [activeTab, setActiveTab] = useState<
+    "general" | "timeline" | "financial"
+  >("general");
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
+  const [imagePreview, setImagePreview] = useState<string>("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ["project-master"],
     queryFn: async () => {
       const res = await fetchWithAuth("/api/project-master");
-      if (!res.ok) throw new Error("Failed to load");
+      if (!res.ok) throw new Error("Failed to load projects");
       return res.json();
     },
   });
 
-  // Fetch Business Units from enterprise master
-  const { data: businessUnits = [] } = useQuery({
-    queryKey: ["enterprise-options", "Business Unit"],
-    queryFn: () => getEnterpriseOptions("Business Unit"),
+  const { data: enterprises = [] } = useQuery({
+    queryKey: ["enterprise-options", "Enterprise"],
+    queryFn: () => getEnterpriseOptions("Enterprise"),
   });
 
   const saveMutation = useMutation({
     mutationFn: async () => {
+      const formData = new FormData();
+
+      Object.entries(form).forEach(([key, value]) => {
+        if (
+          key !== "projectImage" &&
+          value !== null &&
+          value !== undefined &&
+          value !== ""
+        ) {
+          formData.append(key, String(value));
+        }
+      });
+
+      if (form.projectImage instanceof File) {
+        formData.append("projectImage", form.projectImage);
+      }
+
       const url = editId
         ? `/api/project-master/${editId}`
         : "/api/project-master";
+
       const res = await fetchWithAuth(url, {
         method: editId ? "PUT" : "POST",
-        body: JSON.stringify(form),
+        body: formData,
       });
+
       if (!res.ok) {
-        const e = await res.json().catch(() => ({}));
-        throw new Error(e.error || "Save failed");
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Save failed");
       }
     },
     onSuccess: () => {
-      toast.success(editId ? "Project updated" : "Project created");
+      toast.success(
+        editId
+          ? "Project updated successfully"
+          : "Project created successfully",
+      );
       qc.invalidateQueries({ queryKey: ["project-master"] });
-      setShowForm(false);
+      resetForm();
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: any) => toast.error(e.message || "Something went wrong"),
   });
 
   const deleteMutation = useMutation({
@@ -146,12 +180,48 @@ export default function ProjectMaster() {
       if (!res.ok) throw new Error("Delete failed");
     },
     onSuccess: () => {
-      toast.success("Project deleted");
+      toast.success("Project deleted successfully");
       qc.invalidateQueries({ queryKey: ["project-master"] });
       setDeleteConfirm(null);
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: any) => toast.error(e.message),
   });
+
+  const resetForm = () => {
+    setForm({ ...empty });
+    setImagePreview("");
+    setEditId(null);
+    setShowForm(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please select an image file only");
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Image must be under 5 MB");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = reader.result as string;
+      setImagePreview(base64);
+      setForm((prev) => ({ ...prev, projectImage: file }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const removeImage = () => {
+    setImagePreview("");
+    setForm((prev) => ({ ...prev, projectImage: null }));
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
 
   const filtered = projects.filter(
     (p: any) =>
@@ -167,6 +237,7 @@ export default function ProjectMaster() {
     Completed: "bg-purple-500/10 text-purple-600",
     Cancelled: "bg-red-500/10 text-red-500",
   };
+
   const PRIORITY_COLORS: Record<string, string> = {
     Low: "bg-slate-500/10 text-slate-500",
     Medium: "bg-blue-500/10 text-blue-600",
@@ -181,7 +252,7 @@ export default function ProjectMaster() {
       </label>
       <input
         type={type}
-        value={form[key] as string}
+        value={(form[key] as string) || ""}
         onChange={(e) => setForm((p) => ({ ...p, [key]: e.target.value }))}
         placeholder={ph || label}
         className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all"
@@ -195,12 +266,14 @@ export default function ProjectMaster() {
         {label}
       </label>
       <select
-        value={form[key] as string}
+        value={(form[key] as string) || ""}
         onChange={(e) => setForm((p) => ({ ...p, [key]: e.target.value }))}
         className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
       >
         {options.map((o) => (
-          <option key={o}>{o}</option>
+          <option key={o} value={o}>
+            {o}
+          </option>
         ))}
       </select>
     </div>
@@ -210,6 +283,7 @@ export default function ProjectMaster() {
     <>
       <Breadcrumbs items={["Admin", "Masters", "Project Master"]} />
       <div className="p-6 space-y-6">
+        {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-indigo-500/10 flex items-center justify-center">
@@ -226,8 +300,7 @@ export default function ProjectMaster() {
           </div>
           <button
             onClick={() => {
-              setForm({ ...empty });
-              setEditId(null);
+              resetForm();
               setShowForm(true);
               setActiveTab("general");
             }}
@@ -237,6 +310,7 @@ export default function ProjectMaster() {
           </button>
         </div>
 
+        {/* Table View */}
         {!showForm && (
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="p-4 border-b border-border flex items-center gap-3">
@@ -256,6 +330,7 @@ export default function ProjectMaster() {
                 {filtered.length} project{filtered.length !== 1 ? "s" : ""}
               </span>
             </div>
+
             {isLoading ? (
               <div className="flex justify-center py-16">
                 <Loader2
@@ -280,7 +355,7 @@ export default function ProjectMaster() {
                       ].map((h) => (
                         <th
                           key={h}
-                          className="px-4 py-3 text-left text-xs font-heading text-muted-foreground"
+                          className="px-4 py-3 text-left text-xs font-heading text-muted-foreground whitespace-nowrap"
                         >
                           {h}
                         </th>
@@ -340,10 +415,12 @@ export default function ProjectMaster() {
                             <div className="flex items-center gap-2">
                               <button
                                 onClick={() => {
-                                  setForm(rowToForm(p));
+                                  const f = rowToForm(p);
+                                  setForm(f);
                                   setEditId(p.Id);
                                   setShowForm(true);
                                   setActiveTab("general");
+                                  setImagePreview(p.ProjectImage || "");
                                 }}
                                 className="p-1.5 rounded-md hover:bg-primary/10 text-muted-foreground hover:text-primary transition-colors"
                               >
@@ -367,54 +444,126 @@ export default function ProjectMaster() {
           </div>
         )}
 
+        {/* Form View */}
         {showForm && (
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="p-4 border-b border-border flex items-center justify-between bg-muted/30">
-              <h2 className="font-heading font-semibold text-foreground">
-                {editId ? "Edit Project" : "New Project"}
-              </h2>
+              <div className="flex items-center gap-3">
+                {imagePreview && (
+                  <img
+                    src={imagePreview}
+                    alt="Project"
+                    className="w-10 h-10 rounded-lg object-contain border border-border bg-muted/30"
+                  />
+                )}
+                <h2 className="font-heading font-semibold text-foreground">
+                  {editId ? `Edit — ${form.name || "Project"}` : "New Project"}
+                </h2>
+              </div>
               <button
-                onClick={() => setShowForm(false)}
+                onClick={resetForm}
                 className="text-xs text-muted-foreground hover:text-foreground px-3 py-1 rounded border border-border hover:bg-muted transition-colors"
               >
                 Cancel
               </button>
             </div>
+
+            {/* Tabs */}
             <div className="flex gap-1 p-3 border-b border-border bg-muted/20">
               {(["general", "timeline", "financial"] as const).map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
-                  className={`px-4 py-1.5 rounded-md text-xs font-heading capitalize transition-colors ${activeTab === tab ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
+                  className={`px-4 py-1.5 rounded-md text-xs font-heading capitalize transition-colors ${
+                    activeTab === tab
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-muted"
+                  }`}
                 >
                   {tab}
                 </button>
               ))}
             </div>
+
             <div className="p-6">
               {activeTab === "general" && (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  {/* Project Image Upload - Same style as Company Logo */}
+                  <div className="col-span-full">
+                    <label className="block text-xs font-medium text-muted-foreground mb-2">
+                      Project Image
+                    </label>
+                    <div className="flex items-center gap-4">
+                      {imagePreview ? (
+                        <div className="relative group">
+                          <img
+                            src={imagePreview}
+                            alt="Project preview"
+                            className="w-16 h-16 rounded-xl object-contain border border-border bg-muted/30"
+                          />
+                          <button
+                            onClick={removeImage}
+                            className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <X size={11} />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="w-16 h-16 rounded-xl border-2 border-dashed border-border bg-muted/20 flex items-center justify-center">
+                          <FolderKanban
+                            size={20}
+                            className="text-muted-foreground/40"
+                          />
+                        </div>
+                      )}
+                      <div>
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept="image/*"
+                          onChange={handleImageChange}
+                          className="hidden"
+                          id="project-image-input"
+                        />
+                        <label
+                          htmlFor="project-image-input"
+                          className="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border border-border hover:bg-muted cursor-pointer transition-colors"
+                        >
+                          <Upload size={13} />
+                          {imagePreview ? "Change Image" : "Upload Image"}
+                        </label>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          PNG, JPG, JPEG · Max 5 MB
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
                   {fi("Project Code *", "code", "text", "e.g. PRJ-001")}
                   {fi("Project Name *", "name")}
                   {fi("Short Name", "shortName")}
                   {se("Type", "type", PROJECT_TYPES)}
 
-                  {/* Business Unit — dropdown from enterprise master */}
+                  {/* Enterprise Dropdown */}
                   <div>
                     <label className="block text-xs font-medium text-muted-foreground mb-1">
-                      Business Unit
+                      Enterprise <span className="text-red-500">*</span>
                     </label>
                     <select
-                      value={form.businessUnit}
+                      value={form.enterpriseId || ""}
                       onChange={(e) =>
-                        setForm((p) => ({ ...p, businessUnit: e.target.value }))
+                        setForm((p) => ({
+                          ...p,
+                          enterpriseId: e.target.value,
+                          businessUnit: e.target.value,
+                        }))
                       }
                       className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                     >
-                      <option value="">Select Business Unit</option>
-                      {(businessUnits as any[]).map((bu: any) => (
-                        <option key={bu.id ?? bu.Id ?? bu.name} value={bu.name ?? bu.Name}>
-                          {bu.name ?? bu.Name}
+                      <option value="">Select Enterprise</option>
+                      {(enterprises as any[]).map((ent: any) => (
+                        <option key={ent.id} value={ent.id}>
+                          {ent.label || ent.name}
                         </option>
                       ))}
                     </select>
@@ -423,7 +572,8 @@ export default function ProjectMaster() {
                   {fi("Client Name", "clientName")}
                   {fi("Client Code", "clientCode")}
                   {fi("Location", "location")}
-                  <div className="flex items-center gap-3 pt-5">
+
+                  <div className="flex items-center gap-3 pt-5 col-span-full">
                     <button
                       onClick={() =>
                         setForm((p) => ({ ...p, isActive: !p.isActive }))
@@ -433,7 +583,10 @@ export default function ProjectMaster() {
                       {form.isActive ? (
                         <ToggleRight size={24} className="text-emerald-500" />
                       ) : (
-                        <ToggleLeft size={24} className="text-muted-foreground" />
+                        <ToggleLeft
+                          size={24}
+                          className="text-muted-foreground"
+                        />
                       )}
                       <span
                         className={
@@ -446,6 +599,7 @@ export default function ProjectMaster() {
                       </span>
                     </button>
                   </div>
+
                   <div className="col-span-full">
                     {fi("Description", "description")}
                   </div>
@@ -454,6 +608,7 @@ export default function ProjectMaster() {
                   </div>
                 </div>
               )}
+
               {activeTab === "timeline" && (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                   {fi("Start Date", "startDate", "date")}
@@ -463,22 +618,29 @@ export default function ProjectMaster() {
                   {fi("Team Size", "teamSize", "number")}
                 </div>
               )}
+
               {activeTab === "financial" && (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                   {se("Currency", "currency", CURRENCIES)}
                 </div>
               )}
             </div>
+
             <div className="p-4 border-t border-border flex justify-end gap-3">
               <button
-                onClick={() => setShowForm(false)}
+                onClick={resetForm}
                 className="px-5 py-2 text-sm rounded-lg border border-border hover:bg-muted transition-colors"
               >
                 Cancel
               </button>
               <button
                 onClick={() => saveMutation.mutate()}
-                disabled={!form.code || !form.name || saveMutation.isPending}
+                disabled={
+                  !form.code ||
+                  !form.name ||
+                  !form.enterpriseId ||
+                  saveMutation.isPending
+                }
                 className="px-5 py-2 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
               >
                 {saveMutation.isPending && (
@@ -490,6 +652,7 @@ export default function ProjectMaster() {
           </div>
         )}
 
+        {/* Delete Confirmation Modal */}
         {deleteConfirm !== null && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
             <div className="bg-card border border-border rounded-xl p-6 w-80 shadow-xl">
