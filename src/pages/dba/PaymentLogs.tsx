@@ -1,4 +1,6 @@
 import React, { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -71,138 +73,109 @@ interface PaymentLog {
 
 // ─── Mock Data ────────────────────────────────────────────────────────────────
 
-const PAYMENT_LOGS: PaymentLog[] = [
-  {
-    id: "PAY-001",
-    txnId: "UPI2604031427890123",
-    tenantId: "T-001",
-    tenantName: "Civilier Constructions Pvt Ltd",
-    amount: 84000,
-    method: "upi",
-    upiId: "civilier@hdfcbank",
-    paidBy: "Rajesh Kumar (Finance Head)",
-    paidOn: "2026-01-01",
-    paidAt: "10:32 AM",
-    status: "success",
-    purpose: "Annual Enterprise Plan Renewal",
-    plan: "Enterprise",
-    renewalPeriod: "Jan 2026 – Dec 2026",
-    remarks: "Paid via PhonePe. Reference: HDFC0001234",
+const METHOD_CONFIG: Record<
+  PaymentMethod,
+  { label: string; color: string; icon: typeof Smartphone }
+> = {
+  upi: {
+    label: "UPI",
+    color: "bg-violet-500/15 text-violet-600 border-violet-500/30",
+    icon: QrCode,
   },
-  {
-    id: "PAY-002",
-    txnId: "UPI2602151155432109",
-    tenantId: "T-002",
-    tenantName: "Buildtech Infrastructure Ltd",
-    amount: 18000,
-    method: "upi",
-    upiId: "buildtech@ybl",
-    paidBy: "Priya Menon (Accounts)",
-    paidOn: "2026-02-15",
-    paidAt: "11:55 AM",
-    status: "success",
-    purpose: "Growth Plan Q1 Renewal",
-    plan: "Growth",
-    renewalPeriod: "Feb 2026 – May 2026",
-    remarks: "Paid via Google Pay",
+  neft: {
+    label: "NEFT",
+    color: "bg-blue-500/15 text-blue-600 border-blue-500/30",
+    icon: Building2,
   },
-  {
-    id: "PAY-003",
-    txnId: "NEFT260301093847261",
-    tenantId: "T-004",
-    tenantName: "Metro Projects Group",
-    amount: 18000,
-    method: "neft",
-    bankRef: "ICIC0MET2604123",
-    paidBy: "Sundar Rajan (CFO)",
-    paidOn: "2026-03-01",
-    paidAt: "09:38 AM",
-    status: "success",
-    purpose: "Growth Plan Q1 Renewal",
-    plan: "Growth",
-    renewalPeriod: "Mar 2026 – Jun 2026",
-    remarks: "NEFT transfer from ICICI Bank",
+  rtgs: {
+    label: "RTGS",
+    color: "bg-indigo-500/15 text-indigo-600 border-indigo-500/30",
+    icon: CreditCard,
   },
-  {
-    id: "PAY-004",
-    txnId: "UPI2601151438276510",
-    tenantId: "T-003",
-    tenantName: "Apex Realty Developers",
-    amount: 9000,
-    method: "upi",
-    upiId: "apexrealty@upi",
-    paidBy: "Kavita Singh (Admin)",
-    paidOn: "2025-12-01",
-    paidAt: "02:43 PM",
-    status: "success",
-    purpose: "Starter Plan Q4 2025 Renewal",
-    plan: "Starter",
-    renewalPeriod: "Dec 2025 – Mar 2026",
-    remarks: "Paid via Paytm",
+  imps: {
+    label: "IMPS",
+    color: "bg-cyan-500/15 text-cyan-600 border-cyan-500/30",
+    icon: Smartphone,
   },
-  {
-    id: "PAY-005",
-    txnId: "UPI2604030913847562",
-    tenantId: "T-002",
-    tenantName: "Buildtech Infrastructure Ltd",
-    amount: 18000,
-    method: "upi",
-    upiId: "buildtech@ybl",
-    paidBy: "Priya Menon (Accounts)",
-    paidOn: "2026-04-03",
-    paidAt: "09:13 AM",
-    status: "pending",
-    purpose: "Growth Plan Q2 Renewal",
-    plan: "Growth",
-    renewalPeriod: "May 2026 – Aug 2026",
-    remarks: "Awaiting bank confirmation",
+  bank_transfer: {
+    label: "Bank Transfer",
+    color: "bg-slate-500/15 text-slate-600 border-slate-500/30",
+    icon: Building2,
   },
-  {
-    id: "PAY-006",
-    txnId: "IMPS260325111938475",
-    tenantId: "T-001",
-    tenantName: "Civilier Constructions Pvt Ltd",
-    amount: 5000,
-    method: "imps",
-    bankRef: "HDFC9001234567",
-    paidBy: "Rajesh Kumar (Finance Head)",
-    paidOn: "2026-03-25",
-    paidAt: "11:19 AM",
-    status: "refunded",
-    purpose: "Add-on Storage Module",
-    plan: "Enterprise",
-    renewalPeriod: "—",
-    remarks: "Refunded: Feature bundled in Enterprise plan",
-  },
-];
-
-const METHOD_CONFIG: Record<PaymentMethod, { label: string; color: string; icon: typeof Smartphone }> = {
-  upi:           { label: "UPI",           color: "bg-violet-500/15 text-violet-600 border-violet-500/30", icon: QrCode },
-  neft:          { label: "NEFT",          color: "bg-blue-500/15 text-blue-600 border-blue-500/30",       icon: Building2 },
-  rtgs:          { label: "RTGS",          color: "bg-indigo-500/15 text-indigo-600 border-indigo-500/30", icon: CreditCard },
-  imps:          { label: "IMPS",          color: "bg-cyan-500/15 text-cyan-600 border-cyan-500/30",       icon: Smartphone },
-  bank_transfer: { label: "Bank Transfer", color: "bg-slate-500/15 text-slate-600 border-slate-500/30",    icon: Building2 },
 };
 
-const STATUS_CONFIG: Record<PaymentStatus, { label: string; color: string; icon: typeof CheckCircle2 }> = {
-  success:  { label: "Success",  color: "bg-green-500/15 text-green-600 border-green-500/30",    icon: CheckCircle2 },
-  pending:  { label: "Pending",  color: "bg-yellow-500/15 text-yellow-600 border-yellow-500/30", icon: Clock },
-  failed:   { label: "Failed",   color: "bg-red-500/15 text-red-600 border-red-500/30",          icon: XCircle },
-  refunded: { label: "Refunded", color: "bg-slate-500/15 text-slate-600 border-slate-500/30",    icon: RefreshCw },
+const STATUS_CONFIG: Record<
+  PaymentStatus,
+  { label: string; color: string; icon: typeof CheckCircle2 }
+> = {
+  success: {
+    label: "Success",
+    color: "bg-green-500/15 text-green-600 border-green-500/30",
+    icon: CheckCircle2,
+  },
+  pending: {
+    label: "Pending",
+    color: "bg-yellow-500/15 text-yellow-600 border-yellow-500/30",
+    icon: Clock,
+  },
+  failed: {
+    label: "Failed",
+    color: "bg-red-500/15 text-red-600 border-red-500/30",
+    icon: XCircle,
+  },
+  refunded: {
+    label: "Refunded",
+    color: "bg-slate-500/15 text-slate-600 border-slate-500/30",
+    icon: RefreshCw,
+  },
 };
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function PaymentLogs() {
-  const [logs] = useState<PaymentLog[]>(PAYMENT_LOGS);
+  const { data: logs = [] } = useQuery<PaymentLog[]>({
+    queryKey: ["dba-payment-logs"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/dba/payment-logs");
+      if (!res.ok) throw new Error("Failed to load payment logs");
+      const rows = await res.json();
+      // Normalize DB snake_case → component shape
+      return rows.map((r: any) => ({
+        id: String(r.Id),
+        txnId: r.txn_id,
+        tenantId: r.tenant_id ?? "",
+        tenantName: r.tenant_name ?? "",
+        amount: Number(r.amount),
+        method: r.method as PaymentMethod,
+        upiId: r.upi_id ?? undefined,
+        bankRef: r.bank_ref ?? undefined,
+        paidBy: r.paid_by ?? "",
+        paidOn: r.paid_on ? r.paid_on.split("T")[0] : "",
+        paidAt: r.paid_on
+          ? new Date(r.paid_on).toLocaleTimeString("en-IN", {
+              hour: "2-digit",
+              minute: "2-digit",
+            })
+          : "",
+        status: r.status as PaymentStatus,
+        purpose: r.purpose ?? "",
+        plan: r.plan ?? "",
+        renewalPeriod: r.renewal_period ?? "—",
+        remarks: r.remarks ?? "",
+      }));
+    },
+  });
+
   const [selected, setSelected] = useState<PaymentLog | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterMethod, setFilterMethod] = useState("all");
 
-  const filtered = logs.filter(l => {
-    const matchSearch = !search || l.tenantName.toLowerCase().includes(search.toLowerCase()) ||
+  const filtered = logs.filter((l) => {
+    const matchSearch =
+      !search ||
+      l.tenantName.toLowerCase().includes(search.toLowerCase()) ||
       l.txnId.toLowerCase().includes(search.toLowerCase()) ||
       l.paidBy.toLowerCase().includes(search.toLowerCase());
     const matchStatus = filterStatus === "all" || l.status === filterStatus;
@@ -210,10 +183,16 @@ export default function PaymentLogs() {
     return matchSearch && matchStatus && matchMethod;
   });
 
-  const totalReceived = logs.filter(l => l.status === "success").reduce((s, l) => s + l.amount, 0);
-  const pendingAmount = logs.filter(l => l.status === "pending").reduce((s, l) => s + l.amount, 0);
-  const successCount = logs.filter(l => l.status === "success").length;
-  const upiPayments = logs.filter(l => l.method === "upi" && l.status === "success").reduce((s, l) => s + l.amount, 0);
+  const totalReceived = logs
+    .filter((l) => l.status === "success")
+    .reduce((s, l) => s + l.amount, 0);
+  const pendingAmount = logs
+    .filter((l) => l.status === "pending")
+    .reduce((s, l) => s + l.amount, 0);
+  const successCount = logs.filter((l) => l.status === "success").length;
+  const upiPayments = logs
+    .filter((l) => l.method === "upi" && l.status === "success")
+    .reduce((s, l) => s + l.amount, 0);
 
   return (
     <div className="p-4 md:p-6 space-y-5 max-w-[1400px] mx-auto">
@@ -224,7 +203,9 @@ export default function PaymentLogs() {
           <h1 className="text-xl font-semibold flex items-center gap-2">
             <Receipt size={20} className="text-emerald-500" /> Payment Logs
           </h1>
-          <p className="text-xs text-muted-foreground mt-0.5">All received payments via UPI, NEFT, RTGS, IMPS</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            All received payments via UPI, NEFT, RTGS, IMPS
+          </p>
         </div>
         <Button variant="outline" size="sm" className="gap-1.5 text-xs">
           <Download size={12} /> Export CSV
@@ -234,10 +215,34 @@ export default function PaymentLogs() {
       {/* Stats */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {[
-          { label: "Total Received", value: `₹${(totalReceived / 1000).toFixed(0)}K`, icon: IndianRupee, color: "text-green-500", bg: "bg-green-500/10" },
-          { label: "Pending", value: `₹${(pendingAmount / 1000).toFixed(0)}K`, icon: Clock, color: "text-yellow-500", bg: "bg-yellow-500/10" },
-          { label: "Successful Txns", value: successCount, icon: CheckCircle2, color: "text-emerald-500", bg: "bg-emerald-500/10" },
-          { label: "UPI Collections", value: `₹${(upiPayments / 1000).toFixed(0)}K`, icon: QrCode, color: "text-violet-500", bg: "bg-violet-500/10" },
+          {
+            label: "Total Received",
+            value: `₹${(totalReceived / 1000).toFixed(0)}K`,
+            icon: IndianRupee,
+            color: "text-green-500",
+            bg: "bg-green-500/10",
+          },
+          {
+            label: "Pending",
+            value: `₹${(pendingAmount / 1000).toFixed(0)}K`,
+            icon: Clock,
+            color: "text-yellow-500",
+            bg: "bg-yellow-500/10",
+          },
+          {
+            label: "Successful Txns",
+            value: successCount,
+            icon: CheckCircle2,
+            color: "text-emerald-500",
+            bg: "bg-emerald-500/10",
+          },
+          {
+            label: "UPI Collections",
+            value: `₹${(upiPayments / 1000).toFixed(0)}K`,
+            icon: QrCode,
+            color: "text-violet-500",
+            bg: "bg-violet-500/10",
+          },
         ].map((s, i) => (
           <Card key={i}>
             <CardContent className="p-3 flex items-center gap-3">
@@ -246,7 +251,9 @@ export default function PaymentLogs() {
               </div>
               <div>
                 <div className="text-lg font-bold leading-none">{s.value}</div>
-                <div className="text-[10px] text-muted-foreground mt-0.5">{s.label}</div>
+                <div className="text-[10px] text-muted-foreground mt-0.5">
+                  {s.label}
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -256,42 +263,72 @@ export default function PaymentLogs() {
       {/* Filters */}
       <div className="flex flex-wrap gap-2 items-center">
         <div className="relative flex-1 min-w-[180px] max-w-xs">
-          <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Search
+            size={12}
+            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+          />
           <Input
             className="text-xs h-8 pl-7"
             placeholder="Search tenant, TXN ID, payer..."
             value={search}
-            onChange={e => setSearch(e.target.value)}
+            onChange={(e) => setSearch(e.target.value)}
           />
         </div>
         <Select value={filterStatus} onValueChange={setFilterStatus}>
-          <SelectTrigger className="text-xs h-8 w-32"><SelectValue placeholder="Status" /></SelectTrigger>
+          <SelectTrigger className="text-xs h-8 w-32">
+            <SelectValue placeholder="Status" />
+          </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all" className="text-xs">All Status</SelectItem>
-            <SelectItem value="success" className="text-xs">Success</SelectItem>
-            <SelectItem value="pending" className="text-xs">Pending</SelectItem>
-            <SelectItem value="failed" className="text-xs">Failed</SelectItem>
-            <SelectItem value="refunded" className="text-xs">Refunded</SelectItem>
+            <SelectItem value="all" className="text-xs">
+              All Status
+            </SelectItem>
+            <SelectItem value="success" className="text-xs">
+              Success
+            </SelectItem>
+            <SelectItem value="pending" className="text-xs">
+              Pending
+            </SelectItem>
+            <SelectItem value="failed" className="text-xs">
+              Failed
+            </SelectItem>
+            <SelectItem value="refunded" className="text-xs">
+              Refunded
+            </SelectItem>
           </SelectContent>
         </Select>
         <Select value={filterMethod} onValueChange={setFilterMethod}>
-          <SelectTrigger className="text-xs h-8 w-32"><SelectValue placeholder="Method" /></SelectTrigger>
+          <SelectTrigger className="text-xs h-8 w-32">
+            <SelectValue placeholder="Method" />
+          </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all" className="text-xs">All Methods</SelectItem>
-            <SelectItem value="upi" className="text-xs">UPI</SelectItem>
-            <SelectItem value="neft" className="text-xs">NEFT</SelectItem>
-            <SelectItem value="rtgs" className="text-xs">RTGS</SelectItem>
-            <SelectItem value="imps" className="text-xs">IMPS</SelectItem>
+            <SelectItem value="all" className="text-xs">
+              All Methods
+            </SelectItem>
+            <SelectItem value="upi" className="text-xs">
+              UPI
+            </SelectItem>
+            <SelectItem value="neft" className="text-xs">
+              NEFT
+            </SelectItem>
+            <SelectItem value="rtgs" className="text-xs">
+              RTGS
+            </SelectItem>
+            <SelectItem value="imps" className="text-xs">
+              IMPS
+            </SelectItem>
           </SelectContent>
         </Select>
-        <span className="text-xs text-muted-foreground">{filtered.length} of {logs.length} records</span>
+        <span className="text-xs text-muted-foreground">
+          {filtered.length} of {logs.length} records
+        </span>
       </div>
 
       {/* Logs Table */}
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-sm flex items-center gap-2">
-            <Receipt size={14} className="text-emerald-500" /> Transaction Ledger
+            <Receipt size={14} className="text-emerald-500" /> Transaction
+            Ledger
           </CardTitle>
         </CardHeader>
         <CardContent className="p-0">
@@ -322,11 +359,17 @@ export default function PaymentLogs() {
                         </span>
                       </TableCell>
                       <TableCell>
-                        <div className="font-medium text-[11px]">{log.tenantName}</div>
-                        <div className="text-muted-foreground text-[10px] font-mono">{log.tenantId}</div>
+                        <div className="font-medium text-[11px]">
+                          {log.tenantName}
+                        </div>
+                        <div className="text-muted-foreground text-[10px] font-mono">
+                          {log.tenantId}
+                        </div>
                       </TableCell>
                       <TableCell>
-                        <span className={`font-bold text-sm ${log.status === "success" ? "text-emerald-600" : log.status === "refunded" ? "text-slate-500 line-through" : "text-foreground"}`}>
+                        <span
+                          className={`font-bold text-sm ${log.status === "success" ? "text-emerald-600" : log.status === "refunded" ? "text-slate-500 line-through" : "text-foreground"}`}
+                        >
                           ₹{log.amount.toLocaleString()}
                         </span>
                       </TableCell>
@@ -337,16 +380,30 @@ export default function PaymentLogs() {
                       </TableCell>
                       <TableCell>
                         <div className="text-[11px]">{log.paidBy}</div>
-                        {log.upiId && <div className="font-mono text-[10px] text-muted-foreground">{log.upiId}</div>}
-                        {log.bankRef && <div className="font-mono text-[10px] text-muted-foreground">{log.bankRef}</div>}
+                        {log.upiId && (
+                          <div className="font-mono text-[10px] text-muted-foreground">
+                            {log.upiId}
+                          </div>
+                        )}
+                        {log.bankRef && (
+                          <div className="font-mono text-[10px] text-muted-foreground">
+                            {log.bankRef}
+                          </div>
+                        )}
                       </TableCell>
                       <TableCell>
-                        <div className="font-mono text-[10px]">{log.paidOn}</div>
-                        <div className="text-muted-foreground text-[10px]">{log.paidAt}</div>
+                        <div className="font-mono text-[10px]">
+                          {log.paidOn}
+                        </div>
+                        <div className="text-muted-foreground text-[10px]">
+                          {log.paidAt}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <div className="text-[11px]">{log.purpose}</div>
-                        <div className="text-muted-foreground text-[10px]">{log.plan} · {log.renewalPeriod}</div>
+                        <div className="text-muted-foreground text-[10px]">
+                          {log.plan} · {log.renewalPeriod}
+                        </div>
                       </TableCell>
                       <TableCell>
                         <Badge className={`text-[10px] gap-1 ${SC.color}`}>
@@ -358,7 +415,10 @@ export default function PaymentLogs() {
                           variant="ghost"
                           size="sm"
                           className="h-6 w-6 p-0"
-                          onClick={() => { setSelected(log); setDetailOpen(true); }}
+                          onClick={() => {
+                            setSelected(log);
+                            setDetailOpen(true);
+                          }}
                         >
                           <Eye size={11} />
                         </Button>
@@ -383,10 +443,16 @@ export default function PaymentLogs() {
           {selected && (
             <div className="space-y-4 py-1">
               {/* Receipt header */}
-              <div className={`rounded-lg p-3 text-center ${STATUS_CONFIG[selected.status].color} border`}>
+              <div
+                className={`rounded-lg p-3 text-center ${STATUS_CONFIG[selected.status].color} border`}
+              >
                 <StatusIcon status={selected.status} />
-                <div className="text-2xl font-bold mt-1">₹{selected.amount.toLocaleString()}</div>
-                <div className="text-xs font-medium">{STATUS_CONFIG[selected.status].label}</div>
+                <div className="text-2xl font-bold mt-1">
+                  ₹{selected.amount.toLocaleString()}
+                </div>
+                <div className="text-xs font-medium">
+                  {STATUS_CONFIG[selected.status].label}
+                </div>
               </div>
 
               <div className="space-y-2 text-xs">
@@ -394,26 +460,60 @@ export default function PaymentLogs() {
                   { label: "TXN ID", value: selected.txnId, mono: true },
                   { label: "Tenant", value: selected.tenantName },
                   { label: "Paid By", value: selected.paidBy },
-                  { label: "Method", value: METHOD_CONFIG[selected.method].label },
-                  selected.upiId ? { label: "UPI ID", value: selected.upiId, mono: true } : null,
-                  selected.bankRef ? { label: "Bank Ref", value: selected.bankRef, mono: true } : null,
-                  { label: "Date", value: `${selected.paidOn} at ${selected.paidAt}` },
+                  {
+                    label: "Method",
+                    value: METHOD_CONFIG[selected.method].label,
+                  },
+                  selected.upiId
+                    ? { label: "UPI ID", value: selected.upiId, mono: true }
+                    : null,
+                  selected.bankRef
+                    ? { label: "Bank Ref", value: selected.bankRef, mono: true }
+                    : null,
+                  {
+                    label: "Date",
+                    value: `${selected.paidOn} at ${selected.paidAt}`,
+                  },
                   { label: "Purpose", value: selected.purpose },
                   { label: "Plan", value: selected.plan },
                   { label: "Renewal Period", value: selected.renewalPeriod },
                   { label: "Remarks", value: selected.remarks },
-                ].filter(Boolean).map((row: any, i) => (
-                  <div key={i} className="flex justify-between gap-3 py-1 border-b border-dashed border-muted last:border-0">
-                    <span className="text-muted-foreground shrink-0">{row.label}</span>
-                    <span className={`text-right ${row.mono ? "font-mono text-[10px]" : ""}`}>{row.value}</span>
-                  </div>
-                ))}
+                ]
+                  .filter(Boolean)
+                  .map((row: any, i) => (
+                    <div
+                      key={i}
+                      className="flex justify-between gap-3 py-1 border-b border-dashed border-muted last:border-0"
+                    >
+                      <span className="text-muted-foreground shrink-0">
+                        {row.label}
+                      </span>
+                      <span
+                        className={`text-right ${row.mono ? "font-mono text-[10px]" : ""}`}
+                      >
+                        {row.value}
+                      </span>
+                    </div>
+                  ))}
               </div>
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" size="sm" className="text-xs" onClick={() => setDetailOpen(false)}>Close</Button>
-            <Button size="sm" className="text-xs gap-1" onClick={() => { setDetailOpen(false); }}>
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs"
+              onClick={() => setDetailOpen(false)}
+            >
+              Close
+            </Button>
+            <Button
+              size="sm"
+              className="text-xs gap-1"
+              onClick={() => {
+                setDetailOpen(false);
+              }}
+            >
               <Download size={11} /> Download Receipt
             </Button>
           </DialogFooter>
