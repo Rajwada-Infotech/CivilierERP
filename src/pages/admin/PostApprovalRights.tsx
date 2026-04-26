@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useState, useMemo, useCallback, useEffect } from "react";
 import {
   useAuth,
   PAGE_DEFINITIONS,
@@ -8,6 +8,7 @@ import {
   type AppUser,
 } from "@/contexts/AuthContext";
 
+import { getUsersForRights } from "@/api/userApi";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   ShieldCheck,
@@ -212,6 +213,17 @@ export default function PostApprovalRights() {
   const [deletingUserId, setDeletingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [userFilter, setUserFilter] = useState<string>("all");
+
+  // ── Dropdown users fetched directly from the users table ─────────────────
+  const [dropdownUsers, setDropdownUsers] = useState<
+    { id: number; name: string; role: string }[]
+  >([]);
+
+  useEffect(() => {
+    getUsersForRights()
+      .then(setDropdownUsers)
+      .catch((err) => console.warn("Failed to load dropdown users:", err));
+  }, []);
 
   // ── Derived table data ────────────────────────────────────────────────────
   const tableData = useMemo<PermissionRow[]>(() => {
@@ -688,13 +700,11 @@ export default function PostApprovalRights() {
                 className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-0 cursor-pointer"
               >
                 <option value="">Choose a user…</option>
-                {allUsers
-                  .filter((u) => u.role !== "super_admin")
-                  .map((u) => (
-                    <option key={u.id} value={u.id}>
-                      {u.name} · {u.role}
-                    </option>
-                  ))}
+                {dropdownUsers.map((u) => (
+                  <option key={u.id} value={String(u.id)}>
+                    {u.name} · {u.role}
+                  </option>
+                ))}
               </select>
             </div>
 
