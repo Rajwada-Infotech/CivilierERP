@@ -20,15 +20,12 @@ router.get("/", cache("purchase-orders", 300), async (req, res) => {
   try {
     const pool = getPool();
 
-    const page  = Math.max(parseInt(req.query.page)  || 1,  1);
-    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const page   = Math.max(parseInt(req.query.page)  || 1, 1);
+    const limit  = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
     const offset = (page - 1) * limit;
 
     const countResult = await pool.request().query(`
-      SELECT COUNT(*) AS total
-      FROM dbo.PurchaseOrders po
-      LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = po.SupplierID
-      LEFT JOIN dbo.enterprise en ON en.id = po.ProjectId
+      SELECT COUNT(*) AS total FROM dbo.PurchaseOrders
     `);
     const total = parseInt(countResult.recordset[0].total);
 
@@ -42,9 +39,11 @@ router.get("/", cache("purchase-orders", 300), async (req, res) => {
           po.PODate,
           po.ExpectedDeliveryDate,
           po.SupplierID,
-          ah.LHeadName AS SupplierName,
+          ah.LHeadName  AS SupplierName,
+          po.CompanyId,
+          co.name       AS CompanyName,
           po.ProjectId,
-          en.name AS ProjectName,
+          pr.name       AS ProjectName,
           po.ItemDescription,
           po.Quantity,
           po.Unit,
@@ -60,7 +59,8 @@ router.get("/", cache("purchase-orders", 300), async (req, res) => {
           po.ApprovedAt
         FROM dbo.PurchaseOrders po
         LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = po.SupplierID
-        LEFT JOIN dbo.enterprise en ON en.id = po.ProjectId
+        LEFT JOIN dbo.enterprise        co ON co.id      = po.CompanyId
+        LEFT JOIN dbo.enterprise        pr ON pr.id      = po.ProjectId
         ORDER BY po.PurchaseOrderID DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `);
@@ -70,7 +70,7 @@ router.get("/", cache("purchase-orders", 300), async (req, res) => {
       page,
       limit,
       total,
-      totalPages: Math.ceil(total / limit)
+      totalPages: Math.ceil(total / limit),
     });
   } catch (err) {
     console.error("GET PurchaseOrders error:", err);
@@ -82,8 +82,8 @@ router.get("/", cache("purchase-orders", 300), async (req, res) => {
 router.post("/", async (req, res) => {
   const {
     PurchaseOrderNo, PODate, ExpectedDeliveryDate,
-    SupplierID, ProjectId, ItemDescription,
-    Quantity, Unit, Rate, TotalAmount,
+    SupplierID, CompanyId, ProjectId,
+    ItemDescription, Quantity, Unit, Rate, TotalAmount,
     PaymentTerms, Status, Remarks,
   } = req.body;
 
@@ -91,7 +91,7 @@ router.post("/", async (req, res) => {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
 
-    await guardEdit("purchase-orders", id);
+    // guardEdit is only for updates — removed from POST (no ID exists yet)
 
     const pool = getPool();
     const result = await pool
@@ -100,6 +100,7 @@ router.post("/", async (req, res) => {
       .input("PODate",               sql.Date,           PODate || null)
       .input("ExpectedDeliveryDate", sql.Date,           ExpectedDeliveryDate || null)
       .input("SupplierID",           sql.Int,            SupplierID ? parseInt(SupplierID, 10) : null)
+      .input("CompanyId",            sql.Int,            CompanyId  ? parseInt(CompanyId,  10) : null)
       .input("ProjectId",            sql.Int,            ProjectId  ? parseInt(ProjectId,  10) : null)
       .input("ItemDescription",      sql.NVarChar(510),  ItemDescription || null)
       .input("Quantity",             sql.Decimal(18, 2), parseFloat(Quantity)    || 0)
@@ -109,19 +110,19 @@ router.post("/", async (req, res) => {
       .input("PaymentTerms",         sql.NVarChar(255),  PaymentTerms || null)
       .input("Status",               sql.NVarChar(50),   Status || "Draft")
       .input("Remarks",              sql.NVarChar(500),  Remarks || null)
-      .input("CreatedBy",            sql.NVarChar(100),  userEmail)  // ✅ real email, was req.user.id
+      .input("CreatedBy",            sql.NVarChar(100),  userEmail)
       .input("CreatedAt",            sql.DateTime2,      new Date())
       .query(`
         INSERT INTO dbo.PurchaseOrders (
           PurchaseOrderNo, PODate, ExpectedDeliveryDate,
-          SupplierID, ProjectId,
+          SupplierID, CompanyId, ProjectId,
           ItemDescription, Quantity, Unit, Rate, TotalAmount,
           PaymentTerms, Status, Remarks, CreatedBy, CreatedAt
         )
         OUTPUT INSERTED.PurchaseOrderID
         VALUES (
           @PurchaseOrderNo, @PODate, @ExpectedDeliveryDate,
-          @SupplierID, @ProjectId,
+          @SupplierID, @CompanyId, @ProjectId,
           @ItemDescription, @Quantity, @Unit, @Rate, @TotalAmount,
           @PaymentTerms, @Status, @Remarks, @CreatedBy, @CreatedAt
         )
@@ -143,14 +144,16 @@ router.put("/:id", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const {
     PurchaseOrderNo, PODate, ExpectedDeliveryDate,
-    SupplierID, ProjectId, ItemDescription,
-    Quantity, Unit, Rate, TotalAmount,
+    SupplierID, CompanyId, ProjectId,
+    ItemDescription, Quantity, Unit, Rate, TotalAmount,
     PaymentTerms, Status, Remarks,
   } = req.body;
 
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
+
+    await guardEdit("purchase-orders", id);
 
     const pool = getPool();
     const result = await pool
@@ -160,6 +163,7 @@ router.put("/:id", async (req, res) => {
       .input("PODate",               sql.Date,           PODate || null)
       .input("ExpectedDeliveryDate", sql.Date,           ExpectedDeliveryDate || null)
       .input("SupplierID",           sql.Int,            SupplierID ? parseInt(SupplierID, 10) : null)
+      .input("CompanyId",            sql.Int,            CompanyId  ? parseInt(CompanyId,  10) : null)
       .input("ProjectId",            sql.Int,            ProjectId  ? parseInt(ProjectId,  10) : null)
       .input("ItemDescription",      sql.NVarChar(510),  ItemDescription || null)
       .input("Quantity",             sql.Decimal(18, 2), parseFloat(Quantity)    || 0)
@@ -169,7 +173,7 @@ router.put("/:id", async (req, res) => {
       .input("PaymentTerms",         sql.NVarChar(255),  PaymentTerms || null)
       .input("Status",               sql.NVarChar(50),   Status || "Draft")
       .input("Remarks",              sql.NVarChar(500),  Remarks || null)
-      .input("UpdatedBy",            sql.NVarChar(100),  userEmail)  // ✅ real email, was req.user.id
+      .input("UpdatedBy",            sql.NVarChar(100),  userEmail)
       .input("UpdatedAt",            sql.DateTime2,      new Date())
       .query(`
         UPDATE dbo.PurchaseOrders SET
@@ -177,6 +181,7 @@ router.put("/:id", async (req, res) => {
           PODate               = @PODate,
           ExpectedDeliveryDate = @ExpectedDeliveryDate,
           SupplierID           = @SupplierID,
+          CompanyId            = @CompanyId,
           ProjectId            = @ProjectId,
           ItemDescription      = @ItemDescription,
           Quantity             = @Quantity,
@@ -191,9 +196,8 @@ router.put("/:id", async (req, res) => {
         WHERE PurchaseOrderID = @PurchaseOrderID
       `);
 
-    if (result.rowsAffected[0] === 0) {
+    if (result.rowsAffected[0] === 0)
       return res.status(404).json({ error: "Purchase order not found" });
-    }
 
     await bumpCacheVersion("purchase-orders");
     res.json({ message: "Purchase order updated successfully" });
@@ -208,15 +212,13 @@ router.delete("/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
     const pool = getPool();
-
     const result = await pool
       .request()
       .input("PurchaseOrderID", sql.Int, id)
       .query("DELETE FROM dbo.PurchaseOrders WHERE PurchaseOrderID = @PurchaseOrderID");
 
-    if (result.rowsAffected[0] === 0) {
+    if (result.rowsAffected[0] === 0)
       return res.status(404).json({ error: "Purchase order not found" });
-    }
 
     await bumpCacheVersion("purchase-orders");
     res.json({ message: "Purchase order deleted successfully" });
@@ -232,7 +234,6 @@ router.put("/:id/submit", async (req, res) => {
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-
     const result = await transition("purchase-orders", id, "Pending", userEmail, req.user?.role);
     await bumpCacheVersion("purchase-orders");
     res.json({ message: "Purchase order submitted for approval", ...result });
@@ -243,40 +244,33 @@ router.put("/:id/submit", async (req, res) => {
 });
 
 // ── PUT /:id/approve — Pending → Approved ─────────────────────────────────────
-// Requires role: admin | super_admin | dba
 router.put("/:id/approve", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-
     const result = await transition("purchase-orders", id, "Approved", userEmail, req.user?.role);
     await bumpCacheVersion("purchase-orders");
     res.json({ message: "Purchase order approved", ...result });
   } catch (err) {
     console.error("PO approve error:", err.message);
-    const status = err.message.includes("not authorized") ? 403 : 400;
-    res.status(status).json({ error: err.message });
+    res.status(err.message.includes("not authorized") ? 403 : 400).json({ error: err.message });
   }
 });
 
 // ── PUT /:id/reject — Pending → Rejected ──────────────────────────────────────
-// Requires role: admin | super_admin | dba
-// Body: { note: "Reason for rejection" }
 router.put("/:id/reject", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const { note } = req.body;
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-
     const result = await transition("purchase-orders", id, "Rejected", userEmail, req.user?.role, note || null);
     await bumpCacheVersion("purchase-orders");
     res.json({ message: "Purchase order rejected", ...result });
   } catch (err) {
     console.error("PO reject error:", err.message);
-    const status = err.message.includes("not authorized") ? 403 : 400;
-    res.status(status).json({ error: err.message });
+    res.status(err.message.includes("not authorized") ? 403 : 400).json({ error: err.message });
   }
 });
 
