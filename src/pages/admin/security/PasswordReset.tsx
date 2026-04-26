@@ -2,11 +2,19 @@ import React, { useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
-import { Eye, EyeOff, KeyRound, RefreshCw, Search, Shield, User } from "lucide-react";
+import {
+  Eye,
+  EyeOff,
+  KeyRound,
+  RefreshCw,
+  Search,
+  Shield,
+  User,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -15,16 +23,22 @@ import {
   DialogFooter,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { resetUserPassword } from "@/api/userApi";
 
 export default function PasswordReset() {
   const { allUsers } = useAuth();
   const [filter, setFilter] = useState("");
-  const [selectedUser, setSelectedUser] = useState<{ id: string; name: string; email: string } | null>(null);
+  const [selectedUser, setSelectedUser] = useState<{
+    id: string;
+    name: string;
+    email: string;
+  } | null>(null);
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [showNew, setShowNew] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
 
   const filtered = allUsers.filter(
     (u) =>
@@ -39,7 +53,7 @@ export default function PasswordReset() {
     setDialogOpen(true);
   };
 
-  const handleReset = () => {
+  const handleReset = async () => {
     if (!newPassword || newPassword.length < 6) {
       toast.error("Password must be at least 6 characters.");
       return;
@@ -48,15 +62,25 @@ export default function PasswordReset() {
       toast.error("Passwords do not match.");
       return;
     }
-    // In a real app, call API here
-    toast.success(`Password reset successfully for ${selectedUser?.name}.`);
-    setDialogOpen(false);
-    setSelectedUser(null);
+    if (!selectedUser) return;
+    setLoading(true);
+    try {
+      await resetUserPassword(Number(selectedUser.id), newPassword);
+      toast.success(`Password reset successfully for ${selectedUser.name}.`);
+      setDialogOpen(false);
+      setSelectedUser(null);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to reset password.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "Admin", "Security", "Password Reset"]} />
+      <Breadcrumbs
+        items={["Dashboard", "Admin", "Security", "Password Reset"]}
+      />
       <div className="space-y-5">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -72,7 +96,10 @@ export default function PasswordReset() {
 
         {/* Search */}
         <div className="relative max-w-sm">
-          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <Search
+            size={14}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+          />
           <Input
             placeholder="Search by name or email..."
             value={filter}
@@ -84,7 +111,9 @@ export default function PasswordReset() {
         {/* User cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.length === 0 && (
-            <p className="text-sm text-muted-foreground col-span-full py-8 text-center">No users found.</p>
+            <p className="text-sm text-muted-foreground col-span-full py-8 text-center">
+              No users found.
+            </p>
           )}
           {filtered.map((user) => (
             <Card key={user.id} className="border-border/60">
@@ -94,8 +123,12 @@ export default function PasswordReset() {
                     <User size={16} className="text-primary" />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="font-semibold text-sm text-foreground truncate">{user.name}</p>
-                    <p className="text-xs text-muted-foreground truncate">{user.email}</p>
+                    <p className="font-semibold text-sm text-foreground truncate">
+                      {user.name}
+                    </p>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {user.email}
+                    </p>
                   </div>
                   <span
                     className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-heading border shrink-0 ${
@@ -104,7 +137,9 @@ export default function PasswordReset() {
                         : "bg-destructive/10 text-destructive border-destructive/20"
                     }`}
                   >
-                    <span className={`w-1.5 h-1.5 rounded-full mr-1 ${user.isActive ? "bg-emerald-500" : "bg-destructive"}`} />
+                    <span
+                      className={`w-1.5 h-1.5 rounded-full mr-1 ${user.isActive ? "bg-emerald-500" : "bg-destructive"}`}
+                    />
                     {user.isActive ? "Active" : "Inactive"}
                   </span>
                 </div>
@@ -112,7 +147,13 @@ export default function PasswordReset() {
                   variant="outline"
                   size="sm"
                   className="w-full gap-2 text-xs"
-                  onClick={() => openReset({ id: user.id, name: user.name, email: user.email })}
+                  onClick={() =>
+                    openReset({
+                      id: user.id,
+                      name: user.name,
+                      email: user.email,
+                    })
+                  }
                 >
                   <KeyRound size={13} />
                   Reset Password
@@ -132,7 +173,11 @@ export default function PasswordReset() {
               Reset Password
             </DialogTitle>
             <DialogDescription>
-              Resetting password for <span className="font-semibold text-foreground">{selectedUser?.name}</span> ({selectedUser?.email})
+              Resetting password for{" "}
+              <span className="font-semibold text-foreground">
+                {selectedUser?.name}
+              </span>{" "}
+              ({selectedUser?.email})
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-1">
@@ -176,8 +221,27 @@ export default function PasswordReset() {
             </div>
           </div>
           <DialogFooter className="gap-2">
-            <Button variant="outline" size="sm" onClick={() => setDialogOpen(false)}>Cancel</Button>
-            <Button size="sm" className="gradient-accent" onClick={handleReset}>Reset Password</Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setDialogOpen(false)}
+              disabled={loading}
+            >
+              Cancel
+            </Button>
+            <Button
+              size="sm"
+              className="gradient-accent gap-2"
+              onClick={handleReset}
+              disabled={loading}
+            >
+              {loading ? (
+                <RefreshCw size={13} className="animate-spin" />
+              ) : (
+                <KeyRound size={13} />
+              )}
+              {loading ? "Resetting…" : "Reset Password"}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

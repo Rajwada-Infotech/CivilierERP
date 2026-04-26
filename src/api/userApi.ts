@@ -132,6 +132,22 @@ export const saveUserPermissions = async (
   return res.json();
 };
 
+export const resetUserPassword = async (
+  id: number,
+  new_password: string,
+): Promise<{ message: string }> => {
+  const res = await fetch(`${BASE_URL}/${id}/reset-password`, {
+    method: "PATCH",
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ new_password }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || "Failed to reset password");
+  }
+  return res.json();
+};
+
 export default {
   loginUser,
   getUsers,
@@ -141,4 +157,5 @@ export default {
   getUsersForRights,
   getUserPermissions,
   saveUserPermissions,
+  resetUserPassword,
 };
