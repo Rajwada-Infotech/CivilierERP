@@ -19,6 +19,7 @@ import {
   X,
   RefreshCw,
 } from "lucide-react";
+import { formatINR } from "@/utils/formatCurrency";
 import { format } from "date-fns";
 import {
   getBRS,
@@ -188,7 +189,7 @@ export default function Brs() {
   const summaryStats = [
     {
       label:     "Total Amount",
-      value:     `₹${totalAmount.toLocaleString("en-IN")}`,
+      value:     formatINR(totalAmount),
       icon:      IndianRupee,
       iconColor: "text-primary",
       iconBg:    "bg-primary/10",
@@ -452,7 +453,7 @@ export default function Brs() {
 
                     {/* Amount */}
                     <td className="px-5 py-3.5 text-right font-mono font-medium text-foreground">
-                      ₹{p.amount.toLocaleString("en-IN")}
+                      {formatINR(p.amount)}
                     </td>
 
                     {/* Date */}

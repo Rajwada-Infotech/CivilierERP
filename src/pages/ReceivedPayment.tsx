@@ -56,8 +56,7 @@ import {
   approveReceivedPayment,
 } from "@/api/receivedPaymentApi";
 import { getBanks, type BankRecord } from "@/api/bankMasterApi";
-import { getEnterprises } from "@/api/enterpriseApi";
-import { getWorkOrders } from "@/api/workOrderApi";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -100,6 +99,13 @@ export type ReceivedPayment = {
   emiPaying?: number[];
 };
 
+// Project shape from /api/project-master (now includes CompanyName from JOIN)
+interface ProjectOption {
+  Id: number;
+  Name: string;
+  CompanyName: string | null;
+}
+
 // ─── Static Data ──────────────────────────────────────────────────────────────
 
 const PAYMENT_MODES: PaymentMode[] = [
@@ -114,8 +120,9 @@ const PAYMENT_MODES: PaymentMode[] = [
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const fmt = (n: number) =>
-  `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+import { formatINR } from "@/utils/formatCurrency";
+
+const fmt = (n: number) => formatINR(n, { decimals: 2 });
 
 const generateEmiSchedule = (
   total: number,
@@ -181,7 +188,7 @@ function EmptyState() {
   );
 }
 
-// ─── EMI Schedule Table — calm neutral palette ────────────────────────────────
+// ─── EMI Schedule Table ────────────────────────────────────────────────────────
 
 function EmiScheduleTable({
   schedule,
@@ -199,7 +206,6 @@ function EmiScheduleTable({
 
   return (
     <div className="rounded-lg border border-border overflow-hidden">
-      {/* Summary banner — neutral tones */}
       <div className="grid grid-cols-3 divide-x divide-border bg-muted/40 border-b border-border">
         <div className="px-3 py-2.5 text-center">
           <p className="text-[10px] text-muted-foreground mb-0.5 uppercase tracking-wide font-semibold">
@@ -227,7 +233,6 @@ function EmiScheduleTable({
         </div>
       </div>
 
-      {/* Column headers */}
       <div className="grid grid-cols-[20px_48px_1fr_80px] gap-2 items-center px-3 py-2 bg-muted/20 border-b border-border">
         <div />
         <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
@@ -241,7 +246,6 @@ function EmiScheduleTable({
         </span>
       </div>
 
-      {/* Rows */}
       <div className="divide-y divide-border max-h-52 overflow-y-auto">
         {schedule.map((e) => {
           const isPaying = payingNos.includes(e.emiNo);
@@ -254,7 +258,6 @@ function EmiScheduleTable({
               className={`w-full grid grid-cols-[20px_48px_1fr_80px] gap-2 items-center px-3 py-2.5 text-left transition-colors
                 ${isPaying ? "bg-muted/50" : "hover:bg-muted/30"}`}
             >
-              {/* Checkbox — plain, no loud color */}
               <div
                 className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors
                 ${isPaying ? "bg-foreground border-foreground" : "border-border bg-background"}`}
@@ -285,7 +288,6 @@ function EmiScheduleTable({
         })}
       </div>
 
-      {/* Footer */}
       {payingNos.length > 0 ? (
         <div className="px-3 py-2.5 border-t border-border bg-muted/20 flex items-center justify-between">
           <span className="text-xs text-muted-foreground">
@@ -344,8 +346,9 @@ export default function ReceivedPaymentPage() {
   const [emiPayingNos, setEmiPayingNos] = useState<number[]>([]);
   const [emiFetching, setEmiFetching] = useState(false);
   const [banks, setBanks] = useState<BankRecord[]>([]);
-  const [companies, setCompanies] = useState<{ id: number; name: string }[]>([]);
-  const [projects, setProjects] = useState<{ id: number; name: string }[]>([]);
+
+  // Projects from /api/project-master — includes CompanyName via JOIN
+  const [projects, setProjects] = useState<ProjectOption[]>([]);
 
   // Auto-generate transaction ID: TXN-YYYYMMDD-XXXXXX
   const generateTxnId = () => {
@@ -361,52 +364,52 @@ export default function ReceivedPaymentPage() {
       .catch(() => {});
   }, []);
 
+  // Fetch projects from project-master (includes CompanyName)
   useEffect(() => {
-    getEnterprises()
-      .then((data: any[]) =>
-        setCompanies(
-          data
-            .filter((e) => !e.discontinue && e.status !== "Inactive")
-            .map((e) => ({ id: e.id, name: e.name }))
-        )
-      )
-      .catch(() => {});
-  }, []);
-
-  useEffect(() => {
-    getWorkOrders()
-      .then((res: any) => {
-        const rows = Array.isArray(res) ? res : res.data ?? [];
-        const seen = new Set<string>();
-        const unique: { id: number; name: string }[] = [];
-        for (const wo of rows) {
-          if (wo.ProjectName && !seen.has(wo.ProjectName)) {
-            seen.add(wo.ProjectName);
-            unique.push({ id: wo.ProjectId, name: wo.ProjectName });
-          }
-        }
-        setProjects(unique);
+    fetchWithAuth("/api/project-master")
+      .then((res) => res.json())
+      .then((data: any[]) => {
+        setProjects(
+          (Array.isArray(data) ? data : []).map((p) => ({
+            Id: p.Id,
+            Name: p.Name ?? "",
+            CompanyName: p.CompanyName ?? "",
+          }))
+        );
       })
       .catch(() => {});
   }, []);
+
+  // When project changes, auto-fill companyName
+  const handleProjectChange = (projectName: string) => {
+    const selected = projects.find((p) => p.Name === projectName);
+    setForm((f) => ({
+      ...f,
+      projectName,
+      companyName: selected?.CompanyName ?? f.companyName,
+    }));
+  };
 
   useEffect(() => {
     if (form.mode === "EMI" && form.projectName) {
       setEmiFetching(true);
       setEmiSchedule([]);
       setEmiPayingNos([]);
-      const project = projects.find((p) => p.name === form.projectName);
+      const project = projects.find((p) => p.Name === form.projectName);
       if (!project) {
         setEmiFetching(false);
         return;
       }
-      getWorkOrders()
+      // Fetch work orders for this project's EMI schedule
+      import("@/api/workOrderApi")
+        .then(({ getWorkOrders }) => getWorkOrders())
         .then((res: any) => {
           const rows = Array.isArray(res) ? res : res.data ?? [];
-          // Find the most recent work order for this project
-          const wo = rows.find((w: any) => w.ProjectId === project.id || w.ProjectName === form.projectName);
+          const wo = rows.find(
+            (w: any) =>
+              w.ProjectId === project.Id || w.ProjectName === form.projectName
+          );
           if (wo && wo.TotalAmount && wo.DocumentDate) {
-            // Default to 6 months if no EMI months stored
             const months = wo.EmiMonths ?? wo.emiMonths ?? 6;
             const total = Number(wo.TotalAmount);
             const startDate = wo.DocumentDate.slice(0, 10);
@@ -535,7 +538,6 @@ export default function ReceivedPaymentPage() {
 
   useEffect(() => { loadPayments(1); }, [loadPayments]);
 
-
   const setField = (key: keyof typeof EMPTY_FORM, value: string) =>
     setForm((f) => ({ ...f, [key]: value }));
 
@@ -587,8 +589,8 @@ export default function ReceivedPaymentPage() {
     }
 
     const newPay: ReceivedPayment = {
-      id: "",        // will be assigned by DB
-      docNo: "",     // will be formatted after DB insert
+      id: "",
+      docNo: "",
       companyName: form.companyName,
       receivedFrom: form.receivedFrom.trim(),
       projectName: form.projectName,
@@ -611,8 +613,6 @@ export default function ReceivedPaymentPage() {
       emiPaying: isEmi ? emiPayingNos : undefined,
     };
 
-    // POST to API
-    // addReceivedPayment imported statically above
     try {
       await addReceivedPayment({
         RPCompanyName:  newPay.companyName,
@@ -633,10 +633,10 @@ export default function ReceivedPaymentPage() {
         RPEmiSchedule:  newPay.emiSchedule ? JSON.stringify(newPay.emiSchedule) : null,
         RPEmiPaying:    newPay.emiPaying ? JSON.stringify(newPay.emiPaying) : null,
       });
-      toast.success('Payment recorded successfully');
+      toast.success("Payment recorded successfully");
       await loadPayments(1);
     } catch (err) {
-      toast.error('Failed to save payment');
+      toast.error("Failed to save payment");
       console.error(err);
       return;
     }
@@ -649,12 +649,11 @@ export default function ReceivedPaymentPage() {
 
   const deletePayment = async (id: string) => {
     try {
-      // deleteReceivedPayment imported statically above
       await deleteReceivedPayment(Number(id));
-      toast.success('Payment deleted');
+      toast.success("Payment deleted");
       await loadPayments(currentPage);
     } catch (err) {
-      toast.error('Failed to delete payment');
+      toast.error("Failed to delete payment");
       console.error(err);
     }
   };
@@ -708,7 +707,7 @@ export default function ReceivedPaymentPage() {
     <>
       <Breadcrumbs items={["Finance", "Received Payments"]} />
 
-      {/* Header — single Add Payment button */}
+      {/* Header */}
       <div className="flex items-center justify-between mb-5 gap-4">
         <div>
           <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
@@ -1062,7 +1061,7 @@ export default function ReceivedPaymentPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Dialog */}
+      {/* Add / Edit Dialog */}
       <Dialog open={isOpen} onOpenChange={(open) => {
         if (!open) { setIsOpen(false); setEditingId(null); setForm(EMPTY_FORM); setDate(new Date()); }
       }}>
@@ -1080,30 +1079,44 @@ export default function ReceivedPaymentPage() {
           </DialogHeader>
 
           <div className="space-y-4 py-1">
-            {/* Company */}
+
+            {/* Project — select first, company auto-fills */}
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Company Name <span className="text-red-500">*</span>
+                Project <span className="text-red-500">*</span>
               </label>
               <Select
-                value={form.companyName}
-                onValueChange={(v) => setField("companyName", v)}
+                value={form.projectName}
+                onValueChange={handleProjectChange}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder="Select company…" />
+                  <SelectValue placeholder="Select project" />
                 </SelectTrigger>
                 <SelectContent>
-                  {companies.length === 0 ? (
-                    <SelectItem value="__none__" disabled>No companies found</SelectItem>
+                  {projects.length === 0 ? (
+                    <SelectItem value="__none__" disabled>No projects found</SelectItem>
                   ) : (
-                    companies.map((c) => (
-                      <SelectItem key={c.id} value={c.name}>
-                        {c.name}
+                    projects.map((p) => (
+                      <SelectItem key={p.Id} value={p.Name}>
+                        {p.Name}
                       </SelectItem>
                     ))
                   )}
                 </SelectContent>
               </Select>
+            </div>
+
+            {/* Company — read-only, auto-filled when project is selected */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                Company Name <span className="text-red-500">*</span>
+              </label>
+              <Input
+                value={form.companyName}
+                readOnly
+                placeholder="Auto-filled on project select"
+                className="bg-muted/40 text-muted-foreground cursor-not-allowed"
+              />
             </div>
 
             {/* Received From */}
@@ -1116,32 +1129,6 @@ export default function ReceivedPaymentPage() {
                 value={form.receivedFrom}
                 onChange={(e) => setField("receivedFrom", e.target.value)}
               />
-            </div>
-
-            {/* Project */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Project <span className="text-red-500">*</span>
-              </label>
-              <Select
-                value={form.projectName}
-                onValueChange={(v) => setField("projectName", v)}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select project" />
-                </SelectTrigger>
-                <SelectContent>
-                  {projects.length === 0 ? (
-                    <SelectItem value="__none__" disabled>No projects found</SelectItem>
-                  ) : (
-                    projects.map((p) => (
-                      <SelectItem key={p.id} value={p.name}>
-                        {p.name}
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
             </div>
 
             {/* Date + Mode */}
@@ -1224,7 +1211,7 @@ export default function ReceivedPaymentPage() {
               </div>
             )}
 
-            {/* EMI section — calm neutral palette, no loud rose */}
+            {/* EMI section */}
             {isEmiMode && (
               <div className="rounded-lg border border-border bg-muted/20 p-4 space-y-3">
                 <div className="flex items-center gap-2 mb-1">
