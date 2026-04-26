@@ -428,6 +428,8 @@ export const TopNavbar = () => {
       location.pathname.startsWith("/users") ||
       ADMIN_PATHS.some((p) => location.pathname.startsWith(p)));
 
+  const isDbaPage = isDba && location.pathname.startsWith("/dba");
+
   const RoleIcon = isSuperAdmin
     ? Crown
     : isDba
@@ -725,6 +727,44 @@ export const TopNavbar = () => {
                         Users, rights & config
                       </p>
                     </div>
+                  </button>
+                </>
+              )}
+              {isDba && (
+                <>
+                  <div className="mx-3 my-1.5 border-t border-border" />
+                  <button
+                    onClick={() => {
+                      navigate("/dba");
+                      setModuleOpen(false);
+                    }}
+                    className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${isDbaPage ? "bg-emerald-500/10 text-emerald-600" : "hover:bg-muted"}`}
+                  >
+                    <span
+                      className={`flex items-center justify-center w-7 h-7 rounded-md bg-muted group-hover:bg-muted-foreground/10 ${isDbaPage ? "bg-emerald-500/15" : ""}`}
+                    >
+                      <Database
+                        size={14}
+                        className={
+                          isDbaPage
+                            ? "text-emerald-500"
+                            : "text-muted-foreground group-hover:text-foreground"
+                        }
+                      />
+                    </span>
+                    <div className="flex-1 text-left">
+                      <p
+                        className={`text-sm font-heading font-medium leading-none ${isDbaPage ? "text-emerald-600" : ""}`}
+                      >
+                        DBA Console
+                      </p>
+                      <p className="text-[11px] text-muted-foreground mt-0.5">
+                        DB tools, ads & reminders
+                      </p>
+                    </div>
+                    {isDbaPage && (
+                      <span className="w-1.5 h-1.5 rounded-full flex-shrink-0 bg-emerald-500" />
+                    )}
                   </button>
                 </>
               )}

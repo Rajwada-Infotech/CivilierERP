@@ -1,13 +1,14 @@
 const express = require("express");
-const router  = express.Router();
-const { getPool, sql }      = require("../db");
-const { cache }             = require("../middleware/cache");
-const { bumpCacheVersion }  = require("../redis");
+const router = express.Router();
+const { getPool, sql } = require("../db");
+const { cache } = require("../middleware/cache");
+const { bumpCacheVersion } = require("../redis");
+const authMiddleware = require("../middleware/auth");
 
 const CACHE_NS = "approval-workflows";
 
 // GET all workflows — cached 60s
-router.get("/", cache(CACHE_NS, 60), async (req, res) => {
+router.get("/", authMiddleware, cache(CACHE_NS, 60), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -17,9 +18,9 @@ router.get("/", cache(CACHE_NS, 60), async (req, res) => {
       FROM dbo.ApprovalWorkflows
       ORDER BY CreatedAt DESC
     `);
-    const data = result.recordset.map(w => ({
+    const data = result.recordset.map((w) => ({
       ...w,
-      approvers: w.approvers ? w.approvers.split(",").map(s => s.trim()) : [],
+      approvers: w.approvers ? w.approvers.split(",").map((s) => s.trim()) : [],
     }));
     res.json(data);
   } catch (err) {
@@ -28,27 +29,28 @@ router.get("/", cache(CACHE_NS, 60), async (req, res) => {
 });
 
 // POST — create workflow
-router.post("/", async (req, res) => {
+router.post("/", authMiddleware, async (req, res) => {
   const { name, module, levels, approvers, status, description } = req.body;
-  if (!name?.trim())   return res.status(400).json({ error: "Name is required" });
-  if (!module?.trim()) return res.status(400).json({ error: "Module is required" });
+  if (!name?.trim()) return res.status(400).json({ error: "Name is required" });
+  if (!module?.trim())
+    return res.status(400).json({ error: "Module is required" });
 
   try {
     const pool = getPool();
     const approversStr = Array.isArray(approvers)
       ? approvers.join(",")
-      : (approvers || "");
+      : approvers || "";
 
-    await pool.request()
-      .input("Name",        sql.NVarChar(100), name.trim())
-      .input("Module",      sql.NVarChar(100), module.trim())
-      .input("Levels",      sql.Int,           levels || 1)
-      .input("Approvers",   sql.NVarChar(500), approversStr || null)
-      .input("Status",      sql.NVarChar(20),  status || "Active")
+    await pool
+      .request()
+      .input("Name", sql.NVarChar(100), name.trim())
+      .input("Module", sql.NVarChar(100), module.trim())
+      .input("Levels", sql.Int, levels || 1)
+      .input("Approvers", sql.NVarChar(500), approversStr || null)
+      .input("Status", sql.NVarChar(20), status || "Active")
       .input("Description", sql.NVarChar(500), description || null)
-      .input("CreatedBy",   sql.NVarChar(100), req.user?.email || null)
-      .input("CreatedAt",   sql.DateTime2,     new Date())
-      .query(`
+      .input("CreatedBy", sql.NVarChar(100), req.user?.email || null)
+      .input("CreatedAt", sql.DateTime2, new Date()).query(`
         INSERT INTO dbo.ApprovalWorkflows
           (Name, Module, Levels, Approvers, Status, Description, CreatedBy, CreatedAt)
         VALUES
@@ -63,25 +65,25 @@ router.post("/", async (req, res) => {
 });
 
 // PUT — update workflow
-router.put("/:id", async (req, res) => {
+router.put("/:id", authMiddleware, async (req, res) => {
   const { name, module, levels, approvers, status, description } = req.body;
   try {
     const pool = getPool();
     const approversStr = Array.isArray(approvers)
       ? approvers.join(",")
-      : (approvers || "");
+      : approvers || "";
 
-    await pool.request()
-      .input("Id",          sql.Int,           req.params.id)
-      .input("Name",        sql.NVarChar(100), name?.trim() || null)
-      .input("Module",      sql.NVarChar(100), module?.trim() || null)
-      .input("Levels",      sql.Int,           levels || 1)
-      .input("Approvers",   sql.NVarChar(500), approversStr || null)
-      .input("Status",      sql.NVarChar(20),  status || "Active")
+    await pool
+      .request()
+      .input("Id", sql.Int, req.params.id)
+      .input("Name", sql.NVarChar(100), name?.trim() || null)
+      .input("Module", sql.NVarChar(100), module?.trim() || null)
+      .input("Levels", sql.Int, levels || 1)
+      .input("Approvers", sql.NVarChar(500), approversStr || null)
+      .input("Status", sql.NVarChar(20), status || "Active")
       .input("Description", sql.NVarChar(500), description || null)
-      .input("UpdatedBy",   sql.NVarChar(100), req.user?.email || null)
-      .input("UpdatedAt",   sql.DateTime2,     new Date())
-      .query(`
+      .input("UpdatedBy", sql.NVarChar(100), req.user?.email || null)
+      .input("UpdatedAt", sql.DateTime2, new Date()).query(`
         UPDATE dbo.ApprovalWorkflows SET
           Name=@Name, Module=@Module, Levels=@Levels, Approvers=@Approvers,
           Status=@Status, Description=@Description,
@@ -97,13 +99,13 @@ router.put("/:id", async (req, res) => {
 });
 
 // PATCH /:id/toggle
-router.patch("/:id/toggle", async (req, res) => {
+router.patch("/:id/toggle", authMiddleware, async (req, res) => {
   try {
     const pool = getPool();
-    await pool.request()
-      .input("Id",        sql.Int,           req.params.id)
-      .input("UpdatedBy", sql.NVarChar(100), req.user?.email || null)
-      .query(`
+    await pool
+      .request()
+      .input("Id", sql.Int, req.params.id)
+      .input("UpdatedBy", sql.NVarChar(100), req.user?.email || null).query(`
         UPDATE dbo.ApprovalWorkflows SET
           Status    = CASE WHEN Status = 'Active' THEN 'Inactive' ELSE 'Active' END,
           UpdatedBy = @UpdatedBy,
@@ -119,10 +121,11 @@ router.patch("/:id/toggle", async (req, res) => {
 });
 
 // DELETE
-router.delete("/:id", async (req, res) => {
+router.delete("/:id", authMiddleware, async (req, res) => {
   try {
     const pool = getPool();
-    await pool.request()
+    await pool
+      .request()
       .input("Id", sql.Int, req.params.id)
       .query("DELETE FROM dbo.ApprovalWorkflows WHERE Id=@Id");
 
