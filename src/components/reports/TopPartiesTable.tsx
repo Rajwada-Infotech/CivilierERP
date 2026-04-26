@@ -1,4 +1,5 @@
 import React from "react";
+import { formatINR } from "@/utils/formatCurrency";
 
 interface TopParty {
   name: string;
@@ -6,8 +7,7 @@ interface TopParty {
   total: number;
 }
 
-const fmt = (n: number) =>
-  "₹" + n.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+const fmt = (n: number) => formatINR(n);
 
 interface TopPartiesTableProps {
   parties: TopParty[];

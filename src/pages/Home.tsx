@@ -23,6 +23,7 @@ import {
   FileCheck,
   Users,
 } from "lucide-react";
+import { formatINR } from "@/utils/formatCurrency";
 import {
   fetchHomeDashboard,
   type HomeDashboardData,
@@ -462,7 +463,7 @@ function buildActivityFeed(data: HomeDashboardData): ActivityItem[] {
               month: "short",
             })
           : "—",
-        action: `Payment ₹${Number(p.PAmount ?? 0).toLocaleString("en-IN")} via ${p.PMode ?? "—"}`,
+        action: `Payment ${formatINR(Number(p.PAmount ?? 0))} via ${p.PMode ?? "—"}`,
         sub: p.PProject ?? p.PPaymentName ?? "—",
         icon: IndianRupee,
         color: "#f59e0b",

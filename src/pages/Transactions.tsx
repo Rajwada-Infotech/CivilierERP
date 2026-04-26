@@ -9,6 +9,7 @@ import {
   IndianRupee,
   RefreshCw,
 } from "lucide-react";
+import { formatINR } from "@/utils/formatCurrency";
 
 interface Transaction {
   id: string;
@@ -46,8 +47,7 @@ const STATUS_STYLE: Record<string, string> = {
   Posted: "bg-primary/15 text-primary",
 };
 
-const fmt = (n: number) =>
-  "â‚¹" + n.toLocaleString("en-IN", { maximumFractionDigits: 0 });
+const fmt = (n: number) => formatINR(n);
 
 export default function Transactions() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -186,7 +186,7 @@ export default function Transactions() {
                   "Type",
                   "Party",
                   "Description",
-                  "Amount (â‚¹)",
+                  "Amount",
                   "Mode",
                   "Status",
                 "Created By",
@@ -232,7 +232,7 @@ export default function Transactions() {
                     <td className="px-4 py-3 text-foreground whitespace-nowrap">
                       {txn.date
                         ? new Date(txn.date).toLocaleDateString("en-IN")
-                        : "â€”"}
+                        : "—"}
                     </td>
                     <td className="px-4 py-3">
                       <span
