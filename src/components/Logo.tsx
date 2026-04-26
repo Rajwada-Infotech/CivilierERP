@@ -60,21 +60,23 @@ function useMatrixVersion(target: string) {
   return display;
 }
 
-// ─── Exports ──────────────────────────────────────────────────────────────────
+// ─── Components ───────────────────────────────────────────────────────────────
 
-export const LogoIcon = ({ size = 32 }: { size?: number }) => (
-  <img
-    src="/Civilier.png"
-    alt="CivilierERP"
-    width={size}
-    height={size}
-    className="object-contain"
-    loading="eager"
-    decoding="sync"
-  />
-);
+export function LogoIcon({ size = 32 }: { size?: number }) {
+  return (
+    <img
+      src="/Civilier.png"
+      alt="CivilierERP"
+      width={size}
+      height={size}
+      className="object-contain"
+      loading="eager"
+      decoding="sync"
+    />
+  );
+}
 
-export const LogoFull = ({ className }: { className?: string }) => {
+export function LogoFull({ className }: { className?: string }) {
   const matrixVersion = useMatrixVersion(VERSION);
 
   return (
@@ -93,4 +95,6 @@ export const LogoFull = ({ className }: { className?: string }) => {
       </div>
     </div>
   );
-};
+}
+
+export default LogoFull;

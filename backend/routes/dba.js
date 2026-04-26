@@ -180,4 +180,192 @@ router.get("/health", async (req, res) => {
   }
 });
 
+// ─── DBA Control Panel ────────────────────────────────────────────────────────
+
+// GET all tenants for control panel
+router.get("/control-panel", async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT tenant_id, name, db_name, server, plan, max_users,
+             access_level, features, granted_on, expires_on,
+             is_trial, trial_ends_on, paid_amount,
+             storage_limit, storage_used, status, created_at,
+             DATEDIFF(day, GETDATE(), expires_on) AS days_remaining
+      FROM dbo.tenants
+      ORDER BY created_at DESC
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH tenant access level / suspend / activate
+router.patch("/control-panel/:tenantId", async (req, res) => {
+  const { access_level, status, expires_on, features, paid_amount } = req.body;
+  try {
+    const pool = getPool();
+    await pool
+      .request()
+      .input("tenant_id", sql.NVarChar, req.params.tenantId)
+      .input("access_level", sql.NVarChar, access_level || null)
+      .input("status", sql.NVarChar, status || null)
+      .input(
+        "expires_on",
+        sql.DateTime2,
+        expires_on ? new Date(expires_on) : null,
+      )
+      .input("features", sql.NVarChar, features || null)
+      .input("paid_amount", sql.Decimal(18, 2), paid_amount ?? null).query(`
+        UPDATE dbo.tenants SET
+          access_level = COALESCE(@access_level, access_level),
+          status       = COALESCE(@status,       status),
+          expires_on   = COALESCE(@expires_on,   expires_on),
+          features     = COALESCE(@features,     features),
+          paid_amount  = COALESCE(@paid_amount,  paid_amount)
+        WHERE tenant_id = @tenant_id
+      `);
+    res.json({ message: "Tenant updated" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Ads Manager ──────────────────────────────────────────────────────────────
+
+router.get("/ads", async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool
+      .request()
+      .query("SELECT * FROM dbo.DbaAds ORDER BY created_at DESC");
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post("/ads", async (req, res) => {
+  const {
+    tenant_id,
+    title,
+    description,
+    budget,
+    start_date,
+    end_date,
+    category,
+    creative_type,
+  } = req.body;
+  try {
+    const pool = getPool();
+    await pool
+      .request()
+      .input("tenant_id", sql.NVarChar, tenant_id || null)
+      .input("title", sql.NVarChar, title)
+      .input("description", sql.NVarChar, description || null)
+      .input("budget", sql.Decimal(18, 2), budget || 0)
+      .input("start_date", sql.Date, start_date ? new Date(start_date) : null)
+      .input("end_date", sql.Date, end_date ? new Date(end_date) : null)
+      .input("category", sql.NVarChar, category || null)
+      .input("creative_type", sql.NVarChar, creative_type || null)
+      .query(`INSERT INTO dbo.DbaAds (tenant_id,title,description,budget,start_date,end_date,category,creative_type,created_at)
+              VALUES (@tenant_id,@title,@description,@budget,@start_date,@end_date,@category,@creative_type,GETDATE())`);
+    res.status(201).json({ message: "Ad created" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.patch("/ads/:id/status", async (req, res) => {
+  const { status } = req.body; // 'active' | 'paused' | 'completed'
+  try {
+    const pool = getPool();
+    await pool
+      .request()
+      .input("Id", sql.Int, parseInt(req.params.id))
+      .input("status", sql.NVarChar, status)
+      .query(
+        "UPDATE dbo.DbaAds SET status=@status, updated_at=GETDATE() WHERE Id=@Id",
+      );
+    res.json({ message: "Status updated" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Payment Logs ─────────────────────────────────────────────────────────────
+
+router.get("/payment-logs", async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT * FROM dbo.DbaPaymentLogs ORDER BY created_at DESC
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.post("/payment-logs", async (req, res) => {
+  const {
+    txn_id,
+    tenant_id,
+    tenant_name,
+    amount,
+    method,
+    upi_id,
+    bank_ref,
+    paid_by,
+    paid_on,
+    status,
+    purpose,
+    plan,
+    renewal_period,
+    remarks,
+  } = req.body;
+  try {
+    const pool = getPool();
+    await pool
+      .request()
+      .input("txn_id", sql.NVarChar, txn_id)
+      .input("tenant_id", sql.NVarChar, tenant_id || null)
+      .input("tenant_name", sql.NVarChar, tenant_name || null)
+      .input("amount", sql.Decimal(18, 2), amount)
+      .input("method", sql.NVarChar, method || null)
+      .input("upi_id", sql.NVarChar, upi_id || null)
+      .input("bank_ref", sql.NVarChar, bank_ref || null)
+      .input("paid_by", sql.NVarChar, paid_by || null)
+      .input("paid_on", sql.Date, paid_on ? new Date(paid_on) : null)
+      .input("status", sql.NVarChar, status || "pending")
+      .input("purpose", sql.NVarChar, purpose || null)
+      .input("plan", sql.NVarChar, plan || null)
+      .input("renewal_period", sql.NVarChar, renewal_period || null)
+      .input("remarks", sql.NVarChar, remarks || null)
+      .query(`INSERT INTO dbo.DbaPaymentLogs
+        (txn_id,tenant_id,tenant_name,amount,method,upi_id,bank_ref,paid_by,paid_on,status,purpose,plan,renewal_period,remarks,created_at)
+        VALUES
+        (@txn_id,@tenant_id,@tenant_name,@amount,@method,@upi_id,@bank_ref,@paid_by,@paid_on,@status,@purpose,@plan,@renewal_period,@remarks,GETDATE())`);
+    res.status(201).json({ message: "Payment log created" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+router.patch("/payment-logs/:id/status", async (req, res) => {
+  const { status } = req.body;
+  try {
+    const pool = getPool();
+    await pool
+      .request()
+      .input("Id", sql.Int, parseInt(req.params.id))
+      .input("status", sql.NVarChar, status)
+      .query("UPDATE dbo.DbaPaymentLogs SET status=@status WHERE Id=@Id");
+    res.json({ message: "Status updated" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;

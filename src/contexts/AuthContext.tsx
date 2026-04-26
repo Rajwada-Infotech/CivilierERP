@@ -35,8 +35,8 @@ interface AuthContextType {
   ) => Promise<{ success: boolean; error?: string; role?: UserRole }>;
   logout: () => void;
   addUser: (user: Omit<AppUser, "id"> & { password: string }) => void;
-  deleteUser: (id: string) => void;
-  toggleUserStatus: (id: string) => void;
+  deleteUser: (id: string) => Promise<void>;
+  toggleUserStatus: (id: string) => Promise<void>;
   updateUserPagePermissions: (
     userId: string,
     permissions: PagePermission[],
@@ -161,7 +161,9 @@ export const AuthProvider = ({
           return updated;
         });
       })
-      .catch(() => {/* silently ignore — avatar is cosmetic */});
+      .catch(() => {
+        /* silently ignore — avatar is cosmetic */
+      });
   }, [currentUser?.id]);
   const login = useCallback(async (email: string, password: string) => {
     try {
@@ -219,6 +221,7 @@ export const AuthProvider = ({
     localStorage.removeItem("token");
     localStorage.removeItem("user");
     localStorage.removeItem("currentSessionId");
+    localStorage.removeItem("activeModule");
     setCurrentUser(null);
     setUsers([]);
   }, [currentUser, onLogoutSuccess, recordLogout]);
@@ -240,15 +243,54 @@ export const AuthProvider = ({
     [],
   );
 
-  const deleteUser = useCallback((id: string) => {
+  const deleteUser = useCallback(async (id: string) => {
+    const token = localStorage.getItem("token");
+    try {
+      const res = await fetch(`/api/users/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token ?? ""}` },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Failed to delete user");
+      }
+    } catch (err) {
+      console.error("deleteUser:", err);
+      throw err;
+    }
     setUsers((prev) => prev.filter((u) => u.id !== id));
   }, []);
 
-  const toggleUserStatus = useCallback((id: string) => {
-    setUsers((prev) =>
-      prev.map((u) => (u.id === id ? { ...u, isActive: !u.isActive } : u)),
-    );
-  }, []);
+  const toggleUserStatus = useCallback(
+    async (id: string) => {
+      const token = localStorage.getItem("token");
+      // Find current state first so we can send the correct value
+      const user = users.find((u) => u.id === id);
+      if (!user) return;
+      const newDiscontinue = user.isActive ? 1 : 0; // isActive true → discontinue=1 (deactivate)
+      try {
+        const res = await fetch(`/api/users/${id}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${token ?? ""}`,
+          },
+          body: JSON.stringify({ discontinue: newDiscontinue }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || "Failed to toggle user status");
+        }
+      } catch (err) {
+        console.error("toggleUserStatus:", err);
+        throw err;
+      }
+      setUsers((prev) =>
+        prev.map((u) => (u.id === id ? { ...u, isActive: !u.isActive } : u)),
+      );
+    },
+    [users],
+  );
 
   // Update user page permissions - persist to DB then local state
   const updateUserPagePermissions = useCallback(

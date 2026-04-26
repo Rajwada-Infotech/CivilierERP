@@ -181,7 +181,7 @@ export const ActivityBrowserProvider: React.FC<{
   const [rawSessions, setRawSessions] = useState<SessionEvent[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [dateFilters, setDateFilters] = useState({
-    period: "last-month" as const,
+    period: "today" as const,
   });
   const [activity, setActivity] = useState<PaginatedActivity>(EMPTY_ACTIVITY);
 
@@ -255,7 +255,7 @@ export const ActivityBrowserProvider: React.FC<{
   };
 
   const clearDateFilters = () => {
-    setDateFilters({ period: "last-month" });
+    setDateFilters({ period: "today" });
   };
 
   useEffect(() => {

@@ -1,4 +1,5 @@
 import React from "react";
+import { formatINR } from "@/utils/formatCurrency";
 import {
   BarChart,
   Bar,
@@ -35,7 +36,7 @@ export const IncomeVsExpenseChart: React.FC<IncomeVsExpenseChartProps> = ({
         />
         <YAxis
           tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
-          tickFormatter={(v) => `₹${(v / 1000).toFixed(0)}k`}
+          tickFormatter={(v) => formatINR(v / 1000).replace("₹", "") + "k"}
         />
         <Tooltip
           contentStyle={{
@@ -44,10 +45,7 @@ export const IncomeVsExpenseChart: React.FC<IncomeVsExpenseChartProps> = ({
             borderRadius: 8,
             color: "hsl(var(--foreground))",
           }}
-          formatter={(value: number) => [
-            `₹${value.toLocaleString("en-IN")}`,
-            "",
-          ]}
+          formatter={(value: number) => [formatINR(value), ""]}
         />
         <Bar
           dataKey="income"

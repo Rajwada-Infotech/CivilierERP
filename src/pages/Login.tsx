@@ -736,7 +736,14 @@ function FloatingParticles() {
             stroke="rgba(124,58,237,0.55)"
             strokeWidth="1"
           />
-          <circle cx="6" cy="6" r="2" fill="none" stroke="rgba(124,58,237,0.4)" strokeWidth="0.8" />
+          <circle
+            cx="6"
+            cy="6"
+            r="2"
+            fill="none"
+            stroke="rgba(124,58,237,0.4)"
+            strokeWidth="0.8"
+          />
         </svg>
       );
     }
@@ -750,17 +757,52 @@ function FloatingParticles() {
             stroke="rgba(124,58,237,0.5)"
             strokeWidth="1"
           />
-          <line x1="6.5" y1="6" x2="6.5" y2="11" stroke="rgba(124,58,237,0.35)" strokeWidth="0.7" />
-          <line x1="6.5" y1="6" x2="12" y2="11" stroke="rgba(124,58,237,0.35)" strokeWidth="0.7" />
+          <line
+            x1="6.5"
+            y1="6"
+            x2="6.5"
+            y2="11"
+            stroke="rgba(124,58,237,0.35)"
+            strokeWidth="0.7"
+          />
+          <line
+            x1="6.5"
+            y1="6"
+            x2="12"
+            y2="11"
+            stroke="rgba(124,58,237,0.35)"
+            strokeWidth="0.7"
+          />
         </svg>
       );
     }
     // default: brick
     return (
       <svg width="14" height="10" viewBox="0 0 14 10">
-        <rect width="14" height="10" rx="1" fill="none" stroke="rgba(124,58,237,0.6)" strokeWidth="1.2" />
-        <line x1="7" y1="0" x2="7" y2="10" stroke="rgba(124,58,237,0.4)" strokeWidth="0.8" />
-        <line x1="0" y1="5" x2="14" y2="5" stroke="rgba(124,58,237,0.4)" strokeWidth="0.8" />
+        <rect
+          width="14"
+          height="10"
+          rx="1"
+          fill="none"
+          stroke="rgba(124,58,237,0.6)"
+          strokeWidth="1.2"
+        />
+        <line
+          x1="7"
+          y1="0"
+          x2="7"
+          y2="10"
+          stroke="rgba(124,58,237,0.4)"
+          strokeWidth="0.8"
+        />
+        <line
+          x1="0"
+          y1="5"
+          x2="14"
+          y2="5"
+          stroke="rgba(124,58,237,0.4)"
+          strokeWidth="0.8"
+        />
       </svg>
     );
   };
@@ -809,7 +851,9 @@ export default function Login() {
       const result = await login(email, password);
       if (result.success) {
         const role = result.role;
-        if (role === "super_admin" || role === "admin" || role === "dba") {
+        if (role === "dba") {
+          navigate("/dba", { replace: true });
+        } else if (role === "super_admin" || role === "admin") {
           navigate("/admin/dashboard", { replace: true });
         } else {
           navigate("/home", { replace: true });
@@ -869,19 +913,34 @@ export default function Login() {
           className="absolute bottom-[-12%] right-[-8%] w-[45%] h-[45%] rounded-full blur-[100px]"
           style={{ background: "rgba(139,92,246,0.14)" }}
           animate={{ scale: [1, 1.15, 1], opacity: [0.14, 0.24, 0.14] }}
-          transition={{ duration: 10, repeat: Infinity, ease: "easeInOut", delay: 2 }}
+          transition={{
+            duration: 10,
+            repeat: Infinity,
+            ease: "easeInOut",
+            delay: 2,
+          }}
         />
         <motion.div
           className="absolute top-[40%] left-[60%] w-[30%] h-[30%] rounded-full blur-[80px]"
           style={{ background: "rgba(109,40,217,0.1)" }}
           animate={{ scale: [1, 1.2, 1], opacity: [0.1, 0.18, 0.1] }}
-          transition={{ duration: 7, repeat: Infinity, ease: "easeInOut", delay: 1 }}
+          transition={{
+            duration: 7,
+            repeat: Infinity,
+            ease: "easeInOut",
+            delay: 1,
+          }}
         />
         <motion.div
           className="absolute top-[10%] right-[20%] w-[20%] h-[20%] rounded-full blur-[60px]"
           style={{ background: "rgba(196,181,253,0.12)" }}
           animate={{ scale: [1, 1.3, 1], opacity: [0.12, 0.22, 0.12] }}
-          transition={{ duration: 9, repeat: Infinity, ease: "easeInOut", delay: 4 }}
+          transition={{
+            duration: 9,
+            repeat: Infinity,
+            ease: "easeInOut",
+            delay: 4,
+          }}
         />
       </div>
 
