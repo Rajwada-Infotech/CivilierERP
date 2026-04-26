@@ -1,11 +1,11 @@
-// backend/routes/document-type.js
+// backend/routes/typeofdoc.js
 const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { checkPermission } = require("../middleware/permissions");
 
-// GET /api/document-type - List all document types
+// GET /api/typeofdoc - List all document types
 router.get(
   "/",
   authMiddleware,
@@ -38,13 +38,13 @@ router.get(
     `);
       res.json(result.recordset);
     } catch (err) {
-      console.error("Error fetching document types:", err);
+      console.error("Error fetching TypeOfDoc:", err);
       res.status(500).json({ error: "Failed to fetch document types" });
     }
   },
 );
 
-// GET /api/document-type/entrytypes - Get Entry_Type for dropdown
+// GET /api/typeofdoc/entrytypes - Get Entry_Type for dropdown
 router.get("/entrytypes", authMiddleware, async (req, res) => {
   try {
     const pool = getPool();
@@ -64,7 +64,7 @@ router.get("/entrytypes", authMiddleware, async (req, res) => {
   }
 });
 
-// POST /api/document-type - Create
+// POST /api/typeofdoc - Create new document type
 router.post(
   "/",
   authMiddleware,
@@ -105,7 +105,7 @@ router.post(
   },
 );
 
-// PUT /api/document-type/:id - Update
+// PUT /api/typeofdoc/:id - Update
 router.put(
   "/:id",
   authMiddleware,
@@ -147,7 +147,7 @@ router.put(
   },
 );
 
-// DELETE /api/document-type/:id - Soft delete
+// DELETE /api/typeofdoc/:id - Soft delete (deactivate)
 router.delete(
   "/:id",
   authMiddleware,
@@ -158,14 +158,18 @@ router.delete(
       await pool
         .request()
         .input("id", sql.Int, req.params.id)
-        .input("UpdatedBy", sql.NVarChar(100), req.user?.email || "system")
-        .query(`
+        .query(
+          `
         UPDATE dbo.TypeOfDoc
         SET IsActive = 0,
             UpdatedBy = @UpdatedBy,
             UpdatedAt = SYSDATETIME()
-        WHERE TypeOfDocId = @id;
-      `);
+        WHERE TypeOfDocId = @id
+      `,
+          {
+            UpdatedBy: req.user?.email || "system",
+          },
+        );
       res.json({ message: "Document type deactivated successfully" });
     } catch (err) {
       res.status(500).json({ error: "Failed to deactivate document type" });
