@@ -1,7 +1,6 @@
-import React, { useState } from "react";
+// src/pages/masters/ProjectMaster.tsx
+import React, { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { getEnterpriseOptions } from "@/api/enterpriseApi";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   FolderKanban,
@@ -12,8 +11,17 @@ import {
   Loader2,
   ToggleLeft,
   ToggleRight,
+  Upload,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  getProjects,
+  createProject,
+  updateProject,
+  deleteProject,
+} from "@/api/projectMasterApi";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 interface Project {
   Id?: number;
@@ -21,6 +29,7 @@ interface Project {
   name: string;
   shortName: string;
   type: string;
+  enterpriseId?: number | string;
   businessUnit: string;
   clientName: string;
   clientCode: string;
@@ -34,6 +43,7 @@ interface Project {
   description: string;
   remarks: string;
   isActive: boolean;
+  projectImage?: string | File | null;
 }
 
 const PROJECT_TYPES = [
@@ -45,15 +55,17 @@ const PROJECT_TYPES = [
   "Research",
   "Maintenance",
 ];
+
 const STATUSES = ["Planning", "Active", "On Hold", "Completed", "Cancelled"];
 const PRIORITIES = ["Low", "Medium", "High", "Critical"];
 const CURRENCIES = ["INR", "USD", "EUR", "GBP", "AED"];
 
-const empty: Project = {
+const emptyProject: Project = {
   code: "",
   name: "",
   shortName: "",
   type: "Construction",
+  enterpriseId: "",
   businessUnit: "",
   clientName: "",
   clientCode: "",
@@ -67,6 +79,7 @@ const empty: Project = {
   description: "",
   remarks: "",
   isActive: true,
+  projectImage: null,
 };
 
 function rowToForm(row: any): Project {
@@ -76,6 +89,7 @@ function rowToForm(row: any): Project {
     name: row.Name ?? "",
     shortName: row.ShortName ?? "",
     type: row.Type ?? "Construction",
+    enterpriseId: row.EnterpriseId,
     businessUnit: row.BusinessUnit ?? "",
     clientName: row.ClientName ?? "",
     clientCode: row.ClientCode ?? "",
@@ -89,69 +103,128 @@ function rowToForm(row: any): Project {
     description: row.Description ?? "",
     remarks: row.Remarks ?? "",
     isActive: row.IsActive !== 0,
+    projectImage: row.ProjectImage || null,
   };
 }
 
 export default function ProjectMaster() {
   const qc = useQueryClient();
-  const [form, setForm] = useState<Project>(empty);
+  const [form, setForm] = useState<Project>(emptyProject);
   const [editId, setEditId] = useState<number | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [search, setSearch] = useState("");
-  const [activeTab, setActiveTab] = useState<"general" | "timeline" | "financial">("general");
+  const [activeTab, setActiveTab] = useState<
+    "general" | "timeline" | "financial"
+  >("general");
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
+  const [imagePreview, setImagePreview] = useState<string>("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Projects
   const { data: projects = [], isLoading } = useQuery({
     queryKey: ["project-master"],
-    queryFn: async () => {
-      const res = await fetchWithAuth("/api/project-master");
-      if (!res.ok) throw new Error("Failed to load");
-      return res.json();
-    },
+    queryFn: getProjects,
   });
 
-  // Fetch Business Units from enterprise master
-  const { data: businessUnits = [] } = useQuery({
-    queryKey: ["enterprise-options", "Business Unit"],
-    queryFn: () => getEnterpriseOptions("Business Unit"),
+  // FIXED: Enterprise dropdown using reliable fetch
+  const { data: enterprises = [], isLoading: enterprisesLoading } = useQuery({
+    queryKey: ["enterprises"],
+    queryFn: async () => {
+      const endpoints = ["/api/enterprises"];
+
+      for (const endpoint of endpoints) {
+        try {
+          const res = await fetchWithAuth(endpoint);
+          if (res.ok) {
+            const data = await res.json();
+
+            return Array.isArray(data) ? data : [];
+          }
+        } catch (e) {
+          console.log(`Failed endpoint: ${endpoint}`);
+        }
+      }
+      throw new Error("Could not load enterprises from any endpoint");
+    },
+    staleTime: 10 * 60 * 1000,
+    retry: 2,
   });
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const url = editId
-        ? `/api/project-master/${editId}`
-        : "/api/project-master";
-      const res = await fetchWithAuth(url, {
-        method: editId ? "PUT" : "POST",
-        body: JSON.stringify(form),
+      const formData = new FormData();
+      Object.entries(form).forEach(([key, value]) => {
+        if (
+          key !== "projectImage" &&
+          value !== null &&
+          value !== undefined &&
+          value !== ""
+        ) {
+          formData.append(key, String(value));
+        }
       });
-      if (!res.ok) {
-        const e = await res.json().catch(() => ({}));
-        throw new Error(e.error || "Save failed");
+
+      if (form.projectImage instanceof File) {
+        formData.append("projectImage", form.projectImage);
+      }
+
+      if (editId) {
+        return updateProject(editId, formData);
+      } else {
+        return createProject(formData);
       }
     },
     onSuccess: () => {
-      toast.success(editId ? "Project updated" : "Project created");
+      toast.success(
+        editId
+          ? "Project updated successfully"
+          : "Project created successfully",
+      );
       qc.invalidateQueries({ queryKey: ["project-master"] });
-      setShowForm(false);
+      resetForm();
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: any) => toast.error(e.message || "Something went wrong"),
   });
 
   const deleteMutation = useMutation({
-    mutationFn: async (id: number) => {
-      const res = await fetchWithAuth(`/api/project-master/${id}`, {
-        method: "DELETE",
-      });
-      if (!res.ok) throw new Error("Delete failed");
-    },
+    mutationFn: deleteProject,
     onSuccess: () => {
-      toast.success("Project deleted");
+      toast.success("Project deleted successfully");
       qc.invalidateQueries({ queryKey: ["project-master"] });
       setDeleteConfirm(null);
     },
-    onError: (e: Error) => toast.error(e.message),
+    onError: (e: any) => toast.error(e.message),
   });
+
+  const resetForm = () => {
+    setForm({ ...emptyProject });
+    setImagePreview("");
+    setEditId(null);
+    setShowForm(false);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
+  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/"))
+      return toast.error("Please select an image file");
+    if (file.size > 5 * 1024 * 1024)
+      return toast.error("Image must be under 5 MB");
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      setImagePreview(reader.result as string);
+      setForm((prev) => ({ ...prev, projectImage: file }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const removeImage = () => {
+    setImagePreview("");
+    setForm((prev) => ({ ...prev, projectImage: null }));
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
 
   const filtered = projects.filter(
     (p: any) =>
@@ -160,18 +233,19 @@ export default function ProjectMaster() {
       (p.ClientName ?? "").toLowerCase().includes(search.toLowerCase()),
   );
 
-  const STATUS_COLORS: Record<string, string> = {
-    Active: "bg-emerald-500/10 text-emerald-600",
-    Planning: "bg-blue-500/10 text-blue-600",
-    "On Hold": "bg-amber-500/10 text-amber-600",
-    Completed: "bg-purple-500/10 text-purple-600",
-    Cancelled: "bg-red-500/10 text-red-500",
+  const openNew = () => {
+    resetForm();
+    setShowForm(true);
+    setActiveTab("general");
   };
-  const PRIORITY_COLORS: Record<string, string> = {
-    Low: "bg-slate-500/10 text-slate-500",
-    Medium: "bg-blue-500/10 text-blue-600",
-    High: "bg-orange-500/10 text-orange-600",
-    Critical: "bg-red-500/10 text-red-500",
+
+  const openEdit = (row: any) => {
+    const f = rowToForm(row);
+    setForm(f);
+    setImagePreview(f.projectImage || "");
+    setEditId(row.Id);
+    setShowForm(true);
+    setActiveTab("general");
   };
 
   const fi = (label: string, key: keyof Project, type = "text", ph = "") => (
@@ -181,10 +255,10 @@ export default function ProjectMaster() {
       </label>
       <input
         type={type}
-        value={form[key] as string}
+        value={(form[key] as string) || ""}
         onChange={(e) => setForm((p) => ({ ...p, [key]: e.target.value }))}
         placeholder={ph || label}
-        className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all"
+        className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all"
       />
     </div>
   );
@@ -195,12 +269,14 @@ export default function ProjectMaster() {
         {label}
       </label>
       <select
-        value={form[key] as string}
+        value={(form[key] as string) || ""}
         onChange={(e) => setForm((p) => ({ ...p, [key]: e.target.value }))}
-        className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+        className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
       >
         {options.map((o) => (
-          <option key={o}>{o}</option>
+          <option key={o} value={o}>
+            {o}
+          </option>
         ))}
       </select>
     </div>
@@ -209,6 +285,7 @@ export default function ProjectMaster() {
   return (
     <>
       <Breadcrumbs items={["Admin", "Masters", "Project Master"]} />
+
       <div className="p-6 space-y-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -220,18 +297,13 @@ export default function ProjectMaster() {
                 Project Master
               </h1>
               <p className="text-xs text-muted-foreground">
-                Manage projects, budgets and timelines
+                Manage projects, timelines and clients
               </p>
             </div>
           </div>
           <button
-            onClick={() => {
-              setForm({ ...empty });
-              setEditId(null);
-              setShowForm(true);
-              setActiveTab("general");
-            }}
-            className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground text-sm font-heading rounded-lg hover:bg-primary/90 transition-colors"
+            onClick={openNew}
+            className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors"
           >
             <Plus size={16} /> Add Project
           </button>
@@ -248,7 +320,7 @@ export default function ProjectMaster() {
                 <input
                   value={search}
                   onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search by name, code, client…"
+                  placeholder="Search by name, code, client..."
                   className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
                 />
               </div>
@@ -256,6 +328,7 @@ export default function ProjectMaster() {
                 {filtered.length} project{filtered.length !== 1 ? "s" : ""}
               </span>
             </div>
+
             {isLoading ? (
               <div className="flex justify-center py-16">
                 <Loader2
@@ -280,7 +353,7 @@ export default function ProjectMaster() {
                       ].map((h) => (
                         <th
                           key={h}
-                          className="px-4 py-3 text-left text-xs font-heading text-muted-foreground"
+                          className="px-4 py-3 text-left text-xs font-heading text-muted-foreground whitespace-nowrap"
                         >
                           {h}
                         </th>
@@ -316,19 +389,11 @@ export default function ProjectMaster() {
                             {p.Type}
                           </td>
                           <td className="px-4 py-3">
-                            <span
-                              className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[p.Status] ?? "bg-muted text-muted-foreground"}`}
-                            >
+                            <span className="px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-600">
                               {p.Status}
                             </span>
                           </td>
-                          <td className="px-4 py-3">
-                            <span
-                              className={`px-2 py-0.5 rounded-full text-xs ${PRIORITY_COLORS[p.Priority] ?? ""}`}
-                            >
-                              {p.Priority}
-                            </span>
-                          </td>
+                          <td className="px-4 py-3 text-xs">{p.Priority}</td>
                           <td className="px-4 py-3">
                             <span
                               className={`px-2 py-0.5 rounded-full text-xs font-medium ${p.IsActive ? "bg-emerald-500/10 text-emerald-600" : "bg-red-500/10 text-red-500"}`}
@@ -339,19 +404,14 @@ export default function ProjectMaster() {
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-2">
                               <button
-                                onClick={() => {
-                                  setForm(rowToForm(p));
-                                  setEditId(p.Id);
-                                  setShowForm(true);
-                                  setActiveTab("general");
-                                }}
-                                className="p-1.5 rounded-md hover:bg-primary/10 text-muted-foreground hover:text-primary transition-colors"
+                                onClick={() => openEdit(p)}
+                                className="p-1.5 rounded-md hover:bg-primary/10 text-muted-foreground hover:text-primary"
                               >
                                 <Pencil size={13} />
                               </button>
                               <button
                                 onClick={() => setDeleteConfirm(p.Id)}
-                                className="p-1.5 rounded-md hover:bg-red-500/10 text-muted-foreground hover:text-red-500 transition-colors"
+                                className="p-1.5 rounded-md hover:bg-red-500/10 text-red-500"
                               >
                                 <Trash2 size={13} />
                               </button>
@@ -371,59 +431,130 @@ export default function ProjectMaster() {
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="p-4 border-b border-border flex items-center justify-between bg-muted/30">
               <h2 className="font-heading font-semibold text-foreground">
-                {editId ? "Edit Project" : "New Project"}
+                {editId ? `Edit — ${form.name || "Project"}` : "New Project"}
               </h2>
               <button
-                onClick={() => setShowForm(false)}
-                className="text-xs text-muted-foreground hover:text-foreground px-3 py-1 rounded border border-border hover:bg-muted transition-colors"
+                onClick={resetForm}
+                className="text-xs text-muted-foreground hover:text-foreground px-3 py-1 rounded border border-border hover:bg-muted"
               >
                 Cancel
               </button>
             </div>
+
             <div className="flex gap-1 p-3 border-b border-border bg-muted/20">
               {(["general", "timeline", "financial"] as const).map((tab) => (
                 <button
                   key={tab}
                   onClick={() => setActiveTab(tab)}
-                  className={`px-4 py-1.5 rounded-md text-xs font-heading capitalize transition-colors ${activeTab === tab ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
+                  className={`px-4 py-1.5 rounded-md text-xs font-heading capitalize transition-colors ${
+                    activeTab === tab
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-muted"
+                  }`}
                 >
                   {tab}
                 </button>
               ))}
             </div>
+
             <div className="p-6">
               {activeTab === "general" && (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  {/* Image Upload */}
+                  <div className="col-span-full">
+                    <label className="block text-xs font-medium text-muted-foreground mb-2">
+                      Project Image
+                    </label>
+                    <div className="flex items-center gap-4">
+                      {imagePreview ? (
+                        <div className="relative group">
+                          <img
+                            src={imagePreview}
+                            alt="Preview"
+                            className="w-16 h-16 rounded-xl object-contain border border-border bg-muted/30"
+                          />
+                          <button
+                            onClick={removeImage}
+                            className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100"
+                          >
+                            <X size={11} />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="w-16 h-16 rounded-xl border-2 border-dashed border-border bg-muted/20 flex items-center justify-center">
+                          <FolderKanban
+                            size={20}
+                            className="text-muted-foreground/40"
+                          />
+                        </div>
+                      )}
+                      <div>
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept="image/*"
+                          onChange={handleImageChange}
+                          className="hidden"
+                          id="project-image-input"
+                        />
+                        <label
+                          htmlFor="project-image-input"
+                          className="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border border-border hover:bg-muted cursor-pointer"
+                        >
+                          <Upload size={13} />
+                          {imagePreview ? "Change Image" : "Upload Image"}
+                        </label>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          PNG, JPG • Max 5 MB
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
                   {fi("Project Code *", "code", "text", "e.g. PRJ-001")}
                   {fi("Project Name *", "name")}
                   {fi("Short Name", "shortName")}
                   {se("Type", "type", PROJECT_TYPES)}
 
-                  {/* Business Unit — dropdown from enterprise master */}
+                  {/* Enterprise Dropdown - FIXED */}
                   <div>
                     <label className="block text-xs font-medium text-muted-foreground mb-1">
-                      Business Unit
+                      Enterprise <span className="text-red-500">*</span>
                     </label>
                     <select
-                      value={form.businessUnit}
+                      value={form.enterpriseId || ""}
                       onChange={(e) =>
-                        setForm((p) => ({ ...p, businessUnit: e.target.value }))
+                        setForm((p) => ({
+                          ...p,
+                          enterpriseId: e.target.value,
+                          businessUnit: e.target.value,
+                        }))
                       }
-                      className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                      disabled={enterprisesLoading}
+                      className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                     >
-                      <option value="">Select Business Unit</option>
-                      {(businessUnits as any[]).map((bu: any) => (
-                        <option key={bu.id ?? bu.Id ?? bu.name} value={bu.name ?? bu.Name}>
-                          {bu.name ?? bu.Name}
+                      <option value="">Select Enterprise</option>
+                      {enterprises.map((ent: any) => (
+                        <option key={ent.id || ent.Id} value={ent.id || ent.Id}>
+                          {ent.label ||
+                            ent.name ||
+                            ent.Name ||
+                            `Enterprise ${ent.id || ent.Id}`}
                         </option>
                       ))}
                     </select>
+                    {enterprisesLoading && (
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Loading enterprises...
+                      </p>
+                    )}
                   </div>
 
                   {fi("Client Name", "clientName")}
                   {fi("Client Code", "clientCode")}
                   {fi("Location", "location")}
-                  <div className="flex items-center gap-3 pt-5">
+
+                  <div className="flex items-center gap-3 pt-5 col-span-full">
                     <button
                       onClick={() =>
                         setForm((p) => ({ ...p, isActive: !p.isActive }))
@@ -433,19 +564,23 @@ export default function ProjectMaster() {
                       {form.isActive ? (
                         <ToggleRight size={24} className="text-emerald-500" />
                       ) : (
-                        <ToggleLeft size={24} className="text-muted-foreground" />
+                        <ToggleLeft
+                          size={24}
+                          className="text-muted-foreground"
+                        />
                       )}
                       <span
                         className={
                           form.isActive
-                            ? "text-emerald-600 text-sm"
-                            : "text-muted-foreground text-sm"
+                            ? "text-emerald-600"
+                            : "text-muted-foreground"
                         }
                       >
                         {form.isActive ? "Active" : "Inactive"}
                       </span>
                     </button>
                   </div>
+
                   <div className="col-span-full">
                     {fi("Description", "description")}
                   </div>
@@ -454,6 +589,7 @@ export default function ProjectMaster() {
                   </div>
                 </div>
               )}
+
               {activeTab === "timeline" && (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                   {fi("Start Date", "startDate", "date")}
@@ -463,64 +599,61 @@ export default function ProjectMaster() {
                   {fi("Team Size", "teamSize", "number")}
                 </div>
               )}
+
               {activeTab === "financial" && (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                   {se("Currency", "currency", CURRENCIES)}
                 </div>
               )}
             </div>
+
             <div className="p-4 border-t border-border flex justify-end gap-3">
               <button
-                onClick={() => setShowForm(false)}
-                className="px-5 py-2 text-sm rounded-lg border border-border hover:bg-muted transition-colors"
+                onClick={resetForm}
+                className="px-5 py-2 text-sm rounded-lg border border-border hover:bg-muted"
               >
                 Cancel
               </button>
               <button
                 onClick={() => saveMutation.mutate()}
-                disabled={!form.code || !form.name || saveMutation.isPending}
-                className="px-5 py-2 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
+                disabled={
+                  !form.code ||
+                  !form.name ||
+                  !form.enterpriseId ||
+                  saveMutation.isPending
+                }
+                className="px-5 py-2 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2"
               >
                 {saveMutation.isPending && (
                   <Loader2 size={13} className="animate-spin" />
                 )}
-                {editId ? "Update" : "Save"} Project
+                {editId ? "Update Project" : "Create Project"}
               </button>
             </div>
           </div>
         )}
 
+        {/* Delete Confirmation */}
         {deleteConfirm !== null && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
-            <div className="bg-card border border-border rounded-xl p-6 w-80 shadow-xl">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-full bg-red-500/10 flex items-center justify-center">
-                  <Trash2 size={18} className="text-red-500" />
-                </div>
-                <div>
-                  <p className="font-heading font-semibold text-foreground">
-                    Delete Project?
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    This action cannot be undone.
-                  </p>
-                </div>
-              </div>
-              <div className="flex gap-3">
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+            <div className="bg-card border border-border rounded-xl p-6 w-80">
+              <p className="font-semibold text-foreground">
+                Delete this project?
+              </p>
+              <p className="text-sm text-muted-foreground mt-1">
+                This action cannot be undone.
+              </p>
+              <div className="flex gap-3 mt-6">
                 <button
                   onClick={() => setDeleteConfirm(null)}
-                  className="flex-1 py-2 text-sm rounded-lg border border-border hover:bg-muted"
+                  className="flex-1 py-2 border border-border rounded-lg hover:bg-muted"
                 >
                   Cancel
                 </button>
                 <button
-                  onClick={() => deleteMutation.mutate(deleteConfirm!)}
-                  disabled={deleteMutation.isPending}
-                  className="flex-1 py-2 text-sm rounded-lg bg-red-500 text-white hover:bg-red-600 flex items-center justify-center gap-2"
+                  onClick={() => deleteMutation.mutate(deleteConfirm)}
+                  className="flex-1 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600"
                 >
-                  {deleteMutation.isPending && (
-                    <Loader2 size={13} className="animate-spin" />
-                  )}
                   Delete
                 </button>
               </div>
