@@ -7,48 +7,36 @@ const allowRoles = require("../middleware/role");
 router.use(authMiddleware);
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 
-// GET all
+// GET all projects
 router.get("/", async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT * FROM dbo.ProjectMaster WHERE IsDeleted=0 ORDER BY CreatedAt DESC
+      SELECT * FROM dbo.ProjectMaster
+      WHERE IsDeleted = 0
+      ORDER BY CreatedAt DESC
     `);
     res.json(result.recordset);
   } catch (err) {
+    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// POST create
+// POST - Create new project with Base64 image
 router.post("/", adminOnly, async (req, res) => {
   const f = req.body;
   const pool = getPool();
   const transaction = pool.transaction();
+
   try {
     await transaction.begin();
 
-    // 1. Insert into dbo.enterprise and capture EnterpriseId
-    const enterpriseResult = await transaction
-      .request()
-      .input("EntName", sql.NVarChar(255), f.name || null)
-      .input("EntCode", sql.NVarChar(50), f.code || null)
-      .input("EntShortName", sql.NVarChar(100), f.shortName || null)
-      .input("EntType", sql.NVarChar(100), "Project")
-      .input("EntBusinessUnit", sql.NVarChar(200), f.businessUnit || null)
-      .input("EntCurrency", sql.NVarChar(10), f.currency || "INR")
-      .input("EntIsActive", sql.Bit, f.isActive !== false ? 1 : 0)
-      .query(`
-        INSERT INTO dbo.enterprise
-          (name, code, short_name, entity_type, business_unit, currency, is_active, created_at)
-        VALUES
-          (@EntName, @EntCode, @EntShortName, @EntType, @EntBusinessUnit, @EntCurrency, @EntIsActive, GETDATE());
-        SELECT SCOPE_IDENTITY() AS EnterpriseId;
-      `);
+    const enterpriseId = parseInt(f.enterpriseId || f.businessUnit);
+    if (!enterpriseId) {
+      throw new Error("Enterprise is required");
+    }
 
-    const enterpriseId = enterpriseResult.recordset[0].EnterpriseId;
-
-    // 2. Insert into dbo.ProjectMaster with EnterpriseId
     await transaction
       .request()
       .input("EnterpriseId", sql.Int, enterpriseId)
@@ -69,37 +57,42 @@ router.post("/", adminOnly, async (req, res) => {
       .input("Description", sql.NVarChar(sql.MAX), f.description || null)
       .input("Remarks", sql.NVarChar(500), f.remarks || null)
       .input("IsActive", sql.Bit, f.isActive !== false ? 1 : 0)
+      .input("ProjectImage", sql.NVarChar(sql.MAX), f.projectImage || null) // Base64 URI
       .query(`
         INSERT INTO dbo.ProjectMaster
-          (EnterpriseId,Code,Name,ShortName,Type,BusinessUnit,ClientName,ClientCode,
-           TeamSize,StartDate,EndDate,Currency,Status,Priority,Location,
-           Description,Remarks,IsActive,IsDeleted,CreatedAt)
+          (EnterpriseId, Code, Name, ShortName, Type, BusinessUnit, ClientName, ClientCode,
+           TeamSize, StartDate, EndDate, Currency, Status, Priority, Location,
+           Description, Remarks, IsActive, ProjectImage, IsDeleted, CreatedAt)
         VALUES
-          (@EnterpriseId,@Code,@Name,@ShortName,@Type,@BusinessUnit,@ClientName,@ClientCode,
-           @TeamSize,@StartDate,@EndDate,@Currency,@Status,@Priority,@Location,
-           @Description,@Remarks,@IsActive,0,GETDATE())
+          (@EnterpriseId, @Code, @Name, @ShortName, @Type, @BusinessUnit, @ClientName, @ClientCode,
+           @TeamSize, @StartDate, @EndDate, @Currency, @Status, @Priority, @Location,
+           @Description, @Remarks, @IsActive, @ProjectImage, 0, GETDATE())
       `);
 
     await transaction.commit();
-    res.json({ success: true });
+    res.json({ success: true, message: "Project created successfully" });
   } catch (err) {
     await transaction.rollback();
+    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// PUT update
+// PUT - Update project with optional new Base64 image
 router.put("/:id", adminOnly, async (req, res) => {
   const f = req.body;
   const pool = getPool();
   const transaction = pool.transaction();
+
   try {
     await transaction.begin();
 
-    // 1. Update dbo.ProjectMaster
+    const enterpriseId = parseInt(f.enterpriseId || f.businessUnit);
+
     await transaction
       .request()
       .input("Id", sql.Int, parseInt(req.params.id))
+      .input("EnterpriseId", sql.Int, enterpriseId)
       .input("Code", sql.NVarChar(50), f.code || null)
       .input("Name", sql.NVarChar(255), f.name || null)
       .input("ShortName", sql.NVarChar(100), f.shortName || null)
@@ -117,44 +110,37 @@ router.put("/:id", adminOnly, async (req, res) => {
       .input("Description", sql.NVarChar(sql.MAX), f.description || null)
       .input("Remarks", sql.NVarChar(500), f.remarks || null)
       .input("IsActive", sql.Bit, f.isActive !== false ? 1 : 0)
+      .input("ProjectImage", sql.NVarChar(sql.MAX), f.projectImage || null)
       .query(`
         UPDATE dbo.ProjectMaster SET
-          Code=@Code,Name=@Name,ShortName=@ShortName,Type=@Type,BusinessUnit=@BusinessUnit,
-          ClientName=@ClientName,ClientCode=@ClientCode,TeamSize=@TeamSize,
-          StartDate=@StartDate,EndDate=@EndDate,Currency=@Currency,Status=@Status,
-          Priority=@Priority,Location=@Location,Description=@Description,Remarks=@Remarks,
-          IsActive=@IsActive,UpdatedAt=GETDATE()
-        WHERE Id=@Id AND IsDeleted=0
-      `);
-
-    // 2. Sync to dbo.enterprise via EnterpriseId
-    await transaction
-      .request()
-      .input("Id", sql.Int, parseInt(req.params.id))
-      .input("EntName", sql.NVarChar(255), f.name || null)
-      .input("EntCode", sql.NVarChar(50), f.code || null)
-      .input("EntShortName", sql.NVarChar(100), f.shortName || null)
-      .input("EntBusinessUnit", sql.NVarChar(200), f.businessUnit || null)
-      .input("EntCurrency", sql.NVarChar(10), f.currency || "INR")
-      .input("EntIsActive", sql.Bit, f.isActive !== false ? 1 : 0)
-      .query(`
-        UPDATE e SET
-          e.name        = @EntName,
-          e.code        = @EntCode,
-          e.short_name  = @EntShortName,
-          e.business_unit = @EntBusinessUnit,
-          e.currency    = @EntCurrency,
-          e.is_active   = @EntIsActive,
-          e.updated_at  = GETDATE()
-        FROM dbo.enterprise e
-        INNER JOIN dbo.ProjectMaster pm ON pm.EnterpriseId = e.id
-        WHERE pm.Id = @Id AND pm.IsDeleted = 0
+          EnterpriseId = @EnterpriseId,
+          Code = @Code,
+          Name = @Name,
+          ShortName = @ShortName,
+          Type = @Type,
+          BusinessUnit = @BusinessUnit,
+          ClientName = @ClientName,
+          ClientCode = @ClientCode,
+          TeamSize = @TeamSize,
+          StartDate = @StartDate,
+          EndDate = @EndDate,
+          Currency = @Currency,
+          Status = @Status,
+          Priority = @Priority,
+          Location = @Location,
+          Description = @Description,
+          Remarks = @Remarks,
+          IsActive = @IsActive,
+          ProjectImage = COALESCE(@ProjectImage, ProjectImage),   -- Keep old image if null
+          UpdatedAt = GETDATE()
+        WHERE Id = @Id AND IsDeleted = 0
       `);
 
     await transaction.commit();
-    res.json({ success: true });
+    res.json({ success: true, message: "Project updated successfully" });
   } catch (err) {
     await transaction.rollback();
+    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -163,25 +149,22 @@ router.put("/:id", adminOnly, async (req, res) => {
 router.delete("/:id", adminOnly, async (req, res) => {
   const pool = getPool();
   const transaction = pool.transaction();
+
   try {
     await transaction.begin();
 
-    // Soft delete ProjectMaster and remove from enterprise
-    await transaction
-      .request()
-      .input("Id", sql.Int, parseInt(req.params.id))
+    await transaction.request().input("Id", sql.Int, parseInt(req.params.id))
       .query(`
-        UPDATE dbo.ProjectMaster SET IsDeleted=1, UpdatedAt=GETDATE() WHERE Id=@Id;
-
-        DELETE e FROM dbo.enterprise e
-        INNER JOIN dbo.ProjectMaster pm ON pm.EnterpriseId = e.id
-        WHERE pm.Id = @Id;
+        UPDATE dbo.ProjectMaster
+        SET IsDeleted = 1, UpdatedAt = GETDATE()
+        WHERE Id = @Id;
       `);
 
     await transaction.commit();
-    res.json({ success: true });
+    res.json({ success: true, message: "Project deleted successfully" });
   } catch (err) {
     await transaction.rollback();
+    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
