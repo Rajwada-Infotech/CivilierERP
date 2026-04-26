@@ -1,23 +1,17 @@
 require("dotenv").config();
-
 const isDev = process.env.NODE_ENV === "development";
-
 const express = require("express");
 const helmet = require("helmet");
 const cors = require("cors");
 const compression = require("compression");
-
 const { connectDB } = require("./db");
 const authMiddleware = require("./middleware/auth");
 const rateLimit = require("express-rate-limit");
 const { RedisStore } = require("rate-limit-redis");
-
 const logger = require("./logger");
 const requestLogger = require("./requestLogger");
 const { ipKeyGenerator } = require("express-rate-limit");
-
 const { safeLoadRoutes, printRoutesSummary } = require("./utils/loadRoutes");
-
 const {
   getRedis,
   redisZScore,
@@ -52,11 +46,10 @@ function printBanner(port) {
   logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 }
 
-// Helper to create Redis-backed rate limit store (safe with lazyConnect)
+// Helper to create Redis-backed rate limit store
 function makeStore(prefix) {
   return new RedisStore({
     prefix,
-    // Proper async wrapper for ioredis + lazyConnect
     sendCommand: (...args) => getRedis().then((client) => client.call(...args)),
   });
 }
@@ -81,14 +74,12 @@ async function startServer() {
       windowMs: 60 * 1000,
       max: async (req) => {
         if (!req.user?.userId) return 1000;
-
         try {
           const score = Number(
             (await redisZScore("engagement:score", req.user.userId)) || 0,
           );
           const metrics = await getSystemMetrics();
           const predictedRPM = await getPredictedRPM();
-
           return getDynamicLimit(
             score,
             predictedRPM || metrics.rpm,
@@ -99,7 +90,7 @@ async function startServer() {
             { event: "RATE_LIMIT_FALLBACK", err },
             "Using default limit due to Redis issue",
           );
-          return 500; // safe fallback
+          return 500;
         }
       },
       store: makeStore("rl:api:"),
@@ -110,10 +101,8 @@ async function startServer() {
     });
 
     const app = express();
-
     app.disable("x-powered-by");
     app.use(requestLogger);
-
     app.use((req, res, next) => {
       res.setHeader("X-Request-Id", req.id);
       next();
@@ -121,7 +110,6 @@ async function startServer() {
 
     app.use(express.json({ limit: "10mb" }));
     app.use(express.urlencoded({ extended: true, limit: "10mb" }));
-
     app.use(helmet());
     app.use(
       cors({
@@ -144,10 +132,9 @@ async function startServer() {
         optionsSuccessStatus: 204,
       }),
     );
-
     app.use(compression());
 
-    // Global request tracking (non-blocking)
+    // Global request tracking
     app.use(async (req, res, next) => {
       incrGlobalRequests().catch(() => {});
       trackHourLoad().catch(() => {});
@@ -161,9 +148,10 @@ async function startServer() {
     app.get("/", (req, res) => res.send("CivilierERP API running"));
     app.get("/health", (req, res) => res.json({ status: "ok" }));
 
+    // Existing routes
     app.use("/api/users", require("./routes/users"));
 
-    // Active user tracking (after auth)
+    // Active user tracking
     app.use("/api", authMiddleware, async (req, res, next) => {
       if (req.user?.userId) {
         pfaddActiveUser(req.user.userId).catch(() => {});
@@ -183,7 +171,7 @@ async function startServer() {
       { path: "/api/billing-terms", file: "./routes/billingTerms" },
       { path: "/api/card-master", file: "./routes/cardMaster" },
       { path: "/api/cheque-master", file: "./routes/chequeMaster" },
-      { path: "/api/document-type", file: "./routes/documentType" },
+      { path: "/api/document-type", file: "./routes/document-type" }, // ← Added / Fixed
       { path: "/api/fin-year", file: "./routes/finYear" },
       { path: "/api/general-ledger", file: "./routes/generalLedger" },
       { path: "/api/hsn", file: "./routes/hsn" },
@@ -232,7 +220,7 @@ async function startServer() {
       verbose: isDev,
     });
 
-    // DBA route (admin only)
+    // DBA route
     try {
       app.use(
         "/api/dba",
@@ -255,13 +243,10 @@ async function startServer() {
         const metrics = await getSystemMetrics();
         const predictedRPM = await getPredictedRPM();
         metrics.predictedRPM = predictedRPM;
-
         const topEngagedUsers = await getRedis().then((r) =>
           r.zrevrange("engagement:score", 0, 9, "WITHSCORES"),
         );
-
         metrics.topEngagedUsers = topEngagedUsers;
-
         if (req.user) {
           metrics.avgLimit = getDynamicLimit(
             (await redisZScore("engagement:score", req.user.userId)) || 0,
@@ -269,7 +254,6 @@ async function startServer() {
             metrics.memoryUsage,
           );
         }
-
         res.json(metrics);
       } catch (err) {
         logger.error({ event: "METRICS_ERROR", err });
@@ -279,11 +263,7 @@ async function startServer() {
 
     // Global error handler
     app.use((err, req, res, next) => {
-      req.log?.error(`
-[ERR] ERROR: ${err.message}
-   -> ${req.method} ${req.url}
-   -> user: ${req.user?.userId || "anonymous"}
-`);
+      req.log?.error(`[ERR] ERROR: ${err.message} -> ${req.method} ${req.url}`);
       res.status(500).json({
         error: "Internal Server Error",
         requestId: req.id,
@@ -291,7 +271,6 @@ async function startServer() {
     });
 
     const PORT = process.env.PORT || 5000;
-
     app.listen(PORT, () => {
       printBanner(PORT);
       logger.info(`[START] Server ready on port ${PORT}`);
@@ -306,7 +285,6 @@ async function startServer() {
 
 // For Vercel / serverless compatibility
 const appPromise = startServer();
-
 module.exports = async (req, res) => {
   const app = await appPromise;
   return app(req, res);
