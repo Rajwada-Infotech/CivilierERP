@@ -379,4 +379,38 @@ router.patch(
   },
 );
 
+// ======================
+// RESET USER PASSWORD (admin action — no current password required)
+// ======================
+router.patch(
+  "/:id/reset-password",
+  authMiddleware,
+  checkPermission("Users", "List", "CanEdit"),
+  async (req, res) => {
+    const { id } = req.params;
+    const { new_password } = req.body;
+
+    if (!new_password || new_password.length < 6) {
+      return res
+        .status(400)
+        .json({ error: "Password must be at least 6 characters" });
+    }
+
+    try {
+      const pool = getPool();
+      const hashed = await bcrypt.hash(new_password, SALT_ROUNDS);
+      await pool
+        .request()
+        .input("id", sql.Int, id)
+        .input("password", sql.NVarChar, hashed)
+        .query("UPDATE dbo.users SET password = @password WHERE id = @id");
+
+      res.json({ message: "Password reset successfully" });
+    } catch (err) {
+      console.error("PATCH /users/:id/reset-password error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
 module.exports = router;
