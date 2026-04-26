@@ -174,13 +174,6 @@ function computeBreakdown(
   };
 }
 
-const STATUS_STYLES: Record<BookingStatus, string> = {
-  Draft: "bg-slate-100 text-slate-700 border-slate-200",
-  Approved: "bg-blue-100 text-blue-700 border-blue-200",
-  Booked: "bg-emerald-100 text-emerald-700 border-emerald-200",
-  Hold: "bg-amber-100 text-amber-700 border-amber-200",
-};
-
 function blankForm(): Omit<ExpenseRecord, "id"> {
   return {
     bookingReference: "",
@@ -202,7 +195,7 @@ function blankForm(): Omit<ExpenseRecord, "id"> {
   };
 }
 
-// ─── Small helpers ─────────────────────────────────────────────────────────────
+// ─── UI Components ────────────────────────────────────────────────────────────
 
 function FormSection({
   label,
@@ -274,8 +267,7 @@ function ReadonlyField({
   );
 }
 
-// ─── Master Term Picker Dialog ────────────────────────────────────────────────
-
+// Master Term Picker
 interface MasterTermPickerProps {
   open: boolean;
   onClose: () => void;
@@ -388,8 +380,7 @@ function MasterTermPicker({
   );
 }
 
-// ─── Billing / Discount Accordion ─────────────────────────────────────────────
-
+// Billing Accordion
 interface BillingAccordionProps {
   basicAmount: number;
   cgstRate: number;
@@ -444,7 +435,6 @@ function BillingAccordion({
       />
 
       <div className="rounded-xl border border-border overflow-hidden">
-        {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 py-3.5 bg-muted/40">
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-primary/10 shrink-0">
@@ -521,7 +511,6 @@ function BillingAccordion({
           </div>
         </div>
 
-        {/* Applied master term badge */}
         {discount.masterTermName && (
           <div className="px-4 py-2 bg-primary/[0.04] border-b border-primary/10 flex items-center gap-2">
             <CheckCircle2 size={12} className="text-primary shrink-0" />
@@ -529,21 +518,13 @@ function BillingAccordion({
               Term{" "}
               <span className="font-semibold">{discount.masterTermName}</span>{" "}
               applied from master
-              {discount.applicable
-                ? " - " +
-                  (discount.type === "percentage"
-                    ? discount.value + "% discount"
-                    : "Rs." + fmt(discount.value) + " flat off")
-                : " - No discount"}
             </p>
           </div>
         )}
 
-        {/* Body */}
         {open && (
           <div className="border-t border-border bg-card">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 divide-y lg:divide-y-0 lg:divide-x divide-border">
-              {/* Left: discount config */}
               <div className="p-4 space-y-4">
                 <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
                   Discount Configuration
@@ -636,7 +617,6 @@ function BillingAccordion({
                 )}
               </div>
 
-              {/* Right: price breakdown */}
               <div className="p-4">
                 <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground mb-3">
                   Price Breakdown
@@ -651,9 +631,6 @@ function BillingAccordion({
                     <p className="text-xs text-muted-foreground">
                       Basic amount not yet set
                     </p>
-                    <p className="text-[10px] text-muted-foreground/60">
-                      Link a purchase order to auto-fill amounts
-                    </p>
                   </div>
                 ) : (
                   <div className="rounded-lg border border-border overflow-hidden divide-y divide-border/60 text-xs">
@@ -666,12 +643,7 @@ function BillingAccordion({
 
                     {discount.applicable && (
                       <BreakdownRow
-                        label={
-                          "Discount " +
-                          (discount.type === "percentage"
-                            ? "(" + discount.value + "%)"
-                            : "Fixed")
-                        }
+                        label={`Discount ${discount.type === "percentage" ? "(" + discount.value + "%)" : "Fixed"}`}
                         sublabel="Applied before GST"
                         value={"- Rs." + fmt(bd.discountAmount)}
                         variant="debit"
@@ -768,6 +740,7 @@ function BreakdownRow({
     subtotal: "text-foreground font-semibold",
     total: "text-foreground font-bold text-sm",
   };
+
   return (
     <div
       className={
@@ -798,8 +771,7 @@ function BreakdownRow({
   );
 }
 
-// ─── Mobile record card ───────────────────────────────────────────────────────
-
+// RecordCard (Mobile)
 function RecordCard({
   rec,
   onEdit,
@@ -834,15 +806,15 @@ function RecordCard({
       <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
         <div>
           <span className="text-muted-foreground">Date: </span>
-          <span>{rec.bookingDate}</span>
+          {rec.bookingDate}
         </div>
         <div>
           <span className="text-muted-foreground">Due: </span>
-          <span>{rec.dueDate || "-"}</span>
+          {rec.dueDate || "-"}
         </div>
         <div>
           <span className="text-muted-foreground">PO: </span>
-          <span className="font-mono text-foreground/80">{rec.poId || "-"}</span>
+          <span className="font-mono">{rec.poId || "-"}</span>
         </div>
         <div>
           <span className="text-muted-foreground">Invoice: </span>
@@ -915,7 +887,6 @@ async function apiFetch(url: string, opts?: RequestInit) {
   return res.json();
 }
 
-/** Map DB row → ExpenseRecord (frontend shape) */
 function dbToRecord(row: any): ExpenseRecord {
   return {
     id: String(row.Eid ?? row.eid ?? row.EID ?? ""),
@@ -924,7 +895,7 @@ function dbToRecord(row: any): ExpenseRecord {
     dueDate: row.EReminder ? row.EReminder.slice(0, 10) : "",
     financialYear: "",
     poId: null,
-    supplier: row.EProjectName ?? "",   // closest available field
+    supplier: row.EProjectName ?? "",
     projectSite: row.EProjectName ?? "",
     materialCategory: row.EDocumentType ?? "",
     invoiceReference: row.EDocNo ?? "",
@@ -938,7 +909,6 @@ function dbToRecord(row: any): ExpenseRecord {
   };
 }
 
-/** Map form state → POST/PUT body */
 function recordToDb(form: Omit<ExpenseRecord, "id">) {
   return {
     EProjectName: form.supplier || form.projectSite || null,
@@ -954,13 +924,15 @@ function recordToDb(form: Omit<ExpenseRecord, "id">) {
   };
 }
 
-// ─── Main Page ────────────────────────────────────────────────────────────────
+// ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function MaterialExpenseBooking() {
   const { finYears } = useFinYear();
   const activeFinYears = finYears.filter((fy) => fy.status === "Active");
 
-  const [purchaseOrders] = useState<PurchaseOrder[]>([]);
+  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
+  const [poLoading, setPoLoading] = useState(true);
+
   const [records, setRecords] = useState<ExpenseRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<PageView>("list");
@@ -969,7 +941,7 @@ export default function MaterialExpenseBooking() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // ── Fetch list from API ──
+  // Fetch Records
   const fetchRecords = React.useCallback(async () => {
     try {
       setLoading(true);
@@ -982,7 +954,43 @@ export default function MaterialExpenseBooking() {
     }
   }, []);
 
-  React.useEffect(() => { fetchRecords(); }, [fetchRecords]);
+  // Fetch Purchase Orders (Fixed - using Expense Booking data)
+  const fetchPurchaseOrders = React.useCallback(async () => {
+    try {
+      setPoLoading(true);
+      const data = await apiFetch(`${API}?limit=200`);
+
+      const mappedPOs: PurchaseOrder[] = (data.data ?? []).map((row: any) => ({
+        poNumber: row.EDocNo
+          ? String(row.EDocNo)
+          : `EXP-${row.Eid || Date.now()}`,
+        supplier: row.EProjectName || "Unknown Supplier",
+        projectSite: row.EProjectName || "",
+        itemDescription: row.EDocumentType || "Material Expense",
+        quantity: 1,
+        unit: "Nos",
+        rate: parseFloat(row.EAmount) || 0,
+        totalAmount: parseFloat(row.EAmount) || 0,
+        paymentTerms: "Net-30",
+        cgstRate: 18,
+        sgstRate: 0,
+        invoiceReference: row.EDocNo || "",
+      }));
+
+      setPurchaseOrders(mappedPOs);
+    } catch (err: any) {
+      console.error("Failed to load purchase orders:", err);
+      toast.error("Failed to load purchase orders: " + err.message);
+      setPurchaseOrders([]);
+    } finally {
+      setPoLoading(false);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    fetchRecords();
+    fetchPurchaseOrders();
+  }, [fetchRecords, fetchPurchaseOrders]);
 
   const set = <K extends keyof Omit<ExpenseRecord, "id">>(
     field: K,
@@ -991,13 +999,16 @@ export default function MaterialExpenseBooking() {
 
   const linkPO = (poNumber: string) => {
     const po = purchaseOrders.find((p) => p.poNumber === poNumber);
-    if (!po) { set("poId", null); return; }
+    if (!po) {
+      set("poId", null);
+      return;
+    }
     setForm((prev) => ({
       ...prev,
       poId: po.poNumber,
       supplier: po.supplier,
       projectSite: po.projectSite,
-      materialCategory: prev.materialCategory,
+      materialCategory: prev.materialCategory || po.itemDescription,
       invoiceReference: po.invoiceReference,
       basicAmount: po.totalAmount,
       cgstRate: po.cgstRate,
@@ -1010,12 +1021,14 @@ export default function MaterialExpenseBooking() {
     setForm(blankForm());
     setView("form");
   };
+
   const openEdit = (rec: ExpenseRecord) => {
     setEditingId(rec.id);
     const { id, ...rest } = rec;
     setForm(rest);
     setView("form");
   };
+
   const cancelForm = () => {
     setView("list");
     setEditingId(null);
@@ -1027,13 +1040,22 @@ export default function MaterialExpenseBooking() {
       toast.error("Please fill in the Booking Reference and Date.");
       return;
     }
-    const bd = computeBreakdown(form.basicAmount, form.cgstRate, form.sgstRate, form.discount);
+
+    const bd = computeBreakdown(
+      form.basicAmount,
+      form.cgstRate,
+      form.sgstRate,
+      form.discount,
+    );
     const body = { ...recordToDb(form), EAmount: bd.netAmount };
 
     try {
       setSaving(true);
       if (editingId) {
-        await apiFetch(`${API}/${editingId}`, { method: "PUT", body: JSON.stringify(body) });
+        await apiFetch(`${API}/${editingId}`, {
+          method: "PUT",
+          body: JSON.stringify(body),
+        });
         toast.success("Expense booking updated.");
       } else {
         await apiFetch(API, { method: "POST", body: JSON.stringify(body) });
@@ -1059,7 +1081,6 @@ export default function MaterialExpenseBooking() {
     }
   };
 
-  /** Called by ApprovalActions after any status change — refetch to get live status */
   const handleApprovalSuccess = async () => {
     await fetchRecords();
   };
@@ -1068,7 +1089,6 @@ export default function MaterialExpenseBooking() {
     <>
       <Breadcrumbs items={["Dashboard", "Material", "Expense Booking"]} />
       <div className="space-y-4">
-        {/* Page header */}
         <div className="flex items-center justify-between gap-3">
           <div>
             <h1 className="text-lg sm:text-xl font-heading font-bold text-foreground">
@@ -1087,7 +1107,7 @@ export default function MaterialExpenseBooking() {
           )}
         </div>
 
-        {/* ── Inline Form ─────────────────────────────────────────────────── */}
+        {/* Form View */}
         {view === "form" && (
           <Card className="border-primary/20 shadow-sm">
             <CardHeader className="pb-4 border-b border-border px-4 sm:px-6">
@@ -1110,10 +1130,6 @@ export default function MaterialExpenseBooking() {
                         ? "Edit Expense Booking"
                         : "New Expense Booking"}
                     </CardTitle>
-                    <CardDescription className="text-xs mt-0.5 hidden sm:block">
-                      Link a purchase order to auto-fill supplier, invoice and
-                      amount details.
-                    </CardDescription>
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
@@ -1133,7 +1149,6 @@ export default function MaterialExpenseBooking() {
             </CardHeader>
 
             <CardContent className="pt-5 space-y-6 px-4 sm:px-6">
-              {/* ── Booking Info ── */}
               <FormSection label="Booking Information">
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <Field label="Booking Reference" required>
@@ -1175,17 +1190,6 @@ export default function MaterialExpenseBooking() {
                             {fy.year}
                           </SelectItem>
                         ))}
-                        {finYears
-                          .filter((fy) => fy.status !== "Active")
-                          .map((fy) => (
-                            <SelectItem
-                              key={fy.id}
-                              value={fy.year}
-                              className="text-muted-foreground"
-                            >
-                              {fy.year} ({fy.status})
-                            </SelectItem>
-                          ))}
                       </SelectContent>
                     </Select>
                   </Field>
@@ -1216,42 +1220,62 @@ export default function MaterialExpenseBooking() {
                 </div>
               </FormSection>
 
-              {/* ── Purchase Order Link ── */}
+              {/* Fixed PO Dropdown */}
               <FormSection label="Purchase Order">
                 <Field
                   label="Link Purchase Order"
                   required
                   hint="Selecting a PO auto-fills supplier, invoice reference, project site and amounts."
                 >
-                  <Select value={form.poId ?? ""} onValueChange={linkPO}>
+                  <Select
+                    value={form.poId ?? ""}
+                    onValueChange={linkPO}
+                    disabled={poLoading}
+                  >
                     <SelectTrigger>
                       <div className="flex items-center gap-2">
                         <Link2
                           size={13}
                           className="text-muted-foreground shrink-0"
                         />
-                        <SelectValue placeholder="Select purchase order..." />
+                        <SelectValue
+                          placeholder={
+                            poLoading
+                              ? "Loading purchase orders..."
+                              : purchaseOrders.length === 0
+                                ? "No records found"
+                                : "Select purchase order..."
+                          }
+                        />
                       </div>
                     </SelectTrigger>
                     <SelectContent>
                       {purchaseOrders.map((po) => (
                         <SelectItem key={po.poNumber} value={po.poNumber}>
-                          <div className="flex flex-col sm:flex-row sm:items-center gap-0.5 sm:gap-2">
+                          <div className="flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-2">
                             <span className="font-mono text-xs font-semibold">
                               {po.poNumber}
                             </span>
                             <span className="text-muted-foreground text-xs">
                               - {po.supplier}
                             </span>
+                            <span className="text-muted-foreground text-xs ml-auto">
+                              Rs.{fmt(po.totalAmount)}
+                            </span>
                           </div>
                         </SelectItem>
                       ))}
+                      {purchaseOrders.length === 0 && !poLoading && (
+                        <div className="px-4 py-6 text-center text-sm text-muted-foreground">
+                          No purchase orders available
+                        </div>
+                      )}
                     </SelectContent>
                   </Select>
                 </Field>
 
                 {form.poId && (
-                  <div className="rounded-xl border border-border/60 bg-muted/20 p-3 sm:p-4 space-y-3">
+                  <div className="rounded-xl border border-border/60 bg-muted/20 p-3 sm:p-4 space-y-3 mt-4">
                     <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
                       Auto-filled from PO
                     </p>
@@ -1297,7 +1321,6 @@ export default function MaterialExpenseBooking() {
                 )}
               </FormSection>
 
-              {/* ── Billing Terms ── */}
               {form.poId && (
                 <FormSection label="Billing Terms">
                   <BillingAccordion
@@ -1310,7 +1333,6 @@ export default function MaterialExpenseBooking() {
                 </FormSection>
               )}
 
-              {/* ── Remarks ── */}
               <FormSection label="Remarks">
                 <textarea
                   value={form.remarks}
@@ -1325,167 +1347,177 @@ export default function MaterialExpenseBooking() {
                 <Button variant="outline" onClick={cancelForm}>
                   Cancel
                 </Button>
-                <Button className="gradient-accent" onClick={handleSave} disabled={saving}>
-                  {saving ? "Saving…" : editingId ? "Update Booking" : "Save Booking"}
+                <Button
+                  className="gradient-accent"
+                  onClick={handleSave}
+                  disabled={saving}
+                >
+                  {saving
+                    ? "Saving…"
+                    : editingId
+                      ? "Update Booking"
+                      : "Save Booking"}
                 </Button>
               </div>
             </CardContent>
           </Card>
         )}
 
-        {/* ── Bookings List ── */}
+        {/* List View */}
         {view === "list" && (
           <>
             {loading && (
-              <div className="text-center py-12 text-muted-foreground text-sm">
+              <div className="text-center py-12 text-muted-foreground">
                 Loading bookings…
               </div>
             )}
-            {!loading && (
-            <>
-            {/* Mobile: card layout */}
-            <div className="flex flex-col gap-3 sm:hidden">
-              {records.length === 0 && (
-                <div className="text-center py-12 text-muted-foreground text-sm border rounded-xl border-dashed border-border">
-                  No bookings yet. Tap "New" to get started.
-                </div>
-              )}
-              {records.map((rec) => (
-                <RecordCard
-                  key={rec.id}
-                  rec={rec}
-                  onEdit={() => openEdit(rec)}
-                  onDelete={() => setDeleteId(rec.id)}
-                  onApprovalSuccess={handleApprovalSuccess}
-                />
-              ))}
-            </div>
 
-            {/* Desktop: table layout */}
-            <Card className="hidden sm:block">
-              <CardContent className="p-0">
-                <div className="rounded-md overflow-auto">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Reference</TableHead>
-                        <TableHead>Date</TableHead>
-                        <TableHead>Due Date</TableHead>
-                        <TableHead>PO No.</TableHead>
-                        <TableHead>Supplier</TableHead>
-                        <TableHead className="hidden md:table-cell">
-                          Invoice Ref
-                        </TableHead>
-                        <TableHead>Basic Amt</TableHead>
-                        <TableHead>Discount</TableHead>
-                        <TableHead>Net Amt</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {records.map((rec) => {
-                        const rbd = computeBreakdown(
-                          rec.basicAmount,
-                          rec.cgstRate,
-                          rec.sgstRate,
-                          rec.discount,
-                        );
-                        return (
-                          <TableRow key={rec.id}>
-                            <TableCell className="font-mono text-xs">
-                              {rec.bookingReference}
-                            </TableCell>
-                            <TableCell className="text-xs">
-                              {rec.bookingDate}
-                            </TableCell>
-                            <TableCell className="text-xs">
-                              {rec.dueDate || "-"}
-                            </TableCell>
-                            <TableCell className="font-mono text-xs text-foreground/80">
-                              {rec.poId || "-"}
-                            </TableCell>
-                            <TableCell className="text-xs max-w-[110px] truncate">
-                              {rec.supplier}
-                            </TableCell>
-                            <TableCell className="font-mono text-xs hidden md:table-cell">
-                              {rec.invoiceReference || "-"}
-                            </TableCell>
-                            <TableCell className="font-mono text-xs">
-                              Rs.{fmt(rec.basicAmount)}
-                            </TableCell>
-                            <TableCell>
-                              {rec.discount.applicable ? (
-                                <span className="text-xs text-destructive font-medium">
-                                  {rec.discount.type === "percentage"
-                                    ? rec.discount.value + "%"
-                                    : "Rs." + fmt(rec.discount.value)}
-                                </span>
-                              ) : (
-                                <span className="text-xs text-muted-foreground">
-                                  -
-                                </span>
-                              )}
-                            </TableCell>
-                            <TableCell className="font-mono text-xs">
-                              <span className="text-foreground font-semibold">
-                                Rs.{fmt(rbd.netAmount)}
-                              </span>
-                            </TableCell>
-                            <TableCell>
-                              <StatusBadge status={rec.status} />
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex flex-wrap gap-1.5 items-center">
-                                <ApprovalActions
-                                  status={rec.status}
-                                  recordId={rec.id}
-                                  endpoint="/api/expense-booking"
-                                  onSuccess={handleApprovalSuccess}
-                                />
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  className="h-7 w-7 p-0"
-                                  onClick={() => openEdit(rec)}
-                                >
-                                  <Edit size={13} />
-                                </Button>
-                                <Button
-                                  variant="destructive"
-                                  size="sm"
-                                  className="h-7 w-7 p-0"
-                                  onClick={() => setDeleteId(rec.id)}
-                                >
-                                  <Trash2 size={13} />
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })}
-                      {records.length === 0 && (
-                        <TableRow>
-                          <TableCell
-                            colSpan={11}
-                            className="text-center py-10 text-muted-foreground text-sm"
-                          >
-                            No bookings yet. Click "New Booking" to get started.
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
+            {!loading && (
+              <>
+                {/* Mobile Cards */}
+                <div className="flex flex-col gap-3 sm:hidden">
+                  {records.length === 0 && (
+                    <div className="text-center py-12 text-muted-foreground text-sm border rounded-xl border-dashed border-border">
+                      No bookings yet. Tap "New" to get started.
+                    </div>
+                  )}
+                  {records.map((rec) => (
+                    <RecordCard
+                      key={rec.id}
+                      rec={rec}
+                      onEdit={() => openEdit(rec)}
+                      onDelete={() => setDeleteId(rec.id)}
+                      onApprovalSuccess={handleApprovalSuccess}
+                    />
+                  ))}
                 </div>
-              </CardContent>
-            </Card>
-          </>
+
+                {/* Desktop Table */}
+                <Card className="hidden sm:block">
+                  <CardContent className="p-0">
+                    <div className="rounded-md overflow-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Reference</TableHead>
+                            <TableHead>Date</TableHead>
+                            <TableHead>Due Date</TableHead>
+                            <TableHead>PO No.</TableHead>
+                            <TableHead>Supplier</TableHead>
+                            <TableHead className="hidden md:table-cell">
+                              Invoice Ref
+                            </TableHead>
+                            <TableHead>Basic Amt</TableHead>
+                            <TableHead>Discount</TableHead>
+                            <TableHead>Net Amt</TableHead>
+                            <TableHead>Status</TableHead>
+                            <TableHead>Actions</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {records.map((rec) => {
+                            const rbd = computeBreakdown(
+                              rec.basicAmount,
+                              rec.cgstRate,
+                              rec.sgstRate,
+                              rec.discount,
+                            );
+                            return (
+                              <TableRow key={rec.id}>
+                                <TableCell className="font-mono text-xs">
+                                  {rec.bookingReference}
+                                </TableCell>
+                                <TableCell className="text-xs">
+                                  {rec.bookingDate}
+                                </TableCell>
+                                <TableCell className="text-xs">
+                                  {rec.dueDate || "-"}
+                                </TableCell>
+                                <TableCell className="font-mono text-xs">
+                                  {rec.poId || "-"}
+                                </TableCell>
+                                <TableCell className="text-xs max-w-[110px] truncate">
+                                  {rec.supplier}
+                                </TableCell>
+                                <TableCell className="font-mono text-xs hidden md:table-cell">
+                                  {rec.invoiceReference || "-"}
+                                </TableCell>
+                                <TableCell className="font-mono text-xs">
+                                  Rs.{fmt(rec.basicAmount)}
+                                </TableCell>
+                                <TableCell>
+                                  {rec.discount.applicable ? (
+                                    <span className="text-xs text-destructive font-medium">
+                                      {rec.discount.type === "percentage"
+                                        ? rec.discount.value + "%"
+                                        : "Rs." + fmt(rec.discount.value)}
+                                    </span>
+                                  ) : (
+                                    <span className="text-xs text-muted-foreground">
+                                      -
+                                    </span>
+                                  )}
+                                </TableCell>
+                                <TableCell className="font-mono text-xs">
+                                  <span className="text-foreground font-semibold">
+                                    Rs.{fmt(rbd.netAmount)}
+                                  </span>
+                                </TableCell>
+                                <TableCell>
+                                  <StatusBadge status={rec.status} />
+                                </TableCell>
+                                <TableCell>
+                                  <div className="flex flex-wrap gap-1.5 items-center">
+                                    <ApprovalActions
+                                      status={rec.status}
+                                      recordId={rec.id}
+                                      endpoint="/api/expense-booking"
+                                      onSuccess={handleApprovalSuccess}
+                                    />
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-7 w-7 p-0"
+                                      onClick={() => openEdit(rec)}
+                                    >
+                                      <Edit size={13} />
+                                    </Button>
+                                    <Button
+                                      variant="destructive"
+                                      size="sm"
+                                      className="h-7 w-7 p-0"
+                                      onClick={() => setDeleteId(rec.id)}
+                                    >
+                                      <Trash2 size={13} />
+                                    </Button>
+                                  </div>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                          {records.length === 0 && (
+                            <TableRow>
+                              <TableCell
+                                colSpan={11}
+                                className="text-center py-10 text-muted-foreground text-sm"
+                              >
+                                No bookings yet. Click "New Booking" to get
+                                started.
+                              </TableCell>
+                            </TableRow>
+                          )}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </CardContent>
+                </Card>
+              </>
             )}
           </>
         )}
       </div>
 
-      {/* Delete confirmation */}
+      {/* Delete Dialog */}
       <Dialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
         <DialogContent className="w-[calc(100vw-2rem)] max-w-sm">
           <DialogHeader>
@@ -1511,4 +1543,3 @@ export default function MaterialExpenseBooking() {
     </>
   );
 }
-
