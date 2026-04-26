@@ -1,4 +1,5 @@
 import React from "react";
+import { formatINR } from "@/utils/formatCurrency";
 import {
   LineChart,
   Line,
@@ -32,7 +33,7 @@ export const CashFlowChart: React.FC<CashFlowChartProps> = ({ data }) => (
         />
         <YAxis
           tick={{ fill: "hsl(var(--muted-foreground))", fontSize: 12 }}
-          tickFormatter={(v) => `₹${(v / 100000).toFixed(1)}L`}
+          tickFormatter={(v) => formatINR(v / 100000).replace("₹", "") + "L"}
         />
         <Tooltip
           contentStyle={{
@@ -41,10 +42,7 @@ export const CashFlowChart: React.FC<CashFlowChartProps> = ({ data }) => (
             borderRadius: 8,
             color: "hsl(var(--foreground))",
           }}
-          formatter={(value: number) => [
-            `₹${value.toLocaleString("en-IN")}`,
-            "Balance",
-          ]}
+          formatter={(value: number) => [formatINR(value), "Balance"]}
         />
         <Line
           type="monotone"

@@ -1,4 +1,5 @@
 import React from "react";
+import { formatINR } from "@/utils/formatCurrency";
 import {
   PieChart,
   Pie,
@@ -49,7 +50,7 @@ export const ExpenseByCategoryChart: React.FC<ExpenseByCategoryChartProps> = ({
                     {d.name}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    ₹{(d.value as number).toLocaleString("en-IN")}
+                    {formatINR(d.value as number)}
                   </p>
                 </div>
               );
@@ -66,7 +67,7 @@ export const ExpenseByCategoryChart: React.FC<ExpenseByCategoryChartProps> = ({
             />
             <span className="text-xs text-foreground">{c.name}</span>
             <span className="text-xs text-muted-foreground ml-auto">
-              ₹{(c.value / 1000).toFixed(0)}k
+              {formatINR(c.value / 1000).replace("₹", "") + "k"}
             </span>
           </div>
         ))}
