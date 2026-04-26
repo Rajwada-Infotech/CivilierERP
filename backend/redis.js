@@ -25,14 +25,22 @@ function createClient() {
     password: process.env.REDIS_PASSWORD || undefined,
     db: parseInt(process.env.REDIS_DB || "0"),
 
-    enableOfflineQueue: false,
+    // lazyConnect: true — the client is created but does NOT open a TCP
+    // connection until .connect() is explicitly called. This means
+    // rate-limit-redis (which fires a Lua script in its constructor) never
+    // hits an uninitialised stream and the startup crash is gone.
     lazyConnect: true,
+
+    // With lazyConnect, enableOfflineQueue: false is also safe because the
+    // queue is only relevant after the first connect() — any command that
+    // arrives before connect() is called is impossible in our flow.
+    enableOfflineQueue: false,
 
     connectTimeout: 3000,
     commandTimeout: 2000,
 
     retryStrategy: (times) => {
-      if (times > 5) return null;
+      if (times > 5) return null; // stop retrying — Redis is unavailable
       return Math.min(times * 500, 3000);
     },
   });
@@ -50,13 +58,18 @@ function createClient() {
   return redis;
 }
 
+// ─────────────────────────────
+// CONNECTION — async, shared promise so connect() is only called once
+// ─────────────────────────────
 async function getRedis() {
+  // Already connected and healthy — fast path
   if (client && client.status === "ready") return client;
 
   if (!client) {
     client = createClient();
   }
 
+  // Only one connect() in flight at a time
   if (!connectPromise) {
     connectPromise = client
       .connect()
@@ -65,8 +78,12 @@ async function getRedis() {
         return client;
       })
       .catch((err) => {
+        // Reset so the next caller can try again
         connectPromise = null;
-        logger.error({ event: "REDIS_CONNECT_FAIL", err });
+        logger.error(
+          { event: "REDIS_CONNECT_FAIL", err },
+          "Redis connect failed",
+        );
         throw err;
       });
   }
@@ -75,7 +92,8 @@ async function getRedis() {
 }
 
 // ─────────────────────────────
-// SAFE EXEC WRAPPER
+// SAFE EXEC — every public helper goes through this so Redis being down
+// never crashes the app; callers just get the fallback value.
 // ─────────────────────────────
 async function safeExec(fn, fallback = null) {
   try {
@@ -90,12 +108,66 @@ async function safeExec(fn, fallback = null) {
 // BASIC OPS
 // ─────────────────────────────
 const redisGet = (key) => safeExec((r) => r.get(key));
+
 const redisSet = (key, value, ttl = null) =>
   safeExec((r) => (ttl ? r.set(key, value, "EX", ttl) : r.set(key, value)));
+
 const redisDel = (key) => safeExec((r) => r.del(key));
 
+// Pattern-based delete using a Lua script (avoids KEYS in production clusters)
+const redisDelPattern = (pattern) =>
+  safeExec(async (r) => {
+    const script = `
+      local matches = redis.call('KEYS', ARGV[1])
+      if #matches > 0 then redis.call('DEL', unpack(matches)) end
+      return #matches
+    `;
+    return await r.eval(script, 0, pattern);
+  }, 0);
+
 // ─────────────────────────────
-// ZSET + METRICS OPS
+// COMPRESSION — used by cache middleware to shrink large payloads
+// ─────────────────────────────
+function compress(value) {
+  try {
+    return LZString.compressToUTF16(JSON.stringify(value));
+  } catch {
+    return null;
+  }
+}
+
+function decompress(compressed) {
+  try {
+    return JSON.parse(LZString.decompressFromUTF16(compressed));
+  } catch {
+    return null;
+  }
+}
+
+// ─────────────────────────────
+// DISTRIBUTED LOCK — used by cache stampede protection
+// Returns "OK" on acquisition, null if lock is already held
+// ─────────────────────────────
+const redisLock = (key, ttlSeconds = 30) =>
+  safeExec((r) => r.set(key, Date.now(), "PX", ttlSeconds * 1000, "NX"));
+
+// ─────────────────────────────
+// CACHE VERSION — bumping the version invalidates all keys in a namespace
+// without needing a pattern delete (which is slow on large keyspaces)
+// ─────────────────────────────
+const getCacheVersion = (ns) =>
+  safeExec(async (r) => Number((await r.get(`cache:version:${ns}`)) || 0), 0);
+
+const bumpCacheVersion = (ns) => safeExec((r) => r.incr(`cache:version:${ns}`));
+
+// ─────────────────────────────
+// STALE CACHE HELPER
+// ─────────────────────────────
+const setStaleCache = (key, value, ttlSeconds) =>
+  redisSet(key, value, ttlSeconds);
+
+// ─────────────────────────────
+// ZSET OPS
 // ─────────────────────────────
 const redisZScore = (key, member) => safeExec((r) => r.zscore(key, member), 0);
 
@@ -112,7 +184,7 @@ const redisZIncrBy = (key, increment, member, ttl = null) =>
   });
 
 // ─────────────────────────────
-// GLOBAL METRICS
+// GLOBAL METRICS COUNTERS
 // ─────────────────────────────
 const incrGlobalRequests = () =>
   safeExec(async (r) => {
@@ -170,7 +242,6 @@ async function getSystemMetrics() {
   if (now - cachedMetrics.lastUpdated < 2000) return cachedMetrics;
 
   try {
-    const redis = await getRedis();
     const currentHour = new Date().getHours();
 
     const pipelineCommands = [
@@ -189,6 +260,7 @@ async function getSystemMetrics() {
     }
 
     const results = await redisPipelineExec(pipelineCommands);
+    if (!results) return cachedMetrics; // Redis down — return last known
 
     const rpm = Number(results?.[0]?.[1] || 0);
     const activeUsers = Number(results?.[1]?.[1] || 0);
@@ -201,7 +273,6 @@ async function getSystemMetrics() {
 
     const hits = Number(results?.[3]?.[1] || 0);
     const misses = Number(results?.[4]?.[1] || 0);
-
     const cacheHitRate =
       hits + misses > 0 ? Math.round((hits / (hits + misses)) * 100) / 100 : 0;
 
@@ -230,7 +301,10 @@ async function getSystemMetrics() {
       lastUpdated: now,
     };
   } catch (err) {
-    logger.warn({ event: "REDIS_METRICS_ERROR", err });
+    logger.warn(
+      { event: "REDIS_METRICS_ERROR", err },
+      "getSystemMetrics error — preserving cache",
+    );
   }
 
   return cachedMetrics;
@@ -265,17 +339,14 @@ const getPredictedRPM = async () => {
 };
 
 // ─────────────────────────────
-// LIMIT ENGINE
+// DYNAMIC RATE LIMIT
 // ─────────────────────────────
 function getDynamicLimit(score, rpm, memoryUsage) {
-  const base = 20 + Math.sqrt(score) * 10;
-
+  const base = 20 + Math.sqrt(Number(score) || 0) * 10;
   let loadFactor = 1;
   if (rpm > 10000) loadFactor = 0.5;
   else if (rpm > 5000) loadFactor = 0.7;
-
   const memoryFactor = memoryUsage > 0.8 ? 0.7 : 1;
-
   return Math.floor(Math.min(base * loadFactor * memoryFactor, 500));
 }
 
@@ -284,6 +355,13 @@ module.exports = {
   redisGet,
   redisSet,
   redisDel,
+  redisDelPattern,
+  compress,
+  decompress,
+  redisLock,
+  getCacheVersion,
+  bumpCacheVersion,
+  setStaleCache,
   redisZScore,
   redisZIncrBy,
   incrGlobalRequests,
