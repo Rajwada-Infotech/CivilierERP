@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -11,43 +11,19 @@ import {
   Loader2,
   ToggleLeft,
   ToggleRight,
+  Upload,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 
-interface Company {
-  Id?: number;
-  code: string;
-  name: string;
-  legalName: string;
-  shortName: string;
-  type: string;
-  industry: string;
-  incorporationDate: string;
-  cinNumber: string;
-  panNumber: string;
-  tanNumber: string;
-  gstNumber: string;
-  registeredAddress: string;
-  city: string;
-  state: string;
-  country: string;
-  pincode: string;
-  phone: string;
-  fax: string;
-  email: string;
-  website: string;
-  authorizedCapital: string;
-  paidUpCapital: string;
-  currency: string;
-  fiscalYearStart: string;
-  auditorName: string;
-  bankName: string;
-  bankAccountNo: string;
-  bankIfscCode: string;
-  isActive: boolean;
-  remarks: string;
-  logoUrl: string;
-}
+const GST_TYPES = [
+  "Regular",
+  "Composition",
+  "Unregistered",
+  "Consumer",
+  "SEZ",
+  "Overseas",
+];
 
 const CO_TYPES = [
   "Private Limited",
@@ -72,6 +48,42 @@ const INDUSTRIES = [
 ];
 const CURRENCIES = ["INR", "USD", "EUR", "GBP", "AED"];
 
+interface Company {
+  Id?: number;
+  code: string;
+  name: string;
+  legalName: string;
+  shortName: string;
+  type: string;
+  industry: string;
+  incorporationDate: string;
+  cinNumber: string;
+  panNumber: string;
+  tanNumber: string;
+  gstType: string;
+  gstNumber: string;
+  gstDate: string;
+  tradeLicenseNo: string;
+  tradeLicenseDate: string;
+  registeredAddress: string;
+  city: string;
+  state: string;
+  country: string;
+  pincode: string;
+  phone: string;
+  fax: string;
+  email: string;
+  website: string;
+  authorizedCapital: string;
+  paidUpCapital: string;
+  currency: string;
+  fiscalYearStart: string;
+  auditorName: string;
+  isActive: boolean;
+  remarks: string;
+  logoUrl: string;
+}
+
 const empty: Company = {
   code: "",
   name: "",
@@ -83,7 +95,11 @@ const empty: Company = {
   cinNumber: "",
   panNumber: "",
   tanNumber: "",
+  gstType: "Regular",
   gstNumber: "",
+  gstDate: "",
+  tradeLicenseNo: "",
+  tradeLicenseDate: "",
   registeredAddress: "",
   city: "",
   state: "",
@@ -98,9 +114,6 @@ const empty: Company = {
   currency: "INR",
   fiscalYearStart: "April",
   auditorName: "",
-  bankName: "",
-  bankAccountNo: "",
-  bankIfscCode: "",
   isActive: true,
   remarks: "",
   logoUrl: "",
@@ -121,7 +134,13 @@ function rowToForm(row: any): Company {
     cinNumber: row.CIN ?? "",
     panNumber: row.PAN ?? "",
     tanNumber: row.TAN ?? "",
+    gstType: row.GSTType ?? "Regular",
     gstNumber: row.GST ?? "",
+    gstDate: row.GSTDate ? row.GSTDate.slice(0, 10) : "",
+    tradeLicenseNo: row.TradeLicenseNo ?? "",
+    tradeLicenseDate: row.TradeLicenseDate
+      ? row.TradeLicenseDate.slice(0, 10)
+      : "",
     registeredAddress: row.RegisteredAddress ?? "",
     city: row.City ?? "",
     state: row.State ?? "",
@@ -137,13 +156,39 @@ function rowToForm(row: any): Company {
     currency: row.Currency ?? "INR",
     fiscalYearStart: row.FiscalYearStart ?? "April",
     auditorName: row.AuditorName ?? "",
-    bankName: row.BankName ?? "",
-    bankAccountNo: row.BankAccountNo ?? "",
-    bankIfscCode: row.BankIFSC ?? "",
     isActive: row.IsActive !== 0,
     remarks: row.Remarks ?? "",
     logoUrl: row.LogoUrl ?? "",
   };
+}
+
+// Logo avatar shown in the table beside company name
+function LogoAvatar({
+  logoUrl,
+  name,
+  size = "sm",
+}: {
+  logoUrl?: string;
+  name: string;
+  size?: "sm" | "md";
+}) {
+  const dim = size === "sm" ? "w-7 h-7 text-xs" : "w-10 h-10 text-sm";
+  if (logoUrl) {
+    return (
+      <img
+        src={logoUrl}
+        alt={name}
+        className={`${dim} rounded-lg object-contain border border-border bg-muted/30 flex-shrink-0`}
+      />
+    );
+  }
+  return (
+    <div
+      className={`${dim} rounded-lg bg-emerald-500/10 text-emerald-600 font-heading font-bold flex items-center justify-center flex-shrink-0`}
+    >
+      {name.charAt(0).toUpperCase()}
+    </div>
+  );
 }
 
 export default function CompanyMaster() {
@@ -152,10 +197,12 @@ export default function CompanyMaster() {
   const [editId, setEditId] = useState<number | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [search, setSearch] = useState("");
-  const [activeTab, setActiveTab] = useState<
-    "general" | "address" | "legal" | "banking"
-  >("general");
+  const [activeTab, setActiveTab] = useState<"general" | "address" | "legal">(
+    "general",
+  );
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
+  const [logoPreview, setLogoPreview] = useState<string>("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { data: companies = [], isLoading } = useQuery({
     queryKey: ["company-master"],
@@ -164,6 +211,8 @@ export default function CompanyMaster() {
       if (!res.ok) throw new Error("Failed to load");
       return res.json();
     },
+    staleTime: 30_000,
+    refetchOnWindowFocus: false,
   });
 
   const saveMutation = useMutation({
@@ -213,14 +262,39 @@ export default function CompanyMaster() {
   const openNew = () => {
     setForm({ ...empty });
     setEditId(null);
+    setLogoPreview("");
     setShowForm(true);
     setActiveTab("general");
   };
   const openEdit = (row: any) => {
-    setForm(rowToForm(row));
+    const f = rowToForm(row);
+    setForm(f);
+    setLogoPreview(f.logoUrl || "");
     setEditId(row.Id);
     setShowForm(true);
     setActiveTab("general");
+  };
+
+  const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error("Logo must be under 2 MB");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const base64 = reader.result as string;
+      setLogoPreview(base64);
+      setForm((c) => ({ ...c, logoUrl: base64 }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const removeLogo = () => {
+    setLogoPreview("");
+    setForm((c) => ({ ...c, logoUrl: "" }));
+    if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
   const fi = (label: string, key: keyof Company, type = "text", ph = "") => (
@@ -237,6 +311,7 @@ export default function CompanyMaster() {
       />
     </div>
   );
+
   const se = (label: string, key: keyof Company, options: string[]) => (
     <div key={key}>
       <label className="block text-xs font-medium text-muted-foreground mb-1">
@@ -254,10 +329,13 @@ export default function CompanyMaster() {
     </div>
   );
 
+  const TABS = ["general", "address", "legal"] as const;
+
   return (
     <>
       <Breadcrumbs items={["Admin", "Masters", "Company Master"]} />
       <div className="p-6 space-y-6">
+        {/* Header */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center">
@@ -268,7 +346,7 @@ export default function CompanyMaster() {
                 Company Master
               </h1>
               <p className="text-xs text-muted-foreground">
-                Manage company profiles, legal and banking details
+                Manage company profiles, legal and licensing details
               </p>
             </div>
           </div>
@@ -280,6 +358,7 @@ export default function CompanyMaster() {
           </button>
         </div>
 
+        {/* Table */}
         {!showForm && (
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="p-4 border-b border-border flex items-center gap-3">
@@ -312,6 +391,7 @@ export default function CompanyMaster() {
                   <thead className="bg-muted/50">
                     <tr>
                       {[
+                        "Logo",
                         "Code",
                         "Company Name",
                         "Legal Name",
@@ -319,13 +399,14 @@ export default function CompanyMaster() {
                         "Industry",
                         "City",
                         "PAN",
-                        "GST",
+                        "GST No.",
+                        "GST Type",
                         "Status",
                         "Actions",
                       ].map((h) => (
                         <th
                           key={h}
-                          className="px-4 py-3 text-left text-xs font-heading text-muted-foreground"
+                          className="px-4 py-3 text-left text-xs font-heading text-muted-foreground whitespace-nowrap"
                         >
                           {h}
                         </th>
@@ -336,7 +417,7 @@ export default function CompanyMaster() {
                     {filtered.length === 0 ? (
                       <tr>
                         <td
-                          colSpan={10}
+                          colSpan={12}
                           className="px-4 py-10 text-center text-muted-foreground text-sm"
                         >
                           No companies found
@@ -348,6 +429,12 @@ export default function CompanyMaster() {
                           key={c.Id}
                           className="hover:bg-muted/30 transition-colors"
                         >
+                          <td className="px-4 py-3">
+                            <LogoAvatar
+                              logoUrl={c.LogoUrl}
+                              name={c.Name || "?"}
+                            />
+                          </td>
                           <td className="px-4 py-3 font-mono text-xs font-medium text-primary">
                             {c.Code}
                           </td>
@@ -373,6 +460,13 @@ export default function CompanyMaster() {
                           </td>
                           <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
                             {c.GST}
+                          </td>
+                          <td className="px-4 py-3">
+                            {c.GSTType && (
+                              <span className="px-2 py-0.5 rounded-full text-xs bg-blue-500/10 text-blue-600 border border-blue-400/20">
+                                {c.GSTType}
+                              </span>
+                            )}
                           </td>
                           <td className="px-4 py-3">
                             <span
@@ -407,12 +501,21 @@ export default function CompanyMaster() {
           </div>
         )}
 
+        {/* Form */}
         {showForm && (
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="p-4 border-b border-border flex items-center justify-between bg-muted/30">
-              <h2 className="font-heading font-semibold text-foreground">
-                {editId ? "Edit Company" : "New Company"}
-              </h2>
+              <div className="flex items-center gap-3">
+                {/* Live logo preview in form header */}
+                <LogoAvatar
+                  logoUrl={logoPreview}
+                  name={form.name || "?"}
+                  size="md"
+                />
+                <h2 className="font-heading font-semibold text-foreground">
+                  {editId ? `Edit — ${form.name || "Company"}` : "New Company"}
+                </h2>
+              </div>
               <button
                 onClick={() => setShowForm(false)}
                 className="text-xs text-muted-foreground hover:text-foreground px-3 py-1 rounded border border-border hover:bg-muted transition-colors"
@@ -420,27 +523,80 @@ export default function CompanyMaster() {
                 Cancel
               </button>
             </div>
+
+            {/* Tabs */}
             <div className="flex gap-1 p-3 border-b border-border bg-muted/20">
-              {(["general", "address", "legal", "banking"] as const).map(
-                (tab) => (
-                  <button
-                    key={tab}
-                    onClick={() => setActiveTab(tab)}
-                    className={`px-4 py-1.5 rounded-md text-xs font-heading capitalize transition-colors ${activeTab === tab ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
-                  >
-                    {tab}
-                  </button>
-                ),
-              )}
+              {TABS.map((tab) => (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`px-4 py-1.5 rounded-md text-xs font-heading capitalize transition-colors ${activeTab === tab ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
+                >
+                  {tab}
+                </button>
+              ))}
             </div>
+
             <div className="p-6">
+              {/* General tab */}
               {activeTab === "general" && (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                  {fi("Company Code *", "code", "text", "e.g. MAIN")}{" "}
+                  {/* Logo upload — spans full width */}
+                  <div className="col-span-full">
+                    <label className="block text-xs font-medium text-muted-foreground mb-2">
+                      Company Logo
+                    </label>
+                    <div className="flex items-center gap-4">
+                      {logoPreview ? (
+                        <div className="relative group">
+                          <img
+                            src={logoPreview}
+                            alt="Logo preview"
+                            className="w-16 h-16 rounded-xl object-contain border border-border bg-muted/30"
+                          />
+                          <button
+                            onClick={removeLogo}
+                            className="absolute -top-2 -right-2 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <X size={11} />
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="w-16 h-16 rounded-xl border-2 border-dashed border-border bg-muted/20 flex items-center justify-center">
+                          <Landmark
+                            size={20}
+                            className="text-muted-foreground/40"
+                          />
+                        </div>
+                      )}
+                      <div>
+                        <input
+                          ref={fileInputRef}
+                          type="file"
+                          accept="image/*"
+                          onChange={handleLogoChange}
+                          className="hidden"
+                          id="company-logo-input"
+                        />
+                        <label
+                          htmlFor="company-logo-input"
+                          className="flex items-center gap-2 px-3 py-2 text-xs rounded-lg border border-border hover:bg-muted cursor-pointer transition-colors"
+                        >
+                          <Upload size={13} />
+                          {logoPreview ? "Change Logo" : "Upload Logo"}
+                        </label>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          PNG, JPG, SVG · Max 2 MB
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  {fi("Company Code *", "code", "text", "e.g. MAIN")}
                   {fi("Company Name *", "name")}
-                  {fi("Legal Name", "legalName")}{" "}
+                  {fi("Legal Name", "legalName")}
                   {fi("Short Name", "shortName")}
-                  {se("Company Type", "type", CO_TYPES)}{" "}
+                  {se("Company Type", "type", CO_TYPES)}
                   {se("Industry", "industry", INDUSTRIES)}
                   {fi("Incorporation Date", "incorporationDate", "date")}
                   {se("Currency", "currency", CURRENCIES)}
@@ -481,41 +637,60 @@ export default function CompanyMaster() {
                   </div>
                 </div>
               )}
+
+              {/* Address tab */}
               {activeTab === "address" && (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                   <div className="col-span-full">
                     {fi("Registered Address", "registeredAddress")}
                   </div>
-                  {fi("City", "city")} {fi("State", "state")}{" "}
+                  {fi("City", "city")}
+                  {fi("State", "state")}
                   {fi("Country", "country")}
-                  {fi("Pincode", "pincode")} {fi("Phone", "phone")}{" "}
+                  {fi("Pincode", "pincode")}
+                  {fi("Phone", "phone")}
                   {fi("Fax", "fax")}
-                  {fi("Email", "email", "email")} {fi("Website", "website")}{" "}
+                  {fi("Email", "email", "email")}
+                  {fi("Website", "website")}
                   {fi("Auditor Name", "auditorName")}
                 </div>
               )}
+
+              {/* Legal tab */}
               {activeTab === "legal" && (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                  {fi("CIN Number", "cinNumber")}{" "}
+                  {fi("CIN Number", "cinNumber")}
                   {fi("PAN Number", "panNumber", "text", "AAAAA0000A")}
-                  {fi("TAN Number", "tanNumber")}{" "}
+                  {fi("TAN Number", "tanNumber")}
+
+                  <div className="col-span-full pt-2">
+                    <p className="text-xs font-heading font-semibold text-muted-foreground uppercase tracking-widest mb-3 border-b border-border pb-1">
+                      GST Details
+                    </p>
+                  </div>
+                  {se("GST Type", "gstType", GST_TYPES)}
                   {fi("GST Number", "gstNumber", "text", "22AAAAA0000A1Z5")}
-                  {fi(
-                    "Authorized Capital (₹)",
-                    "authorizedCapital",
-                    "number",
-                  )}{" "}
+                  {fi("GST Registration Date", "gstDate", "date")}
+
+                  <div className="col-span-full pt-2">
+                    <p className="text-xs font-heading font-semibold text-muted-foreground uppercase tracking-widest mb-3 border-b border-border pb-1">
+                      Trade License
+                    </p>
+                  </div>
+                  {fi("Trade License Number", "tradeLicenseNo")}
+                  {fi("Trade License Date", "tradeLicenseDate", "date")}
+
+                  <div className="col-span-full pt-2">
+                    <p className="text-xs font-heading font-semibold text-muted-foreground uppercase tracking-widest mb-3 border-b border-border pb-1">
+                      Capital
+                    </p>
+                  </div>
+                  {fi("Authorized Capital (₹)", "authorizedCapital", "number")}
                   {fi("Paid Up Capital (₹)", "paidUpCapital", "number")}
                 </div>
               )}
-              {activeTab === "banking" && (
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                  {fi("Bank Name", "bankName")}{" "}
-                  {fi("Account Number", "bankAccountNo")}
-                  {fi("IFSC Code", "bankIfscCode", "text", "e.g. HDFC0001234")}
-                </div>
-              )}
             </div>
+
             <div className="p-4 border-t border-border flex justify-end gap-3">
               <button
                 onClick={() => setShowForm(false)}
@@ -537,6 +712,7 @@ export default function CompanyMaster() {
           </div>
         )}
 
+        {/* Delete confirm modal */}
         {deleteConfirm !== null && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
             <div className="bg-card border border-border rounded-xl p-6 w-80 shadow-xl">

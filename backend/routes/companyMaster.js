@@ -38,6 +38,10 @@ router.post("/", adminOnly, async (req, res) => {
       .input("PAN", sql.NVarChar(20), f.panNumber || null)
       .input("TAN", sql.NVarChar(20), f.tanNumber || null)
       .input("GST", sql.NVarChar(20), f.gstNumber || null)
+      .input("GSTType", sql.NVarChar(50), f.gstType || null)
+      .input("GSTDate", sql.Date, f.gstDate || null)
+      .input("TradeLicenseNo", sql.NVarChar(100), f.tradeLicenseNo || null)
+      .input("TradeLicenseDate", sql.Date, f.tradeLicenseDate || null)
       .input(
         "RegisteredAddress",
         sql.NVarChar(500),
@@ -60,22 +64,21 @@ router.post("/", adminOnly, async (req, res) => {
       .input("Currency", sql.NVarChar(10), f.currency || "INR")
       .input("FiscalYearStart", sql.NVarChar(20), f.fiscalYearStart || null)
       .input("AuditorName", sql.NVarChar(200), f.auditorName || null)
-      .input("BankName", sql.NVarChar(200), f.bankName || null)
-      .input("BankAccountNo", sql.NVarChar(50), f.bankAccountNo || null)
-      .input("BankIFSC", sql.NVarChar(20), f.bankIfscCode || null)
       .input("IsActive", sql.Bit, f.isActive !== false ? 1 : 0)
       .input("Remarks", sql.NVarChar(500), f.remarks || null)
       .input("LogoUrl", sql.NVarChar(sql.MAX), f.logoUrl || null).query(`
         INSERT INTO dbo.CompanyMaster
-          (Code,Name,LegalName,ShortName,Type,Industry,IncorporationDate,CIN,PAN,TAN,GST,
+          (Code,Name,LegalName,ShortName,Type,Industry,IncorporationDate,
+           CIN,PAN,TAN,GST,GSTType,GSTDate,TradeLicenseNo,TradeLicenseDate,
            RegisteredAddress,City,State,Country,Pincode,Phone,Fax,Email,Website,
            AuthorizedCapital,PaidUpCapital,Currency,FiscalYearStart,AuditorName,
-           BankName,BankAccountNo,BankIFSC,IsActive,Remarks,LogoUrl,IsDeleted,CreatedAt)
+           IsActive,Remarks,LogoUrl,IsDeleted,CreatedAt)
         VALUES
-          (@Code,@Name,@LegalName,@ShortName,@Type,@Industry,@IncorporationDate,@CIN,@PAN,@TAN,@GST,
+          (@Code,@Name,@LegalName,@ShortName,@Type,@Industry,@IncorporationDate,
+           @CIN,@PAN,@TAN,@GST,@GSTType,@GSTDate,@TradeLicenseNo,@TradeLicenseDate,
            @RegisteredAddress,@City,@State,@Country,@Pincode,@Phone,@Fax,@Email,@Website,
            @AuthorizedCapital,@PaidUpCapital,@Currency,@FiscalYearStart,@AuditorName,
-           @BankName,@BankAccountNo,@BankIFSC,@IsActive,@Remarks,@LogoUrl,0,GETDATE())
+           @IsActive,@Remarks,@LogoUrl,0,GETDATE())
       `);
     res.json({ success: true });
   } catch (err) {
@@ -102,6 +105,10 @@ router.put("/:id", adminOnly, async (req, res) => {
       .input("PAN", sql.NVarChar(20), f.panNumber || null)
       .input("TAN", sql.NVarChar(20), f.tanNumber || null)
       .input("GST", sql.NVarChar(20), f.gstNumber || null)
+      .input("GSTType", sql.NVarChar(50), f.gstType || null)
+      .input("GSTDate", sql.Date, f.gstDate || null)
+      .input("TradeLicenseNo", sql.NVarChar(100), f.tradeLicenseNo || null)
+      .input("TradeLicenseDate", sql.Date, f.tradeLicenseDate || null)
       .input(
         "RegisteredAddress",
         sql.NVarChar(500),
@@ -124,23 +131,21 @@ router.put("/:id", adminOnly, async (req, res) => {
       .input("Currency", sql.NVarChar(10), f.currency || "INR")
       .input("FiscalYearStart", sql.NVarChar(20), f.fiscalYearStart || null)
       .input("AuditorName", sql.NVarChar(200), f.auditorName || null)
-      .input("BankName", sql.NVarChar(200), f.bankName || null)
-      .input("BankAccountNo", sql.NVarChar(50), f.bankAccountNo || null)
-      .input("BankIFSC", sql.NVarChar(20), f.bankIfscCode || null)
       .input("IsActive", sql.Bit, f.isActive !== false ? 1 : 0)
       .input("Remarks", sql.NVarChar(500), f.remarks || null)
       .input("LogoUrl", sql.NVarChar(sql.MAX), f.logoUrl || null).query(`
         UPDATE dbo.CompanyMaster SET
-          Code=@Code,Name=@Name,LegalName=@LegalName,ShortName=@ShortName,
-          Type=@Type,Industry=@Industry,IncorporationDate=@IncorporationDate,
-          CIN=@CIN,PAN=@PAN,TAN=@TAN,GST=@GST,
-          RegisteredAddress=@RegisteredAddress,City=@City,State=@State,
-          Country=@Country,Pincode=@Pincode,Phone=@Phone,Fax=@Fax,
-          Email=@Email,Website=@Website,
-          AuthorizedCapital=@AuthorizedCapital,PaidUpCapital=@PaidUpCapital,
-          Currency=@Currency,FiscalYearStart=@FiscalYearStart,AuditorName=@AuditorName,
-          BankName=@BankName,BankAccountNo=@BankAccountNo,BankIFSC=@BankIFSC,
-          IsActive=@IsActive,Remarks=@Remarks,LogoUrl=@LogoUrl,UpdatedAt=GETDATE()
+          Code=@Code, Name=@Name, LegalName=@LegalName, ShortName=@ShortName,
+          Type=@Type, Industry=@Industry, IncorporationDate=@IncorporationDate,
+          CIN=@CIN, PAN=@PAN, TAN=@TAN,
+          GST=@GST, GSTType=@GSTType, GSTDate=@GSTDate,
+          TradeLicenseNo=@TradeLicenseNo, TradeLicenseDate=@TradeLicenseDate,
+          RegisteredAddress=@RegisteredAddress, City=@City, State=@State,
+          Country=@Country, Pincode=@Pincode, Phone=@Phone, Fax=@Fax,
+          Email=@Email, Website=@Website,
+          AuthorizedCapital=@AuthorizedCapital, PaidUpCapital=@PaidUpCapital,
+          Currency=@Currency, FiscalYearStart=@FiscalYearStart, AuditorName=@AuditorName,
+          IsActive=@IsActive, Remarks=@Remarks, LogoUrl=@LogoUrl, UpdatedAt=GETDATE()
         WHERE Id=@Id AND IsDeleted=0
       `);
     res.json({ success: true });

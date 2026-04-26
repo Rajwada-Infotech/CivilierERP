@@ -1,17 +1,15 @@
 const express = require("express");
-const router = express.Router();
-const { getPool, sql } = require("../db");
-const authMiddleware = require("../middleware/auth");
-const allowRoles = require("../middleware/role");
-const { cache } = require("../middleware/cache");
-const { bumpCacheVersion } = require("../redis");
+const router  = express.Router();
+const { getPool, sql }      = require("../db");
+const { cache }             = require("../middleware/cache");
+const { bumpCacheVersion }  = require("../redis");
 
-const adminOnly = allowRoles("admin", "super_admin");
+const CACHE_NS = "approval-workflows";
 
-// GET all workflows
-router.get("/", authMiddleware, cache("approval-workflows", 60), async (req, res) => {
+// GET all workflows — cached 60s
+router.get("/", cache(CACHE_NS, 60), async (req, res) => {
   try {
-    const pool = await getPool();
+    const pool = getPool();
     const result = await pool.request().query(`
       SELECT Id AS id, Name AS name, Module AS module, Levels AS levels,
              Approvers AS approvers, Status AS status, Description AS description,
@@ -19,7 +17,6 @@ router.get("/", authMiddleware, cache("approval-workflows", 60), async (req, res
       FROM dbo.ApprovalWorkflows
       ORDER BY CreatedAt DESC
     `);
-    // Parse approvers string → array
     const data = result.recordset.map(w => ({
       ...w,
       approvers: w.approvers ? w.approvers.split(",").map(s => s.trim()) : [],
@@ -30,15 +27,18 @@ router.get("/", authMiddleware, cache("approval-workflows", 60), async (req, res
   }
 });
 
-// POST — create workflow (admin only)
-router.post("/", authMiddleware, adminOnly, async (req, res) => {
+// POST — create workflow
+router.post("/", async (req, res) => {
   const { name, module, levels, approvers, status, description } = req.body;
-  if (!name?.trim()) return res.status(400).json({ error: "Name is required" });
+  if (!name?.trim())   return res.status(400).json({ error: "Name is required" });
   if (!module?.trim()) return res.status(400).json({ error: "Module is required" });
 
   try {
-    const pool = await getPool();
-    const approversStr = Array.isArray(approvers) ? approvers.join(",") : (approvers || ""); 
+    const pool = getPool();
+    const approversStr = Array.isArray(approvers)
+      ? approvers.join(",")
+      : (approvers || "");
+
     await pool.request()
       .input("Name",        sql.NVarChar(100), name.trim())
       .input("Module",      sql.NVarChar(100), module.trim())
@@ -54,18 +54,22 @@ router.post("/", authMiddleware, adminOnly, async (req, res) => {
         VALUES
           (@Name, @Module, @Levels, @Approvers, @Status, @Description, @CreatedBy, @CreatedAt)
       `);
+
+    await bumpCacheVersion(CACHE_NS);
     res.status(201).json({ message: "Workflow created" });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// PUT — update workflow (admin only)
-router.put("/:id", authMiddleware, adminOnly, async (req, res) => {
+// PUT — update workflow
+router.put("/:id", async (req, res) => {
   const { name, module, levels, approvers, status, description } = req.body;
   try {
-    const pool = await getPool();
-    const approversStr = Array.isArray(approvers) ? approvers.join(",") : (approvers || "");
+    const pool = getPool();
+    const approversStr = Array.isArray(approvers)
+      ? approvers.join(",")
+      : (approvers || "");
 
     await pool.request()
       .input("Id",          sql.Int,           req.params.id)
@@ -84,16 +88,18 @@ router.put("/:id", authMiddleware, adminOnly, async (req, res) => {
           UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt
         WHERE Id=@Id
       `);
+
+    await bumpCacheVersion(CACHE_NS);
     res.json({ message: "Workflow updated" });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// PATCH /:id/toggle — toggle Active/Inactive (admin only)
-router.patch("/:id/toggle", authMiddleware, adminOnly, async (req, res) => {
+// PATCH /:id/toggle
+router.patch("/:id/toggle", async (req, res) => {
   try {
-    const pool = await getPool();
+    const pool = getPool();
     await pool.request()
       .input("Id",        sql.Int,           req.params.id)
       .input("UpdatedBy", sql.NVarChar(100), req.user?.email || null)
@@ -104,19 +110,23 @@ router.patch("/:id/toggle", authMiddleware, adminOnly, async (req, res) => {
           UpdatedAt = SYSDATETIME()
         WHERE Id = @Id
       `);
+
+    await bumpCacheVersion(CACHE_NS);
     res.json({ message: "Status toggled" });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// DELETE (admin only)
-router.delete("/:id", authMiddleware, adminOnly, async (req, res) => {
+// DELETE
+router.delete("/:id", async (req, res) => {
   try {
-    const pool = await getPool();
+    const pool = getPool();
     await pool.request()
       .input("Id", sql.Int, req.params.id)
       .query("DELETE FROM dbo.ApprovalWorkflows WHERE Id=@Id");
+
+    await bumpCacheVersion(CACHE_NS);
     res.json({ message: "Workflow deleted" });
   } catch (err) {
     res.status(500).json({ error: err.message });
