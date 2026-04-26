@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   MasterPage,
@@ -18,7 +18,8 @@ import {
   updatePurchaseOrder,
   deletePurchaseOrder,
   getSuppliers,
-  getProjects,
+  getAllEnterprises,
+  getUOMs,
 } from "@/api/purchaseOrdersApi";
 
 const PurchaseOrderMaster = () => {
@@ -26,52 +27,97 @@ const PurchaseOrderMaster = () => {
   const [page, setPage] = useState(1);
   const limit = 10;
 
-  const {
-    data: dbData,
-    isLoading,
-    error,
-  } = useQuery({
+  // Tracks selected company id so we can filter the project dropdown client-side
+  const [selectedCompanyId, setSelectedCompanyId] = useState<number | null>(null);
+
+  // ── Remote data ──────────────────────────────────────────────────────────────
+  const { data: dbData, isLoading, error } = useQuery({
     queryKey: ["purchase-orders", page, limit],
     queryFn: () => getPurchaseOrders({ page, limit }),
   });
 
-  // Suppliers from AccountHeadMaster (type=Supplier) → { LHeadId, LHeadName }
   const { data: suppliersRaw = [] } = useQuery({
     queryKey: ["suppliers"],
     queryFn: getSuppliers,
   });
 
-  // Projects from enterprise table → { id, name }
-  const { data: projectsRaw = [] } = useQuery({
-    queryKey: ["projects"],
-    queryFn: getProjects,
+  // Single fetch for ALL enterprise rows — we split into companies/projects below
+  const { data: enterprisesRaw = [] } = useQuery({
+    queryKey: ["all-enterprises"],
+    queryFn: getAllEnterprises,
   });
 
-  const suppliers: Array<{ id: number; name: string }> = (
-    suppliersRaw as any[]
-  ).map((s) => ({ id: s.LHeadId, name: s.LHeadName }));
+  // UOMMaster — fields: Id, UOMName (confirmed from uomMaster.js SELECT query)
+  const { data: uomsRaw = [] } = useQuery({
+    queryKey: ["uom-master"],
+    queryFn: getUOMs,
+  });
 
-  const projects: Array<{ id: number; name: string }> = (
-    projectsRaw as any[]
-  ).map((p) => ({ id: p.id, name: p.name || p.Name || "" }));
+  // ── Normalise raw data ───────────────────────────────────────────────────────
+  const suppliers: Array<{ id: number; name: string }> = (suppliersRaw as any[]).map(
+    (s) => ({ id: s.LHeadId, name: s.LHeadName }),
+  );
 
+  // Split enterprises into companies (business_type = 'C') and projects (business_type = 'P')
+  const allEnterprises: Array<{
+    id: number;
+    name: string;
+    businessType: string;
+    belongsTo: number | null;
+  }> = (enterprisesRaw as any[]).map((e) => ({
+    id:           e.id,
+    name:         e.name ?? "",
+    businessType: e.business_type ?? "",
+    belongsTo:    e.belongs_to ?? null,
+  }));
+
+  const companies = useMemo(
+    () => allEnterprises.filter((e) => e.businessType === "C"),
+    [allEnterprises],
+  );
+
+  // All projects (business_type = 'P') — filtered further by selected company below
+  const allProjects = useMemo(
+    () => allEnterprises.filter((e) => e.businessType === "P"),
+    [allEnterprises],
+  );
+
+  // When a company is selected → show only its projects (belongs_to = company id)
+  // When no company selected → show all projects
+  const filteredProjects = useMemo(
+    () =>
+      selectedCompanyId
+        ? allProjects.filter((p) => p.belongsTo === selectedCompanyId)
+        : allProjects,
+    [allProjects, selectedCompanyId],
+  );
+
+  // UOM: field names from DB are "Id" and "UOMName" (confirmed from uomMaster.js)
+  // Only show active UOMs (IsActive = true/1)
+  const uoms: Array<{ id: number; name: string }> = (uomsRaw as any[])
+    .filter((u) => u.IsActive !== false && u.IsActive !== 0)
+    .map((u) => ({ id: u.Id, name: u.UOMName ?? "" }))
+    .filter((u) => u.name !== "");
+
+  // ── Dropdown option string arrays ────────────────────────────────────────────
   const supplierOptions = suppliers.map((s) => s.name);
-  const projectOptions  = projects.map((p)  => p.name);
+  const companyOptions  = companies.map((c) => c.name);
+  const projectOptions  = filteredProjects.map((p) => p.name);
+  const uomOptions      = uoms.map((u) => u.name);
 
+  // ── Pagination ───────────────────────────────────────────────────────────────
   const dbItems: any[] = dbData?.data ?? [];
-  const totalPages = Math.max(dbData?.totalPages ?? 1, 1);
-  const totalRecords = dbData?.total ?? dbItems.length;
+  const totalPages     = Math.max(dbData?.totalPages ?? 1, 1);
+  const totalRecords   = dbData?.total ?? dbItems.length;
 
-  // Map DB rows → UI record
+  // ── Map DB rows → UI records ─────────────────────────────────────────────────
   const mappedData: RecordWithId[] = dbItems.map((item) => {
     const supplierName =
-      suppliers.find((s) => s.id === item.SupplierID)?.name ??
-      item.SupplierName ??
-      "";
+      suppliers.find((s) => s.id === item.SupplierID)?.name ?? item.SupplierName ?? "";
+    const companyName =
+      companies.find((c) => c.id === item.CompanyId)?.name ?? item.CompanyName ?? "";
     const projectName =
-      projects.find((p) => p.id === item.ProjectId)?.name ??
-      item.ProjectName ??
-      "";
+      allProjects.find((p) => p.id === item.ProjectId)?.name ?? item.ProjectName ?? "";
 
     return {
       _id:             String(item.PurchaseOrderID ?? ""),
@@ -79,6 +125,7 @@ const PurchaseOrderMaster = () => {
       poDate:          item.PODate                 ?? "",
       expectedDate:    item.ExpectedDeliveryDate   ?? "",
       supplierName,
+      companyName,
       projectName,
       itemDescription: item.ItemDescription        ?? "",
       quantity:        Number(item.Quantity  ?? 0),
@@ -91,27 +138,30 @@ const PurchaseOrderMaster = () => {
     };
   });
 
-  // Map UI record → DB payload
+  // ── Map UI record → DB payload ───────────────────────────────────────────────
   const toPayload = (r: Record<string, unknown>) => {
     const supplier = suppliers.find((s) => s.name === (r.supplierName as string));
-    const project  = projects.find((p)  => p.name === (r.projectName  as string));
+    const company  = companies.find((c) => c.name === (r.companyName  as string));
+    const project  = allProjects.find((p) => p.name === (r.projectName as string));
     return {
-      PurchaseOrderNo:     (r.poNumber        as string) || null,
-      PODate:              (r.poDate          as string) || null,
-      ExpectedDeliveryDate:(r.expectedDate    as string) || null,
-      SupplierID:          supplier?.id ?? null,
-      ProjectId:           project?.id  ?? null,
-      ItemDescription:     (r.itemDescription as string) || null,
-      Quantity:            Number(r.quantity)     || 0,
-      Unit:                (r.unit as string)     || null,
-      Rate:                Number(r.rate)         || 0,
-      TotalAmount:         Number(r.totalAmount)  || 0,
-      PaymentTerms:        (r.paymentTerms as string) || null,
-      Status:              (r.status as string)   || "Draft",
-      Remarks:             (r.remarks as string)  || null,
+      PurchaseOrderNo:      (r.poNumber        as string) || null,
+      PODate:               (r.poDate          as string) || null,
+      ExpectedDeliveryDate: (r.expectedDate    as string) || null,
+      SupplierID:           supplier?.id ?? null,
+      CompanyId:            company?.id  ?? null,
+      ProjectId:            project?.id  ?? null,
+      ItemDescription:      (r.itemDescription as string) || null,
+      Quantity:             Number(r.quantity)    || 0,
+      Unit:                 (r.unit as string)    || null,
+      Rate:                 Number(r.rate)        || 0,
+      TotalAmount:          Number(r.totalAmount) || 0,
+      PaymentTerms:         (r.paymentTerms as string) || null,
+      Status:               (r.status as string)  || "Draft",
+      Remarks:              (r.remarks as string)  || null,
     };
   };
 
+  // ── CRUD handler ─────────────────────────────────────────────────────────────
   const handleDataEvent = async (event: DataChangeEvent) => {
     try {
       if (event.action === "add") {
@@ -131,39 +181,42 @@ const PurchaseOrderMaster = () => {
     }
   };
 
-  // Auto-calculate Total Amount when quantity or rate changes
-  const handleFieldChange = (
-    record: Record<string, any>,
-    fieldName: string,
-  ) => {
+  // ── Reactive field logic ─────────────────────────────────────────────────────
+  const handleFieldChange = (record: Record<string, any>, fieldName: string) => {
+    let updated = { ...record };
+
+    // Auto-calculate Total Amount
     if (fieldName === "quantity" || fieldName === "rate") {
-      const qty     = Number(record.quantity) || 0;
-      const rateVal = Number(record.rate)     || 0;
-      return { ...record, totalAmount: qty * rateVal };
+      const qty  = Number(updated.quantity) || 0;
+      const rate = Number(updated.rate)     || 0;
+      updated = { ...updated, totalAmount: qty * rate };
     }
-    return record;
+
+    // When Company changes:
+    //  1. Update selectedCompanyId → filteredProjects recomputes via useMemo
+    //  2. Clear projectName so stale value isn't carried forward
+    if (fieldName === "companyName") {
+      const matched = companies.find((c) => c.name === updated.companyName);
+      setSelectedCompanyId(matched?.id ?? null);
+      updated = { ...updated, projectName: "" };
+    }
+
+    return updated;
   };
 
   const refetchPOs = () =>
     queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
 
+  // ── Column renderers ─────────────────────────────────────────────────────────
   const columnRenderers = {
     poDate: (value: unknown) => {
       const d = new Date(String(value));
       return isNaN(d.getTime())
         ? ""
-        : d.toLocaleDateString("en-IN", {
-            day:   "2-digit",
-            month: "short",
-            year:  "numeric",
-          });
+        : d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" });
     },
     totalAmount: (value: unknown) =>
       `₹${Number(value || 0).toLocaleString("en-IN")}`,
-
-    // ── Status badge + inline approval actions ───────────────────────────────
-    // Both rendered in the same cell so we don't add a duplicate Actions column
-    // (MasterPage already renders its own edit/delete Actions column on the right).
     status: (_value: unknown, row: RecordWithId) => (
       <div className="flex items-center gap-2 flex-wrap">
         <StatusBadge status={String(row.status ?? "")} />
@@ -177,6 +230,9 @@ const PurchaseOrderMaster = () => {
     ),
   };
 
+  // ── Field definitions ────────────────────────────────────────────────────────
+  // NOTE: projectOptions is derived from filteredProjects which updates automatically
+  // when selectedCompanyId changes — MasterPage will re-render with fresh options.
   const FIELDS: FieldDef[] = [
     {
       name:      "poNumber",
@@ -185,8 +241,8 @@ const PurchaseOrderMaster = () => {
       required:  true,
       uppercase: true,
     },
-    { name: "poDate",       label: "PO Date",            type: "date", required: true },
-    { name: "expectedDate", label: "Expected Delivery",  type: "date", required: true },
+    { name: "poDate",       label: "PO Date",           type: "date", required: true },
+    { name: "expectedDate", label: "Expected Delivery", type: "date", required: true },
     {
       name:     "supplierName",
       label:    "Supplier",
@@ -195,6 +251,15 @@ const PurchaseOrderMaster = () => {
       options:  supplierOptions,
     },
     {
+      // Filtered client-side: only enterprise rows where business_type = 'C'
+      name:    "companyName",
+      label:   "Company Name",
+      type:    "select",
+      options: companyOptions,
+    },
+    {
+      // Filtered client-side: business_type = 'P', further narrowed by belongs_to
+      // when a company is selected above
       name:    "projectName",
       label:   "Project / Site",
       type:    "select",
@@ -207,15 +272,23 @@ const PurchaseOrderMaster = () => {
       required:  true,
       fullWidth: true,
     },
-    { name: "quantity", label: "Quantity",     type: "number", required: true },
-    { name: "unit",     label: "Unit",         type: "text",   required: true },
-    { name: "rate",     label: "Rate (₹)",     type: "number", required: true },
+    { name: "quantity", label: "Quantity", type: "number", required: true },
     {
-      name:      "totalAmount",
-      label:     "Total Amount (₹)",
-      type:      "number",
-      required:  true,
-      prefix:    "₹",
+      // UOM dropdown — data from dbo.UOMMaster via GET /api/uom-master
+      // DB fields used: Id (id), UOMName (name) — only IsActive records shown
+      name:     "unit",
+      label:    "Unit",
+      type:     "select",
+      required: true,
+      options:  uomOptions,
+    },
+    { name: "rate",       label: "Rate (₹)",       type: "number", required: true },
+    {
+      name:     "totalAmount",
+      label:    "Total Amount (₹)",
+      type:     "number",
+      required: true,
+      prefix:   "₹",
     },
     { name: "paymentTerms", label: "Payment Terms", type: "textarea" },
     {
@@ -228,24 +301,23 @@ const PurchaseOrderMaster = () => {
     { name: "remarks", label: "Remarks", type: "textarea", fullWidth: true },
   ];
 
+  // ── Column definitions ───────────────────────────────────────────────────────
   const COLUMNS: ColumnDef[] = [
     { key: "poNumber",        label: "PO No" },
     { key: "supplierName",    label: "Supplier" },
+    { key: "companyName",     label: "Company",        hideOnMobile: true },
     { key: "projectName",     label: "Project / Site", hideOnMobile: true },
     { key: "itemDescription", label: "Item",           hideOnMobile: true },
     { key: "quantity",        label: "Qty",            hideOnMobile: true },
+    { key: "unit",            label: "Unit",           hideOnMobile: true },
     { key: "totalAmount",     label: "Amount" },
     { key: "status",          label: "Status" },
   ];
 
   if (isLoading)
-    return (
-      <div className="p-6 text-muted-foreground">Loading purchase orders...</div>
-    );
+    return <div className="p-6 text-muted-foreground">Loading purchase orders...</div>;
   if (error)
-    return (
-      <div className="p-6 text-destructive">Failed to load purchase orders.</div>
-    );
+    return <div className="p-6 text-destructive">Failed to load purchase orders.</div>;
 
   return (
     <>
