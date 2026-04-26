@@ -22,6 +22,7 @@ import {
   Package,
   FileCheck,
   Users,
+  Database,
 } from "lucide-react";
 import { formatINR } from "@/utils/formatCurrency";
 import {
@@ -699,6 +700,18 @@ export default function Home() {
           },
         ]
       : []),
+    ...(isDba
+      ? [
+          {
+            label: "DBA Console",
+            desc: "DB tools, control panel & ads",
+            icon: Database,
+            href: "/dba",
+            accent: "#10b981",
+            badge: undefined,
+          },
+        ]
+      : []),
   ];
 
   const activityFeed = data ? buildActivityFeed(data) : [];
@@ -961,7 +974,11 @@ export default function Home() {
           className="mt-10 flex items-center justify-center gap-3 text-muted-foreground/30 text-xs"
         >
           <div className="w-12 h-px bg-border/50" />
-          <span>Use the module switcher to navigate modules</span>
+          <span>
+            {isDba
+              ? "Use DBA Console above or the Module switcher to navigate"
+              : "Use the module switcher to navigate modules"}
+          </span>
           <div className="w-12 h-px bg-border/50" />
         </motion.div>
       </div>
