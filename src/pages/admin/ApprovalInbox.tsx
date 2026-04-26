@@ -5,6 +5,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { formatINR } from "@/utils/formatCurrency";
 import {
   ClipboardCheck,
   Package,
@@ -114,7 +115,7 @@ const fmtDate = (d: string | null) => {
 
 const fmtAmount = (n: number | null) => {
   if (n == null) return "—";
-  return "₹" + n.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+  return formatINR(n, { decimals: 2 });
 };
 
 // ─── Module filter tab ────────────────────────────────────────────────────────

@@ -135,6 +135,7 @@ const BillingTermsMaster = lazy(
   () => import("./pages/masters/BillingTermsMaster"),
 );
 const RoleMaster = lazy(() => import("./pages/masters/RoleMaster"));
+const MenuMasterPage = lazy(() => import("./pages/admin/masters/MenuMaster"));
 const Home = lazy(() => import("./pages/Home"));
 const TCMaster = lazy(() => import("./pages/material/T&CMaster"));
 const UnitOfMeasurementMaster = lazy(
@@ -665,6 +666,14 @@ function AppRoutes() {
         element={
           <AdminRoute>
             <RoleMaster />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/masters/menu-types"
+        element={
+          <AdminRoute>
+            <MenuMasterPage />
           </AdminRoute>
         }
       />

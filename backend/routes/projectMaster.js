@@ -7,15 +7,38 @@ const allowRoles = require("../middleware/role");
 router.use(authMiddleware);
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 
-// GET all projects
+// GET all — includes CompanyName via enterprise JOIN
 router.get("/", async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT * FROM dbo.ProjectMaster
-      WHERE IsDeleted = 0
-      ORDER BY CreatedAt DESC
+      SELECT
+        p.Id,
+        p.Code,
+        p.Name,
+        p.ShortName,
+        p.Type,
+        p.BusinessUnit,
+        p.ClientName,
+        p.ClientCode,
+        p.TeamSize,
+        p.StartDate,
+        p.EndDate,
+        p.Currency,
+        p.Status,
+        p.Priority,
+        p.Location,
+        p.Description,
+        p.Remarks,
+        p.IsActive,
+        p.EnterpriseId,
+        e.Name AS CompanyName
+      FROM dbo.ProjectMaster p
+      LEFT JOIN dbo.CompanyMaster e ON p.EnterpriseId = e.Id
+      WHERE p.IsDeleted = 0
+      ORDER BY p.CreatedAt DESC
     `);
+
     res.json(result.recordset);
   } catch (err) {
     console.error(err);
@@ -57,7 +80,7 @@ router.post("/", adminOnly, async (req, res) => {
       .input("Description", sql.NVarChar(sql.MAX), f.description || null)
       .input("Remarks", sql.NVarChar(500), f.remarks || null)
       .input("IsActive", sql.Bit, f.isActive !== false ? 1 : 0)
-      .input("ProjectImage", sql.NVarChar(sql.MAX), f.projectImage || null) // Base64 URI
+      .input("ProjectImage", sql.NVarChar(sql.MAX), f.projectImage || null)
       .query(`
         INSERT INTO dbo.ProjectMaster
           (EnterpriseId, Code, Name, ShortName, Type, BusinessUnit, ClientName, ClientCode,
@@ -78,7 +101,7 @@ router.post("/", adminOnly, async (req, res) => {
   }
 });
 
-// PUT - Update project with optional new Base64 image
+// PUT - Update project
 router.put("/:id", adminOnly, async (req, res) => {
   const f = req.body;
   const pool = getPool();
@@ -131,7 +154,7 @@ router.put("/:id", adminOnly, async (req, res) => {
           Description = @Description,
           Remarks = @Remarks,
           IsActive = @IsActive,
-          ProjectImage = COALESCE(@ProjectImage, ProjectImage),   -- Keep old image if null
+          ProjectImage = COALESCE(@ProjectImage, ProjectImage),
           UpdatedAt = GETDATE()
         WHERE Id = @Id AND IsDeleted = 0
       `);
@@ -153,7 +176,9 @@ router.delete("/:id", adminOnly, async (req, res) => {
   try {
     await transaction.begin();
 
-    await transaction.request().input("Id", sql.Int, parseInt(req.params.id))
+    await transaction
+      .request()
+      .input("Id", sql.Int, parseInt(req.params.id))
       .query(`
         UPDATE dbo.ProjectMaster
         SET IsDeleted = 1, UpdatedAt = GETDATE()

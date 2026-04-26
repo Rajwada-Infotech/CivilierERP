@@ -235,6 +235,12 @@ const adminSetupItems = [
     path: "/admin/masters/role-master",
     color: "text-blue-400",
   },
+  {
+    icon: LayoutGrid,
+    label: "Menu Types",
+    path: "/admin/masters/menu-types",
+    color: "text-emerald-500",
+  },
 ];
 
 const SetupDropdown = ({
