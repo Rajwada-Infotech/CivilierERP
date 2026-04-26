@@ -267,7 +267,8 @@ function ReadonlyField({
   );
 }
 
-// Master Term Picker
+// ─── Master Term Picker ───────────────────────────────────────────────────────
+
 interface MasterTermPickerProps {
   open: boolean;
   onClose: () => void;
@@ -311,7 +312,7 @@ function MasterTermPicker({
             <div className="flex flex-col items-center gap-2 py-10 text-center">
               <BookOpen size={20} className="text-muted-foreground/40" />
               <p className="text-sm text-muted-foreground">
-                No active billing terms in master
+                No active billing terms found in master
               </p>
             </div>
           )}
@@ -350,14 +351,14 @@ function MasterTermPicker({
                       {term.discountType === "none"
                         ? "No discount"
                         : term.discountType === "percentage"
-                          ? term.discountValue + "% discount"
-                          : "Rs." + fmt(term.discountValue) + " flat off"}
+                          ? `${term.discountValue}% discount`
+                          : `Rs.${fmt(term.discountValue)} flat off`}
                     </span>
                     <span className="flex items-center gap-1">
                       <Clock size={10} />
                       {term.paymentDueDays === 0
                         ? "Immediate"
-                        : "Net-" + term.paymentDueDays}
+                        : `Net-${term.paymentDueDays}`}
                     </span>
                   </div>
                 </div>
@@ -380,7 +381,8 @@ function MasterTermPicker({
   );
 }
 
-// Billing Accordion
+// ─── Billing Accordion (Unlocked) ─────────────────────────────────────────────
+
 interface BillingAccordionProps {
   basicAmount: number;
   cgstRate: number;
@@ -396,7 +398,8 @@ function BillingAccordion({
   discount,
   onChange,
 }: BillingAccordionProps) {
-  const { activeBillingTerms } = useBillingTerms();
+  const { activeBillingTerms = [] } = useBillingTerms();
+
   const [open, setOpen] = useState(discount.applicable);
   const [pickerOpen, setPickerOpen] = useState(false);
 
@@ -419,11 +422,14 @@ function BillingAccordion({
     };
     onChange(mapped);
     if (mapped.applicable) setOpen(true);
-    toast.success(`Billing term "${term.name}" applied.`);
+    toast.success(`Billing term "${term.name}" applied successfully!`);
+    setPickerOpen(false);
   };
 
-  const clearMasterTerm = () =>
-    onChange({ ...discount, masterTermId: null, masterTermName: null });
+  const clearMasterTerm = () => {
+    onChange(defaultDiscount());
+    toast.info("Master billing term cleared.");
+  };
 
   return (
     <>
@@ -435,6 +441,7 @@ function BillingAccordion({
       />
 
       <div className="rounded-xl border border-border overflow-hidden">
+        {/* Header */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 py-3.5 bg-muted/40">
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-primary/10 shrink-0">
@@ -451,11 +458,11 @@ function BillingAccordion({
                   </span>
                 ) : discount.applicable ? (
                   <span className="text-primary font-medium">
-                    Discount applied · Net Rs.
+                    Discount applied · Net Rs.{" "}
                     {hasBase ? fmt(bd.netAmount) : "-"}
                   </span>
                 ) : (
-                  "No discount applied"
+                  "No discount / master term applied"
                 )}
               </p>
             </div>
@@ -470,7 +477,7 @@ function BillingAccordion({
               className="h-7 gap-1.5 text-xs border-primary/30 text-primary hover:bg-primary/[0.06]"
             >
               <BookOpen size={12} />
-              {discount.masterTermName ? "Change Term" : "Add New Term"}
+              {discount.masterTermName ? "Change Term" : "Pick from Master"}
             </Button>
 
             {discount.masterTermName && (
@@ -511,20 +518,11 @@ function BillingAccordion({
           </div>
         </div>
 
-        {discount.masterTermName && (
-          <div className="px-4 py-2 bg-primary/[0.04] border-b border-primary/10 flex items-center gap-2">
-            <CheckCircle2 size={12} className="text-primary shrink-0" />
-            <p className="text-[11px] text-primary">
-              Term{" "}
-              <span className="font-semibold">{discount.masterTermName}</span>{" "}
-              applied from master
-            </p>
-          </div>
-        )}
-
+        {/* Body */}
         {open && (
           <div className="border-t border-border bg-card">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 divide-y lg:divide-y-0 lg:divide-x divide-border">
+              {/* Left: Discount Config */}
               <div className="p-4 space-y-4">
                 <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
                   Discount Configuration
@@ -536,25 +534,6 @@ function BillingAccordion({
                     <p className="text-xs text-muted-foreground">
                       Toggle discount on or pick a term from master
                     </p>
-                    <div className="flex items-center gap-3 mt-1 flex-wrap justify-center">
-                      <button
-                        type="button"
-                        onClick={() => toggle(true)}
-                        className="text-xs text-primary font-medium hover:underline"
-                      >
-                        Enable manually
-                      </button>
-                      <span className="text-muted-foreground/40 text-xs">
-                        or
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => setPickerOpen(true)}
-                        className="text-xs text-primary font-medium hover:underline"
-                      >
-                        Pick from master
-                      </button>
-                    </div>
                   </div>
                 )}
 
@@ -617,6 +596,7 @@ function BillingAccordion({
                 )}
               </div>
 
+              {/* Right: Price Breakdown */}
               <div className="p-4">
                 <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground mb-3">
                   Price Breakdown
@@ -643,7 +623,7 @@ function BillingAccordion({
 
                     {discount.applicable && (
                       <BreakdownRow
-                        label={`Discount ${discount.type === "percentage" ? "(" + discount.value + "%)" : "Fixed"}`}
+                        label={`Discount ${discount.type === "percentage" ? `(${discount.value}%)` : "Fixed"}`}
                         sublabel="Applied before GST"
                         value={"- Rs." + fmt(bd.discountAmount)}
                         variant="debit"
@@ -660,13 +640,13 @@ function BillingAccordion({
                     )}
 
                     <BreakdownRow
-                      label={"CGST @ " + cgstRate + "%"}
+                      label={`CGST @ ${cgstRate}%`}
                       sublabel="Central GST"
                       value={"Rs." + fmt(bd.cgstAmount)}
                       variant="tax"
                     />
                     <BreakdownRow
-                      label={"SGST @ " + sgstRate + "%"}
+                      label={`SGST @ ${sgstRate}%`}
                       sublabel="State GST"
                       value={"Rs." + fmt(bd.sgstAmount)}
                       variant="tax"
@@ -771,7 +751,8 @@ function BreakdownRow({
   );
 }
 
-// RecordCard (Mobile)
+// ─── RecordCard (Mobile) ──────────────────────────────────────────────────────
+
 function RecordCard({
   rec,
   onEdit,
@@ -874,7 +855,7 @@ function RecordCard({
   );
 }
 
-// ─── API helpers ──────────────────────────────────────────────────────────────
+// ─── API Helpers ──────────────────────────────────────────────────────────────
 
 const API = "/api/expense-booking";
 
@@ -941,7 +922,6 @@ export default function MaterialExpenseBooking() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // Fetch Records
   const fetchRecords = React.useCallback(async () => {
     try {
       setLoading(true);
@@ -954,12 +934,10 @@ export default function MaterialExpenseBooking() {
     }
   }, []);
 
-  // Fetch Purchase Orders (Fixed - using Expense Booking data)
   const fetchPurchaseOrders = React.useCallback(async () => {
     try {
       setPoLoading(true);
       const data = await apiFetch(`${API}?limit=200`);
-
       const mappedPOs: PurchaseOrder[] = (data.data ?? []).map((row: any) => ({
         poNumber: row.EDocNo
           ? String(row.EDocNo)
@@ -976,7 +954,6 @@ export default function MaterialExpenseBooking() {
         sgstRate: 0,
         invoiceReference: row.EDocNo || "",
       }));
-
       setPurchaseOrders(mappedPOs);
     } catch (err: any) {
       console.error("Failed to load purchase orders:", err);
@@ -1040,7 +1017,6 @@ export default function MaterialExpenseBooking() {
       toast.error("Please fill in the Booking Reference and Date.");
       return;
     }
-
     const bd = computeBreakdown(
       form.basicAmount,
       form.cgstRate,
@@ -1107,7 +1083,6 @@ export default function MaterialExpenseBooking() {
           )}
         </div>
 
-        {/* Form View */}
         {view === "form" && (
           <Card className="border-primary/20 shadow-sm">
             <CardHeader className="pb-4 border-b border-border px-4 sm:px-6">
@@ -1124,13 +1099,9 @@ export default function MaterialExpenseBooking() {
                   <span className="text-muted-foreground/40 hidden sm:inline">
                     |
                   </span>
-                  <div className="min-w-0">
-                    <CardTitle className="text-base sm:text-lg font-heading">
-                      {editingId
-                        ? "Edit Expense Booking"
-                        : "New Expense Booking"}
-                    </CardTitle>
-                  </div>
+                  <CardTitle className="text-base sm:text-lg font-heading">
+                    {editingId ? "Edit Expense Booking" : "New Expense Booking"}
+                  </CardTitle>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <Button variant="outline" size="sm" onClick={cancelForm}>
@@ -1220,7 +1191,6 @@ export default function MaterialExpenseBooking() {
                 </div>
               </FormSection>
 
-              {/* Fixed PO Dropdown */}
               <FormSection label="Purchase Order">
                 <Field
                   label="Link Purchase Order"
@@ -1265,11 +1235,6 @@ export default function MaterialExpenseBooking() {
                           </div>
                         </SelectItem>
                       ))}
-                      {purchaseOrders.length === 0 && !poLoading && (
-                        <div className="px-4 py-6 text-center text-sm text-muted-foreground">
-                          No purchase orders available
-                        </div>
-                      )}
                     </SelectContent>
                   </Select>
                 </Field>
@@ -1296,25 +1261,6 @@ export default function MaterialExpenseBooking() {
                         label="Invoice Reference"
                         value={form.invoiceReference}
                         highlight
-                      />
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      <ReadonlyField
-                        label="Basic Amount (Rs.)"
-                        value={"Rs." + fmt(form.basicAmount)}
-                        highlight
-                      />
-                      <ReadonlyField
-                        label={"CGST @ " + form.cgstRate + "%"}
-                        value={
-                          "Rs." + fmt((form.basicAmount * form.cgstRate) / 100)
-                        }
-                      />
-                      <ReadonlyField
-                        label={"SGST @ " + form.sgstRate + "%"}
-                        value={
-                          "Rs." + fmt((form.basicAmount * form.sgstRate) / 100)
-                        }
                       />
                     </div>
                   </div>
@@ -1363,18 +1309,15 @@ export default function MaterialExpenseBooking() {
           </Card>
         )}
 
-        {/* List View */}
         {view === "list" && (
           <>
             {loading && (
-              <div className="text-center py-12 text-muted-foreground">
+              <div className="text-center py-12 text-muted-foreground text-sm">
                 Loading bookings…
               </div>
             )}
-
             {!loading && (
               <>
-                {/* Mobile Cards */}
                 <div className="flex flex-col gap-3 sm:hidden">
                   {records.length === 0 && (
                     <div className="text-center py-12 text-muted-foreground text-sm border rounded-xl border-dashed border-border">
@@ -1392,7 +1335,6 @@ export default function MaterialExpenseBooking() {
                   ))}
                 </div>
 
-                {/* Desktop Table */}
                 <Card className="hidden sm:block">
                   <CardContent className="p-0">
                     <div className="rounded-md overflow-auto">
@@ -1517,7 +1459,6 @@ export default function MaterialExpenseBooking() {
         )}
       </div>
 
-      {/* Delete Dialog */}
       <Dialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
         <DialogContent className="w-[calc(100vw-2rem)] max-w-sm">
           <DialogHeader>
