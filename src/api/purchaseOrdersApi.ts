@@ -45,7 +45,7 @@ const normalizePaginated = <T>(payload: any): PaginatedResponse<T> => {
   };
 };
 
-// ─── CRUD Operations ─────────────────────────────────────────────────────────
+// ─── Purchase Order CRUD ──────────────────────────────────────────────────────
 export const getPurchaseOrders = (query: PurchaseOrderQuery = {}) =>
   fetchWithAuth(buildUrl(BASE, query))
     .then((r) => r.json())
@@ -68,16 +68,20 @@ export const updatePurchaseOrder = (id: string, data: object) =>
 export const deletePurchaseOrder = (id: string) =>
   fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" }).then((r) => r.json());
 
-// ─── Dropdown Data ────────────────────────────────────────────────────────────
-// Suppliers: AccountHeadMaster entries with LHeadType = 'Supplier'
-// Returns { LHeadId, LHeadName }
+// ─── Suppliers ────────────────────────────────────────────────────────────────
+// Returns [{ LHeadId, LHeadName, ... }]
 export const getSuppliers = () =>
   fetchWithAuth("/api/account-head?type=S").then((r) => r.json());
 
-// Projects: enterprise table
-// Returns { id, name }
-export const getProjects = () =>
+// ─── All enterprises (unfiltered) ────────────────────────────────────────────
+// The enterprise route GET "/" returns every row.
+// Filtering by business_type is done in the component so we don't touch enterprise.js.
+// Returns [{ id, name, business_type, belongs_to, ... }]
+export const getAllEnterprises = () =>
   fetchWithAuth("/api/enterprises").then((r) => r.json());
 
-// Keep getCompanies as alias so existing imports don't break
-export const getCompanies = getProjects;
+// ─── UOM ─────────────────────────────────────────────────────────────────────
+// uomMaster.js GET "/" → SELECT Id, UOMName, ... FROM dbo.UOMMaster
+// Returns [{ Id, UOMName, UOMCode, Symbol, IsActive, ... }]
+export const getUOMs = () =>
+  fetchWithAuth("/api/uom-master").then((r) => r.json());
