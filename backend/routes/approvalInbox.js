@@ -1,10 +1,6 @@
 const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
-
-// GET /api/approval-inbox
-// Returns all records in Pending state across all 5 modules
-// Optional: ?module=purchase-orders|work-orders|payments|goods-receipt|expense-booking
 router.get("/", async (req, res) => {
   try {
     const pool = getPool();
