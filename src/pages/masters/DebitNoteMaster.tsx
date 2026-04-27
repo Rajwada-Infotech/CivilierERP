@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   MasterPage,
@@ -22,6 +22,7 @@ import {
 } from "@/api/debitNoteApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { toast } from "sonner";
+import { DocNumberPreview } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface DbDebitNote {
@@ -264,6 +265,8 @@ function makeBillRenderer(billOptions: any[]) {
 // ─── Main Component ───────────────────────────────────────────────────────────
 const DebitNoteMaster: React.FC = () => {
   const queryClient = useQueryClient();
+  const [dnDocTypeId, setDnDocTypeId] = useState<number | null>(null);
+  const [dnDocNo, setDnDocNo] = useState("");
 
   // Data Queries
   const {
@@ -342,6 +345,9 @@ const DebitNoteMaster: React.FC = () => {
           finalAmount: null,
         } as BillDiscountGroup,
         status: Boolean(item.is_active),
+        docTypeId: item.doc_type_id ?? null,
+        docNo: item.doc_no ?? "",
+        docTypePrefix: item.doc_type_prefix ?? "",
       }))
     : [];
 
@@ -354,6 +360,8 @@ const DebitNoteMaster: React.FC = () => {
       supplier_id: idByLabel(SUPPLIER_OPTIONS, formData.supplier as string),
       bill_id: g?.billNumber ? billIdByValue(g.billNumber) : null,
       is_active: formData.status !== false,
+      doc_type_id: (formData.docTypeId as number | null) ?? dnDocTypeId,
+      doc_no: (formData.docNo as string) || dnDocNo || null,
     };
   };
 
@@ -435,12 +443,19 @@ const DebitNoteMaster: React.FC = () => {
     { key: "company", label: "Company" },
     { key: "project", label: "Project", hideOnMobile: true },
     { key: "supplier", label: "Supplier" },
+    { key: "docNo", label: "Doc No" },
     { key: "billDiscountGroup", label: "Bill / Doc" },
     { key: "discountDisplay", label: "Discount" },
     { key: "status", label: "Status" },
   ];
 
   const columnRenderers: Record<string, any> = {
+    docNo: (value: unknown) =>
+      value ? (
+        <span className="font-mono text-xs text-primary">{String(value)}</span>
+      ) : (
+        <span className="text-muted-foreground text-xs">—</span>
+      ),
     billDiscountGroup: billDiscountColumnRenderer,
     discountDisplay: (_value: unknown, row: RecordWithId) =>
       discountSummaryRenderer(row.billDiscountGroup),
@@ -504,6 +519,16 @@ const DebitNoteMaster: React.FC = () => {
         <h1 className="text-xl font-heading font-bold text-foreground">
           Debit Note Master
         </h1>
+      </div>
+      <div className="mb-4 rounded-xl bg-card border border-border p-4">
+        <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-2">
+          Document Type &amp; Number
+        </label>
+        <DocNumberPreview
+          selectedDocTypeId={dnDocTypeId}
+          preview={dnDocNo}
+          onSelect={(id, preview) => { setDnDocTypeId(id); setDnDocNo(preview); }}
+        />
       </div>
       <MasterPage
         title="Debit Note"
