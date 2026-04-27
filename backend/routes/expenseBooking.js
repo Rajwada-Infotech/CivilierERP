@@ -317,23 +317,24 @@ router.post("/", async (req, res) => {
       .input("EUpdatedAt", sql.DateTime2, new Date())
       .input("ECreatedBy", sql.Int, req.user?.userId || null)
       .input("EApprovedBy", sql.Int, null)
-      .input(
-        "ECompanyId",
-        sql.Int,
-        ECompanyId ? parseInt(ECompanyId, 10) : null,
-      ).query(`
+      .input("ECompanyId", sql.Int, ECompanyId ? parseInt(ECompanyId, 10) : null)
+      .input("EDocTypeId", sql.Int, EDocTypeId ? parseInt(EDocTypeId, 10) : null)
+      .input("EFinYear", sql.NVarChar(20), EFinYear || null)
+      .query(`
         INSERT INTO dbo.ExpenseBooking (
           EProjectName, EDocumentType, EDocDate, EAmount, ENetAmount,
           ECgstRate, ESgstRate, EDiscountData,
           EDocNo, EEmiPayment, EEmiData, EInstallmentCount, EEmiAmount, EEmiStartDate,
           EReminder, ERemarks, EStatus,
-          ECreatedAt, EUpdatedAt, ECreatedBy, EApprovedBy, ECompanyId
+          ECreatedAt, EUpdatedAt, ECreatedBy, EApprovedBy, ECompanyId,
+          EDocTypeId, EFinYear
         ) VALUES (
           @EProjectName, @EDocumentType, @EDocDate, @EAmount, @ENetAmount,
           @ECgstRate, @ESgstRate, @EDiscountData,
           @EDocNo, @EEmiPayment, @EEmiData, @EInstallmentCount, @EEmiAmount, @EEmiStartDate,
           @EReminder, @ERemarks, @EStatus,
-          @ECreatedAt, @EUpdatedAt, @ECreatedBy, @EApprovedBy, @ECompanyId
+          @ECreatedAt, @EUpdatedAt, @ECreatedBy, @EApprovedBy, @ECompanyId,
+          @EDocTypeId, @EFinYear
         );
         SELECT SCOPE_IDENTITY() AS NewId;
       `);
@@ -392,6 +393,8 @@ router.put("/:id", async (req, res) => {
     ERemarks,
     EStatus,
     ECompanyId,
+    EDocTypeId,
+    EFinYear,
   } = req.body;
 
   try {
@@ -425,11 +428,10 @@ router.put("/:id", async (req, res) => {
       .input("ERemarks", sql.NVarChar(300), ERemarks || null)
       .input("EStatus", sql.NVarChar(50), EStatus || "Draft")
       .input("EUpdatedAt", sql.DateTime2, new Date())
-      .input(
-        "ECompanyId",
-        sql.Int,
-        ECompanyId ? parseInt(ECompanyId, 10) : null,
-      ).query(`
+      .input("ECompanyId", sql.Int, ECompanyId ? parseInt(ECompanyId, 10) : null)
+      .input("EDocTypeId", sql.Int, EDocTypeId ? parseInt(EDocTypeId, 10) : null)
+      .input("EFinYear", sql.NVarChar(20), EFinYear || null)
+      .query(`
         UPDATE dbo.ExpenseBooking SET
           EProjectName=@EProjectName, EDocumentType=@EDocumentType,
           EDocDate=@EDocDate, EAmount=@EAmount, ENetAmount=@ENetAmount,
@@ -438,7 +440,8 @@ router.put("/:id", async (req, res) => {
           EEmiPayment=@EEmiPayment, EEmiData=@EEmiData,
           EInstallmentCount=@EInstallmentCount, EEmiAmount=@EEmiAmount, EEmiStartDate=@EEmiStartDate,
           EReminder=@EReminder, ERemarks=@ERemarks,
-          EStatus=@EStatus, EUpdatedAt=@EUpdatedAt, ECompanyId=@ECompanyId
+          EStatus=@EStatus, EUpdatedAt=@EUpdatedAt, ECompanyId=@ECompanyId,
+          EDocTypeId=@EDocTypeId, EFinYear=@EFinYear
         WHERE Eid=@Eid
       `);
     await bumpCacheVersion("expense-booking");
