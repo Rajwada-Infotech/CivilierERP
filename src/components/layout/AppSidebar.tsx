@@ -188,7 +188,6 @@ const buildMaterialNavItems = (): NavItem[] => [
       { label: "Expense Booking", path: "/material/expense-booking" },
       { label: "Work Order", path: "/material/work-order" },
       { label: "Purchase Order", path: "/material/purchase-order" },
-      { label: "Contractor Master", path: "/masters/contractors" },
     ],
   },
   {
