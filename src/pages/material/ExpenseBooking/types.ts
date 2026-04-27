@@ -6,7 +6,8 @@ export type BookingStatus =
   | "Approved"
   | "Rejected"
   | "Booked"
-  | "Hold";
+  | "Hold"
+  | "Received";
 
 export type PageView = "list" | "form";
 

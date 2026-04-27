@@ -151,13 +151,19 @@ export function dbToRecord(row: any): ExpenseRecord {
     sgstRate: row.ESgstRate ? parseFloat(row.ESgstRate) : 0,
     discount,
     emi,
-    netAmount: row.ENetAmount ? parseFloat(row.ENetAmount) : parseFloat(row.EAmount) || 0,
+    netAmount: row.ENetAmount
+      ? parseFloat(row.ENetAmount)
+      : parseFloat(row.EAmount) || 0,
     status: (row.EStatus ?? row.Status ?? "Draft") as any,
     remarks: row.ERemarks ?? "",
   };
 }
 
-export function recordToDb(form: Omit<ExpenseRecord, "id">, netAmount: number) {
+export function recordToDb(
+  form: Omit<ExpenseRecord, "id">,
+  netAmount: number,
+  docTypeId?: number | null,
+) {
   return {
     EProjectName: form.supplier || form.projectSite || null,
     EDocumentType: form.materialCategory || null,
@@ -168,11 +174,14 @@ export function recordToDb(form: Omit<ExpenseRecord, "id">, netAmount: number) {
     ESgstRate: form.sgstRate,
     EDiscountData: JSON.stringify(form.discount),
     EDocNo: form.bookingReference || null,
+    EDocTypeId: docTypeId ?? null, // NEW — triggers server-side sequence commit
+    EFinYear: form.financialYear || null, // NEW — appended to doc number
     EEmiPayment: form.emi.enabled,
     EEmiData: JSON.stringify(form.emi),
     EInstallmentCount: form.emi.enabled ? form.emi.installmentCount : null,
     EEmiAmount: form.emi.enabled ? form.emi.emiAmount : null,
-    EEmiStartDate: form.emi.enabled && form.emi.startDate ? form.emi.startDate : null,
+    EEmiStartDate:
+      form.emi.enabled && form.emi.startDate ? form.emi.startDate : null,
     EReminder: form.dueDate || null,
     ERemarks: form.remarks || null,
     EStatus: form.status ?? "Draft",

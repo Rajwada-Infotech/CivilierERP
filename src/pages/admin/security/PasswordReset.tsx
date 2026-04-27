@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useCallback } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
@@ -10,6 +10,7 @@ import {
   Search,
   Shield,
   User,
+  AlertCircle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,10 +24,50 @@ import {
   DialogFooter,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { resetUserPassword } from "@/api/userApi";
+import { resetUserPassword, getUsers } from "@/api/userApi";
 
 export default function PasswordReset() {
-  const { allUsers } = useAuth();
+  const { allUsers: contextUsers } = useAuth();
+  const [localUsers, setLocalUsers] = useState<typeof contextUsers | null>(
+    null,
+  );
+  const [refreshing, setRefreshing] = useState(false);
+
+  // Prefer locally-refreshed list, fallback to context
+  const allUsers = localUsers ?? contextUsers;
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const raw = await getUsers();
+      const mapped = raw.map((u: any) => ({
+        id: String(u.id),
+        name: u.name,
+        email: u.email,
+        role: u.role,
+        initials:
+          u.name
+            ?.split(" ")
+            .map((w: string) => w[0])
+            .join("")
+            .toUpperCase() ?? "?",
+        pagePermissions: u.pagePermissions ?? [],
+        isActive: !u.discontinue,
+      }));
+      setLocalUsers(mapped);
+      if (mapped.length === 0) toast.info("No users found in the system.");
+      else
+        toast.success(
+          `Loaded ${mapped.length} user${mapped.length !== 1 ? "s" : ""}.`,
+        );
+    } catch (err: any) {
+      toast.error(
+        err.message || "Failed to load users. Check your permissions.",
+      );
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
   const [filter, setFilter] = useState("");
   const [selectedUser, setSelectedUser] = useState<{
     id: string;
@@ -92,6 +133,16 @@ export default function PasswordReset() {
               Manage and reset user passwords from here
             </p>
           </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-2 text-xs shrink-0"
+            onClick={handleRefresh}
+            disabled={refreshing}
+          >
+            <RefreshCw size={13} className={refreshing ? "animate-spin" : ""} />
+            {refreshing ? "Loading…" : "Refresh"}
+          </Button>
         </div>
 
         {/* Search */}
@@ -111,9 +162,37 @@ export default function PasswordReset() {
         {/* User cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {filtered.length === 0 && (
-            <p className="text-sm text-muted-foreground col-span-full py-8 text-center">
-              No users found.
-            </p>
+            <div className="col-span-full py-12 flex flex-col items-center gap-3 text-center">
+              <div className="flex items-center justify-center w-12 h-12 rounded-full bg-muted">
+                <AlertCircle size={20} className="text-muted-foreground" />
+              </div>
+              <div>
+                <p className="text-sm font-medium text-foreground">
+                  {filter ? "No users match your search." : "No users loaded."}
+                </p>
+                {!filter && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    This can happen if your role lacks the Users list permission
+                    in RoleRights.
+                  </p>
+                )}
+              </div>
+              {!filter && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-2 text-xs mt-1"
+                  onClick={handleRefresh}
+                  disabled={refreshing}
+                >
+                  <RefreshCw
+                    size={13}
+                    className={refreshing ? "animate-spin" : ""}
+                  />
+                  {refreshing ? "Loading…" : "Try loading users"}
+                </Button>
+              )}
+            </div>
           )}
           {filtered.map((user) => (
             <Card key={user.id} className="border-border/60">

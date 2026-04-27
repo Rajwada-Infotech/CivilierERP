@@ -56,17 +56,21 @@ router.get(
 
 // ── GET /:id/next-number — generate the next doc number for a type ─────────────
 // Called by the DocNumberPreview component in the frontend.
+// Query params:
+//   finYear  — e.g. "2024-25"  appended as suffix: PREFIX/000500/2024-25
 router.get("/:id/next-number", authMiddleware, async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0)
     return res.status(400).json({ error: "Invalid document type id" });
 
+  // Fin year from query string (e.g. "2024-25")
+  const finYear = (req.query.finYear || "").toString().trim();
+
   try {
     const pool = getPool();
 
     // Fetch the doc type config
-    const typeResult = await pool.request()
-      .input("TypeOfDocId", sql.Int, id)
+    const typeResult = await pool.request().input("TypeOfDocId", sql.Int, id)
       .query(`
         SELECT t.Prefix, t.FullPrefix, t.StartingDocNo,
                et.EDOC_N
@@ -76,37 +80,49 @@ router.get("/:id/next-number", authMiddleware, async (req, res) => {
       `);
 
     const typeRow = typeResult.recordset[0];
-    if (!typeRow) return res.status(404).json({ error: "Document type not found" });
+    if (!typeRow)
+      return res.status(404).json({ error: "Document type not found" });
 
-    const prefix    = typeRow.FullPrefix ?? typeRow.Prefix ?? "";
+    const rawPrefix = typeRow.FullPrefix ?? typeRow.Prefix ?? "";
     const startFrom = typeRow.StartingDocNo ?? 1;
 
-    // Find the current max sequence for this prefix
-    const maxResult = await pool.request()
-      .input("Prefix", sql.NVarChar(50), prefix + "%")
-      .query(`
+    // FullPrefix in the DB may already include the starting number
+    // e.g. "PR/REC/000500" — strip trailing digits to get the true prefix "PR/REC/"
+    const truePrefix = rawPrefix.replace(/\d+$/, "");
+
+    // Find the current max sequence for this true prefix
+    const maxResult = await pool
+      .request()
+      .input("Prefix", sql.NVarChar(50), truePrefix + "%").query(`
         SELECT MAX(
           TRY_CAST(
-            SUBSTRING(DocNo, LEN(@Prefix) + 1, 20) AS INT
+            SUBSTRING(DocNo, LEN(@Prefix) + 1, 6) AS INT
           )
         ) AS MaxSeq
         FROM dbo.DocNumberSequence
         WHERE DocNo LIKE @Prefix
       `);
 
-    // Fallback: scan all known doc number columns across modules
     let maxSeq = maxResult.recordset[0]?.MaxSeq ?? null;
 
     if (maxSeq === null) {
-      // Seed from StartingDocNo - 1 so the first generated number = StartingDocNo
       maxSeq = startFrom - 1;
     }
 
-    const nextSeq    = Math.max(maxSeq + 1, startFrom);
-    const paddedSeq  = String(nextSeq).padStart(6, "0");
-    const nextDocNo  = `${prefix}${paddedSeq}`;
+    const nextSeq = Math.max(maxSeq + 1, startFrom);
+    const paddedSeq = String(nextSeq).padStart(6, "0");
 
-    res.json({ nextDocNo, prefix, nextSeq });
+    // Final format: PR/REC/000500/2024-25  (or  PR/REC/000500  without finYear)
+    const nextDocNo = finYear
+      ? `${truePrefix}${paddedSeq}/${finYear}`
+      : `${truePrefix}${paddedSeq}`;
+
+    res.json({
+      nextDocNo,
+      prefix: truePrefix,
+      nextSeq,
+      finYear: finYear || null,
+    });
   } catch (err) {
     console.error("next-number error:", err.message);
     res.status(500).json({ error: err.message });
@@ -160,20 +176,34 @@ router.post(
   "/",
   ...bypassOrCheck("Admin", "DocumentType", "CanAdd"),
   async (req, res) => {
-    const { Prefix, Description, CompanyId, ProjectId, EntryTypeId, StartingDocNo } = req.body;
+    const {
+      Prefix,
+      Description,
+      CompanyId,
+      ProjectId,
+      EntryTypeId,
+      StartingDocNo,
+    } = req.body;
     if (!Prefix || !Description || !EntryTypeId)
-      return res.status(400).json({ error: "Prefix, Description and EntryTypeId are required" });
+      return res
+        .status(400)
+        .json({ error: "Prefix, Description and EntryTypeId are required" });
 
     try {
       const pool = getPool();
-      await pool.request()
-        .input("Prefix",        sql.NVarChar(30),  Prefix.toUpperCase().trim())
-        .input("Description",   sql.NVarChar(255), Description.trim())
-        .input("CompanyId",     sql.Int,           CompanyId   || null)
-        .input("ProjectId",     sql.Int,           ProjectId   || null)
-        .input("EntryTypeId",   sql.UniqueIdentifier, EntryTypeId)
-        .input("StartingDocNo", sql.Int,           StartingDocNo ? parseInt(StartingDocNo) : 1)
-        .input("CreatedBy",     sql.NVarChar(100), req.user?.email || "system")
+      await pool
+        .request()
+        .input("Prefix", sql.NVarChar(30), Prefix.toUpperCase().trim())
+        .input("Description", sql.NVarChar(255), Description.trim())
+        .input("CompanyId", sql.Int, CompanyId || null)
+        .input("ProjectId", sql.Int, ProjectId || null)
+        .input("EntryTypeId", sql.UniqueIdentifier, EntryTypeId)
+        .input(
+          "StartingDocNo",
+          sql.Int,
+          StartingDocNo ? parseInt(StartingDocNo) : 1,
+        )
+        .input("CreatedBy", sql.NVarChar(100), req.user?.email || "system")
         .query(`
           INSERT INTO dbo.TypeOfDoc
             (Prefix, Description, CompanyId, ProjectId, EntryTypeId, StartingDocNo, CreatedBy)
@@ -182,7 +212,9 @@ router.post(
         `);
       res.status(201).json({ message: "Document type created successfully" });
     } catch (err) {
-      res.status(500).json({ error: err.message || "Failed to create document type" });
+      res
+        .status(500)
+        .json({ error: err.message || "Failed to create document type" });
     }
   },
 );
@@ -193,19 +225,32 @@ router.put(
   ...bypassOrCheck("Admin", "DocumentType", "CanEdit"),
   async (req, res) => {
     const { id } = req.params;
-    const { Prefix, Description, CompanyId, ProjectId, EntryTypeId, IsActive, StartingDocNo } = req.body;
+    const {
+      Prefix,
+      Description,
+      CompanyId,
+      ProjectId,
+      EntryTypeId,
+      IsActive,
+      StartingDocNo,
+    } = req.body;
     try {
       const pool = getPool();
-      await pool.request()
-        .input("id",            sql.Int,           id)
-        .input("Prefix",        sql.NVarChar(30),  Prefix.toUpperCase().trim())
-        .input("Description",   sql.NVarChar(255), Description.trim())
-        .input("CompanyId",     sql.Int,           CompanyId   || null)
-        .input("ProjectId",     sql.Int,           ProjectId   || null)
-        .input("EntryTypeId",   sql.UniqueIdentifier, EntryTypeId)
-        .input("IsActive",      sql.Bit,           IsActive !== undefined ? IsActive : true)
-        .input("StartingDocNo", sql.Int,           StartingDocNo ? parseInt(StartingDocNo) : 1)
-        .input("UpdatedBy",     sql.NVarChar(100), req.user?.email || "system")
+      await pool
+        .request()
+        .input("id", sql.Int, id)
+        .input("Prefix", sql.NVarChar(30), Prefix.toUpperCase().trim())
+        .input("Description", sql.NVarChar(255), Description.trim())
+        .input("CompanyId", sql.Int, CompanyId || null)
+        .input("ProjectId", sql.Int, ProjectId || null)
+        .input("EntryTypeId", sql.UniqueIdentifier, EntryTypeId)
+        .input("IsActive", sql.Bit, IsActive !== undefined ? IsActive : true)
+        .input(
+          "StartingDocNo",
+          sql.Int,
+          StartingDocNo ? parseInt(StartingDocNo) : 1,
+        )
+        .input("UpdatedBy", sql.NVarChar(100), req.user?.email || "system")
         .query(`
           UPDATE dbo.TypeOfDoc SET
             Prefix        = @Prefix,
@@ -233,8 +278,9 @@ router.delete(
   async (req, res) => {
     try {
       const pool = getPool();
-      await pool.request()
-        .input("id",        sql.Int,         req.params.id)
+      await pool
+        .request()
+        .input("id", sql.Int, req.params.id)
         .input("UpdatedBy", sql.NVarChar(100), req.user?.email || "system")
         .query(`
           UPDATE dbo.TypeOfDoc SET
