@@ -167,7 +167,7 @@ router.get("/projects", authMiddleware, async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT id AS ProjectId, name AS ProjectName, business_identity AS ProjectCode
+      SELECT id AS ProjectId, name AS ProjectName, NULL AS ProjectCode
       FROM dbo.enterprise
       WHERE business_type = 'P'
         AND (discontinue IS NULL OR discontinue = 0)
