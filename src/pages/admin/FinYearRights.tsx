@@ -1,7 +1,16 @@
-import React, { useState, useMemo, useCallback } from "react";
+import React, { useCallback, useMemo, useState } from "react";
 import { useFinYear, type FinYear } from "@/contexts/FinYearContext";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { Calendar, Plus, Search, Trash2, Edit3, Lock, Unlock } from "lucide-react";
+import {
+  Calendar,
+  Edit3,
+  Loader2,
+  Lock,
+  Plus,
+  Search,
+  Trash2,
+  Unlock,
+} from "lucide-react";
 import {
   Card,
   CardContent,
@@ -49,24 +58,40 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
+type FinYearFormState = {
+  year: string;
+  startDate: string;
+  endDate: string;
+  status: "Active" | "Closed";
+  locked: boolean;
+};
+
+const EMPTY_FORM: FinYearFormState = {
+  year: "",
+  startDate: "",
+  endDate: "",
+  status: "Active",
+  locked: false,
+};
+
 export default function FinYearRights() {
-  const { finYears, addFinYear, updateFinYear, toggleLock, deleteFinYear } =
-    useFinYear();
+  const {
+    finYears,
+    isLoading,
+    addFinYear,
+    updateFinYear,
+    toggleLock,
+    deleteFinYear,
+  } = useFinYear();
 
   const [searchTerm, setSearchTerm] = useState("");
-  // FIX: showDialog is now controlled ONLY by state — no DialogTrigger is used.
-  // This means Edit button can open the same dialog without the trigger closing it.
   const [showDialog, setShowDialog] = useState(false);
   const [editingFinYear, setEditingFinYear] = useState<FinYear | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-
-  const [formData, setFormData] = useState({
-    year: "",
-    startDate: "",
-    endDate: "",
-    status: "Active" as "Active" | "Closed",
-    locked: false,
-  });
+  const [pendingLockId, setPendingLockId] = useState<string | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [formData, setFormData] = useState<FinYearFormState>(EMPTY_FORM);
 
   const filteredFinYears = useMemo(
     () =>
@@ -84,21 +109,18 @@ export default function FinYearRights() {
     [finYears],
   );
 
-  // FIX: openAddDialog sets editing to null, clears form, then opens dialog
+  const resetForm = useCallback(() => {
+    setFormData(EMPTY_FORM);
+    setEditingFinYear(null);
+    setShowDialog(false);
+  }, []);
+
   const openAddDialog = useCallback(() => {
     setEditingFinYear(null);
-    setFormData({
-      year: "",
-      startDate: "",
-      endDate: "",
-      status: "Active",
-      locked: false,
-    });
+    setFormData(EMPTY_FORM);
     setShowDialog(true);
   }, []);
 
-  // FIX: openEditDialog sets the record first, then opens dialog
-  // Previously this was fighting with DialogTrigger's own open state
   const openEditDialog = useCallback((fy: FinYear) => {
     setEditingFinYear(fy);
     setFormData({
@@ -117,95 +139,82 @@ export default function FinYearRights() {
       return;
     }
 
+    setIsSaving(true);
     try {
       if (editingFinYear) {
         await updateFinYear(editingFinYear.id, formData);
         toast.success(`Financial year "${formData.year}" updated`);
       } else {
-        await addFinYear({
-          year: formData.year,
-          startDate: formData.startDate,
-          endDate: formData.endDate,
-          status: formData.status,
-          locked: formData.locked,
-        });
+        await addFinYear(formData);
         toast.success(`Financial year "${formData.year}" added`);
       }
-      setShowDialog(false);
+      resetForm();
     } catch (err: any) {
       toast.error(err?.message || "Save failed");
+    } finally {
+      setIsSaving(false);
     }
-  }, [formData, editingFinYear, addFinYear, updateFinYear]);
+  }, [addFinYear, editingFinYear, formData, resetForm, updateFinYear]);
 
-  // FIX: toggleLock sends ONLY FisLocked. The backend PUT was overwriting all
-  // fields with null when they weren't provided. The backend route is also fixed
-  // (see finYear.js) to do a partial UPDATE only on FisLocked for this action.
-  // At the frontend level we call toggleLock (not updateFinYear) so the context
-  // sends only { FisLocked } to the backend.
   const handleToggleLock = useCallback(
     async (id: string, currentlyLocked: boolean) => {
+      setPendingLockId(id);
       try {
         const newLockedState = !currentlyLocked;
         await toggleLock(id, newLockedState);
         toast.success(
           newLockedState ? "Financial year locked" : "Financial year unlocked",
         );
-      } catch {
-        toast.error("Failed to change lock status");
+      } catch (err: any) {
+        toast.error(err?.message || "Failed to change lock status");
+      } finally {
+        setPendingLockId(null);
       }
     },
     [toggleLock],
   );
 
   const handleDelete = useCallback(async () => {
-    if (deletingId) {
-      try {
-        await deleteFinYear(deletingId);
-        toast.error("Financial year deleted");
-      } catch {
-        toast.error("Delete failed");
-      } finally {
-        setDeletingId(null);
-      }
-    }
-  }, [deletingId, deleteFinYear]);
+    if (!deletingId) return;
 
-  const resetForm = useCallback(() => {
-    setFormData({
-      year: "",
-      startDate: "",
-      endDate: "",
-      status: "Active",
-      locked: false,
-    });
-    setEditingFinYear(null);
-    setShowDialog(false);
-  }, []);
+    setIsDeleting(true);
+    try {
+      await deleteFinYear(deletingId);
+      toast.success("Financial year deleted");
+    } catch (err: any) {
+      toast.error(err?.message || "Delete failed");
+    } finally {
+      setIsDeleting(false);
+      setDeletingId(null);
+    }
+  }, [deleteFinYear, deletingId]);
 
   return (
     <>
       <Breadcrumbs items={["Admin", "Rights", "Fin Year Rights"]} />
-      <div className="flex items-center justify-between mb-6">
+      <div className="mb-6 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground flex items-center gap-3">
-            <Calendar className="w-8 h-8 text-primary" />
+          <h1 className="flex items-center gap-3 text-2xl font-bold text-foreground">
+            <Calendar className="h-8 w-8 text-primary" />
             Financial Year Rights
           </h1>
-          <p className="text-muted-foreground mt-1">
-            Manage financial years, dates and lock status
+          <p className="mt-1 text-muted-foreground">
+            Manage financial years, dates, and lock status
           </p>
         </div>
 
-        {/* FIX: Plain Button — no DialogTrigger wrapping — calls openAddDialog */}
-        <Button onClick={openAddDialog}>
-          <Plus className="w-4 h-4 mr-2" />
+        <Button onClick={openAddDialog} disabled={isLoading}>
+          <Plus className="mr-2 h-4 w-4" />
           New Financial Year
         </Button>
       </div>
 
-      {/* FIX: Dialog is fully state-controlled via showDialog.
-          No DialogTrigger here — both Add and Edit share this single dialog. */}
-      <Dialog open={showDialog} onOpenChange={setShowDialog}>
+      <Dialog
+        open={showDialog}
+        onOpenChange={(open) => {
+          if (!isSaving) setShowDialog(open);
+        }}
+      >
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>
@@ -223,7 +232,10 @@ export default function FinYearRights() {
                 id="year"
                 value={formData.year}
                 onChange={(e) =>
-                  setFormData({ ...formData, year: e.target.value })
+                  setFormData((current) => ({
+                    ...current,
+                    year: e.target.value,
+                  }))
                 }
                 placeholder="e.g. 2025-26"
               />
@@ -237,7 +249,10 @@ export default function FinYearRights() {
                   type="date"
                   value={formData.startDate}
                   onChange={(e) =>
-                    setFormData({ ...formData, startDate: e.target.value })
+                    setFormData((current) => ({
+                      ...current,
+                      startDate: e.target.value,
+                    }))
                   }
                 />
               </div>
@@ -248,7 +263,10 @@ export default function FinYearRights() {
                   type="date"
                   value={formData.endDate}
                   onChange={(e) =>
-                    setFormData({ ...formData, endDate: e.target.value })
+                    setFormData((current) => ({
+                      ...current,
+                      endDate: e.target.value,
+                    }))
                   }
                 />
               </div>
@@ -258,11 +276,11 @@ export default function FinYearRights() {
               <Label htmlFor="status">Status</Label>
               <Select
                 value={formData.status}
-                onValueChange={(val) =>
-                  setFormData({
-                    ...formData,
-                    status: val as "Active" | "Closed",
-                  })
+                onValueChange={(value) =>
+                  setFormData((current) => ({
+                    ...current,
+                    status: value as FinYearFormState["status"],
+                  }))
                 }
               >
                 <SelectTrigger id="status">
@@ -280,7 +298,7 @@ export default function FinYearRights() {
                 id="locked"
                 checked={formData.locked}
                 onCheckedChange={(checked) =>
-                  setFormData({ ...formData, locked: checked })
+                  setFormData((current) => ({ ...current, locked: checked }))
                 }
               />
               <Label htmlFor="locked" className="font-normal">
@@ -290,10 +308,24 @@ export default function FinYearRights() {
           </div>
 
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={resetForm}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={resetForm}
+              disabled={isSaving}
+            >
               Cancel
             </Button>
-            <Button onClick={handleSave}>Save</Button>
+            <Button onClick={handleSave} disabled={isSaving}>
+              {isSaving ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Saving...
+                </>
+              ) : (
+                "Save"
+              )}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -303,14 +335,14 @@ export default function FinYearRights() {
           <div>
             <CardTitle>Financial Years</CardTitle>
             <CardDescription>
-              {activeCount} active · {finYears.length} total financial years
+              {activeCount} active • {finYears.length} total financial years
             </CardDescription>
           </div>
           <div className="relative">
             <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="Search years..."
-              className="pl-10 w-64"
+              className="w-64 pl-10"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
@@ -328,92 +360,103 @@ export default function FinYearRights() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {filteredFinYears.length === 0 ? (
+              {isLoading ? (
+                <TableRow>
+                  <TableCell colSpan={5} className="h-24 text-center">
+                    <span className="inline-flex items-center gap-2 text-muted-foreground">
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Loading financial years...
+                    </span>
+                  </TableCell>
+                </TableRow>
+              ) : filteredFinYears.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={5} className="h-24 text-center">
                     No financial years found. Add one above.
                   </TableCell>
                 </TableRow>
               ) : (
-                filteredFinYears.map((fy) => (
-                  <TableRow key={fy.id}>
-                    <TableCell className="font-medium">{fy.year}</TableCell>
-                    <TableCell>
-                      {fy.startDate} – {fy.endDate}
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant={
-                          fy.status === "Active" ? "default" : "secondary"
-                        }
-                        className={
-                          fy.status === "Active"
-                            ? "bg-green-500/10 border-green-500/20 text-green-700 border"
-                            : "bg-red-500/10 border-red-500/20 text-red-700 border"
-                        }
-                      >
-                        <span
-                          className={`w-1.5 h-1.5 rounded-full mr-1.5 inline-block ${
+                filteredFinYears.map((fy) => {
+                  const lockPending = pendingLockId === fy.id;
+
+                  return (
+                    <TableRow key={fy.id}>
+                      <TableCell className="font-medium">{fy.year}</TableCell>
+                      <TableCell>
+                        {fy.startDate} - {fy.endDate}
+                      </TableCell>
+                      <TableCell>
+                        <Badge
+                          variant={
+                            fy.status === "Active" ? "default" : "secondary"
+                          }
+                          className={
                             fy.status === "Active"
-                              ? "bg-green-500"
-                              : "bg-red-500"
-                          }`}
-                        />
-                        {fy.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <Badge variant={fy.locked ? "destructive" : "secondary"}>
-                        {fy.locked ? "Locked" : "Unlocked"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="space-x-1">
-                      {/* FIX: Edit button calls openEditDialog which sets state then opens dialog.
-                          This works because dialog is NOT wrapped in a DialogTrigger anymore. */}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-8"
-                        onClick={() => openEditDialog(fy)}
-                      >
-                        <Edit3 className="w-4 h-4 mr-1" />
-                        Edit
-                      </Button>
+                              ? "border border-green-500/20 bg-green-500/10 text-green-700"
+                              : "border border-red-500/20 bg-red-500/10 text-red-700"
+                          }
+                        >
+                          <span
+                            className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full ${
+                              fy.status === "Active"
+                                ? "bg-green-500"
+                                : "bg-red-500"
+                            }`}
+                          />
+                          {fy.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={fy.locked ? "destructive" : "secondary"}>
+                          {fy.locked ? "Locked" : "Unlocked"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="space-x-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8"
+                          onClick={() => openEditDialog(fy)}
+                        >
+                          <Edit3 className="mr-1 h-4 w-4" />
+                          Edit
+                        </Button>
 
-                      {/* FIX: Lock/Unlock calls toggleLock which only sends FisLocked
-                          to the backend — no risk of nullifying other fields. */}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-8"
-                        onClick={() => handleToggleLock(fy.id, fy.locked)}
-                      >
-                        {fy.locked ? (
-                          <Unlock className="w-4 h-4 mr-1" />
-                        ) : (
-                          <Lock className="w-4 h-4 mr-1" />
-                        )}
-                        {fy.locked ? "Unlock" : "Lock"}
-                      </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8"
+                          onClick={() => handleToggleLock(fy.id, fy.locked)}
+                          disabled={lockPending}
+                        >
+                          {lockPending ? (
+                            <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                          ) : fy.locked ? (
+                            <Unlock className="mr-1 h-4 w-4" />
+                          ) : (
+                            <Lock className="mr-1 h-4 w-4" />
+                          )}
+                          {fy.locked ? "Unlock" : "Lock"}
+                        </Button>
 
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-8 text-destructive hover:bg-destructive/5"
-                        onClick={() => setDeletingId(fy.id)}
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 text-destructive hover:bg-destructive/5"
+                          onClick={() => setDeletingId(fy.id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })
               )}
             </TableBody>
           </Table>
         </CardContent>
       </Card>
 
-      {/* Delete Confirmation Dialog */}
       <AlertDialog open={!!deletingId} onOpenChange={() => setDeletingId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -424,12 +467,20 @@ export default function FinYearRights() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive"
               onClick={handleDelete}
+              disabled={isDeleting}
             >
-              Delete
+              {isDeleting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                "Delete"
+              )}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

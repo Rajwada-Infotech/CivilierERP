@@ -451,6 +451,30 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/followup/follow-ups/reminders"
+        element={
+          <ProtectedRoute>
+            <FollowupReminders />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/follow-ups/tasks"
+        element={
+          <ProtectedRoute>
+            <FollowupTasks />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/follow-ups/log"
+        element={
+          <ProtectedRoute>
+            <FollowupLog />
+          </ProtectedRoute>
+        }
+      />
 
       {/* MASTERS */}
       <Route

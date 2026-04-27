@@ -179,7 +179,7 @@ const buildFollowupNavItems = (): NavItem[] => [
 
 // ── Material module sidebar ──────────────────────────────────────────────────
 const buildMaterialNavItems = (): NavItem[] => [
-  { label: "Amendments", icon: BarChart3, path: "/material" }, // ← Changed here
+  { label: "Amendments", icon: BarChart3, path: "/material/amendments" },
   {
     label: "Transaction",
     icon: Receipt,
