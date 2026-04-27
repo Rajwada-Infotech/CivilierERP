@@ -680,7 +680,8 @@ export default function MaterialExpenseBooking() {
                       <Table>
                         <TableHeader>
                           <TableRow>
-                            <TableHead>Reference</TableHead>
+                            <TableHead>Doc Type</TableHead>
+                            <TableHead>Doc Number</TableHead>
                             <TableHead>Date</TableHead>
                             <TableHead>Due Date</TableHead>
                             <TableHead>Supplier</TableHead>
@@ -704,8 +705,11 @@ export default function MaterialExpenseBooking() {
                             );
                             return (
                               <TableRow key={rec.id}>
-                                <TableCell className="font-mono text-xs">
-                                  {rec.bookingReference}
+                                <TableCell className="text-xs text-muted-foreground max-w-[110px] truncate">
+                                  {rec.docTypeName || "—"}
+                                </TableCell>
+                                <TableCell className="font-mono text-xs font-semibold text-primary">
+                                  {rec.bookingReference || "—"}
                                 </TableCell>
                                 <TableCell className="text-xs">
                                   {rec.bookingDate}
@@ -771,7 +775,7 @@ export default function MaterialExpenseBooking() {
                           {filteredRecords.length === 0 && (
                             <TableRow>
                               <TableCell
-                                colSpan={10}
+                                colSpan={11}
                                 className="text-center py-10 text-muted-foreground text-sm"
                               >
                                 {statusFilter

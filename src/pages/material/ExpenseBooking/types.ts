@@ -69,6 +69,7 @@ export interface ApprovalTrail {
 export interface ExpenseRecord {
   id: string;
   bookingReference: string;
+  docTypeName: string;        // e.g. "PR/REC — Received Payment"
   bookingDate: string;
   dueDate: string;
   financialYear: string;
