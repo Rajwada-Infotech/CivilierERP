@@ -19,7 +19,7 @@ router.get("/", cache("entry-type", 300), async (req, res) => {
 router.post("/", async (req, res) => {
   const { Epname, EntryType, Eprefix, EDoc_N } = req.body;
   try {
-    const userEmail = req.user?.email;
+    const userEmail = req.user?.name;
     if (!userEmail) return res.status(401).json({ error: "User context missing" });
 
     const pool = getPool();

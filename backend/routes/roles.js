@@ -82,7 +82,7 @@ router.post(
       return res.status(400).json({ error: "Role Name is required" });
 
     try {
-      const userEmail = req.user?.email || String(req.user?.id || "system"); // ✅ email
+      const userEmail = req.user?.name || String(req.user?.id || "system"); // ✅ email
       const pool = getPool();
       const cleanName = RName.trim();
       const rCode = generateRoleCode(cleanName);
@@ -123,7 +123,7 @@ router.put(
   async (req, res) => {
     const { id } = req.params;
     const { RName, RDesc } = req.body;
-    const userEmail = req.user?.email || String(req.user?.id || "system"); // ✅ email
+    const userEmail = req.user?.name || String(req.user?.id || "system"); // ✅ email
 
     try {
       const pool = getPool();

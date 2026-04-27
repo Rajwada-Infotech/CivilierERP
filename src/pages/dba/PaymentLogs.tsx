@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Badge } from "@/components/ui/badge";
@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/dialog";
 import {
   Receipt,
+  Plus,
   TrendingUp,
   CheckCircle2,
   XCircle,
@@ -166,6 +167,32 @@ export default function PaymentLogs() {
     },
   });
 
+  const qc = useQueryClient();
+  const [addOpen, setAddOpen] = useState(false);
+  const [addForm, setAddForm] = useState({
+    txn_id: "", tenant_id: "", tenant_name: "", amount: "",
+    method: "upi", upi_id: "", bank_ref: "", paid_by: "",
+    paid_on: "", status: "pending", purpose: "", plan: "",
+    renewal_period: "", remarks: "",
+  });
+
+  const addMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetchWithAuth("/api/dba/payment-logs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...addForm, amount: parseFloat(addForm.amount) || 0 }),
+      });
+      if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || "Failed"); }
+      return res.json();
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["dba-payment-logs"] });
+      setAddOpen(false);
+      setAddForm({ txn_id: "", tenant_id: "", tenant_name: "", amount: "", method: "upi", upi_id: "", bank_ref: "", paid_by: "", paid_on: "", status: "pending", purpose: "", plan: "", renewal_period: "", remarks: "" });
+    },
+  });
+
   const [selected, setSelected] = useState<PaymentLog | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -207,9 +234,14 @@ export default function PaymentLogs() {
             All received payments via UPI, NEFT, RTGS, IMPS
           </p>
         </div>
-        <Button variant="outline" size="sm" className="gap-1.5 text-xs">
-          <Download size={12} /> Export CSV
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" className="gap-1.5 text-xs">
+            <Download size={12} /> Export CSV
+          </Button>
+          <Button size="sm" className="gap-1.5 text-xs gradient-accent" onClick={() => setAddOpen(true)}>
+            <Plus size={12} /> Add Log
+          </Button>
+        </div>
       </div>
 
       {/* Stats */}
@@ -515,6 +547,85 @@ export default function PaymentLogs() {
               }}
             >
               <Download size={11} /> Download Receipt
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add Payment Log Dialog */}
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-sm flex items-center gap-2">
+              <Plus size={14} className="text-emerald-500" /> Add Payment Log
+            </DialogTitle>
+          </DialogHeader>
+          <div className="grid grid-cols-2 gap-3 py-2 text-xs">
+            {[
+              { key: "txn_id", label: "TXN ID *", placeholder: "TXN123456" },
+              { key: "tenant_name", label: "Tenant Name", placeholder: "Acme Corp" },
+              { key: "tenant_id", label: "Tenant ID", placeholder: "tenant_abc" },
+              { key: "amount", label: "Amount (₹) *", placeholder: "5000", type: "number" },
+              { key: "paid_by", label: "Paid By", placeholder: "John Doe" },
+              { key: "paid_on", label: "Paid On", type: "date" },
+              { key: "upi_id", label: "UPI ID", placeholder: "name@upi" },
+              { key: "bank_ref", label: "Bank Ref", placeholder: "REF123" },
+              { key: "purpose", label: "Purpose", placeholder: "Subscription renewal" },
+              { key: "plan", label: "Plan", placeholder: "Pro" },
+              { key: "renewal_period", label: "Renewal Period", placeholder: "Annual" },
+            ].map(({ key, label, placeholder, type }) => (
+              <div key={key} className="space-y-1">
+                <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">{label}</label>
+                <Input
+                  className="h-7 text-xs"
+                  type={type || "text"}
+                  placeholder={placeholder}
+                  value={(addForm as any)[key]}
+                  onChange={(e) => setAddForm((p) => ({ ...p, [key]: e.target.value }))}
+                />
+              </div>
+            ))}
+            <div className="space-y-1">
+              <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Method</label>
+              <Select value={addForm.method} onValueChange={(v) => setAddForm((p) => ({ ...p, method: v }))}>
+                <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {["upi","neft","rtgs","imps","bank_transfer"].map((m) => (
+                    <SelectItem key={m} value={m} className="text-xs">{m.toUpperCase()}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Status</label>
+              <Select value={addForm.status} onValueChange={(v) => setAddForm((p) => ({ ...p, status: v }))}>
+                <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {["pending","success","failed","refunded"].map((s) => (
+                    <SelectItem key={s} value={s} className="text-xs capitalize">{s}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="col-span-2 space-y-1">
+              <label className="text-[10px] font-medium text-muted-foreground uppercase tracking-wide">Remarks</label>
+              <Input
+                className="h-7 text-xs"
+                placeholder="Optional notes"
+                value={addForm.remarks}
+                onChange={(e) => setAddForm((p) => ({ ...p, remarks: e.target.value }))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" className="text-xs" onClick={() => setAddOpen(false)}>Cancel</Button>
+            <Button
+              size="sm"
+              className="text-xs gradient-accent"
+              disabled={!addForm.txn_id || !addForm.amount || addMutation.isPending}
+              onClick={() => addMutation.mutate()}
+            >
+              {addMutation.isPending ? "Saving…" : "Save Log"}
             </Button>
           </DialogFooter>
         </DialogContent>

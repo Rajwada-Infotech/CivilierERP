@@ -6,8 +6,8 @@ const { bumpCacheVersion } = require("../redis");
 
 const { transition, guardEdit } = require("../services/approvalService");
 
-const requireUserEmail = (req, res) => {
-  const email = req.user?.email;
+const requireUserName = (req, res) => {
+  const email = req.user?.name;
   if (!email) {
     res.status(401).json({ error: "User context missing" });
     return null;
@@ -88,7 +88,7 @@ router.post("/", async (req, res) => {
   } = req.body;
 
   try {
-    const userEmail = requireUserEmail(req, res);
+    const userEmail = requireUserName(req, res);
     if (!userEmail) return;
 
     // guardEdit is only for updates — removed from POST (no ID exists yet)
@@ -150,7 +150,7 @@ router.put("/:id", async (req, res) => {
   } = req.body;
 
   try {
-    const userEmail = requireUserEmail(req, res);
+    const userEmail = requireUserName(req, res);
     if (!userEmail) return;
 
     await guardEdit("purchase-orders", id);
@@ -232,7 +232,7 @@ router.delete("/:id", async (req, res) => {
 router.put("/:id/submit", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
-    const userEmail = requireUserEmail(req, res);
+    const userEmail = requireUserName(req, res);
     if (!userEmail) return;
     const result = await transition("purchase-orders", id, "Pending", userEmail, req.user?.role);
     await bumpCacheVersion("purchase-orders");
@@ -247,7 +247,7 @@ router.put("/:id/submit", async (req, res) => {
 router.put("/:id/approve", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
-    const userEmail = requireUserEmail(req, res);
+    const userEmail = requireUserName(req, res);
     if (!userEmail) return;
     const result = await transition("purchase-orders", id, "Approved", userEmail, req.user?.role);
     await bumpCacheVersion("purchase-orders");
@@ -263,7 +263,7 @@ router.put("/:id/reject", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const { note } = req.body;
   try {
-    const userEmail = requireUserEmail(req, res);
+    const userEmail = requireUserName(req, res);
     if (!userEmail) return;
     const result = await transition("purchase-orders", id, "Rejected", userEmail, req.user?.role, note || null);
     await bumpCacheVersion("purchase-orders");

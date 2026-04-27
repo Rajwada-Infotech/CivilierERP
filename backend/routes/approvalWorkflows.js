@@ -49,7 +49,7 @@ router.post("/", authMiddleware, async (req, res) => {
       .input("Approvers", sql.NVarChar(500), approversStr || null)
       .input("Status", sql.NVarChar(20), status || "Active")
       .input("Description", sql.NVarChar(500), description || null)
-      .input("CreatedBy", sql.NVarChar(100), req.user?.email || null)
+      .input("CreatedBy", sql.NVarChar(100), req.user?.name || null)
       .input("CreatedAt", sql.DateTime2, new Date()).query(`
         INSERT INTO dbo.ApprovalWorkflows
           (Name, Module, Levels, Approvers, Status, Description, CreatedBy, CreatedAt)
@@ -82,7 +82,7 @@ router.put("/:id", authMiddleware, async (req, res) => {
       .input("Approvers", sql.NVarChar(500), approversStr || null)
       .input("Status", sql.NVarChar(20), status || "Active")
       .input("Description", sql.NVarChar(500), description || null)
-      .input("UpdatedBy", sql.NVarChar(100), req.user?.email || null)
+      .input("UpdatedBy", sql.NVarChar(100), req.user?.name || null)
       .input("UpdatedAt", sql.DateTime2, new Date()).query(`
         UPDATE dbo.ApprovalWorkflows SET
           Name=@Name, Module=@Module, Levels=@Levels, Approvers=@Approvers,
@@ -105,7 +105,7 @@ router.patch("/:id/toggle", authMiddleware, async (req, res) => {
     await pool
       .request()
       .input("Id", sql.Int, req.params.id)
-      .input("UpdatedBy", sql.NVarChar(100), req.user?.email || null).query(`
+      .input("UpdatedBy", sql.NVarChar(100), req.user?.name || null).query(`
         UPDATE dbo.ApprovalWorkflows SET
           Status    = CASE WHEN Status = 'Active' THEN 'Inactive' ELSE 'Active' END,
           UpdatedBy = @UpdatedBy,
