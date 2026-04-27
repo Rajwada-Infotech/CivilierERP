@@ -90,6 +90,7 @@ export function generateEmiSchedule(
 export function blankForm(): Omit<ExpenseRecord, "id"> {
   return {
     bookingReference: "",
+    docTypeName: "",
     bookingDate: "",
     dueDate: "",
     financialYear: "",
@@ -138,6 +139,7 @@ export function dbToRecord(row: any): ExpenseRecord {
   return {
     id: String(row.Eid ?? row.eid ?? row.EID ?? ""),
     bookingReference: row.EDocNo ?? "",
+    docTypeName: row.DocTypeName ?? "",   // joined from TypeOfDoc via backend
     bookingDate: row.EDocDate ? row.EDocDate.slice(0, 10) : "",
     dueDate: row.EReminder ? row.EReminder.slice(0, 10) : "",
     financialYear: "",

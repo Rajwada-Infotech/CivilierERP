@@ -20,8 +20,11 @@ export function RecordCard({ rec, onEdit, onDelete, onApprovalSuccess }: Props) 
     <div className="rounded-xl border border-border bg-card p-4 space-y-3">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="font-mono text-xs font-semibold text-foreground">
-            {rec.bookingReference}
+          <p className="text-[10px] text-muted-foreground font-medium truncate">
+            {rec.docTypeName || "No Doc Type"}
+          </p>
+          <p className="font-mono text-xs font-semibold text-primary">
+            {rec.bookingReference || "—"}
           </p>
           <p className="text-xs text-muted-foreground mt-0.5 truncate">{rec.supplier}</p>
         </div>

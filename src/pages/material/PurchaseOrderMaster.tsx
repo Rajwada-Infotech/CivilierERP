@@ -11,6 +11,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
+import { DocNumberPreview } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 
 import {
   getPurchaseOrders,
@@ -29,6 +30,8 @@ const PurchaseOrderMaster = () => {
 
   // Tracks selected company id so we can filter the project dropdown client-side
   const [selectedCompanyId, setSelectedCompanyId] = useState<number | null>(null);
+  const [poDocTypeId, setPoDocTypeId] = useState<number | null>(null);
+  const [poDocNo, setPoDocNo] = useState("");
 
   // ── Remote data ──────────────────────────────────────────────────────────────
   const { data: dbData, isLoading, error } = useQuery({
@@ -135,6 +138,9 @@ const PurchaseOrderMaster = () => {
       paymentTerms:    item.PaymentTerms     ?? "",
       status:          item.Status           ?? "Draft",
       remarks:         item.Remarks          ?? "",
+      docTypeId:       item.DocTypeId        ?? null,
+      docNo:           item.DocNo            ?? "",
+      docTypePrefix:   item.DocTypePrefix    ?? "",
     };
   });
 
@@ -158,6 +164,8 @@ const PurchaseOrderMaster = () => {
       PaymentTerms:         (r.paymentTerms as string) || null,
       Status:               (r.status as string)  || "Draft",
       Remarks:              (r.remarks as string)  || null,
+      DocTypeId:            (r.docTypeId as number | null) ?? poDocTypeId,
+      DocNo:                (r.docNo as string) || poDocNo || null,
     };
   };
 
@@ -304,6 +312,7 @@ const PurchaseOrderMaster = () => {
   // ── Column definitions ───────────────────────────────────────────────────────
   const COLUMNS: ColumnDef[] = [
     { key: "poNumber",        label: "PO No" },
+    { key: "docNo",           label: "Doc No" },
     { key: "supplierName",    label: "Supplier" },
     { key: "companyName",     label: "Company",        hideOnMobile: true },
     { key: "projectName",     label: "Project / Site", hideOnMobile: true },
@@ -325,6 +334,16 @@ const PurchaseOrderMaster = () => {
       <h1 className="text-xl font-heading font-bold text-foreground mb-4">
         Purchase Order Master
       </h1>
+      <div className="mb-4 rounded-xl bg-card border border-border p-4">
+        <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-2">
+          Document Type &amp; Number
+        </label>
+        <DocNumberPreview
+          selectedDocTypeId={poDocTypeId}
+          preview={poDocNo}
+          onSelect={(id, preview) => { setPoDocTypeId(id); setPoDocNo(preview); }}
+        />
+      </div>
       <MasterPage
         title="Purchase Order"
         fields={FIELDS}

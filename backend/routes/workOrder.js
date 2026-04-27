@@ -162,16 +162,20 @@ router.get("/", cache("work-orders", 300), async (req, res) => {
           ep.name AS ProjectName, h.ProjectId,
           ahm.LHeadName AS ContractorName, h.ContractorId,
           h.Remarks, h.TermsAndConditions, h.CreatedBy, h.UpdatedBy,
+          h.DocTypeId, h.DocNo,
+          td.Prefix AS DocTypePrefix, td.Description AS DocTypeDescription,
           COUNT(DISTINCT a.Id) AS ActivityCount
         FROM dbo.WorkOrderHeader h
         LEFT JOIN dbo.enterprise        ec  ON ec.id       = h.CompanyId
         LEFT JOIN dbo.enterprise        ep  ON ep.id       = h.ProjectId
         LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = h.ContractorId
         LEFT JOIN dbo.WorkOrderActivities a  ON a.WorkOrderHeaderId = h.Id
+        LEFT JOIN dbo.TypeOfDoc         td  ON td.TypeOfDocId = h.DocTypeId
         GROUP BY h.Id, h.DocumentNumber, h.DocumentDate, h.TotalAmount, h.Status,
           h.CreatedAt, h.UpdatedAt, h.CompanyId, h.ProjectId,
           h.ContractorId, h.Remarks, h.TermsAndConditions,
-          h.CreatedBy, h.UpdatedBy, ec.name, ep.name, ahm.LHeadName
+          h.CreatedBy, h.UpdatedBy, h.DocTypeId, h.DocNo,
+          ec.name, ep.name, ahm.LHeadName, td.Prefix, td.Description
         ORDER BY h.CreatedAt DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `);
@@ -244,7 +248,8 @@ router.get("/:id", cache("work-orders", 300), async (req, res) => {
 
 router.post("/", async (req, res) => {
   const { CompanyId, ProjectId, DocumentNumber, DocumentDate,
-          ContractorId, TotalAmount, Remarks, TermsAndConditions } = req.body;
+          ContractorId, TotalAmount, Remarks, TermsAndConditions,
+          DocTypeId, DocNo } = req.body;
   try {
     const pool = getPool();
     const result = await pool.request()
@@ -256,16 +261,18 @@ router.post("/", async (req, res) => {
       .input("TotalAmount",        sql.Decimal(18,2),     TotalAmount        || 0)
       .input("Remarks",            sql.NVarChar(500),     Remarks            || null)
       .input("TermsAndConditions", sql.NVarChar(sql.MAX), TermsAndConditions || null)
+      .input("DocTypeId",          sql.Int,               DocTypeId ? parseInt(DocTypeId, 10) : null)
+      .input("DocNo",              sql.NVarChar(100),     DocNo              || null)
       .input("CreatedBy",          sql.NVarChar(100),     req.user?.name    || null)
       .input("CreatedAt",          sql.DateTime,          new Date())
       .query(`
         INSERT INTO dbo.WorkOrderHeader
           (CompanyId, ProjectId, DocumentNumber, DocumentDate, ContractorId,
-           TotalAmount, Remarks, TermsAndConditions, CreatedBy, CreatedAt)
+           TotalAmount, Remarks, TermsAndConditions, DocTypeId, DocNo, CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
         VALUES
           (@CompanyId, @ProjectId, @DocumentNumber, @DocumentDate, @ContractorId,
-           @TotalAmount, @Remarks, @TermsAndConditions, @CreatedBy, @CreatedAt)
+           @TotalAmount, @Remarks, @TermsAndConditions, @DocTypeId, @DocNo, @CreatedBy, @CreatedAt)
       `);
     await bumpCacheVersion("work-orders");
     res.status(201).json({ message: "Work order created", Id: result.recordset[0].Id });
@@ -280,7 +287,8 @@ router.put("/:id", async (req, res) => {
   catch (err) { return res.status(400).json({ error: err.message }); }
 
   const { CompanyId, ProjectId, DocumentNumber, DocumentDate,
-          ContractorId, TotalAmount, Remarks, TermsAndConditions } = req.body;
+          ContractorId, TotalAmount, Remarks, TermsAndConditions,
+          DocTypeId, DocNo } = req.body;
   try {
     const pool = getPool();
     await pool.request()
@@ -293,6 +301,8 @@ router.put("/:id", async (req, res) => {
       .input("TotalAmount",        sql.Decimal(18,2),     TotalAmount        || 0)
       .input("Remarks",            sql.NVarChar(500),     Remarks            || null)
       .input("TermsAndConditions", sql.NVarChar(sql.MAX), TermsAndConditions || null)
+      .input("DocTypeId",          sql.Int,               DocTypeId ? parseInt(DocTypeId, 10) : null)
+      .input("DocNo",              sql.NVarChar(100),     DocNo              || null)
       .input("UpdatedBy",          sql.NVarChar(100),     req.user?.name    || null)
       .input("UpdatedAt",          sql.DateTime,          new Date())
       .query(`
@@ -301,6 +311,7 @@ router.put("/:id", async (req, res) => {
           DocumentNumber=@DocumentNumber, DocumentDate=@DocumentDate,
           ContractorId=@ContractorId, TotalAmount=@TotalAmount,
           Remarks=@Remarks, TermsAndConditions=@TermsAndConditions,
+          DocTypeId=@DocTypeId, DocNo=@DocNo,
           UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt
         WHERE Id=@Id
       `);
@@ -600,6 +611,8 @@ router.post("/:id/save-full", async (req, res) => {
       .input("TotalAmount",        sql.Decimal(18,2),     header.TotalAmount        || 0)
       .input("Remarks",            sql.NVarChar(500),     header.Remarks            || null)
       .input("TermsAndConditions", sql.NVarChar(sql.MAX), header.TermsAndConditions || null)
+      .input("DocTypeId",          sql.Int,               header.DocTypeId ? parseInt(header.DocTypeId, 10) : null)
+      .input("DocNo",              sql.NVarChar(100),     header.DocNo              || null)
       .input("UpdatedBy",          sql.NVarChar(100),     req.user?.name           || null)
       .input("UpdatedAt",          sql.DateTime,          new Date())
       .query(`
@@ -608,6 +621,7 @@ router.post("/:id/save-full", async (req, res) => {
           DocumentNumber=@DocumentNumber, DocumentDate=@DocumentDate,
           ContractorId=@ContractorId, TotalAmount=@TotalAmount,
           Remarks=@Remarks, TermsAndConditions=@TermsAndConditions,
+          DocTypeId=@DocTypeId, DocNo=@DocNo,
           UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt
         WHERE Id=@Id
       `);
