@@ -34,7 +34,11 @@ import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
-import { FormSection, Field, ReadonlyField } from "./ExpenseBooking/FormPrimitives";
+import {
+  FormSection,
+  Field,
+  ReadonlyField,
+} from "./ExpenseBooking/FormPrimitives";
 import { BillingAccordion } from "./ExpenseBooking/BillingAccordion";
 import { EmiSection } from "./ExpenseBooking/EmiSection";
 import { DocNumberPreview } from "./ExpenseBooking/DocNumberPreview";
@@ -84,10 +88,15 @@ export default function MaterialExpenseBooking() {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   // Doc number state
-  const [selectedDocTypeId, setSelectedDocTypeId] = useState<number | null>(null);
+  const [selectedDocTypeId, setSelectedDocTypeId] = useState<number | null>(
+    null,
+  );
   const [docNumberPreview, setDocNumberPreview] = useState("");
+  // Status filter for list view — default to "Received" payment status
+  const [statusFilter, setStatusFilter] = useState<string>("Received");
   // Approval trail for selected record
-  const [approvalTrail, setApprovalTrail] = useState<ExpenseRecord["approvalTrail"]>(undefined);
+  const [approvalTrail, setApprovalTrail] =
+    useState<ExpenseRecord["approvalTrail"]>(undefined);
 
   const fetchRecords = React.useCallback(async () => {
     try {
@@ -105,21 +114,27 @@ export default function MaterialExpenseBooking() {
     try {
       setPoLoading(true);
       const data = await apiFetch(`${API}?limit=200`);
-      const mapped: PurchaseOrder[] = (data.data ?? data ?? []).map((row: any) => ({
-        id: row.POId ?? row.Eid ?? null,
-        poNumber: row.PODocNo ?? row.EDocNo ?? (row.POId ?? row.Eid ? `PO-${row.POId ?? row.Eid}` : "N/A"),
-        supplier: row.SupplierName ?? row.EProjectName ?? "Unknown",
-        projectSite: row.ProjectName ?? row.EProjectName ?? "",
-        itemDescription: row.ItemDescription ?? row.EDocumentType ?? "Material",
-        quantity: parseFloat(row.Quantity) || 1,
-        unit: row.UOMCode ?? "Nos",
-        rate: parseFloat(row.Rate ?? row.EAmount) || 0,
-        totalAmount: parseFloat(row.TotalAmount ?? row.EAmount) || 0,
-        paymentTerms: row.PaymentTerms ?? "Net-30",
-        cgstRate: parseFloat(row.CGSTRate ?? row.ECgstRate) || 18,
-        sgstRate: parseFloat(row.SGSTRate ?? row.ESgstRate) || 0,
-        invoiceReference: row.InvoiceRef ?? row.EDocNo ?? "",
-      }));
+      const mapped: PurchaseOrder[] = (data.data ?? data ?? []).map(
+        (row: any) => ({
+          id: row.POId ?? row.Eid ?? null,
+          poNumber:
+            row.PODocNo ??
+            row.EDocNo ??
+            ((row.POId ?? row.Eid) ? `PO-${row.POId ?? row.Eid}` : "N/A"),
+          supplier: row.SupplierName ?? row.EProjectName ?? "Unknown",
+          projectSite: row.ProjectName ?? row.EProjectName ?? "",
+          itemDescription:
+            row.ItemDescription ?? row.EDocumentType ?? "Material",
+          quantity: parseFloat(row.Quantity) || 1,
+          unit: row.UOMCode ?? "Nos",
+          rate: parseFloat(row.Rate ?? row.EAmount) || 0,
+          totalAmount: parseFloat(row.TotalAmount ?? row.EAmount) || 0,
+          paymentTerms: row.PaymentTerms ?? "Net-30",
+          cgstRate: parseFloat(row.CGSTRate ?? row.ECgstRate) || 18,
+          sgstRate: parseFloat(row.SGSTRate ?? row.ESgstRate) || 0,
+          invoiceReference: row.InvoiceRef ?? row.EDocNo ?? "",
+        }),
+      );
       setPurchaseOrders(mapped);
     } catch (err: any) {
       console.error("PO load failed:", err.message);
@@ -150,7 +165,10 @@ export default function MaterialExpenseBooking() {
 
   const linkPO = (poNumber: string) => {
     const po = purchaseOrders.find((p) => p.poNumber === poNumber);
-    if (!po) { set("poId", null); return; }
+    if (!po) {
+      set("poId", null);
+      return;
+    }
     setForm((prev) => ({
       ...prev,
       poId: String(po.id ?? po.poNumber),
@@ -192,9 +210,13 @@ export default function MaterialExpenseBooking() {
 
   const handleDocTypeSelect = (docTypeId: number | null, preview: string) => {
     setSelectedDocTypeId(docTypeId);
-    setDocNumberPreview(preview);
-    // Auto-fill the booking reference with the preview
-    if (preview) set("bookingReference", preview);
+    // preview from backend already has finYear if it was passed — but if financialYear
+    // is set and preview doesn't already contain it, append it now
+    const fy = form.financialYear;
+    const finalPreview =
+      preview && fy && !preview.includes(fy) ? `${preview}/${fy}` : preview;
+    setDocNumberPreview(finalPreview);
+    if (finalPreview) set("bookingReference", finalPreview);
   };
 
   const handleSave = async () => {
@@ -202,8 +224,18 @@ export default function MaterialExpenseBooking() {
       toast.error("Booking reference and date are required.");
       return;
     }
-    const bd = computeBreakdown(form.basicAmount, form.cgstRate, form.sgstRate, form.discount);
-    const body = recordToDb(form, bd.netAmount);
+    const bd = computeBreakdown(
+      form.basicAmount,
+      form.cgstRate,
+      form.sgstRate,
+      form.discount,
+    );
+    // Pass selectedDocTypeId so the backend locks the sequence on new records
+    const body = recordToDb(
+      form,
+      bd.netAmount,
+      editingId ? null : selectedDocTypeId,
+    );
 
     try {
       setSaving(true);
@@ -214,8 +246,13 @@ export default function MaterialExpenseBooking() {
         });
         toast.success("Expense booking updated.");
       } else {
-        await apiFetch(API, { method: "POST", body: JSON.stringify(body) });
-        toast.success("Expense booking created.");
+        const result = await apiFetch(API, {
+          method: "POST",
+          body: JSON.stringify(body),
+        });
+        // Server returns the authoritative locked doc number — show it in success toast
+        const confirmedDocNo = result?.docNo || form.bookingReference;
+        toast.success(`Expense booking created — Ref: ${confirmedDocNo}`);
       }
       await fetchRecords();
       cancelForm();
@@ -237,7 +274,27 @@ export default function MaterialExpenseBooking() {
     }
   };
 
-  const bd = computeBreakdown(form.basicAmount, form.cgstRate, form.sgstRate, form.discount);
+  const bd = computeBreakdown(
+    form.basicAmount,
+    form.cgstRate,
+    form.sgstRate,
+    form.discount,
+  );
+
+  // Status options for the list filter (all booking statuses + Received)
+  const ALL_STATUSES = [
+    "Draft",
+    "Pending",
+    "Approved",
+    "Rejected",
+    "Booked",
+    "Hold",
+    "Received",
+  ] as const;
+  // Default filter: show Received payment records only
+  const filteredRecords = statusFilter
+    ? records.filter((r) => r.status === statusFilter)
+    : records;
 
   return (
     <>
@@ -276,13 +333,17 @@ export default function MaterialExpenseBooking() {
                     <ArrowLeft size={15} />
                     <span className="hidden sm:inline">Back to list</span>
                   </button>
-                  <span className="text-muted-foreground/40 hidden sm:inline">|</span>
+                  <span className="text-muted-foreground/40 hidden sm:inline">
+                    |
+                  </span>
                   <CardTitle className="text-base sm:text-lg font-heading">
                     {editingId ? "Edit Expense Booking" : "New Expense Booking"}
                   </CardTitle>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <Button variant="outline" size="sm" onClick={cancelForm}>Cancel</Button>
+                  <Button variant="outline" size="sm" onClick={cancelForm}>
+                    Cancel
+                  </Button>
                   <Button
                     size="sm"
                     className="gradient-accent"
@@ -299,13 +360,17 @@ export default function MaterialExpenseBooking() {
               {/* ── Document Numbering ──────────────────────────────────── */}
               <FormSection label="Document Numbering">
                 <DocNumberPreview
-                  entryTypeFilter="expense"
+                  finYear={form.financialYear || undefined}
                   selectedDocTypeId={selectedDocTypeId}
                   onSelect={handleDocTypeSelect}
                   preview={docNumberPreview}
                 />
                 {/* Manual override */}
-                <Field label="Booking Reference" required hint="Auto-filled when you pick a document type above; or enter manually.">
+                <Field
+                  label="Booking Reference"
+                  required
+                  hint="Auto-filled when you pick a document type above; or enter manually."
+                >
                   <Input
                     value={form.bookingReference}
                     onChange={(e) => {
@@ -337,14 +402,28 @@ export default function MaterialExpenseBooking() {
                   <Field label="Financial Year">
                     <Select
                       value={form.financialYear}
-                      onValueChange={(v) => set("financialYear", v)}
+                      onValueChange={(v) => {
+                        set("financialYear", v);
+                        // Rebuild booking reference: strip any existing finYear suffix then append new one
+                        if (selectedDocTypeId && docNumberPreview) {
+                          const base = docNumberPreview.replace(
+                            /\/\d{4}-\d{2,4}$/,
+                            "",
+                          );
+                          const newRef = `${base}/${v}`;
+                          setDocNumberPreview(newRef);
+                          set("bookingReference", newRef);
+                        }
+                      }}
                     >
                       <SelectTrigger>
                         <SelectValue placeholder="Select year..." />
                       </SelectTrigger>
                       <SelectContent>
                         {activeFinYears.map((fy) => (
-                          <SelectItem key={fy.id} value={fy.year}>{fy.year}</SelectItem>
+                          <SelectItem key={fy.id} value={fy.year}>
+                            {fy.year}
+                          </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -356,10 +435,24 @@ export default function MaterialExpenseBooking() {
                       value={form.status}
                       onValueChange={(v) => set("status", v as BookingStatus)}
                     >
-                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
                       <SelectContent>
-                        {(["Draft", "Pending", "Approved", "Rejected", "Booked", "Hold"] as BookingStatus[]).map((s) => (
-                          <SelectItem key={s} value={s}>{s}</SelectItem>
+                        {(
+                          [
+                            "Draft",
+                            "Pending",
+                            "Approved",
+                            "Rejected",
+                            "Booked",
+                            "Hold",
+                            "Received",
+                          ] as BookingStatus[]
+                        ).map((s) => (
+                          <SelectItem key={s} value={s}>
+                            {s}
+                          </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
@@ -380,7 +473,10 @@ export default function MaterialExpenseBooking() {
                   >
                     <SelectTrigger>
                       <div className="flex items-center gap-2">
-                        <Link2 size={13} className="text-muted-foreground shrink-0" />
+                        <Link2
+                          size={13}
+                          className="text-muted-foreground shrink-0"
+                        />
                         <SelectValue
                           placeholder={
                             poLoading
@@ -396,9 +492,15 @@ export default function MaterialExpenseBooking() {
                       {purchaseOrders.map((po) => (
                         <SelectItem key={po.poNumber} value={po.poNumber}>
                           <div className="flex items-center gap-2">
-                            <span className="font-mono text-xs font-semibold">{po.poNumber}</span>
-                            <span className="text-muted-foreground text-xs">— {po.supplier}</span>
-                            <span className="text-muted-foreground text-xs ml-auto">Rs.{fmt(po.totalAmount)}</span>
+                            <span className="font-mono text-xs font-semibold">
+                              {po.poNumber}
+                            </span>
+                            <span className="text-muted-foreground text-xs">
+                              — {po.supplier}
+                            </span>
+                            <span className="text-muted-foreground text-xs ml-auto">
+                              Rs.{fmt(po.totalAmount)}
+                            </span>
                           </div>
                         </SelectItem>
                       ))}
@@ -412,10 +514,23 @@ export default function MaterialExpenseBooking() {
                       Auto-filled from PO
                     </p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                      <ReadonlyField label="Vendor / Supplier" value={form.supplier} />
-                      <ReadonlyField label="Project / Site" value={form.projectSite} />
-                      <ReadonlyField label="Material Category" value={form.materialCategory} />
-                      <ReadonlyField label="Invoice Reference" value={form.invoiceReference} highlight />
+                      <ReadonlyField
+                        label="Vendor / Supplier"
+                        value={form.supplier}
+                      />
+                      <ReadonlyField
+                        label="Project / Site"
+                        value={form.projectSite}
+                      />
+                      <ReadonlyField
+                        label="Material Category"
+                        value={form.materialCategory}
+                      />
+                      <ReadonlyField
+                        label="Invoice Reference"
+                        value={form.invoiceReference}
+                        highlight
+                      />
                     </div>
                   </div>
                 )}
@@ -465,9 +580,19 @@ export default function MaterialExpenseBooking() {
               </FormSection>
 
               <div className="flex justify-end gap-2 pt-2 border-t border-border">
-                <Button variant="outline" onClick={cancelForm}>Cancel</Button>
-                <Button className="gradient-accent" onClick={handleSave} disabled={saving}>
-                  {saving ? "Saving…" : editingId ? "Update Booking" : "Save Booking"}
+                <Button variant="outline" onClick={cancelForm}>
+                  Cancel
+                </Button>
+                <Button
+                  className="gradient-accent"
+                  onClick={handleSave}
+                  disabled={saving}
+                >
+                  {saving
+                    ? "Saving…"
+                    : editingId
+                      ? "Update Booking"
+                      : "Save Booking"}
                 </Button>
               </div>
             </CardContent>
@@ -484,14 +609,60 @@ export default function MaterialExpenseBooking() {
             )}
             {!loading && (
               <>
+                {/* ── Status filter bar ──────────────────────────────────── */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs text-muted-foreground font-medium shrink-0">
+                    Filter:
+                  </span>
+                  {(
+                    [
+                      "Received",
+                      "Draft",
+                      "Pending",
+                      "Approved",
+                      "Rejected",
+                      "Booked",
+                      "Hold",
+                    ] as const
+                  ).map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      onClick={() =>
+                        setStatusFilter(statusFilter === s ? "" : s)
+                      }
+                      className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                        statusFilter === s
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-background text-muted-foreground border-border hover:border-primary/40"
+                      }`}
+                    >
+                      {s}
+                    </button>
+                  ))}
+                  {statusFilter && (
+                    <button
+                      type="button"
+                      onClick={() => setStatusFilter("")}
+                      className="px-2 py-1 rounded-full text-xs text-muted-foreground hover:text-foreground border border-dashed border-border"
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+
                 {/* Mobile cards */}
                 <div className="flex flex-col gap-3 sm:hidden">
-                  {records.length === 0 && (
+                  {filteredRecords.length === 0 && (
                     <div className="text-center py-12 text-muted-foreground text-sm border rounded-xl border-dashed border-border">
-                      No bookings yet. Tap "New" to get started.
+                      No bookings
+                      {statusFilter ? ` with status "${statusFilter}"` : ""}.{" "}
+                      {statusFilter
+                        ? "Try a different filter."
+                        : 'Tap "New" to get started.'}
                     </div>
                   )}
-                  {records.map((rec) => (
+                  {filteredRecords.map((rec) => (
                     <RecordCard
                       key={rec.id}
                       rec={rec}
@@ -513,7 +684,9 @@ export default function MaterialExpenseBooking() {
                             <TableHead>Date</TableHead>
                             <TableHead>Due Date</TableHead>
                             <TableHead>Supplier</TableHead>
-                            <TableHead className="hidden md:table-cell">Invoice Ref</TableHead>
+                            <TableHead className="hidden md:table-cell">
+                              Invoice Ref
+                            </TableHead>
                             <TableHead>Basic Amt</TableHead>
                             <TableHead>EMI</TableHead>
                             <TableHead>Net Amt</TableHead>
@@ -522,27 +695,50 @@ export default function MaterialExpenseBooking() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {records.map((rec) => {
-                            const rbd = computeBreakdown(rec.basicAmount, rec.cgstRate, rec.sgstRate, rec.discount);
+                          {filteredRecords.map((rec) => {
+                            const rbd = computeBreakdown(
+                              rec.basicAmount,
+                              rec.cgstRate,
+                              rec.sgstRate,
+                              rec.discount,
+                            );
                             return (
                               <TableRow key={rec.id}>
-                                <TableCell className="font-mono text-xs">{rec.bookingReference}</TableCell>
-                                <TableCell className="text-xs">{rec.bookingDate}</TableCell>
-                                <TableCell className="text-xs">{rec.dueDate || "-"}</TableCell>
-                                <TableCell className="text-xs max-w-[110px] truncate">{rec.supplier}</TableCell>
-                                <TableCell className="font-mono text-xs hidden md:table-cell">{rec.invoiceReference || "-"}</TableCell>
-                                <TableCell className="font-mono text-xs">Rs.{fmt(rec.basicAmount)}</TableCell>
+                                <TableCell className="font-mono text-xs">
+                                  {rec.bookingReference}
+                                </TableCell>
+                                <TableCell className="text-xs">
+                                  {rec.bookingDate}
+                                </TableCell>
+                                <TableCell className="text-xs">
+                                  {rec.dueDate || "-"}
+                                </TableCell>
+                                <TableCell className="text-xs max-w-[110px] truncate">
+                                  {rec.supplier}
+                                </TableCell>
+                                <TableCell className="font-mono text-xs hidden md:table-cell">
+                                  {rec.invoiceReference || "-"}
+                                </TableCell>
+                                <TableCell className="font-mono text-xs">
+                                  Rs.{fmt(rec.basicAmount)}
+                                </TableCell>
                                 <TableCell className="text-xs">
                                   {rec.emi.enabled ? (
-                                    <span className="text-primary font-medium">{rec.emi.installmentCount}x</span>
+                                    <span className="text-primary font-medium">
+                                      {rec.emi.installmentCount}x
+                                    </span>
                                   ) : (
-                                    <span className="text-muted-foreground">—</span>
+                                    <span className="text-muted-foreground">
+                                      —
+                                    </span>
                                   )}
                                 </TableCell>
                                 <TableCell className="font-mono text-xs font-semibold">
                                   Rs.{fmt(rbd.netAmount)}
                                 </TableCell>
-                                <TableCell><StatusBadge status={rec.status} /></TableCell>
+                                <TableCell>
+                                  <StatusBadge status={rec.status} />
+                                </TableCell>
                                 <TableCell>
                                   <div className="flex flex-wrap gap-1.5 items-center">
                                     <ApprovalActions
@@ -572,13 +768,15 @@ export default function MaterialExpenseBooking() {
                               </TableRow>
                             );
                           })}
-                          {records.length === 0 && (
+                          {filteredRecords.length === 0 && (
                             <TableRow>
                               <TableCell
                                 colSpan={10}
                                 className="text-center py-10 text-muted-foreground text-sm"
                               >
-                                No bookings yet. Click "New Booking" to get started.
+                                {statusFilter
+                                  ? `No bookings with status "${statusFilter}". Try a different filter.`
+                                  : `No bookings yet. Click "New Booking" to get started.`}
                               </TableCell>
                             </TableRow>
                           )}
@@ -599,11 +797,14 @@ export default function MaterialExpenseBooking() {
           <DialogHeader>
             <DialogTitle>Delete Booking</DialogTitle>
             <DialogDescription>
-              Are you sure you want to delete this expense booking? This cannot be undone.
+              Are you sure you want to delete this expense booking? This cannot
+              be undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="flex-col-reverse sm:flex-row gap-2">
-            <Button variant="outline" onClick={() => setDeleteId(null)}>Cancel</Button>
+            <Button variant="outline" onClick={() => setDeleteId(null)}>
+              Cancel
+            </Button>
             <Button
               variant="destructive"
               onClick={() => deleteId && handleDelete(deleteId)}

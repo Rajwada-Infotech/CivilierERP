@@ -20,13 +20,31 @@ interface DocType {
 interface Props {
   /** Optional filter — leave undefined to show ALL doc types */
   entryTypeFilter?: string;
+  /** Financial year string e.g. "2024-25" — appended to the booking reference */
+  finYear?: string;
   selectedDocTypeId: number | null;
   onSelect: (docTypeId: number | null, preview: string) => void;
   preview: string;
 }
 
-async function fetchNextDocNumber(docTypeId: number): Promise<string> {
-  const res = await fetchWithAuth(`/api/document-type/${docTypeId}/next-number`);
+// Only show doc types that are invoice / receipt / payment related
+const PAYMENT_KEYWORDS = ["invoice", "receipt", "received", "payment"];
+
+function isPaymentRelated(dt: DocType): boolean {
+  const haystack = [dt.EntryType, dt.Description, dt.Prefix]
+    .join(" ")
+    .toLowerCase();
+  return PAYMENT_KEYWORDS.some((kw) => haystack.includes(kw));
+}
+
+async function fetchNextDocNumber(
+  docTypeId: number,
+  finYear?: string,
+): Promise<string> {
+  const qs = finYear ? `?finYear=${encodeURIComponent(finYear)}` : "";
+  const res = await fetchWithAuth(
+    `/api/document-type/${docTypeId}/next-number${qs}`,
+  );
   if (!res.ok) return "";
   const data = await res.json();
   return data.nextDocNo ?? "";
@@ -40,6 +58,7 @@ async function fetchDocTypes(): Promise<DocType[]> {
 
 export function DocNumberPreview({
   entryTypeFilter,
+  finYear,
   selectedDocTypeId,
   onSelect,
   preview,
@@ -53,26 +72,36 @@ export function DocNumberPreview({
     setDocTypesLoading(true);
     fetchDocTypes()
       .then((all) => {
-        // Filter by entryTypeFilter if provided, but fall back to ALL types
-        // if the filter matches nothing (avoids the "No document types" dead-end)
+        // Filter to payment/invoice/receipt related types only — no fallback to all
+        const paymentRelated = all.filter(isPaymentRelated);
+
+        // Apply optional extra entryTypeFilter on top if provided
         const filtered = entryTypeFilter
-          ? all.filter(
+          ? paymentRelated.filter(
               (d) =>
-                d.EntryType?.toLowerCase().includes(entryTypeFilter.toLowerCase()) ||
-                d.Description?.toLowerCase().includes(entryTypeFilter.toLowerCase()) ||
+                d.EntryType?.toLowerCase().includes(
+                  entryTypeFilter.toLowerCase(),
+                ) ||
+                d.Description?.toLowerCase().includes(
+                  entryTypeFilter.toLowerCase(),
+                ) ||
                 d.Prefix?.toLowerCase().includes(entryTypeFilter.toLowerCase()),
             )
-          : all;
-        setDocTypes(filtered.length > 0 ? filtered : all);
+          : paymentRelated;
+
+        setDocTypes(filtered);
       })
       .finally(() => setDocTypesLoading(false));
   }, [entryTypeFilter]);
 
   const handleSelect = async (value: string) => {
-    if (!value) { onSelect(null, ""); return; }
+    if (!value) {
+      onSelect(null, "");
+      return;
+    }
     const id = parseInt(value, 10);
     setGenerating(true);
-    const next = await fetchNextDocNumber(id);
+    const next = await fetchNextDocNumber(id, finYear);
     onSelect(id, next);
     setGenerating(false);
   };
@@ -80,12 +109,14 @@ export function DocNumberPreview({
   const handleRefresh = async () => {
     if (!selectedDocTypeId) return;
     setRefreshing(true);
-    const next = await fetchNextDocNumber(selectedDocTypeId);
+    const next = await fetchNextDocNumber(selectedDocTypeId, finYear);
     onSelect(selectedDocTypeId, next);
     setRefreshing(false);
   };
 
-  const selectedType = docTypes.find((d) => d.TypeOfDocId === selectedDocTypeId);
+  const selectedType = docTypes.find(
+    (d) => d.TypeOfDocId === selectedDocTypeId,
+  );
 
   return (
     <div className="space-y-3">
@@ -153,10 +184,17 @@ export function DocNumberPreview({
           <div className="min-w-0 flex-1">
             <p className="text-[10px] text-muted-foreground">
               prefix:{" "}
-              <span className="font-mono">{selectedType.FullPrefix ?? selectedType.Prefix}</span>
+              <span className="font-mono">
+                {selectedType.FullPrefix ?? selectedType.Prefix}
+              </span>
+              {finYear && (
+                <span className="ml-2 text-primary/60">· FY {finYear}</span>
+              )}
             </p>
             {generating ? (
-              <p className="text-xs text-muted-foreground animate-pulse">Generating…</p>
+              <p className="text-xs text-muted-foreground animate-pulse">
+                Generating…
+              </p>
             ) : (
               <p className="text-sm font-mono font-semibold text-primary tracking-wide">
                 {preview || "—"}
