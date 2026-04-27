@@ -15,23 +15,23 @@ router.get("/", cache("debit-note", 300), async (req, res) => {
   try {
     const pool = getPool()
 
-    // Sanitized pagination params
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
     const offset = (page - 1) * limit;
 
-    // Total count
     const countResult = await pool.request().query("SELECT COUNT(*) AS total FROM dbo.DebitNote");
     const total = parseInt(countResult.recordset[0].total);
 
-    // Paginated data
     const result = await pool.request()
       .input('offset', sql.Int, offset)
       .input('limit', sql.Int, limit)
-      .query(`SELECT id, company_id, project_id, supplier_id, bill_id, is_active,
-                    created_at, updated_at
-             FROM dbo.DebitNote
-             ORDER BY id DESC
+      .query(`SELECT dn.id, dn.company_id, dn.project_id, dn.supplier_id, dn.bill_id, dn.is_active,
+                    dn.doc_type_id, dn.doc_no,
+                    dn.created_at, dn.updated_at,
+                    td.Prefix AS doc_type_prefix, td.Description AS doc_type_description
+             FROM dbo.DebitNote dn
+             LEFT JOIN dbo.TypeOfDoc td ON td.TypeOfDocId = dn.doc_type_id
+             ORDER BY dn.id DESC
              OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY`);
 
     res.json({
@@ -49,9 +49,8 @@ router.get("/", cache("debit-note", 300), async (req, res) => {
 
 // ADD debit note
 router.post("/", async (req, res) => {
-  const { company_id, project_id, supplier_id, bill_id, is_active } = req.body
+  const { company_id, project_id, supplier_id, bill_id, is_active, doc_type_id, doc_no } = req.body
 
-  // ── Validate required NOT NULL FK columns before touching the DB ─────────────
   const company_id_val  = toInt(company_id)
   const project_id_val  = toInt(project_id)
   const supplier_id_val = toInt(supplier_id)
@@ -72,18 +71,20 @@ router.post("/", async (req, res) => {
   try {
     const pool = getPool()
     await pool.request()
-      .input("company_id",  sql.Int,       company_id_val)
-      .input("project_id",  sql.Int,       project_id_val)
-      .input("supplier_id", sql.Int,       supplier_id_val)
-      .input("bill_id",     sql.Int,       bill_id_val)
-      .input("is_active",   sql.Bit,       is_active !== false ? 1 : 0)
-      .input("created_by",  sql.Int,       1)
-      .input("created_at",  sql.DateTime2, new Date())
+      .input("company_id",   sql.Int,          company_id_val)
+      .input("project_id",   sql.Int,          project_id_val)
+      .input("supplier_id",  sql.Int,          supplier_id_val)
+      .input("bill_id",      sql.Int,          bill_id_val)
+      .input("is_active",    sql.Bit,          is_active !== false ? 1 : 0)
+      .input("doc_type_id",  sql.Int,          doc_type_id ? toInt(doc_type_id) : null)
+      .input("doc_no",       sql.NVarChar(100), doc_no || null)
+      .input("created_by",   sql.Int,          1)
+      .input("created_at",   sql.DateTime2,    new Date())
       .query(`
         INSERT INTO dbo.DebitNote
-          (company_id, project_id, supplier_id, bill_id, is_active, created_by, created_at)
+          (company_id, project_id, supplier_id, bill_id, is_active, doc_type_id, doc_no, created_by, created_at)
         VALUES
-          (@company_id, @project_id, @supplier_id, @bill_id, @is_active, @created_by, @created_at)
+          (@company_id, @project_id, @supplier_id, @bill_id, @is_active, @doc_type_id, @doc_no, @created_by, @created_at)
       `)
     await bumpCacheVersion("debit-note")
     res.json({ message: "Debit note added successfully" })
@@ -95,9 +96,8 @@ router.post("/", async (req, res) => {
 
 // UPDATE debit note
 router.put("/:id", async (req, res) => {
-  const { company_id, project_id, supplier_id, bill_id, is_active } = req.body
+  const { company_id, project_id, supplier_id, bill_id, is_active, doc_type_id, doc_no } = req.body
 
-  // ── Validate required NOT NULL FK columns before touching the DB ─────────────
   const company_id_val  = toInt(company_id)
   const project_id_val  = toInt(project_id)
   const supplier_id_val = toInt(supplier_id)
@@ -123,14 +123,16 @@ router.put("/:id", async (req, res) => {
   try {
     const pool = getPool()
     await pool.request()
-      .input("id",          sql.Int,       id)
-      .input("company_id",  sql.Int,       company_id_val)
-      .input("project_id",  sql.Int,       project_id_val)
-      .input("supplier_id", sql.Int,       supplier_id_val)
-      .input("bill_id",     sql.Int,       bill_id_val)
-      .input("is_active",   sql.Bit,       is_active !== false ? 1 : 0)
-      .input("updated_by",  sql.Int,       1)
-      .input("updated_at",  sql.DateTime2, new Date())
+      .input("id",           sql.Int,          id)
+      .input("company_id",   sql.Int,          company_id_val)
+      .input("project_id",   sql.Int,          project_id_val)
+      .input("supplier_id",  sql.Int,          supplier_id_val)
+      .input("bill_id",      sql.Int,          bill_id_val)
+      .input("is_active",    sql.Bit,          is_active !== false ? 1 : 0)
+      .input("doc_type_id",  sql.Int,          doc_type_id ? toInt(doc_type_id) : null)
+      .input("doc_no",       sql.NVarChar(100), doc_no || null)
+      .input("updated_by",   sql.Int,          1)
+      .input("updated_at",   sql.DateTime2,    new Date())
       .query(`
         UPDATE dbo.DebitNote SET
           company_id  = @company_id,
@@ -138,6 +140,8 @@ router.put("/:id", async (req, res) => {
           supplier_id = @supplier_id,
           bill_id     = @bill_id,
           is_active   = @is_active,
+          doc_type_id = @doc_type_id,
+          doc_no      = @doc_no,
           updated_by  = @updated_by,
           updated_at  = @updated_at
         WHERE id = @id

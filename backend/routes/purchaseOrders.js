@@ -56,11 +56,16 @@ router.get("/", cache("purchase-orders", 300), async (req, res) => {
           po.CreatedAt,
           po.UpdatedAt,
           po.ApprovedBy,
-          po.ApprovedAt
+          po.ApprovedAt,
+          po.DocTypeId,
+          po.DocNo,
+          td.Prefix      AS DocTypePrefix,
+          td.Description AS DocTypeDescription
         FROM dbo.PurchaseOrders po
         LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = po.SupplierID
         LEFT JOIN dbo.enterprise        co ON co.id      = po.CompanyId
         LEFT JOIN dbo.enterprise        pr ON pr.id      = po.ProjectId
+        LEFT JOIN dbo.TypeOfDoc         td ON td.TypeOfDocId = po.DocTypeId
         ORDER BY po.PurchaseOrderID DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `);
@@ -84,14 +89,12 @@ router.post("/", async (req, res) => {
     PurchaseOrderNo, PODate, ExpectedDeliveryDate,
     SupplierID, CompanyId, ProjectId,
     ItemDescription, Quantity, Unit, Rate, TotalAmount,
-    PaymentTerms, Status, Remarks,
+    PaymentTerms, Status, Remarks, DocTypeId, DocNo,
   } = req.body;
 
   try {
     const userEmail = requireUserName(req, res);
     if (!userEmail) return;
-
-    // guardEdit is only for updates — removed from POST (no ID exists yet)
 
     const pool = getPool();
     const result = await pool
@@ -110,6 +113,8 @@ router.post("/", async (req, res) => {
       .input("PaymentTerms",         sql.NVarChar(255),  PaymentTerms || null)
       .input("Status",               sql.NVarChar(50),   Status || "Draft")
       .input("Remarks",              sql.NVarChar(500),  Remarks || null)
+      .input("DocTypeId",            sql.Int,            DocTypeId ? parseInt(DocTypeId, 10) : null)
+      .input("DocNo",                sql.NVarChar(100),  DocNo || null)
       .input("CreatedBy",            sql.NVarChar(100),  userEmail)
       .input("CreatedAt",            sql.DateTime2,      new Date())
       .query(`
@@ -117,14 +122,14 @@ router.post("/", async (req, res) => {
           PurchaseOrderNo, PODate, ExpectedDeliveryDate,
           SupplierID, CompanyId, ProjectId,
           ItemDescription, Quantity, Unit, Rate, TotalAmount,
-          PaymentTerms, Status, Remarks, CreatedBy, CreatedAt
+          PaymentTerms, Status, Remarks, DocTypeId, DocNo, CreatedBy, CreatedAt
         )
         OUTPUT INSERTED.PurchaseOrderID
         VALUES (
           @PurchaseOrderNo, @PODate, @ExpectedDeliveryDate,
           @SupplierID, @CompanyId, @ProjectId,
           @ItemDescription, @Quantity, @Unit, @Rate, @TotalAmount,
-          @PaymentTerms, @Status, @Remarks, @CreatedBy, @CreatedAt
+          @PaymentTerms, @Status, @Remarks, @DocTypeId, @DocNo, @CreatedBy, @CreatedAt
         )
       `);
 
@@ -146,7 +151,7 @@ router.put("/:id", async (req, res) => {
     PurchaseOrderNo, PODate, ExpectedDeliveryDate,
     SupplierID, CompanyId, ProjectId,
     ItemDescription, Quantity, Unit, Rate, TotalAmount,
-    PaymentTerms, Status, Remarks,
+    PaymentTerms, Status, Remarks, DocTypeId, DocNo,
   } = req.body;
 
   try {
@@ -173,6 +178,8 @@ router.put("/:id", async (req, res) => {
       .input("PaymentTerms",         sql.NVarChar(255),  PaymentTerms || null)
       .input("Status",               sql.NVarChar(50),   Status || "Draft")
       .input("Remarks",              sql.NVarChar(500),  Remarks || null)
+      .input("DocTypeId",            sql.Int,            DocTypeId ? parseInt(DocTypeId, 10) : null)
+      .input("DocNo",                sql.NVarChar(100),  DocNo || null)
       .input("UpdatedBy",            sql.NVarChar(100),  userEmail)
       .input("UpdatedAt",            sql.DateTime2,      new Date())
       .query(`
@@ -191,6 +198,8 @@ router.put("/:id", async (req, res) => {
           PaymentTerms         = @PaymentTerms,
           Status               = @Status,
           Remarks              = @Remarks,
+          DocTypeId            = @DocTypeId,
+          DocNo                = @DocNo,
           UpdatedBy            = @UpdatedBy,
           UpdatedAt            = @UpdatedAt
         WHERE PurchaseOrderID = @PurchaseOrderID

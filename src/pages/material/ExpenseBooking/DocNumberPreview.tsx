@@ -27,14 +27,10 @@ interface Props {
   preview: string;
 }
 
-// Only show doc types that are invoice / receipt / payment related
-const PAYMENT_KEYWORDS = ["invoice", "receipt", "received", "payment"];
-
-function isPaymentRelated(dt: DocType): boolean {
-  const haystack = [dt.EntryType, dt.Description, dt.Prefix]
-    .join(" ")
-    .toLowerCase();
-  return PAYMENT_KEYWORDS.some((kw) => haystack.includes(kw));
+// Only show doc types whose EntryType is "Received" (exact match, case-insensitive).
+// This matches the "Received" category shown in the Transaction sidebar (GRN, Invoice, Payment).
+function isReceivedDocType(dt: DocType): boolean {
+  return dt.EntryType?.trim().toLowerCase() === "received";
 }
 
 async function fetchNextDocNumber(
@@ -72,8 +68,8 @@ export function DocNumberPreview({
     setDocTypesLoading(true);
     fetchDocTypes()
       .then((all) => {
-        // Filter to payment/invoice/receipt related types only — no fallback to all
-        const paymentRelated = all.filter(isPaymentRelated);
+        // Filter to "Received" entry type documents only (invoice, payment received, etc.)
+        const paymentRelated = all.filter(isReceivedDocType);
 
         // Apply optional extra entryTypeFilter on top if provided
         const filtered = entryTypeFilter

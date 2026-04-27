@@ -17,6 +17,7 @@ import {
 import * as grnApi from "@/api/grnApi";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
+import { DocNumberPreview } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import type {
   GRNFormDataPayload,
   GRNItemLine,
@@ -73,6 +74,8 @@ export default function GRN() {
     remarks: "",
     status: "Draft" as const,
     items: [createEmptyItem()],
+    docTypeId: null as number | null,
+    docNo: "",
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
@@ -185,6 +188,8 @@ export default function GRN() {
       remarks: "",
       status: "Draft",
       items: [createEmptyItem()],
+      docTypeId: null,
+      docNo: "",
     });
     setEditingId(null);
     setErrors({});
@@ -218,6 +223,8 @@ export default function GRN() {
       remarks: formData.remarks,
       supplierName: formData.supplierName,
       poNumber: formData.poNumber,
+      docTypeId: formData.docTypeId,
+      docNo: formData.docNo,
     };
 
     if (editingId) {
@@ -342,6 +349,8 @@ export default function GRN() {
       remarks: grn.Remarks || "",
       status: (grn.Status as any) || "Draft",
       items: parsedItems.length ? parsedItems : [createEmptyItem()],
+      docTypeId: grn.DocTypeId ?? null,
+      docNo: grn.DocNo || "",
     });
 
     setEditingId(String(grn.GRNID));
@@ -375,6 +384,20 @@ export default function GRN() {
           </div>
 
           <div className="p-6 space-y-6">
+            {/* Document Type & Number */}
+            <div>
+              <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                Document Type &amp; Number
+              </label>
+              <DocNumberPreview
+                selectedDocTypeId={formData.docTypeId}
+                preview={formData.docNo}
+                onSelect={(id, preview) =>
+                  setFormData((prev) => ({ ...prev, docTypeId: id, docNo: preview }))
+                }
+              />
+            </div>
+
             {/* Header Fields */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
               <div>
@@ -610,6 +633,7 @@ export default function GRN() {
               <thead>
                 <tr className="bg-muted/50 border-b">
                   <th className="px-6 py-4 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">GRN No</th>
+                  <th className="px-6 py-4 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">Doc No</th>
                   <th className="px-6 py-4 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">PO No</th>
                   <th className="px-6 py-4 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">Supplier</th>
                   <th className="px-6 py-4 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">Date</th>
@@ -620,7 +644,7 @@ export default function GRN() {
               <tbody className="divide-y divide-border">
                 {filteredGrns.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-6 py-12 text-center text-muted-foreground">
+                    <td colSpan={7} className="px-6 py-12 text-center text-muted-foreground">
                       No GRNs found
                     </td>
                   </tr>
@@ -628,6 +652,7 @@ export default function GRN() {
                   filteredGrns.map((grn: any) => (
                     <tr key={grn.GRNID} className="hover:bg-muted/30 transition-colors">
                       <td className="px-6 py-4 font-medium">{grn.GRNNo}</td>
+                      <td className="px-6 py-4 font-mono text-xs">{grn.DocNo || "—"}</td>
                       <td className="px-6 py-4">{grn.PONumber || "—"}</td>
                       <td className="px-6 py-4">{grn.SupplierName || "—"}</td>
                       <td className="px-6 py-4">
