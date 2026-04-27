@@ -2,7 +2,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const BASE = "/api/cheque-master";
 const BANKS_URL = "/api/account-head/bank-options";
-const COMPANY_URL = "/api/enterprises/options?type=Company";
+const COMPANY_URL = "/api/company-master";
 
 // ─── Response handler ─────────────────────────────────────────────────────────
 async function handleResponse<T = unknown>(res: Response): Promise<T> {
@@ -34,6 +34,7 @@ export interface DbCheque {
   BankName: string | null;
   BankBranch: string | null;
   BankAccountType: string | null;
+  CompanyName: string | null;
 }
 
 export interface BankOption {
@@ -68,7 +69,9 @@ export const getBanksForCheque = (): Promise<BankOption[]> =>
   fetchWithAuth(BANKS_URL).then((r) => handleResponse<BankOption[]>(r));
 
 export const getCompanyOptions = (): Promise<CompanyOption[]> =>
-  fetchWithAuth(COMPANY_URL).then((r) => handleResponse<CompanyOption[]>(r));
+  fetchWithAuth(COMPANY_URL)
+    .then((r) => handleResponse<any[]>(r))
+    .then((rows) => rows.map((r) => ({ id: r.Id ?? r.id, label: r.Name ?? r.name ?? r.label })));
 
 export const addCheque = (data: ChequePayload): Promise<{ message: string }> =>
   fetchWithAuth(BASE, {

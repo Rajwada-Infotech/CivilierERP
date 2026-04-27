@@ -39,8 +39,8 @@ const findColumn = (meta, names, fallback = null) => {
   return fallback;
 };
 
-const requireUserEmail = (req, res) => {
-  const email = req.user?.email;
+const requireUserName = (req, res) => {
+  const email = req.user?.name;
   if (!email) {
     res.status(401).json({ error: "User context missing" });
     return null;
@@ -155,7 +155,7 @@ router.post("/", async (req, res) => {
 
   try {
     const pool = await getPool();
-    const userEmail = requireUserEmail(req, res);
+    const userEmail = requireUserName(req, res);
     if (!userEmail) return;
 
     const columnMeta = await getAccountHeadColumnMeta();
@@ -271,7 +271,7 @@ router.put("/:id", async (req, res) => {
 
   try {
     const pool = await getPool();
-    const userEmail = requireUserEmail(req, res);
+    const userEmail = requireUserName(req, res);
     if (!userEmail) return;
 
     const columnMeta = await getAccountHeadColumnMeta();

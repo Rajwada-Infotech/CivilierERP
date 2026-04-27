@@ -5,8 +5,8 @@ const { transition, guardEdit } = require("../services/approvalService");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 
-const requireUserEmail = (req, res) => {
-  const email = req.user?.email;
+const requireUserName = (req, res) => {
+  const email = req.user?.name;
   if (!email) { res.status(401).json({ error: "User context missing" }); return null; }
   return email;
 };
@@ -256,7 +256,7 @@ router.post("/", async (req, res) => {
       .input("TotalAmount",        sql.Decimal(18,2),     TotalAmount        || 0)
       .input("Remarks",            sql.NVarChar(500),     Remarks            || null)
       .input("TermsAndConditions", sql.NVarChar(sql.MAX), TermsAndConditions || null)
-      .input("CreatedBy",          sql.NVarChar(100),     req.user?.email    || null)
+      .input("CreatedBy",          sql.NVarChar(100),     req.user?.name    || null)
       .input("CreatedAt",          sql.DateTime,          new Date())
       .query(`
         INSERT INTO dbo.WorkOrderHeader
@@ -293,7 +293,7 @@ router.put("/:id", async (req, res) => {
       .input("TotalAmount",        sql.Decimal(18,2),     TotalAmount        || 0)
       .input("Remarks",            sql.NVarChar(500),     Remarks            || null)
       .input("TermsAndConditions", sql.NVarChar(sql.MAX), TermsAndConditions || null)
-      .input("UpdatedBy",          sql.NVarChar(100),     req.user?.email    || null)
+      .input("UpdatedBy",          sql.NVarChar(100),     req.user?.name    || null)
       .input("UpdatedAt",          sql.DateTime,          new Date())
       .query(`
         UPDATE dbo.WorkOrderHeader SET
@@ -513,7 +513,7 @@ router.post("/:id/activities/:activityId/materials", async (req, res) => {
       .input("Rate",                sql.Decimal(18,2),    Rate     || null)
       .input("Remarks",             sql.NVarChar(400),    Remarks  || null)
       .input("DocNo",               sql.NVarChar(100),    docNo)
-      .input("CreatedBy",           sql.NVarChar(100),    req.user?.email || null)
+      .input("CreatedBy",           sql.NVarChar(100),    req.user?.name || null)
       .input("CreatedAt",           sql.DateTime2,        new Date())
       .query(`
         INSERT INTO dbo.WorkOrderActivityMaterials
@@ -541,7 +541,7 @@ router.put("/:id/activities/:activityId/materials/:materialId", async (req, res)
       .input("Quantity",  sql.Decimal(18,2),    Quantity || null)
       .input("Rate",      sql.Decimal(18,2),    Rate     || null)
       .input("Remarks",   sql.NVarChar(400),    Remarks  || null)
-      .input("UpdatedBy", sql.NVarChar(100),    req.user?.email || null)
+      .input("UpdatedBy", sql.NVarChar(100),    req.user?.name || null)
       .input("UpdatedAt", sql.DateTime2,        new Date())
       .query(`
         UPDATE dbo.WorkOrderActivityMaterials SET
@@ -600,7 +600,7 @@ router.post("/:id/save-full", async (req, res) => {
       .input("TotalAmount",        sql.Decimal(18,2),     header.TotalAmount        || 0)
       .input("Remarks",            sql.NVarChar(500),     header.Remarks            || null)
       .input("TermsAndConditions", sql.NVarChar(sql.MAX), header.TermsAndConditions || null)
-      .input("UpdatedBy",          sql.NVarChar(100),     req.user?.email           || null)
+      .input("UpdatedBy",          sql.NVarChar(100),     req.user?.name           || null)
       .input("UpdatedAt",          sql.DateTime,          new Date())
       .query(`
         UPDATE dbo.WorkOrderHeader SET
@@ -691,7 +691,7 @@ router.post("/:id/save-full", async (req, res) => {
             .input("Remarks",             sql.NVarChar(400),    mat.Remarks  || null)
             // ↓ DocNo FK — required by FK_WorkOrderActivityMaterials_DocNo
             .input("DocNo",               sql.NVarChar(100),    docNo)
-            .input("CreatedBy",           sql.NVarChar(100),    req.user?.email || null)
+            .input("CreatedBy",           sql.NVarChar(100),    req.user?.name || null)
             .input("CreatedAt",           sql.DateTime2,        new Date())
             .query(`
               INSERT INTO dbo.WorkOrderActivityMaterials
@@ -709,7 +709,7 @@ router.post("/:id/save-full", async (req, res) => {
             .input("Quantity",  sql.Decimal(18,2),    mat.Quantity || null)
             .input("Rate",      sql.Decimal(18,2),    mat.Rate     || null)
             .input("Remarks",   sql.NVarChar(400),    mat.Remarks  || null)
-            .input("UpdatedBy", sql.NVarChar(100),    req.user?.email || null)
+            .input("UpdatedBy", sql.NVarChar(100),    req.user?.name || null)
             .input("UpdatedAt", sql.DateTime2,        new Date())
             .query(`
               UPDATE dbo.WorkOrderActivityMaterials SET
@@ -775,7 +775,7 @@ router.post("/:id/save-full", async (req, res) => {
 router.put("/:id/submit", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
-    const userEmail = requireUserEmail(req, res);
+    const userEmail = requireUserName(req, res);
     if (!userEmail) return;
     const result = await transition("work-orders", id, "Pending", userEmail, req.user?.role);
     await bumpCacheVersion("work-orders");
@@ -786,7 +786,7 @@ router.put("/:id/submit", async (req, res) => {
 router.put("/:id/approve", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
-    const userEmail = requireUserEmail(req, res);
+    const userEmail = requireUserName(req, res);
     if (!userEmail) return;
     const result = await transition("work-orders", id, "Approved", userEmail, req.user?.role);
     await bumpCacheVersion("work-orders");
@@ -800,7 +800,7 @@ router.put("/:id/reject", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const { note } = req.body;
   try {
-    const userEmail = requireUserEmail(req, res);
+    const userEmail = requireUserName(req, res);
     if (!userEmail) return;
     const result = await transition("work-orders", id, "Rejected", userEmail, req.user?.role, note || null);
     await bumpCacheVersion("work-orders");

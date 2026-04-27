@@ -152,26 +152,28 @@ export default function ProjectMaster() {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const formData = new FormData();
+      // Build plain JSON payload — backend uses req.body (JSON), not FormData
+      const payload: Record<string, any> = {};
       Object.entries(form).forEach(([key, value]) => {
-        if (
-          key !== "projectImage" &&
-          value !== null &&
-          value !== undefined &&
-          value !== ""
-        ) {
-          formData.append(key, String(value));
+        if (key !== "projectImage" && value !== null && value !== undefined && value !== "") {
+          payload[key] = value;
         }
       });
-
+      // Convert File to base64 for NVARCHAR(MAX) storage
       if (form.projectImage instanceof File) {
-        formData.append("projectImage", form.projectImage);
+        const base64 = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.readAsDataURL(form.projectImage as File);
+        });
+        payload.projectImage = base64;
+      } else if (typeof form.projectImage === "string") {
+        payload.projectImage = form.projectImage;
       }
-
       if (editId) {
-        return updateProject(editId, formData);
+        return updateProject(editId, payload);
       } else {
-        return createProject(formData);
+        return createProject(payload);
       }
     },
     onSuccess: () => {
