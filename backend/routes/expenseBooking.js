@@ -50,8 +50,17 @@ router.get("/", cache("expense-booking", 300), async (req, res) => {
       .request()
       .input("offset", sql.Int, offset)
       .input("limit", sql.Int, limit).query(`
-        SELECT * FROM dbo.ExpenseBooking
-        ORDER BY Eid DESC
+        SELECT
+          eb.*,
+          CASE
+            WHEN t.Prefix IS NOT NULL AND t.Description IS NOT NULL
+              THEN t.Prefix + ' — ' + t.Description
+            WHEN t.Prefix IS NOT NULL THEN t.Prefix
+            ELSE NULL
+          END AS DocTypeName
+        FROM dbo.ExpenseBooking eb
+        LEFT JOIN dbo.TypeOfDoc t ON eb.EDocTypeId = t.TypeOfDocId
+        ORDER BY eb.Eid DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `);
 
