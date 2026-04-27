@@ -199,6 +199,7 @@ const FollowupDashboard = lazy(
 const FollowupReminders = lazy(() => import("./pages/followup/Reminders"));
 const FollowupTasks = lazy(() => import("./pages/followup/FollowupTasks"));
 const FollowupLog = lazy(() => import("./pages/followup/FollowupLog"));
+const AmendmentMenu = lazy(() => import("./pages/material/AmendmentMenu"));
 const Amendments = lazy(() => import("./pages/material/Amendments"));
 const RemindersManager = lazy(() => import("./pages/dba/RemindersManager"));
 const PaymentLogs = lazy(() => import("./pages/dba/PaymentLogs"));
@@ -570,6 +571,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <Amendments />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/material/amendment-menu"
+        element={
+          <ProtectedRoute>
+            <AmendmentMenu />
           </ProtectedRoute>
         }
       />
