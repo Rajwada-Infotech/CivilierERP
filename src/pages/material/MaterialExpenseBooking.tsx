@@ -114,7 +114,16 @@ export default function MaterialExpenseBooking() {
     try {
       setPoLoading(true);
       const data = await apiFetch(`${API}?limit=200`);
-      const mapped: PurchaseOrder[] = (data.data ?? data ?? []).map(
+      // Safely extract the array regardless of response shape:
+      // { data: [...] }, { recordset: [...] }, or a bare array
+      const rows: any[] = Array.isArray(data)
+        ? data
+        : Array.isArray(data?.data)
+          ? data.data
+          : Array.isArray(data?.recordset)
+            ? data.recordset
+            : [];
+      const mapped: PurchaseOrder[] = rows.map(
         (row: any) => ({
           id: row.POId ?? row.Eid ?? null,
           poNumber:
