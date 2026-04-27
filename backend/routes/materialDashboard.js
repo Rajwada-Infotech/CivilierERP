@@ -1,20 +1,11 @@
 const express = require("express");
 const router = express.Router();
 const { getPool } = require("../db");
-// authMiddleware is applied globally in server.js for all /api/* routes —
-// do NOT add it here again or every request runs auth twice.
 
-/**
- * GET /api/material-dashboard
- * Single round-trip for all Material Dashboard stats.
- * Each query is wrapped individually so one failing table never kills
- * the whole response — the frontend always gets a valid JSON shape.
- */
 router.get("/", async (req, res) => {
   try {
     const pool = getPool();
 
-    // Safe query helper — returns null on error instead of throwing
     const safeQuery = async (sql) => {
       try {
         return await pool.request().query(sql);
@@ -56,27 +47,23 @@ router.get("/", async (req, res) => {
       // ── GRNs ────────────────────────────────────────────────────────
       safeQuery(`
         SELECT
-          COUNT(*)  AS TotalCount,
+          COUNT(*) AS TotalCount,
           COUNT(CASE WHEN YEAR(GRNDate)  = YEAR(GETDATE())
                       AND MONTH(GRNDate) = MONTH(GETDATE()) THEN 1 END) AS ThisMonthCount,
-          COUNT(CASE WHEN CAST(GRNDate AS DATE) = CAST(GETDATE() AS DATE) THEN 1 END) AS TodayCount,
-          ISNULL(SUM(TotalAmount), 0) AS TotalValue,
-          ISNULL(SUM(CASE WHEN YEAR(GRNDate) = YEAR(GETDATE())
-                           AND MONTH(GRNDate) = MONTH(GETDATE())
-                          THEN TotalAmount ELSE 0 END), 0) AS ThisMonthValue
+          COUNT(CASE WHEN CAST(GRNDate AS DATE) = CAST(GETDATE() AS DATE) THEN 1 END) AS TodayCount
         FROM dbo.GoodsReceiptNotes
       `),
 
       // ── Purchase Orders ──────────────────────────────────────────────
       safeQuery(`
         SELECT
-          COUNT(*)                                                             AS TotalCount,
-          COUNT(CASE WHEN ISNULL(Status,'') NOT IN ('Closed','Rejected') THEN 1 END) AS OpenCount,
-          COUNT(CASE WHEN ISNULL(Status,'') = 'Approved' THEN 1 END)         AS ApprovedCount,
-          COUNT(CASE WHEN ISNULL(Status,'') = 'Pending'  THEN 1 END)         AS PendingCount,
-          ISNULL(SUM(TotalAmount), 0)                                          AS TotalValue,
+          COUNT(*)                                                                     AS TotalCount,
+          COUNT(CASE WHEN ISNULL(Status,'') NOT IN ('Closed','Rejected') THEN 1 END)  AS OpenCount,
+          COUNT(CASE WHEN ISNULL(Status,'') = 'Approved' THEN 1 END)                  AS ApprovedCount,
+          COUNT(CASE WHEN ISNULL(Status,'') = 'Pending'  THEN 1 END)                  AS PendingCount,
+          ISNULL(SUM(TotalAmount), 0)                                                  AS TotalValue,
           ISNULL(SUM(CASE WHEN ISNULL(Status,'') NOT IN ('Closed','Rejected')
-                          THEN TotalAmount ELSE 0 END), 0)                    AS OpenValue
+                          THEN TotalAmount ELSE 0 END), 0)                             AS OpenValue
         FROM dbo.PurchaseOrders
       `),
 
@@ -118,14 +105,19 @@ router.get("/", async (req, res) => {
       `),
 
       // ── Recent GRNs (last 6) ─────────────────────────────────────────
+      // FIX: removed TotalAmount (column doesn't exist), use correct POID casing
       safeQuery(`
         SELECT TOP 6
-          grn.GRNID, grn.GRNNo, grn.GRNDate, grn.Status,
-          grn.TotalAmount,
-          s.LHeadName  AS SupplierName,
-          p.PurchaseOrderNo AS PONumber
+          grn.GRNID,
+          grn.GRNNo,
+          grn.GRNDate,
+          grn.Status,
+          grn.Remarks,
+          grn.CreatedDate,
+          ISNULL(s.LHeadName, 'N/A')       AS SupplierName,
+          ISNULL(p.PurchaseOrderNo, 'N/A') AS PONumber
         FROM dbo.GoodsReceiptNotes grn
-        LEFT JOIN dbo.AccountHeadMaster s ON s.LHeadId = grn.SupplierID
+        LEFT JOIN dbo.AccountHeadMaster s ON s.LHeadId        = grn.SupplierID
         LEFT JOIN dbo.PurchaseOrders    p ON p.PurchaseOrderID = grn.POID
         ORDER BY grn.GRNID DESC
       `),
@@ -151,8 +143,8 @@ router.get("/", async (req, res) => {
           ep.name AS ProjectName,
           con.LHeadName AS ContractorName
         FROM dbo.WorkOrderHeader h
-        LEFT JOIN dbo.enterprise        ec  ON ec.id     = h.CompanyId
-        LEFT JOIN dbo.enterprise        ep  ON ep.id     = h.ProjectId
+        LEFT JOIN dbo.enterprise        ec  ON ec.id       = h.CompanyId
+        LEFT JOIN dbo.enterprise        ep  ON ep.id       = h.ProjectId
         LEFT JOIN dbo.AccountHeadMaster con ON con.LHeadId = h.ContractorId
         ORDER BY h.Id DESC
       `),
@@ -186,7 +178,7 @@ router.get("/", async (req, res) => {
         GROUP BY Status
       `),
 
-      // ── Top 5 Items by GRN receipts ──────────────────────────────────
+      // ── Top 5 Items by stock ──────────────────────────────────────────
       safeQuery(`
         SELECT TOP 5
           sl.ItemID,
@@ -202,7 +194,6 @@ router.get("/", async (req, res) => {
       `),
     ]);
 
-    // ?? {} guards against null (failed query) or empty tables
     const it = itemStats?.recordset[0] ?? {};
     const gr = grnStats?.recordset[0] ?? {};
     const po = poStats?.recordset[0] ?? {};
@@ -220,8 +211,6 @@ router.get("/", async (req, res) => {
         total: gr.TotalCount ?? 0,
         thisMonth: gr.ThisMonthCount ?? 0,
         today: gr.TodayCount ?? 0,
-        totalValue: parseFloat(gr.TotalValue ?? 0),
-        thisMonthValue: parseFloat(gr.ThisMonthValue ?? 0),
       },
       purchaseOrders: {
         total: po.TotalCount ?? 0,
