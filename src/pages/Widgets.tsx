@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { useSearchParams, useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { getWidgetsDashboard, type WidgetsDashboardData } from "@/api/widgetsApi";
 import {
   Puzzle, BarChart2, TrendingUp, PieChart, Hash, Table2,
   Calendar, Bell, MessageSquare, Map, Paperclip, RefreshCw,
@@ -46,12 +47,14 @@ function Spinner() {
 }
 
 function useWidgetsData() {
-  const [data, setData] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  useEffect(() => {
-    fetchWithAuth("/api/widgets").then(r => r.json()).then(setData).catch(() => {}).finally(() => setLoading(false));
-  }, []);
-  return { data, loading };
+  const { data, isLoading } = useQuery<WidgetsDashboardData>({
+    queryKey: ["widgets-dashboard"],
+    queryFn: getWidgetsDashboard,
+    staleTime: 60_000,
+    refetchInterval: 5 * 60 * 1000,
+  });
+
+  return { data, loading: isLoading };
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════

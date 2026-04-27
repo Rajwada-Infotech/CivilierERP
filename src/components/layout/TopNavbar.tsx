@@ -199,19 +199,19 @@ const followupSetupItems = [
   {
     icon: Calendar,
     label: "Reminders",
-    path: "/followup/reminders",
+    path: "/followup/follow-ups/reminders",
     color: "text-indigo-500",
   },
   {
     icon: FileText,
     label: "Follow-up Log",
-    path: "/followup/log",
+    path: "/followup/follow-ups/log",
     color: "text-violet-500",
   },
   {
     icon: Activity,
     label: "Pending Tasks",
-    path: "/followup/tasks",
+    path: "/followup/follow-ups/tasks",
     color: "text-purple-500",
   },
 ];

@@ -32,6 +32,7 @@ export interface Task {
   id: string;
   title: string;
   description: string;
+  module?: string | null;
   priority: TaskPriority;
   status: TaskStatus;
   assignedTo: string;

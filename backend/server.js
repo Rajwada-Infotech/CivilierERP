@@ -181,6 +181,7 @@ async function startServer() {
       { path: "/api/enterprises", file: "./routes/enterprise" },
       { path: "/api/entry-type", file: "./routes/entryType" },
       { path: "/api/expense-booking", file: "./routes/expenseBooking" },
+      { path: "/api/amendments", file: "./routes/amendments" },
       { path: "/api/new-payment", file: "./routes/newPayment" },
       { path: "/api/received-payment", file: "./routes/receivedPayment" },
       { path: "/api/purchase-orders", file: "./routes/purchaseOrders" },
@@ -207,11 +208,15 @@ async function startServer() {
       { path: "/api/widgets", file: "./routes/widgets" },
       { path: "/api/tenant-reminders", file: "./routes/tenantReminders" },
       { path: "/api/reminders", file: "./routes/tenantReminders" },
+      { path: "/api/followup-log", file: "./routes/followupLog" },
       { path: "/api/company-master", file: "./routes/companyMaster" },
       { path: "/api/project-master", file: "./routes/projectMaster" },
       { path: "/api/signatures", file: "./routes/signatures" },
       { path: "/api/communicator", file: "./routes/communicator" },
+      { path: "/api/system/metrics", file: "./routes/systemMetrics" },
       { path: "/api/menu-master", file: "./routes/menuMaster" },
+      { path: "/api/menu-type", file: "./routes/menuType" },
+      { path: "/api/menu-types", file: "./routes/menuType" },
     ];
 
     const routeResults = await safeLoadRoutes(app, routes, {
@@ -237,30 +242,6 @@ async function startServer() {
 
     printRoutesSummary(routeResults, logger);
     logger.info(`[OK] Routes loaded: ${routeResults.loaded.length}`);
-
-    // System metrics endpoint
-    app.get("/api/system/metrics", authMiddleware, async (req, res) => {
-      try {
-        const metrics = await getSystemMetrics();
-        const predictedRPM = await getPredictedRPM();
-        metrics.predictedRPM = predictedRPM;
-        const topEngagedUsers = await getRedis().then((r) =>
-          r.zrevrange("engagement:score", 0, 9, "WITHSCORES"),
-        );
-        metrics.topEngagedUsers = topEngagedUsers;
-        if (req.user) {
-          metrics.avgLimit = getDynamicLimit(
-            (await redisZScore("engagement:score", req.user.userId)) || 0,
-            predictedRPM || metrics.rpm,
-            metrics.memoryUsage,
-          );
-        }
-        res.json(metrics);
-      } catch (err) {
-        logger.error({ event: "METRICS_ERROR", err });
-        res.status(500).json({ error: "Failed to fetch metrics" });
-      }
-    });
 
     // Global error handler
     app.use((err, req, res, next) => {

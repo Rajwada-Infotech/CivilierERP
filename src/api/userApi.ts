@@ -14,8 +14,13 @@ export interface User {
   name: string;
   email: string;
   role: string;
+  roleName?: string;
+  RoleId?: number;
   created_datetime: string;
   discontinue: boolean;
+  last_login?: string | null;
+  tenant_id?: string | null;
+  tenantId?: string | null;
 }
 
 export interface PagePermission {
