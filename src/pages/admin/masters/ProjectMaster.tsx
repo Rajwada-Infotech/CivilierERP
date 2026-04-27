@@ -46,6 +46,35 @@ interface Project {
   projectImage?: string | File | null;
 }
 
+// ── Project avatar shown beside name in table + form header ──────────────────
+function ProjectAvatar({
+  imageUrl,
+  name,
+  size = "sm",
+}: {
+  imageUrl?: string | null;
+  name: string;
+  size?: "sm" | "md";
+}) {
+  const dim = size === "md" ? "w-10 h-10 text-base" : "w-8 h-8 text-xs";
+  if (imageUrl) {
+    return (
+      <img
+        src={imageUrl}
+        alt={name}
+        className={`${dim} rounded-lg object-contain border border-border bg-muted/30 shrink-0`}
+      />
+    );
+  }
+  return (
+    <div
+      className={`${dim} rounded-lg bg-primary/10 text-primary font-heading font-bold flex items-center justify-center shrink-0`}
+    >
+      {name.charAt(0).toUpperCase()}
+    </div>
+  );
+}
+
 const PROJECT_TYPES = [
   "Construction",
   "IT",
@@ -155,7 +184,12 @@ export default function ProjectMaster() {
       // Build plain JSON payload — backend uses req.body (JSON), not FormData
       const payload: Record<string, any> = {};
       Object.entries(form).forEach(([key, value]) => {
-        if (key !== "projectImage" && value !== null && value !== undefined && value !== "") {
+        if (
+          key !== "projectImage" &&
+          value !== null &&
+          value !== undefined &&
+          value !== ""
+        ) {
           payload[key] = value;
         }
       });
@@ -381,8 +415,16 @@ export default function ProjectMaster() {
                           <td className="px-4 py-3 font-mono text-xs font-medium text-primary">
                             {p.Code}
                           </td>
-                          <td className="px-4 py-3 font-medium text-foreground max-w-[180px] truncate">
-                            {p.Name}
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <ProjectAvatar
+                                imageUrl={p.ProjectImage}
+                                name={p.Name || "?"}
+                              />
+                              <span className="font-medium text-foreground max-w-[160px] truncate">
+                                {p.Name}
+                              </span>
+                            </div>
                           </td>
                           <td className="px-4 py-3 text-muted-foreground text-xs">
                             {p.ClientName}
@@ -432,9 +474,16 @@ export default function ProjectMaster() {
         {showForm && (
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="p-4 border-b border-border flex items-center justify-between bg-muted/30">
-              <h2 className="font-heading font-semibold text-foreground">
-                {editId ? `Edit — ${form.name || "Project"}` : "New Project"}
-              </h2>
+              <div className="flex items-center gap-3">
+                <ProjectAvatar
+                  imageUrl={imagePreview || null}
+                  name={form.name || "?"}
+                  size="md"
+                />
+                <h2 className="font-heading font-semibold text-foreground">
+                  {editId ? `Edit — ${form.name || "Project"}` : "New Project"}
+                </h2>
+              </div>
               <button
                 onClick={resetForm}
                 className="text-xs text-muted-foreground hover:text-foreground px-3 py-1 rounded border border-border hover:bg-muted"
