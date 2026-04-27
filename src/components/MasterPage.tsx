@@ -83,6 +83,8 @@ interface MasterPageProps {
     isEdit: boolean,
     allRecords: Record<string, unknown>[],
   ) => Record<string, unknown> | null;
+  externalFormPatch?: Record<string, unknown> | null;
+  externalFormPatchKey?: string | number | null;
 }
 
 function getDefaults(f: FieldDef[]): Record<string, unknown> {
@@ -114,6 +116,8 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   onFormChange,
   onFieldChange,
   onCustomSave,
+  externalFormPatch,
+  externalFormPatchKey,
 }) => {
   const [data, setData] = useState<RecordWithId[]>(() =>
     seedWithIds(initialData),
@@ -140,6 +144,15 @@ export const MasterPage: React.FC<MasterPageProps> = ({
       setData(seedWithIds(initialData));
     }
   }, [initialData]);
+
+  const prevPatchKeyRef = React.useRef<string | number | null>(null);
+  React.useEffect(() => {
+    if (externalFormPatchKey === null || externalFormPatchKey === undefined) return;
+    if (prevPatchKeyRef.current === externalFormPatchKey) return;
+    prevPatchKeyRef.current = externalFormPatchKey;
+    setForm((current) => ({ ...current, ...(externalFormPatch ?? {}) }));
+    setErrors({});
+  }, [externalFormPatch, externalFormPatchKey]);
 
   const applyPatch = (
     next: Record<string, unknown>,
@@ -231,7 +244,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
       });
       toast.success("Record saved successfully ✓");
     }
-    setForm(getDefaults(fields));
+    setForm({ ...getDefaults(fields), ...(externalFormPatch ?? {}) });
   };
 
   const handleEdit = (id: string) => {
@@ -253,13 +266,13 @@ export const MasterPage: React.FC<MasterPageProps> = ({
     setDeleteConfirmId(null);
     if (editingId === id) {
       setEditingId(null);
-      setForm(getDefaults(fields));
+      setForm({ ...getDefaults(fields), ...(externalFormPatch ?? {}) });
     }
     toast.success("Record deleted");
   };
 
   const handleReset = () => {
-    setForm(getDefaults(fields));
+    setForm({ ...getDefaults(fields), ...(externalFormPatch ?? {}) });
     setEditingId(null);
     setErrors({});
   };

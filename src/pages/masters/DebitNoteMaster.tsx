@@ -22,7 +22,11 @@ import {
 } from "@/api/debitNoteApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { toast } from "sonner";
-import { DocNumberPreview } from "@/pages/material/ExpenseBooking/DocNumberPreview";
+import { useFinYear } from "@/contexts/FinYearContext";
+import {
+  DocNumberPreview,
+  fetchNextDocNumber,
+} from "@/pages/material/ExpenseBooking/DocNumberPreview";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface DbDebitNote {
@@ -265,8 +269,32 @@ function makeBillRenderer(billOptions: any[]) {
 // ─── Main Component ───────────────────────────────────────────────────────────
 const DebitNoteMaster: React.FC = () => {
   const queryClient = useQueryClient();
+  const { finYears } = useFinYear();
   const [dnDocTypeId, setDnDocTypeId] = useState<number | null>(null);
   const [dnDocNo, setDnDocNo] = useState("");
+  const [dnFormPatch, setDnFormPatch] = useState<Record<string, unknown> | null>(null);
+  const [dnFormPatchKey, setDnFormPatchKey] = useState(0);
+  const activeFinYear =
+    finYears.find((fy) => fy.status === "Active")?.year || undefined;
+
+  const applyDnDocNumber = (docTypeId: number | null, docNo: string) => {
+    setDnDocTypeId(docTypeId);
+    setDnDocNo(docNo);
+    setDnFormPatch({
+      docNo,
+      docTypeId,
+    });
+    setDnFormPatchKey((current) => current + 1);
+  };
+
+  const refreshDnDocNumber = async (docTypeId: number | null = dnDocTypeId) => {
+    if (!docTypeId) {
+      applyDnDocNumber(null, "");
+      return;
+    }
+    const nextDocNo = await fetchNextDocNumber(docTypeId, activeFinYear);
+    applyDnDocNumber(docTypeId, nextDocNo);
+  };
 
   // Data Queries
   const {
@@ -374,6 +402,7 @@ const DebitNoteMaster: React.FC = () => {
       is_active: formData.status !== false,
       doc_type_id: (formData.docTypeId as number | null) ?? dnDocTypeId,
       doc_no: (formData.docNo as string) || dnDocNo || null,
+      finYear: activeFinYear || null,
     };
   };
 
@@ -389,6 +418,7 @@ const DebitNoteMaster: React.FC = () => {
       try {
         await addDebitNote(toPayload(event.record));
         toast.success("Debit note saved!");
+        await refreshDnDocNumber();
         await refetchExpenses(); // Refresh expense dropdown
         await queryClient.invalidateQueries({ queryKey: ["debit-notes"] });
       } catch (err: any) {
@@ -419,6 +449,13 @@ const DebitNoteMaster: React.FC = () => {
   const BillDiscountRenderer = makeBillRenderer(BILL_OPTIONS);
 
   const fields: FieldDef[] = [
+    {
+      name: "docNo",
+      label: "Debit Note Number",
+      type: "text",
+      required: true,
+      uppercase: true,
+    },
     {
       name: "company",
       label: "Company",
@@ -537,9 +574,10 @@ const DebitNoteMaster: React.FC = () => {
           Document Type &amp; Number
         </label>
         <DocNumberPreview
+          finYear={activeFinYear}
           selectedDocTypeId={dnDocTypeId}
           preview={dnDocNo}
-          onSelect={(id, preview) => { setDnDocTypeId(id); setDnDocNo(preview); }}
+          onSelect={applyDnDocNumber}
         />
       </div>
       <MasterPage
@@ -550,6 +588,8 @@ const DebitNoteMaster: React.FC = () => {
         initialData={mappedData}
         onCustomSave={handleCustomSave}
         onDataEvent={handleDataEvent}
+        externalFormPatch={dnFormPatch}
+        externalFormPatchKey={dnFormPatchKey}
       />
     </>
   );

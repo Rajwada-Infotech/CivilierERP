@@ -18,22 +18,14 @@ interface DocType {
 }
 
 interface Props {
-  /** Optional filter — leave undefined to show ALL doc types */
   entryTypeFilter?: string;
-  /** Financial year string e.g. "2024-25" — appended to the booking reference */
   finYear?: string;
   selectedDocTypeId: number | null;
   onSelect: (docTypeId: number | null, preview: string) => void;
   preview: string;
 }
 
-// Only show doc types whose EntryType is "Received" (exact match, case-insensitive).
-// This matches the "Received" category shown in the Transaction sidebar (GRN, Invoice, Payment).
-function isReceivedDocType(dt: DocType): boolean {
-  return dt.EntryType?.trim().toLowerCase() === "received";
-}
-
-async function fetchNextDocNumber(
+export async function fetchNextDocNumber(
   docTypeId: number,
   finYear?: string,
 ): Promise<string> {
@@ -57,7 +49,6 @@ export function DocNumberPreview({
   finYear,
   selectedDocTypeId,
   onSelect,
-  preview,
 }: Props) {
   const [docTypes, setDocTypes] = useState<DocType[]>([]);
   const [docTypesLoading, setDocTypesLoading] = useState(true);
@@ -68,12 +59,8 @@ export function DocNumberPreview({
     setDocTypesLoading(true);
     fetchDocTypes()
       .then((all) => {
-        // Filter to "Received" entry type documents only (invoice, payment received, etc.)
-        const paymentRelated = all.filter(isReceivedDocType);
-
-        // Apply optional extra entryTypeFilter on top if provided
         const filtered = entryTypeFilter
-          ? paymentRelated.filter(
+          ? all.filter(
               (d) =>
                 d.EntryType?.toLowerCase().includes(
                   entryTypeFilter.toLowerCase(),
@@ -83,7 +70,7 @@ export function DocNumberPreview({
                 ) ||
                 d.Prefix?.toLowerCase().includes(entryTypeFilter.toLowerCase()),
             )
-          : paymentRelated;
+          : all;
 
         setDocTypes(filtered);
       })
@@ -115,8 +102,7 @@ export function DocNumberPreview({
   );
 
   return (
-    <div className="space-y-3">
-      {/* ── Doc type dropdown ──────────────────────────────────────────── */}
+    <div className="space-y-2">
       <div className="flex gap-2 items-start">
         <div className="flex-1">
           <Select
@@ -130,10 +116,10 @@ export function DocNumberPreview({
                 <SelectValue
                   placeholder={
                     docTypesLoading
-                      ? "Loading document types…"
+                      ? "Loading document types..."
                       : docTypes.length === 0
                         ? "No document types found"
-                        : "Select document type…"
+                        : "Select document type..."
                   }
                 />
               </div>
@@ -145,7 +131,7 @@ export function DocNumberPreview({
                     <span className="font-mono text-xs font-semibold">
                       {dt.FullPrefix ?? dt.Prefix}
                     </span>
-                    <span className="text-xs opacity-50">—</span>
+                    <span className="text-xs opacity-50">-</span>
                     <span className="text-xs opacity-80">{dt.Description}</span>
                     {dt.EntryType && (
                       <span className="text-[10px] opacity-50 ml-auto pl-3">
@@ -159,7 +145,6 @@ export function DocNumberPreview({
           </Select>
         </div>
 
-        {/* Refresh button — only when a type is selected */}
         {selectedDocTypeId && (
           <button
             type="button"
@@ -173,34 +158,11 @@ export function DocNumberPreview({
         )}
       </div>
 
-      {/* ── Preview chip — shown after selection ───────────────────────── */}
-      {selectedType && (
-        <div className="flex items-center gap-2.5 rounded-xl border border-primary/25 bg-primary/[0.04] px-3.5 py-2.5">
-          <Hash size={13} className="text-primary shrink-0" />
-          <div className="min-w-0 flex-1">
-            <p className="text-[10px] text-muted-foreground">
-              prefix:{" "}
-              <span className="font-mono">
-                {selectedType.FullPrefix ?? selectedType.Prefix}
-              </span>
-              {finYear && (
-                <span className="ml-2 text-primary/60">· FY {finYear}</span>
-              )}
-            </p>
-            {generating ? (
-              <p className="text-xs text-muted-foreground animate-pulse">
-                Generating…
-              </p>
-            ) : (
-              <p className="text-sm font-mono font-semibold text-primary tracking-wide">
-                {preview || "—"}
-              </p>
-            )}
-          </div>
-          <span className="text-[10px] text-muted-foreground/70 shrink-0">
-            {selectedType.Description}
-          </span>
-        </div>
+      {selectedType && generating && (
+        <p className="px-1 text-xs text-muted-foreground animate-pulse">
+          Generating next number...
+          {finYear ? ` FY ${finYear}` : ""}
+        </p>
       )}
     </div>
   );

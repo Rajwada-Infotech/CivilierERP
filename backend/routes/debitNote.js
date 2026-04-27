@@ -3,6 +3,7 @@ const router = express.Router()
 const { getPool, sql } = require("../db")
 const { cache } = require("../middleware/cache")
 const { bumpCacheVersion } = require("../redis")
+const { lockNextDocNumber, backPatchRecordId } = require("../utils/docNumberLock")
 
 // ─── Helper: parse a value as a positive integer, or return null ──────────────
 function toInt(val) {
@@ -49,7 +50,7 @@ router.get("/", cache("debit-note", 300), async (req, res) => {
 
 // ADD debit note
 router.post("/", async (req, res) => {
-  const { company_id, project_id, supplier_id, bill_id, is_active, doc_type_id, doc_no } = req.body
+  const { company_id, project_id, supplier_id, bill_id, is_active, doc_type_id, doc_no, finYear } = req.body
 
   const company_id_val  = toInt(company_id)
   const project_id_val  = toInt(project_id)
@@ -68,27 +69,56 @@ router.post("/", async (req, res) => {
     })
   }
 
+  let transaction
   try {
     const pool = getPool()
-    await pool.request()
-      .input("company_id",   sql.Int,          company_id_val)
-      .input("project_id",   sql.Int,          project_id_val)
-      .input("supplier_id",  sql.Int,          supplier_id_val)
-      .input("bill_id",      sql.Int,          bill_id_val)
-      .input("is_active",    sql.Bit,          is_active !== false ? 1 : 0)
-      .input("doc_type_id",  sql.Int,          doc_type_id ? toInt(doc_type_id) : null)
-      .input("doc_no",       sql.NVarChar(100), doc_no || null)
-      .input("created_by",   sql.Int,          1)
-      .input("created_at",   sql.DateTime2,    new Date())
+    transaction = pool.transaction()
+    await transaction.begin()
+
+    let finalDocNo = doc_no || null
+
+    if (doc_type_id) {
+      finalDocNo = await lockNextDocNumber(transaction, sql, {
+        docTypeId: toInt(doc_type_id),
+        finYear,
+        tableName: "DebitNote",
+        issuedBy: req.user?.email || req.user?.name || null,
+      })
+    }
+
+    const result = await transaction.request()
+      .input("company_id",   sql.Int,           company_id_val)
+      .input("project_id",   sql.Int,           project_id_val)
+      .input("supplier_id",  sql.Int,           supplier_id_val)
+      .input("bill_id",      sql.Int,           bill_id_val)
+      .input("is_active",    sql.Bit,           is_active !== false ? 1 : 0)
+      .input("doc_type_id",  sql.Int,           doc_type_id ? toInt(doc_type_id) : null)
+      .input("doc_no",       sql.NVarChar(100), finalDocNo || null)
+      .input("created_by",   sql.Int,           1)
+      .input("created_at",   sql.DateTime2,     new Date())
       .query(`
         INSERT INTO dbo.DebitNote
           (company_id, project_id, supplier_id, bill_id, is_active, doc_type_id, doc_no, created_by, created_at)
+        OUTPUT INSERTED.id
         VALUES
           (@company_id, @project_id, @supplier_id, @bill_id, @is_active, @doc_type_id, @doc_no, @created_by, @created_at)
       `)
+
+    const newId = result.recordset[0]?.id
+
+    if (doc_type_id && finalDocNo && newId) {
+      await backPatchRecordId(transaction, sql, finalDocNo, "DebitNote", newId)
+    }
+
+    await transaction.commit()
     await bumpCacheVersion("debit-note")
-    res.json({ message: "Debit note added successfully" })
+    res.json({ message: "Debit note added successfully", id: newId, doc_no: finalDocNo })
   } catch (err) {
+    try {
+      if (transaction) await transaction.rollback()
+    } catch (_) {
+      // ignore rollback failure
+    }
     console.error("INSERT ERROR:", err.message)
     res.status(500).json({ error: err.message })
   }
