@@ -280,14 +280,15 @@ const DebitNoteMaster: React.FC = () => {
   });
 
   const { data: enterpriseData } = useQuery({
-    queryKey: ["enterprise-options"],
-    queryFn: () => fetchWithAuth("/api/enterprises/options").then((r) => r.json()),
+    queryKey: ["enterprises"],
+    queryFn: () => fetchWithAuth("/api/enterprises").then((r) => r.json()),
     staleTime: 5 * 60 * 1000,
   });
 
   const { data: accountHeadData } = useQuery({
-    queryKey: ["account-head-options"],
-    queryFn: () => fetchWithAuth("/api/account-head/options").then((r) => r.json()),
+    queryKey: ["supplier-head-options"],
+    queryFn: () =>
+      fetchWithAuth("/api/account-head/options?type=S").then((r) => r.json()),
     staleTime: 5 * 60 * 1000,
   });
 
@@ -308,13 +309,24 @@ const DebitNoteMaster: React.FC = () => {
   });
 
   // Options
-  const ENTERPRISE_OPTIONS: { id: number; label: string }[] = Array.isArray(
-    enterpriseData,
+  const ALL_ENTERPRISES: Array<{
+    id: number;
+    name: string | null;
+    business_type: string | null;
+  }> = Array.isArray(enterpriseData) ? enterpriseData : [];
+
+  const COMPANY_OPTIONS = ALL_ENTERPRISES.filter(
+    (enterprise) => (enterprise.business_type ?? "").toUpperCase() === "C",
   )
-    ? enterpriseData
-    : [];
-  const COMPANY_OPTIONS = ENTERPRISE_OPTIONS;
-  const PROJECT_OPTIONS = ENTERPRISE_OPTIONS;
+    .map((enterprise) => ({ id: enterprise.id, label: enterprise.name ?? "" }))
+    .filter((option) => option.label !== "");
+
+  const PROJECT_OPTIONS = ALL_ENTERPRISES.filter(
+    (enterprise) => (enterprise.business_type ?? "").toUpperCase() === "P",
+  )
+    .map((enterprise) => ({ id: enterprise.id, label: enterprise.name ?? "" }))
+    .filter((option) => option.label !== "");
+
   const SUPPLIER_OPTIONS: { id: number; label: string }[] = Array.isArray(
     accountHeadData,
   )
