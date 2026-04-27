@@ -59,6 +59,7 @@ import {
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { DocNumberPreview } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1470,7 +1471,8 @@ const WorkOrdersList: React.FC<{
                   >
                     <div>
                       <p className="text-sm font-mono font-semibold text-primary group-hover:underline">{wo.DocumentNumber}</p>
-                      <p className="text-[10px] text-muted-foreground mt-0.5">#{wo.Id}</p>
+                      <p className="text-[10px] text-muted-foreground mt-0.5 font-mono">{(wo as any).DocNo || ""}</p>
+                      <p className="text-[10px] text-muted-foreground">#{wo.Id}</p>
                     </div>
                     <div>
                       <p className="text-sm font-medium text-foreground truncate" title={wo.CompanyName}>{wo.CompanyName || "—"}</p>
@@ -1562,6 +1564,8 @@ const WorkOrderMaster: React.FC = () => {
   const [saved, setSaved] = useState(false);
   const [savedId, setSavedId] = useState<number | null>(null);
   const [savedStatus, setSavedStatus] = useState<string>("Draft");
+  const [woDocTypeId, setWoDocTypeId] = useState<number | null>(null);
+  const [woDocNo, setWoDocNo] = useState("");
 
   // ── Dropdown states ───────────────────────────────────────────────────────
   const [companies, setCompanies] = useState<DropdownOption[]>([]);
@@ -1679,6 +1683,8 @@ const WorkOrderMaster: React.FC = () => {
         TotalAmount: grandTotal,
         Remarks: form.remarks || null,
         TermsAndConditions: form.termsAndConditions || null,
+        DocTypeId: woDocTypeId,
+        DocNo: woDocNo || null,
         CreatedBy: userId,
       });
       const newHeaderId: number = created.Id;
@@ -1719,6 +1725,8 @@ const WorkOrderMaster: React.FC = () => {
           TotalAmount: grandTotal,
           Remarks: form.remarks || null,
           TermsAndConditions: form.termsAndConditions || null,
+          DocTypeId: woDocTypeId,
+          DocNo: woDocNo || null,
           UpdatedBy: userId,
         },
         activities,
@@ -1902,6 +1910,19 @@ const WorkOrderMaster: React.FC = () => {
               />
             </div>
           )}
+
+          {/* Document Type & Number */}
+          <div className="rounded-xl border border-border bg-card mb-5 p-4 sm:p-5">
+            <div className="flex items-center gap-2 mb-3">
+              <Hash size={15} className="text-primary shrink-0" />
+              <h2 className="text-sm font-semibold text-foreground">Document Type &amp; Number</h2>
+            </div>
+            <DocNumberPreview
+              selectedDocTypeId={woDocTypeId}
+              preview={woDocNo}
+              onSelect={(id, preview) => { setWoDocTypeId(id); setWoDocNo(preview); }}
+            />
+          </div>
 
           {/* Header card */}
           <div className="rounded-xl border border-border bg-card mb-5">

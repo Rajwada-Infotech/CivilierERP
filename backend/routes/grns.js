@@ -71,11 +71,16 @@ router.get("/", cache("grns", 300), async (req, res) => {
         grn.Status,
         grn.Remarks,
         grn.CreatedDate,
+        grn.DocTypeId,
+        grn.DocNo,
         s.LHeadName AS SupplierName,
-        p.PurchaseOrderNo AS PONumber
+        p.PurchaseOrderNo AS PONumber,
+        td.Prefix AS DocTypePrefix,
+        td.Description AS DocTypeDescription
       FROM GoodsReceiptNotes grn
       LEFT JOIN dbo.AccountHeadMaster s ON grn.SupplierID = s.LHeadId
       LEFT JOIN PurchaseOrders p ON grn.POID = p.PurchaseOrderID
+      LEFT JOIN dbo.TypeOfDoc td ON td.TypeOfDocId = grn.DocTypeId
       ORDER BY grn.GRNID DESC
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
     `);
@@ -98,7 +103,7 @@ router.get("/", cache("grns", 300), async (req, res) => {
 
 // POST - Create GRN + Stock Ledger Entries
 router.post("/", async (req, res) => {
-  const { grnNo, grnDate, supplierId, poId, grnItems, status, remarks } =
+  const { grnNo, grnDate, supplierId, poId, grnItems, status, remarks, docTypeId, docNo } =
     req.body;
 
   if (!grnNo || !grnDate || !supplierId) {
@@ -123,12 +128,14 @@ router.post("/", async (req, res) => {
       .input("GRNItems", sql.NVarChar(sql.MAX), JSON.stringify(grnItems || []))
       .input("Status", sql.NVarChar(50), status || "Draft")
       .input("Remarks", sql.NVarChar(sql.MAX), remarks || null)
+      .input("DocTypeId", sql.Int, docTypeId ? parseInt(docTypeId, 10) : null)
+      .input("DocNo", sql.NVarChar(100), docNo || null)
       .input("CreatedDate", sql.DateTime2, new Date()).query(`
         INSERT INTO GoodsReceiptNotes
-          (GRNNo, GRNDate, SupplierID, POID, GRNItems, Status, Remarks, CreatedDate)
+          (GRNNo, GRNDate, SupplierID, POID, GRNItems, Status, Remarks, DocTypeId, DocNo, CreatedDate)
         OUTPUT INSERTED.GRNID
         VALUES
-          (@GRNNo, @GRNDate, @SupplierID, @POID, @GRNItems, @Status, @Remarks, @CreatedDate)
+          (@GRNNo, @GRNDate, @SupplierID, @POID, @GRNItems, @Status, @Remarks, @DocTypeId, @DocNo, @CreatedDate)
       `);
 
     const grnId = grnResult.recordset[0].GRNID;
@@ -156,7 +163,7 @@ router.post("/", async (req, res) => {
 
 // PUT - Update GRN
 router.put("/:id", async (req, res) => {
-  const { grnNo, grnDate, supplierId, poId, grnItems, status, remarks } =
+  const { grnNo, grnDate, supplierId, poId, grnItems, status, remarks, docTypeId, docNo } =
   await guardEdit("goods-receipt", req.params.id);
     req.body;
   const grnId = parseInt(req.params.id, 10);
@@ -176,6 +183,8 @@ router.put("/:id", async (req, res) => {
       .input("GRNItems", sql.NVarChar(sql.MAX), JSON.stringify(grnItems || []))
       .input("Status", sql.NVarChar(50), status || "Draft")
       .input("Remarks", sql.NVarChar(sql.MAX), remarks || null)
+      .input("DocTypeId", sql.Int, docTypeId ? parseInt(docTypeId, 10) : null)
+      .input("DocNo", sql.NVarChar(100), docNo || null)
       .input("UpdatedDate", sql.DateTime2, new Date()).query(`
         UPDATE GoodsReceiptNotes
         SET GRNNo = @GRNNo,
@@ -184,7 +193,9 @@ router.put("/:id", async (req, res) => {
             POID = @POID,
             GRNItems = @GRNItems,
             Status = @Status,
-            Remarks = @Remarks
+            Remarks = @Remarks,
+            DocTypeId = @DocTypeId,
+            DocNo = @DocNo
         WHERE GRNID = @GRNID
       `);
 

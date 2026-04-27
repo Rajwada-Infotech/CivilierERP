@@ -62,6 +62,8 @@ export interface GRNFormDataPayload {
   remarks?: string;
   supplierName?: string;
   poNumber?: string;
+  docTypeId?: number | null;
+  docNo?: string;
 }
 
 export interface PaginatedResponse<T> {
