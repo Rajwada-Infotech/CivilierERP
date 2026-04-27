@@ -11,7 +11,11 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
-import { DocNumberPreview } from "@/pages/material/ExpenseBooking/DocNumberPreview";
+import { useFinYear } from "@/contexts/FinYearContext";
+import {
+  DocNumberPreview,
+  fetchNextDocNumber,
+} from "@/pages/material/ExpenseBooking/DocNumberPreview";
 
 import {
   getPurchaseOrders,
@@ -25,6 +29,7 @@ import {
 
 const PurchaseOrderMaster = () => {
   const queryClient = useQueryClient();
+  const { finYears } = useFinYear();
   const [page, setPage] = useState(1);
   const limit = 10;
 
@@ -32,6 +37,30 @@ const PurchaseOrderMaster = () => {
   const [selectedCompanyId, setSelectedCompanyId] = useState<number | null>(null);
   const [poDocTypeId, setPoDocTypeId] = useState<number | null>(null);
   const [poDocNo, setPoDocNo] = useState("");
+  const [poFormPatch, setPoFormPatch] = useState<Record<string, unknown> | null>(null);
+  const [poFormPatchKey, setPoFormPatchKey] = useState(0);
+  const activeFinYear =
+    finYears.find((fy) => fy.status === "Active")?.year || undefined;
+
+  const applyPoDocNumber = (docTypeId: number | null, docNo: string) => {
+    setPoDocTypeId(docTypeId);
+    setPoDocNo(docNo);
+    setPoFormPatch({
+      poNumber: docNo,
+      docNo,
+      docTypeId,
+    });
+    setPoFormPatchKey((current) => current + 1);
+  };
+
+  const refreshPoDocNumber = async (docTypeId: number | null = poDocTypeId) => {
+    if (!docTypeId) {
+      applyPoDocNumber(null, "");
+      return;
+    }
+    const nextDocNo = await fetchNextDocNumber(docTypeId, activeFinYear);
+    applyPoDocNumber(docTypeId, nextDocNo);
+  };
 
   // ── Remote data ──────────────────────────────────────────────────────────────
   const { data: dbData, isLoading, error } = useQuery({
@@ -149,8 +178,9 @@ const PurchaseOrderMaster = () => {
     const supplier = suppliers.find((s) => s.name === (r.supplierName as string));
     const company  = companies.find((c) => c.name === (r.companyName  as string));
     const project  = allProjects.find((p) => p.name === (r.projectName as string));
+    const finalNumber = (r.poNumber as string) || null;
     return {
-      PurchaseOrderNo:      (r.poNumber        as string) || null,
+      PurchaseOrderNo:      finalNumber,
       PODate:               (r.poDate          as string) || null,
       ExpectedDeliveryDate: (r.expectedDate    as string) || null,
       SupplierID:           supplier?.id ?? null,
@@ -165,7 +195,8 @@ const PurchaseOrderMaster = () => {
       Status:               (r.status as string)  || "Draft",
       Remarks:              (r.remarks as string)  || null,
       DocTypeId:            (r.docTypeId as number | null) ?? poDocTypeId,
-      DocNo:                (r.docNo as string) || poDocNo || null,
+      DocNo:                finalNumber || (r.docNo as string) || poDocNo || null,
+      finYear:              activeFinYear || null,
     };
   };
 
@@ -175,6 +206,7 @@ const PurchaseOrderMaster = () => {
       if (event.action === "add") {
         await addPurchaseOrder(toPayload(event.record));
         toast.success("Purchase Order created successfully!");
+        await refreshPoDocNumber();
       } else if (event.action === "update") {
         await updatePurchaseOrder(event.id, toPayload(event.record));
         toast.success("Purchase Order updated successfully!");
@@ -339,9 +371,10 @@ const PurchaseOrderMaster = () => {
           Document Type &amp; Number
         </label>
         <DocNumberPreview
+          finYear={activeFinYear}
           selectedDocTypeId={poDocTypeId}
           preview={poDocNo}
-          onSelect={(id, preview) => { setPoDocTypeId(id); setPoDocNo(preview); }}
+          onSelect={applyPoDocNumber}
         />
       </div>
       <MasterPage
@@ -352,6 +385,8 @@ const PurchaseOrderMaster = () => {
         columnRenderers={columnRenderers}
         onDataEvent={handleDataEvent}
         onFieldChange={handleFieldChange}
+        externalFormPatch={poFormPatch}
+        externalFormPatchKey={poFormPatchKey}
       />
       <div className="mt-4 flex items-center justify-between rounded-lg border border-border bg-card px-4 py-3 text-sm">
         <span className="text-muted-foreground">

@@ -41,7 +41,10 @@ import {
 } from "./ExpenseBooking/FormPrimitives";
 import { BillingAccordion } from "./ExpenseBooking/BillingAccordion";
 import { EmiSection } from "./ExpenseBooking/EmiSection";
-import { DocNumberPreview } from "./ExpenseBooking/DocNumberPreview";
+import {
+  DocNumberPreview,
+  fetchNextDocNumber,
+} from "./ExpenseBooking/DocNumberPreview";
 import { ApprovalTrailPanel } from "./ExpenseBooking/ApprovalTrailPanel";
 import { RecordCard } from "./ExpenseBooking/RecordCard";
 import {
@@ -254,6 +257,7 @@ export default function MaterialExpenseBooking() {
           body: JSON.stringify(body),
         });
         toast.success("Expense booking updated.");
+        cancelForm();
       } else {
         const result = await apiFetch(API, {
           method: "POST",
@@ -262,9 +266,24 @@ export default function MaterialExpenseBooking() {
         // Server returns the authoritative locked doc number — show it in success toast
         const confirmedDocNo = result?.docNo || form.bookingReference;
         toast.success(`Expense booking created — Ref: ${confirmedDocNo}`);
+        await fetchRecords();
+        if (selectedDocTypeId) {
+          const nextDocNo = await fetchNextDocNumber(
+            selectedDocTypeId,
+            form.financialYear || undefined,
+          );
+          setForm({
+            ...blankForm(),
+            bookingReference: nextDocNo,
+            financialYear: form.financialYear,
+          });
+          setDocNumberPreview(nextDocNo);
+        } else {
+          cancelForm();
+        }
+        return;
       }
       await fetchRecords();
-      cancelForm();
     } catch (err: any) {
       toast.error("Save failed: " + err.message);
     } finally {
