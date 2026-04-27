@@ -35,15 +35,15 @@ router.get(
           et.EntryType,
           et.Eprefix,
           et.EDOC_N,
-          ISNULL(c.Name, 'All Companies') AS CompanyName,
-          ISNULL(p.Name, 'All Projects')  AS ProjectName,
+          ISNULL(c.name, 'All Companies') AS CompanyName,
+          ISNULL(p.name, 'All Projects')  AS ProjectName,
           t.FullPrefix,
           t.CreatedAt,
           t.UpdatedAt
         FROM dbo.TypeOfDoc t
         LEFT JOIN dbo.Entry_Type    et ON t.EntryTypeId = et.E_Id
-        LEFT JOIN dbo.CompanyMaster c  ON t.CompanyId   = c.Id
-        LEFT JOIN dbo.ProjectMaster p  ON t.ProjectId   = p.Id
+        LEFT JOIN dbo.enterprise c  ON t.CompanyId = c.id AND c.business_type = 'C'
+        LEFT JOIN dbo.enterprise p  ON t.ProjectId = p.id AND p.business_type = 'P'
         WHERE t.IsActive = 1
         ORDER BY et.EntryType, t.Prefix;
       `);
@@ -144,12 +144,16 @@ router.get("/entrytypes", authMiddleware, async (req, res) => {
 });
 
 // ── GET /companies ────────────────────────────────────────────────────────────
+// Sources from enterprise table where business_type = 'C'
 router.get("/companies", authMiddleware, async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT Id AS CompanyId, Name AS CompanyName
-      FROM dbo.CompanyMaster WHERE IsDeleted = 0 ORDER BY Name;
+      SELECT id AS CompanyId, name AS CompanyName
+      FROM dbo.enterprise
+      WHERE business_type = 'C'
+        AND (discontinue IS NULL OR discontinue = 0)
+      ORDER BY name;
     `);
     res.json(result.recordset);
   } catch (err) {
@@ -158,12 +162,16 @@ router.get("/companies", authMiddleware, async (req, res) => {
 });
 
 // ── GET /projects ─────────────────────────────────────────────────────────────
+// Sources from enterprise table where business_type = 'P'
 router.get("/projects", authMiddleware, async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT Id AS ProjectId, Name AS ProjectName, Code AS ProjectCode
-      FROM dbo.ProjectMaster WHERE IsActive = 1 ORDER BY Name;
+      SELECT id AS ProjectId, name AS ProjectName, business_identity AS ProjectCode
+      FROM dbo.enterprise
+      WHERE business_type = 'P'
+        AND (discontinue IS NULL OR discontinue = 0)
+      ORDER BY name;
     `);
     res.json(result.recordset);
   } catch (err) {

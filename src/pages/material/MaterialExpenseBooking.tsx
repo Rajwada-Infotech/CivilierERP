@@ -32,6 +32,7 @@ import { Plus, Edit, Trash2, ArrowLeft, Link2 } from "lucide-react";
 import { toast } from "sonner";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
+import { getEnterprises } from "@/api/enterpriseApi";
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 import {
@@ -80,6 +81,7 @@ export default function MaterialExpenseBooking() {
 
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
   const [poLoading, setPoLoading] = useState(true);
+  const [companyOptions, setCompanyOptions] = useState<{ id: number; label: string }[]>([]);
   const [records, setRecords] = useState<ExpenseRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<PageView>("list");
@@ -165,6 +167,15 @@ export default function MaterialExpenseBooking() {
   React.useEffect(() => {
     fetchRecords();
     fetchPurchaseOrders();
+    getEnterprises()
+      .then((list) => {
+        const companies = list
+          .filter((e) => (e.business_type ?? "").toUpperCase() === "C" && !e.discontinue)
+          .map((e) => ({ id: e.id, label: e.name ?? "" }))
+          .filter((o) => o.label !== "");
+        setCompanyOptions(companies);
+      })
+      .catch(() => {/* silently ignore */});
   }, [fetchRecords, fetchPurchaseOrders]);
 
   const set = <K extends keyof Omit<ExpenseRecord, "id">>(
@@ -231,6 +242,10 @@ export default function MaterialExpenseBooking() {
   const handleSave = async () => {
     if (!form.bookingReference.trim() || !form.bookingDate) {
       toast.error("Booking reference and date are required.");
+      return;
+    }
+    if (!form.companyId) {
+      toast.error("Please select a company.");
       return;
     }
     const bd = computeBreakdown(
@@ -461,6 +476,23 @@ export default function MaterialExpenseBooking() {
                         ).map((s) => (
                           <SelectItem key={s} value={s}>
                             {s}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field label="Company" required>
+                    <Select
+                      value={form.companyId ? String(form.companyId) : ""}
+                      onValueChange={(v) => set("companyId", v ? parseInt(v, 10) : null)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select company..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {companyOptions.map((c) => (
+                          <SelectItem key={c.id} value={String(c.id)}>
+                            {c.label}
                           </SelectItem>
                         ))}
                       </SelectContent>

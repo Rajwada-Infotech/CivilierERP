@@ -4,38 +4,70 @@ const { bumpCacheVersion } = require("../redis");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 
-// GET all
-router.get("/", cache("entry-type", 300), async (req, res) => {
+// ── GET /projects — projects from enterprise where business_type = 'P' ────────
+router.get("/projects", async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query("SELECT * FROM dbo.Entry_Type");
+    const result = await pool.request().query(`
+      SELECT id, name
+      FROM dbo.enterprise
+      WHERE business_type = 'P'
+        AND (discontinue IS NULL OR discontinue = 0)
+      ORDER BY name
+    `);
     res.json(result.recordset);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// ADD
+// ── GET / — all entry types with resolved project name via JOIN ───────────────
+router.get("/", cache("entry-type", 300), async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT
+        et.E_Id,
+        et.project_id,
+        e.name  AS Epname,
+        et.EntryType,
+        et.Eprefix,
+        et.EDoc_N,
+        et.E_CreatedBy,
+        et.E_CreatedAt
+      FROM dbo.Entry_Type et
+      LEFT JOIN dbo.enterprise e ON et.project_id = e.id
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST / — store project_id FK, not the name string ────────────────────────
 router.post("/", async (req, res) => {
-  const { Epname, EntryType, Eprefix, EDoc_N } = req.body;
+  const { project_id, EntryType, Eprefix, EDoc_N } = req.body;
   try {
     const userEmail = req.user?.name;
-    if (!userEmail) return res.status(401).json({ error: "User context missing" });
+    if (!userEmail)
+      return res.status(401).json({ error: "User context missing" });
+
+    if (!project_id)
+      return res.status(400).json({ error: "project_id is required" });
 
     const pool = getPool();
     await pool
       .request()
-      .input("Epname",      sql.NVarChar,       Epname || null)
-      .input("EntryType",   sql.NVarChar,       EntryType || null)
-      .input("Eprefix",     sql.NVarChar,       Eprefix || null)
-      .input("EDoc_N",      sql.Int,            EDoc_N || 1)
-      .input("E_CreatedBy", sql.NVarChar(100),  userEmail)  // ✅ real email
-      .input("E_CreatedAt", sql.DateTime2,      new Date())
-      .query(`
+      .input("project_id", sql.Int, project_id)
+      .input("EntryType", sql.NVarChar, EntryType || null)
+      .input("Eprefix", sql.NVarChar, Eprefix || null)
+      .input("EDoc_N", sql.Int, EDoc_N || 1)
+      .input("E_CreatedBy", sql.NVarChar(100), userEmail)
+      .input("E_CreatedAt", sql.DateTime2, new Date()).query(`
         INSERT INTO dbo.Entry_Type
-          (Epname, EntryType, Eprefix, EDoc_N, E_CreatedBy, E_CreatedAt)
+          (project_id, EntryType, Eprefix, EDoc_N, E_CreatedBy, E_CreatedAt)
         VALUES
-          (@Epname, @EntryType, @Eprefix, @EDoc_N, @E_CreatedBy, @E_CreatedAt)
+          (@project_id, @EntryType, @Eprefix, @EDoc_N, @E_CreatedBy, @E_CreatedAt)
       `);
     await bumpCacheVersion("entry-type");
     res.json({ message: "Entry type added successfully" });
@@ -44,24 +76,28 @@ router.post("/", async (req, res) => {
   }
 });
 
-// UPDATE
+// ── PUT /:id — update with project_id FK ─────────────────────────────────────
 router.put("/:id", async (req, res) => {
   const { id } = req.params;
-  const { Epname, EntryType, Eprefix, EDoc_N } = req.body;
+  const { project_id, EntryType, Eprefix, EDoc_N } = req.body;
   try {
+    if (!project_id)
+      return res.status(400).json({ error: "project_id is required" });
+
     const pool = getPool();
     await pool
       .request()
-      .input("E_Id",      sql.UniqueIdentifier, id)
-      .input("Epname",    sql.NVarChar,         Epname || null)
-      .input("EntryType", sql.NVarChar,         EntryType || null)
-      .input("Eprefix",   sql.NVarChar,         Eprefix || null)
-      .input("EDoc_N",    sql.Int,              EDoc_N || 1)
-      .query(`
+      .input("E_Id", sql.UniqueIdentifier, id)
+      .input("project_id", sql.Int, project_id)
+      .input("EntryType", sql.NVarChar, EntryType || null)
+      .input("Eprefix", sql.NVarChar, Eprefix || null)
+      .input("EDoc_N", sql.Int, EDoc_N || 1).query(`
         UPDATE dbo.Entry_Type SET
-          Epname=@Epname, EntryType=@EntryType,
-          Eprefix=@Eprefix, EDoc_N=@EDoc_N
-        WHERE E_Id=@E_Id
+          project_id = @project_id,
+          EntryType  = @EntryType,
+          Eprefix    = @Eprefix,
+          EDoc_N     = @EDoc_N
+        WHERE E_Id = @E_Id
       `);
     await bumpCacheVersion("entry-type");
     res.json({ message: "Entry type updated successfully" });
@@ -70,7 +106,7 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-// DELETE
+// ── DELETE /:id ───────────────────────────────────────────────────────────────
 router.delete("/:id", async (req, res) => {
   const { id } = req.params;
   try {

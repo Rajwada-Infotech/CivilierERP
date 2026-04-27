@@ -11,6 +11,7 @@ import {
   addEntryType,
   updateEntryType,
   deleteEntryType,
+  getProjects,
 } from "@/api/entryTypeApi";
 import { getMenuMasters } from "@/api/menuMasterApi";
 import { toast } from "sonner";
@@ -19,7 +20,8 @@ import { Tag } from "lucide-react";
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface DbEntryType {
   E_Id: string | number | null;
-  Epname: string | null;
+  project_id: number | null; // FK referencing enterprise.id
+  Epname: string | null; // resolved via JOIN at read time
   EntryType: string | null;
   Eprefix: string | null;
   EDoc_N: number | null;
@@ -178,31 +180,14 @@ const NamedEntryTypeMaster: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
-  // Fetch Projects
+  // Fetch Projects from enterprise (business_type = 'P') via /api/entry-type/projects
   const {
     data: projectsData = [],
     isLoading: isProjectsLoading,
     error: projectsError,
   } = useQuery({
-    queryKey: ["project-master"],
-    queryFn: async () => {
-      const token =
-        localStorage.getItem("token") ||
-        localStorage.getItem("accessToken") ||
-        localStorage.getItem("authToken");
-      if (!token) throw new Error("No authentication token found.");
-
-      const res = await fetch("/api/project-master", {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-      });
-      if (res.status === 401) throw new Error("Session expired.");
-      if (!res.ok) throw new Error(`Failed to fetch projects: ${res.status}`);
-      return res.json();
-    },
+    queryKey: ["entry-type-projects"],
+    queryFn: getProjects,
     staleTime: 10 * 60 * 1000,
   });
 
@@ -217,31 +202,50 @@ const NamedEntryTypeMaster: React.FC = () => {
 
   const dbItems: DbEntryType[] = Array.isArray(dbData) ? dbData : [];
 
+  // projectsData: [{ id: number, name: string }]
+  // We keep a lookup map so we can resolve id ↔ name
+  const projectMap = useMemo(() => {
+    const m = new Map<number, string>();
+    if (Array.isArray(projectsData)) {
+      projectsData.forEach((p: any) => {
+        if (p?.id && p?.name) m.set(p.id, p.name);
+      });
+    }
+    return m;
+  }, [projectsData]);
+
+  // Options shown in the dropdown — stored value is the numeric id as string
   const projectOptions = useMemo(() => {
-    if (!Array.isArray(projectsData) || projectsData.length === 0)
-      return ["No projects available"];
+    if (!Array.isArray(projectsData) || projectsData.length === 0) return [];
     return projectsData
-      .filter((p: any) => p?.Name || p?.name)
-      .map((p: any) => {
-        const name = p.Name || p.name || "";
-        const code = p.Code || p.code || "";
-        return code ? `${code} - ${name}` : name;
-      })
-      .sort((a, b) => a.localeCompare(b));
+      .filter((p: any) => p?.id && p?.name)
+      .map((p: any) => ({ value: String(p.id), label: p.name }))
+      .sort((a, b) => a.label.localeCompare(b.label));
   }, [projectsData]);
 
   // Dynamic entry type options from Menu Master
   const entryTypeOptions = useMemo(() => {
-    const fallback = ["Received", "Invoice", "Payment", "BOQ", "Purchase Order", "Work Order"];
-    if (!Array.isArray(menuMasterData) || menuMasterData.length === 0) return fallback;
-    const options = menuMasterData.map((m: any) => m?.Name).filter(Boolean) as string[];
+    const fallback = [
+      "Received",
+      "Invoice",
+      "Payment",
+      "BOQ",
+      "Purchase Order",
+      "Work Order",
+    ];
+    if (!Array.isArray(menuMasterData) || menuMasterData.length === 0)
+      return fallback;
+    const options = menuMasterData
+      .map((m: any) => m?.Name)
+      .filter(Boolean) as string[];
     return options.length > 0 ? options : fallback;
   }, [menuMasterData]);
 
   const mappedData = useMemo(() => {
     return dbItems.map((item) => ({
-      _id: String(item.E_Id || ""), // Ensure it's always a string
-      projectName: item.Epname || "",
+      _id: String(item.E_Id || ""),
+      project_id: String(item.project_id ?? ""), // FK stored/sent to backend
+      projectName: item.Epname || "", // resolved at read time via JOIN
       entryType: item.EntryType || "Payment",
       prefix: item.Eprefix || "",
       prefixMode: "auto" as const,
@@ -255,7 +259,9 @@ const NamedEntryTypeMaster: React.FC = () => {
 
   // ── Payload Builder ───────────────────────────────────────────────────────
   const toPayload = (record: Record<string, unknown>) => {
-    const projectName = (record.projectName as string) || "";
+    const project_id = Number(record.project_id); // FK — what we persist
+    const projectName =
+      (record.projectName as string) || projectMap.get(project_id) || "";
     const entryType = (record.entryType as string) || "Payment";
     const prefixGroup = record.prefixGroup as PrefixGroupValue | undefined;
 
@@ -266,7 +272,7 @@ const NamedEntryTypeMaster: React.FC = () => {
         : (prefixGroup?.customPrefix ?? "").trim();
 
     return {
-      Epname: projectName,
+      project_id, // ✅ FK stored, not the name string
       EntryType: entryType,
       Eprefix: prefixStr,
       EDoc_N: 1,
@@ -298,11 +304,18 @@ const NamedEntryTypeMaster: React.FC = () => {
     form: Record<string, unknown>,
     updateForm: (patch: Record<string, unknown>) => void,
   ) => {
-    const projectName = (form.projectName as string) || "";
+    const project_id = Number(form.project_id);
+    const projectName =
+      projectMap.get(project_id) || (form.projectName as string) || "";
     const entryType = (form.entryType as string) || "";
 
     projectNameRef.current = projectName;
     entryTypeRef.current = entryType;
+
+    // Keep projectName in sync so the prefix renderer can read it
+    if (form.projectName !== projectName) {
+      updateForm({ projectName });
+    }
 
     const prefixGroup = form.prefixGroup as PrefixGroupValue | undefined;
     if (prefixGroup?.mode === "auto") {
@@ -316,7 +329,9 @@ const NamedEntryTypeMaster: React.FC = () => {
   const handleCustomSave = (
     formData: Record<string, unknown>,
   ): Record<string, unknown> | null => {
-    const projectName = (formData.projectName as string) || "";
+    const project_id = Number(formData.project_id);
+    const projectName =
+      projectMap.get(project_id) || (formData.projectName as string) || "";
     const entryType = (formData.entryType as string) || "Payment";
     const prefixGroup = formData.prefixGroup as PrefixGroupValue | undefined;
 
@@ -326,9 +341,10 @@ const NamedEntryTypeMaster: React.FC = () => {
         ? buildAutoPrefix(projectName, entryType)
         : (prefixGroup?.customPrefix ?? "").trim();
 
-    if (!prefixStr) return null;
+    if (!prefixStr || !project_id) return null;
 
     return {
+      project_id,
       projectName,
       entryType,
       prefix: prefixStr,
@@ -377,11 +393,11 @@ const NamedEntryTypeMaster: React.FC = () => {
         title="Named Entry Type"
         fields={[
           {
-            name: "projectName",
-            label: "Project Name",
+            name: "project_id",
+            label: "Project",
             type: "select",
             required: true,
-            options: projectOptions,
+            optionsProvider: () => projectOptions, // { value: id, label: name }[]
             placeholder: "Select a project",
           },
           {
@@ -407,7 +423,7 @@ const NamedEntryTypeMaster: React.FC = () => {
           },
         ]}
         columns={[
-          { key: "projectName", label: "Project Name" },
+          { key: "projectName", label: "Project" },
           { key: "entryType", label: "Entry Type" },
           { key: "prefix", label: "Prefix" },
           { key: "status", label: "Status" },

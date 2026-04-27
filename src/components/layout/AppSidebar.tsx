@@ -34,6 +34,7 @@ import {
   Terminal,
   Megaphone,
   BellRing,
+  FileEdit,
 } from "lucide-react";
 
 // ── Approval pending count (polls every 60 s) ────────────────────────────────
@@ -179,7 +180,7 @@ const buildFollowupNavItems = (): NavItem[] => [
 
 // ── Material module sidebar ──────────────────────────────────────────────────
 const buildMaterialNavItems = (): NavItem[] => [
-  { label: "Amendments", icon: BarChart3, path: "/material" }, // ← Changed here
+  { label: "Amendments", icon: BarChart3, path: "/material/amendments" },
   {
     label: "Transaction",
     icon: Receipt,
@@ -195,6 +196,7 @@ const buildMaterialNavItems = (): NavItem[] => [
     icon: FileWarning,
     path: "/masters/debit-note",
   },
+  { label: "Amendment Menu", icon: FileEdit, path: "/material/amendment-menu" },
 ];
 
 // ── Admin sidebar ──────────────────────────────────────────────────────────
