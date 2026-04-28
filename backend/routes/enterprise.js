@@ -10,7 +10,9 @@ router.get("/", cache("enterprises", 300), async (req, res) => {
     const pool = getPool();
     const result = await pool
       .request()
-      .query("SELECT * FROM dbo.enterprise ORDER BY name");
+      .query(
+        "SELECT * FROM dbo.enterprise WHERE business_type = 'E' ORDER BY name",
+      );
     res.json(result.recordset);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -69,7 +71,7 @@ router.post("/", async (req, res) => {
       .input("short_name", sql.NVarChar(100), short_name || null)
       .input("entity_type", sql.NVarChar(100), entity_type || null)
       .input("business_identity", sql.NVarChar(100), business_identity || null)
-      .input("business_type", sql.NVarChar(100), business_type || null)
+      .input("business_type", sql.NVarChar(100), "E")
       .input(
         "b_sub_identity_type",
         sql.NVarChar(100),
@@ -194,7 +196,7 @@ router.put("/:id", async (req, res) => {
       .input("short_name", sql.NVarChar(100), short_name || null)
       .input("entity_type", sql.NVarChar(100), entity_type || null)
       .input("business_identity", sql.NVarChar(100), business_identity || null)
-      .input("business_type", sql.NVarChar(100), business_type || null)
+      .input("business_type", sql.NVarChar(100), "E")
       .input(
         "b_sub_identity_type",
         sql.NVarChar(100),
@@ -236,7 +238,7 @@ router.put("/:id", async (req, res) => {
       .input("profit_center", sql.NVarChar(100), profit_center || null).query(`
         UPDATE dbo.enterprise SET
           name=@name, short_name=@short_name, entity_type=@entity_type,
-          business_identity=@business_identity, business_type=@business_type,
+          business_identity=@business_identity, business_type='E',
           b_sub_identity_type=@b_sub_identity_type, belongs_to=@belongs_to, logo=@logo,
           date_of_entry=@date_of_entry, date_of_establishment=@date_of_establishment,
           start_date=@start_date, start_fin_year=@start_fin_year,
@@ -250,7 +252,7 @@ router.put("/:id", async (req, res) => {
           tan=@tan, rera_no=@rera_no, rera_date=@rera_date, trade_license=@trade_license,
           status=@status, cr_code=@cr_code, discontinue=@discontinue,
           fiscal_year_start=@fiscal_year_start, cost_center=@cost_center, profit_center=@profit_center
-        WHERE id=@id
+        WHERE id=@id AND business_type='E'
       `);
     await bumpCacheVersion("enterprises");
     res.json({ message: "Enterprise updated successfully" });
@@ -267,7 +269,7 @@ router.delete("/:id", async (req, res) => {
     await pool
       .request()
       .input("id", sql.Int, id)
-      .query("DELETE FROM dbo.enterprise WHERE id=@id");
+      .query("DELETE FROM dbo.enterprise WHERE id=@id AND business_type='E'");
     await bumpCacheVersion("enterprises");
     res.json({ message: "Enterprise deleted successfully" });
   } catch (err) {
