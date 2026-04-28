@@ -1,4 +1,4 @@
-const BASE_URL = "/api/menu-types";
+const BASE_URL = "/api/menu-type";
 
 const getAuthHeaders = () => ({
   "Content-Type": "application/json",
@@ -39,7 +39,10 @@ export const addMenuType = async (data: Record<string, unknown>) => {
   return res.json();
 };
 
-export const updateMenuType = async (id: number, data: Record<string, unknown>) => {
+export const updateMenuType = async (
+  id: number,
+  data: Record<string, unknown>,
+) => {
   const res = await fetch(`${BASE_URL}/${id}`, {
     method: "PUT",
     headers: getAuthHeaders(),

@@ -1,7 +1,9 @@
-import React, { useEffect, useState } from "react";
+import React from "react";
+import { useQuery } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { DashboardBackground } from "@/components/DashboardBackground";
 import {
   ShieldCheck,
   Users,
@@ -34,16 +36,17 @@ interface ActivityRow {
   timestamp: string;
 }
 
-interface DashboardStats {
-  totalUsers: number;
-  activeUsers: number;
-  inactiveUsers: number;
-  recentActions: number;
+interface DashboardPayload {
+  stats: { totalUsers: number; totalRoles: number; activeUsers: number };
+  recentUsers: AdminUser[];
+}
+
+interface ActivityPayload {
+  data: ActivityRow[];
+  total: number;
 }
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
-
-
 const getRelativeTime = (timestamp: string) => {
   const diffMinutes = Math.floor(
     (Date.now() - new Date(timestamp).getTime()) / 1000 / 60,
@@ -64,7 +67,6 @@ const getRelativeTimeColor = (timestamp: string) => {
   return "text-muted-foreground";
 };
 
-// Pick an icon based on the activity event/action
 const getActivityIcon = (event: string, actionType: string) => {
   if (event === "login" || event === "logout") return UserCheck;
   if (actionType === "settings_change") return Lock;
@@ -74,58 +76,51 @@ const getActivityIcon = (event: string, actionType: string) => {
 
 // ─── COMPONENT ────────────────────────────────────────────────────────────────
 export default function AdminDashboard() {
-  const [stats, setStats] = useState<DashboardStats>({
-    totalUsers: 0,
-    activeUsers: 0,
-    inactiveUsers: 0,
-    recentActions: 0,
+  const {
+    data: dashData,
+    isLoading: dashLoading,
+    isError: dashError,
+    refetch,
+    isFetching,
+    dataUpdatedAt,
+  } = useQuery<DashboardPayload>({
+    queryKey: ["adminDashboard"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/admin-dashboard");
+      if (!res.ok) throw new Error("Failed to fetch dashboard");
+      return res.json();
+    },
+    staleTime: 60_000,
+    refetchInterval: 2 * 60_000,
+    refetchOnWindowFocus: true,
   });
-  const [recentUsers, setRecentUsers] = useState<AdminUser[]>([]);
-  const [recentActivities, setRecentActivities] = useState<ActivityRow[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [lastRefreshed, setLastRefreshed] = useState<Date>(new Date());
 
-const fetchDashboardData = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [dashRes, activityRes] = await Promise.all([
-        fetchWithAuth("/api/admin-dashboard"),
-        fetchWithAuth("/api/user-activity?limit=6&page=1"),
-      ]);
+  const { data: activityData, isLoading: activityLoading } =
+    useQuery<ActivityPayload>({
+      queryKey: ["adminActivity"],
+      queryFn: async () => {
+        const res = await fetchWithAuth("/api/user-activity?limit=6&page=1");
+        if (!res.ok) throw new Error("Failed to fetch activity log");
+        return res.json();
+      },
+      staleTime: 60_000,
+      refetchInterval: 90_000,
+      refetchOnWindowFocus: true,
+    });
 
-      if (!dashRes.ok) throw new Error("Failed to fetch dashboard");
-      if (!activityRes.ok) throw new Error("Failed to fetch activity log");
+  const loading = dashLoading || activityLoading;
 
-      const dash: {
-        stats: { totalUsers: number; totalRoles: number; activeUsers: number };
-        recentUsers: AdminUser[];
-      } = await dashRes.json();
+  const stats = dashData
+    ? {
+        totalUsers: dashData.stats.totalUsers,
+        activeUsers: dashData.stats.activeUsers,
+        inactiveUsers: dashData.stats.totalUsers - dashData.stats.activeUsers,
+        recentActions: activityData?.total ?? 0,
+      }
+    : { totalUsers: 0, activeUsers: 0, inactiveUsers: 0, recentActions: 0 };
 
-      const activityData: { data: ActivityRow[]; total: number } =
-        await activityRes.json();
-
-      setStats({
-        totalUsers: dash.stats.totalUsers,
-        activeUsers: dash.stats.activeUsers,
-        inactiveUsers: dash.stats.totalUsers - dash.stats.activeUsers,
-        recentActions: activityData.total,
-      });
-
-      setRecentUsers(dash.recentUsers);
-      setRecentActivities(activityData.data);
-      setLastRefreshed(new Date());
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchDashboardData();
-  }, []);
+  const recentUsers = dashData?.recentUsers ?? [];
+  const recentActivities = activityData?.data ?? [];
 
   const statCards = [
     {
@@ -160,10 +155,10 @@ const fetchDashboardData = async () => {
 
   return (
     <>
-      <div className="max-w-7xl mx-auto px-2 sm:px-4 md:px-6 lg:px-8 py-6">
+      <div className="relative max-w-7xl mx-auto px-2 sm:px-4 md:px-6 lg:px-8 py-6">
+        <DashboardBackground />
         <Breadcrumbs items={["Admin", "Dashboard"]} />
 
-        {/* ── Page header ── */}
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">
@@ -174,32 +169,31 @@ const fetchDashboardData = async () => {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            {!loading && (
+            {dataUpdatedAt > 0 && (
               <span className="text-xs text-muted-foreground hidden sm:block">
-                Last refreshed: {lastRefreshed.toLocaleTimeString("en-IN")}
+                Last refreshed:{" "}
+                {new Date(dataUpdatedAt).toLocaleTimeString("en-IN")}
               </span>
             )}
             <button
-              onClick={fetchDashboardData}
-              disabled={loading}
+              onClick={() => refetch()}
+              disabled={isFetching}
               className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm hover:bg-accent transition disabled:opacity-50"
             >
               <RefreshCw
-                className={`w-4 h-4 ${loading ? "animate-spin" : ""}`}
+                className={`w-4 h-4 ${isFetching ? "animate-spin" : ""}`}
               />
               Refresh
             </button>
           </div>
         </div>
 
-        {/* ── Error banner ── */}
-        {error && (
+        {dashError && (
           <div className="mb-6 px-4 py-3 rounded-lg bg-destructive/10 border border-destructive/30 text-destructive text-sm">
-            {error} — showing last known data.
+            Failed to load dashboard data — please try refreshing.
           </div>
         )}
 
-        {/* ── Stat cards ── */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-6 mb-8 bg-gradient-to-r from-primary/5 to-secondary/5 rounded-xl p-3 sm:p-4 md:p-6">
           {statCards.map((stat) => (
             <Card
@@ -226,9 +220,7 @@ const fetchDashboardData = async () => {
           ))}
         </div>
 
-        {/* ── Bottom grid ── */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-          {/* Recent Users */}
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-sm sm:text-base">
@@ -264,13 +256,13 @@ const fetchDashboardData = async () => {
                           </p>
                         </div>
                         <Badge
-                          className={`ml-2 px-1.5 sm:px-2.5 py-0.5 text-xs font-semibold border-2 transition-colors focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 whitespace-nowrap ${
+                          className={`ml-2 px-1.5 sm:px-2.5 py-0.5 text-xs font-semibold border-2 transition-colors whitespace-nowrap ${
                             !user.discontinue
                               ? "border-green-500 bg-transparent text-green-700 hover:bg-green-500/10"
                               : "border-red-500 bg-transparent text-red-700 hover:bg-red-500/10"
                           }`}
                         >
-{!user.discontinue ? "Active" : "Inactive"}
+                          {!user.discontinue ? "Active" : "Inactive"}
                         </Badge>
                       </li>
                     ))}
@@ -280,7 +272,6 @@ const fetchDashboardData = async () => {
             </CardContent>
           </Card>
 
-          {/* Recent Activity */}
           <Card className="md:col-span-1 lg:col-span-2">
             <CardHeader className="pb-3">
               <CardTitle className="text-sm sm:text-base">
@@ -312,11 +303,10 @@ const fetchDashboardData = async () => {
                       const description =
                         activity.details ||
                         `${activity.event} — ${activity.resource || activity.actionType || "system"}`;
-
                       return (
                         <div
                           key={activity.id || i}
-                          className="flex items-start gap-2 sm:gap-3 p-2 sm:p-3 bg-gradient-to-r from-muted/30 to-accent/30 rounded-lg text-xs sm:text-sm hover:shadow-md hover:ring-1 hover:ring-primary/20 transition-all group"
+                          className="flex items-start gap-2 sm:gap-3 p-2 sm:p-3 bg-gradient-to-r from-muted/30 to-accent/30 rounded-lg text-xs sm:text-sm hover:shadow-md hover:ring-1 hover:ring-primary/20 transition-all"
                         >
                           <Icon className="h-3.5 w-3.5 sm:h-4 sm:w-4 mt-0.5 flex-shrink-0 text-muted-foreground" />
                           <div className="min-w-0 flex-1 space-y-1">
@@ -339,9 +329,7 @@ const fetchDashboardData = async () => {
                           </div>
                           <Badge
                             variant="outline"
-                            className={`text-xs whitespace-nowrap ml-1 sm:ml-2 ${getRelativeTimeColor(
-                              activity.timestamp,
-                            )}`}
+                            className={`text-xs whitespace-nowrap ml-1 sm:ml-2 ${getRelativeTimeColor(activity.timestamp)}`}
                           >
                             {getRelativeTime(activity.timestamp)}
                           </Badge>

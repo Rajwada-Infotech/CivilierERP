@@ -211,6 +211,8 @@ router.get("/", async (req, res) => {
         total: gr.TotalCount ?? 0,
         thisMonth: gr.ThisMonthCount ?? 0,
         today: gr.TodayCount ?? 0,
+        totalValue: parseFloat(gr.TotalValue ?? 0),
+        thisMonthValue: parseFloat(gr.ThisMonthValue ?? 0),
       },
       purchaseOrders: {
         total: po.TotalCount ?? 0,

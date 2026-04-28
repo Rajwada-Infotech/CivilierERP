@@ -4,17 +4,30 @@ const { bumpCacheVersion } = require("../redis");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 
+// Bust stale cache on every deploy/restart so schema changes take effect immediately
+bumpCacheVersion("uom-master").catch(() => {});
+
 // GET all UOM
 router.get("/", cache("uom-master", 300), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT Id, UOMName, UOMCode, CreatedAt, Symbol, UOMType,
-             DecimalPlaces, ConversionFactor, IsBaseUnit, Remarks, IsActive
+      SELECT Id, UOMName, UOMCode, CreatedAt, Symbol, Remarks, IsActive
       FROM dbo.UOMMaster
       ORDER BY UOMName
     `);
     res.json(result.recordset);
+  } catch (err) {
+    console.error("[uom-master] GET error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Cache bust — call once after schema migrations
+router.post("/cache-bust", async (req, res) => {
+  try {
+    await bumpCacheVersion("uom-master");
+    res.json({ message: "UOM cache cleared" });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -22,33 +35,24 @@ router.get("/", cache("uom-master", 300), async (req, res) => {
 
 // ADD UOM
 router.post("/", async (req, res) => {
-  const {
-    UOMName, UOMCode, Symbol, UOMType,
-    DecimalPlaces, ConversionFactor, IsBaseUnit, Remarks, IsActive,
-  } = req.body;
+  const { UOMName, UOMCode, Symbol, Remarks, IsActive } = req.body;
   const createdBy = req.user?.userId || null;
 
   try {
     const pool = getPool();
-    await pool.request()
-      .input("UOMName",          sql.NVarChar(50),   UOMName)
-      .input("UOMCode",          sql.NVarChar(20),   UOMCode)
-      .input("Symbol",           sql.NVarChar(20),   Symbol           || null)
-      .input("UOMType",          sql.NVarChar(20),   UOMType          || null)
-      .input("DecimalPlaces",    sql.Int,            DecimalPlaces    ?? 0)
-      .input("ConversionFactor", sql.Decimal(18, 6), ConversionFactor ?? null)
-      .input("IsBaseUnit",       sql.Bit,            IsBaseUnit ? 1 : 0)
-      .input("Remarks",          sql.NVarChar(250),  Remarks          || null)
-      .input("IsActive",         sql.Bit,            IsActive !== false ? 1 : 0)
-      .input("CreatedBy",        sql.Int,            createdBy)
-      .input("CreatedAt",        sql.DateTime2(3),   new Date())
-      .query(`
+    await pool
+      .request()
+      .input("UOMName", sql.NVarChar(50), UOMName)
+      .input("UOMCode", sql.NVarChar(20), UOMCode)
+      .input("Symbol", sql.NVarChar(20), Symbol || null)
+      .input("Remarks", sql.NVarChar(250), Remarks || null)
+      .input("IsActive", sql.Bit, IsActive !== false ? 1 : 0)
+      .input("CreatedBy", sql.Int, createdBy)
+      .input("CreatedAt", sql.DateTime2(3), new Date()).query(`
         INSERT INTO dbo.UOMMaster
-          (UOMName, UOMCode, Symbol, UOMType, DecimalPlaces,
-           ConversionFactor, IsBaseUnit, Remarks, IsActive, CreatedBy, CreatedAt)
+          (UOMName, UOMCode, Symbol, Remarks, IsActive, CreatedBy, CreatedAt)
         VALUES
-          (@UOMName, @UOMCode, @Symbol, @UOMType, @DecimalPlaces,
-           @ConversionFactor, @IsBaseUnit, @Remarks, @IsActive, @CreatedBy, @CreatedAt)
+          (@UOMName, @UOMCode, @Symbol, @Remarks, @IsActive, @CreatedBy, @CreatedAt)
       `);
     await bumpCacheVersion("uom-master");
     await bumpCacheVersion("stock-ledger");
@@ -61,40 +65,29 @@ router.post("/", async (req, res) => {
 // UPDATE UOM
 router.put("/:id", async (req, res) => {
   const { id } = req.params;
-  const {
-    UOMName, UOMCode, Symbol, UOMType,
-    DecimalPlaces, ConversionFactor, IsBaseUnit, Remarks, IsActive,
-  } = req.body;
+  const { UOMName, UOMCode, Symbol, Remarks, IsActive } = req.body;
   const updatedBy = req.user?.userId || null;
 
   try {
     const pool = getPool();
-    await pool.request()
-      .input("Id",               sql.Int,            parseInt(id))
-      .input("UOMName",          sql.NVarChar(50),   UOMName)
-      .input("UOMCode",          sql.NVarChar(20),   UOMCode)
-      .input("Symbol",           sql.NVarChar(20),   Symbol           || null)
-      .input("UOMType",          sql.NVarChar(20),   UOMType          || null)
-      .input("DecimalPlaces",    sql.Int,            DecimalPlaces    ?? 0)
-      .input("ConversionFactor", sql.Decimal(18, 6), ConversionFactor ?? null)
-      .input("IsBaseUnit",       sql.Bit,            IsBaseUnit ? 1 : 0)
-      .input("Remarks",          sql.NVarChar(250),  Remarks          || null)
-      .input("IsActive",         sql.Bit,            IsActive !== false ? 1 : 0)
-      .input("UpdatedBy",        sql.Int,            updatedBy)
-      .input("UpdatedAt",        sql.DateTime2(3),   new Date())
-      .query(`
+    await pool
+      .request()
+      .input("Id", sql.Int, parseInt(id))
+      .input("UOMName", sql.NVarChar(50), UOMName)
+      .input("UOMCode", sql.NVarChar(20), UOMCode)
+      .input("Symbol", sql.NVarChar(20), Symbol || null)
+      .input("Remarks", sql.NVarChar(250), Remarks || null)
+      .input("IsActive", sql.Bit, IsActive !== false ? 1 : 0)
+      .input("UpdatedBy", sql.Int, updatedBy)
+      .input("UpdatedAt", sql.DateTime2(3), new Date()).query(`
         UPDATE dbo.UOMMaster SET
-          UOMName          = @UOMName,
-          UOMCode          = @UOMCode,
-          Symbol           = @Symbol,
-          UOMType          = @UOMType,
-          DecimalPlaces    = @DecimalPlaces,
-          ConversionFactor = @ConversionFactor,
-          IsBaseUnit       = @IsBaseUnit,
-          Remarks          = @Remarks,
-          IsActive         = @IsActive,
-          UpdatedBy        = @UpdatedBy,
-          UpdatedAt        = @UpdatedAt
+          UOMName   = @UOMName,
+          UOMCode   = @UOMCode,
+          Symbol    = @Symbol,
+          Remarks   = @Remarks,
+          IsActive  = @IsActive,
+          UpdatedBy = @UpdatedBy,
+          UpdatedAt = @UpdatedAt
         WHERE Id = @Id
       `);
     await bumpCacheVersion("uom-master");
@@ -115,7 +108,8 @@ router.delete("/:id", async (req, res) => {
     const pool = getPool();
 
     // Get UOM details for context
-    const uomResult = await pool.request()
+    const uomResult = await pool
+      .request()
       .input("Id", sql.Int, id)
       .query("SELECT UOMName, UOMCode FROM dbo.UOMMaster WHERE Id = @Id");
 
@@ -156,12 +150,14 @@ router.delete("/:id", async (req, res) => {
     const usedIn = [];
     for (const check of checks) {
       try {
-        const result = await pool.request()
-          .input("Id",      sql.Int,         id)
+        const result = await pool
+          .request()
+          .input("Id", sql.Int, id)
           .input("UOMCode", sql.NVarChar(20), UOMCode)
           .query(check.query);
         const cnt = result.recordset[0]?.cnt ?? 0;
-        if (cnt > 0) usedIn.push(`${check.label} (${cnt} record${cnt === 1 ? "" : "s"})`);
+        if (cnt > 0)
+          usedIn.push(`${check.label} (${cnt} record${cnt === 1 ? "" : "s"})`);
       } catch {
         // If the table/column doesn't exist in this schema, skip gracefully
       }
@@ -175,7 +171,8 @@ router.delete("/:id", async (req, res) => {
     }
 
     // Safe to delete
-    await pool.request()
+    await pool
+      .request()
       .input("Id", sql.Int, id)
       .query("DELETE FROM dbo.UOMMaster WHERE Id = @Id");
 
