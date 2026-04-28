@@ -2015,6 +2015,14 @@ const WorkOrderMaster: React.FC = () => {
   const { finYears } = useFinYear();
   const activeFinYear =
     finYears.find((fy) => fy.status === "Active")?.year || undefined;
+  const finYearOptions = finYears.filter((fy) => fy.status === "Active");
+  const [selectedFinYear, setSelectedFinYear] = useState("");
+
+  useEffect(() => {
+    if (!selectedFinYear && activeFinYear) {
+      setSelectedFinYear(activeFinYear);
+    }
+  }, [activeFinYear, selectedFinYear]);
 
   // ── Tab state ─────────────────────────────────────────────────────────────
   const [viewMode, setViewMode] = useState<ViewMode>("create");
@@ -2037,12 +2045,18 @@ const WorkOrderMaster: React.FC = () => {
     setForm((prev) => ({ ...prev, docNumber: docNo }));
   };
 
-  const refreshWoDocNumber = async (docTypeId: number | null = woDocTypeId) => {
+  const refreshWoDocNumber = async (
+    docTypeId: number | null = woDocTypeId,
+    finYearOverride = selectedFinYear,
+  ) => {
     if (!docTypeId) {
       applyWoDocNumber(null, "");
       return "";
     }
-    const nextDocNo = await fetchNextDocNumber(docTypeId, activeFinYear);
+    const nextDocNo = await fetchNextDocNumber(
+      docTypeId,
+      finYearOverride || undefined,
+    );
     applyWoDocNumber(docTypeId, nextDocNo);
     return nextDocNo;
   };
@@ -2133,7 +2147,7 @@ const WorkOrderMaster: React.FC = () => {
   const resetAll = async (keepDocType = false) => {
     const nextDocTypeId = keepDocType ? woDocTypeId : null;
     const nextDocNo = nextDocTypeId
-      ? await fetchNextDocNumber(nextDocTypeId, activeFinYear)
+      ? await fetchNextDocNumber(nextDocTypeId, selectedFinYear || undefined)
       : "";
     setForm({ ...EMPTY_FORM(), docNumber: nextDocNo });
     setGroups([EMPTY_GROUP()]);
@@ -2171,7 +2185,7 @@ const WorkOrderMaster: React.FC = () => {
         TermsAndConditions: form.termsAndConditions || null,
         DocTypeId: woDocTypeId,
         DocNo: form.docNumber || woDocNo || null,
-        finYear: activeFinYear || null,
+        finYear: selectedFinYear || null,
         CreatedBy: userId,
       });
       const newHeaderId: number = created.Id;
@@ -2224,11 +2238,7 @@ const WorkOrderMaster: React.FC = () => {
       setSaved(true);
       setSavedId(newHeaderId);
       setSavedStatus("Draft");
-      if (woDocTypeId) {
-        await refreshWoDocNumber(woDocTypeId);
-      } else {
-        setForm((p) => ({ ...p, docNumber: "" }));
-      }
+      await resetAll(!!woDocTypeId);
       setTimeout(() => setSaved(false), 3000);
     } catch (err: unknown) {
       const msg: string = err instanceof Error ? err.message : String(err);
@@ -2428,8 +2438,29 @@ const WorkOrderMaster: React.FC = () => {
               <Hash size={15} className="text-primary shrink-0" />
               <h2 className="text-sm font-semibold text-foreground">Document Type &amp; Number</h2>
             </div>
+            <div className="mb-3">
+              <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
+                Fin Year
+              </label>
+              <select
+                value={selectedFinYear}
+                onChange={(e) => {
+                  const nextFinYear = e.target.value;
+                  setSelectedFinYear(nextFinYear);
+                  if (woDocTypeId) void refreshWoDocNumber(woDocTypeId, nextFinYear);
+                }}
+                className={selectCls}
+              >
+                <option value="">Select fin year...</option>
+                {finYearOptions.map((fy) => (
+                  <option key={fy.id} value={fy.year}>
+                    {fy.year}
+                  </option>
+                ))}
+              </select>
+            </div>
             <DocNumberPreview
-              finYear={activeFinYear}
+              finYear={selectedFinYear || undefined}
               selectedDocTypeId={woDocTypeId}
               preview={woDocNo}
               onSelect={applyWoDocNumber}

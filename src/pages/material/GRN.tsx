@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -66,6 +66,7 @@ export default function GRN() {
 
   const activeFinYear =
     finYears.find((fy) => fy.status === "Active")?.year || undefined;
+  const finYearOptions = finYears.filter((fy) => fy.status === "Active");
 
   const buildEmptyForm = (
     overrides: Partial<{
@@ -80,6 +81,7 @@ export default function GRN() {
       items: GRNItemLine[];
       docTypeId: number | null;
       docNo: string;
+      finYear: string;
     }> = {},
   ) => ({
     grnNo: "",
@@ -93,6 +95,7 @@ export default function GRN() {
     items: [createEmptyItem()],
     docTypeId: null as number | null,
     docNo: "",
+    finYear: activeFinYear || "",
     ...overrides,
   });
 
@@ -101,6 +104,12 @@ export default function GRN() {
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!formData.finYear && activeFinYear) {
+      setFormData((prev) => ({ ...prev, finYear: activeFinYear }));
+    }
+  }, [activeFinYear, formData.finYear]);
 
   // ── Queries ──────────────────────────────────────────────────────────────────
   const { data: grnsPage, isLoading: loadingGrns } = useQuery({
@@ -201,8 +210,9 @@ export default function GRN() {
   // ── Helpers ──────────────────────────────────────────────────────────────────
   const resetForm = async (keepDocType = false) => {
     const nextDocTypeId = keepDocType ? formData.docTypeId : null;
+    const nextFinYear = formData.finYear || activeFinYear || "";
     const nextDocNo = nextDocTypeId
-      ? await fetchNextDocNumber(nextDocTypeId, activeFinYear)
+      ? await fetchNextDocNumber(nextDocTypeId, nextFinYear || undefined)
       : "";
 
     setFormData(
@@ -210,6 +220,7 @@ export default function GRN() {
         docTypeId: nextDocTypeId,
         docNo: nextDocNo,
         grnNo: nextDocNo,
+        finYear: nextFinYear,
       }),
     );
     setEditingId(null);
@@ -246,7 +257,7 @@ export default function GRN() {
       poNumber: formData.poNumber,
       docTypeId: formData.docTypeId,
       docNo: formData.docNo,
-      finYear: activeFinYear || null,
+      finYear: formData.finYear || null,
     };
 
     if (editingId) {
@@ -417,8 +428,41 @@ export default function GRN() {
               <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                 Document Type &amp; Number
               </label>
+              <div className="mb-3">
+                <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  Fin Year
+                </label>
+                <select
+                  value={formData.finYear}
+                  onChange={async (e) => {
+                    const nextFinYear = e.target.value;
+                    if (formData.docTypeId) {
+                      const nextDocNo = await fetchNextDocNumber(
+                        formData.docTypeId,
+                        nextFinYear || undefined,
+                      );
+                      setFormData((prev) => ({
+                        ...prev,
+                        finYear: nextFinYear,
+                        docNo: nextDocNo,
+                        grnNo: nextDocNo,
+                      }));
+                      return;
+                    }
+                    setFormData((prev) => ({ ...prev, finYear: nextFinYear }));
+                  }}
+                  className={inp}
+                >
+                  <option value="">Select Fin Year...</option>
+                  {finYearOptions.map((fy) => (
+                    <option key={fy.id} value={fy.year}>
+                      {fy.year}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <DocNumberPreview
-                finYear={activeFinYear}
+                finYear={formData.finYear || undefined}
                 selectedDocTypeId={formData.docTypeId}
                 preview={formData.docNo}
                 onSelect={(id, preview) =>

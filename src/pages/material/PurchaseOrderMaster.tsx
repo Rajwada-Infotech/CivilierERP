@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   MasterPage,
@@ -41,6 +41,14 @@ const PurchaseOrderMaster = () => {
   const [poFormPatchKey, setPoFormPatchKey] = useState(0);
   const activeFinYear =
     finYears.find((fy) => fy.status === "Active")?.year || undefined;
+  const finYearOptions = finYears.filter((fy) => fy.status === "Active");
+  const [selectedFinYear, setSelectedFinYear] = useState("");
+
+  useEffect(() => {
+    if (!selectedFinYear && activeFinYear) {
+      setSelectedFinYear(activeFinYear);
+    }
+  }, [activeFinYear, selectedFinYear]);
 
   const applyPoDocNumber = (docTypeId: number | null, docNo: string) => {
     setPoDocTypeId(docTypeId);
@@ -53,13 +61,20 @@ const PurchaseOrderMaster = () => {
     setPoFormPatchKey((current) => current + 1);
   };
 
-  const refreshPoDocNumber = async (docTypeId: number | null = poDocTypeId) => {
+  const refreshPoDocNumber = async (
+    docTypeId: number | null = poDocTypeId,
+    finYearOverride = selectedFinYear,
+  ) => {
     if (!docTypeId) {
       applyPoDocNumber(null, "");
-      return;
+      return "";
     }
-    const nextDocNo = await fetchNextDocNumber(docTypeId, activeFinYear);
+    const nextDocNo = await fetchNextDocNumber(
+      docTypeId,
+      finYearOverride || undefined,
+    );
     applyPoDocNumber(docTypeId, nextDocNo);
+    return nextDocNo;
   };
 
   // ── Remote data ──────────────────────────────────────────────────────────────
@@ -196,7 +211,7 @@ const PurchaseOrderMaster = () => {
       Remarks:              (r.remarks as string)  || null,
       DocTypeId:            (r.docTypeId as number | null) ?? poDocTypeId,
       DocNo:                finalNumber || (r.docNo as string) || poDocNo || null,
-      finYear:              activeFinYear || null,
+      finYear:              selectedFinYear || null,
     };
   };
 
@@ -205,20 +220,31 @@ const PurchaseOrderMaster = () => {
     try {
       if (event.action === "add") {
         await addPurchaseOrder(toPayload(event.record));
+        await queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
+        setPage(1);
         toast.success("Purchase Order created successfully!");
-        await refreshPoDocNumber();
+        const nextDocNo = await refreshPoDocNumber();
+        return {
+          poNumber: nextDocNo,
+          docNo: nextDocNo,
+          docTypeId: poDocTypeId,
+        };
       } else if (event.action === "update") {
         await updatePurchaseOrder(event.id, toPayload(event.record));
+        await queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
+        setPage(1);
         toast.success("Purchase Order updated successfully!");
       } else if (event.action === "delete") {
         await deletePurchaseOrder(event.id);
+        await queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
+        setPage(1);
         toast.success("Purchase Order deleted successfully!");
       }
-      await queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
-      setPage(1);
     } catch (err: any) {
       toast.error(`Operation failed: ${err.message}`);
+      throw err;
     }
+    return undefined;
   };
 
   // ── Reactive field logic ─────────────────────────────────────────────────────
@@ -368,10 +394,29 @@ const PurchaseOrderMaster = () => {
       </h1>
       <div className="mb-4 rounded-xl bg-card border border-border p-4">
         <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-2">
+          Fin Year
+        </label>
+        <select
+          value={selectedFinYear}
+          onChange={(e) => {
+            const nextFinYear = e.target.value;
+            setSelectedFinYear(nextFinYear);
+            if (poDocTypeId) void refreshPoDocNumber(poDocTypeId, nextFinYear);
+          }}
+          className="mb-4 w-full rounded-lg border border-border bg-muted px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+        >
+          <option value="">Select Fin Year...</option>
+          {finYearOptions.map((fy) => (
+            <option key={fy.id} value={fy.year}>
+              {fy.year}
+            </option>
+          ))}
+        </select>
+        <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-2">
           Document Type &amp; Number
         </label>
         <DocNumberPreview
-          finYear={activeFinYear}
+          finYear={selectedFinYear || undefined}
           selectedDocTypeId={poDocTypeId}
           preview={poDocNo}
           onSelect={applyPoDocNumber}
