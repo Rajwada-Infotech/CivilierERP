@@ -16,9 +16,6 @@ interface DbUOM {
   UOMName: string;
   UOMCode: string;
   Symbol: string | null;
-  DecimalPlaces: number;
-  ConversionFactor: number | null;
-  IsBaseUnit: boolean;
   Remarks: string | null;
   IsActive: boolean;
   CreatedAt: string | null;
@@ -45,26 +42,6 @@ const FIELDS: FieldDef[] = [
     required: true,
   },
   {
-    name: "decimalPlaces",
-    label: "Decimal Places",
-    type: "number",
-    min: 0,
-    max: 6,
-    required: true,
-  },
-  {
-    name: "conversionFactor",
-    label: "Conversion Factor",
-    type: "number",
-    required: false,
-  },
-  {
-    name: "isBaseUnit",
-    label: "Base Unit",
-    type: "toggle",
-    defaultValue: false,
-  },
-  {
     name: "remarks",
     label: "Remarks",
     type: "textarea",
@@ -82,7 +59,6 @@ const COLUMNS: ColumnDef[] = [
   { key: "code", label: "Code" },
   { key: "name", label: "Name" },
   { key: "symbol", label: "Symbol" },
-  { key: "decimalPlaces", label: "Decimals" },
   { key: "status", label: "Status" },
 ];
 
@@ -90,11 +66,6 @@ const toPayload = (record: Record<string, unknown>) => ({
   UOMCode: record.code as string,
   UOMName: record.name as string,
   Symbol: record.symbol as string,
-  DecimalPlaces: Number(record.decimalPlaces ?? 0),
-  ConversionFactor: record.conversionFactor
-    ? Number(record.conversionFactor)
-    : null,
-  IsBaseUnit: Boolean(record.isBaseUnit),
   Remarks: (record.remarks as string) || null,
   IsActive: record.status !== false,
 });
@@ -114,11 +85,6 @@ const columnRenderers = {
     <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/60 px-2.5 py-1 text-[11px] font-heading text-foreground">
       <Ruler size={11} className="text-primary" />
       {String(value ?? "")}
-    </span>
-  ),
-  decimalPlaces: (value: unknown) => (
-    <span className="text-sm font-mono text-foreground">
-      {String(value ?? 0)} places
     </span>
   ),
   status: (value: unknown) => (
@@ -159,9 +125,6 @@ export default function UnitOfMeasurementMaster() {
     code: item.UOMCode || "",
     name: item.UOMName || "",
     symbol: item.Symbol || "",
-    decimalPlaces: item.DecimalPlaces ?? 0,
-    conversionFactor: item.ConversionFactor ?? "",
-    isBaseUnit: Boolean(item.IsBaseUnit),
     remarks: item.Remarks || "",
     status: Boolean(item.IsActive),
   }));
