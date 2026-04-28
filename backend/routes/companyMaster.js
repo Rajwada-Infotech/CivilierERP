@@ -89,6 +89,7 @@ router.post("/", adminOnly, async (req, res) => {
       .input("currency", sql.NVarChar(10), f.currency || "INR")
       .input("fiscal_year_start", sql.NVarChar(20), f.fiscalYearStart || null)
       .input("logo", sql.NVarChar(sql.MAX), f.logoUrl || null)
+      .input("belongs_to", sql.Int, f.belongsTo ? parseInt(f.belongsTo) : null)
       .input("discontinue", sql.Bit, f.isActive ? 0 : 1)
       .input("date_of_entry", sql.Date, new Date()).query(`
         INSERT INTO dbo.enterprise (
@@ -96,13 +97,13 @@ router.post("/", adminOnly, async (req, res) => {
           cr_code, date_of_establishment, cin, pan, tan, gst_type, gst_issue_date,
           trade_license, address, city, state, country, pincode,
           phone_number, email, website, currency, fiscal_year_start,
-          logo, discontinue, date_of_entry
+          logo, belongs_to, discontinue, date_of_entry
         ) VALUES (
           @name, @short_name, @business_identity, @business_type, @entity_type, @description,
           @cr_code, @date_of_establishment, @cin, @pan, @tan, @gst_type, @gst_issue_date,
           @trade_license, @address, @city, @state, @country, @pincode,
           @phone_number, @email, @website, @currency, @fiscal_year_start,
-          @logo, @discontinue, @date_of_entry
+          @logo, @belongs_to, @discontinue, @date_of_entry
         )
       `);
     await bumpCacheVersion("enterprises");
@@ -144,6 +145,7 @@ router.put("/:id", adminOnly, async (req, res) => {
       .input("currency", sql.NVarChar(10), f.currency || "INR")
       .input("fiscal_year_start", sql.NVarChar(20), f.fiscalYearStart || null)
       .input("logo", sql.NVarChar(sql.MAX), f.logoUrl || null)
+      .input("belongs_to", sql.Int, f.belongsTo ? parseInt(f.belongsTo) : null)
       .input("discontinue", sql.Bit, f.isActive ? 0 : 1).query(`
         UPDATE dbo.enterprise SET
           name=@name, short_name=@short_name, business_identity=@business_identity,
@@ -153,7 +155,7 @@ router.put("/:id", adminOnly, async (req, res) => {
           address=@address, city=@city, state=@state, country=@country, pincode=@pincode,
           phone_number=@phone_number, email=@email, website=@website,
           currency=@currency, fiscal_year_start=@fiscal_year_start,
-          logo=@logo, discontinue=@discontinue
+          logo=@logo, belongs_to=@belongs_to, discontinue=@discontinue
         WHERE id=@id AND business_type='C'
       `);
     await bumpCacheVersion("enterprises");
