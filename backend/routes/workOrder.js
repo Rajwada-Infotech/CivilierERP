@@ -4,6 +4,7 @@ const { bumpCacheVersion } = require("../redis");
 const { transition, guardEdit } = require("../services/approvalService");
 const router = express.Router();
 const { getPool, sql } = require("../db");
+const { lockNextDocNumber, backPatchRecordId } = require("../utils/docNumberLock");
 
 const requireUserName = (req, res) => {
   const email = req.user?.name;
@@ -249,21 +250,36 @@ router.get("/:id", cache("work-orders", 300), async (req, res) => {
 router.post("/", async (req, res) => {
   const { CompanyId, ProjectId, DocumentNumber, DocumentDate,
           ContractorId, TotalAmount, Remarks, TermsAndConditions,
-          DocTypeId, DocNo } = req.body;
+          DocTypeId, DocNo, finYear } = req.body;
+  let transaction;
   try {
     const pool = getPool();
-    const result = await pool.request()
+    transaction = pool.transaction();
+    await transaction.begin();
+
+    let finalDocNo = DocumentNumber || DocNo || null;
+
+    if (DocTypeId) {
+      finalDocNo = await lockNextDocNumber(transaction, sql, {
+        docTypeId: parseInt(DocTypeId, 10),
+        finYear,
+        tableName: "WorkOrderHeader",
+        issuedBy: req.user?.email || req.user?.name || null,
+      });
+    }
+
+    const result = await transaction.request()
       .input("CompanyId",          sql.Int,               CompanyId          || null)
       .input("ProjectId",          sql.Int,               ProjectId          || null)
-      .input("DocumentNumber",     sql.NVarChar(100),     DocumentNumber     || null)
+      .input("DocumentNumber",     sql.NVarChar(100),     finalDocNo         || null)
       .input("DocumentDate",       sql.Date,              DocumentDate       || null)
       .input("ContractorId",       sql.Int,               ContractorId       || null)
       .input("TotalAmount",        sql.Decimal(18,2),     TotalAmount        || 0)
       .input("Remarks",            sql.NVarChar(500),     Remarks            || null)
       .input("TermsAndConditions", sql.NVarChar(sql.MAX), TermsAndConditions || null)
       .input("DocTypeId",          sql.Int,               DocTypeId ? parseInt(DocTypeId, 10) : null)
-      .input("DocNo",              sql.NVarChar(100),     DocNo              || null)
-      .input("CreatedBy",          sql.NVarChar(100),     req.user?.name    || null)
+      .input("DocNo",              sql.NVarChar(100),     finalDocNo         || null)
+      .input("CreatedBy",          sql.NVarChar(100),     req.user?.name     || null)
       .input("CreatedAt",          sql.DateTime,          new Date())
       .query(`
         INSERT INTO dbo.WorkOrderHeader
@@ -274,9 +290,32 @@ router.post("/", async (req, res) => {
           (@CompanyId, @ProjectId, @DocumentNumber, @DocumentDate, @ContractorId,
            @TotalAmount, @Remarks, @TermsAndConditions, @DocTypeId, @DocNo, @CreatedBy, @CreatedAt)
       `);
+    const newId = result.recordset[0].Id;
+
+    if (DocTypeId && finalDocNo) {
+      await backPatchRecordId(
+        transaction,
+        sql,
+        finalDocNo,
+        "WorkOrderHeader",
+        newId,
+      );
+    }
+
+    await transaction.commit();
     await bumpCacheVersion("work-orders");
-    res.status(201).json({ message: "Work order created", Id: result.recordset[0].Id });
+    res.status(201).json({
+      message: "Work order created",
+      Id: newId,
+      DocumentNumber: finalDocNo,
+      DocNo: finalDocNo,
+    });
   } catch (err) {
+    try {
+      if (transaction) await transaction.rollback();
+    } catch (_) {
+      // ignore rollback failure
+    }
     console.error("[POST /work-orders]", err.message);
     res.status(500).json({ error: err.message });
   }

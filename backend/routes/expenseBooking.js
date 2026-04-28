@@ -34,7 +34,7 @@ router.get("/options", async (req, res) => {
 });
 
 // ─── GET all ──────────────────────────────────────────────────────────────────
-router.get("/", cache("expense-booking", 300), async (req, res) => {
+router.get("/", cache("expense-booking", 60), async (req, res) => {
   try {
     const pool = getPool();
     const page = Math.max(parseInt(req.query.page) || 1, 1);

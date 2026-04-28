@@ -123,8 +123,8 @@ router.post("/", async (req, res) => {
   } = req.body;
 
   try {
-    const userEmail = requireUserName(req, res);
-    if (!userEmail) return;
+    const userName = requireUserName(req, res);
+    if (!userName) return;
 
     const pool = getPool();
     const columnMeta = await getAccountHeadColumnMeta();
@@ -167,7 +167,7 @@ router.post("/", async (req, res) => {
       insertColumns.push("LHeadCatagory"); insertValues.push("@LHeadCatagory");
     }
     if (hasColumn(columnMeta, "CreatedBy")) {
-      request.input("CreatedBy", sql.NVarChar(100), userEmail);
+      request.input("CreatedBy", sql.NVarChar(100), userName);
       insertColumns.push("CreatedBy"); insertValues.push("@CreatedBy");
     }
     if (hasColumn(columnMeta, "CreatedAt")) {
@@ -227,8 +227,8 @@ router.get("/bank-options", async (req, res) => {
 // ─── PUT /:id/submit — user submits for approval ───────────────────────────────
 router.put("/:id/submit", async (req, res) => {
   try {
-    const userEmail = requireUserName(req, res);
-    if (!userEmail) return;
+    const userName = requireUserName(req, res);
+    if (!userName) return;
 
     const pool = getPool();
 
@@ -245,7 +245,7 @@ router.put("/:id/submit", async (req, res) => {
 
     await pool.request()
       .input("id",        sql.Int,           req.params.id)
-      .input("UpdatedBy", sql.NVarChar(100), userEmail)
+      .input("UpdatedBy", sql.NVarChar(100), userName)
       .query(`
         UPDATE dbo.AccountHeadMaster SET
           Status    = 'Pending',
@@ -265,8 +265,8 @@ router.put("/:id/submit", async (req, res) => {
 // ─── PUT /:id/approve — admin approves ────────────────────────────────────────
 router.put("/:id/approve", adminOnly, async (req, res) => {
   try {
-    const userEmail = requireUserName(req, res);
-    if (!userEmail) return;
+    const userName = requireUserName(req, res);
+    if (!userName) return;
 
     const pool = getPool();
 
@@ -282,7 +282,7 @@ router.put("/:id/approve", adminOnly, async (req, res) => {
 
     await pool.request()
       .input("id",         sql.Int,           req.params.id)
-      .input("ApprovedBy", sql.NVarChar(100), userEmail)
+      .input("ApprovedBy", sql.NVarChar(100), userName)
       .query(`
         UPDATE dbo.AccountHeadMaster SET
           Status     = 'Approved',
@@ -302,8 +302,8 @@ router.put("/:id/approve", adminOnly, async (req, res) => {
 // ─── PUT /:id/reject — admin rejects ──────────────────────────────────────────
 router.put("/:id/reject", adminOnly, async (req, res) => {
   try {
-    const userEmail = requireUserName(req, res);
-    if (!userEmail) return;
+    const userName = requireUserName(req, res);
+    if (!userName) return;
 
     const { reason } = req.body; // optional rejection reason
 
@@ -321,7 +321,7 @@ router.put("/:id/reject", adminOnly, async (req, res) => {
 
     await pool.request()
       .input("id",        sql.Int,           req.params.id)
-      .input("UpdatedBy", sql.NVarChar(100), userEmail)
+      .input("UpdatedBy", sql.NVarChar(100), userName)
       .input("reason",    sql.NVarChar(500), reason || null)
       .query(`
         UPDATE dbo.AccountHeadMaster SET
@@ -349,8 +349,8 @@ router.put("/:id", async (req, res) => {
   } = req.body;
 
   try {
-    const userEmail = requireUserName(req, res);
-    if (!userEmail) return;
+    const userName = requireUserName(req, res);
+    if (!userName) return;
 
     const pool = getPool();
 
@@ -407,7 +407,7 @@ router.put("/:id", async (req, res) => {
       updates.push("LHeadCatagory=@LHeadCatagory");
     }
     if (hasColumn(columnMeta, "UpdatedBy")) {
-      request.input("UpdatedBy", sql.NVarChar(100), userEmail);
+      request.input("UpdatedBy", sql.NVarChar(100), userName);
       updates.push("UpdatedBy=@UpdatedBy");
     }
     if (hasColumn(columnMeta, "UpdatedAt")) {

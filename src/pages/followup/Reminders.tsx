@@ -1,191 +1,435 @@
-import React, { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { useAuth } from '@/contexts/AuthContext'
-import { useTask } from '@/contexts/TaskContext'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Button } from '@/components/ui/button'
-import { Badge } from '@/components/ui/badge'
-import { 
-  Clock, 
-  AlertCircle, 
-  CheckCircle, 
-  Calendar, 
-  Bell, 
-  User, 
-  DollarSign,
-  Table,
-  FileText 
-} from 'lucide-react'
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  TableHeader,
-  TableRow,
-  TableHead,
+  AlertCircle,
+  ArrowLeft,
+  Bell,
+  CheckCircle,
+  Clock,
+  Plus,
+  Send,
+} from "lucide-react";
+import { toast } from "sonner";
+
+import { useAuth } from "@/contexts/AuthContext";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Table as UITable,
   TableBody,
   TableCell,
-  Table as UITable
-} from '@/components/ui/table'
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
-// Mock reminder data (replace with API later)
-const MOCK_REMINDERS = [
-  { id: 1, customer: 'ABC Corp', amount: 25000, dueDate: '2024-12-15', daysOverdue: 5, status: 'overdue', lastContact: '2024-12-10' },
-  { id: 2, customer: 'XYZ Ltd', amount: 15000, dueDate: '2024-12-20', daysOverdue: 0, status: 'due-soon', lastContact: '2024-12-12' },
-  { id: 3, customer: 'Tech Innovators', amount: 45000, dueDate: '2024-12-25', daysOverdue: -2, status: 'scheduled', lastContact: '2024-12-15' },
-  { id: 4, customer: 'Global Traders', amount: 32000, dueDate: '2024-12-18', daysOverdue: 2, status: 'overdue', lastContact: '2024-12-08' },
-]
+type ReminderStatus = "sent" | "overdue" | "scheduled";
 
-const FollowupReminders = () => {
-  const navigate = useNavigate()
-  const { currentUser } = useAuth()
-  const { tasks } = useTask()
-  
-  const [selectedReminders, setSelectedReminders] = useState(new Set())
-  const [viewMode, setViewMode] = useState<'list' | 'grid'>('list')
+interface ReminderRecord {
+  id: number;
+  tenantName: string;
+  message?: string | null;
+  module?: string | null;
+  refId?: number | null;
+  dueDate?: string | null;
+  lastSentOn?: string | null;
+  IsSent?: boolean;
+  CreatedBy?: string | null;
+  CreatedAt?: string | null;
+  status: ReminderStatus;
+  amountDue?: number | null;
+}
 
-  const overdueReminders = MOCK_REMINDERS.filter(r => r.status === 'overdue').length
-  const dueSoonReminders = MOCK_REMINDERS.filter(r => r.status === 'due-soon').length
-  const totalReminders = MOCK_REMINDERS.length
+interface ReminderFormState {
+  title: string;
+  message: string;
+  module: string;
+  dueDate: string;
+  refId: string;
+}
 
-  const handleNewReminder = () => {
-    // Navigate to new reminder form (implement later)
-    console.log('Create new reminder')
+const EMPTY_FORM: ReminderFormState = {
+  title: "",
+  message: "",
+  module: "followup",
+  dueDate: "",
+  refId: "",
+};
+
+const STATUS_STYLES: Record<ReminderStatus, string> = {
+  overdue: "bg-red-500/10 text-red-600 border-red-500/30",
+  scheduled: "bg-indigo-500/10 text-indigo-600 border-indigo-500/30",
+  sent: "bg-green-500/10 text-green-600 border-green-500/30",
+};
+
+async function fetchReminders(): Promise<ReminderRecord[]> {
+  const response = await fetchWithAuth("/api/tenant-reminders");
+  if (!response.ok) {
+    throw new Error("Failed to load reminders");
   }
 
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'overdue': return <Badge className="bg-red-500/10 text-red-600 border-red-500/30">Overdue</Badge>
-      case 'due-soon': return <Badge className="bg-amber-500/10 text-amber-600 border-amber-500/30">Due Soon</Badge>
-      case 'scheduled': return <Badge className="bg-indigo-500/10 text-indigo-600 border-indigo-500/30">Scheduled</Badge>
-      default: return <Badge variant="secondary">Unknown</Badge>
-    }
+  const data = await response.json();
+  return Array.isArray(data) ? data : data.data || [];
+}
+
+async function createReminder(payload: {
+  title: string;
+  message?: string;
+  module?: string;
+  refId?: number;
+  dueDate?: string;
+  createdBy?: string;
+}) {
+  const response = await fetchWithAuth("/api/tenant-reminders", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || "Failed to create reminder");
   }
+}
+
+async function sendReminder(id: number) {
+  const response = await fetchWithAuth(`/api/tenant-reminders/send/${id}`, {
+    method: "POST",
+  });
+
+  if (!response.ok) {
+    const error = await response.json().catch(() => ({}));
+    throw new Error(error.error || "Failed to send reminder");
+  }
+}
+
+function formatDate(value?: string | null) {
+  if (!value) return "-";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("en-IN");
+}
+
+export default function FollowupReminders() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const { currentUser } = useAuth();
+  const [search, setSearch] = useState("");
+  const [isDialogOpen, setIsDialogOpen] = useState(false);
+  const [form, setForm] = useState<ReminderFormState>(EMPTY_FORM);
+
+  const { data: reminders = [], isLoading, isError } = useQuery({
+    queryKey: ["followup-reminders"],
+    queryFn: fetchReminders,
+  });
+
+  const createMutation = useMutation({
+    mutationFn: createReminder,
+    onSuccess: () => {
+      toast.success("Reminder created");
+      queryClient.invalidateQueries({ queryKey: ["followup-reminders"] });
+      setForm(EMPTY_FORM);
+      setIsDialogOpen(false);
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+
+  const sendMutation = useMutation({
+    mutationFn: sendReminder,
+    onSuccess: () => {
+      toast.success("Reminder marked as sent");
+      queryClient.invalidateQueries({ queryKey: ["followup-reminders"] });
+    },
+    onError: (error: Error) => {
+      toast.error(error.message);
+    },
+  });
+
+  const filteredReminders = reminders.filter((reminder) => {
+    const haystack = [
+      reminder.tenantName,
+      reminder.message || "",
+      reminder.module || "",
+    ]
+      .join(" ")
+      .toLowerCase();
+
+    return haystack.includes(search.toLowerCase());
+  });
+
+  const overdueCount = reminders.filter((reminder) => reminder.status === "overdue").length;
+  const scheduledCount = reminders.filter(
+    (reminder) => reminder.status === "scheduled",
+  ).length;
+  const sentCount = reminders.filter((reminder) => reminder.status === "sent").length;
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-4">
         <div>
           <h1 className="text-3xl font-heading font-bold text-foreground">
             Reminders Management
           </h1>
           <p className="text-muted-foreground mt-1">
-            Track payment reminders, follow-ups, and overdue invoices across all projects
+            Track and send follow-up reminders from the live `TenantReminders` table.
           </p>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => navigate('/followup')}>
-            ← Back to Dashboard
+          <Button
+            variant="outline"
+            onClick={() => navigate("/followup")}
+            className="gap-2"
+          >
+            <ArrowLeft className="w-4 h-4" />
+            Dashboard
           </Button>
-          <Button onClick={handleNewReminder} className="gap-2">
-            <Bell className="w-4 h-4" />
+          <Button onClick={() => setIsDialogOpen(true)} className="gap-2">
+            <Plus className="w-4 h-4" />
             New Reminder
           </Button>
         </div>
       </div>
 
-      {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <Card>
-          <CardHeader className="pb-3">
-            <div className="w-12 h-12 bg-red-500/10 text-red-600 rounded-xl flex items-center justify-center mb-3">
-              <AlertCircle className="w-6 h-6" />
-            </div>
-            <CardTitle className="text-2xl font-bold">{overdueReminders}</CardTitle>
-            <p className="text-sm text-muted-foreground">Overdue</p>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="pb-3">
-            <div className="w-12 h-12 bg-amber-500/10 text-amber-600 rounded-xl flex items-center justify-center mb-3">
-              <Clock className="w-6 h-6" />
-            </div>
-            <CardTitle className="text-2xl font-bold">{dueSoonReminders}</CardTitle>
-            <p className="text-sm text-muted-foreground">Due Soon</p>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="pb-3">
-            <div className="w-12 h-12 bg-indigo-500/10 text-indigo-600 rounded-xl flex items-center justify-center mb-3">
-              <Calendar className="w-6 h-6" />
-            </div>
-            <CardTitle className="text-2xl font-bold">{totalReminders}</CardTitle>
-            <p className="text-sm text-muted-foreground">Total</p>
-          </CardHeader>
-        </Card>
-        <Card>
-          <CardHeader className="pb-3">
-            <div className="w-12 h-12 bg-green-500/10 text-green-600 rounded-xl flex items-center justify-center mb-3">
-              <CheckCircle className="w-6 h-6" />
-            </div>
-            <CardTitle className="text-2xl font-bold">0</CardTitle>
-            <p className="text-sm text-muted-foreground">Completed</p>
-          </CardHeader>
-        </Card>
+        {[
+          {
+            label: "Total",
+            value: reminders.length,
+            icon: Bell,
+            color: "bg-indigo-500/10 text-indigo-600",
+          },
+          {
+            label: "Overdue",
+            value: overdueCount,
+            icon: AlertCircle,
+            color: "bg-red-500/10 text-red-600",
+          },
+          {
+            label: "Scheduled",
+            value: scheduledCount,
+            icon: Clock,
+            color: "bg-amber-500/10 text-amber-600",
+          },
+          {
+            label: "Sent",
+            value: sentCount,
+            icon: CheckCircle,
+            color: "bg-green-500/10 text-green-600",
+          },
+        ].map(({ label, value, icon: Icon, color }) => (
+          <Card key={label}>
+            <CardHeader className="pb-3">
+              <div
+                className={`w-12 h-12 rounded-xl ${color} flex items-center justify-center mb-3`}
+              >
+                <Icon className="w-6 h-6" />
+              </div>
+              <CardTitle className="text-2xl font-bold">{value}</CardTitle>
+              <p className="text-sm text-muted-foreground">{label}</p>
+            </CardHeader>
+          </Card>
+        ))}
       </div>
 
-      {/* Reminders Table */}
       <Card className="border-0 shadow-sm">
-        <CardHeader>
-          <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2">
-              <FileText className="w-5 h-5" />
-              All Reminders ({MOCK_REMINDERS.length})
-            </CardTitle>
-            <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => setViewMode(viewMode === 'list' ? 'grid' : 'list')}>
-                {viewMode === 'list' ? 'Grid View' : 'List View'}
-              </Button>
-            </div>
+        <CardHeader className="gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <CardTitle>All Reminders ({filteredReminders.length})</CardTitle>
+            <p className="text-sm text-muted-foreground mt-1">
+              Backend fields are mapped directly from `/api/tenant-reminders`.
+            </p>
           </div>
+          <Input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search title, message, or module"
+            className="sm:max-w-xs"
+          />
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto">
             <UITable>
               <TableHeader>
                 <TableRow>
-                  <TableHead className="w-12">Customer</TableHead>
+                  <TableHead>Title</TableHead>
+                  <TableHead>Module</TableHead>
                   <TableHead>Amount</TableHead>
                   <TableHead>Due Date</TableHead>
+                  <TableHead>Last Sent</TableHead>
                   <TableHead>Status</TableHead>
-                  <TableHead>Days Overdue</TableHead>
-                  <TableHead>Last Contact</TableHead>
-                  <TableHead>Actions</TableHead>
+                  <TableHead className="text-right">Action</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {MOCK_REMINDERS.map((reminder) => (
-                  <TableRow key={reminder.id} className="hover:bg-muted/50">
-                    <TableCell className="font-medium">
-                      <div className="flex items-center gap-2">
-                        <User className="w-4 h-4 text-muted-foreground" />
-                        {reminder.customer}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-1">
-                        <DollarSign className="w-4 h-4 text-muted-foreground" />
-                        ₹{reminder.amount.toLocaleString()}
-                      </div>
-                    </TableCell>
-                    <TableCell>{reminder.dueDate}</TableCell>
-                    <TableCell>{getStatusBadge(reminder.status)}</TableCell>
-                    <TableCell className={reminder.daysOverdue > 0 ? 'text-red-600 font-medium' : ''}>
-                      {reminder.daysOverdue > 0 ? `+${reminder.daysOverdue}` : '–'}
-                    </TableCell>
-                    <TableCell>{reminder.lastContact}</TableCell>
-                    <TableCell>
-                      <Button variant="ghost" size="sm" className="h-8">
-                        Send Reminder
-                      </Button>
+                {isLoading && (
+                  <TableRow>
+                    <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
+                      Loading reminders...
                     </TableCell>
                   </TableRow>
-                ))}
+                )}
+                {isError && (
+                  <TableRow>
+                    <TableCell colSpan={7} className="py-8 text-center text-red-600">
+                      Failed to load reminders.
+                    </TableCell>
+                  </TableRow>
+                )}
+                {!isLoading && !isError && filteredReminders.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={7} className="py-8 text-center text-muted-foreground">
+                      No reminders found.
+                    </TableCell>
+                  </TableRow>
+                )}
+                {!isLoading &&
+                  !isError &&
+                  filteredReminders.map((reminder) => (
+                    <TableRow key={reminder.id} className="hover:bg-muted/50">
+                      <TableCell className="align-top">
+                        <div className="font-medium">{reminder.tenantName}</div>
+                        {reminder.message ? (
+                          <div className="text-xs text-muted-foreground max-w-md mt-1">
+                            {reminder.message}
+                          </div>
+                        ) : null}
+                      </TableCell>
+                      <TableCell>{reminder.module || "-"}</TableCell>
+                      <TableCell>
+                        {typeof reminder.amountDue === "number"
+                          ? `Rs ${reminder.amountDue.toLocaleString()}`
+                          : "-"}
+                      </TableCell>
+                      <TableCell>{formatDate(reminder.dueDate)}</TableCell>
+                      <TableCell>{formatDate(reminder.lastSentOn)}</TableCell>
+                      <TableCell>
+                        <Badge className={STATUS_STYLES[reminder.status]}>
+                          {reminder.status}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        {reminder.status === "sent" ? (
+                          <span className="text-xs text-muted-foreground">Sent</span>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-1"
+                            disabled={sendMutation.isPending}
+                            onClick={() => sendMutation.mutate(reminder.id)}
+                          >
+                            <Send className="w-3.5 h-3.5" />
+                            Send
+                          </Button>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  ))}
               </TableBody>
             </UITable>
           </div>
         </CardContent>
       </Card>
+
+      <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>New Reminder</DialogTitle>
+            <DialogDescription>
+              This creates a live row in `TenantReminders`.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Title</label>
+              <Input
+                value={form.title}
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, title: event.target.value }))
+                }
+                placeholder="Reminder title"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Message</label>
+              <textarea
+                value={form.message}
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, message: event.target.value }))
+                }
+                placeholder="Optional message"
+                className="flex min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              />
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Module</label>
+                <Input
+                  value={form.module}
+                  onChange={(event) =>
+                    setForm((current) => ({ ...current, module: event.target.value }))
+                  }
+                  placeholder="followup"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Due Date</label>
+                <Input
+                  type="date"
+                  value={form.dueDate}
+                  onChange={(event) =>
+                    setForm((current) => ({ ...current, dueDate: event.target.value }))
+                  }
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Reference Id</label>
+              <Input
+                value={form.refId}
+                onChange={(event) =>
+                  setForm((current) => ({ ...current, refId: event.target.value }))
+                }
+                placeholder="Optional numeric reference"
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() =>
+                createMutation.mutate({
+                  title: form.title.trim(),
+                  message: form.message.trim() || undefined,
+                  module: form.module.trim() || undefined,
+                  dueDate: form.dueDate || undefined,
+                  refId: form.refId ? Number(form.refId) : undefined,
+                  createdBy: currentUser?.name,
+                })
+              }
+              disabled={!form.title.trim() || createMutation.isPending}
+            >
+              {createMutation.isPending ? "Creating..." : "Create Reminder"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
-  )
+  );
 }
-
-export default FollowupReminders
-

@@ -43,6 +43,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
+import { useFinYear } from "@/contexts/FinYearContext";
 import {
   createWorkOrder,
   saveFullWorkOrder,
@@ -59,7 +60,10 @@ import {
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { DocNumberPreview } from "@/pages/material/ExpenseBooking/DocNumberPreview";
+import {
+  DocNumberPreview,
+  fetchNextDocNumber,
+} from "@/pages/material/ExpenseBooking/DocNumberPreview";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -185,11 +189,7 @@ interface WorkOrderActivityDetail {
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const generateDocNumber = () => {
-  const now = new Date();
-  const yy = String(now.getFullYear()).slice(2);
-  const mm = String(now.getMonth() + 1).padStart(2, "0");
-  const seq = String(Math.floor(Math.random() * 900) + 100);
-  return `WO-${yy}${mm}-${seq}`;
+  return "";
 };
 
 const uid = () => Math.random().toString(36).slice(2, 9);
@@ -2012,6 +2012,17 @@ type ViewMode = "create" | "list" | "detail" | "edit";
 
 const WorkOrderMaster: React.FC = () => {
   const { currentUser } = useAuth();
+  const { finYears } = useFinYear();
+  const activeFinYear =
+    finYears.find((fy) => fy.status === "Active")?.year || undefined;
+  const finYearOptions = finYears.filter((fy) => fy.status === "Active");
+  const [selectedFinYear, setSelectedFinYear] = useState("");
+
+  useEffect(() => {
+    if (!selectedFinYear && activeFinYear) {
+      setSelectedFinYear(activeFinYear);
+    }
+  }, [activeFinYear, selectedFinYear]);
 
   // ── Tab state ─────────────────────────────────────────────────────────────
   const [viewMode, setViewMode] = useState<ViewMode>("create");
@@ -2027,6 +2038,28 @@ const WorkOrderMaster: React.FC = () => {
   const [savedStatus, setSavedStatus] = useState<string>("Draft");
   const [woDocTypeId, setWoDocTypeId] = useState<number | null>(null);
   const [woDocNo, setWoDocNo] = useState("");
+
+  const applyWoDocNumber = (docTypeId: number | null, docNo: string) => {
+    setWoDocTypeId(docTypeId);
+    setWoDocNo(docNo);
+    setForm((prev) => ({ ...prev, docNumber: docNo }));
+  };
+
+  const refreshWoDocNumber = async (
+    docTypeId: number | null = woDocTypeId,
+    finYearOverride = selectedFinYear,
+  ) => {
+    if (!docTypeId) {
+      applyWoDocNumber(null, "");
+      return "";
+    }
+    const nextDocNo = await fetchNextDocNumber(
+      docTypeId,
+      finYearOverride || undefined,
+    );
+    applyWoDocNumber(docTypeId, nextDocNo);
+    return nextDocNo;
+  };
 
   // ── Dropdown states ───────────────────────────────────────────────────────
   const [companies, setCompanies] = useState<DropdownOption[]>([]);
@@ -2111,13 +2144,19 @@ const WorkOrderMaster: React.FC = () => {
   const deleteGroup = (idx: number) =>
     setGroups((prev) => prev.filter((_, i) => i !== idx));
 
-  const resetAll = () => {
-    setForm(EMPTY_FORM());
+  const resetAll = async (keepDocType = false) => {
+    const nextDocTypeId = keepDocType ? woDocTypeId : null;
+    const nextDocNo = nextDocTypeId
+      ? await fetchNextDocNumber(nextDocTypeId, selectedFinYear || undefined)
+      : "";
+    setForm({ ...EMPTY_FORM(), docNumber: nextDocNo });
     setGroups([EMPTY_GROUP()]);
     setErrors({});
     setSaved(false);
     setSavedId(null);
     setSavedStatus("Draft");
+    setWoDocTypeId(nextDocTypeId);
+    setWoDocNo(nextDocNo);
   };
 
   const validate = () => {
@@ -2145,10 +2184,13 @@ const WorkOrderMaster: React.FC = () => {
         Remarks: form.remarks || null,
         TermsAndConditions: form.termsAndConditions || null,
         DocTypeId: woDocTypeId,
-        DocNo: woDocNo || null,
+        DocNo: form.docNumber || woDocNo || null,
+        finYear: selectedFinYear || null,
         CreatedBy: userId,
       });
       const newHeaderId: number = created.Id;
+      const confirmedDocNumber =
+        created.DocumentNumber || created.DocNo || form.docNumber;
       const activities = groups.flatMap((g) =>
         g.activities.map((a) => {
           const labourAmt = a.ratePerUnit * a.area;
@@ -2180,14 +2222,14 @@ const WorkOrderMaster: React.FC = () => {
         header: {
           CompanyId: parseInt(form.companyId),
           ProjectId: parseInt(form.projectId),
-          DocumentNumber: form.docNumber,
+          DocumentNumber: confirmedDocNumber,
           DocumentDate: form.docDate,
           ContractorId: parseInt(form.contractorId),
           TotalAmount: grandTotal,
           Remarks: form.remarks || null,
           TermsAndConditions: form.termsAndConditions || null,
           DocTypeId: woDocTypeId,
-          DocNo: woDocNo || null,
+          DocNo: confirmedDocNumber || null,
           UpdatedBy: userId,
         },
         activities,
@@ -2196,7 +2238,7 @@ const WorkOrderMaster: React.FC = () => {
       setSaved(true);
       setSavedId(newHeaderId);
       setSavedStatus("Draft");
-      setForm((p) => ({ ...p, docNumber: generateDocNumber() }));
+      await resetAll(!!woDocTypeId);
       setTimeout(() => setSaved(false), 3000);
     } catch (err: unknown) {
       const msg: string = err instanceof Error ? err.message : String(err);
@@ -2296,7 +2338,7 @@ const WorkOrderMaster: React.FC = () => {
           {viewMode === "create" && (
             <>
               <button
-                onClick={resetAll}
+                onClick={() => void resetAll()}
                 className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted transition-colors"
               >
                 <RotateCcw size={13} />
@@ -2396,10 +2438,32 @@ const WorkOrderMaster: React.FC = () => {
               <Hash size={15} className="text-primary shrink-0" />
               <h2 className="text-sm font-semibold text-foreground">Document Type &amp; Number</h2>
             </div>
+            <div className="mb-3">
+              <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
+                Fin Year
+              </label>
+              <select
+                value={selectedFinYear}
+                onChange={(e) => {
+                  const nextFinYear = e.target.value;
+                  setSelectedFinYear(nextFinYear);
+                  if (woDocTypeId) void refreshWoDocNumber(woDocTypeId, nextFinYear);
+                }}
+                className={selectCls}
+              >
+                <option value="">Select fin year...</option>
+                {finYearOptions.map((fy) => (
+                  <option key={fy.id} value={fy.year}>
+                    {fy.year}
+                  </option>
+                ))}
+              </select>
+            </div>
             <DocNumberPreview
+              finYear={selectedFinYear || undefined}
               selectedDocTypeId={woDocTypeId}
               preview={woDocNo}
-              onSelect={(id, preview) => { setWoDocTypeId(id); setWoDocNo(preview); }}
+              onSelect={applyWoDocNumber}
             />
           </div>
 
@@ -2426,8 +2490,16 @@ const WorkOrderMaster: React.FC = () => {
                 </div>
                 <div>
                   <FieldLabel><span className="flex items-center gap-1.5"><Hash size={11} />Document Number</span></FieldLabel>
-                  <input value={form.docNumber} readOnly className={`${inputCls} bg-muted/50 text-muted-foreground font-mono cursor-not-allowed`} />
-                  <p className="text-[11px] text-muted-foreground mt-1">Auto-generated</p>
+                  <input
+                    value={form.docNumber}
+                    onChange={(e) => {
+                      const nextValue = e.target.value.toUpperCase();
+                      setForm((prev) => ({ ...prev, docNumber: nextValue }));
+                      setWoDocNo(nextValue);
+                    }}
+                    className={`${inputCls} font-mono`}
+                  />
+                  <p className="text-[11px] text-muted-foreground mt-1">Auto-filled from document type, but still editable.</p>
                 </div>
                 <div>
                   <FieldLabel required><span className="flex items-center gap-1.5"><Calendar size={11} />Document Date</span></FieldLabel>
@@ -2512,7 +2584,7 @@ const WorkOrderMaster: React.FC = () => {
 
           {/* Bottom bar */}
           <div className="flex items-center justify-end gap-3 pb-8">
-            <button onClick={resetAll} className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted transition-colors">
+            <button onClick={() => void resetAll()} className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-border text-sm text-muted-foreground hover:bg-muted transition-colors">
               <RotateCcw size={13} />Reset
             </button>
             <button

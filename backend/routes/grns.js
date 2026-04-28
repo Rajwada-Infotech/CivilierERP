@@ -4,6 +4,7 @@ const { bumpCacheVersion } = require("../redis");
 const { transition, guardEdit } = require("../services/approvalService");
 const router = express.Router();
 const { getPool, sql } = require("../db");
+const { lockNextDocNumber, backPatchRecordId } = require("../utils/docNumberLock");
 
 const requireUserEmail = (req, res) => {
   const email = req.user?.email;
@@ -103,13 +104,13 @@ router.get("/", cache("grns", 300), async (req, res) => {
 
 // POST - Create GRN + Stock Ledger Entries
 router.post("/", async (req, res) => {
-  const { grnNo, grnDate, supplierId, poId, grnItems, status, remarks, docTypeId, docNo } =
+  const { grnNo, grnDate, supplierId, poId, grnItems, status, remarks, docTypeId, docNo, finYear } =
     req.body;
 
-  if (!grnNo || !grnDate || !supplierId) {
+  if (!grnDate || !supplierId || (!grnNo && !docTypeId)) {
     return res
       .status(400)
-      .json({ error: "GRNNo, GRNDate and SupplierID are required" });
+      .json({ error: "GRNDate, SupplierID, and either GRNNo or DocTypeId are required" });
   }
 
   const pool = getPool();
@@ -118,10 +119,21 @@ router.post("/", async (req, res) => {
   try {
     await transaction.begin();
 
+    let finalDocNo = grnNo || docNo || null;
+
+    if (docTypeId) {
+      finalDocNo = await lockNextDocNumber(transaction, sql, {
+        docTypeId: parseInt(docTypeId, 10),
+        finYear,
+        tableName: "GoodsReceiptNotes",
+        issuedBy: req.user?.email || req.user?.name || null,
+      });
+    }
+
     // Insert GRN Header
     const grnResult = await transaction
       .request()
-      .input("GRNNo", sql.NVarChar(50), grnNo)
+      .input("GRNNo", sql.NVarChar(50), finalDocNo)
       .input("GRNDate", sql.Date, grnDate)
       .input("SupplierID", sql.Int, supplierId)
       .input("POID", sql.Int, poId || null)
@@ -129,7 +141,7 @@ router.post("/", async (req, res) => {
       .input("Status", sql.NVarChar(50), status || "Draft")
       .input("Remarks", sql.NVarChar(sql.MAX), remarks || null)
       .input("DocTypeId", sql.Int, docTypeId ? parseInt(docTypeId, 10) : null)
-      .input("DocNo", sql.NVarChar(100), docNo || null)
+      .input("DocNo", sql.NVarChar(100), finalDocNo)
       .input("CreatedDate", sql.DateTime2, new Date()).query(`
         INSERT INTO GoodsReceiptNotes
           (GRNNo, GRNDate, SupplierID, POID, GRNItems, Status, Remarks, DocTypeId, DocNo, CreatedDate)
@@ -140,6 +152,16 @@ router.post("/", async (req, res) => {
 
     const grnId = grnResult.recordset[0].GRNID;
 
+    if (docTypeId && finalDocNo) {
+      await backPatchRecordId(
+        transaction,
+        sql,
+        finalDocNo,
+        "GoodsReceiptNotes",
+        grnId,
+      );
+    }
+
     await insertStockLedgerEntries(transaction, grnId, grnItems);
 
     await transaction.commit();
@@ -149,6 +171,7 @@ router.post("/", async (req, res) => {
     res.status(201).json({
       message: "GRN created successfully",
       grnId,
+      grnNo: finalDocNo,
     });
   } catch (err) {
     await transaction.rollback().catch(() => {});
