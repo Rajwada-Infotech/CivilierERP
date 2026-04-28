@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   MasterPage,
@@ -22,6 +22,11 @@ import {
 } from "@/api/debitNoteApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { toast } from "sonner";
+import { useFinYear } from "@/contexts/FinYearContext";
+import {
+  DocNumberPreview,
+  fetchNextDocNumber,
+} from "@/pages/material/ExpenseBooking/DocNumberPreview";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface DbDebitNote {
@@ -264,6 +269,47 @@ function makeBillRenderer(billOptions: any[]) {
 // ─── Main Component ───────────────────────────────────────────────────────────
 const DebitNoteMaster: React.FC = () => {
   const queryClient = useQueryClient();
+  const { finYears } = useFinYear();
+  const [dnDocTypeId, setDnDocTypeId] = useState<number | null>(null);
+  const [dnDocNo, setDnDocNo] = useState("");
+  const [dnFormPatch, setDnFormPatch] = useState<Record<string, unknown> | null>(null);
+  const [dnFormPatchKey, setDnFormPatchKey] = useState(0);
+  const activeFinYear =
+    finYears.find((fy) => fy.status === "Active")?.year || undefined;
+  const finYearOptions = finYears.filter((fy) => fy.status === "Active");
+  const [selectedFinYear, setSelectedFinYear] = useState("");
+
+  useEffect(() => {
+    if (!selectedFinYear && activeFinYear) {
+      setSelectedFinYear(activeFinYear);
+    }
+  }, [activeFinYear, selectedFinYear]);
+
+  const applyDnDocNumber = (docTypeId: number | null, docNo: string) => {
+    setDnDocTypeId(docTypeId);
+    setDnDocNo(docNo);
+    setDnFormPatch({
+      docNo,
+      docTypeId,
+    });
+    setDnFormPatchKey((current) => current + 1);
+  };
+
+  const refreshDnDocNumber = async (
+    docTypeId: number | null = dnDocTypeId,
+    finYearOverride = selectedFinYear,
+  ) => {
+    if (!docTypeId) {
+      applyDnDocNumber(null, "");
+      return "";
+    }
+    const nextDocNo = await fetchNextDocNumber(
+      docTypeId,
+      finYearOverride || undefined,
+    );
+    applyDnDocNumber(docTypeId, nextDocNo);
+    return nextDocNo;
+  };
 
   // Data Queries
   const {
@@ -277,14 +323,15 @@ const DebitNoteMaster: React.FC = () => {
   });
 
   const { data: enterpriseData } = useQuery({
-    queryKey: ["enterprise-options"],
-    queryFn: () => fetchWithAuth("/api/enterprises/options").then((r) => r.json()),
+    queryKey: ["enterprises"],
+    queryFn: () => fetchWithAuth("/api/enterprises").then((r) => r.json()),
     staleTime: 5 * 60 * 1000,
   });
 
   const { data: accountHeadData } = useQuery({
-    queryKey: ["account-head-options"],
-    queryFn: () => fetchWithAuth("/api/account-head/options").then((r) => r.json()),
+    queryKey: ["supplier-head-options"],
+    queryFn: () =>
+      fetchWithAuth("/api/account-head/options?type=S").then((r) => r.json()),
     staleTime: 5 * 60 * 1000,
   });
 
@@ -305,13 +352,24 @@ const DebitNoteMaster: React.FC = () => {
   });
 
   // Options
-  const ENTERPRISE_OPTIONS: { id: number; label: string }[] = Array.isArray(
-    enterpriseData,
+  const ALL_ENTERPRISES: Array<{
+    id: number;
+    name: string | null;
+    business_type: string | null;
+  }> = Array.isArray(enterpriseData) ? enterpriseData : [];
+
+  const COMPANY_OPTIONS = ALL_ENTERPRISES.filter(
+    (enterprise) => (enterprise.business_type ?? "").toUpperCase() === "C",
   )
-    ? enterpriseData
-    : [];
-  const COMPANY_OPTIONS = ENTERPRISE_OPTIONS;
-  const PROJECT_OPTIONS = ENTERPRISE_OPTIONS;
+    .map((enterprise) => ({ id: enterprise.id, label: enterprise.name ?? "" }))
+    .filter((option) => option.label !== "");
+
+  const PROJECT_OPTIONS = ALL_ENTERPRISES.filter(
+    (enterprise) => (enterprise.business_type ?? "").toUpperCase() === "P",
+  )
+    .map((enterprise) => ({ id: enterprise.id, label: enterprise.name ?? "" }))
+    .filter((option) => option.label !== "");
+
   const SUPPLIER_OPTIONS: { id: number; label: string }[] = Array.isArray(
     accountHeadData,
   )
@@ -342,6 +400,9 @@ const DebitNoteMaster: React.FC = () => {
           finalAmount: null,
         } as BillDiscountGroup,
         status: Boolean(item.is_active),
+        docTypeId: item.doc_type_id ?? null,
+        docNo: item.doc_no ?? "",
+        docTypePrefix: item.doc_type_prefix ?? "",
       }))
     : [];
 
@@ -354,6 +415,9 @@ const DebitNoteMaster: React.FC = () => {
       supplier_id: idByLabel(SUPPLIER_OPTIONS, formData.supplier as string),
       bill_id: g?.billNumber ? billIdByValue(g.billNumber) : null,
       is_active: formData.status !== false,
+      doc_type_id: (formData.docTypeId as number | null) ?? dnDocTypeId,
+      doc_no: (formData.docNo as string) || dnDocNo || null,
+      finYear: selectedFinYear || null,
     };
   };
 
@@ -368,11 +432,17 @@ const DebitNoteMaster: React.FC = () => {
     if (event.action === "add") {
       try {
         await addDebitNote(toPayload(event.record));
-        toast.success("Debit note saved!");
-        await refetchExpenses(); // Refresh expense dropdown
         await queryClient.invalidateQueries({ queryKey: ["debit-notes"] });
+        toast.success("Debit note saved!");
+        const nextDocNo = await refreshDnDocNumber();
+        await refetchExpenses(); // Refresh expense dropdown
+        return {
+          docNo: nextDocNo,
+          docTypeId: dnDocTypeId,
+        };
       } catch (err: any) {
         toast.error("Save failed: " + err.message);
+        throw err;
       }
     }
     if (event.action === "update") {
@@ -383,6 +453,7 @@ const DebitNoteMaster: React.FC = () => {
         await queryClient.invalidateQueries({ queryKey: ["debit-notes"] });
       } catch (err: any) {
         toast.error("Update failed: " + err.message);
+        throw err;
       }
     }
     if (event.action === "delete") {
@@ -392,13 +463,22 @@ const DebitNoteMaster: React.FC = () => {
         await queryClient.invalidateQueries({ queryKey: ["debit-notes"] });
       } catch (err: any) {
         toast.error("Delete failed: " + err.message);
+        throw err;
       }
     }
+    return undefined;
   };
 
   const BillDiscountRenderer = makeBillRenderer(BILL_OPTIONS);
 
   const fields: FieldDef[] = [
+    {
+      name: "docNo",
+      label: "Debit Note Number",
+      type: "text",
+      required: true,
+      uppercase: true,
+    },
     {
       name: "company",
       label: "Company",
@@ -435,12 +515,19 @@ const DebitNoteMaster: React.FC = () => {
     { key: "company", label: "Company" },
     { key: "project", label: "Project", hideOnMobile: true },
     { key: "supplier", label: "Supplier" },
+    { key: "docNo", label: "Doc No" },
     { key: "billDiscountGroup", label: "Bill / Doc" },
     { key: "discountDisplay", label: "Discount" },
     { key: "status", label: "Status" },
   ];
 
   const columnRenderers: Record<string, any> = {
+    docNo: (value: unknown) =>
+      value ? (
+        <span className="font-mono text-xs text-primary">{String(value)}</span>
+      ) : (
+        <span className="text-muted-foreground text-xs">—</span>
+      ),
     billDiscountGroup: billDiscountColumnRenderer,
     discountDisplay: (_value: unknown, row: RecordWithId) =>
       discountSummaryRenderer(row.billDiscountGroup),
@@ -505,6 +592,36 @@ const DebitNoteMaster: React.FC = () => {
           Debit Note Master
         </h1>
       </div>
+      <div className="mb-4 rounded-xl bg-card border border-border p-4">
+        <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-2">
+          Fin Year
+        </label>
+        <select
+          value={selectedFinYear}
+          onChange={(e) => {
+            const nextFinYear = e.target.value;
+            setSelectedFinYear(nextFinYear);
+            if (dnDocTypeId) void refreshDnDocNumber(dnDocTypeId, nextFinYear);
+          }}
+          className="mb-4 w-full rounded-lg border border-border bg-muted px-3 py-2 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+        >
+          <option value="">Select Fin Year...</option>
+          {finYearOptions.map((fy) => (
+            <option key={fy.id} value={fy.year}>
+              {fy.year}
+            </option>
+          ))}
+        </select>
+        <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-2">
+          Document Type &amp; Number
+        </label>
+        <DocNumberPreview
+          finYear={selectedFinYear || undefined}
+          selectedDocTypeId={dnDocTypeId}
+          preview={dnDocNo}
+          onSelect={applyDnDocNumber}
+        />
+      </div>
       <MasterPage
         title="Debit Note"
         fields={fields}
@@ -513,6 +630,8 @@ const DebitNoteMaster: React.FC = () => {
         initialData={mappedData}
         onCustomSave={handleCustomSave}
         onDataEvent={handleDataEvent}
+        externalFormPatch={dnFormPatch}
+        externalFormPatchKey={dnFormPatchKey}
       />
     </>
   );

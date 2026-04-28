@@ -5,7 +5,7 @@ import {
   type DataChangeEvent,
   type RecordWithId,
 } from "@/components/MasterPage";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Calendar as CalendarIcon } from "lucide-react";
 import {
@@ -46,6 +46,9 @@ const FinancialYearMaster: React.FC = () => {
     queryKey: ["fin-years"],
     queryFn: getFinYears,
     staleTime: 5 * 60 * 1000,
+    // Keep previous data during background refetch so the list never empties
+    // while invalidateQueries is in flight.
+    placeholderData: keepPreviousData,
   });
 
   const dbItems: DbFinYear[] = Array.isArray(dbData) ? dbData : [];

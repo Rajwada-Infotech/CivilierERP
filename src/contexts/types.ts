@@ -1,5 +1,3 @@
-
-
 export type UserRole = "super_admin" | "admin" | "user" | "dba";
 
 export type PageKey =
@@ -69,5 +67,3 @@ export interface LoginResponse {
     discontinue: boolean;
   };
 }
-
-

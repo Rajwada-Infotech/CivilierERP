@@ -1,5 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   getAccountGroups,
   addAccountGroup,
@@ -310,9 +311,8 @@ const AccountGroupMaster: React.FC = () => {
     queryKey: ["account-head", "GL", selectedGroupId],
     queryFn: async () => {
       if (!selectedGroupId) return [];
-      const res = await fetch(`/api/account-head?type=GL&groupId=${selectedGroupId}`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
-      });
+      const res = await fetchWithAuth(`/api/account-head?type=GL&groupId=${selectedGroupId}`);
+      if (!res.ok) throw new Error("Failed to load GL accounts");
       return res.json();
     },
     enabled: !!selectedGroupId,

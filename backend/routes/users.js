@@ -7,6 +7,10 @@ const { redisGet, redisSet, redisDel } = require("../redis");
 const { blacklistToken } = require("../middleware/blacklist");
 const authMiddleware = require("../middleware/auth");
 const { checkPermission } = require("../middleware/permissions");
+const allowRoles = require("../middleware/role");
+
+// Privileged roles that can always list users (Password Reset, User Management)
+const PRIVILEGED_ROLES = ["super_admin", "admin", "dba"];
 
 const SALT_ROUNDS = 12;
 const MAX_LOGIN_ATTEMPTS = 5;
@@ -41,6 +45,22 @@ const normalizeRole = (role) => {
     administrator: "admin",
     "system admin": "admin",
     "system administrator": "admin",
+
+    // branch_manager variants
+    "branch manager": "branch_manager",
+    "branch admin": "branch_manager",
+    branch_manager: "branch_manager",
+
+    // finance_manager variants
+    "finance manager": "finance_manager",
+    finance: "finance_manager",
+    finance_manager: "finance_manager",
+    accountant: "finance_manager",
+
+    // store_manager variants
+    "store manager": "store_manager",
+    "material manager": "store_manager",
+    store_manager: "store_manager",
 
     // user variants
     user: "user",
@@ -187,10 +207,13 @@ router.post("/logout", authMiddleware, async (req, res) => {
 // ======================
 // GET USERS
 // ======================
+// Open to any privileged role (super_admin / admin / dba) so that the
+// Password Reset and User Management pages always load, regardless of
+// whether a RoleRights row exists for "Users / List" in the DB.
 router.get(
   "/",
   authMiddleware,
-  checkPermission("Users", "List", "CanView"),
+  allowRoles(...PRIVILEGED_ROLES),
   async (req, res) => {
     try {
       const pool = getPool();

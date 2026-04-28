@@ -46,6 +46,35 @@ interface Project {
   projectImage?: string | File | null;
 }
 
+// ── Project avatar shown beside name in table + form header ──────────────────
+function ProjectAvatar({
+  imageUrl,
+  name,
+  size = "sm",
+}: {
+  imageUrl?: string | null;
+  name: string;
+  size?: "sm" | "md";
+}) {
+  const dim = size === "md" ? "w-10 h-10 text-base" : "w-8 h-8 text-xs";
+  if (imageUrl) {
+    return (
+      <img
+        src={imageUrl}
+        alt={name}
+        className={`${dim} rounded-lg object-contain border border-border bg-muted/30 shrink-0`}
+      />
+    );
+  }
+  return (
+    <div
+      className={`${dim} rounded-lg bg-primary/10 text-primary font-heading font-bold flex items-center justify-center shrink-0`}
+    >
+      {name.charAt(0).toUpperCase()}
+    </div>
+  );
+}
+
 const PROJECT_TYPES = [
   "Construction",
   "IT",
@@ -130,21 +159,13 @@ export default function ProjectMaster() {
   const { data: enterprises = [], isLoading: enterprisesLoading } = useQuery({
     queryKey: ["enterprises"],
     queryFn: async () => {
-      const endpoints = ["/api/enterprises"];
-
-      for (const endpoint of endpoints) {
-        try {
-          const res = await fetchWithAuth(endpoint);
-          if (res.ok) {
-            const data = await res.json();
-
-            return Array.isArray(data) ? data : [];
-          }
-        } catch (e) {
-          console.log(`Failed endpoint: ${endpoint}`);
-        }
-      }
-      throw new Error("Could not load enterprises from any endpoint");
+      const res = await fetchWithAuth("/api/enterprises");
+      if (!res.ok) throw new Error("Failed to load companies");
+      const data = await res.json();
+      // Only show companies (business_type = 'C') as parent options for projects
+      return Array.isArray(data)
+        ? data.filter((e: any) => e.business_type === "C" && !e.discontinue)
+        : [];
     },
     staleTime: 10 * 60 * 1000,
     retry: 2,
@@ -152,7 +173,8 @@ export default function ProjectMaster() {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const formData = new FormData();
+      // Build plain JSON payload — backend uses req.body (JSON), not FormData
+      const payload: Record<string, any> = {};
       Object.entries(form).forEach(([key, value]) => {
         if (
           key !== "projectImage" &&
@@ -160,18 +182,24 @@ export default function ProjectMaster() {
           value !== undefined &&
           value !== ""
         ) {
-          formData.append(key, String(value));
+          payload[key] = value;
         }
       });
-
+      // Convert File to base64 for NVARCHAR(MAX) storage
       if (form.projectImage instanceof File) {
-        formData.append("projectImage", form.projectImage);
+        const base64 = await new Promise<string>((resolve) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result as string);
+          reader.readAsDataURL(form.projectImage as File);
+        });
+        payload.projectImage = base64;
+      } else if (typeof form.projectImage === "string") {
+        payload.projectImage = form.projectImage;
       }
-
       if (editId) {
-        return updateProject(editId, formData);
+        return updateProject(editId, payload);
       } else {
-        return createProject(formData);
+        return createProject(payload);
       }
     },
     onSuccess: () => {
@@ -181,6 +209,7 @@ export default function ProjectMaster() {
           : "Project created successfully",
       );
       qc.invalidateQueries({ queryKey: ["project-master"] });
+      qc.invalidateQueries({ queryKey: ["enterprises"] });
       resetForm();
     },
     onError: (e: any) => toast.error(e.message || "Something went wrong"),
@@ -189,8 +218,9 @@ export default function ProjectMaster() {
   const deleteMutation = useMutation({
     mutationFn: deleteProject,
     onSuccess: () => {
-      toast.success("Project deleted successfully");
+      toast.success("Project deactivated successfully");
       qc.invalidateQueries({ queryKey: ["project-master"] });
+      qc.invalidateQueries({ queryKey: ["enterprises"] });
       setDeleteConfirm(null);
     },
     onError: (e: any) => toast.error(e.message),
@@ -379,8 +409,16 @@ export default function ProjectMaster() {
                           <td className="px-4 py-3 font-mono text-xs font-medium text-primary">
                             {p.Code}
                           </td>
-                          <td className="px-4 py-3 font-medium text-foreground max-w-[180px] truncate">
-                            {p.Name}
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <ProjectAvatar
+                                imageUrl={p.ProjectImage}
+                                name={p.Name || "?"}
+                              />
+                              <span className="font-medium text-foreground max-w-[160px] truncate">
+                                {p.Name}
+                              </span>
+                            </div>
                           </td>
                           <td className="px-4 py-3 text-muted-foreground text-xs">
                             {p.ClientName}
@@ -430,9 +468,16 @@ export default function ProjectMaster() {
         {showForm && (
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="p-4 border-b border-border flex items-center justify-between bg-muted/30">
-              <h2 className="font-heading font-semibold text-foreground">
-                {editId ? `Edit — ${form.name || "Project"}` : "New Project"}
-              </h2>
+              <div className="flex items-center gap-3">
+                <ProjectAvatar
+                  imageUrl={imagePreview || null}
+                  name={form.name || "?"}
+                  size="md"
+                />
+                <h2 className="font-heading font-semibold text-foreground">
+                  {editId ? `Edit — ${form.name || "Project"}` : "New Project"}
+                </h2>
+              </div>
               <button
                 onClick={resetForm}
                 className="text-xs text-muted-foreground hover:text-foreground px-3 py-1 rounded border border-border hover:bg-muted"
@@ -519,7 +564,7 @@ export default function ProjectMaster() {
                   {/* Enterprise Dropdown - FIXED */}
                   <div>
                     <label className="block text-xs font-medium text-muted-foreground mb-1">
-                      Enterprise <span className="text-red-500">*</span>
+                      Parent Company <span className="text-red-500">*</span>
                     </label>
                     <select
                       value={form.enterpriseId || ""}
@@ -638,10 +683,10 @@ export default function ProjectMaster() {
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
             <div className="bg-card border border-border rounded-xl p-6 w-80">
               <p className="font-semibold text-foreground">
-                Delete this project?
+                Deactivate this project?
               </p>
               <p className="text-sm text-muted-foreground mt-1">
-                This action cannot be undone.
+                The project will be deactivated and hidden from all dropdowns.
               </p>
               <div className="flex gap-3 mt-6">
                 <button
