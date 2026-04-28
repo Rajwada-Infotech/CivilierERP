@@ -2,6 +2,7 @@ import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { DashboardBackground } from "@/components/DashboardBackground";
 import {
   Card,
   CardContent,
@@ -38,12 +39,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { useTask } from "@/contexts/TaskContext";
-
-// ─── API ──────────────────────────────────────────────────────────────────────
-const getAuthHeaders = () => ({
-  "Content-Type": "application/json",
-  Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
-});
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 interface DashboardData {
   payments: {
@@ -150,18 +146,18 @@ const FinanceDashboard = () => {
   const { currentUser } = useAuth();
   const { tasks, getOverdueTasks, getDueSoonTasks } = useTask();
 
-  const { data, isLoading, isError } = useQuery<DashboardData>({
-    queryKey: ["financeDashboard"],
-    queryFn: async () => {
-      const res = await fetch("/api/finance-dashboard", {
-        headers: getAuthHeaders(),
-      });
-      if (!res.ok) throw new Error("Failed to fetch dashboard data");
-      return res.json();
-    },
-    staleTime: 60_000,
-    refetchOnWindowFocus: false,
-  });
+  const { data, isLoading, isError, refetch, isFetching } =
+    useQuery<DashboardData>({
+      queryKey: ["financeDashboard"],
+      queryFn: async () => {
+        const res = await fetchWithAuth("/api/finance-dashboard");
+        if (!res.ok) throw new Error("Failed to fetch dashboard data");
+        return res.json();
+      },
+      staleTime: 60_000,
+      refetchInterval: 2 * 60_000, // auto-refresh every 2 min
+      refetchOnWindowFocus: true,
+    });
 
   // Task calculations (from old branch)
   const myTasks = React.useMemo(() => {
@@ -223,11 +219,24 @@ const FinanceDashboard = () => {
     : [];
 
   return (
-    <>
+    <div className="relative">
+      <DashboardBackground />
       <Breadcrumbs items={["Dashboard", "Finance"]} />
-      <h1 className="text-2xl font-heading font-bold text-foreground mb-6">
-        Finance Overview
-      </h1>
+      <div className="flex items-center justify-between mb-6">
+        <h1 className="text-2xl font-heading font-bold text-foreground">
+          Finance Overview
+        </h1>
+        <button
+          onClick={() => refetch()}
+          disabled={isFetching}
+          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm hover:bg-accent transition disabled:opacity-50"
+        >
+          <TrendingUp
+            className={`w-4 h-4 ${isFetching ? "animate-spin" : ""}`}
+          />
+          {isFetching ? "Refreshing…" : "Refresh"}
+        </button>
+      </div>
 
       {isError && (
         <div className="mb-6 px-4 py-3 rounded-lg bg-destructive/10 text-destructive text-sm border border-destructive/20">
@@ -449,7 +458,7 @@ const FinanceDashboard = () => {
           ))}
         </CardContent>
       </Card>
-    </>
+    </div>
   );
 };
 

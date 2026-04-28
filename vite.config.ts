@@ -9,6 +9,11 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  // Prevent Vite from trying to bundle Node.js / CJS-only packages.
+  // These belong in the backend only and must never reach the browser bundle.
+  optimizeDeps: {
+    exclude: ["bcryptjs", "express", "morgan", "dotenv", "bun", "vercel"],
+  },
   server: {
     port: 8080,
     host: true,

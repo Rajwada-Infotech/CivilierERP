@@ -2,6 +2,7 @@ import React, { useState, useCallback } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { DashboardBackground } from "@/components/DashboardBackground";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -203,7 +204,8 @@ export default function DBADashboard() {
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+    <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+      <DashboardBackground />
       <Breadcrumbs items={["DBA", "Database Console"]} />
 
       {/* Header */}

@@ -199,6 +199,7 @@ const FollowupDashboard = lazy(
 const FollowupReminders = lazy(() => import("./pages/followup/Reminders"));
 const FollowupTasks = lazy(() => import("./pages/followup/FollowupTasks"));
 const FollowupLog = lazy(() => import("./pages/followup/FollowupLog"));
+const AmendmentMenu = lazy(() => import("./pages/material/AmendmentMenu"));
 const Amendments = lazy(() => import("./pages/material/Amendments"));
 const RemindersManager = lazy(() => import("./pages/dba/RemindersManager"));
 const PaymentLogs = lazy(() => import("./pages/dba/PaymentLogs"));
@@ -270,6 +271,21 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
   return (
     <RequireAuth>
       <RequireRole allowed={[...ADMIN_ROLES]}>
+        <AppLayout>
+          <ErrorBoundary>
+            <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
+          </ErrorBoundary>
+        </AppLayout>
+      </RequireRole>
+    </RequireAuth>
+  );
+}
+
+// ─── Super Admin Only Route ───────────────────────────────────────────────────
+function SuperAdminRoute({ children }: { children: React.ReactNode }) {
+  return (
+    <RequireAuth>
+      <RequireRole allowed={["super_admin"]}>
         <AppLayout>
           <ErrorBoundary>
             <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
@@ -594,6 +610,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <Amendments />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/material/amendment-menu"
+        element={
+          <ProtectedRoute>
+            <AmendmentMenu />
           </ProtectedRoute>
         }
       />
@@ -968,9 +992,9 @@ function AppRoutes() {
       <Route
         path="/superadmin"
         element={
-          <AdminRoute>
+          <SuperAdminRoute>
             <SuperAdminDashboard />
-          </AdminRoute>
+          </SuperAdminRoute>
         }
       />
 

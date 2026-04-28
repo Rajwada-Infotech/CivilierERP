@@ -3,16 +3,53 @@ const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const allowRoles = require("../middleware/role");
+const { bumpCacheVersion } = require("../redis");
 
 router.use(authMiddleware);
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 
-// GET all
+// GET all — reads from enterprise where business_type = 'C'
 router.get("/", async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT * FROM dbo.CompanyMaster WHERE IsDeleted = 0 ORDER BY CreatedAt DESC
+      SELECT
+        id          AS Id,
+        business_identity AS Code,
+        name        AS Name,
+        description AS LegalName,
+        short_name  AS ShortName,
+        entity_type AS Type,
+        cr_code     AS Industry,
+        date_of_establishment AS IncorporationDate,
+        cin         AS CIN,
+        pan         AS PAN,
+        tan         AS TAN,
+        gst_type    AS GSTType,
+        business_identity AS GST,
+        gst_issue_date AS GSTDate,
+        trade_license  AS TradeLicenseNo,
+        NULL           AS TradeLicenseDate,
+        address        AS RegisteredAddress,
+        address_line2  AS Address2,
+        city, state, country, pincode,
+        phone_number   AS Phone,
+        NULL           AS Fax,
+        email,
+        website,
+        NULL           AS AuthorizedCapital,
+        NULL           AS PaidUpCapital,
+        currency,
+        fiscal_year_start AS FiscalYearStart,
+        NULL           AS AuditorName,
+        CASE WHEN discontinue = 1 THEN 0 ELSE 1 END AS IsActive,
+        NULL           AS Remarks,
+        logo           AS LogoUrl,
+        status,
+        belongs_to
+      FROM dbo.enterprise
+      WHERE business_type = 'C'
+      ORDER BY name
     `);
     res.json(result.recordset);
   } catch (err) {
@@ -20,150 +57,123 @@ router.get("/", async (req, res) => {
   }
 });
 
-// POST create
+// POST — inserts into enterprise with business_type = 'C'
 router.post("/", adminOnly, async (req, res) => {
   const f = req.body;
   try {
     const pool = getPool();
     await pool
       .request()
-      .input("Code", sql.NVarChar(50), f.code || null)
-      .input("Name", sql.NVarChar(255), f.name || null)
-      .input("LegalName", sql.NVarChar(255), f.legalName || null)
-      .input("ShortName", sql.NVarChar(100), f.shortName || null)
-      .input("Type", sql.NVarChar(100), f.type || null)
-      .input("Industry", sql.NVarChar(100), f.industry || null)
-      .input("IncorporationDate", sql.Date, f.incorporationDate || null)
-      .input("CIN", sql.NVarChar(50), f.cinNumber || null)
-      .input("PAN", sql.NVarChar(20), f.panNumber || null)
-      .input("TAN", sql.NVarChar(20), f.tanNumber || null)
-      .input("GST", sql.NVarChar(20), f.gstNumber || null)
-      .input("GSTType", sql.NVarChar(50), f.gstType || null)
-      .input("GSTDate", sql.Date, f.gstDate || null)
-      .input("TradeLicenseNo", sql.NVarChar(100), f.tradeLicenseNo || null)
-      .input("TradeLicenseDate", sql.Date, f.tradeLicenseDate || null)
-      .input(
-        "RegisteredAddress",
-        sql.NVarChar(500),
-        f.registeredAddress || null,
-      )
-      .input("City", sql.NVarChar(100), f.city || null)
-      .input("State", sql.NVarChar(100), f.state || null)
-      .input("Country", sql.NVarChar(100), f.country || null)
-      .input("Pincode", sql.NVarChar(10), f.pincode || null)
-      .input("Phone", sql.NVarChar(30), f.phone || null)
-      .input("Fax", sql.NVarChar(30), f.fax || null)
-      .input("Email", sql.NVarChar(200), f.email || null)
-      .input("Website", sql.NVarChar(255), f.website || null)
-      .input(
-        "AuthorizedCapital",
-        sql.Decimal(18, 2),
-        f.authorizedCapital || null,
-      )
-      .input("PaidUpCapital", sql.Decimal(18, 2), f.paidUpCapital || null)
-      .input("Currency", sql.NVarChar(10), f.currency || "INR")
-      .input("FiscalYearStart", sql.NVarChar(20), f.fiscalYearStart || null)
-      .input("AuditorName", sql.NVarChar(200), f.auditorName || null)
-      .input("IsActive", sql.Bit, f.isActive !== false ? 1 : 0)
-      .input("Remarks", sql.NVarChar(500), f.remarks || null)
-      .input("LogoUrl", sql.NVarChar(sql.MAX), f.logoUrl || null).query(`
-        INSERT INTO dbo.CompanyMaster
-          (Code,Name,LegalName,ShortName,Type,Industry,IncorporationDate,
-           CIN,PAN,TAN,GST,GSTType,GSTDate,TradeLicenseNo,TradeLicenseDate,
-           RegisteredAddress,City,State,Country,Pincode,Phone,Fax,Email,Website,
-           AuthorizedCapital,PaidUpCapital,Currency,FiscalYearStart,AuditorName,
-           IsActive,Remarks,LogoUrl,IsDeleted,CreatedAt)
-        VALUES
-          (@Code,@Name,@LegalName,@ShortName,@Type,@Industry,@IncorporationDate,
-           @CIN,@PAN,@TAN,@GST,@GSTType,@GSTDate,@TradeLicenseNo,@TradeLicenseDate,
-           @RegisteredAddress,@City,@State,@Country,@Pincode,@Phone,@Fax,@Email,@Website,
-           @AuthorizedCapital,@PaidUpCapital,@Currency,@FiscalYearStart,@AuditorName,
-           @IsActive,@Remarks,@LogoUrl,0,GETDATE())
+      .input("name", sql.NVarChar(255), f.name || null)
+      .input("short_name", sql.NVarChar(100), f.shortName || null)
+      .input("business_identity", sql.NVarChar(100), f.code || null)
+      .input("business_type", sql.NVarChar(100), "C")
+      .input("entity_type", sql.NVarChar(50), f.type || null)
+      .input("description", sql.NVarChar(sql.MAX), f.legalName || null)
+      .input("cr_code", sql.NVarChar(50), f.industry || null)
+      .input("date_of_establishment", sql.Date, f.incorporationDate || null)
+      .input("cin", sql.NVarChar(50), f.cinNumber || null)
+      .input("pan", sql.NVarChar(20), f.panNumber || null)
+      .input("tan", sql.NVarChar(15), f.tanNumber || null)
+      .input("gst_type", sql.NVarChar(50), f.gstType || null)
+      .input("gst_issue_date", sql.Date, f.gstDate || null)
+      .input("trade_license", sql.NVarChar(100), f.tradeLicenseNo || null)
+      .input("address", sql.NVarChar(sql.MAX), f.registeredAddress || null)
+      .input("city", sql.NVarChar(100), f.city || null)
+      .input("state", sql.NVarChar(100), f.state || null)
+      .input("country", sql.NVarChar(100), f.country || null)
+      .input("pincode", sql.NVarChar(10), f.pincode || null)
+      .input("phone_number", sql.NVarChar(20), f.phone || null)
+      .input("email", sql.NVarChar(255), f.email || null)
+      .input("website", sql.NVarChar(255), f.website || null)
+      .input("currency", sql.NVarChar(10), f.currency || "INR")
+      .input("fiscal_year_start", sql.NVarChar(20), f.fiscalYearStart || null)
+      .input("logo", sql.NVarChar(sql.MAX), f.logoUrl || null)
+      .input("discontinue", sql.Bit, f.isActive ? 0 : 1)
+      .input("date_of_entry", sql.Date, new Date()).query(`
+        INSERT INTO dbo.enterprise (
+          name, short_name, business_identity, business_type, entity_type, description,
+          cr_code, date_of_establishment, cin, pan, tan, gst_type, gst_issue_date,
+          trade_license, address, city, state, country, pincode,
+          phone_number, email, website, currency, fiscal_year_start,
+          logo, discontinue, date_of_entry
+        ) VALUES (
+          @name, @short_name, @business_identity, @business_type, @entity_type, @description,
+          @cr_code, @date_of_establishment, @cin, @pan, @tan, @gst_type, @gst_issue_date,
+          @trade_license, @address, @city, @state, @country, @pincode,
+          @phone_number, @email, @website, @currency, @fiscal_year_start,
+          @logo, @discontinue, @date_of_entry
+        )
       `);
+    await bumpCacheVersion("enterprises");
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// PUT update
+// PUT — updates enterprise row
 router.put("/:id", adminOnly, async (req, res) => {
   const f = req.body;
   try {
     const pool = getPool();
     await pool
       .request()
-      .input("Id", sql.Int, parseInt(req.params.id))
-      .input("Code", sql.NVarChar(50), f.code || null)
-      .input("Name", sql.NVarChar(255), f.name || null)
-      .input("LegalName", sql.NVarChar(255), f.legalName || null)
-      .input("ShortName", sql.NVarChar(100), f.shortName || null)
-      .input("Type", sql.NVarChar(100), f.type || null)
-      .input("Industry", sql.NVarChar(100), f.industry || null)
-      .input("IncorporationDate", sql.Date, f.incorporationDate || null)
-      .input("CIN", sql.NVarChar(50), f.cinNumber || null)
-      .input("PAN", sql.NVarChar(20), f.panNumber || null)
-      .input("TAN", sql.NVarChar(20), f.tanNumber || null)
-      .input("GST", sql.NVarChar(20), f.gstNumber || null)
-      .input("GSTType", sql.NVarChar(50), f.gstType || null)
-      .input("GSTDate", sql.Date, f.gstDate || null)
-      .input("TradeLicenseNo", sql.NVarChar(100), f.tradeLicenseNo || null)
-      .input("TradeLicenseDate", sql.Date, f.tradeLicenseDate || null)
-      .input(
-        "RegisteredAddress",
-        sql.NVarChar(500),
-        f.registeredAddress || null,
-      )
-      .input("City", sql.NVarChar(100), f.city || null)
-      .input("State", sql.NVarChar(100), f.state || null)
-      .input("Country", sql.NVarChar(100), f.country || null)
-      .input("Pincode", sql.NVarChar(10), f.pincode || null)
-      .input("Phone", sql.NVarChar(30), f.phone || null)
-      .input("Fax", sql.NVarChar(30), f.fax || null)
-      .input("Email", sql.NVarChar(200), f.email || null)
-      .input("Website", sql.NVarChar(255), f.website || null)
-      .input(
-        "AuthorizedCapital",
-        sql.Decimal(18, 2),
-        f.authorizedCapital || null,
-      )
-      .input("PaidUpCapital", sql.Decimal(18, 2), f.paidUpCapital || null)
-      .input("Currency", sql.NVarChar(10), f.currency || "INR")
-      .input("FiscalYearStart", sql.NVarChar(20), f.fiscalYearStart || null)
-      .input("AuditorName", sql.NVarChar(200), f.auditorName || null)
-      .input("IsActive", sql.Bit, f.isActive !== false ? 1 : 0)
-      .input("Remarks", sql.NVarChar(500), f.remarks || null)
-      .input("LogoUrl", sql.NVarChar(sql.MAX), f.logoUrl || null).query(`
-        UPDATE dbo.CompanyMaster SET
-          Code=@Code, Name=@Name, LegalName=@LegalName, ShortName=@ShortName,
-          Type=@Type, Industry=@Industry, IncorporationDate=@IncorporationDate,
-          CIN=@CIN, PAN=@PAN, TAN=@TAN,
-          GST=@GST, GSTType=@GSTType, GSTDate=@GSTDate,
-          TradeLicenseNo=@TradeLicenseNo, TradeLicenseDate=@TradeLicenseDate,
-          RegisteredAddress=@RegisteredAddress, City=@City, State=@State,
-          Country=@Country, Pincode=@Pincode, Phone=@Phone, Fax=@Fax,
-          Email=@Email, Website=@Website,
-          AuthorizedCapital=@AuthorizedCapital, PaidUpCapital=@PaidUpCapital,
-          Currency=@Currency, FiscalYearStart=@FiscalYearStart, AuditorName=@AuditorName,
-          IsActive=@IsActive, Remarks=@Remarks, LogoUrl=@LogoUrl, UpdatedAt=GETDATE()
-        WHERE Id=@Id AND IsDeleted=0
+      .input("id", sql.Int, parseInt(req.params.id))
+      .input("name", sql.NVarChar(255), f.name || null)
+      .input("short_name", sql.NVarChar(100), f.shortName || null)
+      .input("business_identity", sql.NVarChar(100), f.code || null)
+      .input("entity_type", sql.NVarChar(50), f.type || null)
+      .input("description", sql.NVarChar(sql.MAX), f.legalName || null)
+      .input("cr_code", sql.NVarChar(50), f.industry || null)
+      .input("date_of_establishment", sql.Date, f.incorporationDate || null)
+      .input("cin", sql.NVarChar(50), f.cinNumber || null)
+      .input("pan", sql.NVarChar(20), f.panNumber || null)
+      .input("tan", sql.NVarChar(15), f.tanNumber || null)
+      .input("gst_type", sql.NVarChar(50), f.gstType || null)
+      .input("gst_issue_date", sql.Date, f.gstDate || null)
+      .input("trade_license", sql.NVarChar(100), f.tradeLicenseNo || null)
+      .input("address", sql.NVarChar(sql.MAX), f.registeredAddress || null)
+      .input("city", sql.NVarChar(100), f.city || null)
+      .input("state", sql.NVarChar(100), f.state || null)
+      .input("country", sql.NVarChar(100), f.country || null)
+      .input("pincode", sql.NVarChar(10), f.pincode || null)
+      .input("phone_number", sql.NVarChar(20), f.phone || null)
+      .input("email", sql.NVarChar(255), f.email || null)
+      .input("website", sql.NVarChar(255), f.website || null)
+      .input("currency", sql.NVarChar(10), f.currency || "INR")
+      .input("fiscal_year_start", sql.NVarChar(20), f.fiscalYearStart || null)
+      .input("logo", sql.NVarChar(sql.MAX), f.logoUrl || null)
+      .input("discontinue", sql.Bit, f.isActive ? 0 : 1).query(`
+        UPDATE dbo.enterprise SET
+          name=@name, short_name=@short_name, business_identity=@business_identity,
+          entity_type=@entity_type, description=@description, cr_code=@cr_code,
+          date_of_establishment=@date_of_establishment, cin=@cin, pan=@pan, tan=@tan,
+          gst_type=@gst_type, gst_issue_date=@gst_issue_date, trade_license=@trade_license,
+          address=@address, city=@city, state=@state, country=@country, pincode=@pincode,
+          phone_number=@phone_number, email=@email, website=@website,
+          currency=@currency, fiscal_year_start=@fiscal_year_start,
+          logo=@logo, discontinue=@discontinue
+        WHERE id=@id AND business_type='C'
       `);
+    await bumpCacheVersion("enterprises");
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// DELETE (soft)
+// DELETE — soft delete via discontinue flag
 router.delete("/:id", adminOnly, async (req, res) => {
   try {
     const pool = getPool();
     await pool
       .request()
-      .input("Id", sql.Int, parseInt(req.params.id))
+      .input("id", sql.Int, parseInt(req.params.id))
       .query(
-        "UPDATE dbo.CompanyMaster SET IsDeleted=1, UpdatedAt=GETDATE() WHERE Id=@Id",
+        "UPDATE dbo.enterprise SET discontinue=1 WHERE id=@id AND business_type='C'",
       );
+    await bumpCacheVersion("enterprises");
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

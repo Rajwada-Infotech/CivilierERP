@@ -94,6 +94,7 @@ export function blankForm(): Omit<ExpenseRecord, "id"> {
     bookingDate: "",
     dueDate: "",
     financialYear: "",
+    companyId: null,
     poId: null,
     supplier: "",
     projectSite: "",
@@ -139,10 +140,11 @@ export function dbToRecord(row: any): ExpenseRecord {
   return {
     id: String(row.Eid ?? row.eid ?? row.EID ?? ""),
     bookingReference: row.EDocNo ?? "",
-    docTypeName: row.DocTypeName ?? "",   // joined from TypeOfDoc via backend
+    docTypeName: row.DocTypeName ?? "", // joined from TypeOfDoc via backend
     bookingDate: row.EDocDate ? row.EDocDate.slice(0, 10) : "",
     dueDate: row.EReminder ? row.EReminder.slice(0, 10) : "",
     financialYear: "",
+    companyId: row.ECompanyId ? parseInt(row.ECompanyId, 10) : null,
     poId: null,
     supplier: row.EProjectName ?? "",
     projectSite: row.EProjectName ?? "",
@@ -187,6 +189,6 @@ export function recordToDb(
     EReminder: form.dueDate || null,
     ERemarks: form.remarks || null,
     EStatus: form.status ?? "Draft",
-    ECompanyId: null,
+    ECompanyId: form.companyId ?? null,
   };
 }
