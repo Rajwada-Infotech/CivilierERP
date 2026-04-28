@@ -225,14 +225,22 @@ router.post("/", async (req, res) => {
       // Find current max sequence for this prefix (only the 6-digit part)
       const maxResult = await pool
         .request()
-        .input("Prefix", sql.NVarChar(50), prefix + "%").query(`
+        .input("TypeOfDocId", sql.Int, typeId)
+        .input("Prefix", sql.NVarChar(100), prefix + "%")
+        .input(
+          "FinYearPattern",
+          sql.NVarChar(130),
+          EFinYear ? `%/${String(EFinYear).trim()}` : null,
+        ).query(`
           SELECT MAX(
             TRY_CAST(
               SUBSTRING(DocNo, LEN(@Prefix) + 1, 6) AS INT
             )
           ) AS MaxSeq
           FROM dbo.DocNumberSequence
-          WHERE DocNo LIKE @Prefix
+          WHERE TypeOfDocId = @TypeOfDocId
+            AND DocNo LIKE @Prefix
+            AND (@FinYearPattern IS NULL OR DocNo LIKE @FinYearPattern)
         `);
 
       const maxSeq = maxResult.recordset[0]?.MaxSeq ?? startFrom - 1;
@@ -262,11 +270,17 @@ router.post("/", async (req, res) => {
         // Re-try by re-reading max and bumping by 1 more
         const retryMax = await pool
           .request()
-          .input("Prefix", sql.NVarChar(50), prefix + "%").query(`
+          .input("TypeOfDocId", sql.Int, typeId)
+          .input("Prefix", sql.NVarChar(100), prefix + "%")
+          .input("FinYearPattern", sql.NVarChar(130), finYear ? `%/${finYear}` : null)
+          .query(`
             SELECT MAX(
               TRY_CAST(SUBSTRING(DocNo, LEN(@Prefix) + 1, 6) AS INT)
             ) AS MaxSeq
-            FROM dbo.DocNumberSequence WHERE DocNo LIKE @Prefix
+            FROM dbo.DocNumberSequence
+            WHERE TypeOfDocId = @TypeOfDocId
+              AND DocNo LIKE @Prefix
+              AND (@FinYearPattern IS NULL OR DocNo LIKE @FinYearPattern)
           `);
         const retrySeq = (retryMax.recordset[0]?.MaxSeq ?? nextSeq) + 1;
         const retryPad = String(retrySeq).padStart(6, "0");

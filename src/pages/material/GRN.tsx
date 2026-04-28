@@ -102,6 +102,7 @@ export default function GRN() {
   const [formData, setFormData] = useState({
     ...buildEmptyForm(),
   });
+  const [docRefreshTrigger, setDocRefreshTrigger] = useState(0);
 
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -181,6 +182,7 @@ export default function GRN() {
       queryClient.invalidateQueries({ queryKey: ["grns"] });
       setPage(1);
       await resetForm(true);
+      setDocRefreshTrigger((current) => current + 1);
       toast.success("GRN created successfully");
     },
     onError: (err: any) => toast.error(err.message || "Failed to create GRN"),
@@ -390,6 +392,7 @@ export default function GRN() {
       items: parsedItems.length ? parsedItems : [createEmptyItem()],
       docTypeId: grn.DocTypeId ?? null,
       docNo: grn.DocNo || "",
+      finYear: grn.FinYear || activeFinYear || "",
     });
 
     setEditingId(String(grn.GRNID));
@@ -465,6 +468,7 @@ export default function GRN() {
                 finYear={formData.finYear || undefined}
                 selectedDocTypeId={formData.docTypeId}
                 preview={formData.docNo}
+                refreshTrigger={docRefreshTrigger}
                 onSelect={(id, preview) =>
                   setFormData((prev) => ({
                     ...prev,
