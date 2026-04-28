@@ -23,6 +23,7 @@ interface Props {
   selectedDocTypeId: number | null;
   onSelect: (docTypeId: number | null, preview: string) => void;
   preview: string;
+  refreshTrigger?: number;
 }
 
 export async function fetchNextDocNumber(
@@ -49,6 +50,7 @@ export function DocNumberPreview({
   finYear,
   selectedDocTypeId,
   onSelect,
+  refreshTrigger = 0,
 }: Props) {
   const [docTypes, setDocTypes] = useState<DocType[]>([]);
   const [docTypesLoading, setDocTypesLoading] = useState(true);
@@ -96,6 +98,23 @@ export function DocNumberPreview({
     onSelect(selectedDocTypeId, next);
     setRefreshing(false);
   };
+
+  useEffect(() => {
+    if (!selectedDocTypeId) return;
+    let active = true;
+    setRefreshing(true);
+    fetchNextDocNumber(selectedDocTypeId, finYear)
+      .then((next) => {
+        if (active) onSelect(selectedDocTypeId, next);
+      })
+      .finally(() => {
+        if (active) setRefreshing(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [selectedDocTypeId, finYear, refreshTrigger]);
 
   const selectedType = docTypes.find(
     (d) => d.TypeOfDocId === selectedDocTypeId,
