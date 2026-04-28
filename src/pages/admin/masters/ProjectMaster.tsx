@@ -159,21 +159,13 @@ export default function ProjectMaster() {
   const { data: enterprises = [], isLoading: enterprisesLoading } = useQuery({
     queryKey: ["enterprises"],
     queryFn: async () => {
-      const endpoints = ["/api/enterprises"];
-
-      for (const endpoint of endpoints) {
-        try {
-          const res = await fetchWithAuth(endpoint);
-          if (res.ok) {
-            const data = await res.json();
-
-            return Array.isArray(data) ? data : [];
-          }
-        } catch (e) {
-          console.log(`Failed endpoint: ${endpoint}`);
-        }
-      }
-      throw new Error("Could not load enterprises from any endpoint");
+      const res = await fetchWithAuth("/api/enterprises");
+      if (!res.ok) throw new Error("Failed to load companies");
+      const data = await res.json();
+      // Only show companies (business_type = 'C') as parent options for projects
+      return Array.isArray(data)
+        ? data.filter((e: any) => e.business_type === "C" && !e.discontinue)
+        : [];
     },
     staleTime: 10 * 60 * 1000,
     retry: 2,
@@ -217,6 +209,7 @@ export default function ProjectMaster() {
           : "Project created successfully",
       );
       qc.invalidateQueries({ queryKey: ["project-master"] });
+      qc.invalidateQueries({ queryKey: ["enterprises"] });
       resetForm();
     },
     onError: (e: any) => toast.error(e.message || "Something went wrong"),
@@ -225,8 +218,9 @@ export default function ProjectMaster() {
   const deleteMutation = useMutation({
     mutationFn: deleteProject,
     onSuccess: () => {
-      toast.success("Project deleted successfully");
+      toast.success("Project deactivated successfully");
       qc.invalidateQueries({ queryKey: ["project-master"] });
+      qc.invalidateQueries({ queryKey: ["enterprises"] });
       setDeleteConfirm(null);
     },
     onError: (e: any) => toast.error(e.message),
@@ -570,7 +564,7 @@ export default function ProjectMaster() {
                   {/* Enterprise Dropdown - FIXED */}
                   <div>
                     <label className="block text-xs font-medium text-muted-foreground mb-1">
-                      Enterprise <span className="text-red-500">*</span>
+                      Parent Company <span className="text-red-500">*</span>
                     </label>
                     <select
                       value={form.enterpriseId || ""}
@@ -689,10 +683,10 @@ export default function ProjectMaster() {
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
             <div className="bg-card border border-border rounded-xl p-6 w-80">
               <p className="font-semibold text-foreground">
-                Delete this project?
+                Deactivate this project?
               </p>
               <p className="text-sm text-muted-foreground mt-1">
-                This action cannot be undone.
+                The project will be deactivated and hidden from all dropdowns.
               </p>
               <div className="flex gap-3 mt-6">
                 <button
