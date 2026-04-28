@@ -3,193 +3,179 @@ const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const allowRoles = require("../middleware/role");
+const { bumpCacheVersion } = require("../redis");
 
 router.use(authMiddleware);
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 
-// GET all — includes CompanyName via enterprise JOIN
+// GET all — reads from enterprise where business_type = 'C'
 router.get("/", async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
       SELECT
-        p.Id,
-        p.Code,
-        p.Name,
-        p.ShortName,
-        p.Type,
-        p.BusinessUnit,
-        p.ClientName,
-        p.ClientCode,
-        p.TeamSize,
-        p.StartDate,
-        p.EndDate,
-        p.Currency,
-        p.Status,
-        p.Priority,
-        p.Location,
-        p.Description,
-        p.Remarks,
-        p.IsActive,
-        p.EnterpriseId,
-        e.Name AS CompanyName
-      FROM dbo.ProjectMaster p
-      LEFT JOIN dbo.CompanyMaster e ON p.EnterpriseId = e.Id
-      WHERE p.IsDeleted = 0
-      ORDER BY p.CreatedAt DESC
+        id          AS Id,
+        business_identity AS Code,
+        name        AS Name,
+        description AS LegalName,
+        short_name  AS ShortName,
+        entity_type AS Type,
+        cr_code     AS Industry,
+        date_of_establishment AS IncorporationDate,
+        cin         AS CIN,
+        pan         AS PAN,
+        tan         AS TAN,
+        gst_type    AS GSTType,
+        business_identity AS GST,
+        gst_issue_date AS GSTDate,
+        trade_license  AS TradeLicenseNo,
+        NULL           AS TradeLicenseDate,
+        address        AS RegisteredAddress,
+        address_line2  AS Address2,
+        city, state, country, pincode,
+        phone_number   AS Phone,
+        NULL           AS Fax,
+        email,
+        website,
+        NULL           AS AuthorizedCapital,
+        NULL           AS PaidUpCapital,
+        currency,
+        fiscal_year_start AS FiscalYearStart,
+        NULL           AS AuditorName,
+        CASE WHEN discontinue = 1 THEN 0 ELSE 1 END AS IsActive,
+        NULL           AS Remarks,
+        logo           AS LogoUrl,
+        status,
+        belongs_to
+      FROM dbo.enterprise
+      WHERE business_type = 'C'
+      ORDER BY name
     `);
-
     res.json(result.recordset);
   } catch (err) {
-    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// POST - Create new project with Base64 image
+// POST — inserts into enterprise with business_type = 'C'
 router.post("/", adminOnly, async (req, res) => {
   const f = req.body;
-  const pool = getPool();
-  const transaction = pool.transaction();
-
   try {
-    await transaction.begin();
-
-    const enterpriseId = parseInt(f.enterpriseId || f.businessUnit);
-    if (!enterpriseId) {
-      throw new Error("Enterprise is required");
-    }
-
-    await transaction
+    const pool = getPool();
+    await pool
       .request()
-      .input("EnterpriseId", sql.Int, enterpriseId)
-      .input("Code", sql.NVarChar(50), f.code || null)
-      .input("Name", sql.NVarChar(255), f.name || null)
-      .input("ShortName", sql.NVarChar(100), f.shortName || null)
-      .input("Type", sql.NVarChar(100), f.type || null)
-      .input("BusinessUnit", sql.NVarChar(200), f.businessUnit || null)
-      .input("ClientName", sql.NVarChar(200), f.clientName || null)
-      .input("ClientCode", sql.NVarChar(50), f.clientCode || null)
-      .input("TeamSize", sql.Int, parseInt(f.teamSize) || null)
-      .input("StartDate", sql.Date, f.startDate || null)
-      .input("EndDate", sql.Date, f.endDate || null)
-      .input("Currency", sql.NVarChar(10), f.currency || "INR")
-      .input("Status", sql.NVarChar(50), f.status || "Planning")
-      .input("Priority", sql.NVarChar(50), f.priority || "Medium")
-      .input("Location", sql.NVarChar(255), f.location || null)
-      .input("Description", sql.NVarChar(sql.MAX), f.description || null)
-      .input("Remarks", sql.NVarChar(500), f.remarks || null)
-      .input("IsActive", sql.Bit, f.isActive !== false ? 1 : 0)
-      .input("ProjectImage", sql.NVarChar(sql.MAX), f.projectImage || null)
-      .query(`
-        INSERT INTO dbo.ProjectMaster
-          (EnterpriseId, Code, Name, ShortName, Type, BusinessUnit, ClientName, ClientCode,
-           TeamSize, StartDate, EndDate, Currency, Status, Priority, Location,
-           Description, Remarks, IsActive, ProjectImage, IsDeleted, CreatedAt)
-        VALUES
-          (@EnterpriseId, @Code, @Name, @ShortName, @Type, @BusinessUnit, @ClientName, @ClientCode,
-           @TeamSize, @StartDate, @EndDate, @Currency, @Status, @Priority, @Location,
-           @Description, @Remarks, @IsActive, @ProjectImage, 0, GETDATE())
+      .input("name", sql.NVarChar(255), f.name || null)
+      .input("short_name", sql.NVarChar(100), f.shortName || null)
+      .input("business_identity", sql.NVarChar(100), f.code || null)
+      .input("business_type", sql.NVarChar(100), "C")
+      .input("entity_type", sql.NVarChar(50), f.type || null)
+      .input("description", sql.NVarChar(sql.MAX), f.legalName || null)
+      .input("cr_code", sql.NVarChar(50), f.industry || null)
+      .input("date_of_establishment", sql.Date, f.incorporationDate || null)
+      .input("cin", sql.NVarChar(50), f.cinNumber || null)
+      .input("pan", sql.NVarChar(20), f.panNumber || null)
+      .input("tan", sql.NVarChar(15), f.tanNumber || null)
+      .input("gst_type", sql.NVarChar(50), f.gstType || null)
+      .input("gst_issue_date", sql.Date, f.gstDate || null)
+      .input("trade_license", sql.NVarChar(100), f.tradeLicenseNo || null)
+      .input("address", sql.NVarChar(sql.MAX), f.registeredAddress || null)
+      .input("city", sql.NVarChar(100), f.city || null)
+      .input("state", sql.NVarChar(100), f.state || null)
+      .input("country", sql.NVarChar(100), f.country || null)
+      .input("pincode", sql.NVarChar(10), f.pincode || null)
+      .input("phone_number", sql.NVarChar(20), f.phone || null)
+      .input("email", sql.NVarChar(255), f.email || null)
+      .input("website", sql.NVarChar(255), f.website || null)
+      .input("currency", sql.NVarChar(10), f.currency || "INR")
+      .input("fiscal_year_start", sql.NVarChar(20), f.fiscalYearStart || null)
+      .input("logo", sql.NVarChar(sql.MAX), f.logoUrl || null)
+      .input("discontinue", sql.Bit, f.isActive ? 0 : 1)
+      .input("date_of_entry", sql.Date, new Date()).query(`
+        INSERT INTO dbo.enterprise (
+          name, short_name, business_identity, business_type, entity_type, description,
+          cr_code, date_of_establishment, cin, pan, tan, gst_type, gst_issue_date,
+          trade_license, address, city, state, country, pincode,
+          phone_number, email, website, currency, fiscal_year_start,
+          logo, discontinue, date_of_entry
+        ) VALUES (
+          @name, @short_name, @business_identity, @business_type, @entity_type, @description,
+          @cr_code, @date_of_establishment, @cin, @pan, @tan, @gst_type, @gst_issue_date,
+          @trade_license, @address, @city, @state, @country, @pincode,
+          @phone_number, @email, @website, @currency, @fiscal_year_start,
+          @logo, @discontinue, @date_of_entry
+        )
       `);
-
-    await transaction.commit();
-    res.json({ success: true, message: "Project created successfully" });
+    await bumpCacheVersion("enterprises");
+    res.json({ success: true });
   } catch (err) {
-    await transaction.rollback();
-    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// PUT - Update project
+// PUT — updates enterprise row
 router.put("/:id", adminOnly, async (req, res) => {
   const f = req.body;
-  const pool = getPool();
-  const transaction = pool.transaction();
-
   try {
-    await transaction.begin();
-
-    const enterpriseId = parseInt(f.enterpriseId || f.businessUnit);
-
-    await transaction
+    const pool = getPool();
+    await pool
       .request()
-      .input("Id", sql.Int, parseInt(req.params.id))
-      .input("EnterpriseId", sql.Int, enterpriseId)
-      .input("Code", sql.NVarChar(50), f.code || null)
-      .input("Name", sql.NVarChar(255), f.name || null)
-      .input("ShortName", sql.NVarChar(100), f.shortName || null)
-      .input("Type", sql.NVarChar(100), f.type || null)
-      .input("BusinessUnit", sql.NVarChar(200), f.businessUnit || null)
-      .input("ClientName", sql.NVarChar(200), f.clientName || null)
-      .input("ClientCode", sql.NVarChar(50), f.clientCode || null)
-      .input("TeamSize", sql.Int, parseInt(f.teamSize) || null)
-      .input("StartDate", sql.Date, f.startDate || null)
-      .input("EndDate", sql.Date, f.endDate || null)
-      .input("Currency", sql.NVarChar(10), f.currency || "INR")
-      .input("Status", sql.NVarChar(50), f.status || "Planning")
-      .input("Priority", sql.NVarChar(50), f.priority || "Medium")
-      .input("Location", sql.NVarChar(255), f.location || null)
-      .input("Description", sql.NVarChar(sql.MAX), f.description || null)
-      .input("Remarks", sql.NVarChar(500), f.remarks || null)
-      .input("IsActive", sql.Bit, f.isActive !== false ? 1 : 0)
-      .input("ProjectImage", sql.NVarChar(sql.MAX), f.projectImage || null)
-      .query(`
-        UPDATE dbo.ProjectMaster SET
-          EnterpriseId = @EnterpriseId,
-          Code = @Code,
-          Name = @Name,
-          ShortName = @ShortName,
-          Type = @Type,
-          BusinessUnit = @BusinessUnit,
-          ClientName = @ClientName,
-          ClientCode = @ClientCode,
-          TeamSize = @TeamSize,
-          StartDate = @StartDate,
-          EndDate = @EndDate,
-          Currency = @Currency,
-          Status = @Status,
-          Priority = @Priority,
-          Location = @Location,
-          Description = @Description,
-          Remarks = @Remarks,
-          IsActive = @IsActive,
-          ProjectImage = COALESCE(@ProjectImage, ProjectImage),
-          UpdatedAt = GETDATE()
-        WHERE Id = @Id AND IsDeleted = 0
+      .input("id", sql.Int, parseInt(req.params.id))
+      .input("name", sql.NVarChar(255), f.name || null)
+      .input("short_name", sql.NVarChar(100), f.shortName || null)
+      .input("business_identity", sql.NVarChar(100), f.code || null)
+      .input("entity_type", sql.NVarChar(50), f.type || null)
+      .input("description", sql.NVarChar(sql.MAX), f.legalName || null)
+      .input("cr_code", sql.NVarChar(50), f.industry || null)
+      .input("date_of_establishment", sql.Date, f.incorporationDate || null)
+      .input("cin", sql.NVarChar(50), f.cinNumber || null)
+      .input("pan", sql.NVarChar(20), f.panNumber || null)
+      .input("tan", sql.NVarChar(15), f.tanNumber || null)
+      .input("gst_type", sql.NVarChar(50), f.gstType || null)
+      .input("gst_issue_date", sql.Date, f.gstDate || null)
+      .input("trade_license", sql.NVarChar(100), f.tradeLicenseNo || null)
+      .input("address", sql.NVarChar(sql.MAX), f.registeredAddress || null)
+      .input("city", sql.NVarChar(100), f.city || null)
+      .input("state", sql.NVarChar(100), f.state || null)
+      .input("country", sql.NVarChar(100), f.country || null)
+      .input("pincode", sql.NVarChar(10), f.pincode || null)
+      .input("phone_number", sql.NVarChar(20), f.phone || null)
+      .input("email", sql.NVarChar(255), f.email || null)
+      .input("website", sql.NVarChar(255), f.website || null)
+      .input("currency", sql.NVarChar(10), f.currency || "INR")
+      .input("fiscal_year_start", sql.NVarChar(20), f.fiscalYearStart || null)
+      .input("logo", sql.NVarChar(sql.MAX), f.logoUrl || null)
+      .input("discontinue", sql.Bit, f.isActive ? 0 : 1).query(`
+        UPDATE dbo.enterprise SET
+          name=@name, short_name=@short_name, business_identity=@business_identity,
+          entity_type=@entity_type, description=@description, cr_code=@cr_code,
+          date_of_establishment=@date_of_establishment, cin=@cin, pan=@pan, tan=@tan,
+          gst_type=@gst_type, gst_issue_date=@gst_issue_date, trade_license=@trade_license,
+          address=@address, city=@city, state=@state, country=@country, pincode=@pincode,
+          phone_number=@phone_number, email=@email, website=@website,
+          currency=@currency, fiscal_year_start=@fiscal_year_start,
+          logo=@logo, discontinue=@discontinue
+        WHERE id=@id AND business_type='C'
       `);
-
-    await transaction.commit();
-    res.json({ success: true, message: "Project updated successfully" });
+    await bumpCacheVersion("enterprises");
+    res.json({ success: true });
   } catch (err) {
-    await transaction.rollback();
-    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// DELETE (soft)
+// DELETE — soft delete via discontinue flag
 router.delete("/:id", adminOnly, async (req, res) => {
-  const pool = getPool();
-  const transaction = pool.transaction();
-
   try {
-    await transaction.begin();
-
-    await transaction
+    const pool = getPool();
+    await pool
       .request()
-      .input("Id", sql.Int, parseInt(req.params.id))
-      .query(`
-        UPDATE dbo.ProjectMaster
-        SET IsDeleted = 1, UpdatedAt = GETDATE()
-        WHERE Id = @Id;
-      `);
-
-    await transaction.commit();
-    res.json({ success: true, message: "Project deleted successfully" });
+      .input("id", sql.Int, parseInt(req.params.id))
+      .query(
+        "UPDATE dbo.enterprise SET discontinue=1 WHERE id=@id AND business_type='C'",
+      );
+    await bumpCacheVersion("enterprises");
+    res.json({ success: true });
   } catch (err) {
-    await transaction.rollback();
-    console.error(err);
     res.status(500).json({ error: err.message });
   }
 });

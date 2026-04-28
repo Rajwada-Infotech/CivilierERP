@@ -47,7 +47,13 @@ interface InboxItem {
 
 const MODULE_CONFIG: Record<
   string,
-  { icon: React.ElementType; color: string; navPath: string; apiEndpoint: string; label: string }
+  {
+    icon: React.ElementType;
+    color: string;
+    navPath: string;
+    apiEndpoint: string;
+    label: string;
+  }
 > = {
   "purchase-orders": {
     icon: Package,
@@ -60,7 +66,7 @@ const MODULE_CONFIG: Record<
     icon: Hammer,
     color: "text-amber-500 bg-amber-500/10",
     navPath: "/material/work-order",
-    apiEndpoint: "/api/work-order",
+    apiEndpoint: "/api/work-orders",
     label: "Work Orders",
   },
   payments: {
@@ -167,11 +173,15 @@ const InboxRow: React.FC<{
     <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 px-4 py-3.5 border-b border-border last:border-0 hover:bg-muted/30 transition-colors group">
       {/* Module icon + label */}
       <div className="flex items-center gap-3 min-w-[160px]">
-        <div className={`p-2 rounded-lg shrink-0 ${cfg?.color ?? "bg-muted text-muted-foreground"}`}>
+        <div
+          className={`p-2 rounded-lg shrink-0 ${cfg?.color ?? "bg-muted text-muted-foreground"}`}
+        >
           <Icon size={14} />
         </div>
         <div className="min-w-0">
-          <p className="text-xs font-semibold text-foreground">{item.ModuleLabel}</p>
+          <p className="text-xs font-semibold text-foreground">
+            {item.ModuleLabel}
+          </p>
           <p className="text-[11px] text-muted-foreground font-mono truncate">
             {item.Reference || `#${item.RecordId}`}
           </p>
@@ -251,7 +261,12 @@ const ApprovalInbox: React.FC = () => {
   const queryClient = useQueryClient();
   const [activeModule, setActiveModule] = useState<string | null>(null);
 
-  const { data: items = [], isLoading, isRefetching, refetch } = useQuery({
+  const {
+    data: items = [],
+    isLoading,
+    isRefetching,
+    refetch,
+  } = useQuery({
     queryKey: ["approval-inbox", activeModule],
     queryFn: () => fetchInbox(activeModule ?? undefined),
     refetchInterval: 60_000,
@@ -267,7 +282,8 @@ const ApprovalInbox: React.FC = () => {
     queryFn: () => fetchInbox(),
   });
 
-  const countFor = (mod: string) => allItems.filter((i) => i.Module === mod).length;
+  const countFor = (mod: string) =>
+    allItems.filter((i) => i.Module === mod).length;
   const totalCount = allItems.length;
 
   return (
@@ -332,7 +348,10 @@ const ApprovalInbox: React.FC = () => {
         {isLoading ? (
           <div className="divide-y divide-border">
             {Array.from({ length: 5 }).map((_, i) => (
-              <div key={i} className="flex items-center gap-4 px-4 py-3.5 animate-pulse">
+              <div
+                key={i}
+                className="flex items-center gap-4 px-4 py-3.5 animate-pulse"
+              >
                 <div className="w-8 h-8 rounded-lg bg-muted shrink-0" />
                 <div className="flex-1 space-y-1.5">
                   <div className="h-3 w-32 rounded bg-muted" />
@@ -361,13 +380,27 @@ const ApprovalInbox: React.FC = () => {
           <>
             {/* Table header — desktop */}
             <div className="hidden sm:grid grid-cols-[160px_100px_1fr_100px_140px_120px_auto] gap-4 px-4 py-2.5 bg-muted/40 border-b border-border">
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Module / Ref</p>
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Date</p>
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Party</p>
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Amount</p>
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Approved/Rejected By</p>
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Status</p>
-              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">Actions</p>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                Module / Ref
+              </p>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                Date
+              </p>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                Party
+              </p>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                Amount
+              </p>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                Approved/Rejected By
+              </p>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                Status
+              </p>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                Actions
+              </p>
             </div>
 
             <div>
@@ -382,8 +415,10 @@ const ApprovalInbox: React.FC = () => {
 
             <div className="px-4 py-2.5 border-t border-border bg-muted/20">
               <p className="text-[11px] text-muted-foreground">
-                {items.length} record{items.length !== 1 ? "s" : ""} pending approval
-                {activeModule && ` in ${MODULE_CONFIG[activeModule]?.label ?? activeModule}`}
+                {items.length} record{items.length !== 1 ? "s" : ""} pending
+                approval
+                {activeModule &&
+                  ` in ${MODULE_CONFIG[activeModule]?.label ?? activeModule}`}
               </p>
             </div>
           </>

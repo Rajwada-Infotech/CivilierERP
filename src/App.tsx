@@ -281,6 +281,21 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
   );
 }
 
+// ─── Super Admin Only Route ───────────────────────────────────────────────────
+function SuperAdminRoute({ children }: { children: React.ReactNode }) {
+  return (
+    <RequireAuth>
+      <RequireRole allowed={["super_admin"]}>
+        <AppLayout>
+          <ErrorBoundary>
+            <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
+          </ErrorBoundary>
+        </AppLayout>
+      </RequireRole>
+    </RequireAuth>
+  );
+}
+
 // ─── Protected Route ──────────────────────────────────────────────────────────
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return (
@@ -953,9 +968,9 @@ function AppRoutes() {
       <Route
         path="/superadmin"
         element={
-          <AdminRoute>
+          <SuperAdminRoute>
             <SuperAdminDashboard />
-          </AdminRoute>
+          </SuperAdminRoute>
         }
       />
 
