@@ -97,6 +97,7 @@ export default function MaterialExpenseBooking() {
     null,
   );
   const [docNumberPreview, setDocNumberPreview] = useState("");
+  const [docRefreshTrigger, setDocRefreshTrigger] = useState(0);
   // Status filter for list view — default to "Received" payment status
   const [statusFilter, setStatusFilter] = useState<string>("Received");
   // Approval trail for selected record
@@ -296,6 +297,7 @@ export default function MaterialExpenseBooking() {
             financialYear: form.financialYear,
           });
           setDocNumberPreview(nextDocNo);
+          setDocRefreshTrigger((current) => current + 1);
         } else {
           cancelForm();
         }
@@ -410,6 +412,7 @@ export default function MaterialExpenseBooking() {
                   selectedDocTypeId={selectedDocTypeId}
                   onSelect={handleDocTypeSelect}
                   preview={docNumberPreview}
+                  refreshTrigger={docRefreshTrigger}
                 />
                 {/* Manual override */}
                 <Field
@@ -450,15 +453,13 @@ export default function MaterialExpenseBooking() {
                       value={form.financialYear}
                       onValueChange={(v) => {
                         set("financialYear", v);
-                        // Rebuild booking reference: strip any existing finYear suffix then append new one
-                        if (selectedDocTypeId && docNumberPreview) {
-                          const base = docNumberPreview.replace(
-                            /\/\d{4}-\d{2,4}$/,
-                            "",
+                        if (selectedDocTypeId) {
+                          void fetchNextDocNumber(selectedDocTypeId, v).then(
+                            (nextDocNo) => {
+                              setDocNumberPreview(nextDocNo);
+                              if (nextDocNo) set("bookingReference", nextDocNo);
+                            },
                           );
-                          const newRef = `${base}/${v}`;
-                          setDocNumberPreview(newRef);
-                          set("bookingReference", newRef);
                         }
                       }}
                     >

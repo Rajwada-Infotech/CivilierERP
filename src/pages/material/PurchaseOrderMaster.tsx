@@ -39,6 +39,7 @@ const PurchaseOrderMaster = () => {
   const [poDocNo, setPoDocNo] = useState("");
   const [poFormPatch, setPoFormPatch] = useState<Record<string, unknown> | null>(null);
   const [poFormPatchKey, setPoFormPatchKey] = useState(0);
+  const [docRefreshTrigger, setDocRefreshTrigger] = useState(0);
   const activeFinYear =
     finYears.find((fy) => fy.status === "Active")?.year || undefined;
   const finYearOptions = finYears.filter((fy) => fy.status === "Active");
@@ -74,6 +75,7 @@ const PurchaseOrderMaster = () => {
       finYearOverride || undefined,
     );
     applyPoDocNumber(docTypeId, nextDocNo);
+    setDocRefreshTrigger((current) => current + 1);
     return nextDocNo;
   };
 
@@ -223,11 +225,13 @@ const PurchaseOrderMaster = () => {
         await queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
         setPage(1);
         toast.success("Purchase Order created successfully!");
-        const nextDocNo = await refreshPoDocNumber();
+        const savedDocTypeId =
+          (event.record.docTypeId as number | null) ?? poDocTypeId;
+        const nextDocNo = await refreshPoDocNumber(savedDocTypeId);
         return {
           poNumber: nextDocNo,
           docNo: nextDocNo,
-          docTypeId: poDocTypeId,
+          docTypeId: savedDocTypeId,
         };
       } else if (event.action === "update") {
         await updatePurchaseOrder(event.id, toPayload(event.record));
@@ -419,6 +423,7 @@ const PurchaseOrderMaster = () => {
           finYear={selectedFinYear || undefined}
           selectedDocTypeId={poDocTypeId}
           preview={poDocNo}
+          refreshTrigger={docRefreshTrigger}
           onSelect={applyPoDocNumber}
         />
       </div>

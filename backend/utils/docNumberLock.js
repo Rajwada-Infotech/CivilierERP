@@ -48,11 +48,15 @@ async function lockNextDocNumber(pool, sql, { docTypeId, finYear, tableName, iss
   // 2. Find current max sequence already locked for this prefix
   const maxResult = await pool
     .request()
+    .input("TypeOfDocId", sql.Int, docTypeId)
     .input("Prefix", sql.NVarChar(100), prefix + "%")
+    .input("FinYearPattern", sql.NVarChar(130), fy ? `%/${fy}` : null)
     .query(`
       SELECT MAX(TRY_CAST(SUBSTRING(DocNo, LEN(@Prefix) + 1, 6) AS INT)) AS MaxSeq
       FROM   dbo.DocNumberSequence
-      WHERE  DocNo LIKE @Prefix
+      WHERE  TypeOfDocId = @TypeOfDocId
+        AND  DocNo LIKE @Prefix
+        AND  (@FinYearPattern IS NULL OR DocNo LIKE @FinYearPattern)
     `);
 
   const maxSeq  = maxResult.recordset[0]?.MaxSeq ?? startFrom - 1;
@@ -83,10 +87,15 @@ async function lockNextDocNumber(pool, sql, { docTypeId, finYear, tableName, iss
     // Re-read the max and bump by 1 more.
     const retryMax = await pool
       .request()
+      .input("TypeOfDocId", sql.Int, docTypeId)
       .input("Prefix", sql.NVarChar(100), prefix + "%")
+      .input("FinYearPattern", sql.NVarChar(130), fy ? `%/${fy}` : null)
       .query(`
         SELECT MAX(TRY_CAST(SUBSTRING(DocNo, LEN(@Prefix) + 1, 6) AS INT)) AS MaxSeq
-        FROM   dbo.DocNumberSequence WHERE DocNo LIKE @Prefix
+        FROM   dbo.DocNumberSequence
+        WHERE  TypeOfDocId = @TypeOfDocId
+          AND  DocNo LIKE @Prefix
+          AND  (@FinYearPattern IS NULL OR DocNo LIKE @FinYearPattern)
       `);
     const retrySeq  = (retryMax.recordset[0]?.MaxSeq ?? nextSeq) + 1;
     const retryBase = `${prefix}${String(retrySeq).padStart(6, "0")}`;
