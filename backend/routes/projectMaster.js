@@ -89,7 +89,7 @@ router.post("/", adminOnly, async (req, res) => {
       .input("currency", sql.NVarChar(10), f.currency || "INR")
       .input("fiscal_year_start", sql.NVarChar(20), f.fiscalYearStart || null)
       .input("logo", sql.NVarChar(sql.MAX), f.logoUrl || null)
-      .input("belongs_to", sql.Int, f.belongsTo ? parseInt(f.belongsTo) : null)
+      .input("belongs_to", sql.NVarChar(50), f.belongsTo || null)
       .input("discontinue", sql.Bit, f.isActive ? 0 : 1)
       .input("date_of_entry", sql.Date, new Date()).query(`
         INSERT INTO dbo.enterprise (
@@ -145,7 +145,7 @@ router.put("/:id", adminOnly, async (req, res) => {
       .input("currency", sql.NVarChar(10), f.currency || "INR")
       .input("fiscal_year_start", sql.NVarChar(20), f.fiscalYearStart || null)
       .input("logo", sql.NVarChar(sql.MAX), f.logoUrl || null)
-      .input("belongs_to", sql.Int, f.belongsTo ? parseInt(f.belongsTo) : null)
+      .input("belongs_to", sql.NVarChar(50), f.belongsTo || null)
       .input("discontinue", sql.Bit, f.isActive ? 0 : 1).query(`
         UPDATE dbo.enterprise SET
           name=@name, short_name=@short_name, business_identity=@business_identity,

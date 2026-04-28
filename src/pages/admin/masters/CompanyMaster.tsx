@@ -457,19 +457,7 @@ export default function CompanyMaster() {
                             {c.Name}
                           </td>
                           <td className="px-4 py-3 text-xs text-muted-foreground max-w-[140px] truncate">
-                            {c.belongs_to
-                              ? ((
-                                  enterprises.find(
-                                    (e: any) => (e.id ?? e.Id) === c.belongs_to,
-                                  ) as any
-                                )?.name ??
-                                (
-                                  enterprises.find(
-                                    (e: any) => (e.id ?? e.Id) === c.belongs_to,
-                                  ) as any
-                                )?.Name ??
-                                "—")
-                              : "—"}
+                            {c.belongs_to || "—"}
                           </td>
                           <td className="px-4 py-3 text-muted-foreground text-xs max-w-[160px] truncate">
                             {c.LegalName}
@@ -645,11 +633,14 @@ export default function CompanyMaster() {
                       className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                     >
                       <option value="">— Select Enterprise —</option>
-                      {enterprises.map((e: any) => (
-                        <option key={e.id ?? e.Id} value={e.id ?? e.Id}>
-                          {e.name ?? e.Name}
-                        </option>
-                      ))}
+                      {enterprises.map((e: any) => {
+                        const name = e.name ?? e.Name ?? "";
+                        return (
+                          <option key={e.id ?? e.Id} value={name}>
+                            {name}
+                          </option>
+                        );
+                      })}
                     </select>
                   </div>
                   {fi("Incorporation Date", "incorporationDate", "date")}
