@@ -1,6 +1,9 @@
 import React from "react";
 import { useNavigate } from "react-router-dom";
+import { useModule } from "@/contexts/ModuleContext";
 import { useTask } from "@/contexts/TaskContext";
+import { useAuth } from "@/contexts/AuthContext";
+import { DashboardBackground } from "@/components/DashboardBackground";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -16,32 +19,13 @@ import { Badge } from "@/components/ui/badge";
 
 const FollowupDashboard = () => {
   const navigate = useNavigate();
-  const { tasks } = useTask();
+  const { activeModule } = useModule();
+  const { tasks, getOverdueTasks, getDueSoonTasks } = useTask();
+  const { currentUser } = useAuth();
 
   const followupTasks = tasks.filter((task) => task.module === "followup");
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const overdueTasks = followupTasks.filter((task) => {
-    if (!task.dueDate) return false;
-    const due = new Date(task.dueDate);
-    due.setHours(0, 0, 0, 0);
-    return due < today && task.status !== "closed" && task.status !== "reviewed";
-  });
-
-  const dueSoonTasks = followupTasks.filter((task) => {
-    if (!task.dueDate) return false;
-    const due = new Date(task.dueDate);
-    due.setHours(0, 0, 0, 0);
-    const diffDays = Math.floor((due.getTime() - today.getTime()) / 86400000);
-    return (
-      diffDays >= 0 &&
-      diffDays <= 3 &&
-      task.status !== "closed" &&
-      task.status !== "reviewed"
-    );
-  });
-
+  const overdueTasks = getOverdueTasks();
+  const dueSoonTasks = getDueSoonTasks();
   const completedTasks = followupTasks.filter(
     (task) => task.status === "closed" || task.status === "reviewed",
   );
@@ -75,8 +59,10 @@ const FollowupDashboard = () => {
     },
   ];
 
+
   return (
-    <div className="p-6 space-y-6">
+    <div className="relative p-6 space-y-6">
+      <DashboardBackground />
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-heading font-bold text-foreground">
@@ -207,4 +193,3 @@ const FollowupDashboard = () => {
 };
 
 export default FollowupDashboard;
-

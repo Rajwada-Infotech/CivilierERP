@@ -46,6 +46,22 @@ const normalizeRole = (role) => {
     "system admin": "admin",
     "system administrator": "admin",
 
+    // branch_manager variants
+    "branch manager": "branch_manager",
+    "branch admin": "branch_manager",
+    branch_manager: "branch_manager",
+
+    // finance_manager variants
+    "finance manager": "finance_manager",
+    finance: "finance_manager",
+    finance_manager: "finance_manager",
+    accountant: "finance_manager",
+
+    // store_manager variants
+    "store manager": "store_manager",
+    "material manager": "store_manager",
+    store_manager: "store_manager",
+
     // user variants
     user: "user",
     "standard user": "user",

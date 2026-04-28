@@ -2,7 +2,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const BASE = "/api/card-master";
 const BANKS_URL = "/api/account-head/bank-options";
-const COMPANY_URL = "/api/enterprises/options";
+const COMPANY_URL = "/api/enterprises/options?business_type=C";
 
 // ─── Response handler ─────────────────────────────────────────────────────────
 async function handleResponse<T = unknown>(res: Response): Promise<T> {

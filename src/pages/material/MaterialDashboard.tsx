@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { DashboardBackground } from "@/components/DashboardBackground";
 import {
   Package,
   Truck,
@@ -445,7 +446,8 @@ export default function MaterialDashboard() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Material"]} />
-      <div className="p-6 space-y-6">
+      <div className="relative p-6 space-y-6">
+        <DashboardBackground />
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>

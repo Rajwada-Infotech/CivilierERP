@@ -722,10 +722,11 @@ export default function CompanyMaster() {
                 </div>
                 <div>
                   <p className="font-heading font-semibold text-foreground">
-                    Delete Company?
+                    Deactivate Company?
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    This action cannot be undone.
+                    The company will be deactivated and hidden from all
+                    dropdowns.
                   </p>
                 </div>
               </div>
