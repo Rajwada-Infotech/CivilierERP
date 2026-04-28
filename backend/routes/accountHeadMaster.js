@@ -37,8 +37,8 @@ async function getAccountHeadColumnMeta() {
 const getColumn = (meta, columnName) => meta.get(columnName.toLowerCase()) || null;
 const hasColumn = (meta, columnName) => Boolean(getColumn(meta, columnName));
 
-const requireUserEmail = (req, res) => {
-  const email = req.user?.email;
+const requireUserName = (req, res) => {
+  const email = req.user?.name;
   if (!email) {
     res.status(401).json({ error: "User context missing" });
     return null;
@@ -92,9 +92,17 @@ router.get("/", cache("account-head-master", 300), async (req, res) => {
       LEFT JOIN dbo.AccountGroup parent ON parent.AGId = ag.ParentGroupId`;
 
     const request = pool.request();
+    const conditions = [];
     if (req.query.type) {
-      query += ` WHERE lh.LHeadType = @type`;
+      conditions.push("lh.LHeadType = @type");
       request.input("type", sql.VarChar(50), req.query.type);
+    }
+    if (req.query.groupId) {
+      conditions.push("lh.LBelongsTo = @groupId");
+      request.input("groupId", sql.Int, parseInt(req.query.groupId, 10));
+    }
+    if (conditions.length) {
+      query += " WHERE " + conditions.join(" AND ");
     }
 
     const result = await request.query(query);
@@ -115,8 +123,8 @@ router.post("/", async (req, res) => {
   } = req.body;
 
   try {
-    const userEmail = requireUserEmail(req, res);
-    if (!userEmail) return;
+    const userName = requireUserName(req, res);
+    if (!userName) return;
 
     const pool = getPool();
     const columnMeta = await getAccountHeadColumnMeta();
@@ -159,7 +167,7 @@ router.post("/", async (req, res) => {
       insertColumns.push("LHeadCatagory"); insertValues.push("@LHeadCatagory");
     }
     if (hasColumn(columnMeta, "CreatedBy")) {
-      request.input("CreatedBy", sql.NVarChar(100), userEmail);
+      request.input("CreatedBy", sql.NVarChar(100), userName);
       insertColumns.push("CreatedBy"); insertValues.push("@CreatedBy");
     }
     if (hasColumn(columnMeta, "CreatedAt")) {
@@ -219,8 +227,8 @@ router.get("/bank-options", async (req, res) => {
 // ─── PUT /:id/submit — user submits for approval ───────────────────────────────
 router.put("/:id/submit", async (req, res) => {
   try {
-    const userEmail = requireUserEmail(req, res);
-    if (!userEmail) return;
+    const userName = requireUserName(req, res);
+    if (!userName) return;
 
     const pool = getPool();
 
@@ -237,7 +245,7 @@ router.put("/:id/submit", async (req, res) => {
 
     await pool.request()
       .input("id",        sql.Int,           req.params.id)
-      .input("UpdatedBy", sql.NVarChar(100), userEmail)
+      .input("UpdatedBy", sql.NVarChar(100), userName)
       .query(`
         UPDATE dbo.AccountHeadMaster SET
           Status    = 'Pending',
@@ -257,8 +265,8 @@ router.put("/:id/submit", async (req, res) => {
 // ─── PUT /:id/approve — admin approves ────────────────────────────────────────
 router.put("/:id/approve", adminOnly, async (req, res) => {
   try {
-    const userEmail = requireUserEmail(req, res);
-    if (!userEmail) return;
+    const userName = requireUserName(req, res);
+    if (!userName) return;
 
     const pool = getPool();
 
@@ -274,7 +282,7 @@ router.put("/:id/approve", adminOnly, async (req, res) => {
 
     await pool.request()
       .input("id",         sql.Int,           req.params.id)
-      .input("ApprovedBy", sql.NVarChar(100), userEmail)
+      .input("ApprovedBy", sql.NVarChar(100), userName)
       .query(`
         UPDATE dbo.AccountHeadMaster SET
           Status     = 'Approved',
@@ -294,8 +302,8 @@ router.put("/:id/approve", adminOnly, async (req, res) => {
 // ─── PUT /:id/reject — admin rejects ──────────────────────────────────────────
 router.put("/:id/reject", adminOnly, async (req, res) => {
   try {
-    const userEmail = requireUserEmail(req, res);
-    if (!userEmail) return;
+    const userName = requireUserName(req, res);
+    if (!userName) return;
 
     const { reason } = req.body; // optional rejection reason
 
@@ -313,7 +321,7 @@ router.put("/:id/reject", adminOnly, async (req, res) => {
 
     await pool.request()
       .input("id",        sql.Int,           req.params.id)
-      .input("UpdatedBy", sql.NVarChar(100), userEmail)
+      .input("UpdatedBy", sql.NVarChar(100), userName)
       .input("reason",    sql.NVarChar(500), reason || null)
       .query(`
         UPDATE dbo.AccountHeadMaster SET
@@ -341,8 +349,8 @@ router.put("/:id", async (req, res) => {
   } = req.body;
 
   try {
-    const userEmail = requireUserEmail(req, res);
-    if (!userEmail) return;
+    const userName = requireUserName(req, res);
+    if (!userName) return;
 
     const pool = getPool();
 
@@ -399,7 +407,7 @@ router.put("/:id", async (req, res) => {
       updates.push("LHeadCatagory=@LHeadCatagory");
     }
     if (hasColumn(columnMeta, "UpdatedBy")) {
-      request.input("UpdatedBy", sql.NVarChar(100), userEmail);
+      request.input("UpdatedBy", sql.NVarChar(100), userName);
       updates.push("UpdatedBy=@UpdatedBy");
     }
     if (hasColumn(columnMeta, "UpdatedAt")) {

@@ -2,7 +2,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 const BASE = "/api/cheque-master";
 const BANKS_URL = "/api/account-head/bank-options";
-const COMPANY_URL = "/api/enterprises/options?type=Company";
+const COMPANY_URL = "/api/enterprises/options?business_type=C";
 
 // ─── Response handler ─────────────────────────────────────────────────────────
 async function handleResponse<T = unknown>(res: Response): Promise<T> {
@@ -34,6 +34,7 @@ export interface DbCheque {
   BankName: string | null;
   BankBranch: string | null;
   BankAccountType: string | null;
+  CompanyName: string | null;
 }
 
 export interface BankOption {

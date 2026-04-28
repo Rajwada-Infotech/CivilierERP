@@ -6,7 +6,7 @@ import {
   type FieldDef,
   type DataChangeEvent,
 } from "@/components/MasterPage";
-import { BadgeCheck, Ruler, Hash } from "lucide-react";
+import { Ruler, Hash } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getUomList, addUom, updateUom, deleteUom } from "@/api/uomApi";
 import { toast } from "sonner";
@@ -16,10 +16,6 @@ interface DbUOM {
   UOMName: string;
   UOMCode: string;
   Symbol: string | null;
-  UOMType: string | null;
-  DecimalPlaces: number;
-  ConversionFactor: number | null;
-  IsBaseUnit: boolean;
   Remarks: string | null;
   IsActive: boolean;
   CreatedAt: string | null;
@@ -46,33 +42,6 @@ const FIELDS: FieldDef[] = [
     required: true,
   },
   {
-    name: "type",
-    label: "Type",
-    type: "select",
-    required: true,
-    options: ["Simple", "Compound", "Base"],
-  },
-  {
-    name: "decimalPlaces",
-    label: "Decimal Places",
-    type: "number",
-    min: 0,
-    max: 6,
-    required: true,
-  },
-  {
-    name: "conversionFactor",
-    label: "Conversion Factor",
-    type: "number",
-    required: false,
-  },
-  {
-    name: "isBaseUnit",
-    label: "Base Unit",
-    type: "toggle",
-    defaultValue: false,
-  },
-  {
     name: "remarks",
     label: "Remarks",
     type: "textarea",
@@ -90,8 +59,6 @@ const COLUMNS: ColumnDef[] = [
   { key: "code", label: "Code" },
   { key: "name", label: "Name" },
   { key: "symbol", label: "Symbol" },
-  { key: "decimalPlaces", label: "Decimals" },
-  { key: "type", label: "Type", hideOnMobile: true },
   { key: "status", label: "Status" },
 ];
 
@@ -99,10 +66,6 @@ const toPayload = (record: Record<string, unknown>) => ({
   UOMCode: record.code as string,
   UOMName: record.name as string,
   Symbol: record.symbol as string,
-  UOMType: record.type as string,
-  DecimalPlaces: Number(record.decimalPlaces ?? 0),
-  ConversionFactor: record.conversionFactor ? Number(record.conversionFactor) : null,
-  IsBaseUnit: Boolean(record.isBaseUnit),
   Remarks: (record.remarks as string) || null,
   IsActive: record.status !== false,
 });
@@ -122,17 +85,6 @@ const columnRenderers = {
     <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/60 px-2.5 py-1 text-[11px] font-heading text-foreground">
       <Ruler size={11} className="text-primary" />
       {String(value ?? "")}
-    </span>
-  ),
-  type: (value: unknown) => (
-    <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1 text-[11px] font-heading text-primary">
-      <BadgeCheck size={11} />
-      {String(value ?? "")}
-    </span>
-  ),
-  decimalPlaces: (value: unknown) => (
-    <span className="text-sm font-mono text-foreground">
-      {String(value ?? 0)} places
     </span>
   ),
   status: (value: unknown) => (
@@ -156,7 +108,11 @@ const columnRenderers = {
 export default function UnitOfMeasurementMaster() {
   const queryClient = useQueryClient();
 
-  const { data: dbData, isLoading, error } = useQuery({
+  const {
+    data: dbData,
+    isLoading,
+    error,
+  } = useQuery({
     queryKey: ["uom-master"],
     queryFn: getUomList,
     staleTime: 5 * 60 * 1000,
@@ -169,10 +125,6 @@ export default function UnitOfMeasurementMaster() {
     code: item.UOMCode || "",
     name: item.UOMName || "",
     symbol: item.Symbol || "",
-    type: item.UOMType || "",
-    decimalPlaces: item.DecimalPlaces ?? 0,
-    conversionFactor: item.ConversionFactor ?? "",
-    isBaseUnit: Boolean(item.IsBaseUnit),
     remarks: item.Remarks || "",
     status: Boolean(item.IsActive),
   }));
@@ -221,7 +173,9 @@ export default function UnitOfMeasurementMaster() {
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "Material Module", "Unit of Measurement"]} />
+      <Breadcrumbs
+        items={["Dashboard", "Material Module", "Unit of Measurement"]}
+      />
       <h1 className="text-xl font-heading font-bold text-foreground mb-4">
         Unit of Measurement Master
       </h1>

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -17,6 +17,11 @@ import {
 import * as grnApi from "@/api/grnApi";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
+import { useFinYear } from "@/contexts/FinYearContext";
+import {
+  DocNumberPreview,
+  fetchNextDocNumber,
+} from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import type {
   GRNFormDataPayload,
   GRNItemLine,
@@ -37,11 +42,6 @@ const createEmptyItem = (): GRNItemLine => ({
   uom: "",
 });
 
-const generateGrnNo = () => {
-  const today = new Date().toISOString().slice(0, 10).replace(/-/g, "");
-  return `GRN-${today}-${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
-};
-
 const parseJsonArray = <T,>(val: unknown): T[] => {
   if (Array.isArray(val)) return val as T[];
   if (typeof val !== "string" || !val.trim()) return [];
@@ -58,13 +58,33 @@ const inp =
 
 export default function GRN() {
   const queryClient = useQueryClient();
+  const { finYears } = useFinYear();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const limit = 10;
 
-  const [formData, setFormData] = useState({
-    grnNo: generateGrnNo(),
+  const activeFinYear =
+    finYears.find((fy) => fy.status === "Active")?.year || undefined;
+  const finYearOptions = finYears.filter((fy) => fy.status === "Active");
+
+  const buildEmptyForm = (
+    overrides: Partial<{
+      grnNo: string;
+      grnDate: string;
+      supplierId: string;
+      supplierName: string;
+      poId: string;
+      poNumber: string;
+      remarks: string;
+      status: "Draft" | "Partially Received" | "Fully Received";
+      items: GRNItemLine[];
+      docTypeId: number | null;
+      docNo: string;
+      finYear: string;
+    }> = {},
+  ) => ({
+    grnNo: "",
     grnDate: new Date().toISOString().slice(0, 10),
     supplierId: "",
     supplierName: "",
@@ -73,9 +93,23 @@ export default function GRN() {
     remarks: "",
     status: "Draft" as const,
     items: [createEmptyItem()],
+    docTypeId: null as number | null,
+    docNo: "",
+    finYear: activeFinYear || "",
+    ...overrides,
+  });
+
+  const [formData, setFormData] = useState({
+    ...buildEmptyForm(),
   });
 
   const [errors, setErrors] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!formData.finYear && activeFinYear) {
+      setFormData((prev) => ({ ...prev, finYear: activeFinYear }));
+    }
+  }, [activeFinYear, formData.finYear]);
 
   // ── Queries ──────────────────────────────────────────────────────────────────
   const { data: grnsPage, isLoading: loadingGrns } = useQuery({
@@ -143,10 +177,10 @@ export default function GRN() {
   // ── Mutations ────────────────────────────────────────────────────────────────
   const createMutation = useMutation({
     mutationFn: grnApi.addGRN,
-    onSuccess: () => {
+    onSuccess: async () => {
       queryClient.invalidateQueries({ queryKey: ["grns"] });
       setPage(1);
-      resetForm();
+      await resetForm(true);
       toast.success("GRN created successfully");
     },
     onError: (err: any) => toast.error(err.message || "Failed to create GRN"),
@@ -154,10 +188,10 @@ export default function GRN() {
 
   const updateMutation = useMutation({
     mutationFn: (payload: GRNFormDataPayload) => grnApi.updateGRN(editingId!, payload),
-    onSuccess: () => {
+    onSuccess: async () => {
       queryClient.invalidateQueries({ queryKey: ["grns"] });
       setPage(1);
-      resetForm();
+      await resetForm();
       toast.success("GRN updated successfully");
     },
     onError: (err: any) => toast.error(err.message || "Failed to update GRN"),
@@ -174,18 +208,21 @@ export default function GRN() {
   });
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
-  const resetForm = () => {
-    setFormData({
-      grnNo: generateGrnNo(),
-      grnDate: new Date().toISOString().slice(0, 10),
-      supplierId: "",
-      supplierName: "",
-      poId: "",
-      poNumber: "",
-      remarks: "",
-      status: "Draft",
-      items: [createEmptyItem()],
-    });
+  const resetForm = async (keepDocType = false) => {
+    const nextDocTypeId = keepDocType ? formData.docTypeId : null;
+    const nextFinYear = formData.finYear || activeFinYear || "";
+    const nextDocNo = nextDocTypeId
+      ? await fetchNextDocNumber(nextDocTypeId, nextFinYear || undefined)
+      : "";
+
+    setFormData(
+      buildEmptyForm({
+        docTypeId: nextDocTypeId,
+        docNo: nextDocNo,
+        grnNo: nextDocNo,
+        finYear: nextFinYear,
+      }),
+    );
     setEditingId(null);
     setErrors({});
   };
@@ -218,6 +255,9 @@ export default function GRN() {
       remarks: formData.remarks,
       supplierName: formData.supplierName,
       poNumber: formData.poNumber,
+      docTypeId: formData.docTypeId,
+      docNo: formData.docNo,
+      finYear: formData.finYear || null,
     };
 
     if (editingId) {
@@ -290,6 +330,12 @@ export default function GRN() {
       return;
     }
 
+    if (field === "grnNo") {
+      const nextValue = String(value || "").toUpperCase();
+      setFormData((prev) => ({ ...prev, grnNo: nextValue, docNo: nextValue }));
+      return;
+    }
+
     setFormData((prev) => ({ ...prev, [field]: value }));
   };
 
@@ -342,6 +388,8 @@ export default function GRN() {
       remarks: grn.Remarks || "",
       status: (grn.Status as any) || "Draft",
       items: parsedItems.length ? parsedItems : [createEmptyItem()],
+      docTypeId: grn.DocTypeId ?? null,
+      docNo: grn.DocNo || "",
     });
 
     setEditingId(String(grn.GRNID));
@@ -375,6 +423,59 @@ export default function GRN() {
           </div>
 
           <div className="p-6 space-y-6">
+            {/* Document Type & Number */}
+            <div>
+              <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                Document Type &amp; Number
+              </label>
+              <div className="mb-3">
+                <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  Fin Year
+                </label>
+                <select
+                  value={formData.finYear}
+                  onChange={async (e) => {
+                    const nextFinYear = e.target.value;
+                    if (formData.docTypeId) {
+                      const nextDocNo = await fetchNextDocNumber(
+                        formData.docTypeId,
+                        nextFinYear || undefined,
+                      );
+                      setFormData((prev) => ({
+                        ...prev,
+                        finYear: nextFinYear,
+                        docNo: nextDocNo,
+                        grnNo: nextDocNo,
+                      }));
+                      return;
+                    }
+                    setFormData((prev) => ({ ...prev, finYear: nextFinYear }));
+                  }}
+                  className={inp}
+                >
+                  <option value="">Select Fin Year...</option>
+                  {finYearOptions.map((fy) => (
+                    <option key={fy.id} value={fy.year}>
+                      {fy.year}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <DocNumberPreview
+                finYear={formData.finYear || undefined}
+                selectedDocTypeId={formData.docTypeId}
+                preview={formData.docNo}
+                onSelect={(id, preview) =>
+                  setFormData((prev) => ({
+                    ...prev,
+                    docTypeId: id,
+                    docNo: preview,
+                    grnNo: preview,
+                  }))
+                }
+              />
+            </div>
+
             {/* Header Fields */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
               <div>
@@ -610,6 +711,7 @@ export default function GRN() {
               <thead>
                 <tr className="bg-muted/50 border-b">
                   <th className="px-6 py-4 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">GRN No</th>
+                  <th className="px-6 py-4 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">Doc No</th>
                   <th className="px-6 py-4 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">PO No</th>
                   <th className="px-6 py-4 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">Supplier</th>
                   <th className="px-6 py-4 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">Date</th>
@@ -620,7 +722,7 @@ export default function GRN() {
               <tbody className="divide-y divide-border">
                 {filteredGrns.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="px-6 py-12 text-center text-muted-foreground">
+                    <td colSpan={7} className="px-6 py-12 text-center text-muted-foreground">
                       No GRNs found
                     </td>
                   </tr>
@@ -628,6 +730,7 @@ export default function GRN() {
                   filteredGrns.map((grn: any) => (
                     <tr key={grn.GRNID} className="hover:bg-muted/30 transition-colors">
                       <td className="px-6 py-4 font-medium">{grn.GRNNo}</td>
+                      <td className="px-6 py-4 font-mono text-xs">{grn.DocNo || "—"}</td>
                       <td className="px-6 py-4">{grn.PONumber || "—"}</td>
                       <td className="px-6 py-4">{grn.SupplierName || "—"}</td>
                       <td className="px-6 py-4">

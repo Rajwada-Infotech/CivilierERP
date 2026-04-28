@@ -68,7 +68,9 @@ interface MasterPageProps {
   loading?: boolean;
   initialData: Record<string, unknown>[];
   onDataChange?: (records: Record<string, unknown>[]) => void;
-  onDataEvent?: (event: DataChangeEvent) => void;
+  onDataEvent?: (
+    event: DataChangeEvent,
+  ) => void | Record<string, unknown> | Promise<void | Record<string, unknown>>;
   onFormChange?: (
     form: Record<string, unknown>,
     updateForm: (patch: Record<string, unknown>) => void,
@@ -83,6 +85,8 @@ interface MasterPageProps {
     isEdit: boolean,
     allRecords: Record<string, unknown>[],
   ) => Record<string, unknown> | null;
+  externalFormPatch?: Record<string, unknown> | null;
+  externalFormPatchKey?: string | number | null;
 }
 
 function getDefaults(f: FieldDef[]): Record<string, unknown> {
@@ -114,6 +118,8 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   onFormChange,
   onFieldChange,
   onCustomSave,
+  externalFormPatch,
+  externalFormPatchKey,
 }) => {
   const [data, setData] = useState<RecordWithId[]>(() =>
     seedWithIds(initialData),
@@ -130,6 +136,10 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   const prevInitialRef = React.useRef<Record<string, unknown>[]>([]);
   React.useEffect(() => {
     const prev = prevInitialRef.current;
+    // Guard: never replace existing rows with a transient empty array that
+    // arrives while invalidateQueries is mid-flight. Without this the list
+    // blanks out briefly every time a record is unlocked or updated.
+    if (initialData.length === 0 && prev.length > 0) return;
     const same =
       prev.length === initialData.length &&
       initialData.every(
@@ -140,6 +150,15 @@ export const MasterPage: React.FC<MasterPageProps> = ({
       setData(seedWithIds(initialData));
     }
   }, [initialData]);
+
+  const prevPatchKeyRef = React.useRef<string | number | null>(null);
+  React.useEffect(() => {
+    if (externalFormPatchKey === null || externalFormPatchKey === undefined) return;
+    if (prevPatchKeyRef.current === externalFormPatchKey) return;
+    prevPatchKeyRef.current = externalFormPatchKey;
+    setForm((current) => ({ ...current, ...(externalFormPatch ?? {}) }));
+    setErrors({});
+  }, [externalFormPatch, externalFormPatchKey]);
 
   const applyPatch = (
     next: Record<string, unknown>,
@@ -193,7 +212,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
     return Object.keys(errs).length === 0;
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!validate()) return;
 
     const finalData: Record<string, unknown> = onCustomSave
@@ -202,36 +221,48 @@ export const MasterPage: React.FC<MasterPageProps> = ({
 
     if (onCustomSave && Object.keys(finalData).length === 0) return;
 
+    try {
     if (editingId !== null) {
-      setData((prev) => {
-        const next = prev.map((row) =>
-          row._id === editingId ? { ...finalData, _id: editingId } : row,
-        );
-        const stripped = next.map(({ _id, ...rest }) => rest);
-        onDataChange?.(stripped);
-        onDataEvent?.({
+      const next = data.map((row) =>
+        row._id === editingId ? { ...finalData, _id: editingId } : row,
+      );
+      const stripped = next.map(({ _id, ...rest }) => rest);
+      setData(next);
+      onDataChange?.(stripped);
+      await onDataEvent?.({
           action: "update",
           id: editingId,
           record: finalData,
           records: stripped,
-        });
-        return next;
       });
       setEditingId(null);
       toast.success("Record updated successfully ✓");
+      setForm({ ...getDefaults(fields), ...(externalFormPatch ?? {}) });
     } else {
       const newId = `record-${Date.now()}`;
       const newRecord: RecordWithId = { ...finalData, _id: newId };
-      setData((prev) => {
-        const next = [...prev, newRecord];
-        const stripped = next.map(({ _id, ...rest }) => rest);
-        onDataChange?.(stripped);
-        onDataEvent?.({ action: "add", record: finalData, records: stripped });
-        return next;
+      const next = [...data, newRecord];
+      const stripped = next.map(({ _id, ...rest }) => rest);
+      setData(next);
+      onDataChange?.(stripped);
+      const result = await onDataEvent?.({
+        action: "add",
+        record: finalData,
+        records: stripped,
       });
       toast.success("Record saved successfully ✓");
+      setForm({
+        ...getDefaults(fields),
+        ...(externalFormPatch ?? {}),
+        ...((result && typeof result === "object" && !Array.isArray(result))
+          ? result
+          : {}),
+      });
+      return;
     }
-    setForm(getDefaults(fields));
+    } catch {
+      // Page-level handlers already raise the most useful toast message.
+    }
   };
 
   const handleEdit = (id: string) => {
@@ -253,13 +284,13 @@ export const MasterPage: React.FC<MasterPageProps> = ({
     setDeleteConfirmId(null);
     if (editingId === id) {
       setEditingId(null);
-      setForm(getDefaults(fields));
+      setForm({ ...getDefaults(fields), ...(externalFormPatch ?? {}) });
     }
     toast.success("Record deleted");
   };
 
   const handleReset = () => {
-    setForm(getDefaults(fields));
+    setForm({ ...getDefaults(fields), ...(externalFormPatch ?? {}) });
     setEditingId(null);
     setErrors({});
   };

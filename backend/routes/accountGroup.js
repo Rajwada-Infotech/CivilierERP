@@ -26,7 +26,7 @@ router.get("/", cache("account-group", 300), async (req, res) => {
 router.post("/", async (req, res) => {
   const { Name, Code, ParentGroupId, Status } = req.body;
   try {
-    const userEmail = req.user?.email;
+    const userEmail = req.user?.name;
     if (!userEmail) {
       return res.status(401).json({ error: "User context missing" });
     }
@@ -54,7 +54,7 @@ router.post("/", async (req, res) => {
 router.put("/:id", async (req, res) => {
   const { Name, Code, ParentGroupId, Status } = req.body;
   try {
-    const userEmail = req.user?.email;
+    const userEmail = req.user?.name;
     if (!userEmail) {
       return res.status(401).json({ error: "User context missing" });
     }

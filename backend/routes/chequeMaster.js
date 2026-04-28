@@ -29,8 +29,8 @@ async function getChequeColumnMeta() {
 
 const hasColumn = (meta, columnName) => meta.has(columnName.toLowerCase());
 
-const requireUserEmail = (req, res) => {
-  const email = req.user?.email;
+const requireUserName = (req, res) => {
+  const email = req.user?.name;
   if (!email) {
     res.status(401).json({ error: "User context missing" });
     return null;
@@ -65,9 +65,11 @@ router.get("/", cache("cheque-master", 300), async (req, res) => {
         cm.ApprovedAt,
         bm.BName        AS BankName,
         bm.BBranch      AS BankBranch,
-        bm.BAccountType AS BankAccountType
+        bm.BAccountType AS BankAccountType,
+        co.Name         AS CompanyName
       FROM dbo.ChequeMaster cm
-      LEFT JOIN dbo.BankMaster bm ON cm.BankId = bm.BId
+      LEFT JOIN dbo.BankMaster     bm ON cm.BankId    = bm.BId
+      LEFT JOIN dbo.CompanyMaster  co ON cm.CompanyId = co.Id
     `);
 
     res.json(result.recordset);
@@ -92,7 +94,7 @@ router.post("/", async (req, res) => {
   } = req.body;
 
   try {
-    const userEmail = requireUserEmail(req, res);
+    const userEmail = requireUserName(req, res);
     if (!userEmail) return;
 
     const pool = getPool();
@@ -163,7 +165,7 @@ router.put("/:id", async (req, res) => {
   } = req.body;
 
   try {
-    const userEmail = requireUserEmail(req, res);
+    const userEmail = requireUserName(req, res);
     if (!userEmail) return;
 
     const pool = getPool();
