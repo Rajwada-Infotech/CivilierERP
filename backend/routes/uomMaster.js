@@ -4,6 +4,9 @@ const { bumpCacheVersion } = require("../redis");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 
+// Bust stale cache on every deploy/restart so schema changes take effect immediately
+bumpCacheVersion("uom-master").catch(() => {});
+
 // GET all UOM
 router.get("/", cache("uom-master", 300), async (req, res) => {
   try {
@@ -14,6 +17,17 @@ router.get("/", cache("uom-master", 300), async (req, res) => {
       ORDER BY UOMName
     `);
     res.json(result.recordset);
+  } catch (err) {
+    console.error("[uom-master] GET error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Cache bust — call once after schema migrations
+router.post("/cache-bust", async (req, res) => {
+  try {
+    await bumpCacheVersion("uom-master");
+    res.json({ message: "UOM cache cleared" });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
