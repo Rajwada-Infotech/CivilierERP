@@ -50,24 +50,24 @@ interface ActivityFilters {
   role?: string;
 }
 
+interface DateFilters {
+  dateFrom?: string;
+  dateTo?: string;
+  period?:
+    | "today"
+    | "yesterday"
+    | "this-week"
+    | "this-month"
+    | "last-month"
+    | "this-year";
+}
+
 interface ActivityBrowserContextType {
   rawSessions: SessionEvent[];
   groupedSessions: GroupedSession[];
   isLoading: boolean;
-  dateFilters: {
-    dateFrom?: string;
-    dateTo?: string;
-    period?:
-      | "today"
-      | "yesterday"
-      | "this-week"
-      | "this-month"
-      | "last-month"
-      | "this-year";
-  };
-  setDateFilters: React.Dispatch<
-    React.SetStateAction<ActivityBrowserContextType["dateFilters"]>
-  >;
+  dateFilters: DateFilters;
+  setDateFilters: React.Dispatch<React.SetStateAction<DateFilters>>;
   clearDateFilters: () => void;
   activity: PaginatedActivity;
   setPage: (page: number) => void;
@@ -101,8 +101,6 @@ const ActivityBrowserContext = createContext<ActivityBrowserContextType | null>(
   null,
 );
 
-// No-op fallback used when the hook is called outside the provider
-// (e.g. during hot-reload before the tree has fully mounted).
 const NOOP_CONTEXT: ActivityBrowserContextType = {
   rawSessions: [],
   groupedSessions: [],
@@ -110,7 +108,7 @@ const NOOP_CONTEXT: ActivityBrowserContextType = {
   dateFilters: {},
   setDateFilters: () => {},
   clearDateFilters: () => {},
-  activity: { data: [], total: 0, page: 1, limit: 20, pages: 0 },
+  activity: { data: [], total: 0, page: 1, limit: 50, pages: 0 },
   setPage: () => {},
   setFilters: () => {},
   recordLogin: async () => {},
@@ -122,8 +120,6 @@ const NOOP_CONTEXT: ActivityBrowserContextType = {
 
 export const useActivityBrowser = () => {
   const ctx = useContext(ActivityBrowserContext);
-  // Return a safe no-op instead of throwing — this can happen during
-  // hot-module-reload before the provider tree has fully mounted.
   return ctx ?? NOOP_CONTEXT;
 };
 
@@ -169,7 +165,7 @@ const EMPTY_ACTIVITY: PaginatedActivity = {
   data: [],
   total: 0,
   page: 1,
-  limit: 20,
+  limit: 50,
   pages: 0,
 };
 
@@ -180,15 +176,25 @@ export const ActivityBrowserProvider: React.FC<{
 }> = ({ children }) => {
   const [rawSessions, setRawSessions] = useState<SessionEvent[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [dateFilters, setDateFilters] = useState({
-    period: "today" as const,
+  // Default to "this-week" so actions are visible without needing to change filters
+  const [dateFilters, setDateFilters] = useState<DateFilters>({
+    period: "this-week",
   });
   const [activity, setActivity] = useState<PaginatedActivity>(EMPTY_ACTIVITY);
 
   const currentPageRef = useRef(1);
   const currentFiltersRef = useRef<ActivityFilters>({});
+  // Store dateFilters in a ref so SSE callback always reads current value
+  const dateFiltersRef = useRef<DateFilters>(dateFilters);
   const sseSourceRef = useRef<EventSource | null>(null);
   const cachedIp = useRef<string | null>(null);
+  // Track if a fetch is in-flight to avoid SSE overwriting it
+  const fetchingRef = useRef(false);
+
+  // Keep dateFiltersRef in sync
+  useEffect(() => {
+    dateFiltersRef.current = dateFilters;
+  }, [dateFilters]);
 
   const getIp = useCallback(async () => {
     if (cachedIp.current) return cachedIp.current;
@@ -198,9 +204,9 @@ export const ActivityBrowserProvider: React.FC<{
   }, []);
 
   // ── FETCH ──────────────────────────────────────────────────────────────────
-
-  const fetchActivity = useCallback(
-    async (page = 1, filters: ActivityFilters = {}) => {
+  // Use a ref-based fetch so SSE callback can call it without stale closures
+  const fetchActivityCore = useCallback(
+    async (page: number, filters: ActivityFilters, df: DateFilters) => {
       const token = localStorage.getItem("token");
       if (!token) {
         setRawSessions([]);
@@ -209,18 +215,17 @@ export const ActivityBrowserProvider: React.FC<{
       }
 
       try {
+        fetchingRef.current = true;
         setIsLoading(true);
 
-        currentPageRef.current = page;
-        currentFiltersRef.current = filters;
-
+        // Fetch a larger page so both sessions and actions are well-populated
         const result = await getUserActivityLogs({
           page,
-          limit: 20,
+          limit: 100,
           ...filters,
-          dateFrom: dateFilters.dateFrom,
-          dateTo: dateFilters.dateTo,
-          period: dateFilters.period,
+          dateFrom: df.dateFrom,
+          dateTo: df.dateTo,
+          period: df.period,
         });
 
         setActivity(result);
@@ -229,10 +234,29 @@ export const ActivityBrowserProvider: React.FC<{
         console.error("Failed to fetch activity:", err);
       } finally {
         setIsLoading(false);
+        fetchingRef.current = false;
       }
     },
-    [dateFilters],
+    [],
   );
+
+  const fetchActivity = useCallback(
+    (page = 1, filters: ActivityFilters = {}) => {
+      currentPageRef.current = page;
+      currentFiltersRef.current = filters;
+      return fetchActivityCore(page, filters, dateFiltersRef.current);
+    },
+    [fetchActivityCore],
+  );
+
+  // Re-fetch whenever dateFilters change
+  useEffect(() => {
+    void fetchActivityCore(
+      currentPageRef.current,
+      currentFiltersRef.current,
+      dateFilters,
+    );
+  }, [dateFilters, fetchActivityCore]);
 
   const setPage = useCallback(
     (page: number) => fetchActivity(page, currentFiltersRef.current),
@@ -244,10 +268,13 @@ export const ActivityBrowserProvider: React.FC<{
     [fetchActivity],
   );
 
-  const refresh = useCallback(
-    () => fetchActivity(currentPageRef.current, currentFiltersRef.current),
-    [fetchActivity],
-  );
+  const refresh = useCallback(() => {
+    return fetchActivityCore(
+      currentPageRef.current,
+      currentFiltersRef.current,
+      dateFiltersRef.current,
+    );
+  }, [fetchActivityCore]);
 
   const clearAll = () => {
     setRawSessions([]);
@@ -255,28 +282,33 @@ export const ActivityBrowserProvider: React.FC<{
   };
 
   const clearDateFilters = () => {
-    setDateFilters({ period: "today" });
+    setDateFilters({ period: "this-week" });
   };
 
-  useEffect(() => {
-    void fetchActivity();
-  }, [fetchActivity]);
-
   // ── SSE ────────────────────────────────────────────────────────────────────
-
+  // SSE only triggers a refresh — it never directly sets rawSessions
+  // (which was overwriting the filtered fetch with unfiltered latest-25 rows)
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) return;
 
-    sseSourceRef.current = subscribeToActivityStream((events) => {
-      setRawSessions(events.map((e, i) => normalizeEvent(e, i)));
-      refresh();
+    sseSourceRef.current = subscribeToActivityStream(() => {
+      // Only refresh if not currently fetching to avoid race conditions
+      if (!fetchingRef.current) {
+        void fetchActivityCore(
+          currentPageRef.current,
+          currentFiltersRef.current,
+          dateFiltersRef.current,
+        );
+      }
     });
 
     return () => {
       sseSourceRef.current?.close();
     };
-  }, [refresh]);
+    // fetchActivityCore is stable (no deps) — safe to use here without re-running
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // ── RECORDING ──────────────────────────────────────────────────────────────
 
@@ -431,11 +463,11 @@ export const ActivityBrowserProvider: React.FC<{
       } else if (event.event === "logout") {
         group.logoutTime = event.timestamp;
         group.logoutEvent = event;
-
         group.durationMs =
           new Date(event.timestamp).getTime() -
           new Date(group.loginTime).getTime();
       } else {
+        // event === "action"
         group.actions.push(event);
       }
     });

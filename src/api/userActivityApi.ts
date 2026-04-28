@@ -6,7 +6,6 @@ export type ActivityEventType = "login" | "logout" | "action";
 
 export type ActivityActionType =
   | "read"
-  | "write"
   | "create"
   | "update"
   | "delete"
