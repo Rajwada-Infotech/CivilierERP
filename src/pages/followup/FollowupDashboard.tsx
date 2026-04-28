@@ -23,10 +23,11 @@ const FollowupDashboard = () => {
   const { tasks, getOverdueTasks, getDueSoonTasks } = useTask();
   const { currentUser } = useAuth();
 
+  const followupTasks = tasks.filter((task) => task.module === "followup");
   const overdueTasks = getOverdueTasks();
   const dueSoonTasks = getDueSoonTasks();
-  const completedTasks = tasks.filter(
-    (t) => t.status === "closed" || t.status === "reviewed",
+  const completedTasks = followupTasks.filter(
+    (task) => task.status === "closed" || task.status === "reviewed",
   );
 
   const stats = [
@@ -50,18 +51,14 @@ const FollowupDashboard = () => {
     },
     {
       label: "Pending Tasks",
-      value: tasks
-        .filter((t) => ["open", "in_progress"].includes(t.status))
+      value: followupTasks
+        .filter((task) => ["open", "in_progress"].includes(task.status))
         .length.toString(),
       icon: Activity,
       color: "bg-indigo-500/10 text-indigo-600",
     },
   ];
 
-  // Temporarily allow render for testing (module state now syncs correctly)
-  // if (activeModule !== 'followup') {
-  //   return <div>Switch to Follow-Up module to view dashboard</div>
-  // }
 
   return (
     <div className="relative p-6 space-y-6">
@@ -80,7 +77,7 @@ const FollowupDashboard = () => {
             <Calendar className="w-4 h-4 mr-2" />
             View All Tasks
           </Button>
-          <Button onClick={() => navigate("/followup/reminders")}>
+          <Button onClick={() => navigate("/followup/follow-ups/reminders")}>
             New Reminder
           </Button>
         </div>
@@ -117,18 +114,18 @@ const FollowupDashboard = () => {
           <Button
             variant="outline"
             className="justify-start h-16"
-            onClick={() => navigate("/followup/tasks")}
+            onClick={() => navigate("/followup/follow-ups/tasks")}
           >
             <CheckCircle className="w-5 h-5 mr-3" />
             Review Pending Tasks
             <Badge className="ml-auto text-xs bg-indigo-500/20 text-indigo-700 border-indigo-500/30">
-              {tasks.filter((t) => t.status === "in_progress").length}
+              {followupTasks.filter((task) => task.status === "in_progress").length}
             </Badge>
           </Button>
           <Button
             variant="outline"
             className="justify-start h-16"
-            onClick={() => navigate("/followup/reminders")}
+            onClick={() => navigate("/followup/follow-ups/reminders")}
           >
             <Clock className="w-5 h-5 mr-3" />
             Manage Reminders
@@ -139,7 +136,7 @@ const FollowupDashboard = () => {
           <Button
             variant="outline"
             className="justify-start h-16"
-            onClick={() => navigate("/followup/log")}
+            onClick={() => navigate("/followup/follow-ups/log")}
           >
             <FileText className="w-5 h-5 mr-3" />
             Follow-up Log
@@ -153,13 +150,19 @@ const FollowupDashboard = () => {
           <CardTitle>Recent Follow-ups</CardTitle>
         </CardHeader>
         <CardContent>
-          {tasks.slice(0, 5).map((task) => (
+          {followupTasks.slice(0, 5).map((task) => (
             <div
               key={task.id}
               className="flex items-center gap-4 p-4 border-b last:border-b-0 hover:bg-muted/50 rounded-lg"
             >
               <div
-                className={`w-3 h-3 rounded-full ${task.status === "closed" ? "bg-green-500" : task.status === "in_progress" ? "bg-amber-500" : "bg-gray-500"}`}
+                className={`w-3 h-3 rounded-full ${
+                  task.status === "closed"
+                    ? "bg-green-500"
+                    : task.status === "in_progress"
+                      ? "bg-amber-500"
+                      : "bg-gray-500"
+                }`}
               />
               <div className="flex-1 min-w-0">
                 <p className="font-medium text-sm line-clamp-1">{task.title}</p>
@@ -169,7 +172,7 @@ const FollowupDashboard = () => {
               </div>
               <div className="text-right">
                 <p className="text-xs font-medium">
-                  {new Date(task.dueDate).toLocaleDateString()}
+                  {task.dueDate ? new Date(task.dueDate).toLocaleDateString() : "-"}
                 </p>
                 <Badge
                   variant={task.status === "closed" ? "default" : "secondary"}
@@ -180,6 +183,9 @@ const FollowupDashboard = () => {
               </div>
             </div>
           ))}
+          {followupTasks.length === 0 && (
+            <p className="text-sm text-muted-foreground">No follow-up tasks yet.</p>
+          )}
         </CardContent>
       </Card>
     </div>

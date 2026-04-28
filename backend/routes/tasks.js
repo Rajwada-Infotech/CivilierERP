@@ -34,6 +34,7 @@ function mapTask(row, comments = []) {
     id: String(row.Id),
     title: row.Title,
     description: row.Description || "",
+    module: row.Module || null,
     priority: row.Priority,
     status: row.Status,
     assignedTo: String(row.AssignedTo),
@@ -76,13 +77,18 @@ function mapComment(row) {
 // ─── GET /api/tasks ───────────────────────────────────────────────────────────
 // Admins see all tasks; regular users see only tasks assigned/created by them.
 router.get("/", async (req, res) => {
+  let userId = null;
   try {
-    const userId = req.user.userId ?? req.user.id;
+    userId = req.user.userId ?? req.user.id;
     const { role } = req.user;
     const isAdmin =
       role === "admin" || role === "super_admin" || role === "dba";
+    const moduleFilter =
+      typeof req.query.module === "string" && req.query.module.trim()
+        ? req.query.module.trim().toLowerCase()
+        : "";
 
-    const cacheKey = `tasks:${userId}:${isAdmin}`;
+    const cacheKey = `tasks:${userId}:${isAdmin}:${moduleFilter || "all"}`;
 
     // ✅ 1. Check cache
     const cached = await redisGet(cacheKey);
@@ -95,7 +101,7 @@ router.get("/", async (req, res) => {
 
     let query = `
       SELECT
-        t.Id, t.Title, t.Description, t.Priority, t.Status,
+        t.Id, t.Title, t.Description, t.Module, t.Priority, t.Status,
         t.AssignedTo, au.name AS AssignedToName,
         t.CreatedBy,  cu.name AS CreatedByName,
         t.ReviewedBy, ru.name AS ReviewedByName,
@@ -108,10 +114,20 @@ router.get("/", async (req, res) => {
     `;
 
     const request = pool.request();
+    const conditions = [];
 
     if (!isAdmin) {
-      query += ` WHERE t.AssignedTo = @userId OR t.CreatedBy = @userId`;
+      conditions.push(`(t.AssignedTo = @userId OR t.CreatedBy = @userId)`);
       request.input("userId", sql.Int, userId);
+    }
+
+    if (moduleFilter) {
+      conditions.push(`LOWER(ISNULL(t.Module, '')) = @module`);
+      request.input("module", sql.NVarChar(50), moduleFilter);
+    }
+
+    if (conditions.length > 0) {
+      query += ` WHERE ${conditions.join(" AND ")}`;
     }
 
     query += ` ORDER BY t.CreatedAt DESC`;
@@ -219,9 +235,10 @@ router.get("/reminders", async (req, res) => {
 
 // ─── GET /api/tasks/:id ───────────────────────────────────────────────────────
 router.get("/:id", async (req, res) => {
+  let userId = null;
   try {
     const pool = getPool();
-    const userId = req.user.userId ?? req.user.id;
+    userId = req.user.userId ?? req.user.id;
     const { role } = req.user;
     const isAdmin =
       role === "admin" || role === "super_admin" || role === "dba";
@@ -230,7 +247,7 @@ router.get("/:id", async (req, res) => {
 
     const result = await pool.request().input("id", sql.Int, id).query(`
         SELECT
-          t.Id, t.Title, t.Description, t.Priority, t.Status,
+          t.Id, t.Title, t.Description, t.Module, t.Priority, t.Status,
           t.AssignedTo, au.name AS AssignedToName,
           t.CreatedBy,  cu.name AS CreatedByName,
           t.ReviewedBy, ru.name AS ReviewedByName,
@@ -273,16 +290,20 @@ router.get("/:id", async (req, res) => {
 
 // ─── POST /api/tasks ──────────────────────────────────────────────────────────
 router.post("/", adminOnly, async (req, res) => {
+  let createdBy = null;
+  let assignedTo = null;
   try {
     const pool = getPool();
     const {
       title,
       description,
+      module = null,
       priority = "medium",
-      assignedTo,
+      assignedTo: assignedToRaw,
       dueDate,
       qualityCriteria = [],
     } = req.body;
+    assignedTo = assignedToRaw;
 
     if (!title || !assignedTo || !dueDate) {
       return res
@@ -290,12 +311,13 @@ router.post("/", adminOnly, async (req, res) => {
         .json({ error: "title, assignedTo and dueDate are required" });
     }
 
-    const createdBy = req.user.userId ?? req.user.id;
+    createdBy = req.user.userId ?? req.user.id;
 
     const result = await pool
       .request()
       .input("title", sql.NVarChar(255), title)
       .input("description", sql.NVarChar(sql.MAX), description || "")
+      .input("module", sql.NVarChar(50), module ? String(module).trim().toLowerCase() : null)
       .input("priority", sql.NVarChar(20), priority)
       .input("assignedTo", sql.Int, assignedTo)
       .input("createdBy", sql.Int, createdBy)
@@ -306,10 +328,10 @@ router.post("/", adminOnly, async (req, res) => {
         JSON.stringify(qualityCriteria),
       ).query(`
         INSERT INTO dbo.Tasks
-          (Title, Description, Priority, Status, AssignedTo, CreatedBy, DueDate, QualityCriteria)
+          (Title, Description, Module, Priority, Status, AssignedTo, CreatedBy, DueDate, QualityCriteria)
         OUTPUT INSERTED.Id
         VALUES
-          (@title, @description, @priority, 'open', @assignedTo, @createdBy, @dueDate, @qualityCriteria)
+          (@title, @description, @module, @priority, 'open', @assignedTo, @createdBy, @dueDate, @qualityCriteria)
       `);
 
     const newId = result.recordset[0].Id;
@@ -337,13 +359,15 @@ router.post("/", adminOnly, async (req, res) => {
 
 // ─── PUT /api/tasks/:id ───────────────────────────────────────────────────────
 router.put("/:id", async (req, res) => {
+  let userId = null;
+  let id = null;
   try {
     const pool = getPool();
-    const userId = req.user.userId ?? req.user.id;
+    userId = req.user.userId ?? req.user.id;
     const { role } = req.user;
     const isAdmin =
       role === "admin" || role === "super_admin" || role === "dba";
-    const id = parseInt(req.params.id, 10);
+    id = parseInt(req.params.id, 10);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid task id" });
 
     const existing = await pool
@@ -367,6 +391,7 @@ router.put("/:id", async (req, res) => {
       description,
       priority,
       status,
+      module,
       assignedTo,
       dueDate,
       qualityCriteria,
@@ -388,6 +413,14 @@ router.put("/:id", async (req, res) => {
     if (priority !== undefined) {
       updates.push("Priority = @priority");
       request.input("priority", sql.NVarChar(20), priority);
+    }
+    if (module !== undefined) {
+      updates.push("Module = @module");
+      request.input(
+        "module",
+        sql.NVarChar(50),
+        module ? String(module).trim().toLowerCase() : null,
+      );
     }
     if (status !== undefined) {
       updates.push("Status = @status");

@@ -1,6 +1,6 @@
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
-
-interface SystemMetrics {
+export interface SystemMetrics {
   rpm: number;
   activeUsers: number;
   memoryUsage: number;
@@ -11,7 +11,19 @@ interface SystemMetrics {
   workerOk: boolean;
   aofOk: boolean;
   lastUpdated: number;
+  predictedRPM?: number;
+  avgLimit?: number;
+  topEngagedUsers?: string[];
 }
+
+export const getSystemMetrics = async (): Promise<SystemMetrics> => {
+  const res = await fetchWithAuth("/api/system/metrics");
+  if (!res.ok) {
+    const error = await res.json().catch(() => ({}));
+    throw new Error(error.error || "Failed to fetch system metrics");
+  }
+  return res.json();
+};
 
 export const fetchMetrics = async (baseURL: string, token?: string): Promise<SystemMetrics> => {
   const url = `${baseURL.replace(/\/$/, '')}/api/system/metrics`;

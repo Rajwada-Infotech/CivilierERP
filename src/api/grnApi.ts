@@ -64,6 +64,7 @@ export interface GRNFormDataPayload {
   poNumber?: string;
   docTypeId?: number | null;
   docNo?: string;
+  finYear?: string | null;
 }
 
 export interface PaginatedResponse<T> {
