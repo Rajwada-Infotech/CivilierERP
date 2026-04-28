@@ -2038,6 +2038,7 @@ const WorkOrderMaster: React.FC = () => {
   const [savedStatus, setSavedStatus] = useState<string>("Draft");
   const [woDocTypeId, setWoDocTypeId] = useState<number | null>(null);
   const [woDocNo, setWoDocNo] = useState("");
+  const [docRefreshTrigger, setDocRefreshTrigger] = useState(0);
 
   const applyWoDocNumber = (docTypeId: number | null, docNo: string) => {
     setWoDocTypeId(docTypeId);
@@ -2058,6 +2059,7 @@ const WorkOrderMaster: React.FC = () => {
       finYearOverride || undefined,
     );
     applyWoDocNumber(docTypeId, nextDocNo);
+    setDocRefreshTrigger((current) => current + 1);
     return nextDocNo;
   };
 
@@ -2157,6 +2159,9 @@ const WorkOrderMaster: React.FC = () => {
     setSavedStatus("Draft");
     setWoDocTypeId(nextDocTypeId);
     setWoDocNo(nextDocNo);
+    if (nextDocTypeId) {
+      setDocRefreshTrigger((current) => current + 1);
+    }
   };
 
   const validate = () => {
@@ -2463,6 +2468,7 @@ const WorkOrderMaster: React.FC = () => {
               finYear={selectedFinYear || undefined}
               selectedDocTypeId={woDocTypeId}
               preview={woDocNo}
+              refreshTrigger={docRefreshTrigger}
               onSelect={applyWoDocNumber}
             />
           </div>
