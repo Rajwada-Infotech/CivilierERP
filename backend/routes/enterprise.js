@@ -276,16 +276,29 @@ router.delete("/:id", async (req, res) => {
 });
 
 // GET options for FK dropdowns
+// Supports: ?type=<entity_type>  (legacy)
+//           ?business_type=C     (filter companies by business_type column)
 router.get("/options", async (req, res) => {
   try {
     const pool = getPool();
     const request = pool.request();
-    let query = "SELECT id, name AS label FROM dbo.enterprise";
+    const conditions = [];
+
     if (req.query.type) {
-      query += " WHERE entity_type = @type";
-      request.input("type", sql.NVarChar(50), req.query.type);
+      conditions.push("entity_type = @entityType");
+      request.input("entityType", sql.NVarChar(50), req.query.type);
+    }
+    if (req.query.business_type) {
+      conditions.push("business_type = @businessType");
+      request.input("businessType", sql.NVarChar(100), req.query.business_type);
+    }
+
+    let query = "SELECT id, name AS label FROM dbo.enterprise";
+    if (conditions.length > 0) {
+      query += " WHERE " + conditions.join(" AND ");
     }
     query += " ORDER BY name";
+
     const result = await request.query(query);
     res.json(result.recordset);
   } catch (err) {
