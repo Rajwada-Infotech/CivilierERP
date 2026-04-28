@@ -68,7 +68,9 @@ interface MasterPageProps {
   loading?: boolean;
   initialData: Record<string, unknown>[];
   onDataChange?: (records: Record<string, unknown>[]) => void;
-  onDataEvent?: (event: DataChangeEvent) => void;
+  onDataEvent?: (
+    event: DataChangeEvent,
+  ) => void | Record<string, unknown> | Promise<void | Record<string, unknown>>;
   onFormChange?: (
     form: Record<string, unknown>,
     updateForm: (patch: Record<string, unknown>) => void,
@@ -206,7 +208,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
     return Object.keys(errs).length === 0;
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!validate()) return;
 
     const finalData: Record<string, unknown> = onCustomSave
@@ -215,36 +217,48 @@ export const MasterPage: React.FC<MasterPageProps> = ({
 
     if (onCustomSave && Object.keys(finalData).length === 0) return;
 
+    try {
     if (editingId !== null) {
-      setData((prev) => {
-        const next = prev.map((row) =>
-          row._id === editingId ? { ...finalData, _id: editingId } : row,
-        );
-        const stripped = next.map(({ _id, ...rest }) => rest);
-        onDataChange?.(stripped);
-        onDataEvent?.({
+      const next = data.map((row) =>
+        row._id === editingId ? { ...finalData, _id: editingId } : row,
+      );
+      const stripped = next.map(({ _id, ...rest }) => rest);
+      setData(next);
+      onDataChange?.(stripped);
+      await onDataEvent?.({
           action: "update",
           id: editingId,
           record: finalData,
           records: stripped,
-        });
-        return next;
       });
       setEditingId(null);
       toast.success("Record updated successfully ✓");
+      setForm({ ...getDefaults(fields), ...(externalFormPatch ?? {}) });
     } else {
       const newId = `record-${Date.now()}`;
       const newRecord: RecordWithId = { ...finalData, _id: newId };
-      setData((prev) => {
-        const next = [...prev, newRecord];
-        const stripped = next.map(({ _id, ...rest }) => rest);
-        onDataChange?.(stripped);
-        onDataEvent?.({ action: "add", record: finalData, records: stripped });
-        return next;
+      const next = [...data, newRecord];
+      const stripped = next.map(({ _id, ...rest }) => rest);
+      setData(next);
+      onDataChange?.(stripped);
+      const result = await onDataEvent?.({
+        action: "add",
+        record: finalData,
+        records: stripped,
       });
       toast.success("Record saved successfully ✓");
+      setForm({
+        ...getDefaults(fields),
+        ...(externalFormPatch ?? {}),
+        ...((result && typeof result === "object" && !Array.isArray(result))
+          ? result
+          : {}),
+      });
+      return;
     }
-    setForm({ ...getDefaults(fields), ...(externalFormPatch ?? {}) });
+    } catch {
+      // Page-level handlers already raise the most useful toast message.
+    }
   };
 
   const handleEdit = (id: string) => {

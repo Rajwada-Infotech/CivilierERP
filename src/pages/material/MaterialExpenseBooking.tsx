@@ -196,7 +196,10 @@ export default function MaterialExpenseBooking() {
 
   const openNew = () => {
     setEditingId(null);
-    setForm(blankForm());
+    setForm({
+      ...blankForm(),
+      financialYear: activeFinYears[0]?.year || "",
+    });
     setSelectedDocTypeId(null);
     setDocNumberPreview("");
     setApprovalTrail(undefined);
