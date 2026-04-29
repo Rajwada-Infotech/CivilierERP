@@ -30,6 +30,7 @@ interface Project {
   shortName: string;
   type: string;
   enterpriseId?: number | string;
+  companyId?: number | string;
   businessUnit: string;
   clientName: string;
   clientCode: string;
@@ -44,6 +45,7 @@ interface Project {
   remarks: string;
   isActive: boolean;
   projectImage?: string | File | null;
+  belongsTo?: number | string;
 }
 
 // ── Project avatar shown beside name in table + form header ──────────────────
@@ -95,6 +97,7 @@ const emptyProject: Project = {
   shortName: "",
   type: "Construction",
   enterpriseId: "",
+  companyId: "",
   businessUnit: "",
   clientName: "",
   clientCode: "",
@@ -109,16 +112,22 @@ const emptyProject: Project = {
   remarks: "",
   isActive: true,
   projectImage: null,
+  belongsTo: "",
 };
 
 function rowToForm(row: any): Project {
+  // belongs_to is a name string — we'll let the component resolve it into
+  // enterpriseId / companyId after mount using the loaded lists.
+  // Store it in belongsTo so the dropdowns can be pre-selected.
   return {
     Id: row.Id,
     code: row.Code ?? "",
     name: row.Name ?? "",
     shortName: row.ShortName ?? "",
     type: row.Type ?? "Construction",
-    enterpriseId: row.EnterpriseId,
+    enterpriseId: "",
+    companyId: "",
+    belongsTo: row.belongs_to ?? "",
     businessUnit: row.BusinessUnit ?? "",
     clientName: row.ClientName ?? "",
     clientCode: row.ClientCode ?? "",
@@ -155,29 +164,40 @@ export default function ProjectMaster() {
     queryFn: getProjects,
   });
 
-  // FIXED: Enterprise dropdown using reliable fetch
-  const { data: enterprises = [], isLoading: enterprisesLoading } = useQuery({
-    queryKey: ["enterprises"],
+  // Enterprise dropdown (business_type = 'E')
+  const { data: enterprises = [] } = useQuery({
+    queryKey: ["enterprises-list"],
     queryFn: async () => {
       const res = await fetchWithAuth("/api/enterprises");
+      if (!res.ok) throw new Error("Failed to load enterprises");
+      const data = await res.json();
+      return Array.isArray(data) ? data.filter((e: any) => !e.discontinue) : [];
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
+  // Company dropdown (business_type = 'C')
+  const { data: companies = [] } = useQuery({
+    queryKey: ["companies-list"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/company-master");
       if (!res.ok) throw new Error("Failed to load companies");
       const data = await res.json();
-      // Only show companies (business_type = 'C') as parent options for projects
       return Array.isArray(data)
-        ? data.filter((e: any) => e.business_type === "C" && !e.discontinue)
+        ? data.filter((c: any) => c.IsActive !== 0)
         : [];
     },
-    staleTime: 10 * 60 * 1000,
-    retry: 2,
+    staleTime: 5 * 60 * 1000,
   });
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      // Build plain JSON payload — backend uses req.body (JSON), not FormData
       const payload: Record<string, any> = {};
       Object.entries(form).forEach(([key, value]) => {
         if (
           key !== "projectImage" &&
+          key !== "enterpriseId" &&
+          key !== "companyId" &&
           value !== null &&
           value !== undefined &&
           value !== ""
@@ -185,7 +205,14 @@ export default function ProjectMaster() {
           payload[key] = value;
         }
       });
-      // Convert File to base64 for NVARCHAR(MAX) storage
+      // belongsTo: company name takes priority over enterprise name
+      const resolvedBelongsTo =
+        (form.companyId as string) ||
+        (form.enterpriseId as string) ||
+        (form.belongsTo as string) ||
+        null;
+      if (resolvedBelongsTo) payload.belongsTo = resolvedBelongsTo;
+
       if (form.projectImage instanceof File) {
         const base64 = await new Promise<string>((resolve) => {
           const reader = new FileReader();
@@ -271,8 +298,18 @@ export default function ProjectMaster() {
 
   const openEdit = (row: any) => {
     const f = rowToForm(row);
+    const storedName = f.belongsTo as string;
+    // Try to match stored name to a company first, then enterprise
+    const matchedCompany = companies.find(
+      (c: any) => (c.Name ?? c.name) === storedName,
+    ) as any;
+    const matchedEnterprise = !matchedCompany
+      ? (enterprises.find((e: any) => (e.name ?? e.Name) === storedName) as any)
+      : null;
+    f.companyId = matchedCompany ? storedName : "";
+    f.enterpriseId = matchedEnterprise ? storedName : "";
     setForm(f);
-    setImagePreview(f.projectImage || "");
+    setImagePreview(typeof f.projectImage === "string" ? f.projectImage : "");
     setEditId(row.Id);
     setShowForm(true);
     setActiveTab("general");
@@ -374,6 +411,7 @@ export default function ProjectMaster() {
                       {[
                         "Code",
                         "Project Name",
+                        "Enterprise / Company",
                         "Client",
                         "Type",
                         "Status",
@@ -394,7 +432,7 @@ export default function ProjectMaster() {
                     {filtered.length === 0 ? (
                       <tr>
                         <td
-                          colSpan={8}
+                          colSpan={9}
                           className="px-4 py-10 text-center text-muted-foreground text-sm"
                         >
                           No projects found
@@ -419,6 +457,9 @@ export default function ProjectMaster() {
                                 {p.Name}
                               </span>
                             </div>
+                          </td>
+                          <td className="px-4 py-3 text-xs text-muted-foreground max-w-[140px] truncate">
+                            {p.belongs_to || "—"}
                           </td>
                           <td className="px-4 py-3 text-muted-foreground text-xs">
                             {p.ClientName}
@@ -561,38 +602,65 @@ export default function ProjectMaster() {
                   {fi("Short Name", "shortName")}
                   {se("Type", "type", PROJECT_TYPES)}
 
-                  {/* Enterprise Dropdown - FIXED */}
+                  {/* Enterprise Dropdown */}
                   <div>
                     <label className="block text-xs font-medium text-muted-foreground mb-1">
-                      Parent Company <span className="text-red-500">*</span>
+                      Enterprise{" "}
+                      <span className="text-xs text-muted-foreground/60">
+                        (Parent)
+                      </span>
                     </label>
                     <select
-                      value={form.enterpriseId || ""}
+                      value={form.enterpriseId as string}
                       onChange={(e) =>
                         setForm((p) => ({
                           ...p,
                           enterpriseId: e.target.value,
-                          businessUnit: e.target.value,
+                          companyId: "",
                         }))
                       }
-                      disabled={enterprisesLoading}
                       className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                     >
-                      <option value="">Select Enterprise</option>
-                      {enterprises.map((ent: any) => (
-                        <option key={ent.id || ent.Id} value={ent.id || ent.Id}>
-                          {ent.label ||
-                            ent.name ||
-                            ent.Name ||
-                            `Enterprise ${ent.id || ent.Id}`}
-                        </option>
-                      ))}
+                      <option value="">— Select Enterprise —</option>
+                      {enterprises.map((e: any) => {
+                        const name = e.name ?? e.Name ?? "";
+                        return (
+                          <option key={e.id ?? e.Id} value={name}>
+                            {name}
+                          </option>
+                        );
+                      })}
                     </select>
-                    {enterprisesLoading && (
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Loading enterprises...
-                      </p>
-                    )}
+                  </div>
+
+                  {/* Company Dropdown */}
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">
+                      Company{" "}
+                      <span className="text-xs text-muted-foreground/60">
+                        (Overrides Enterprise)
+                      </span>
+                    </label>
+                    <select
+                      value={form.companyId as string}
+                      onChange={(e) =>
+                        setForm((p) => ({
+                          ...p,
+                          companyId: e.target.value,
+                        }))
+                      }
+                      className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                    >
+                      <option value="">— Select Company —</option>
+                      {companies.map((c: any) => {
+                        const name = c.Name ?? c.name ?? "";
+                        return (
+                          <option key={c.Id ?? c.id} value={name}>
+                            {name}
+                          </option>
+                        );
+                      })}
+                    </select>
                   </div>
 
                   {fi("Client Name", "clientName")}
@@ -661,12 +729,7 @@ export default function ProjectMaster() {
               </button>
               <button
                 onClick={() => saveMutation.mutate()}
-                disabled={
-                  !form.code ||
-                  !form.name ||
-                  !form.enterpriseId ||
-                  saveMutation.isPending
-                }
+                disabled={!form.code || !form.name || saveMutation.isPending}
                 className="px-5 py-2 text-sm rounded-lg bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 flex items-center gap-2"
               >
                 {saveMutation.isPending && (

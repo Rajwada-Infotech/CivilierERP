@@ -274,6 +274,7 @@ const DebitNoteMaster: React.FC = () => {
   const [dnDocNo, setDnDocNo] = useState("");
   const [dnFormPatch, setDnFormPatch] = useState<Record<string, unknown> | null>(null);
   const [dnFormPatchKey, setDnFormPatchKey] = useState(0);
+  const [docRefreshTrigger, setDocRefreshTrigger] = useState(0);
   const activeFinYear =
     finYears.find((fy) => fy.status === "Active")?.year || undefined;
   const finYearOptions = finYears.filter((fy) => fy.status === "Active");
@@ -308,6 +309,7 @@ const DebitNoteMaster: React.FC = () => {
       finYearOverride || undefined,
     );
     applyDnDocNumber(docTypeId, nextDocNo);
+    setDocRefreshTrigger((current) => current + 1);
     return nextDocNo;
   };
 
@@ -434,11 +436,13 @@ const DebitNoteMaster: React.FC = () => {
         await addDebitNote(toPayload(event.record));
         await queryClient.invalidateQueries({ queryKey: ["debit-notes"] });
         toast.success("Debit note saved!");
-        const nextDocNo = await refreshDnDocNumber();
+        const savedDocTypeId =
+          (event.record.docTypeId as number | null) ?? dnDocTypeId;
+        const nextDocNo = await refreshDnDocNumber(savedDocTypeId);
         await refetchExpenses(); // Refresh expense dropdown
         return {
           docNo: nextDocNo,
-          docTypeId: dnDocTypeId,
+          docTypeId: savedDocTypeId,
         };
       } catch (err: any) {
         toast.error("Save failed: " + err.message);
@@ -619,6 +623,7 @@ const DebitNoteMaster: React.FC = () => {
           finYear={selectedFinYear || undefined}
           selectedDocTypeId={dnDocTypeId}
           preview={dnDocNo}
+          refreshTrigger={docRefreshTrigger}
           onSelect={applyDnDocNumber}
         />
       </div>

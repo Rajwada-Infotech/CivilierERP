@@ -82,6 +82,7 @@ interface Company {
   isActive: boolean;
   remarks: string;
   logoUrl: string;
+  belongsTo: string | number;
 }
 
 const empty: Company = {
@@ -117,6 +118,7 @@ const empty: Company = {
   isActive: true,
   remarks: "",
   logoUrl: "",
+  belongsTo: "",
 };
 
 function rowToForm(row: any): Company {
@@ -159,6 +161,7 @@ function rowToForm(row: any): Company {
     isActive: row.IsActive !== 0,
     remarks: row.Remarks ?? "",
     logoUrl: row.LogoUrl ?? "",
+    belongsTo: row.belongs_to ?? "",
   };
 }
 
@@ -213,6 +216,17 @@ export default function CompanyMaster() {
     },
     staleTime: 30_000,
     refetchOnWindowFocus: false,
+  });
+
+  const { data: enterprises = [] } = useQuery({
+    queryKey: ["enterprises-options"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/enterprises");
+      if (!res.ok) throw new Error("Failed to load enterprises");
+      const data = await res.json();
+      return Array.isArray(data) ? data.filter((e: any) => !e.discontinue) : [];
+    },
+    staleTime: 5 * 60 * 1000,
   });
 
   const saveMutation = useMutation({
@@ -394,6 +408,7 @@ export default function CompanyMaster() {
                         "Logo",
                         "Code",
                         "Company Name",
+                        "Enterprise",
                         "Legal Name",
                         "Type",
                         "Industry",
@@ -417,7 +432,7 @@ export default function CompanyMaster() {
                     {filtered.length === 0 ? (
                       <tr>
                         <td
-                          colSpan={12}
+                          colSpan={13}
                           className="px-4 py-10 text-center text-muted-foreground text-sm"
                         >
                           No companies found
@@ -440,6 +455,9 @@ export default function CompanyMaster() {
                           </td>
                           <td className="px-4 py-3 font-medium text-foreground max-w-[180px] truncate">
                             {c.Name}
+                          </td>
+                          <td className="px-4 py-3 text-xs text-muted-foreground max-w-[140px] truncate">
+                            {c.belongs_to || "—"}
                           </td>
                           <td className="px-4 py-3 text-muted-foreground text-xs max-w-[160px] truncate">
                             {c.LegalName}
@@ -598,6 +616,33 @@ export default function CompanyMaster() {
                   {fi("Short Name", "shortName")}
                   {se("Company Type", "type", CO_TYPES)}
                   {se("Industry", "industry", INDUSTRIES)}
+
+                  {/* Enterprise dropdown */}
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">
+                      Enterprise{" "}
+                      <span className="text-xs text-muted-foreground/60">
+                        (Parent)
+                      </span>
+                    </label>
+                    <select
+                      value={form.belongsTo as string}
+                      onChange={(e) =>
+                        setForm((c) => ({ ...c, belongsTo: e.target.value }))
+                      }
+                      className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                    >
+                      <option value="">— Select Enterprise —</option>
+                      {enterprises.map((e: any) => {
+                        const name = e.name ?? e.Name ?? "";
+                        return (
+                          <option key={e.id ?? e.Id} value={name}>
+                            {name}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
                   {fi("Incorporation Date", "incorporationDate", "date")}
                   {se("Currency", "currency", CURRENCIES)}
                   {se("Fiscal Year Start", "fiscalYearStart", [
