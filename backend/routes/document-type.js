@@ -93,14 +93,19 @@ router.get("/:id/next-number", authMiddleware, async (req, res) => {
     // Find the current max sequence for this true prefix
     const maxResult = await pool
       .request()
-      .input("Prefix", sql.NVarChar(50), truePrefix + "%").query(`
+      .input("TypeOfDocId", sql.Int, id)
+      .input("Prefix", sql.NVarChar(100), truePrefix + "%")
+      .input("FinYearPattern", sql.NVarChar(130), finYear ? `%/${finYear}` : null)
+      .query(`
         SELECT MAX(
           TRY_CAST(
             SUBSTRING(DocNo, LEN(@Prefix) + 1, 6) AS INT
           )
         ) AS MaxSeq
         FROM dbo.DocNumberSequence
-        WHERE DocNo LIKE @Prefix
+        WHERE TypeOfDocId = @TypeOfDocId
+          AND DocNo LIKE @Prefix
+          AND (@FinYearPattern IS NULL OR DocNo LIKE @FinYearPattern)
       `);
 
     let maxSeq = maxResult.recordset[0]?.MaxSeq ?? null;

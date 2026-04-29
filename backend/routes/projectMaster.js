@@ -8,7 +8,7 @@ const { bumpCacheVersion } = require("../redis");
 router.use(authMiddleware);
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 
-// GET all — reads from enterprise where business_type = 'C'
+// GET all — reads from enterprise where business_type = 'P'
 router.get("/", async (req, res) => {
   try {
     const pool = getPool();
@@ -48,7 +48,7 @@ router.get("/", async (req, res) => {
         status,
         belongs_to
       FROM dbo.enterprise
-      WHERE business_type = 'C'
+      WHERE business_type = 'P'
       ORDER BY name
     `);
     res.json(result.recordset);
@@ -57,7 +57,7 @@ router.get("/", async (req, res) => {
   }
 });
 
-// POST — inserts into enterprise with business_type = 'C'
+// POST — inserts into enterprise with business_type = 'P'
 router.post("/", adminOnly, async (req, res) => {
   const f = req.body;
   try {
@@ -67,7 +67,7 @@ router.post("/", adminOnly, async (req, res) => {
       .input("name", sql.NVarChar(255), f.name || null)
       .input("short_name", sql.NVarChar(100), f.shortName || null)
       .input("business_identity", sql.NVarChar(100), f.code || null)
-      .input("business_type", sql.NVarChar(100), "C")
+      .input("business_type", sql.NVarChar(100), "P")
       .input("entity_type", sql.NVarChar(50), f.type || null)
       .input("description", sql.NVarChar(sql.MAX), f.legalName || null)
       .input("cr_code", sql.NVarChar(50), f.industry || null)
@@ -89,6 +89,7 @@ router.post("/", adminOnly, async (req, res) => {
       .input("currency", sql.NVarChar(10), f.currency || "INR")
       .input("fiscal_year_start", sql.NVarChar(20), f.fiscalYearStart || null)
       .input("logo", sql.NVarChar(sql.MAX), f.logoUrl || null)
+      .input("belongs_to", sql.NVarChar(50), f.belongsTo || null)
       .input("discontinue", sql.Bit, f.isActive ? 0 : 1)
       .input("date_of_entry", sql.Date, new Date()).query(`
         INSERT INTO dbo.enterprise (
@@ -96,13 +97,13 @@ router.post("/", adminOnly, async (req, res) => {
           cr_code, date_of_establishment, cin, pan, tan, gst_type, gst_issue_date,
           trade_license, address, city, state, country, pincode,
           phone_number, email, website, currency, fiscal_year_start,
-          logo, discontinue, date_of_entry
+          logo, belongs_to, discontinue, date_of_entry
         ) VALUES (
           @name, @short_name, @business_identity, @business_type, @entity_type, @description,
           @cr_code, @date_of_establishment, @cin, @pan, @tan, @gst_type, @gst_issue_date,
           @trade_license, @address, @city, @state, @country, @pincode,
           @phone_number, @email, @website, @currency, @fiscal_year_start,
-          @logo, @discontinue, @date_of_entry
+          @logo, @belongs_to, @discontinue, @date_of_entry
         )
       `);
     await bumpCacheVersion("enterprises");
@@ -144,6 +145,7 @@ router.put("/:id", adminOnly, async (req, res) => {
       .input("currency", sql.NVarChar(10), f.currency || "INR")
       .input("fiscal_year_start", sql.NVarChar(20), f.fiscalYearStart || null)
       .input("logo", sql.NVarChar(sql.MAX), f.logoUrl || null)
+      .input("belongs_to", sql.NVarChar(50), f.belongsTo || null)
       .input("discontinue", sql.Bit, f.isActive ? 0 : 1).query(`
         UPDATE dbo.enterprise SET
           name=@name, short_name=@short_name, business_identity=@business_identity,
@@ -153,8 +155,8 @@ router.put("/:id", adminOnly, async (req, res) => {
           address=@address, city=@city, state=@state, country=@country, pincode=@pincode,
           phone_number=@phone_number, email=@email, website=@website,
           currency=@currency, fiscal_year_start=@fiscal_year_start,
-          logo=@logo, discontinue=@discontinue
-        WHERE id=@id AND business_type='C'
+          logo=@logo, belongs_to=@belongs_to, discontinue=@discontinue
+        WHERE id=@id AND business_type='P'
       `);
     await bumpCacheVersion("enterprises");
     res.json({ success: true });
@@ -171,7 +173,7 @@ router.delete("/:id", adminOnly, async (req, res) => {
       .request()
       .input("id", sql.Int, parseInt(req.params.id))
       .query(
-        "UPDATE dbo.enterprise SET discontinue=1 WHERE id=@id AND business_type='C'",
+        "UPDATE dbo.enterprise SET discontinue=1 WHERE id=@id AND business_type='P'",
       );
     await bumpCacheVersion("enterprises");
     res.json({ success: true });
