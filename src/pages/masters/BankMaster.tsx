@@ -1,7 +1,10 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "react-hook-form";
 import { toast } from "sonner";
+import { z } from "zod";
 import {
   Landmark,
   Plus,
@@ -10,13 +13,13 @@ import {
   RotateCcw,
   Check,
   X,
-  Search,
   Hash,
   Building2,
   MapPin,
   CreditCard,
   IndianRupee,
 } from "lucide-react";
+
 import {
   getBanks,
   addBank,
@@ -27,21 +30,44 @@ import {
   type CompanyOption,
 } from "@/api/bankMasterApi";
 
-// ─── Local form types ────────────────────────────────────────────────────────
-interface FormState {
-  companyName: string;
-  bankName: string;
-  branch: string;
-  accountNo: string;
-  ifsc: string;
-  accountType: string;
-  bankType: string;
-  holderName: string;
-  openingBalance: string;
-  address: string;
-  status: boolean;
-}
+import {
+  DataTable,
+  type ColumnDef,
+  type ExportColumn,
+} from "@/components/ui/DataTable";
 
+// ─── Zod Schema ─────────────────────────────────────────────────────────────
+const IFSC_REGEX = /^[A-Z]{4}0[A-Z0-9]{6}$/;
+
+const bankFormSchema = z.object({
+  companyName: z.string(),
+  bankName: z.string().trim().min(1, "Bank name is required"),
+  branch: z.string(),
+  accountNo: z.string().trim().min(1, "Account number is required"),
+  ifsc: z
+    .string()
+    .trim()
+    .min(1, "IFSC code is required")
+    .transform((value) => value.toUpperCase())
+    .refine((value) => IFSC_REGEX.test(value), {
+      message:
+        "Invalid format - must be 4 letters + 0 + 6 alphanumeric (e.g. SBIN0001234)",
+    }),
+  accountType: z.string(),
+  bankType: z.string(),
+  holderName: z.string(),
+  openingBalance: z.string().refine(
+    (value) =>
+      value === "" || (!Number.isNaN(Number(value)) && Number(value) >= 0),
+    "Opening balance must be 0 or greater",
+  ),
+  address: z.string(),
+  status: z.boolean(),
+});
+
+type FormState = z.infer<typeof bankFormSchema>;
+
+// ─── Default Values ─────────────────────────────────────────────────────────
 const EMPTY: FormState = {
   companyName: "",
   bankName: "",
@@ -56,6 +82,21 @@ const EMPTY: FormState = {
   status: true,
 };
 
+// ─── Export Columns ─────────────────────────────────────────────────────────
+const EXPORT_COLUMNS: ExportColumn[] = [
+  { header: "Company", accessor: "companyName" },
+  { header: "Bank Name", accessor: "bankName" },
+  { header: "Branch", accessor: "branch" },
+  { header: "Account No", accessor: "accountNo" },
+  { header: "IFSC", accessor: "ifsc" },
+  { header: "Account Type", accessor: "accountType" },
+  { header: "Bank Type", accessor: "bankType" },
+  { header: "Holder Name", accessor: "holderName" },
+  { header: "Opening Balance", accessor: "openingBalance" },
+  { header: "Address", accessor: "address" },
+  { header: "Status", accessor: (r) => (r.BActive ? "Active" : "Inactive") },
+];
+
 const ACCOUNT_TYPES = ["Current", "Savings", "Overdraft (OD)", "Cash Credit"];
 const BANK_TYPES = [
   "Nationalized",
@@ -68,9 +109,178 @@ const BANK_TYPES = [
 const inp =
   "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground placeholder:text-muted-foreground/50";
 
-const IFSC_REGEX = /^[A-Z]{4}0[A-Z0-9]{6}$/;
+// ─── Bank Type Badges ───────────────────────────────────────────────────────
+const bankTypeBadge: Record<string, string> = {
+  Nationalized: "bg-blue-500/10 border-blue-500/20 text-blue-600",
+  Private: "bg-violet-500/10 border-violet-500/20 text-violet-600",
+  "Co-operative": "bg-amber-500/10 border-amber-500/20 text-amber-600",
+  Foreign: "bg-cyan-500/10 border-cyan-500/20 text-cyan-600",
+  "Regional Rural": "bg-green-500/10 border-green-500/20 text-green-600",
+};
 
-// ─── Component ───────────────────────────────────────────────────────────────
+// ─── Column Builder ─────────────────────────────────────────────────────────
+function buildColumns(
+  editingId: string | null,
+  deleteId: string | null,
+  onEdit: (bank: BankRecord) => void,
+  onDeleteRequest: (id: string) => void,
+  onDeleteConfirm: (id: string) => void,
+  onDeleteCancel: () => void,
+): ColumnDef<BankRecord, unknown>[] {
+  return [
+    {
+      id: "company",
+      accessorKey: "BCompanyName",
+      header: "Company",
+      cell: ({ getValue }) => (
+        <span className="text-foreground font-body text-xs">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
+    },
+    {
+      id: "bankName",
+      accessorKey: "BName",
+      header: "Bank Name",
+      cell: ({ getValue }) => (
+        <span className="font-heading font-medium text-foreground">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
+    },
+    {
+      id: "branch",
+      accessorKey: "BBranch",
+      header: "Branch",
+      cell: ({ getValue }) => (
+        <span className="text-muted-foreground text-xs">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
+    },
+    {
+      id: "accountNo",
+      accessorKey: "BAccountNumber",
+      header: "Account No.",
+      enableSorting: false,
+      cell: ({ getValue }) => (
+        <span className="font-mono text-xs bg-muted px-2 py-0.5 rounded">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
+    },
+    {
+      id: "ifsc",
+      accessorKey: "BIfscCode",
+      header: "IFSC",
+      enableSorting: false,
+      cell: ({ getValue }) => (
+        <span className="font-mono text-xs bg-muted px-2 py-0.5 rounded tracking-widest">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
+    },
+    {
+      id: "bankType",
+      accessorKey: "BBankType",
+      header: "Type",
+      cell: ({ getValue }) => {
+        const v = getValue() as string | null;
+        if (!v) return <span className="text-muted-foreground">—</span>;
+        const cls =
+          bankTypeBadge[v] ?? "bg-muted border-border text-muted-foreground";
+        return (
+          <span
+            className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${cls}`}
+          >
+            {v}
+          </span>
+        );
+      },
+    },
+    {
+      id: "openingBalance",
+      accessorKey: "BOpeningBalance",
+      header: "Opening Bal.",
+      cell: ({ getValue }) => (
+        <span className="font-mono text-foreground">
+          ₹ {Number(getValue() || 0).toLocaleString("en-IN")}
+        </span>
+      ),
+    },
+    {
+      id: "status",
+      accessorKey: "BStatus",
+      header: "Status",
+      cell: ({ getValue }) => {
+        const active = Boolean(getValue());
+        return (
+          <span
+            className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${
+              active
+                ? "bg-green-500/10 border-green-500/20 text-green-600"
+                : "bg-red-500/10 border-red-500/20 text-red-600"
+            }`}
+          >
+            <span
+              className={`w-1.5 h-1.5 rounded-full mr-1.5 ${active ? "bg-green-500" : "bg-red-500"}`}
+            />
+            {active ? "Active" : "Inactive"}
+          </span>
+        );
+      },
+    },
+    {
+      id: "actions",
+      header: "Actions",
+      enableSorting: false,
+      cell: ({ row }) => {
+        const bank = row.original;
+        const id = String(bank.BId);
+        return (
+          <div className="flex items-center justify-end gap-1">
+            {deleteId === id ? (
+              <>
+                <span className="text-[11px] text-muted-foreground mr-1">
+                  Confirm?
+                </span>
+                <button
+                  onClick={() => onDeleteConfirm(id)}
+                  className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"
+                >
+                  <Check size={13} />
+                </button>
+                <button
+                  onClick={onDeleteCancel}
+                  className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors"
+                >
+                  <X size={13} />
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => onEdit(bank)}
+                  className="p-1.5 rounded-lg text-primary hover:bg-primary/10 transition-colors"
+                >
+                  <Edit2 size={13} />
+                </button>
+                <button
+                  onClick={() => onDeleteRequest(id)}
+                  className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </>
+            )}
+          </div>
+        );
+      },
+    },
+  ];
+}
+
+// ─── Main Component ─────────────────────────────────────────────────────────
 const BankMaster: React.FC = () => {
   const queryClient = useQueryClient();
 
@@ -92,29 +302,22 @@ const BankMaster: React.FC = () => {
 
   const dbBanks: BankRecord[] = Array.isArray(dbData) ? dbData : [];
 
-  const [form, setForm] = useState<FormState>(EMPTY);
+  const {
+    register,
+    handleSubmit,
+    reset,
+    setValue,
+    watch,
+    formState: { errors },
+  } = useForm<FormState>({
+    resolver: zodResolver(bankFormSchema),
+    defaultValues: EMPTY,
+    mode: "onChange", // Optional: real-time validation
+  });
+
+  const form = watch();
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [errors, setErrors] = useState<Record<string, boolean>>({});
-  const [search, setSearch] = useState("");
   const [deleteId, setDeleteId] = useState<string | null>(null);
-
-  const setField = (k: keyof FormState, v: unknown) => {
-    setForm((p) => ({ ...p, [k]: v }));
-    if (errors[k]) setErrors((e) => ({ ...e, [k]: false }));
-  };
-
-  const validate = () => {
-    const e: Record<string, boolean> = {};
-    if (!form.bankName.trim()) e.bankName = true;
-    if (!form.ifsc.trim()) {
-      e.ifsc = true;
-    } else if (!IFSC_REGEX.test(form.ifsc.trim().toUpperCase())) {
-      e.ifsc = true;
-    }
-    if (!form.accountNo.trim()) e.accountNo = true;
-    setErrors(e);
-    return Object.keys(e).length === 0;
-  };
 
   const toPayload = (f: FormState) => ({
     BName: f.bankName.trim() || null,
@@ -130,36 +333,26 @@ const BankMaster: React.FC = () => {
     BCompanyName: f.companyName.trim() || null,
   });
 
-  const handleSave = async () => {
-    if (!validate()) return;
-
-    // Extra IFSC guard with user-friendly toast (from ac97f7f branch)
-    const ifsc = form.ifsc.trim().toUpperCase();
-    if (!IFSC_REGEX.test(ifsc)) {
-      toast.error(
-        `Invalid IFSC Code "${ifsc || "empty"}". Format must be like SBIN0001234 (11 characters).`,
-      );
-      return;
-    }
-
+  const handleSave = async (values: FormState) => {
     try {
       if (editingId) {
-        await updateBank(editingId, toPayload(form));
-        toast.success("Bank updated!");
+        await updateBank(editingId, toPayload(values));
+        toast.success("Bank updated successfully!");
       } else {
-        await addBank(toPayload(form));
-        toast.success("Bank saved!");
+        await addBank(toPayload(values));
+        toast.success("Bank added successfully!");
       }
+
       await queryClient.invalidateQueries({ queryKey: ["bank-master"] });
-      setForm(EMPTY);
+      reset(EMPTY);
       setEditingId(null);
     } catch (err: any) {
-      toast.error("Failed: " + err.message);
+      toast.error("Failed: " + (err.message || "Unknown error"));
     }
   };
 
   const handleEdit = (item: BankRecord) => {
-    setForm({
+    reset({
       companyName: item.BCompanyName || "",
       bankName: item.BName || "",
       branch: item.BBranch || "",
@@ -171,7 +364,7 @@ const BankMaster: React.FC = () => {
       openingBalance:
         item.BOpeningBalance != null ? String(item.BOpeningBalance) : "",
       address: item.BAddress || "",
-      status: item.BStatus,
+      status: Boolean(item.BStatus),
     });
     setEditingId(String(item.BId));
     window.scrollTo({ top: 0, behavior: "smooth" });
@@ -180,46 +373,36 @@ const BankMaster: React.FC = () => {
   const handleDelete = async (id: string) => {
     try {
       await deleteBank(id);
-      toast.success("Bank deleted!");
+      toast.success("Bank deleted successfully!");
       await queryClient.invalidateQueries({ queryKey: ["bank-master"] });
       setDeleteId(null);
       if (editingId === id) {
         setEditingId(null);
-        setForm(EMPTY);
+        reset(EMPTY);
       }
     } catch (err: any) {
-      toast.error("Delete failed: " + err.message);
+      toast.error("Delete failed: " + (err.message || "Unknown error"));
     }
   };
 
   const handleReset = () => {
-    setForm(EMPTY);
+    reset(EMPTY);
     setEditingId(null);
-    setErrors({});
   };
 
-  const filtered = dbBanks.filter((b) => {
-    if (!search) return true;
-    const q = search.toLowerCase();
-    return (
-      (b.BName || "").toLowerCase().includes(q) ||
-      (b.BBranch || "").toLowerCase().includes(q) ||
-      (b.BAccountNumber || "").toLowerCase().includes(q) ||
-      (b.BIfscCode || "").toLowerCase().includes(q) ||
-      (b.BCompanyName || "").toLowerCase().includes(q)
-    );
-  });
+  const columns = useMemo(
+    () =>
+      buildColumns(
+        editingId,
+        deleteId,
+        handleEdit,
+        setDeleteId,
+        handleDelete,
+        () => setDeleteId(null),
+      ),
+    [editingId, deleteId],
+  );
 
-  const bankTypeBadge: Record<string, string> = {
-    Nationalized: "bg-blue-500/10 border-blue-500/20 text-blue-600",
-    Private: "bg-violet-500/10 border-violet-500/20 text-violet-600",
-    "Co-operative": "bg-amber-500/10 border-amber-500/20 text-amber-600",
-    Foreign: "bg-cyan-500/10 border-cyan-500/20 text-cyan-600",
-    "Regional Rural": "bg-green-500/10 border-green-500/20 text-green-600",
-  };
-
-  if (isLoading)
-    return <div className="p-6 text-muted-foreground">Loading banks...</div>;
   if (error)
     return <div className="p-6 text-red-500">Failed to load banks.</div>;
 
@@ -231,7 +414,7 @@ const BankMaster: React.FC = () => {
       </h1>
 
       <div className="space-y-5">
-        {/* ── Form ── */}
+        {/* Form Section */}
         <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden">
           <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-card/60">
             <div>
@@ -251,7 +434,7 @@ const BankMaster: React.FC = () => {
             )}
           </div>
 
-          <div className="p-5">
+          <form className="p-5" onSubmit={handleSubmit(handleSave)}>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Company Name */}
               <div>
@@ -263,11 +446,7 @@ const BankMaster: React.FC = () => {
                     size={14}
                     className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                   />
-                  <select
-                    value={form.companyName}
-                    onChange={(e) => setField("companyName", e.target.value)}
-                    className={`${inp} pl-8`}
-                  >
+                  <select {...register("companyName")} className={`${inp} pl-8`}>
                     <option value="">Select Company...</option>
                     {companies.map((c) => (
                       <option key={c.id} value={c.label}>
@@ -290,15 +469,14 @@ const BankMaster: React.FC = () => {
                   />
                   <input
                     type="text"
-                    value={form.bankName}
-                    onChange={(e) => setField("bankName", e.target.value)}
+                    {...register("bankName")}
                     placeholder="e.g. State Bank of India"
                     className={`${inp} pl-8 ${errors.bankName ? "border-destructive" : ""}`}
                   />
                 </div>
                 {errors.bankName && (
                   <p className="text-[11px] text-destructive mt-1">
-                    Bank name is required
+                    {errors.bankName.message}
                   </p>
                 )}
               </div>
@@ -310,8 +488,7 @@ const BankMaster: React.FC = () => {
                 </label>
                 <input
                   type="text"
-                  value={form.branch}
-                  onChange={(e) => setField("branch", e.target.value)}
+                  {...register("branch")}
                   placeholder="e.g. Park Street Branch"
                   className={inp}
                 />
@@ -329,15 +506,14 @@ const BankMaster: React.FC = () => {
                   />
                   <input
                     type="text"
-                    value={form.accountNo}
-                    onChange={(e) => setField("accountNo", e.target.value)}
+                    {...register("accountNo")}
                     placeholder="Bank account number"
                     className={`${inp} pl-8 font-mono tracking-widest ${errors.accountNo ? "border-destructive" : ""}`}
                   />
                 </div>
                 {errors.accountNo && (
                   <p className="text-[11px] text-destructive mt-1">
-                    Account number is required
+                    {errors.accountNo.message}
                   </p>
                 )}
               </div>
@@ -354,11 +530,13 @@ const BankMaster: React.FC = () => {
                   />
                   <input
                     type="text"
+                    {...register("ifsc")}
                     value={form.ifsc}
                     onChange={(e) =>
-                      setField(
+                      setValue(
                         "ifsc",
                         e.target.value.toUpperCase().slice(0, 11),
+                        { shouldValidate: true },
                       )
                     }
                     placeholder="e.g. SBIN0001234"
@@ -373,9 +551,7 @@ const BankMaster: React.FC = () => {
                 </div>
                 {errors.ifsc && (
                   <p className="text-[11px] text-destructive mt-1">
-                    {!form.ifsc.trim()
-                      ? "IFSC code is required"
-                      : "Invalid format — must be 4 letters + 0 + 6 alphanumeric (e.g. SBIN0001234)"}
+                    {errors.ifsc.message}
                   </p>
                 )}
               </div>
@@ -385,11 +561,7 @@ const BankMaster: React.FC = () => {
                 <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                   Account Type
                 </label>
-                <select
-                  value={form.accountType}
-                  onChange={(e) => setField("accountType", e.target.value)}
-                  className={inp}
-                >
+                <select {...register("accountType")} className={inp}>
                   <option value="">Select Account Type...</option>
                   {ACCOUNT_TYPES.map((t) => (
                     <option key={t} value={t}>
@@ -404,11 +576,7 @@ const BankMaster: React.FC = () => {
                 <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                   Bank Type
                 </label>
-                <select
-                  value={form.bankType}
-                  onChange={(e) => setField("bankType", e.target.value)}
-                  className={inp}
-                >
+                <select {...register("bankType")} className={inp}>
                   <option value="">Select Bank Type...</option>
                   {BANK_TYPES.map((t) => (
                     <option key={t} value={t}>
@@ -418,7 +586,7 @@ const BankMaster: React.FC = () => {
                 </select>
               </div>
 
-              {/* Account Holder Name */}
+              {/* Holder Name */}
               <div>
                 <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                   Account Holder Name
@@ -430,8 +598,7 @@ const BankMaster: React.FC = () => {
                   />
                   <input
                     type="text"
-                    value={form.holderName}
-                    onChange={(e) => setField("holderName", e.target.value)}
+                    {...register("holderName")}
                     placeholder="Name on account"
                     className={`${inp} pl-8`}
                   />
@@ -452,12 +619,16 @@ const BankMaster: React.FC = () => {
                     type="number"
                     min="0"
                     step="0.01"
-                    value={form.openingBalance}
-                    onChange={(e) => setField("openingBalance", e.target.value)}
+                    {...register("openingBalance")}
                     placeholder="0.00"
-                    className={`${inp} pl-8 font-mono`}
+                    className={`${inp} pl-8 font-mono ${errors.openingBalance ? "border-destructive" : ""}`}
                   />
                 </div>
+                {errors.openingBalance && (
+                  <p className="text-[11px] text-destructive mt-1">
+                    {errors.openingBalance.message}
+                  </p>
+                )}
               </div>
 
               {/* Address */}
@@ -472,8 +643,7 @@ const BankMaster: React.FC = () => {
                   />
                   <textarea
                     rows={2}
-                    value={form.address}
-                    onChange={(e) => setField("address", e.target.value)}
+                    {...register("address")}
                     placeholder="Branch address..."
                     className={`${inp} pl-8 resize-none`}
                   />
@@ -487,7 +657,7 @@ const BankMaster: React.FC = () => {
                 </label>
                 <button
                   type="button"
-                  onClick={() => setField("status", !form.status)}
+                  onClick={() => setValue("status", !form.status)}
                   className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                     form.status ? "bg-primary" : "bg-muted border border-border"
                   }`}
@@ -506,13 +676,14 @@ const BankMaster: React.FC = () => {
 
             <div className="flex items-center gap-2 mt-5 pt-4 border-t border-border">
               <button
-                onClick={handleSave}
+                type="submit"
                 className="flex items-center gap-1.5 px-4 py-2 rounded-lg font-heading text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
               >
                 <Plus size={15} />
                 {editingId ? "Update" : "Save"}
               </button>
               <button
+                type="button"
                 onClick={handleReset}
                 className="flex items-center gap-1.5 px-4 py-2 rounded-lg font-heading text-sm border border-border text-muted-foreground hover:bg-muted transition-all"
               >
@@ -520,183 +691,33 @@ const BankMaster: React.FC = () => {
                 Reset
               </button>
             </div>
-          </div>
+          </form>
         </div>
 
-        {/* ── Table ── */}
+        {/* Table Section */}
         <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-card/60">
-            <div>
-              <h3 className="font-heading font-semibold text-foreground text-sm">
-                Bank Records
-              </h3>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
-                {filtered.length} bank{filtered.length !== 1 ? "s" : ""}
-              </p>
-            </div>
-            <div className="relative">
-              <Search
-                size={13}
-                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
-              />
-              <input
-                type="text"
-                placeholder="Search..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-8 pr-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary w-36 sm:w-44"
-              />
-            </div>
+          <div className="px-5 py-3.5 border-b border-border bg-card/60">
+            <h3 className="font-heading font-semibold text-foreground text-sm">
+              Bank Records
+            </h3>
           </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border bg-muted/30">
-                  {[
-                    "Company",
-                    "Bank Name",
-                    "Branch",
-                    "Account No.",
-                    "IFSC",
-                    "Type",
-                    "Opening Bal.",
-                    "Status",
-                    "Actions",
-                  ].map((h) => (
-                    <th
-                      key={h}
-                      className="px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap"
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {filtered.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={9}
-                      className="px-4 py-10 text-center text-muted-foreground text-sm"
-                    >
-                      {search
-                        ? "No banks match your search."
-                        : "No banks yet. Add one above."}
-                    </td>
-                  </tr>
-                ) : (
-                  filtered.map((bank) => {
-                    const id = String(bank.BId);
-                    const btCls =
-                      bankTypeBadge[bank.BBankType || ""] ??
-                      "bg-muted border-border text-muted-foreground";
-                    return (
-                      <tr
-                        key={id}
-                        className={`hover:bg-muted/20 transition-colors ${
-                          editingId === id
-                            ? "bg-primary/5 border-l-2 border-l-primary"
-                            : ""
-                        }`}
-                      >
-                        <td className="px-4 py-3 text-foreground font-body text-xs">
-                          {bank.BCompanyName || "—"}
-                        </td>
-                        <td className="px-4 py-3 font-heading font-medium text-foreground">
-                          {bank.BName || "—"}
-                        </td>
-                        <td className="px-4 py-3 text-muted-foreground text-xs">
-                          {bank.BBranch || "—"}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className="font-mono text-xs bg-muted px-2 py-0.5 rounded">
-                            {bank.BAccountNumber || "—"}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className="font-mono text-xs bg-muted px-2 py-0.5 rounded tracking-widest">
-                            {bank.BIfscCode || "—"}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3">
-                          {bank.BBankType ? (
-                            <span
-                              className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${btCls}`}
-                            >
-                              {bank.BBankType}
-                            </span>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
-                        </td>
-                        <td className="px-4 py-3 font-mono text-foreground text-sm">
-                          ₹{" "}
-                          {Number(bank.BOpeningBalance || 0).toLocaleString(
-                            "en-IN",
-                          )}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span
-                            className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${
-                              bank.BStatus
-                                ? "bg-green-500/10 border-green-500/20 text-green-600"
-                                : "bg-red-500/10 border-red-500/20 text-red-600"
-                            }`}
-                          >
-                            <span
-                              className={`w-1.5 h-1.5 rounded-full mr-1.5 ${
-                                bank.BStatus ? "bg-green-500" : "bg-red-500"
-                              }`}
-                            />
-                            {bank.BStatus ? "Active" : "Inactive"}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center justify-end gap-1">
-                            {deleteId === id ? (
-                              <>
-                                <span className="text-[11px] text-muted-foreground mr-1">
-                                  Confirm?
-                                </span>
-                                <button
-                                  onClick={() => handleDelete(id)}
-                                  className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"
-                                >
-                                  <Check size={13} />
-                                </button>
-                                <button
-                                  onClick={() => setDeleteId(null)}
-                                  className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors"
-                                >
-                                  <X size={13} />
-                                </button>
-                              </>
-                            ) : (
-                              <>
-                                <button
-                                  onClick={() => handleEdit(bank)}
-                                  className="p-1.5 rounded-lg text-primary hover:bg-primary/10 transition-colors"
-                                >
-                                  <Edit2 size={13} />
-                                </button>
-                                <button
-                                  onClick={() => setDeleteId(id)}
-                                  className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"
-                                >
-                                  <Trash2 size={13} />
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            data={dbBanks}
+            columns={columns}
+            loading={isLoading}
+            searchPlaceholder="Search banks..."
+            emptyMessage="No banks yet. Add one above."
+            exportConfig={{
+              title: "Bank Master",
+              filename: "bank-master",
+              columns: EXPORT_COLUMNS,
+            }}
+            rowClassName={(row) =>
+              editingId === String(row.original.BId)
+                ? "bg-primary/5 border-l-2 border-l-primary"
+                : ""
+            }
+          />
         </div>
       </div>
     </>

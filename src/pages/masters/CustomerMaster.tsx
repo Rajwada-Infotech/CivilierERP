@@ -7,6 +7,7 @@ import {
   type DataChangeEvent,
   type RecordWithId,
 } from "@/components/MasterPage";
+import type { ExportColumn } from "@/lib/export";
 
 import {
   getList,
@@ -144,6 +145,18 @@ const CustomerMaster: React.FC = () => {
         columns={columns}
         initialData={mappedData}
         onDataEvent={handleDataEvent}
+        exportConfig={{
+          title: "Customer Master",
+          filename: "customer-master",
+          columns: [
+            { header: "Customer Name",  accessor: "name" },
+            { header: "Contact Person", accessor: "contact" },
+            { header: "Phone",          accessor: "phone" },
+            { header: "GST No.",        accessor: "gst" },
+            { header: "Payment Terms",  accessor: "paymentTerms" },
+            { header: "Status",         accessor: "status" },
+          ],
+        }}
       />
     </>
   );

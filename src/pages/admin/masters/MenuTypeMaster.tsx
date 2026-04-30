@@ -1,5 +1,7 @@
 import React, { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import {
   Plus,
@@ -46,6 +48,7 @@ import {
   deleteMenuType,
   type MenuType,
 } from "@/api/menuTypeApi";
+import { menuTypeSchema, type MenuTypeForm } from "@/schemas/menuTypeSchema";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -63,18 +66,7 @@ const AUDIT_FIELDS: { key: keyof MenuType; label: string }[] = [
   { key: "ApprovedBy", label: "Approved By" },
 ];
 
-type FormState = {
-  MenuReceipt: string;
-  MenuPayment: string;
-  MenuBOQ: string;
-  MenuPurchaseOrder: string;
-  MenuWorkOrder: string;
-  CreatedBy: string;
-  UpdatedBy: string;
-  ApprovedBy: string;
-};
-
-const EMPTY_FORM: FormState = {
+const EMPTY_FORM: MenuTypeForm = {
   MenuReceipt: "",
   MenuPayment: "",
   MenuBOQ: "",
@@ -92,7 +84,11 @@ const MenuTypeMaster: React.FC = () => {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const { register, handleSubmit, reset, watch } = useForm<MenuTypeForm>({
+    resolver: zodResolver(menuTypeSchema),
+    defaultValues: EMPTY_FORM,
+  });
+  const form = watch();
 
   // ── Queries ──────────────────────────────────────────────────────────────
   const {
@@ -143,13 +139,13 @@ const MenuTypeMaster: React.FC = () => {
 
   function openCreate() {
     setEditingId(null);
-    setForm(EMPTY_FORM);
+    reset(EMPTY_FORM);
     setDialogOpen(true);
   }
 
   function openEdit(row: MenuType) {
     setEditingId(row.Id);
-    setForm({
+    reset({
       MenuReceipt: row.MenuReceipt || "",
       MenuPayment: row.MenuPayment || "",
       MenuBOQ: row.MenuBOQ || "",
@@ -165,23 +161,19 @@ const MenuTypeMaster: React.FC = () => {
   function closeDialog() {
     setDialogOpen(false);
     setEditingId(null);
-    setForm(EMPTY_FORM);
+    reset(EMPTY_FORM);
   }
 
-  function handleChange(key: keyof FormState, value: string) {
-    setForm((prev) => ({ ...prev, [key]: value }));
-  }
-
-  function handleSubmit() {
+  function submitMenuType(values: MenuTypeForm) {
     const payload = {
-      MenuReceipt: form.MenuReceipt || null,
-      MenuPayment: form.MenuPayment || null,
-      MenuBOQ: form.MenuBOQ || null,
-      MenuPurchaseOrder: form.MenuPurchaseOrder || null,
-      MenuWorkOrder: form.MenuWorkOrder || null,
-      CreatedBy: form.CreatedBy || null,
-      UpdatedBy: form.UpdatedBy || null,
-      ApprovedBy: form.ApprovedBy || null,
+      MenuReceipt: values.MenuReceipt || null,
+      MenuPayment: values.MenuPayment || null,
+      MenuBOQ: values.MenuBOQ || null,
+      MenuPurchaseOrder: values.MenuPurchaseOrder || null,
+      MenuWorkOrder: values.MenuWorkOrder || null,
+      CreatedBy: values.CreatedBy || null,
+      UpdatedBy: values.UpdatedBy || null,
+      ApprovedBy: values.ApprovedBy || null,
     };
     if (editingId !== null) {
       updateMutation.mutate({ id: editingId, data: payload });
@@ -339,7 +331,7 @@ const MenuTypeMaster: React.FC = () => {
             </DialogTitle>
           </DialogHeader>
 
-          <div className="space-y-5 py-1">
+          <form className="space-y-5 py-1" onSubmit={handleSubmit(submitMenuType)}>
             {/* Menu labels */}
             <div className="space-y-1">
               <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground mb-3">
@@ -356,10 +348,7 @@ const MenuTypeMaster: React.FC = () => {
                     </Label>
                     <Input
                       placeholder={field.placeholder}
-                      value={form[field.key as keyof FormState]}
-                      onChange={(e) =>
-                        handleChange(field.key as keyof FormState, e.target.value)
-                      }
+                      {...register(field.key as keyof MenuTypeForm)}
                       maxLength={200}
                       className="h-8 text-sm"
                     />
@@ -384,10 +373,7 @@ const MenuTypeMaster: React.FC = () => {
                     </Label>
                     <Input
                       placeholder="Name"
-                      value={form[field.key as keyof FormState]}
-                      onChange={(e) =>
-                        handleChange(field.key as keyof FormState, e.target.value)
-                      }
+                      {...register(field.key as keyof MenuTypeForm)}
                       maxLength={100}
                       className="h-8 text-sm"
                     />
@@ -395,23 +381,24 @@ const MenuTypeMaster: React.FC = () => {
                 ))}
               </div>
             </div>
-          </div>
+            <DialogFooter className="gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={closeDialog}
+                disabled={isPending}
+                size="sm"
+              >
+                <X size={13} className="mr-1" />
+                Cancel
+              </Button>
+              <Button type="submit" disabled={isPending} size="sm">
+                <CheckCircle2 size={13} className="mr-1" />
+                {isPending ? "Saving..." : editingId !== null ? "Update" : "Create"}
+              </Button>
+            </DialogFooter>
+          </form>
 
-          <DialogFooter className="gap-2">
-            <Button
-              variant="outline"
-              onClick={closeDialog}
-              disabled={isPending}
-              size="sm"
-            >
-              <X size={13} className="mr-1" />
-              Cancel
-            </Button>
-            <Button onClick={handleSubmit} disabled={isPending} size="sm">
-              <CheckCircle2 size={13} className="mr-1" />
-              {isPending ? "Saving..." : editingId !== null ? "Update" : "Create"}
-            </Button>
-          </DialogFooter>
         </DialogContent>
       </Dialog>
 

@@ -1,7 +1,7 @@
 // Run this from your backend folder: node fix-passwords.js
 // It will bcrypt-hash any plaintext passwords in dbo.users
 
-require("dotenv").config();
+require("./config/env").loadEnv();
 const sql = require("mssql");
 const bcrypt = require("bcrypt");
 

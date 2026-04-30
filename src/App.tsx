@@ -1,4 +1,5 @@
-import React, { Suspense, lazy, useState, useEffect, Component } from "react";
+import React, { Suspense, lazy, useState, useEffect } from "react";
+import { RouteErrorBoundary } from "./components/ErrorBoundary";
 import { QueryClientProvider } from "@tanstack/react-query";
 import Loader from "./components/Loader";
 import { Toaster } from "sonner";
@@ -204,41 +205,6 @@ const Amendments = lazy(() => import("./pages/material/Amendments"));
 const RemindersManager = lazy(() => import("./pages/dba/RemindersManager"));
 const PaymentLogs = lazy(() => import("./pages/dba/PaymentLogs"));
 
-// ─── Error Boundary ───────────────────────────────────────────────────────────
-class ErrorBoundary extends Component<
-  { children: React.ReactNode },
-  { hasError: boolean; message: string }
-> {
-  constructor(props: { children: React.ReactNode }) {
-    super(props);
-    this.state = { hasError: false, message: "" };
-  }
-
-  static getDerivedStateFromError(error: Error) {
-    return { hasError: true, message: error.message };
-  }
-
-  render() {
-    if (this.state.hasError) {
-      return (
-        <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4 p-8">
-          <p className="text-destructive font-semibold text-lg">
-            Something went wrong
-          </p>
-          <p className="text-muted-foreground text-sm">{this.state.message}</p>
-          <button
-            className="px-4 py-2 rounded bg-primary text-primary-foreground text-sm"
-            onClick={() => this.setState({ hasError: false, message: "" })}
-          >
-            Try again
-          </button>
-        </div>
-      );
-    }
-    return this.props.children;
-  }
-}
-
 // ─── Auth Guard ───────────────────────────────────────────────────────────────
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { currentUser } = useAuth();
@@ -272,9 +238,9 @@ function AdminRoute({ children }: { children: React.ReactNode }) {
     <RequireAuth>
       <RequireRole allowed={[...ADMIN_ROLES]}>
         <AppLayout>
-          <ErrorBoundary>
+          <RouteErrorBoundary>
             <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
-          </ErrorBoundary>
+          </RouteErrorBoundary>
         </AppLayout>
       </RequireRole>
     </RequireAuth>
@@ -287,9 +253,9 @@ function SuperAdminRoute({ children }: { children: React.ReactNode }) {
     <RequireAuth>
       <RequireRole allowed={["super_admin"]}>
         <AppLayout>
-          <ErrorBoundary>
+          <RouteErrorBoundary>
             <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
-          </ErrorBoundary>
+          </RouteErrorBoundary>
         </AppLayout>
       </RequireRole>
     </RequireAuth>
@@ -301,9 +267,9 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return (
     <RequireAuth>
       <AppLayout>
-        <ErrorBoundary>
+        <RouteErrorBoundary>
           <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
-        </ErrorBoundary>
+        </RouteErrorBoundary>
       </AppLayout>
     </RequireAuth>
   );
