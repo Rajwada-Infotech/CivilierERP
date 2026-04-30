@@ -102,7 +102,7 @@ setInterval(async () => {
   } catch (err) {
     logger.error({ event: "WORKER_ERROR", err }, "Worker interval crashed");
   }
-}, 3600000); // 1 hour
+}, 3600000);
 
 // ─── Run once on startup ──────────────────────────────────────────────────────
 (async () => {

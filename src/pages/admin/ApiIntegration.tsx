@@ -1,5 +1,7 @@
 import React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "react-hook-form";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { getCommunicatorConfig, saveCommunicatorConfig } from "@/api/communicatorConfigApi";
 import { Button } from "@/components/ui/button";
@@ -9,6 +11,10 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Edit3, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  apiIntegrationSchema,
+  type ApiIntegrationForm,
+} from "@/schemas/apiIntegrationSchema";
 
 interface ApiConfig {
   id: string;
@@ -18,18 +24,12 @@ interface ApiConfig {
   status: "active" | "inactive";
 }
 
-type ApiFormState = {
-  name: string;
-  baseUrl: string;
-  apiKey: string;
-};
-
 interface IntegrationConfigPayload {
   apis?: ApiConfig[];
 }
 
 const QUERY_KEY = ["communicator-config", "integrations"];
-const EMPTY_FORM: ApiFormState = { name: "", baseUrl: "", apiKey: "" };
+const EMPTY_FORM: ApiIntegrationForm = { name: "", baseUrl: "", apiKey: "" };
 
 const buildId = () => {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -47,9 +47,27 @@ const maskApiKey = (apiKey: string) => {
 
 export default function ApiIntegration() {
   const queryClient = useQueryClient();
-  const [newApi, setNewApi] = React.useState<ApiFormState>(EMPTY_FORM);
   const [editingId, setEditingId] = React.useState<string | null>(null);
-  const [editForm, setEditForm] = React.useState<ApiFormState>(EMPTY_FORM);
+  const {
+    register: registerNewApi,
+    handleSubmit: handleNewApiSubmit,
+    reset: resetNewApi,
+    watch: watchNewApi,
+    formState: { errors: newApiErrors },
+  } = useForm<ApiIntegrationForm>({
+    resolver: zodResolver(apiIntegrationSchema),
+    defaultValues: EMPTY_FORM,
+  });
+  const {
+    register: registerEditApi,
+    handleSubmit: handleEditApiSubmit,
+    reset: resetEditApi,
+    formState: { errors: editApiErrors },
+  } = useForm<ApiIntegrationForm>({
+    resolver: zodResolver(apiIntegrationSchema),
+    defaultValues: EMPTY_FORM,
+  });
+  const newApi = watchNewApi();
 
   const {
     data: apis = [],
@@ -92,27 +110,22 @@ export default function ApiIntegration() {
     [persistApis],
   );
 
-  const addApi = async () => {
-    if (!newApi.name || !newApi.baseUrl || !newApi.apiKey) {
-      toast.error("Please fill all API fields");
-      return;
-    }
-
+  const addApi = async (values: ApiIntegrationForm) => {
     const saved = await saveApis(
       [
         ...apis,
         {
           id: buildId(),
-          name: newApi.name.trim(),
-          baseUrl: newApi.baseUrl.trim(),
-          apiKey: newApi.apiKey.trim(),
+          name: values.name.trim(),
+          baseUrl: values.baseUrl.trim(),
+          apiKey: values.apiKey.trim(),
           status: "active",
         },
       ],
-      `API "${newApi.name.trim()}" saved`,
+      `API "${values.name.trim()}" saved`,
     );
     if (saved) {
-      setNewApi(EMPTY_FORM);
+      resetNewApi(EMPTY_FORM);
     }
   };
 
@@ -144,7 +157,7 @@ export default function ApiIntegration() {
 
   const startEdit = (api: ApiConfig) => {
     setEditingId(api.id);
-    setEditForm({
+    resetEditApi({
       name: api.name,
       baseUrl: api.baseUrl,
       apiKey: api.apiKey,
@@ -153,28 +166,24 @@ export default function ApiIntegration() {
 
   const cancelEdit = () => {
     setEditingId(null);
-    setEditForm(EMPTY_FORM);
+    resetEditApi(EMPTY_FORM);
   };
 
-  const saveEdit = async () => {
+  const saveEdit = async (values: ApiIntegrationForm) => {
     if (!editingId) return;
-    if (!editForm.name || !editForm.baseUrl || !editForm.apiKey) {
-      toast.error("Please fill all API fields");
-      return;
-    }
 
     const nextApis = apis.map((api) =>
       api.id === editingId
         ? {
             ...api,
-            name: editForm.name.trim(),
-            baseUrl: editForm.baseUrl.trim(),
-            apiKey: editForm.apiKey.trim(),
+            name: values.name.trim(),
+            baseUrl: values.baseUrl.trim(),
+            apiKey: values.apiKey.trim(),
           }
         : api,
     );
 
-    const saved = await saveApis(nextApis, `API "${editForm.name.trim()}" updated`);
+    const saved = await saveApis(nextApis, `API "${values.name.trim()}" updated`);
     if (saved) {
       cancelEdit();
     }
@@ -215,34 +224,33 @@ export default function ApiIntegration() {
             <CardTitle>Add New API</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4 p-6">
+            <form className="space-y-4" onSubmit={handleNewApiSubmit(addApi)}>
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
               <div>
                 <Label htmlFor="name">API Name</Label>
                 <Input
                   id="name"
                   placeholder="Payment Gateway API"
-                  value={newApi.name}
-                  onChange={(e) =>
-                    setNewApi((current) => ({
-                      ...current,
-                      name: e.target.value,
-                    }))
-                  }
+                  {...registerNewApi("name")}
                 />
+                {newApiErrors.name && (
+                  <p className="mt-1 text-xs text-destructive">
+                    {newApiErrors.name.message}
+                  </p>
+                )}
               </div>
               <div>
                 <Label htmlFor="baseUrl">Base URL</Label>
                 <Input
                   id="baseUrl"
                   placeholder="https://api.example.com"
-                  value={newApi.baseUrl}
-                  onChange={(e) =>
-                    setNewApi((current) => ({
-                      ...current,
-                      baseUrl: e.target.value,
-                    }))
-                  }
+                  {...registerNewApi("baseUrl")}
                 />
+                {newApiErrors.baseUrl && (
+                  <p className="mt-1 text-xs text-destructive">
+                    {newApiErrors.baseUrl.message}
+                  </p>
+                )}
               </div>
               <div>
                 <Label htmlFor="apiKey">API Key</Label>
@@ -250,18 +258,17 @@ export default function ApiIntegration() {
                   id="apiKey"
                   type="password"
                   placeholder="sk-..."
-                  value={newApi.apiKey}
-                  onChange={(e) =>
-                    setNewApi((current) => ({
-                      ...current,
-                      apiKey: e.target.value,
-                    }))
-                  }
+                  {...registerNewApi("apiKey")}
                 />
+                {newApiErrors.apiKey && (
+                  <p className="mt-1 text-xs text-destructive">
+                    {newApiErrors.apiKey.message}
+                  </p>
+                )}
               </div>
             </div>
             <Button
-              onClick={addApi}
+              type="submit"
               disabled={
                 isSaving || !newApi.name || !newApi.baseUrl || !newApi.apiKey
               }
@@ -273,6 +280,7 @@ export default function ApiIntegration() {
               )}
               Add API
             </Button>
+            </form>
           </CardContent>
         </Card>
 
@@ -304,47 +312,48 @@ export default function ApiIntegration() {
                   >
                     {editingId === api.id ? (
                       <div className="space-y-4">
+                        <form
+                          className="space-y-4"
+                          onSubmit={handleEditApiSubmit(saveEdit)}
+                        >
                         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
                           <div>
                             <Label>Name</Label>
                             <Input
-                              value={editForm.name}
-                              onChange={(e) =>
-                                setEditForm((current) => ({
-                                  ...current,
-                                  name: e.target.value,
-                                }))
-                              }
+                              {...registerEditApi("name")}
                             />
+                            {editApiErrors.name && (
+                              <p className="mt-1 text-xs text-destructive">
+                                {editApiErrors.name.message}
+                              </p>
+                            )}
                           </div>
                           <div>
                             <Label>Base URL</Label>
                             <Input
-                              value={editForm.baseUrl}
-                              onChange={(e) =>
-                                setEditForm((current) => ({
-                                  ...current,
-                                  baseUrl: e.target.value,
-                                }))
-                              }
+                              {...registerEditApi("baseUrl")}
                             />
+                            {editApiErrors.baseUrl && (
+                              <p className="mt-1 text-xs text-destructive">
+                                {editApiErrors.baseUrl.message}
+                              </p>
+                            )}
                           </div>
                           <div>
                             <Label>API Key</Label>
                             <Input
                               type="password"
-                              value={editForm.apiKey}
-                              onChange={(e) =>
-                                setEditForm((current) => ({
-                                  ...current,
-                                  apiKey: e.target.value,
-                                }))
-                              }
+                              {...registerEditApi("apiKey")}
                             />
+                            {editApiErrors.apiKey && (
+                              <p className="mt-1 text-xs text-destructive">
+                                {editApiErrors.apiKey.message}
+                              </p>
+                            )}
                           </div>
                         </div>
                         <div className="flex gap-2">
-                          <Button onClick={saveEdit} disabled={isSaving}>
+                          <Button type="submit" disabled={isSaving}>
                             {isSaving ? (
                               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                             ) : null}
@@ -358,6 +367,7 @@ export default function ApiIntegration() {
                             Cancel
                           </Button>
                         </div>
+                        </form>
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 items-start gap-6 lg:grid-cols-2">

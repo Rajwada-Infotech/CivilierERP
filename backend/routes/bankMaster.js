@@ -2,7 +2,12 @@ const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
+const { validateBody } = require("../middleware/validateRequest");
 const { bumpCacheVersion } = require("../redis");
+const {
+  bankMasterCreateSchema,
+  bankMasterUpdateSchema,
+} = require("../utils/bankMasterSchemas");
 
 let accountHeadColumnMetaPromise = null;
 
@@ -54,16 +59,9 @@ const cleanStr = (v, len = 255) => {
   return String(v).trim().slice(0, len);
 };
 
-const IFSC_REGEX = /^[A-Z]{4}0[A-Z0-9]{6}$/;
-
 const cleanIfsc = (v) => {
   if (!v || String(v).trim() === "") return null;
   return String(v).trim().toUpperCase().slice(0, 11);
-};
-
-const validateIfsc = (v) => {
-  if (!v) return false;
-  return IFSC_REGEX.test(String(v).trim().toUpperCase());
 };
 
 const cleanDecimal = (v) => {
@@ -126,7 +124,7 @@ router.get("/", cache("bank-master", 300), async (req, res) => {
 });
 
 // ====================== CREATE BANK ======================
-router.post("/", async (req, res) => {
+router.post("/", validateBody(bankMasterCreateSchema), async (req, res) => {
   const {
     BName,
     BBranch,
@@ -140,18 +138,6 @@ router.post("/", async (req, res) => {
     BStatus = true,
     BCompanyName,
   } = req.body;
-
-  if (!BName?.trim()) {
-    return res.status(400).json({ error: "Bank Name is required" });
-  }
-  if (!BIfscCode?.trim()) {
-    return res.status(400).json({ error: "IFSC Code is required" });
-  }
-  if (!validateIfsc(BIfscCode)) {
-    return res.status(400).json({
-      error: "Invalid IFSC Code format. Expected format: 4 letters + 0 + 6 alphanumeric (e.g. SBIN0001234)",
-    });
-  }
 
   try {
     const pool = await getPool();
@@ -253,7 +239,7 @@ router.post("/", async (req, res) => {
 });
 
 // ====================== UPDATE BANK ======================
-router.put("/:id", async (req, res) => {
+router.put("/:id", validateBody(bankMasterUpdateSchema), async (req, res) => {
   const { id } = req.params;
   const {
     BName,
@@ -280,12 +266,6 @@ router.put("/:id", async (req, res) => {
       ["CompanyName", "companyname", "LCompanyName"],
       "LDescription",
     );
-
-    if (BIfscCode && !validateIfsc(BIfscCode)) {
-      return res.status(400).json({
-        error: "Invalid IFSC Code format. Expected format: 4 letters + 0 + 6 alphanumeric (e.g. SBIN0001234)",
-      });
-    }
 
     const request = pool
       .request()

@@ -10,6 +10,11 @@ const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const router = express.Router()
 const { getPool, sql } = require("../db")
+const { validateBody } = require("../middleware/validateRequest")
+const {
+  finYearCreateSchema,
+  finYearUpdateSchema,
+} = require("../validation/finYearSchemas")
 
 router.get("/", cache("fin-year", 300), async (req, res) => {
   try {
@@ -19,7 +24,7 @@ router.get("/", cache("fin-year", 300), async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }) }
 })
 
-router.post("/", async (req, res) => {
+router.post("/", validateBody(finYearCreateSchema), async (req, res) => {
   const { FName, FStartDate, FEndDate, FStatus, FisLocked } = req.body
   try {
     const pool = getPool()
@@ -43,7 +48,7 @@ router.post("/", async (req, res) => {
 // Partial UPDATE — only columns present in req.body are modified.
 // This ensures toggleLock (which sends only FisLocked) does not null out
 // FName, FStartDate, FEndDate, or FStatus.
-router.put("/:id", async (req, res) => {
+router.put("/:id", validateBody(finYearUpdateSchema), async (req, res) => {
   const { FName, FStartDate, FEndDate, FStatus, FisLocked } = req.body
   try {
     const pool = getPool()
