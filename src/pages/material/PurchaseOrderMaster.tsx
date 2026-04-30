@@ -11,6 +11,9 @@ import {
   DocNumberPreview,
   fetchNextDocNumber,
 } from "@/pages/material/ExpenseBooking/DocNumberPreview";
+import { BillingAccordion } from "@/pages/material/ExpenseBooking/BillingAccordion";
+import { computeBreakdown, defaultDiscount } from "@/pages/material/ExpenseBooking/helpers";
+import type { DiscountConfig } from "@/pages/material/ExpenseBooking/types";
 
 import {
   getPurchaseOrders,
@@ -83,6 +86,7 @@ interface FormState {
   remarks: string;
   docTypeId: number | null;
   docNo: string;
+  discount: DiscountConfig;
 }
 
 const EMPTY_FORM: FormState = {
@@ -97,6 +101,7 @@ const EMPTY_FORM: FormState = {
   remarks: "",
   docTypeId: null,
   docNo: "",
+  discount: defaultDiscount(),
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -212,7 +217,14 @@ const POForm: React.FC<POFormProps> = ({
     (s, r) => s + (r.quantity * r.rate * r.tax) / 100,
     0,
   );
-  const grandTotal = subtotal + totalTax;
+  const effectiveTaxRate = subtotal > 0 ? (totalTax / subtotal) * 100 : 0;
+  const billingBreakdown = computeBreakdown(
+    subtotal,
+    effectiveTaxRate,
+    0,
+    form.discount,
+  );
+  const grandTotal = billingBreakdown.netAmount;
 
   // ── Line item handlers ──────────────────────────────────────────────────────
   const addItem = () => setItems((prev) => [...prev, emptyItem()]);
@@ -615,7 +627,31 @@ const POForm: React.FC<POFormProps> = ({
                 </div>
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Total Tax</span>
-                  <span className="font-medium tabular-nums">₹{fmt(totalTax)}</span>
+                  <span className="font-medium tabular-nums">
+                    ₹{fmt(billingBreakdown.cgstAmount)}
+                  </span>
+                </div>
+                {form.discount.applicable && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Discount</span>
+                    <span className="font-medium tabular-nums text-destructive">
+                      -₹{fmt(billingBreakdown.discountAmount)}
+                    </span>
+                  </div>
+                )}
+                {billingBreakdown.roundOff !== 0 && (
+                  <div className="flex justify-between text-sm">
+                    <span className="text-muted-foreground">Round Off</span>
+                    <span className="font-medium tabular-nums">
+                      ₹{fmt(billingBreakdown.roundOff)}
+                    </span>
+                  </div>
+                )}
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Taxable Amount</span>
+                  <span className="font-medium tabular-nums">
+                    ₹{fmt(billingBreakdown.taxableAmount)}
+                  </span>
                 </div>
                 <div className="flex justify-between pt-2 border-t border-border text-base">
                   <span className="font-semibold">Grand Total</span>
@@ -626,6 +662,14 @@ const POForm: React.FC<POFormProps> = ({
               </div>
             </div>
           </section>
+
+          <BillingAccordion
+            basicAmount={subtotal}
+            cgstRate={effectiveTaxRate}
+            sgstRate={0}
+            discount={form.discount}
+            onChange={(discount) => setForm((prev) => ({ ...prev, discount }))}
+          />
 
           {/* ── Remarks ───────────────────────────────────────────────────── */}
           <section className="rounded-xl border border-border bg-card p-4">
@@ -826,6 +870,7 @@ const PurchaseOrderMaster = () => {
         remarks: po.Remarks ?? "",
         docTypeId: po.DocTypeId ?? null,
         docNo: po.DocNo ?? "",
+        discount: po.Discount ?? defaultDiscount(),
       });
 
       // Prefer new multi-item list; fall back to legacy single-item fields
@@ -860,7 +905,18 @@ const PurchaseOrderMaster = () => {
       const supplier = suppliers.find((s) => s.name === form.supplierName);
       const company = companies.find((c) => c.name === form.companyName);
       const project = allProjects.find((p) => p.name === form.projectName);
-      const grandTotal = items.reduce((s, r) => s + r.amount, 0);
+      const subtotal = items.reduce((s, r) => s + r.quantity * r.rate, 0);
+      const totalTax = items.reduce(
+        (s, r) => s + (r.quantity * r.rate * r.tax) / 100,
+        0,
+      );
+      const effectiveTaxRate = subtotal > 0 ? (totalTax / subtotal) * 100 : 0;
+      const grandTotal = computeBreakdown(
+        subtotal,
+        effectiveTaxRate,
+        0,
+        form.discount,
+      ).netAmount;
 
       const payload: CreatePOPayload = {
         PurchaseOrderNo: form.poNumber || null,
@@ -877,6 +933,7 @@ const PurchaseOrderMaster = () => {
         DocTypeId: form.docTypeId ?? null,
         DocNo: form.poNumber || form.docNo || null,
         finYear: selectedFinYear || null,
+        Discount: form.discount,
       };
 
       if (panelMode === "edit" && editId) {
