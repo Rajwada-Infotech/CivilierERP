@@ -1,3 +1,5 @@
+import { apiUrl } from "./apiBase";
+
 export async function fetchWithAuth(
   url: string,
   options: RequestInit = {},
@@ -8,7 +10,7 @@ export async function fetchWithAuth(
   let response: Response;
 
   try {
-    response = await fetch(url, {
+    response = await fetch(apiUrl(url), {
       ...options,
       headers: {
         "Content-Type": "application/json",
@@ -16,11 +18,11 @@ export async function fetchWithAuth(
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
     // Suppress console spam for connection refused / backend not running.
     // The hook / component that calls fetchWithAuth is responsible for
     // showing the user a meaningful error if needed.
-    const msg: string = err?.message ?? "";
+    const msg = err instanceof Error ? err.message : "";
     const isConnRefused =
       msg.includes("Failed to fetch") ||
       msg.includes("ERR_CONNECTION_REFUSED") ||
