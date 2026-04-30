@@ -1,6 +1,8 @@
-import React, { useState, useEffect } from "react";
+import React, { useMemo, useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import {
   FileText,
@@ -27,23 +29,13 @@ import {
   type BankOption,
   type CompanyOption,
 } from "@/api/chequeMasterApi";
+import {
+  chequeMasterSchema,
+  type ChequeMasterForm,
+} from "@/schemas/chequeMasterSchema";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-interface FormState {
-  companyId: string;
-  bankId: string;
-  bankName: string;
-  accountNumber: string;
-  ifscCode: string;
-  lotNumber: string;
-  chqStart: number | "";
-  chqEnd: number | "";
-  totalCheques: number;
-  remarks: string;
-  status: boolean;
-}
-
-const EMPTY: FormState = {
+const EMPTY: ChequeMasterForm = {
   companyId: "",
   bankId: "",
   bankName: "",
@@ -88,53 +80,38 @@ const ChequeMaster: React.FC = () => {
   const dbCheques: DbCheque[] = Array.isArray(chequeData) ? chequeData : [];
   const dbBanks: BankOption[] = Array.isArray(bankData) ? bankData : [];
 
-  const [form, setForm] = useState<FormState>(EMPTY);
+  const {
+    register,
+    handleSubmit,
+    reset,
+    setValue,
+    watch,
+    formState: { errors },
+  } = useForm<ChequeMasterForm>({
+    resolver: zodResolver(chequeMasterSchema),
+    defaultValues: EMPTY,
+  });
+  const form = watch();
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [search, setSearch] = useState("");
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
-  // Auto-recalculate total
-  useEffect(() => {
-    setForm((p) => ({ ...p, totalCheques: calcTotal(p.chqStart, p.chqEnd) }));
-  }, [form.chqStart, form.chqEnd]);
-
   const handleBankChange = (bankId: string) => {
     const bank = dbBanks.find((b) => String(b.id) === bankId);
-    setForm((p) => ({
-      ...p,
-      bankId,
-      bankName: bank?.label || "",
-      accountNumber: bank?.accountNumber || "",
-      ifscCode: bank?.ifscCode || "",
-    }));
-    if (errors.bankId) setErrors((e) => ({ ...e, bankId: false }));
+    setValue("bankId", bankId, { shouldValidate: true });
+    setValue("bankName", bank?.label || "");
+    setValue("accountNumber", bank?.accountNumber || "", {
+      shouldValidate: Boolean(errors.accountNumber),
+    });
+    setValue("ifscCode", bank?.ifscCode || "");
   };
 
-  const setField = (k: keyof FormState, v: unknown) => {
-    setForm((p) => ({ ...p, [k]: v }));
-    if (errors[k]) setErrors((e) => ({ ...e, [k]: false }));
+  const setChequeNumber = (field: "chqStart" | "chqEnd", value: string) => {
+    const next = value === "" ? "" : Number(value);
+    setValue(field, next, { shouldValidate: Boolean(errors[field]) });
   };
 
-  const validate = () => {
-    const e: Record<string, boolean> = {};
-    if (!form.companyId) e.companyId = true;
-    if (!form.bankId) e.bankId = true;
-    if (!form.accountNumber.trim()) e.accountNumber = true;
-    if (!form.lotNumber.trim()) e.lotNumber = true;
-    if (form.chqStart === "" || isNaN(Number(form.chqStart))) e.chqStart = true;
-    if (form.chqEnd === "" || isNaN(Number(form.chqEnd))) e.chqEnd = true;
-    if (
-      form.chqStart !== "" &&
-      form.chqEnd !== "" &&
-      Number(form.chqEnd) < Number(form.chqStart)
-    )
-      e.chqEnd = true;
-    setErrors(e);
-    return Object.keys(e).length === 0;
-  };
-
-  const toPayload = (f: FormState) => ({
+  const toPayload = (f: ChequeMasterForm) => ({
     CompanyId: f.companyId ? Number(f.companyId) : null,
     BankId: f.bankId ? Number(f.bankId) : null,
     AccountNumber: f.accountNumber || null,
@@ -142,23 +119,22 @@ const ChequeMaster: React.FC = () => {
     ChequeLotNumber: f.lotNumber || null,
     ChequeStartNumber: f.chqStart !== "" ? Number(f.chqStart) : null,
     ChequeEndNumber: f.chqEnd !== "" ? Number(f.chqEnd) : null,
-    TotalCheques: f.totalCheques || null,
+    TotalCheques: calcTotal(f.chqStart, f.chqEnd) || null,
     Remarks: f.remarks || null,
     Status: f.status,
   });
 
-  const handleSave = async () => {
-    if (!validate()) return;
+  const handleSave = async (values: ChequeMasterForm) => {
     try {
       if (editingId) {
-        await updateCheque(editingId, toPayload(form));
+        await updateCheque(editingId, toPayload(values));
         toast.success("Cheque lot updated!");
       } else {
-        await addCheque(toPayload(form));
+        await addCheque(toPayload(values));
         toast.success("Cheque lot saved!");
       }
       await queryClient.invalidateQueries({ queryKey: ["cheques"] });
-      setForm(EMPTY);
+      reset(EMPTY);
       setEditingId(null);
     } catch (err: any) {
       toast.error("Failed: " + err.message);
@@ -167,7 +143,7 @@ const ChequeMaster: React.FC = () => {
 
   const handleEdit = (item: DbCheque) => {
     const bank = dbBanks.find((b) => b.id === item.BankId);
-    setForm({
+    reset({
       companyId: item.CompanyId ? String(item.CompanyId) : "",
       bankId: item.BankId ? String(item.BankId) : "",
       bankName: bank?.label || "",
@@ -192,7 +168,7 @@ const ChequeMaster: React.FC = () => {
       setDeleteId(null);
       if (editingId === id) {
         setEditingId(null);
-        setForm(EMPTY);
+        reset(EMPTY);
       }
     } catch (err: any) {
       toast.error("Delete failed: " + err.message);
@@ -200,9 +176,8 @@ const ChequeMaster: React.FC = () => {
   };
 
   const handleReset = () => {
-    setForm(EMPTY);
+    reset(EMPTY);
     setEditingId(null);
-    setErrors({});
   };
 
   const filtered = dbCheques.filter((r) => {
@@ -255,7 +230,7 @@ const ChequeMaster: React.FC = () => {
             )}
           </div>
 
-          <div className="p-5">
+          <form className="p-5" onSubmit={handleSubmit(handleSave)}>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Company dropdown — live from DB */}
               <div>
@@ -263,8 +238,7 @@ const ChequeMaster: React.FC = () => {
                   Company <span className="text-destructive">*</span>
                 </label>
                 <select
-                  value={form.companyId}
-                  onChange={(e) => setField("companyId", e.target.value)}
+                  {...register("companyId")}
                   className={`${inp} ${errors.companyId ? "border-destructive" : ""}`}
                 >
                   <option value="">Select Company...</option>
@@ -327,8 +301,7 @@ const ChequeMaster: React.FC = () => {
                   />
                   <input
                     type="text"
-                    value={form.accountNumber}
-                    onChange={(e) => setField("accountNumber", e.target.value)}
+                    {...register("accountNumber")}
                     placeholder="Auto-filled on bank selection"
                     className={`${inp} pl-8 font-mono tracking-widest ${errors.accountNumber ? "border-destructive" : ""}`}
                   />
@@ -385,8 +358,7 @@ const ChequeMaster: React.FC = () => {
                   />
                   <input
                     type="text"
-                    value={form.lotNumber}
-                    onChange={(e) => setField("lotNumber", e.target.value)}
+                    {...register("lotNumber")}
                     placeholder="e.g. LOT-2024-001"
                     className={`${inp} pl-8 ${errors.lotNumber ? "border-destructive" : ""}`}
                   />
@@ -412,12 +384,7 @@ const ChequeMaster: React.FC = () => {
                   <input
                     type="number"
                     value={form.chqStart}
-                    onChange={(e) =>
-                      setField(
-                        "chqStart",
-                        e.target.value === "" ? "" : Number(e.target.value),
-                      )
-                    }
+                    onChange={(e) => setChequeNumber("chqStart", e.target.value)}
                     placeholder="e.g. 100001"
                     className={`${inp} pl-8 font-mono ${errors.chqStart ? "border-destructive" : ""}`}
                   />
@@ -442,12 +409,7 @@ const ChequeMaster: React.FC = () => {
                   <input
                     type="number"
                     value={form.chqEnd}
-                    onChange={(e) =>
-                      setField(
-                        "chqEnd",
-                        e.target.value === "" ? "" : Number(e.target.value),
-                      )
-                    }
+                    onChange={(e) => setChequeNumber("chqEnd", e.target.value)}
                     placeholder="e.g. 100050"
                     className={`${inp} pl-8 font-mono ${errors.chqEnd ? "border-destructive" : ""}`}
                   />
@@ -513,8 +475,7 @@ const ChequeMaster: React.FC = () => {
                   Remarks
                 </label>
                 <textarea
-                  value={form.remarks}
-                  onChange={(e) => setField("remarks", e.target.value)}
+                  {...register("remarks")}
                   rows={2}
                   placeholder="Optional notes..."
                   className={inp}
@@ -528,7 +489,7 @@ const ChequeMaster: React.FC = () => {
                 </label>
                 <button
                   type="button"
-                  onClick={() => setField("status", !form.status)}
+                  onClick={() => setValue("status", !form.status)}
                   className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${form.status ? "bg-primary" : "bg-muted border border-border"}`}
                 >
                   <span
@@ -540,13 +501,14 @@ const ChequeMaster: React.FC = () => {
 
             <div className="flex items-center gap-2 mt-5 pt-4 border-t border-border">
               <button
-                onClick={handleSave}
+                type="submit"
                 className="flex items-center gap-1.5 px-4 py-2 rounded-lg font-heading text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
               >
                 <Plus size={15} />
                 {editingId ? "Update" : "Save"}
               </button>
               <button
+                type="button"
                 onClick={handleReset}
                 className="flex items-center gap-1.5 px-4 py-2 rounded-lg font-heading text-sm border border-border text-muted-foreground hover:bg-muted transition-all"
               >
@@ -554,7 +516,7 @@ const ChequeMaster: React.FC = () => {
                 Reset
               </button>
             </div>
-          </div>
+          </form>
         </div>
 
         {/* Table */}

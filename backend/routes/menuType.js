@@ -1,6 +1,11 @@
 const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
+const { validateBody } = require("../middleware/validateRequest");
+const {
+  menuTypeCreateSchema,
+  menuTypeUpdateSchema,
+} = require("../validation/menuTypeSchemas");
 
 // GET all menu types
 router.get("/", async (req, res) => {
@@ -37,7 +42,7 @@ router.get("/:id", async (req, res) => {
 });
 
 // POST
-router.post("/", async (req, res) => {
+router.post("/", validateBody(menuTypeCreateSchema), async (req, res) => {
   const { MenuReceipt, MenuPayment, MenuBOQ, MenuPurchaseOrder, MenuWorkOrder, CreatedBy } = req.body;
   try {
     const pool = await getPool();
@@ -65,7 +70,7 @@ router.post("/", async (req, res) => {
 });
 
 // PUT
-router.put("/:id", async (req, res) => {
+router.put("/:id", validateBody(menuTypeUpdateSchema), async (req, res) => {
   const { MenuReceipt, MenuPayment, MenuBOQ, MenuPurchaseOrder, MenuWorkOrder, UpdatedBy, ApprovedBy, ApprovedAt } = req.body;
   try {
     const pool = await getPool();

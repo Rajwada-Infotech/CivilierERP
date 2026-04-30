@@ -1,7 +1,10 @@
 import React, { useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "react-hook-form";
 import { toast } from "sonner";
+import { z } from "zod";
 import {
   Landmark,
   Plus,
@@ -28,19 +31,35 @@ import {
 } from "@/api/bankMasterApi";
 
 // ─── Local form types ────────────────────────────────────────────────────────
-interface FormState {
-  companyName: string;
-  bankName: string;
-  branch: string;
-  accountNo: string;
-  ifsc: string;
-  accountType: string;
-  bankType: string;
-  holderName: string;
-  openingBalance: string;
-  address: string;
-  status: boolean;
-}
+const IFSC_REGEX = /^[A-Z]{4}0[A-Z0-9]{6}$/;
+
+const bankFormSchema = z.object({
+  companyName: z.string(),
+  bankName: z.string().trim().min(1, "Bank name is required"),
+  branch: z.string(),
+  accountNo: z.string().trim().min(1, "Account number is required"),
+  ifsc: z
+    .string()
+    .trim()
+    .min(1, "IFSC code is required")
+    .transform((value) => value.toUpperCase())
+    .refine((value) => IFSC_REGEX.test(value), {
+      message:
+        "Invalid format - must be 4 letters + 0 + 6 alphanumeric (e.g. SBIN0001234)",
+    }),
+  accountType: z.string(),
+  bankType: z.string(),
+  holderName: z.string(),
+  openingBalance: z.string().refine(
+    (value) =>
+      value === "" || (!Number.isNaN(Number(value)) && Number(value) >= 0),
+    "Opening balance must be 0 or greater",
+  ),
+  address: z.string(),
+  status: z.boolean(),
+});
+
+type FormState = z.infer<typeof bankFormSchema>;
 
 const EMPTY: FormState = {
   companyName: "",
@@ -68,8 +87,6 @@ const BANK_TYPES = [
 const inp =
   "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground placeholder:text-muted-foreground/50";
 
-const IFSC_REGEX = /^[A-Z]{4}0[A-Z0-9]{6}$/;
-
 // ─── Component ───────────────────────────────────────────────────────────────
 const BankMaster: React.FC = () => {
   const queryClient = useQueryClient();
@@ -92,29 +109,22 @@ const BankMaster: React.FC = () => {
 
   const dbBanks: BankRecord[] = Array.isArray(dbData) ? dbData : [];
 
-  const [form, setForm] = useState<FormState>(EMPTY);
+  const {
+    register,
+    handleSubmit,
+    reset,
+    setValue,
+    watch,
+    formState: { errors },
+  } = useForm<FormState>({
+    resolver: zodResolver(bankFormSchema),
+    defaultValues: EMPTY,
+  });
+
+  const form = watch();
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [search, setSearch] = useState("");
   const [deleteId, setDeleteId] = useState<string | null>(null);
-
-  const setField = (k: keyof FormState, v: unknown) => {
-    setForm((p) => ({ ...p, [k]: v }));
-    if (errors[k]) setErrors((e) => ({ ...e, [k]: false }));
-  };
-
-  const validate = () => {
-    const e: Record<string, boolean> = {};
-    if (!form.bankName.trim()) e.bankName = true;
-    if (!form.ifsc.trim()) {
-      e.ifsc = true;
-    } else if (!IFSC_REGEX.test(form.ifsc.trim().toUpperCase())) {
-      e.ifsc = true;
-    }
-    if (!form.accountNo.trim()) e.accountNo = true;
-    setErrors(e);
-    return Object.keys(e).length === 0;
-  };
 
   const toPayload = (f: FormState) => ({
     BName: f.bankName.trim() || null,
@@ -130,28 +140,17 @@ const BankMaster: React.FC = () => {
     BCompanyName: f.companyName.trim() || null,
   });
 
-  const handleSave = async () => {
-    if (!validate()) return;
-
-    // Extra IFSC guard with user-friendly toast (from ac97f7f branch)
-    const ifsc = form.ifsc.trim().toUpperCase();
-    if (!IFSC_REGEX.test(ifsc)) {
-      toast.error(
-        `Invalid IFSC Code "${ifsc || "empty"}". Format must be like SBIN0001234 (11 characters).`,
-      );
-      return;
-    }
-
+  const handleSave = async (values: FormState) => {
     try {
       if (editingId) {
-        await updateBank(editingId, toPayload(form));
+        await updateBank(editingId, toPayload(values));
         toast.success("Bank updated!");
       } else {
-        await addBank(toPayload(form));
+        await addBank(toPayload(values));
         toast.success("Bank saved!");
       }
       await queryClient.invalidateQueries({ queryKey: ["bank-master"] });
-      setForm(EMPTY);
+      reset(EMPTY);
       setEditingId(null);
     } catch (err: any) {
       toast.error("Failed: " + err.message);
@@ -159,7 +158,7 @@ const BankMaster: React.FC = () => {
   };
 
   const handleEdit = (item: BankRecord) => {
-    setForm({
+    reset({
       companyName: item.BCompanyName || "",
       bankName: item.BName || "",
       branch: item.BBranch || "",
@@ -185,7 +184,7 @@ const BankMaster: React.FC = () => {
       setDeleteId(null);
       if (editingId === id) {
         setEditingId(null);
-        setForm(EMPTY);
+        reset(EMPTY);
       }
     } catch (err: any) {
       toast.error("Delete failed: " + err.message);
@@ -193,9 +192,8 @@ const BankMaster: React.FC = () => {
   };
 
   const handleReset = () => {
-    setForm(EMPTY);
+    reset(EMPTY);
     setEditingId(null);
-    setErrors({});
   };
 
   const filtered = dbBanks.filter((b) => {
@@ -251,7 +249,7 @@ const BankMaster: React.FC = () => {
             )}
           </div>
 
-          <div className="p-5">
+          <form className="p-5" onSubmit={handleSubmit(handleSave)}>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               {/* Company Name */}
               <div>
@@ -264,8 +262,7 @@ const BankMaster: React.FC = () => {
                     className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                   />
                   <select
-                    value={form.companyName}
-                    onChange={(e) => setField("companyName", e.target.value)}
+                    {...register("companyName")}
                     className={`${inp} pl-8`}
                   >
                     <option value="">Select Company...</option>
@@ -290,8 +287,7 @@ const BankMaster: React.FC = () => {
                   />
                   <input
                     type="text"
-                    value={form.bankName}
-                    onChange={(e) => setField("bankName", e.target.value)}
+                    {...register("bankName")}
                     placeholder="e.g. State Bank of India"
                     className={`${inp} pl-8 ${errors.bankName ? "border-destructive" : ""}`}
                   />
@@ -310,8 +306,7 @@ const BankMaster: React.FC = () => {
                 </label>
                 <input
                   type="text"
-                  value={form.branch}
-                  onChange={(e) => setField("branch", e.target.value)}
+                  {...register("branch")}
                   placeholder="e.g. Park Street Branch"
                   className={inp}
                 />
@@ -329,8 +324,7 @@ const BankMaster: React.FC = () => {
                   />
                   <input
                     type="text"
-                    value={form.accountNo}
-                    onChange={(e) => setField("accountNo", e.target.value)}
+                    {...register("accountNo")}
                     placeholder="Bank account number"
                     className={`${inp} pl-8 font-mono tracking-widest ${errors.accountNo ? "border-destructive" : ""}`}
                   />
@@ -356,10 +350,16 @@ const BankMaster: React.FC = () => {
                     type="text"
                     value={form.ifsc}
                     onChange={(e) =>
-                      setField(
+                      setValue(
                         "ifsc",
                         e.target.value.toUpperCase().slice(0, 11),
+                        { shouldValidate: Boolean(errors.ifsc) },
                       )
+                    }
+                    onBlur={() =>
+                      setValue("ifsc", form.ifsc.trim().toUpperCase(), {
+                        shouldValidate: true,
+                      })
                     }
                     placeholder="e.g. SBIN0001234"
                     maxLength={11}
@@ -386,8 +386,7 @@ const BankMaster: React.FC = () => {
                   Account Type
                 </label>
                 <select
-                  value={form.accountType}
-                  onChange={(e) => setField("accountType", e.target.value)}
+                  {...register("accountType")}
                   className={inp}
                 >
                   <option value="">Select Account Type...</option>
@@ -405,8 +404,7 @@ const BankMaster: React.FC = () => {
                   Bank Type
                 </label>
                 <select
-                  value={form.bankType}
-                  onChange={(e) => setField("bankType", e.target.value)}
+                  {...register("bankType")}
                   className={inp}
                 >
                   <option value="">Select Bank Type...</option>
@@ -430,8 +428,7 @@ const BankMaster: React.FC = () => {
                   />
                   <input
                     type="text"
-                    value={form.holderName}
-                    onChange={(e) => setField("holderName", e.target.value)}
+                    {...register("holderName")}
                     placeholder="Name on account"
                     className={`${inp} pl-8`}
                   />
@@ -452,12 +449,16 @@ const BankMaster: React.FC = () => {
                     type="number"
                     min="0"
                     step="0.01"
-                    value={form.openingBalance}
-                    onChange={(e) => setField("openingBalance", e.target.value)}
+                    {...register("openingBalance")}
                     placeholder="0.00"
-                    className={`${inp} pl-8 font-mono`}
+                    className={`${inp} pl-8 font-mono ${errors.openingBalance ? "border-destructive" : ""}`}
                   />
                 </div>
+                {errors.openingBalance && (
+                  <p className="text-[11px] text-destructive mt-1">
+                    {errors.openingBalance.message}
+                  </p>
+                )}
               </div>
 
               {/* Address */}
@@ -472,8 +473,7 @@ const BankMaster: React.FC = () => {
                   />
                   <textarea
                     rows={2}
-                    value={form.address}
-                    onChange={(e) => setField("address", e.target.value)}
+                    {...register("address")}
                     placeholder="Branch address..."
                     className={`${inp} pl-8 resize-none`}
                   />
@@ -487,7 +487,7 @@ const BankMaster: React.FC = () => {
                 </label>
                 <button
                   type="button"
-                  onClick={() => setField("status", !form.status)}
+                  onClick={() => setValue("status", !form.status)}
                   className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                     form.status ? "bg-primary" : "bg-muted border border-border"
                   }`}
@@ -506,13 +506,14 @@ const BankMaster: React.FC = () => {
 
             <div className="flex items-center gap-2 mt-5 pt-4 border-t border-border">
               <button
-                onClick={handleSave}
+                type="submit"
                 className="flex items-center gap-1.5 px-4 py-2 rounded-lg font-heading text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
               >
                 <Plus size={15} />
                 {editingId ? "Update" : "Save"}
               </button>
               <button
+                type="button"
                 onClick={handleReset}
                 className="flex items-center gap-1.5 px-4 py-2 rounded-lg font-heading text-sm border border-border text-muted-foreground hover:bg-muted transition-all"
               >
@@ -520,7 +521,7 @@ const BankMaster: React.FC = () => {
                 Reset
               </button>
             </div>
-          </div>
+          </form>
         </div>
 
         {/* ── Table ── */}

@@ -3,6 +3,8 @@ const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const allowRoles = require("../middleware/role");
+const { validateBody } = require("../middleware/validateRequest");
+const { communicatorConfigSchema } = require("../validation/communicatorSchemas");
 
 router.use(authMiddleware);
 const adminOnly = allowRoles("admin", "super_admin", "dba");
@@ -181,7 +183,7 @@ router.get("/:channel", adminOnly, async (req, res) => {
 });
 
 // PUT upsert config by channel
-router.put("/:channel", adminOnly, async (req, res) => {
+router.put("/:channel", adminOnly, validateBody(communicatorConfigSchema), async (req, res) => {
   const { channel } = req.params;
   const { config } = req.body;
   if (!config || typeof config !== "object")

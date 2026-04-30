@@ -3,6 +3,11 @@ const router = express.Router();
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
+const { validateBody } = require("../middleware/validateRequest");
+const {
+  chequeMasterCreateSchema,
+  chequeMasterUpdateSchema,
+} = require("../validation/chequeMasterSchemas");
 
 let chequeColumnMetaPromise = null;
 
@@ -80,7 +85,7 @@ router.get("/", cache("cheque-master", 300), async (req, res) => {
 });
 
 // POST - Create cheque lot
-router.post("/", async (req, res) => {
+router.post("/", validateBody(chequeMasterCreateSchema), async (req, res) => {
   const {
     CompanyId,
     BankId,
@@ -151,7 +156,7 @@ router.post("/", async (req, res) => {
 });
 
 // PUT - Update cheque lot
-router.put("/:id", async (req, res) => {
+router.put("/:id", validateBody(chequeMasterUpdateSchema), async (req, res) => {
   const {
     CompanyId,
     BankId,

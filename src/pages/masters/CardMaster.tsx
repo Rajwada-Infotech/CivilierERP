@@ -1,6 +1,8 @@
 import React, { useState, useMemo } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import {
   CreditCard,
@@ -33,6 +35,10 @@ import {
   type BankOption,
   type CompanyOption,
 } from "@/api/cardMasterApi";
+import {
+  cardMasterSchema,
+  type CardMasterForm,
+} from "@/schemas/cardMasterSchema";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface CardRecord {
@@ -107,9 +113,7 @@ function formatted(num: string) {
 const inp =
   "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground placeholder:text-muted-foreground/50";
 
-type FormState = Omit<CardRecord, "_id" | "reminderDismissed">;
-
-const EMPTY: FormState = {
+const EMPTY: CardMasterForm = {
   companyName: "",
   bankId: "",
   bankName: "",
@@ -303,9 +307,19 @@ const CardMaster: React.FC = () => {
     };
   });
 
-  const [form, setForm] = useState<FormState>(EMPTY);
+  const {
+    register,
+    handleSubmit,
+    reset,
+    setValue,
+    watch,
+    formState: { errors },
+  } = useForm<CardMasterForm>({
+    resolver: zodResolver(cardMasterSchema),
+    defaultValues: EMPTY,
+  });
+  const form = watch();
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [search, setSearch] = useState("");
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [revealedRows, setRevealedRows] = useState<Record<string, boolean>>({});
@@ -325,22 +339,20 @@ const CardMaster: React.FC = () => {
     return calculateReminderDate(form.expiryDate, form.reminderDays);
   }, [form.reminderEnabled, form.reminderDays, form.expiryDate]);
 
-  const setField = (k: keyof FormState, v: unknown) => {
-    setForm((p) => ({ ...p, [k]: v }));
-    if (errors[k as string]) setErrors((p) => ({ ...p, [k as string]: false }));
+  const setField = <K extends keyof CardMasterForm>(
+    k: K,
+    v: CardMasterForm[K],
+  ) => {
+    setValue(k, v, { shouldValidate: Boolean(errors[k]) });
   };
 
   // ── Bank dropdown handler — auto-fills account number & IFSC ──────────────
   const handleBankChange = (bankId: string) => {
     const bank = dbBanks.find((b) => String(b.id) === bankId);
-    setForm((p) => ({
-      ...p,
-      bankId,
-      bankName: bank?.label || "",
-      accountNumber: bank?.accountNumber || "",
-      ifscCode: bank?.ifscCode || "",
-    }));
-    if (errors.bankId) setErrors((e) => ({ ...e, bankId: false }));
+    setValue("bankId", bankId, { shouldValidate: true });
+    setValue("bankName", bank?.label || "");
+    setValue("accountNumber", bank?.accountNumber || "");
+    setValue("ifscCode", bank?.ifscCode || "");
   };
 
   const handleExpiry = (val: string) => {
@@ -349,29 +361,12 @@ const CardMaster: React.FC = () => {
     setField("expiryDate", v);
     if (v.length === 5) {
       const [m, y] = v.split("/");
-      setForm((p) => ({
-        ...p,
-        expiryMonth: parseInt(m),
-        expiryYear: 2000 + parseInt(y),
-      }));
+      setValue("expiryMonth", parseInt(m), { shouldValidate: true });
+      setValue("expiryYear", 2000 + parseInt(y), { shouldValidate: true });
     }
   };
 
-  const validate = () => {
-    const e: Record<string, boolean> = {};
-    if (!form.bankId) e.bankId = true;
-    if (!form.cardNumber || form.cardNumber.replace(/\D/g, "").length < 13)
-      e.cardNumber = true;
-    if (!form.cvv || form.cvv.length < 3) e.cvv = true;
-    if (!form.expiryDate || !/^\d{2}\/\d{2}$/.test(form.expiryDate))
-      e.expiryDate = true;
-    if (form.reminderEnabled && (!form.reminderDays || form.reminderDays < 1))
-      e.reminderDays = true;
-    setErrors(e);
-    return Object.keys(e).length === 0;
-  };
-
-  const toPayload = (f: FormState) => ({
+  const toPayload = (f: CardMasterForm) => ({
     company_name: f.companyName || null,
     bank_name: f.bankName || null,
     account_number: f.accountNumber || null,
@@ -388,22 +383,21 @@ const CardMaster: React.FC = () => {
     status: f.status,
   });
 
-  const handleSave = async () => {
-    if (!validate()) return;
+  const handleSave = async (values: CardMasterForm) => {
     try {
       if (editingId) {
-        await updateCard(editingId, toPayload(form));
+        await updateCard(editingId, toPayload(values));
         toast.success("Card updated!");
       } else {
-        await addCard(toPayload(form));
+        await addCard(toPayload(values));
         toast.success(
-          form.reminderEnabled && previewReminderDate
+          values.reminderEnabled && previewReminderDate
             ? `Card saved · Reminder set for ${formatDisplayDate(previewReminderDate)}`
             : "Card saved!",
         );
       }
       await queryClient.invalidateQueries({ queryKey: ["cards"] });
-      setForm(EMPTY);
+      reset(EMPTY);
       setEditingId(null);
       setShowCvc(false);
     } catch (err: any) {
@@ -414,7 +408,7 @@ const CardMaster: React.FC = () => {
   const handleEdit = (id: string) => {
     const r = cards.find((x) => x._id === id);
     if (!r) return;
-    setForm({
+    reset({
       companyName: r.companyName,
       bankId: r.bankId,
       bankName: r.bankName,
@@ -445,7 +439,7 @@ const CardMaster: React.FC = () => {
       setDeleteId(null);
       if (editingId === id) {
         setEditingId(null);
-        setForm(EMPTY);
+        reset(EMPTY);
       }
     } catch (err: any) {
       toast.error("Delete failed: " + err.message);
@@ -453,9 +447,8 @@ const CardMaster: React.FC = () => {
   };
 
   const handleReset = () => {
-    setForm(EMPTY);
+    reset(EMPTY);
     setEditingId(null);
-    setErrors({});
     setShowCvc(false);
   };
 
@@ -546,7 +539,7 @@ const CardMaster: React.FC = () => {
             )}
           </div>
 
-          <div className="p-5">
+          <form className="p-5" onSubmit={handleSubmit(handleSave)}>
             {/* Card Preview */}
             <div className="mb-5 rounded-2xl bg-gradient-to-br from-primary/80 via-primary to-primary/60 p-5 flex items-end justify-between shadow-lg min-h-[110px] relative overflow-hidden">
               <div className="absolute -top-6 -right-6 w-32 h-32 rounded-full bg-white/5" />
@@ -622,8 +615,7 @@ const CardMaster: React.FC = () => {
                   Company Name
                 </label>
                 <select
-                  value={form.companyName}
-                  onChange={(e) => setField("companyName", e.target.value)}
+                  {...register("companyName")}
                   className={inp}
                 >
                   <option value="">Select Company...</option>
@@ -650,8 +642,7 @@ const CardMaster: React.FC = () => {
                   />
                   <input
                     type="text"
-                    value={form.accountNumber}
-                    onChange={(e) => setField("accountNumber", e.target.value)}
+                    {...register("accountNumber")}
                     placeholder="Auto-filled on bank selection"
                     className={`${inp} pl-8 font-mono tracking-widest`}
                   />
@@ -696,8 +687,7 @@ const CardMaster: React.FC = () => {
                   Card Network
                 </label>
                 <select
-                  value={form.network}
-                  onChange={(e) => setField("network", e.target.value)}
+                  {...register("network")}
                   className={inp}
                 >
                   <option value="">Select Network...</option>
@@ -714,8 +704,7 @@ const CardMaster: React.FC = () => {
                   Card Type
                 </label>
                 <select
-                  value={form.cardType}
-                  onChange={(e) => setField("cardType", e.target.value)}
+                  {...register("cardType")}
                   className={inp}
                 >
                   <option value="">Select Type...</option>
@@ -733,8 +722,7 @@ const CardMaster: React.FC = () => {
                 </label>
                 <input
                   type="text"
-                  value={form.cardHolder}
-                  onChange={(e) => setField("cardHolder", e.target.value)}
+                  {...register("cardHolder")}
                   placeholder="As printed on card"
                   className={inp}
                 />
@@ -963,13 +951,14 @@ const CardMaster: React.FC = () => {
 
             <div className="flex items-center gap-2 mt-5 pt-4 border-t border-border">
               <button
-                onClick={handleSave}
+                type="submit"
                 className="flex items-center gap-1.5 px-4 py-2 rounded-lg font-heading text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
               >
                 <Plus size={15} />
                 {editingId ? "Update" : "Save"}
               </button>
               <button
+                type="button"
                 onClick={handleReset}
                 className="flex items-center gap-1.5 px-4 py-2 rounded-lg font-heading text-sm border border-border text-muted-foreground hover:bg-muted transition-all"
               >
@@ -977,7 +966,7 @@ const CardMaster: React.FC = () => {
                 Reset
               </button>
             </div>
-          </div>
+          </form>
         </div>
 
         {/* Table */}

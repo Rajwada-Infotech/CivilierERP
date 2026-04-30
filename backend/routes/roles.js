@@ -5,6 +5,11 @@ const authMiddleware = require("../middleware/auth");
 const { checkPermission } = require("../middleware/permissions");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
+const { validateBody } = require("../middleware/validateRequest");
+const {
+  roleMasterCreateSchema,
+  roleMasterUpdateSchema,
+} = require("../validation/roleMasterSchemas");
 
 const cleanStr = (v, len = 255) => {
   if (!v || String(v).trim() === "") return null;
@@ -76,10 +81,9 @@ router.post(
   "/",
   authMiddleware,
   checkPermission("Rights", "Menu", "CanAdd"),
+  validateBody(roleMasterCreateSchema),
   async (req, res) => {
     const { RName, RDesc } = req.body;
-    if (!RName?.trim())
-      return res.status(400).json({ error: "Role Name is required" });
 
     try {
       const userEmail = req.user?.name || String(req.user?.id || "system"); // ✅ email
@@ -120,6 +124,7 @@ router.put(
   "/:id",
   authMiddleware,
   checkPermission("Rights", "Menu", "CanEdit"),
+  validateBody(roleMasterUpdateSchema),
   async (req, res) => {
     const { id } = req.params;
     const { RName, RDesc } = req.body;
