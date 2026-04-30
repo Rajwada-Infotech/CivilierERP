@@ -9,28 +9,23 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
-  // Prevent Vite from trying to bundle Node.js / CJS-only packages.
-  // These belong in the backend only and must never reach the browser bundle.
   optimizeDeps: {
     exclude: ["bcryptjs", "express", "morgan", "dotenv", "bun", "vercel"],
+    include: ["jspdf", "jspdf-autotable", "fflate"],
   },
   server: {
     port: 8080,
     host: true,
     open: true,
     proxy: {
-      // ── SSE route: dedicated entry BEFORE the generic /api catch-all ──────
-      // Vite matches proxy keys longest-first, so this takes priority.
       "/api/user-activity/stream": {
         target: "http://localhost:5000",
         changeOrigin: true,
         ws: false,
-        timeout: 0, // disable proxy-level socket timeout
-        proxyTimeout: 0, // disable upstream response timeout
+        timeout: 0,
+        proxyTimeout: 0,
         configure: (proxy) => {
           proxy.on("error", (err, _req, res) => {
-            // ECONNRESET when the browser tab closes is completely normal for
-            // SSE — swallow it silently instead of spamming the console.
             if ((err as NodeJS.ErrnoException).code !== "ECONNRESET") {
               console.log("SSE proxy error", err);
             }
@@ -39,9 +34,7 @@ export default defineConfig({
                 res.writeHead(502);
                 res.end("SSE proxy error");
               }
-            } catch (_) {
-              // response already gone — ignore
-            }
+            } catch (_) {}
           });
           proxy.on("proxyReq", (proxyReq) => {
             proxyReq.setHeader("Connection", "keep-alive");
@@ -53,8 +46,6 @@ export default defineConfig({
           });
         },
       },
-
-      // ── All other API routes ───────────────────────────────────────────────
       "/api": {
         target: "http://localhost:5000",
         changeOrigin: true,

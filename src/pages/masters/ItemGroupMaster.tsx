@@ -123,6 +123,15 @@ const ItemGroupMaster: React.FC = () => {
         ]}
         initialData={mappedData}
         onDataEvent={handleDataEvent}
+        exportConfig={{
+          title: "Item Group Master",
+          filename: "item-group-master",
+          columns: [
+            { header: "Name",        accessor: "Name" },
+            { header: "Code",        accessor: "Code" },
+            { header: "Description", accessor: "Description" },
+          ],
+        }}
       />
     </>
   )

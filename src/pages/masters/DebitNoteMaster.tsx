@@ -6,6 +6,7 @@ import {
   ColumnDef,
   RecordWithId,
 } from "@/components/MasterPage";
+import type { ExportColumn } from "@/lib/export";
 import {
   FileWarning,
   Percent,
@@ -637,6 +638,19 @@ const DebitNoteMaster: React.FC = () => {
         onDataEvent={handleDataEvent}
         externalFormPatch={dnFormPatch}
         externalFormPatchKey={dnFormPatchKey}
+        exportConfig={{
+          title: "Debit Note Master",
+          filename: "debit-note-master",
+          columns: [
+            { header: "Company",  accessor: "company" },
+            { header: "Project",  accessor: "project" },
+            { header: "Supplier", accessor: "supplier" },
+            { header: "Doc No.",  accessor: "docNo" },
+            { header: "Bill/Doc", accessor: "billDiscountGroup" },
+            { header: "Discount", accessor: "discountDisplay" },
+            { header: "Status",   accessor: "status" },
+          ],
+        }}
       />
     </>
   );

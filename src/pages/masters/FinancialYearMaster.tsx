@@ -5,6 +5,7 @@ import {
   type DataChangeEvent,
   type RecordWithId,
 } from "@/components/MasterPage";
+import type { ExportColumn } from "@/lib/export";
 import { useQuery, useQueryClient, keepPreviousData } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Calendar as CalendarIcon } from "lucide-react";
@@ -171,6 +172,17 @@ const FinancialYearMaster: React.FC = () => {
         columnRenderers={columnRenderers}
         initialData={mappedData}
         onDataEvent={handleDataEvent}
+        exportConfig={{
+          title: "Financial Year Master",
+          filename: "financial-year-master",
+          columns: [
+            { header: "Financial Year", accessor: "year" },
+            { header: "Start Date",     accessor: "startDate" },
+            { header: "End Date",       accessor: "endDate" },
+            { header: "Status",         accessor: "status" },
+            { header: "Locked",         accessor: (r) => r.locked ? "Yes" : "No" },
+          ],
+        }}
       />
     </>
   );

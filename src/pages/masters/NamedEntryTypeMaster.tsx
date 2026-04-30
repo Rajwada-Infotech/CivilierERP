@@ -5,6 +5,7 @@ import {
   type DataChangeEvent,
   type FieldDef,
 } from "@/components/MasterPage";
+import type { ExportColumn } from "@/lib/export";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getEntryTypes,
@@ -432,6 +433,15 @@ const NamedEntryTypeMaster: React.FC = () => {
         onDataEvent={handleDataEvent}
         onFormChange={handleFormChange}
         onCustomSave={handleCustomSave}
+        exportConfig={{
+          title: "Named Entry Type Master",
+          filename: "named-entry-type-master",
+          columns: [            { header: "Project",    accessor: "projectName" },
+            { header: "Entry Type", accessor: "entryType" },
+            { header: "Prefix",     accessor: "prefix" },
+            { header: "Status",     accessor: "status" },
+          ],
+        }}
       />
     </>
   );

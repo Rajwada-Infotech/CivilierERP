@@ -1,6 +1,7 @@
 import React from 'react'
 import { Breadcrumbs } from '@/components/Breadcrumbs'
-import { MasterPage, type DataChangeEvent, type RecordWithId } from '@/components/MasterPage'
+import { MasterPage, type DataChangeEvent, type RecordWithId } from '@/components/MasterPage';
+import type { ExportColumn } from '@/lib/export'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { BadgeCheck, CalendarRange, FileBadge2, ShieldCheck } from "lucide-react"
@@ -139,6 +140,19 @@ const CardMaster = () => {
         columnRenderers={columnRenderers}
         initialData={mappedData}
         onDataEvent={handleDataEvent}
+        exportConfig={{
+          title: "Card Master",
+          filename: "card-master",
+          columns: [
+            { header: "Card No.",     accessor: "cardNumber" },
+            { header: "Holder",       accessor: "holderName" },
+            { header: "Card Type",    accessor: "cardType" },
+            { header: "Site/Project", accessor: "siteProject" },
+            { header: "Access Level", accessor: "accessLevel" },
+            { header: "Validity",     accessor: "validity" },
+            { header: "Status",       accessor: "status" },
+          ],
+        }}
       />
     </>
   )

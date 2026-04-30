@@ -6,6 +6,7 @@ import {
   type ColumnDef,
   type DataChangeEvent,
 } from "@/components/MasterPage";
+import type { ExportColumn } from "@/lib/export";
 import { Book, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -169,6 +170,15 @@ const BillingTermsMaster: React.FC = () => {
           columnRenderers={columnRenderers}
           initialData={billingTerms}
           onDataEvent={handleDataEvent}
+        exportConfig={{
+          title: "Billing Terms Master",
+          filename: "billing-terms-master",
+          columns: [
+            { header: "Term Name",        accessor: "Name" },
+            { header: "Calculation Type", accessor: "CalculationType" },
+            { header: "Status",           accessor: (r) => r.IsActive ? "Active" : "Inactive" },
+          ],
+        }}
         />
       )}
     </>

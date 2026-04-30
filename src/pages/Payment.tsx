@@ -6,6 +6,7 @@ import {
   type FieldDef,
   type RecordWithId,
 } from "@/components/MasterPage";
+import type { ExportColumn } from "@/lib/export";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getPayments,
@@ -386,6 +387,19 @@ const Payment: React.FC = () => {
         columnRenderers={columnRenderers}
         initialData={mappedData}
         onDataEvent={handleDataEvent}
+        exportConfig={{
+          title: "Payment",
+          filename: "payments",
+          columns: [            { header: "Payment Name", accessor: "paymentName" },
+            { header: "Project",      accessor: "project" },
+            { header: "Mode",         accessor: "mode" },
+            { header: "Date",         accessor: "date" },
+            { header: "Amount",       accessor: "amount" },
+            { header: "Bank",         accessor: "bankName" },
+            { header: "Doc Type",     accessor: "docType" },
+            { header: "Status",       accessor: "status" },
+          ],
+        }}
       />
 
       {/* Pagination */}
