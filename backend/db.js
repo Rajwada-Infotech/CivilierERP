@@ -1,5 +1,5 @@
 const logger = require("./logger");
-require("dotenv").config();
+require("./config/env").loadEnv();
 const sql = require("mssql");
 
 const config = {
