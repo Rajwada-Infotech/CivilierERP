@@ -12,6 +12,33 @@ const requireUserName = (req, res) => {
   return name;
 };
 
+// Helper to parse POItems safely
+const parseItems = (body) => {
+  const items = body.POItems;
+  if (!items) return '[]';
+  return typeof items === 'string' ? items : JSON.stringify(items);
+};
+
+// Helper to serialize items for response
+const serializeItems = (itemsStr) => {
+  if (!itemsStr) return [];
+  try {
+    return JSON.parse(itemsStr);
+  } catch {
+    return [];
+  }
+};
+
+// Helper to serialize discount for response
+const serializeDiscount = (discountStr) => {
+  if (!discountStr) return null;
+  try {
+    return JSON.parse(discountStr);
+  } catch {
+    return null;
+  }
+};
+
 // ── GET / ─────────────────────────────────────────────────────────────────────
 router.get("/", cache("purchase-orders", 300), async (req, res) => {
   try {
@@ -35,7 +62,7 @@ router.get("/", cache("purchase-orders", 300), async (req, res) => {
           po.ItemDescription, po.Quantity, po.Unit, po.Rate, po.TotalAmount,
           po.PaymentTerms, po.Remarks, po.Status,
           po.CreatedBy, po.CreatedAt, po.UpdatedAt, po.ApprovedBy, po.ApprovedAt,
-          po.DocTypeId, po.DocNo,
+          po.DocTypeId, po.DocNo, po.POItems, po.Discount,
           td.Prefix      AS DocTypePrefix,
           td.Description AS DocTypeDescription
         FROM dbo.PurchaseOrders po
@@ -47,9 +74,59 @@ router.get("/", cache("purchase-orders", 300), async (req, res) => {
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `);
 
-    res.json({ data: result.recordset, page, limit, total, totalPages: Math.ceil(total / limit) });
+    // Parse POItems and Discount JSON for each record
+    const data = result.recordset.map((po) => ({
+      ...po,
+      POItems: serializeItems(po.POItems),
+      Discount: serializeDiscount(po.Discount),
+    }));
+
+    res.json({ data, page, limit, total, totalPages: Math.ceil(total / limit) });
   } catch (err) {
     console.error("GET PurchaseOrders error:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /:id ──────────────────────────────────────────────────────────────────
+// GET /:id - used by the edit form
+router.get("/:id", async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request()
+      .input("PurchaseOrderID", sql.Int, parseInt(req.params.id, 10))
+      .query(`
+        SELECT
+          po.PurchaseOrderID, po.PurchaseOrderNo, po.PODate, po.ExpectedDeliveryDate,
+          po.SupplierID,  ah.LHeadName  AS SupplierName,
+          po.CompanyId,   co.name       AS CompanyName,
+          po.ProjectId,   pr.name       AS ProjectName,
+          po.ItemDescription, po.Quantity, po.Unit, po.Rate, po.TotalAmount,
+          po.PaymentTerms, po.Remarks, po.Status,
+          po.CreatedBy, po.CreatedAt, po.UpdatedAt, po.ApprovedBy, po.ApprovedAt,
+          po.DocTypeId, po.DocNo, po.POItems, po.Discount,
+          td.Prefix      AS DocTypePrefix,
+          td.Description AS DocTypeDescription
+        FROM dbo.PurchaseOrders po
+        LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId     = po.SupplierID
+        LEFT JOIN dbo.enterprise        co ON co.id          = po.CompanyId
+        LEFT JOIN dbo.enterprise        pr ON pr.id          = po.ProjectId
+        LEFT JOIN dbo.TypeOfDoc         td ON td.TypeOfDocId = po.DocTypeId
+        WHERE po.PurchaseOrderID = @PurchaseOrderID
+      `);
+
+    if (result.recordset.length === 0) {
+      return res.status(404).json({ error: "Purchase order not found" });
+    }
+
+    const po = result.recordset[0];
+    res.json({
+      ...po,
+      POItems: serializeItems(po.POItems),
+      Discount: serializeDiscount(po.Discount),
+    });
+  } catch (err) {
+    console.error("GET PurchaseOrder by id error:", err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -66,7 +143,15 @@ router.post("/", async (req, res) => {
     ItemDescription, Quantity, Unit, Rate, TotalAmount,
     PaymentTerms, Status, Remarks,
     DocTypeId, finYear,
+    POItems,
+    Discount,
   } = req.body;
+
+  // Parse POItems JSON
+  const poItemsJson = parseItems({ POItems });
+
+  // Parse Discount JSON
+  const discountJson = Discount ? (typeof Discount === 'string' ? Discount : JSON.stringify(Discount)) : null;
 
   try {
     const userEmail = requireUserName(req, res);
@@ -74,7 +159,7 @@ router.post("/", async (req, res) => {
 
     const pool = getPool();
 
-    // ── 1. Generate + lock doc number ─────────────────────────────────────────
+    // ── 1. Generate + lock doc number ──────────────────��──────────────────────
     let finalDocNo = poNoFromClient || null;
 
     if (DocTypeId) {
@@ -93,7 +178,7 @@ router.post("/", async (req, res) => {
       .input("ExpectedDeliveryDate", sql.Date,           ExpectedDeliveryDate || null)
       .input("SupplierID",           sql.Int,            SupplierID ? parseInt(SupplierID, 10) : null)
       .input("CompanyId",            sql.Int,            CompanyId  ? parseInt(CompanyId,  10) : null)
-      .input("ProjectId",            sql.Int,            ProjectId  ? parseInt(ProjectId,  10) : null)
+      .input("ProjectId",            sql.Int,            ProjectId  ? parseInt(ProjectId, 10) : null)
       .input("ItemDescription",      sql.NVarChar(510),  ItemDescription || null)
       .input("Quantity",             sql.Decimal(18, 2), parseFloat(Quantity)    || 0)
       .input("Unit",                 sql.NVarChar(50),   Unit || null)
@@ -106,19 +191,21 @@ router.post("/", async (req, res) => {
       .input("DocNo",                sql.NVarChar(100),  finalDocNo || null)
       .input("CreatedBy",            sql.NVarChar(100),  userEmail)
       .input("CreatedAt",            sql.DateTime2,      new Date())
+      .input("POItems",             sql.NVarChar(sql.MAX), poItemsJson)
+      .input("Discount",            sql.NVarChar(sql.MAX), discountJson)
       .query(`
         INSERT INTO dbo.PurchaseOrders (
           PurchaseOrderNo, PODate, ExpectedDeliveryDate,
           SupplierID, CompanyId, ProjectId,
           ItemDescription, Quantity, Unit, Rate, TotalAmount,
-          PaymentTerms, Status, Remarks, DocTypeId, DocNo, CreatedBy, CreatedAt
+          PaymentTerms, Status, Remarks, DocTypeId, DocNo, CreatedBy, CreatedAt, POItems, Discount
         )
         OUTPUT INSERTED.PurchaseOrderID
         VALUES (
           @PurchaseOrderNo, @PODate, @ExpectedDeliveryDate,
           @SupplierID, @CompanyId, @ProjectId,
           @ItemDescription, @Quantity, @Unit, @Rate, @TotalAmount,
-          @PaymentTerms, @Status, @Remarks, @DocTypeId, @DocNo, @CreatedBy, @CreatedAt
+          @PaymentTerms, @Status, @Remarks, @DocTypeId, @DocNo, @CreatedBy, @CreatedAt, @POItems, @Discount
         )
       `);
 
@@ -149,7 +236,15 @@ router.put("/:id", async (req, res) => {
     SupplierID, CompanyId, ProjectId,
     ItemDescription, Quantity, Unit, Rate, TotalAmount,
     PaymentTerms, Status, Remarks, DocTypeId, DocNo,
+    POItems,
+    Discount,
   } = req.body;
+
+  // Parse POItems JSON for update
+  const poItemsJson = parseItems({ POItems });
+  
+  // Parse Discount JSON for update
+  const discountJson = Discount ? (typeof Discount === 'string' ? Discount : JSON.stringify(Discount)) : null;
 
   try {
     const userEmail = requireUserName(req, res);
@@ -165,7 +260,7 @@ router.put("/:id", async (req, res) => {
       .input("ExpectedDeliveryDate", sql.Date,           ExpectedDeliveryDate || null)
       .input("SupplierID",           sql.Int,            SupplierID ? parseInt(SupplierID, 10) : null)
       .input("CompanyId",            sql.Int,            CompanyId  ? parseInt(CompanyId,  10) : null)
-      .input("ProjectId",            sql.Int,            ProjectId  ? parseInt(ProjectId,  10) : null)
+      .input("ProjectId",            sql.Int,            ProjectId  ? parseInt(ProjectId, 10) : null)
       .input("ItemDescription",      sql.NVarChar(510),  ItemDescription || null)
       .input("Quantity",             sql.Decimal(18, 2), parseFloat(Quantity)    || 0)
       .input("Unit",                 sql.NVarChar(50),   Unit || null)
@@ -178,6 +273,8 @@ router.put("/:id", async (req, res) => {
       .input("DocNo",                sql.NVarChar(100),  DocNo || null)
       .input("UpdatedBy",            sql.NVarChar(100),  userEmail)
       .input("UpdatedAt",            sql.DateTime2,      new Date())
+      .input("POItems",             sql.NVarChar(sql.MAX), poItemsJson)
+      .input("Discount",            sql.NVarChar(sql.MAX), discountJson)
       .query(`
         UPDATE dbo.PurchaseOrders SET
           PurchaseOrderNo = @PurchaseOrderNo, PODate = @PODate,
@@ -187,7 +284,8 @@ router.put("/:id", async (req, res) => {
           Rate = @Rate, TotalAmount = @TotalAmount, PaymentTerms = @PaymentTerms,
           Status = @Status, Remarks = @Remarks,
           DocTypeId = @DocTypeId, DocNo = @DocNo,
-          UpdatedBy = @UpdatedBy, UpdatedAt = @UpdatedAt
+          UpdatedBy = @UpdatedBy, UpdatedAt = @UpdatedAt,
+          POItems = @POItems, Discount = @Discount
         WHERE PurchaseOrderID = @PurchaseOrderID
       `);
 
@@ -261,4 +359,3 @@ router.put("/:id/reject", async (req, res) => {
 });
 
 module.exports = router;
-

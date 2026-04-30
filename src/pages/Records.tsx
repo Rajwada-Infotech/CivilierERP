@@ -1,6 +1,10 @@
-import React, { useRef, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { useRecords, RecordFileAttachment } from "@/hooks/useRecords";
+import {
+  useRecords,
+  type RecordFileAttachment,
+  type UnifiedRecord,
+} from "@/hooks/useRecords";
 import { format } from "date-fns";
 import {
   Download,
@@ -15,37 +19,41 @@ import {
   CreditCard,
 } from "lucide-react";
 import { formatINR } from "@/utils/formatCurrency";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function fileIcon(type?: string) {
   if (!type) return <File size={14} className="text-muted-foreground" />;
-  if (type.startsWith("image/")) return <FileImage size={14} className="text-blue-400" />;
-  if (type.includes("pdf")) return <FileText size={14} className="text-red-400" />;
+  if (type.startsWith("image/"))
+    return <FileImage size={14} className="text-blue-400" />;
+  if (type.includes("pdf"))
+    return <FileText size={14} className="text-red-400" />;
   if (type.includes("sheet") || type.includes("excel") || type.includes("csv"))
     return <FileSpreadsheet size={14} className="text-green-500" />;
   return <FileText size={14} className="text-muted-foreground" />;
 }
 
-function entryBadge(type: string) {
-  if (type === "Payment")
-    return (
-      <span className="px-2 py-0.5 rounded-full text-xs font-heading bg-blue-500/15 text-blue-500">
-        Payment
-      </span>
-    );
-  if (type === "Expense")
-    return (
-      <span className="px-2 py-0.5 rounded-full text-xs font-heading bg-destructive/15 text-destructive">
-        Expense
-      </span>
-    );
+function EntryBadge({ type }: { type: string }) {
+  const styles: Record<string, string> = {
+    Payment: "bg-blue-500/15 text-blue-500",
+    Expense: "bg-destructive/15 text-destructive",
+    Receipt: "bg-green-500/15 text-green-500",
+  };
   return (
-    <span className="px-2 py-0.5 rounded-full text-xs font-heading bg-green-500/15 text-green-500">
-      Receipt
+    <span
+      className={`px-2 py-0.5 rounded-full text-xs font-heading ${styles[type] ?? styles.Receipt}`}
+    >
+      {type}
     </span>
   );
 }
 
-function UploadCell({ id, attachment, onAttach }: {
+function UploadCell({
+  id,
+  attachment,
+  onAttach,
+}: {
   id: string;
   attachment?: RecordFileAttachment;
   onAttach: (id: string, file: RecordFileAttachment) => void;
@@ -69,7 +77,6 @@ function UploadCell({ id, attachment, onAttach }: {
       setLoading(false);
     };
     reader.readAsDataURL(file);
-    // reset so same file can be re-uploaded
     e.target.value = "";
   };
 
@@ -77,7 +84,10 @@ function UploadCell({ id, attachment, onAttach }: {
     return (
       <div className="flex items-center gap-1.5 min-w-0">
         {fileIcon(attachment.type)}
-        <span className="text-xs text-foreground truncate max-w-[100px]" title={attachment.name}>
+        <span
+          className="text-xs text-foreground truncate max-w-[100px]"
+          title={attachment.name}
+        >
           {attachment.name}
         </span>
         <button
@@ -87,7 +97,12 @@ function UploadCell({ id, attachment, onAttach }: {
         >
           <Paperclip size={12} />
         </button>
-        <input ref={inputRef} type="file" className="hidden" onChange={handleFile} />
+        <input
+          ref={inputRef}
+          type="file"
+          className="hidden"
+          onChange={handleFile}
+        />
       </div>
     );
   }
@@ -102,7 +117,12 @@ function UploadCell({ id, attachment, onAttach }: {
         <Paperclip size={12} />
         {loading ? "Uploading…" : "Attach"}
       </button>
-      <input ref={inputRef} type="file" className="hidden" onChange={handleFile} />
+      <input
+        ref={inputRef}
+        type="file"
+        className="hidden"
+        onChange={handleFile}
+      />
     </>
   );
 }
@@ -119,7 +139,6 @@ function DownloadButton({ attachment }: { attachment?: RecordFileAttachment }) {
       </button>
     );
   }
-
   const handleDownload = () => {
     const link = document.createElement("a");
     link.href = attachment.dataUrl;
@@ -128,7 +147,6 @@ function DownloadButton({ attachment }: { attachment?: RecordFileAttachment }) {
     link.click();
     document.body.removeChild(link);
   };
-
   return (
     <button
       onClick={handleDownload}
@@ -140,8 +158,115 @@ function DownloadButton({ attachment }: { attachment?: RecordFileAttachment }) {
   );
 }
 
+// ─── Columns ─────────────────────────────────────────────────────────────────
+
+function buildColumns(
+  attachFile: (id: string, file: RecordFileAttachment) => void,
+): ColumnDef<UnifiedRecord, unknown>[] {
+  return [
+    {
+      accessorKey: "docNumber",
+      header: "Doc No.",
+      cell: ({ getValue }) => (
+        <span className="text-primary font-heading text-xs whitespace-nowrap">
+          {getValue() as string}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "date",
+      header: "Date",
+      cell: ({ getValue }) => {
+        const v = getValue() as string;
+        return (
+          <span className="whitespace-nowrap">
+            {v ? format(new Date(v), "dd/MM/yyyy") : "—"}
+          </span>
+        );
+      },
+    },
+    {
+      accessorKey: "entryType",
+      header: "Entry Type",
+      cell: ({ getValue }) => <EntryBadge type={getValue() as string} />,
+    },
+    {
+      accessorKey: "project",
+      header: "Project",
+      cell: ({ getValue }) => (
+        <span className="font-medium whitespace-nowrap max-w-[140px] truncate block">
+          {getValue() as string}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "amount",
+      header: "Amount (₹)",
+      cell: ({ getValue }) => (
+        <span className="font-heading font-medium whitespace-nowrap">
+          {formatINR(getValue() as number)}
+        </span>
+      ),
+    },
+    {
+      id: "modeOrDoc",
+      header: "Mode / Doc Type",
+      accessorFn: (row) => row.mode || row.docType || "—",
+      cell: ({ getValue }) => (
+        <span className="text-muted-foreground whitespace-nowrap">
+          {getValue() as string}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "status",
+      header: "Status",
+      cell: ({ getValue }) => {
+        const v = getValue() as string;
+        const style =
+          v === "approved" || v === "reconciled"
+            ? "bg-green-500/15 text-green-500"
+            : v === "cleared"
+              ? "bg-blue-500/15 text-blue-500"
+              : "bg-yellow-500/15 text-yellow-600";
+        return (
+          <span
+            className={`px-2 py-0.5 rounded-full text-xs font-heading ${style}`}
+          >
+            {v.charAt(0).toUpperCase() + v.slice(1)}
+          </span>
+        );
+      },
+    },
+    {
+      id: "attachment",
+      header: "Attachment",
+      enableSorting: false,
+      cell: ({ row }) => (
+        <UploadCell
+          id={row.original.id}
+          attachment={row.original.attachment}
+          onAttach={attachFile}
+        />
+      ),
+    },
+    {
+      id: "download",
+      header: "Download",
+      enableSorting: false,
+      cell: ({ row }) => (
+        <DownloadButton attachment={row.original.attachment} />
+      ),
+    },
+  ];
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
+
 export default function Records() {
   const { records, loading, error, attachFile, refreshRecords } = useRecords();
+
+  const columns = useMemo(() => buildColumns(attachFile), [attachFile]);
 
   const totalPayments = records.filter((r) => r.entryType === "Payment").length;
   const totalExpenses = records.filter((r) => r.entryType === "Expense").length;
@@ -177,8 +302,11 @@ export default function Records() {
   return (
     <>
       <Breadcrumbs items={["Record Management", "Records"]} />
+
       <div className="flex items-center justify-between mb-4">
-        <h1 className="text-xl font-heading font-bold text-foreground">Records</h1>
+        <h1 className="text-xl font-heading font-bold text-foreground">
+          Records
+        </h1>
         <button
           onClick={refreshRecords}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
@@ -197,11 +325,16 @@ export default function Records() {
             className="rounded-xl bg-card border border-border p-4 flex items-center gap-4"
             style={{ borderLeftWidth: 3, borderLeftColor: s.color }}
           >
-            <div className="p-2 rounded-lg" style={{ background: `${s.color}20` }}>
+            <div
+              className="p-2 rounded-lg"
+              style={{ background: `${s.color}20` }}
+            >
               <s.icon size={20} style={{ color: s.color }} />
             </div>
             <div className="min-w-0">
-              <p className="text-xs text-muted-foreground font-heading">{s.label}</p>
+              <p className="text-xs text-muted-foreground font-heading">
+                {s.label}
+              </p>
               <p className="text-base sm:text-lg font-heading font-bold text-foreground truncate">
                 {s.value}
               </p>
@@ -210,141 +343,22 @@ export default function Records() {
         ))}
       </div>
 
+      {error && (
+        <div className="p-6 text-center text-destructive text-sm bg-destructive/5 border border-destructive/20 rounded-lg mb-4">
+          Failed to load records: {error}
+        </div>
+      )}
+
       {/* Records Table */}
       <div className="rounded-xl bg-card border border-border overflow-hidden">
-        <div className="p-4 border-b border-border flex items-center justify-between">
-          <h2 className="font-heading font-semibold text-foreground text-sm">All Records</h2>
-          <span className="text-xs text-muted-foreground">{records.length} entries</span>
-        </div>
-
-        {loading ? (
-          <div className="p-10 text-center text-muted-foreground text-sm flex items-center justify-center gap-2">
-            <RefreshCw size={14} className="animate-spin" />
-            Loading records…
-          </div>
-        ) : error ? (
-          <div className="p-6 text-center text-destructive text-sm bg-destructive/5 border border-destructive/20 rounded-lg m-4">
-            Failed to load records: {error}
-          </div>
-        ) : records.length === 0 ? (
-          <div className="p-10 text-center text-muted-foreground text-sm">
-            No records found. Add payments or expenses first, then click Refresh.
-          </div>
-        ) : (
-          <>
-            {/* Desktop table */}
-            <div className="hidden sm:block overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border">
-                    {[
-                      "Doc No.",
-                      "Date",
-                      "Entry Type",
-                      "Project",
-                      "Amount (₹)",
-                      "Mode / Doc Type",
-                      "Status",
-                      "Attachment",
-                      "Download",
-                    ].map((h) => (
-                      <th
-                        key={h}
-                        className="px-4 py-3 text-left text-xs font-heading text-muted-foreground font-semibold whitespace-nowrap"
-                      >
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {records.map((record, i) => (
-                    <tr
-                      key={record.id}
-                      className={`border-b border-border transition-colors hover:bg-muted/50 ${
-                        i % 2 === 1 ? "bg-muted/20" : ""
-                      }`}
-                    >
-                      <td className="px-4 py-3 text-primary font-heading text-xs whitespace-nowrap">
-                        {record.docNumber}
-                      </td>
-                      <td className="px-4 py-3 text-foreground whitespace-nowrap">
-                        {record.date
-                          ? format(new Date(record.date), "dd/MM/yyyy")
-                          : "—"}
-                      </td>
-                      <td className="px-4 py-3">{entryBadge(record.entryType)}</td>
-                      <td className="px-4 py-3 text-foreground font-medium whitespace-nowrap max-w-[140px] truncate">
-                        {record.project}
-                      </td>
-                      <td className="px-4 py-3 text-foreground font-heading font-medium whitespace-nowrap">
-                        {formatINR(record.amount)}
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
-                        {record.mode || record.docType || "—"}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span
-                          className={`px-2 py-0.5 rounded-full text-xs font-heading ${
-                            record.status === "approved" || record.status === "reconciled"
-                              ? "bg-green-500/15 text-green-500"
-                              : record.status === "cleared"
-                              ? "bg-blue-500/15 text-blue-500"
-                              : "bg-yellow-500/15 text-yellow-600"
-                          }`}
-                        >
-                          {record.status.charAt(0).toUpperCase() + record.status.slice(1)}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <UploadCell
-                          id={record.id}
-                          attachment={record.attachment}
-                          onAttach={attachFile}
-                        />
-                      </td>
-                      <td className="px-4 py-3">
-                        <DownloadButton attachment={record.attachment} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {/* Mobile card list */}
-            <div className="sm:hidden divide-y divide-border">
-              {records.map((record) => (
-                <div key={record.id} className="p-4 space-y-2">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="text-xs text-primary font-heading">{record.docNumber}</p>
-                      <p className="text-sm font-medium text-foreground truncate">{record.project}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {record.date ? format(new Date(record.date), "dd/MM/yyyy") : "—"}
-                        {(record.mode || record.docType) ? ` · ${record.mode || record.docType}` : ""}
-                      </p>
-                    </div>
-                    <div className="flex flex-col items-end gap-1 shrink-0">
-                      {entryBadge(record.entryType)}
-                      <p className="text-sm font-heading font-bold text-foreground">
-                        {formatINR(record.amount)}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center justify-between gap-2">
-                    <UploadCell
-                      id={record.id}
-                      attachment={record.attachment}
-                      onAttach={attachFile}
-                    />
-                    <DownloadButton attachment={record.attachment} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </>
-        )}
+        <DataTable
+          data={records}
+          columns={columns}
+          loading={loading}
+          paginated={false}
+          searchPlaceholder="Search records…"
+          emptyMessage="No records found. Add payments or expenses first, then click Refresh."
+        />
       </div>
     </>
   );

@@ -1,8 +1,6 @@
 import React, { useState, useMemo } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { zodResolver } from "@hookform/resolvers/zod";
-import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import {
   CreditCard,
@@ -13,7 +11,6 @@ import {
   Trash2,
   RotateCcw,
   X,
-  Search,
   Landmark,
   Hash,
   ShieldAlert,
@@ -35,10 +32,7 @@ import {
   type BankOption,
   type CompanyOption,
 } from "@/api/cardMasterApi";
-import {
-  cardMasterSchema,
-  type CardMasterForm,
-} from "@/schemas/cardMasterSchema";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface CardRecord {
@@ -53,7 +47,7 @@ interface CardRecord {
   cardHolder: string;
   cardNumber: string;
   cvv: string;
-  expiryDate: string; // MM/YY display format
+  expiryDate: string;
   expiryMonth: number;
   expiryYear: number;
   reminderEnabled: boolean;
@@ -62,7 +56,6 @@ interface CardRecord {
   reminderDismissed: boolean;
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 const CARD_NETWORKS = ["Visa", "Mastercard", "RuPay", "Amex", "Diners Club"];
 const CARD_TYPES = ["Debit", "Credit", "Prepaid", "Corporate"];
 const DEFAULT_REMINDER_DAYS = 30;
@@ -70,18 +63,15 @@ const DEFAULT_REMINDER_DAYS = 30;
 function parseExpiryToDate(expiry: string): Date | null {
   if (!/^\d{2}\/\d{2}$/.test(expiry)) return null;
   const [m, y] = expiry.split("/");
-  const month = parseInt(m) - 1;
   const year = 2000 + parseInt(y);
-  return new Date(year, month + 1, 0);
+  return new Date(year, parseInt(m) - 1 + 1, 0);
 }
-
 function calculateReminderDate(expiry: string, days: number): string {
   const d = parseExpiryToDate(expiry);
   if (!d) return "";
   d.setDate(d.getDate() - days);
   return d.toISOString().split("T")[0];
 }
-
 function formatDisplayDate(iso: string): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("en-IN", {
@@ -90,18 +80,14 @@ function formatDisplayDate(iso: string): string {
     year: "numeric",
   });
 }
-
 function daysFromNow(iso: string): number {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   return Math.round((new Date(iso).getTime() - today.getTime()) / 86400000);
 }
-
 function masked(num: string) {
-  const last4 = num.replace(/\D/g, "").slice(-4).padStart(4, "X");
-  return `•••• •••• •••• ${last4}`;
+  return `•••• •••• •••• ${num.replace(/\D/g, "").slice(-4).padStart(4, "X")}`;
 }
-
 function formatted(num: string) {
   return num
     .replace(/\D/g, "")
@@ -113,7 +99,8 @@ function formatted(num: string) {
 const inp =
   "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground placeholder:text-muted-foreground/50";
 
-const EMPTY: CardMasterForm = {
+type FormState = Omit<CardRecord, "_id" | "reminderDismissed">;
+const EMPTY: FormState = {
   companyName: "",
   bankId: "",
   bankName: "",
@@ -142,7 +129,6 @@ const ReminderBanner: React.FC<{
     c.reminderEnabled && c.expiryDate
       ? calculateReminderDate(c.expiryDate, c.reminderDays)
       : "";
-
   const due = cards.filter(
     (c) =>
       !c.reminderDismissed &&
@@ -158,9 +144,7 @@ const ReminderBanner: React.FC<{
       daysFromNow(reminderDate(c)) > 0 &&
       daysFromNow(reminderDate(c)) <= 7,
   );
-
   if (!due.length && !upcoming.length) return null;
-
   return (
     <div className="space-y-3">
       {due.map((card) => {
@@ -258,6 +242,167 @@ const ReminderBanner: React.FC<{
   );
 };
 
+// ─── Column definitions ───────────────────────────────────────────────────────
+function buildColumns(
+  editingId: string | null,
+  revealedRows: Record<string, boolean>,
+  onToggleReveal: (id: string) => void,
+  onEdit: (id: string) => void,
+  onDelete: (id: string) => void,
+): ColumnDef<CardRecord, unknown>[] {
+  return [
+    {
+      accessorKey: "bankName",
+      header: "Bank",
+      cell: ({ getValue }) => (
+        <span className="font-medium text-foreground">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "accountNumber",
+      header: "Account No.",
+      enableSorting: false,
+      cell: ({ getValue }) => (
+        <span className="font-mono text-foreground">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
+    },
+    {
+      id: "cardNumber",
+      header: "Card Number",
+      enableSorting: false,
+      cell: ({ row }) => {
+        const { _id, cardNumber } = row.original;
+        return (
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-foreground tracking-widest">
+              {revealedRows[_id] ? formatted(cardNumber) : masked(cardNumber)}
+            </span>
+            <button
+              onClick={() => onToggleReveal(_id)}
+              className="p-1 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+            >
+              {revealedRows[_id] ? <EyeOff size={13} /> : <Eye size={13} />}
+            </button>
+          </div>
+        );
+      },
+    },
+    {
+      accessorKey: "network",
+      header: "Network",
+      cell: ({ getValue }) => (
+        <span className="text-foreground">{(getValue() as string) || "—"}</span>
+      ),
+    },
+    {
+      accessorKey: "cardType",
+      header: "Type",
+      cell: ({ getValue }) => (
+        <span className="text-foreground">{(getValue() as string) || "—"}</span>
+      ),
+    },
+    {
+      accessorKey: "expiryDate",
+      header: "Expiry",
+      cell: ({ getValue }) => (
+        <span className="font-mono text-foreground">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
+    },
+    {
+      id: "reminder",
+      header: "Reminder",
+      enableSorting: false,
+      cell: ({ row }) => {
+        const c = row.original;
+        const rd =
+          c.reminderEnabled && c.expiryDate
+            ? calculateReminderDate(c.expiryDate, c.reminderDays)
+            : "";
+        const dfl = rd ? daysFromNow(rd) : null;
+        const isOverdue = dfl !== null && dfl <= 0 && !c.reminderDismissed;
+        const isUpcoming =
+          dfl !== null && dfl > 0 && dfl <= 7 && !c.reminderDismissed;
+        if (!c.reminderEnabled)
+          return (
+            <span className="text-[11px] text-muted-foreground font-heading">
+              Off
+            </span>
+          );
+        if (c.reminderDismissed)
+          return (
+            <span className="text-[11px] text-muted-foreground font-heading">
+              Dismissed
+            </span>
+          );
+        if (isOverdue)
+          return (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-heading border bg-destructive/10 text-destructive border-destructive/20">
+              <BellRing size={10} className="animate-pulse" /> Overdue{" "}
+              {Math.abs(dfl!)}d
+            </span>
+          );
+        if (isUpcoming)
+          return (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-heading border bg-amber-500/10 text-amber-600 border-amber-500/20">
+              <Bell size={10} /> In {dfl}d
+            </span>
+          );
+        if (rd)
+          return (
+            <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground font-heading">
+              <Bell size={10} /> {formatDisplayDate(rd)}
+            </span>
+          );
+        return null;
+      },
+    },
+    {
+      accessorKey: "status",
+      header: "Status",
+      cell: ({ getValue }) => {
+        const active = Boolean(getValue());
+        return (
+          <span
+            className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${active ? "bg-primary/10 text-primary border-primary/20" : "bg-destructive/10 text-destructive border-destructive/20"}`}
+          >
+            <span
+              className={`w-1.5 h-1.5 rounded-full mr-1.5 ${active ? "bg-primary" : "bg-destructive"}`}
+            />
+            {active ? "Active" : "Inactive"}
+          </span>
+        );
+      },
+    },
+    {
+      id: "actions",
+      header: "Actions",
+      enableSorting: false,
+      cell: ({ row }) => (
+        <div className="flex items-center justify-end gap-1">
+          <button
+            onClick={() => onEdit(row.original._id)}
+            className="p-1.5 rounded-lg text-primary hover:bg-primary/10 transition-colors"
+          >
+            <Edit2 size={13} />
+          </button>
+          <button
+            onClick={() => onDelete(row.original._id)}
+            className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"
+          >
+            <Trash2 size={13} />
+          </button>
+        </div>
+      ),
+    },
+  ];
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 const CardMaster: React.FC = () => {
   const queryClient = useQueryClient();
@@ -283,7 +428,6 @@ const CardMaster: React.FC = () => {
   const cards: CardRecord[] = dbItems.map((item) => {
     const mm = String(item.expiry_month ?? 0).padStart(2, "0");
     const yy = String(item.expiry_year ?? 0).slice(-2);
-    // Try to match back to a bank record by name so bankId is consistent
     const matchedBank = dbBanks.find((b) => b.label === item.bank_name);
     return {
       _id: String(item.id),
@@ -307,20 +451,9 @@ const CardMaster: React.FC = () => {
     };
   });
 
-  const {
-    register,
-    handleSubmit,
-    reset,
-    setValue,
-    watch,
-    formState: { errors },
-  } = useForm<CardMasterForm>({
-    resolver: zodResolver(cardMasterSchema),
-    defaultValues: EMPTY,
-  });
-  const form = watch();
+  const [form, setForm] = useState<FormState>(EMPTY);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
+  const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [revealedRows, setRevealedRows] = useState<Record<string, boolean>>({});
   const [showCvc, setShowCvc] = useState(false);
@@ -339,20 +472,21 @@ const CardMaster: React.FC = () => {
     return calculateReminderDate(form.expiryDate, form.reminderDays);
   }, [form.reminderEnabled, form.reminderDays, form.expiryDate]);
 
-  const setField = <K extends keyof CardMasterForm>(
-    k: K,
-    v: CardMasterForm[K],
-  ) => {
-    setValue(k, v, { shouldValidate: Boolean(errors[k]) });
+  const setField = (k: keyof FormState, v: unknown) => {
+    setForm((p) => ({ ...p, [k]: v }));
+    if (errors[k as string]) setErrors((p) => ({ ...p, [k as string]: false }));
   };
 
-  // ── Bank dropdown handler — auto-fills account number & IFSC ──────────────
   const handleBankChange = (bankId: string) => {
     const bank = dbBanks.find((b) => String(b.id) === bankId);
-    setValue("bankId", bankId, { shouldValidate: true });
-    setValue("bankName", bank?.label || "");
-    setValue("accountNumber", bank?.accountNumber || "");
-    setValue("ifscCode", bank?.ifscCode || "");
+    setForm((p) => ({
+      ...p,
+      bankId,
+      bankName: bank?.label || "",
+      accountNumber: bank?.accountNumber || "",
+      ifscCode: bank?.ifscCode || "",
+    }));
+    if (errors.bankId) setErrors((e) => ({ ...e, bankId: false }));
   };
 
   const handleExpiry = (val: string) => {
@@ -361,12 +495,29 @@ const CardMaster: React.FC = () => {
     setField("expiryDate", v);
     if (v.length === 5) {
       const [m, y] = v.split("/");
-      setValue("expiryMonth", parseInt(m), { shouldValidate: true });
-      setValue("expiryYear", 2000 + parseInt(y), { shouldValidate: true });
+      setForm((p) => ({
+        ...p,
+        expiryMonth: parseInt(m),
+        expiryYear: 2000 + parseInt(y),
+      }));
     }
   };
 
-  const toPayload = (f: CardMasterForm) => ({
+  const validate = () => {
+    const e: Record<string, boolean> = {};
+    if (!form.bankId) e.bankId = true;
+    if (!form.cardNumber || form.cardNumber.replace(/\D/g, "").length < 13)
+      e.cardNumber = true;
+    if (!form.cvv || form.cvv.length < 3) e.cvv = true;
+    if (!form.expiryDate || !/^\d{2}\/\d{2}$/.test(form.expiryDate))
+      e.expiryDate = true;
+    if (form.reminderEnabled && (!form.reminderDays || form.reminderDays < 1))
+      e.reminderDays = true;
+    setErrors(e);
+    return Object.keys(e).length === 0;
+  };
+
+  const toPayload = (f: FormState) => ({
     company_name: f.companyName || null,
     bank_name: f.bankName || null,
     account_number: f.accountNumber || null,
@@ -383,21 +534,22 @@ const CardMaster: React.FC = () => {
     status: f.status,
   });
 
-  const handleSave = async (values: CardMasterForm) => {
+  const handleSave = async () => {
+    if (!validate()) return;
     try {
       if (editingId) {
-        await updateCard(editingId, toPayload(values));
+        await updateCard(editingId, toPayload(form));
         toast.success("Card updated!");
       } else {
-        await addCard(toPayload(values));
+        await addCard(toPayload(form));
         toast.success(
-          values.reminderEnabled && previewReminderDate
+          form.reminderEnabled && previewReminderDate
             ? `Card saved · Reminder set for ${formatDisplayDate(previewReminderDate)}`
             : "Card saved!",
         );
       }
       await queryClient.invalidateQueries({ queryKey: ["cards"] });
-      reset(EMPTY);
+      setForm(EMPTY);
       setEditingId(null);
       setShowCvc(false);
     } catch (err: any) {
@@ -408,7 +560,7 @@ const CardMaster: React.FC = () => {
   const handleEdit = (id: string) => {
     const r = cards.find((x) => x._id === id);
     if (!r) return;
-    reset({
+    setForm({
       companyName: r.companyName,
       bankId: r.bankId,
       bankName: r.bankName,
@@ -439,27 +591,12 @@ const CardMaster: React.FC = () => {
       setDeleteId(null);
       if (editingId === id) {
         setEditingId(null);
-        reset(EMPTY);
+        setForm(EMPTY);
       }
     } catch (err: any) {
       toast.error("Delete failed: " + err.message);
     }
   };
-
-  const handleReset = () => {
-    reset(EMPTY);
-    setEditingId(null);
-    setShowCvc(false);
-  };
-
-  const filtered = cardsWithDismiss.filter(
-    (r) =>
-      !search ||
-      r.bankName.toLowerCase().includes(search.toLowerCase()) ||
-      r.cardHolder.toLowerCase().includes(search.toLowerCase()) ||
-      r.network.toLowerCase().includes(search.toLowerCase()) ||
-      r.cardNumber.slice(-4).includes(search),
-  );
 
   const overdueCount = cardsWithDismiss.filter(
     (c) =>
@@ -478,13 +615,25 @@ const CardMaster: React.FC = () => {
   ).length;
   const hasAlerts = overdueCount > 0 || upcomingCount > 0;
 
+  const columns = useMemo(
+    () =>
+      buildColumns(
+        editingId,
+        revealedRows,
+        (id) => setRevealedRows((p) => ({ ...p, [id]: !p[id] })),
+        handleEdit,
+        setDeleteId,
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [editingId, revealedRows],
+  );
+
   if (loadingCards || loadingBanks)
     return <div className="p-6 text-muted-foreground">Loading...</div>;
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance Module", "Card Master"]} />
-
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-heading font-bold text-foreground">
           Card Master
@@ -515,7 +664,12 @@ const CardMaster: React.FC = () => {
           <ReminderBanner
             cards={cardsWithDismiss}
             onDismiss={(id) => setDismissed((p) => [...p, id])}
-            onAddNew={handleReset}
+            onAddNew={() => {
+              setForm(EMPTY);
+              setEditingId(null);
+              setErrors({});
+              setShowCvc(false);
+            }}
           />
         )}
 
@@ -538,8 +692,7 @@ const CardMaster: React.FC = () => {
               </span>
             )}
           </div>
-
-          <form className="p-5" onSubmit={handleSubmit(handleSave)}>
+          <div className="p-5">
             {/* Card Preview */}
             <div className="mb-5 rounded-2xl bg-gradient-to-br from-primary/80 via-primary to-primary/60 p-5 flex items-end justify-between shadow-lg min-h-[110px] relative overflow-hidden">
               <div className="absolute -top-6 -right-6 w-32 h-32 rounded-full bg-white/5" />
@@ -577,9 +730,7 @@ const CardMaster: React.FC = () => {
               </div>
             </div>
 
-            {/* Fields */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* Bank dropdown — live from BankMaster DB */}
               <div>
                 <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                   Bank Name <span className="text-destructive">*</span>
@@ -609,13 +760,13 @@ const CardMaster: React.FC = () => {
                   </p>
                 )}
               </div>
-
               <div>
                 <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                   Company Name
                 </label>
                 <select
-                  {...register("companyName")}
+                  value={form.companyName}
+                  onChange={(e) => setField("companyName", e.target.value)}
                   className={inp}
                 >
                   <option value="">Select Company...</option>
@@ -626,11 +777,9 @@ const CardMaster: React.FC = () => {
                   ))}
                 </select>
               </div>
-
-              {/* Account Number — auto-filled from bank selection */}
               <div>
                 <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                  Account Number
+                  Account Number{" "}
                   <span className="ml-2 normal-case text-[10px] text-muted-foreground/60">
                     (auto-filled)
                   </span>
@@ -642,7 +791,8 @@ const CardMaster: React.FC = () => {
                   />
                   <input
                     type="text"
-                    {...register("accountNumber")}
+                    value={form.accountNumber}
+                    onChange={(e) => setField("accountNumber", e.target.value)}
                     placeholder="Auto-filled on bank selection"
                     className={`${inp} pl-8 font-mono tracking-widest`}
                   />
@@ -653,11 +803,9 @@ const CardMaster: React.FC = () => {
                   )}
                 </div>
               </div>
-
-              {/* IFSC — auto-filled, read-only */}
               <div>
                 <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                  IFSC Code
+                  IFSC Code{" "}
                   <span className="ml-2 normal-case text-[10px] text-muted-foreground/60">
                     (auto-filled)
                   </span>
@@ -681,13 +829,13 @@ const CardMaster: React.FC = () => {
                   )}
                 </div>
               </div>
-
               <div>
                 <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                   Card Network
                 </label>
                 <select
-                  {...register("network")}
+                  value={form.network}
+                  onChange={(e) => setField("network", e.target.value)}
                   className={inp}
                 >
                   <option value="">Select Network...</option>
@@ -698,13 +846,13 @@ const CardMaster: React.FC = () => {
                   ))}
                 </select>
               </div>
-
               <div>
                 <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                   Card Type
                 </label>
                 <select
-                  {...register("cardType")}
+                  value={form.cardType}
+                  onChange={(e) => setField("cardType", e.target.value)}
                   className={inp}
                 >
                   <option value="">Select Type...</option>
@@ -715,19 +863,18 @@ const CardMaster: React.FC = () => {
                   ))}
                 </select>
               </div>
-
               <div className="sm:col-span-2">
                 <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                   Card Holder Name
                 </label>
                 <input
                   type="text"
-                  {...register("cardHolder")}
+                  value={form.cardHolder}
+                  onChange={(e) => setField("cardHolder", e.target.value)}
                   placeholder="As printed on card"
                   className={inp}
                 />
               </div>
-
               <div className="sm:col-span-2">
                 <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                   Card Number <span className="text-destructive">*</span>
@@ -763,7 +910,6 @@ const CardMaster: React.FC = () => {
                   </p>
                 )}
               </div>
-
               <div>
                 <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                   CVC / CVV <span className="text-destructive">*</span>
@@ -799,7 +945,6 @@ const CardMaster: React.FC = () => {
                   </p>
                 )}
               </div>
-
               <div>
                 <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                   Expiry Date <span className="text-destructive">*</span>
@@ -825,7 +970,7 @@ const CardMaster: React.FC = () => {
                 )}
               </div>
 
-              {/* Reminder */}
+              {/* Reminder panel */}
               <div className="sm:col-span-2">
                 <div
                   className={`rounded-xl border p-4 transition-all ${form.reminderEnabled ? "border-primary/30 bg-primary/5" : "border-border bg-muted/30"}`}
@@ -867,7 +1012,6 @@ const CardMaster: React.FC = () => {
                       />
                     </button>
                   </div>
-
                   {form.reminderEnabled && (
                     <div className="mt-4 pt-4 border-t border-primary/15 grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
@@ -951,208 +1095,50 @@ const CardMaster: React.FC = () => {
 
             <div className="flex items-center gap-2 mt-5 pt-4 border-t border-border">
               <button
-                type="submit"
+                onClick={handleSave}
                 className="flex items-center gap-1.5 px-4 py-2 rounded-lg font-heading text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
               >
                 <Plus size={15} />
                 {editingId ? "Update" : "Save"}
               </button>
               <button
-                type="button"
-                onClick={handleReset}
+                onClick={() => {
+                  setForm(EMPTY);
+                  setEditingId(null);
+                  setErrors({});
+                  setShowCvc(false);
+                }}
                 className="flex items-center gap-1.5 px-4 py-2 rounded-lg font-heading text-sm border border-border text-muted-foreground hover:bg-muted transition-all"
               >
                 <RotateCcw size={14} />
                 Reset
               </button>
             </div>
-          </form>
+          </div>
         </div>
 
         {/* Table */}
         <div className="rounded-xl bg-card/80 border border-border shadow-sm overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-card/60">
-            <div>
-              <h3 className="font-heading font-semibold text-foreground text-sm">
-                Card Records
-              </h3>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
-                {filtered.length} record{filtered.length !== 1 ? "s" : ""}
-              </p>
-            </div>
-            <div className="relative">
-              <Search
-                size={13}
-                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
-              />
-              <input
-                type="text"
-                placeholder="Search..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-8 pr-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary w-36 sm:w-44"
-              />
-            </div>
+          <div className="px-5 py-3.5 border-b border-border bg-card/60">
+            <h3 className="font-heading font-semibold text-foreground text-sm">
+              Card Records
+            </h3>
           </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-border bg-muted/30">
-                  {[
-                    "Bank",
-                    "Account No.",
-                    "Card Number",
-                    "Network",
-                    "Type",
-                    "Expiry",
-                    "Reminder",
-                    "Status",
-                    "Actions",
-                  ].map((h) => (
-                    <th
-                      key={h}
-                      className="px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground"
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {filtered.length === 0 ? (
-                  <tr>
-                    <td
-                      colSpan={9}
-                      className="px-4 py-10 text-center text-muted-foreground text-sm"
-                    >
-                      {search
-                        ? "No cards match your search."
-                        : "No cards yet. Add one above."}
-                    </td>
-                  </tr>
-                ) : (
-                  filtered.map((row) => {
-                    const rd =
-                      row.reminderEnabled && row.expiryDate
-                        ? calculateReminderDate(
-                            row.expiryDate,
-                            row.reminderDays,
-                          )
-                        : "";
-                    const dfl = rd ? daysFromNow(rd) : null;
-                    const isOverdue =
-                      dfl !== null && dfl <= 0 && !row.reminderDismissed;
-                    const isUpcoming =
-                      dfl !== null &&
-                      dfl > 0 &&
-                      dfl <= 7 &&
-                      !row.reminderDismissed;
-
-                    return (
-                      <tr
-                        key={row._id}
-                        className={`hover:bg-muted/20 transition-colors ${editingId === row._id ? "bg-primary/5 border-l-2 border-l-primary" : ""}`}
-                      >
-                        <td className="px-4 py-3 font-medium text-foreground">
-                          {row.bankName || "—"}
-                        </td>
-                        <td className="px-4 py-3 font-mono text-foreground">
-                          {row.accountNumber || "—"}
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-2">
-                            <span className="font-mono text-foreground tracking-widest">
-                              {revealedRows[row._id]
-                                ? formatted(row.cardNumber)
-                                : masked(row.cardNumber)}
-                            </span>
-                            <button
-                              onClick={() =>
-                                setRevealedRows((p) => ({
-                                  ...p,
-                                  [row._id]: !p[row._id],
-                                }))
-                              }
-                              className="p-1 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
-                            >
-                              {revealedRows[row._id] ? (
-                                <EyeOff size={13} />
-                              ) : (
-                                <Eye size={13} />
-                              )}
-                            </button>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-foreground">
-                          {row.network || "—"}
-                        </td>
-                        <td className="px-4 py-3 text-foreground">
-                          {row.cardType || "—"}
-                        </td>
-                        <td className="px-4 py-3 font-mono text-foreground">
-                          {row.expiryDate}
-                        </td>
-                        <td className="px-4 py-3">
-                          {!row.reminderEnabled ? (
-                            <span className="text-[11px] text-muted-foreground font-heading">
-                              Off
-                            </span>
-                          ) : row.reminderDismissed ? (
-                            <span className="text-[11px] text-muted-foreground font-heading">
-                              Dismissed
-                            </span>
-                          ) : isOverdue ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-heading border bg-destructive/10 text-destructive border-destructive/20">
-                              <BellRing size={10} className="animate-pulse" />{" "}
-                              Overdue {Math.abs(dfl!)}d
-                            </span>
-                          ) : isUpcoming ? (
-                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-heading border bg-amber-500/10 text-amber-600 border-amber-500/20">
-                              <Bell size={10} /> In {dfl}d
-                            </span>
-                          ) : rd ? (
-                            <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground font-heading">
-                              <Bell size={10} /> {formatDisplayDate(rd)}
-                            </span>
-                          ) : null}
-                        </td>
-                        <td className="px-4 py-3">
-                          <span
-                            className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${row.status ? "bg-primary/10 text-primary border-primary/20" : "bg-destructive/10 text-destructive border-destructive/20"}`}
-                          >
-                            <span
-                              className={`w-1.5 h-1.5 rounded-full mr-1.5 ${row.status ? "bg-primary" : "bg-destructive"}`}
-                            />
-                            {row.status ? "Active" : "Inactive"}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="flex items-center justify-end gap-1">
-                            <button
-                              onClick={() => handleEdit(row._id)}
-                              className="p-1.5 rounded-lg text-primary hover:bg-primary/10 transition-colors"
-                            >
-                              <Edit2 size={13} />
-                            </button>
-                            <button
-                              onClick={() => setDeleteId(row._id)}
-                              className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"
-                            >
-                              <Trash2 size={13} />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            data={cardsWithDismiss}
+            columns={columns}
+            loading={false}
+            searchPlaceholder="Search cards..."
+            emptyMessage="No cards yet. Add one above."
+            rowClassName={(row) =>
+              editingId === row.original._id
+                ? "bg-primary/5 border-l-2 border-l-primary"
+                : ""
+            }
+          />
         </div>
 
-        {/* Delete Confirm */}
+        {/* Delete Confirm Modal */}
         {deleteId && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
             <div className="rounded-xl bg-card border border-border shadow-xl p-6 max-w-sm w-full mx-4">

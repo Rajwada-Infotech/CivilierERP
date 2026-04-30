@@ -1,7 +1,6 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
-  Search,
   Edit,
   Trash2,
   Eye,
@@ -16,8 +15,9 @@ import {
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { getRolesList } from "@/api/roleApi";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
-// ─── Types ───────────────────────────────────────────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
 interface User {
   id: number;
   name: string;
@@ -29,9 +29,8 @@ interface User {
   discontinue: boolean;
 }
 
-// ─── API calls ────────────────────────────────────────────────────────────────
+// ─── API ──────────────────────────────────────────────────────────────────────
 const BASE_URL = "/api/users";
-
 const authHeaders = () => ({
   "Content-Type": "application/json",
   Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
@@ -42,7 +41,6 @@ const getUsers = async (): Promise<User[]> => {
   if (!res.ok) throw new Error("Failed to fetch users");
   return res.json();
 };
-
 const addUserApi = async (user: {
   name: string;
   email: string;
@@ -56,17 +54,14 @@ const addUserApi = async (user: {
   });
   if (!res.ok) {
     const data = await res.json().catch(() => ({}));
-    if (res.status === 409) {
+    if (res.status === 409)
       throw new Error(
-        data?.error ||
-          `The email "${user.email}" is already registered to another user.`,
+        data?.error || `The email "${user.email}" is already registered.`,
       );
-    }
     throw new Error(data?.error || "Failed to add user");
   }
   return res.json();
 };
-
 const updateUserApi = async (id: number, data: Partial<User>) => {
   const res = await fetch(`${BASE_URL}/${id}`, {
     method: "PUT",
@@ -75,17 +70,14 @@ const updateUserApi = async (id: number, data: Partial<User>) => {
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    if (res.status === 409) {
+    if (res.status === 409)
       throw new Error(
-        body?.error ||
-          `The email "${data.email}" is already registered to another user.`,
+        body?.error || `The email "${data.email}" is already registered.`,
       );
-    }
     throw new Error(body?.error || "Failed to update user");
   }
   return res.json();
 };
-
 const deleteUserApi = async (id: number) => {
   const res = await fetch(`${BASE_URL}/${id}`, {
     method: "DELETE",
@@ -98,7 +90,7 @@ const deleteUserApi = async (id: number) => {
   return res.json();
 };
 
-// ─── Avatar helper ────────────────────────────────────────────────────────────
+// ─── Avatar helpers ───────────────────────────────────────────────────────────
 const getInitials = (name: string) =>
   name
     .split(" ")
@@ -106,7 +98,6 @@ const getInitials = (name: string) =>
     .slice(0, 2)
     .join("")
     .toUpperCase();
-
 const avatarColors = [
   "bg-violet-500",
   "bg-blue-500",
@@ -119,6 +110,138 @@ const avatarColors = [
 ];
 const getAvatarColor = (id: number) => avatarColors[id % avatarColors.length];
 
+// ─── Column definitions ───────────────────────────────────────────────────────
+function buildColumns(
+  roles: { RId: number; RName: string }[],
+  deleteConfirmId: number | null,
+  onView: (id: number) => void,
+  onEdit: (id: number) => void,
+  onToggleActive: (user: User) => void,
+  onDeleteRequest: (id: number) => void,
+  onDeleteConfirm: (id: number) => void,
+  onDeleteCancel: () => void,
+): ColumnDef<User, unknown>[] {
+  return [
+    {
+      id: "user",
+      header: "User",
+      accessorKey: "name",
+      cell: ({ row }) => {
+        const user = row.original;
+        return (
+          <div className="flex items-center gap-3">
+            <div
+              className={`w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0 ${getAvatarColor(user.id)}`}
+            >
+              {getInitials(user.name)}
+            </div>
+            <div className="min-w-0">
+              <p className="font-medium text-foreground truncate">
+                {user.name}
+              </p>
+              <p className="text-xs text-muted-foreground truncate">
+                {user.email}
+              </p>
+            </div>
+          </div>
+        );
+      },
+    },
+    {
+      id: "role",
+      header: "Role",
+      accessorKey: "roleName",
+      cell: ({ row }) => {
+        const user = row.original;
+        const roleName =
+          user.roleName ??
+          roles.find((r) => r.RId === user.RoleId)?.RName ??
+          "—";
+        return (
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-muted text-xs font-medium text-foreground">
+            <ShieldCheck size={12} className="text-primary" />
+            {roleName}
+          </span>
+        );
+      },
+    },
+    {
+      id: "status",
+      header: "Status",
+      accessorKey: "discontinue",
+      cell: ({ row }) => {
+        const active = !row.original.discontinue;
+        return (
+          <span
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full ${active ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" : "bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400"}`}
+          >
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${active ? "bg-emerald-500" : "bg-rose-500"}`}
+            />
+            {active ? "Active" : "Inactive"}
+          </span>
+        );
+      },
+    },
+    {
+      id: "actions",
+      header: "Actions",
+      enableSorting: false,
+      cell: ({ row }) => {
+        const user = row.original;
+        return (
+          <div className="flex items-center justify-end gap-1">
+            <button
+              onClick={() => onView(user.id)}
+              className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition"
+              title="View"
+            >
+              <Eye size={15} />
+            </button>
+            <button
+              onClick={() => onEdit(user.id)}
+              className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition"
+              title="Edit"
+            >
+              <Edit size={15} />
+            </button>
+            <button
+              onClick={() => onToggleActive(user)}
+              className={`px-2.5 py-1 rounded-lg text-xs font-medium transition ${!user.discontinue ? "bg-rose-100 text-rose-600 hover:bg-rose-200 dark:bg-rose-900/30 dark:text-rose-400 dark:hover:bg-rose-900/50" : "bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:hover:bg-emerald-900/50"}`}
+            >
+              {!user.discontinue ? "Deactivate" : "Activate"}
+            </button>
+            {deleteConfirmId === user.id ? (
+              <div className="flex items-center gap-1 ml-1">
+                <button
+                  onClick={() => onDeleteConfirm(user.id)}
+                  className="text-xs px-2.5 py-1 bg-destructive text-destructive-foreground rounded-lg hover:bg-destructive/90 transition font-medium"
+                >
+                  Confirm
+                </button>
+                <button
+                  onClick={onDeleteCancel}
+                  className="text-xs px-2 py-1 text-muted-foreground hover:text-foreground transition"
+                >
+                  Cancel
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => onDeleteRequest(user.id)}
+                className="p-2 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition"
+                title="Delete"
+              >
+                <Trash2 size={15} />
+              </button>
+            )}
+          </div>
+        );
+      },
+    },
+  ];
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 const Users = () => {
   const queryClient = useQueryClient();
@@ -127,7 +250,6 @@ const Users = () => {
     queryKey: ["users"],
     queryFn: getUsers,
   });
-
   const { data: roles = [] } = useQuery({
     queryKey: ["roles:list"],
     queryFn: getRolesList,
@@ -143,7 +265,6 @@ const Users = () => {
     },
     onError: (err: Error) => toast.error(err.message),
   });
-
   const updateMutation = useMutation({
     mutationFn: ({ id, data }: { id: number; data: Partial<User> }) =>
       updateUserApi(id, data),
@@ -155,7 +276,6 @@ const Users = () => {
     },
     onError: (err: Error) => toast.error(err.message),
   });
-
   const deleteMutation = useMutation({
     mutationFn: deleteUserApi,
     onSuccess: () => {
@@ -173,9 +293,7 @@ const Users = () => {
     password: "",
     isActive: true,
   });
-
   const [editUserId, setEditUserId] = useState<number | null>(null);
-  const [filter, setFilter] = useState("");
   const [viewUserId, setViewUserId] = useState<number | null>(null);
   const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
   const [showPass, setShowPass] = useState(false);
@@ -211,8 +329,7 @@ const Users = () => {
       toast.error("Name and Email are required.");
       return;
     }
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    if (!emailRegex.test(form.email.trim())) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
       toast.error("Please enter a valid email address.");
       return;
     }
@@ -220,8 +337,7 @@ const Users = () => {
       toast.error("Password is required when adding a new user.");
       return;
     }
-
-    if (editUserId !== null) {
+    if (editUserId !== null)
       updateMutation.mutate({
         id: editUserId,
         data: {
@@ -231,14 +347,13 @@ const Users = () => {
           discontinue: !form.isActive,
         },
       });
-    } else {
+    else
       addMutation.mutate({
         name: form.name.trim(),
         email: form.email.trim(),
         RoleId: form.RoleId,
         password: form.password,
       });
-    }
   };
 
   const resetForm = () => {
@@ -246,34 +361,41 @@ const Users = () => {
     setEditUserId(null);
     setShowPass(false);
   };
-
-  const openAddDrawer = () => {
-    resetForm();
-    setDrawerOpen(true);
-  };
-
   const closeDrawer = () => {
     setDrawerOpen(false);
     resetForm();
   };
 
-  const filteredUsers = allUsers.filter(
-    (u) =>
-      u.name.toLowerCase().includes(filter.toLowerCase()) ||
-      u.email.toLowerCase().includes(filter.toLowerCase()),
-  );
-
   const viewedUser =
     viewUserId !== null ? allUsers.find((u) => u.id === viewUserId) : null;
-
   const activeCount = allUsers.filter((u) => !u.discontinue).length;
   const inactiveCount = allUsers.filter((u) => u.discontinue).length;
+
+  const columns = useMemo(
+    () =>
+      buildColumns(
+        roles,
+        deleteConfirmId,
+        setViewUserId,
+        (id) => setEditUserId(id),
+        (user) =>
+          updateMutation.mutate({
+            id: user.id,
+            data: { discontinue: !user.discontinue },
+          }),
+        setDeleteConfirmId,
+        (id) => deleteMutation.mutate(id),
+        () => setDeleteConfirmId(null),
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [roles, deleteConfirmId],
+  );
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Admin", "Users"]} />
 
-      {/* ── Page header ── */}
+      {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
           <h1 className="text-2xl font-heading font-bold text-foreground tracking-tight">
@@ -284,7 +406,10 @@ const Users = () => {
           </p>
         </div>
         <button
-          onClick={openAddDrawer}
+          onClick={() => {
+            resetForm();
+            setDrawerOpen(true);
+          }}
           className="flex items-center gap-2 px-4 h-10 bg-primary text-primary-foreground rounded-lg hover:opacity-90 transition text-sm font-medium shadow-sm"
         >
           <UserPlus size={16} />
@@ -292,7 +417,7 @@ const Users = () => {
         </button>
       </div>
 
-      {/* ── Stats strip ── */}
+      {/* Stats strip */}
       <div className="grid grid-cols-3 gap-4 mb-7">
         {[
           {
@@ -331,182 +456,19 @@ const Users = () => {
         ))}
       </div>
 
-      {/* ── Search bar ── */}
-      <div className="relative mb-5 max-w-sm">
-        <Search
-          size={15}
-          className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-        />
-        <input
-          value={filter}
-          onChange={(e) => setFilter(e.target.value)}
-          placeholder="Search users…"
-          className="w-full h-10 pl-9 pr-4 bg-input/70 border border-border rounded-lg focus:ring-1 focus:ring-primary focus:border-primary outline-none text-sm"
-        />
-        {filter && (
-          <button
-            onClick={() => setFilter("")}
-            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-          >
-            <X size={14} />
-          </button>
-        )}
-      </div>
-
-      {/* ── Users table ── */}
+      {/* Table */}
       <div className="glass rounded-xl overflow-hidden">
-        {isLoading ? (
-          <div className="px-6 py-16 text-center text-muted-foreground text-sm">
-            Loading users…
-          </div>
-        ) : (
-          <table className="w-full text-sm">
-            <thead className="border-b border-border">
-              <tr>
-                <th className="px-6 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                  User
-                </th>
-                <th className="px-6 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                  Role
-                </th>
-                <th className="px-6 py-3.5 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                  Status
-                </th>
-                <th className="px-6 py-3.5 text-right text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {filteredUsers.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={4}
-                    className="px-6 py-16 text-center text-muted-foreground text-sm"
-                  >
-                    {filter
-                      ? "No users match your search."
-                      : "No users added yet."}
-                  </td>
-                </tr>
-              ) : (
-                filteredUsers.map((user) => (
-                  <tr
-                    key={user.id}
-                    className="hover:bg-muted/30 transition-colors group"
-                  >
-                    {/* User cell */}
-                    <td className="px-6 py-3.5">
-                      <div className="flex items-center gap-3">
-                        <div
-                          className={`w-9 h-9 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0 ${getAvatarColor(user.id)}`}
-                        >
-                          {getInitials(user.name)}
-                        </div>
-                        <div className="min-w-0">
-                          <p className="font-medium text-foreground truncate">
-                            {user.name}
-                          </p>
-                          <p className="text-xs text-muted-foreground truncate">
-                            {user.email}
-                          </p>
-                        </div>
-                      </div>
-                    </td>
-
-                    {/* Role */}
-                    <td className="px-6 py-3.5">
-                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-muted text-xs font-medium text-foreground">
-                        <ShieldCheck size={12} className="text-primary" />
-                        {user.roleName ??
-                          roles.find((r) => r.RId === user.RoleId)?.RName ??
-                          "—"}
-                      </span>
-                    </td>
-
-                    {/* Status */}
-                    <td className="px-6 py-3.5">
-                      <span
-                        className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full ${
-                          !user.discontinue
-                            ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-                            : "bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400"
-                        }`}
-                      >
-                        <span
-                          className={`w-1.5 h-1.5 rounded-full ${!user.discontinue ? "bg-emerald-500" : "bg-rose-500"}`}
-                        />
-                        {!user.discontinue ? "Active" : "Inactive"}
-                      </span>
-                    </td>
-
-                    {/* Actions */}
-                    <td className="px-6 py-3.5">
-                      <div className="flex items-center justify-end gap-1">
-                        <button
-                          onClick={() => setViewUserId(user.id)}
-                          className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition"
-                          title="View"
-                        >
-                          <Eye size={15} />
-                        </button>
-                        <button
-                          onClick={() => setEditUserId(user.id)}
-                          className="p-2 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition"
-                          title="Edit"
-                        >
-                          <Edit size={15} />
-                        </button>
-                        <button
-                          onClick={() =>
-                            updateMutation.mutate({
-                              id: user.id,
-                              data: { discontinue: !user.discontinue },
-                            })
-                          }
-                          className={`px-2.5 py-1 rounded-lg text-xs font-medium transition ${
-                            !user.discontinue
-                              ? "bg-rose-100 text-rose-600 hover:bg-rose-200 dark:bg-rose-900/30 dark:text-rose-400 dark:hover:bg-rose-900/50"
-                              : "bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400 dark:hover:bg-emerald-900/50"
-                          }`}
-                        >
-                          {!user.discontinue ? "Deactivate" : "Activate"}
-                        </button>
-                        {deleteConfirmId === user.id ? (
-                          <div className="flex items-center gap-1 ml-1">
-                            <button
-                              onClick={() => deleteMutation.mutate(user.id)}
-                              className="text-xs px-2.5 py-1 bg-destructive text-destructive-foreground rounded-lg hover:bg-destructive/90 transition font-medium"
-                            >
-                              Confirm
-                            </button>
-                            <button
-                              onClick={() => setDeleteConfirmId(null)}
-                              className="text-xs px-2 py-1 text-muted-foreground hover:text-foreground transition"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        ) : (
-                          <button
-                            onClick={() => setDeleteConfirmId(user.id)}
-                            className="p-2 rounded-lg hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition"
-                            title="Delete"
-                          >
-                            <Trash2 size={15} />
-                          </button>
-                        )}
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        )}
+        <DataTable
+          data={allUsers}
+          columns={columns}
+          loading={isLoading}
+          searchPlaceholder="Search users…"
+          emptyMessage="No users added yet."
+          rowClassName={() => ""}
+        />
       </div>
 
-      {/* ── Add / Edit Drawer ── */}
+      {/* Add / Edit Drawer */}
       {drawerOpen && (
         <div
           className="fixed inset-0 bg-black/50 z-40 flex justify-end"
@@ -516,7 +478,6 @@ const Users = () => {
             className="relative w-full max-w-md h-full bg-card border-l border-border shadow-2xl flex flex-col overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Drawer header */}
             <div className="flex items-center justify-between px-6 py-5 border-b border-border flex-shrink-0">
               <div className="flex items-center gap-3">
                 <div className="p-2 rounded-lg bg-primary/10 text-primary">
@@ -533,8 +494,6 @@ const Users = () => {
                 <X size={18} />
               </button>
             </div>
-
-            {/* Drawer body */}
             <form
               onSubmit={handleSubmit}
               className="flex flex-col flex-1 px-6 py-6 gap-5"
@@ -552,7 +511,6 @@ const Users = () => {
                   className="w-full h-10 px-3 bg-input/70 border border-border rounded-lg focus:ring-1 focus:ring-primary focus:border-primary outline-none text-sm"
                 />
               </div>
-
               <div>
                 <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
                   Email Address *
@@ -567,7 +525,6 @@ const Users = () => {
                   className="w-full h-10 px-3 bg-input/70 border border-border rounded-lg focus:ring-1 focus:ring-primary focus:border-primary outline-none text-sm"
                 />
               </div>
-
               <div>
                 <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
                   Role
@@ -597,7 +554,6 @@ const Users = () => {
                   />
                 </div>
               </div>
-
               {editUserId === null && (
                 <div>
                   <label className="text-xs font-medium text-muted-foreground mb-1.5 block">
@@ -623,7 +579,6 @@ const Users = () => {
                   </div>
                 </div>
               )}
-
               <div className="flex items-center gap-2.5 p-3.5 rounded-lg bg-muted/50 border border-border">
                 <input
                   type="checkbox"
@@ -641,17 +596,11 @@ const Users = () => {
                   Active User
                 </label>
                 <span
-                  className={`text-xs px-2 py-0.5 rounded-full font-medium ${
-                    form.isActive
-                      ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-                      : "bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400"
-                  }`}
+                  className={`text-xs px-2 py-0.5 rounded-full font-medium ${form.isActive ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" : "bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400"}`}
                 >
                   {form.isActive ? "Active" : "Inactive"}
                 </span>
               </div>
-
-              {/* Drawer footer */}
               <div className="flex gap-3 mt-auto pt-4 border-t border-border">
                 <button
                   type="button"
@@ -677,7 +626,7 @@ const Users = () => {
         </div>
       )}
 
-      {/* ── View User Modal ── */}
+      {/* View User Modal */}
       {viewedUser && (
         <div
           className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
@@ -687,7 +636,6 @@ const Users = () => {
             className="glass p-6 rounded-2xl w-full max-w-sm mx-4"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Avatar header */}
             <div className="flex flex-col items-center mb-6 text-center">
               <div
                 className={`w-16 h-16 rounded-full flex items-center justify-center text-white text-xl font-bold mb-3 ${getAvatarColor(viewedUser.id)}`}
@@ -701,11 +649,7 @@ const Users = () => {
                 {viewedUser.email}
               </p>
               <span
-                className={`mt-2 inline-flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-full ${
-                  !viewedUser.discontinue
-                    ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-                    : "bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400"
-                }`}
+                className={`mt-2 inline-flex items-center gap-1.5 px-3 py-1 text-xs font-medium rounded-full ${!viewedUser.discontinue ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400" : "bg-rose-100 text-rose-600 dark:bg-rose-900/30 dark:text-rose-400"}`}
               >
                 <span
                   className={`w-1.5 h-1.5 rounded-full ${!viewedUser.discontinue ? "bg-emerald-500" : "bg-rose-500"}`}
@@ -713,7 +657,6 @@ const Users = () => {
                 {!viewedUser.discontinue ? "Active" : "Inactive"}
               </span>
             </div>
-
             <div className="space-y-3 text-sm border-t border-border pt-4">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Role</span>
@@ -739,7 +682,6 @@ const Users = () => {
                 </span>
               </div>
             </div>
-
             <button
               onClick={() => setViewUserId(null)}
               className="mt-6 w-full h-10 bg-primary text-primary-foreground rounded-xl hover:opacity-90 transition text-sm font-medium"
