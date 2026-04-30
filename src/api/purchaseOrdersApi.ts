@@ -15,6 +15,16 @@ export interface POLineItem {
   amount: number; // computed: qty * rate * (1 + tax/100)
 }
 
+// Billing terms / discount configuration
+export interface DiscountConfig {
+  applicable: boolean;
+  type: "percentage" | "fixed";
+  value: number;
+  appliedOn: "pre-gst" | "post-gst";
+  masterTermId: string | null;
+  masterTermName: string | null;
+}
+
 export interface PurchaseOrder {
   PurchaseOrderID: number;
   PurchaseOrderNo: string;
@@ -46,6 +56,8 @@ export interface PurchaseOrder {
   UpdatedAt?: string;
   ApprovedBy?: string;
   ApprovedAt?: string;
+  // Billing terms / discount configuration
+  Discount?: DiscountConfig;
 }
 
 export interface POListResponse {
@@ -77,6 +89,8 @@ export interface CreatePOPayload {
   DocTypeId?: number | string | null;
   DocNo?: string | null;
   finYear?: string | null;
+  // Billing terms / discount configuration
+  Discount?: DiscountConfig | null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -87,7 +101,20 @@ export interface CreatePOPayload {
  */
 function enrichPayload(payload: CreatePOPayload): CreatePOPayload {
   const items = payload.POItems ?? [];
-  const grandTotal = items.reduce((sum, it) => sum + it.amount, 0);
+  const subtotal = items.reduce((sum, it) => sum + it.quantity * it.rate, 0);
+  const totalTax = items.reduce(
+    (sum, it) => sum + (it.quantity * it.rate * it.tax) / 100,
+    0,
+  );
+  const discount = payload.Discount;
+  const discountAmount = discount?.applicable
+    ? discount.type === "percentage"
+      ? (subtotal * discount.value) / 100
+      : discount.value
+    : 0;
+  const taxableAmount = Math.max(0, subtotal - discountAmount);
+  const taxMultiplier = subtotal > 0 ? taxableAmount / subtotal : 0;
+  const grandTotal = Math.round(taxableAmount + totalTax * taxMultiplier);
 
   return {
     ...payload,
