@@ -1,8 +1,8 @@
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { getList, addRecord, updateRecord, deleteRecord } from "@/api/accountHeadApi";
+import { getContractorCategoryOptions } from "@/api/contractorCategoryApi";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { MasterPage, type FieldDef, type ColumnDef, type DataChangeEvent } from "@/components/MasterPage";
 
@@ -42,9 +42,8 @@ const ContractorMaster: React.FC = () => {
   const { data: categoryOptions } = useQuery({
     queryKey: ["contractor-category-options"],
     queryFn: async () => {
-      const res = await fetchWithAuth("/api/contractor-category/options");
-      const json = await res.json();
-      return (json as { label: string }[]).map((o) => o.label);
+      const options = await getContractorCategoryOptions();
+      return options.map((o) => o.name);
     },
     staleTime: 5 * 60 * 1000,
   });
