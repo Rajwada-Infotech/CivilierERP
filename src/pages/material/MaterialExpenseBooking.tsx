@@ -28,19 +28,38 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Plus, Edit, Trash2, ArrowLeft, Link2 } from "lucide-react";
+import {
+  Plus,
+  Edit,
+  Trash2,
+  ArrowLeft,
+  Link2,
+  BookOpen,
+  X,
+  BadgePercent,
+  Clock,
+  ChevronDown,
+  CreditCard,
+  ToggleLeft,
+  ToggleRight,
+  Receipt,
+} from "lucide-react";
 import { toast } from "sonner";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { getEnterprises } from "@/api/enterpriseApi";
+import {
+  useBillingTerms,
+  type BillingTerm,
+} from "@/contexts/BillingTermsContext";
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 import {
   FormSection,
   Field,
   ReadonlyField,
+  PriceBreakdownPanel,
 } from "./ExpenseBooking/FormPrimitives";
-import { BillingAccordion } from "./ExpenseBooking/BillingAccordion";
 import { EmiSection } from "./ExpenseBooking/EmiSection";
 import {
   DocNumberPreview,
@@ -52,12 +71,14 @@ import {
   blankForm,
   computeBreakdown,
   dbToRecord,
+  defaultDiscount,
   defaultEmi,
   fmt,
   recordToDb,
 } from "./ExpenseBooking/helpers";
 import type {
   BookingStatus,
+  DiscountConfig,
   ExpenseRecord,
   PageView,
   PurchaseOrder,
@@ -76,6 +97,255 @@ async function apiFetch(url: string, opts?: RequestInit) {
   return res.json();
 }
 
+// ─── BillingTermSelector (inline, no accordion) ───────────────────────────────
+
+const BILL_TYPE_COLORS: Record<string, string> = {
+  "Tax Invoice": "bg-blue-100 text-blue-700 border-blue-200",
+  "Proforma Invoice": "bg-violet-100 text-violet-700 border-violet-200",
+  "Credit Note": "bg-emerald-100 text-emerald-700 border-emerald-200",
+  "Debit Note": "bg-orange-100 text-orange-700 border-orange-200",
+  "Bill of Supply": "bg-amber-100 text-amber-700 border-amber-200",
+  "Receipt Voucher": "bg-cyan-100 text-cyan-700 border-cyan-200",
+  "Delivery Challan": "bg-pink-100 text-pink-700 border-pink-200",
+  "Self Invoice": "bg-slate-100 text-slate-700 border-slate-200",
+};
+
+function BillingTermPickerDialog({
+  open,
+  onClose,
+  terms,
+  onSelect,
+}: {
+  open: boolean;
+  onClose: () => void;
+  terms: BillingTerm[];
+  onSelect: (term: BillingTerm) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="w-[calc(100vw-2rem)] max-w-xl max-h-[80vh] overflow-hidden flex flex-col">
+        <DialogHeader>
+          <DialogTitle className="font-heading flex items-center gap-2">
+            <BookOpen size={16} className="text-primary" />
+            Select Billing Term
+          </DialogTitle>
+          <DialogDescription>
+            Choose a billing term from master. A discount will be auto-applied
+            if the term includes one.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="flex-1 overflow-y-auto -mx-6 px-6 space-y-2 py-1">
+          {terms.length === 0 && (
+            <div className="flex flex-col items-center gap-2 py-10 text-center">
+              <BookOpen size={20} className="text-muted-foreground/40" />
+              <p className="text-sm text-muted-foreground">
+                No active billing terms found
+              </p>
+            </div>
+          )}
+          {terms.map((term) => (
+            <button
+              key={term._id}
+              type="button"
+              onClick={() => {
+                onSelect(term);
+                onClose();
+              }}
+              className="w-full text-left rounded-xl border border-border bg-background hover:border-primary/40 hover:bg-primary/[0.03] transition-all px-4 py-3 group"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-sm font-heading font-semibold text-foreground group-hover:text-primary transition-colors">
+                      {term.name}
+                    </p>
+                    <span
+                      className={
+                        "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-heading " +
+                        (BILL_TYPE_COLORS[term.billType] ??
+                          "bg-muted text-muted-foreground border-border")
+                      }
+                    >
+                      {term.billType}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground mt-1 truncate">
+                    {term.description}
+                  </p>
+                  <div className="flex items-center gap-3 mt-1.5 text-[11px] text-muted-foreground flex-wrap">
+                    <span className="flex items-center gap-1">
+                      <BadgePercent size={10} />
+                      {term.discountType === "none"
+                        ? "No discount"
+                        : term.discountType === "percentage"
+                          ? `${term.discountValue}% discount`
+                          : `Rs.${fmt(term.discountValue)} flat off`}
+                    </span>
+                    <span className="flex items-center gap-1">
+                      <Clock size={10} />
+                      {term.paymentDueDays === 0
+                        ? "Immediate"
+                        : `Net-${term.paymentDueDays}`}
+                    </span>
+                  </div>
+                </div>
+                <ChevronDown
+                  size={14}
+                  className="text-muted-foreground group-hover:text-primary rotate-[-90deg] shrink-0 mt-1 transition-colors"
+                />
+              </div>
+            </button>
+          ))}
+        </div>
+
+        <DialogFooter className="pt-3 border-t border-border">
+          <Button variant="outline" size="sm" onClick={onClose}>
+            Cancel
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── BillingTermsSection ──────────────────────────────────────────────────────
+// Always shown. If a billing term is applied → show amount / breakdown.
+// If no billing term → EMI section is shown below.
+
+function BillingTermsSection({
+  discount,
+  basicAmount,
+  cgstRate,
+  sgstRate,
+  onChange,
+}: {
+  discount: DiscountConfig;
+  basicAmount: number;
+  cgstRate: number;
+  sgstRate: number;
+  onChange: (d: DiscountConfig) => void;
+}) {
+  const { activeBillingTerms = [] } = useBillingTerms();
+  const [pickerOpen, setPickerOpen] = useState(false);
+
+  const bd = computeBreakdown(basicAmount, cgstRate, sgstRate, discount);
+  const hasBase = basicAmount > 0;
+  const termApplied = !!discount.masterTermId;
+
+  const applyTerm = (term: BillingTerm) => {
+    const mapped: DiscountConfig = {
+      applicable: term.discountType !== "none",
+      type: term.discountType === "flat" ? "fixed" : "percentage",
+      value: term.discountValue,
+      appliedOn: "pre-gst",
+      masterTermId: term._id,
+      masterTermName: term.name,
+    };
+    onChange(mapped);
+    toast.success(`Billing term "${term.name}" applied`);
+  };
+
+  const clearTerm = () => {
+    onChange(defaultDiscount());
+    toast.info("Billing term cleared");
+  };
+
+  return (
+    <>
+      <BillingTermPickerDialog
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        terms={activeBillingTerms}
+        onSelect={applyTerm}
+      />
+
+      <div className="rounded-xl border border-border overflow-hidden">
+        {/* Header row */}
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 py-3.5 bg-muted/40">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-primary/10 shrink-0">
+              <Receipt size={14} className="text-primary" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm font-heading font-semibold text-foreground">
+                Billing Terms
+              </p>
+              <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
+                {termApplied ? (
+                  <span className="text-primary font-medium">
+                    {discount.masterTermName}
+                    {discount.applicable && hasBase
+                      ? ` · Net Rs.${fmt(bd.netAmount)}`
+                      : ""}
+                  </span>
+                ) : (
+                  "No billing term applied — pick from master"
+                )}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 flex-wrap shrink-0">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => setPickerOpen(true)}
+              className="h-7 gap-1.5 text-xs border-primary/30 text-primary hover:bg-primary/[0.06]"
+            >
+              <BookOpen size={12} />
+              {termApplied ? "Change Term" : "Pick from Master"}
+            </Button>
+            {termApplied && (
+              <button
+                type="button"
+                onClick={clearTerm}
+                className="flex items-center gap-1 text-[11px] text-destructive hover:underline"
+              >
+                <X size={10} /> Clear
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Applied term detail */}
+        {termApplied && (
+          <div className="border-t border-border bg-card p-4">
+            {/* Term badge row */}
+            <div className="flex flex-wrap items-center gap-3 mb-4">
+              <div className="flex items-center gap-2">
+                <BadgePercent size={13} className="text-muted-foreground" />
+                <span className="text-xs text-foreground font-medium">
+                  {discount.applicable
+                    ? discount.type === "percentage"
+                      ? `${discount.value}% discount applied`
+                      : `Rs.${fmt(discount.value)} flat discount applied`
+                    : "No discount with this term"}
+                </span>
+              </div>
+            </div>
+
+            {/* Price breakdown if basic amount exists */}
+            {hasBase ? (
+              <PriceBreakdownPanel
+                bd={bd}
+                cgstRate={cgstRate}
+                sgstRate={sgstRate}
+                hasDiscount={discount.applicable}
+              />
+            ) : (
+              <p className="text-xs text-muted-foreground text-center py-4 border border-dashed border-border rounded-lg">
+                Enter a basic amount above to see the price breakdown
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 
 export default function MaterialExpenseBooking() {
@@ -84,7 +354,9 @@ export default function MaterialExpenseBooking() {
 
   const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
   const [poLoading, setPoLoading] = useState(true);
-  const [companyOptions, setCompanyOptions] = useState<{ id: number; label: string }[]>([]);
+  const [companyOptions, setCompanyOptions] = useState<
+    { id: number; label: string }[]
+  >([]);
   const [records, setRecords] = useState<ExpenseRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<PageView>("list");
@@ -92,15 +364,12 @@ export default function MaterialExpenseBooking() {
   const [form, setForm] = useState<Omit<ExpenseRecord, "id">>(blankForm());
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  // Doc number state
   const [selectedDocTypeId, setSelectedDocTypeId] = useState<number | null>(
     null,
   );
   const [docNumberPreview, setDocNumberPreview] = useState("");
   const [docRefreshTrigger, setDocRefreshTrigger] = useState(0);
-  // Status filter for list view — default to "Received" payment status
   const [statusFilter, setStatusFilter] = useState<string>("Received");
-  // Approval trail for selected record
   const [approvalTrail, setApprovalTrail] =
     useState<ExpenseRecord["approvalTrail"]>(undefined);
 
@@ -120,8 +389,6 @@ export default function MaterialExpenseBooking() {
     try {
       setPoLoading(true);
       const data = await apiFetch(`${API}?limit=200`);
-      // Safely extract the array regardless of response shape:
-      // { data: [...] }, { recordset: [...] }, or a bare array
       const rows: any[] = Array.isArray(data)
         ? data
         : Array.isArray(data?.data)
@@ -129,27 +396,24 @@ export default function MaterialExpenseBooking() {
           : Array.isArray(data?.recordset)
             ? data.recordset
             : [];
-      const mapped: PurchaseOrder[] = rows.map(
-        (row: any) => ({
-          id: row.POId ?? row.Eid ?? null,
-          poNumber:
-            row.PODocNo ??
-            row.EDocNo ??
-            ((row.POId ?? row.Eid) ? `PO-${row.POId ?? row.Eid}` : "N/A"),
-          supplier: row.SupplierName ?? row.EProjectName ?? "Unknown",
-          projectSite: row.ProjectName ?? row.EProjectName ?? "",
-          itemDescription:
-            row.ItemDescription ?? row.EDocumentType ?? "Material",
-          quantity: parseFloat(row.Quantity) || 1,
-          unit: row.UOMCode ?? "Nos",
-          rate: parseFloat(row.Rate ?? row.EAmount) || 0,
-          totalAmount: parseFloat(row.TotalAmount ?? row.EAmount) || 0,
-          paymentTerms: row.PaymentTerms ?? "Net-30",
-          cgstRate: parseFloat(row.CGSTRate ?? row.ECgstRate) || 18,
-          sgstRate: parseFloat(row.SGSTRate ?? row.ESgstRate) || 0,
-          invoiceReference: row.InvoiceRef ?? row.EDocNo ?? "",
-        }),
-      );
+      const mapped: PurchaseOrder[] = rows.map((row: any) => ({
+        id: row.POId ?? row.Eid ?? null,
+        poNumber:
+          row.PODocNo ??
+          row.EDocNo ??
+          ((row.POId ?? row.Eid) ? `PO-${row.POId ?? row.Eid}` : "N/A"),
+        supplier: row.SupplierName ?? row.EProjectName ?? "Unknown",
+        projectSite: row.ProjectName ?? row.EProjectName ?? "",
+        itemDescription: row.ItemDescription ?? row.EDocumentType ?? "Material",
+        quantity: parseFloat(row.Quantity) || 1,
+        unit: row.UOMCode ?? "Nos",
+        rate: parseFloat(row.Rate ?? row.EAmount) || 0,
+        totalAmount: parseFloat(row.TotalAmount ?? row.EAmount) || 0,
+        paymentTerms: row.PaymentTerms ?? "Net-30",
+        cgstRate: parseFloat(row.CGSTRate ?? row.ECgstRate) || 18,
+        sgstRate: parseFloat(row.SGSTRate ?? row.ESgstRate) || 0,
+        invoiceReference: row.InvoiceRef ?? row.EDocNo ?? "",
+      }));
       setPurchaseOrders(mapped);
     } catch (err: any) {
       console.error("PO load failed:", err.message);
@@ -174,12 +438,15 @@ export default function MaterialExpenseBooking() {
     getEnterprises()
       .then((list) => {
         const companies = list
-          .filter((e) => (e.business_type ?? "").toUpperCase() === "C" && !e.discontinue)
+          .filter(
+            (e) =>
+              (e.business_type ?? "").toUpperCase() === "C" && !e.discontinue,
+          )
           .map((e) => ({ id: e.id, label: e.name ?? "" }))
           .filter((o) => o.label !== "");
         setCompanyOptions(companies);
       })
-      .catch(() => {/* silently ignore */});
+      .catch(() => {});
   }, [fetchRecords, fetchPurchaseOrders]);
 
   const set = <K extends keyof Omit<ExpenseRecord, "id">>(
@@ -208,10 +475,7 @@ export default function MaterialExpenseBooking() {
 
   const openNew = () => {
     setEditingId(null);
-    setForm({
-      ...blankForm(),
-      financialYear: activeFinYears[0]?.year || "",
-    });
+    setForm({ ...blankForm(), financialYear: activeFinYears[0]?.year || "" });
     setSelectedDocTypeId(null);
     setDocNumberPreview("");
     setApprovalTrail(undefined);
@@ -237,8 +501,6 @@ export default function MaterialExpenseBooking() {
 
   const handleDocTypeSelect = (docTypeId: number | null, preview: string) => {
     setSelectedDocTypeId(docTypeId);
-    // preview from backend already has finYear if it was passed — but if financialYear
-    // is set and preview doesn't already contain it, append it now
     const fy = form.financialYear;
     const finalPreview =
       preview && fy && !preview.includes(fy) ? `${preview}/${fy}` : preview;
@@ -261,7 +523,6 @@ export default function MaterialExpenseBooking() {
       form.sgstRate,
       form.discount,
     );
-    // Pass selectedDocTypeId so the backend locks the sequence on new records
     const body = recordToDb(
       form,
       bd.netAmount,
@@ -282,7 +543,6 @@ export default function MaterialExpenseBooking() {
           method: "POST",
           body: JSON.stringify(body),
         });
-        // Server returns the authoritative locked doc number — show it in success toast
         const confirmedDocNo = result?.docNo || form.bookingReference;
         toast.success(`Expense booking created — Ref: ${confirmedDocNo}`);
         await fetchRecords();
@@ -297,7 +557,7 @@ export default function MaterialExpenseBooking() {
             financialYear: form.financialYear,
           });
           setDocNumberPreview(nextDocNo);
-          setDocRefreshTrigger((current) => current + 1);
+          setDocRefreshTrigger((c) => c + 1);
         } else {
           cancelForm();
         }
@@ -329,17 +589,9 @@ export default function MaterialExpenseBooking() {
     form.discount,
   );
 
-  // Status options for the list filter (all booking statuses + Received)
-  const ALL_STATUSES = [
-    "Draft",
-    "Pending",
-    "Approved",
-    "Rejected",
-    "Booked",
-    "Hold",
-    "Received",
-  ] as const;
-  // Default filter: show Received payment records only
+  // EMI is only shown if no billing term is applied
+  const billingTermApplied = !!form.discount.masterTermId;
+
   const filteredRecords = statusFilter
     ? records.filter((r) => r.status === statusFilter)
     : records;
@@ -405,8 +657,8 @@ export default function MaterialExpenseBooking() {
             </CardHeader>
 
             <CardContent className="pt-5 space-y-6 px-4 sm:px-6">
-              {/* ── Document Numbering ──────────────────────────────────── */}
-              <FormSection label="Document Numbering">
+              {/* ① Doc Type & Doc Number ──────────────────────────────────── */}
+              <FormSection label="Document">
                 <DocNumberPreview
                   finYear={form.financialYear || undefined}
                   selectedDocTypeId={selectedDocTypeId}
@@ -414,38 +666,19 @@ export default function MaterialExpenseBooking() {
                   preview={docNumberPreview}
                   refreshTrigger={docRefreshTrigger}
                 />
-                {/* Manual override */}
-                <Field
-                  label="Booking Reference"
-                  required
-                  hint="Auto-filled when you pick a document type above; or enter manually."
-                >
-                  <Input
-                    value={form.bookingReference}
-                    onChange={(e) => {
-                      set("bookingReference", e.target.value.toUpperCase());
-                      setDocNumberPreview(e.target.value.toUpperCase());
-                    }}
-                    placeholder="e.g. PR/REC/000500"
-                  />
-                </Field>
-              </FormSection>
-
-              {/* ── Booking Information ─────────────────────────────────── */}
-              <FormSection label="Booking Information">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <Field label="Booking Date" required>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Field
+                    label="Booking Reference"
+                    required
+                    hint="Auto-filled from doc type above, or enter manually."
+                  >
                     <Input
-                      type="date"
-                      value={form.bookingDate}
-                      onChange={(e) => set("bookingDate", e.target.value)}
-                    />
-                  </Field>
-                  <Field label="Due Date">
-                    <Input
-                      type="date"
-                      value={form.dueDate}
-                      onChange={(e) => set("dueDate", e.target.value)}
+                      value={form.bookingReference}
+                      onChange={(e) => {
+                        set("bookingReference", e.target.value.toUpperCase());
+                        setDocNumberPreview(e.target.value.toUpperCase());
+                      }}
+                      placeholder="e.g. PR/REC/000500"
                     />
                   </Field>
                   <Field label="Financial Year">
@@ -455,9 +688,9 @@ export default function MaterialExpenseBooking() {
                         set("financialYear", v);
                         if (selectedDocTypeId) {
                           void fetchNextDocNumber(selectedDocTypeId, v).then(
-                            (nextDocNo) => {
-                              setDocNumberPreview(nextDocNo);
-                              if (nextDocNo) set("bookingReference", nextDocNo);
+                            (n) => {
+                              setDocNumberPreview(n);
+                              if (n) set("bookingReference", n);
                             },
                           );
                         }
@@ -476,58 +709,12 @@ export default function MaterialExpenseBooking() {
                     </Select>
                   </Field>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <Field label="Booking Status">
-                    <Select
-                      value={form.status}
-                      onValueChange={(v) => set("status", v as BookingStatus)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {(
-                          [
-                            "Draft",
-                            "Pending",
-                            "Approved",
-                            "Rejected",
-                            "Booked",
-                            "Hold",
-                            "Received",
-                          ] as BookingStatus[]
-                        ).map((s) => (
-                          <SelectItem key={s} value={s}>
-                            {s}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                  <Field label="Company" required>
-                    <Select
-                      value={form.companyId ? String(form.companyId) : ""}
-                      onValueChange={(v) => set("companyId", v ? parseInt(v, 10) : null)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select company..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {companyOptions.map((c) => (
-                          <SelectItem key={c.id} value={String(c.id)}>
-                            {c.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                </div>
               </FormSection>
 
-              {/* ── Purchase Order Link ─────────────────────────────────── */}
-              <FormSection label="Purchase Order">
+              {/* ② Link PO ────────────────────────────────────────────────── */}
+              <FormSection label="Link Purchase Order">
                 <Field
-                  label="Link Purchase Order"
+                  label="Purchase Order"
                   hint="Selecting a PO auto-fills supplier, invoice reference, project site and amounts."
                 >
                   <Select
@@ -573,7 +760,7 @@ export default function MaterialExpenseBooking() {
                 </Field>
 
                 {form.poId && (
-                  <div className="rounded-xl border border-border/60 bg-muted/20 p-3 sm:p-4 space-y-3 mt-4">
+                  <div className="rounded-xl border border-border/60 bg-muted/20 p-3 sm:p-4 space-y-3 mt-2">
                     <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
                       Auto-filled from PO
                     </p>
@@ -600,27 +787,169 @@ export default function MaterialExpenseBooking() {
                 )}
               </FormSection>
 
-              {/* ── Billing Terms (discount) ─────────────────────────────── */}
-              {form.poId && (
-                <FormSection label="Billing Terms">
-                  <BillingAccordion
-                    basicAmount={form.basicAmount}
-                    cgstRate={form.cgstRate}
-                    sgstRate={form.sgstRate}
-                    discount={form.discount}
-                    onChange={(d) => set("discount", d)}
+              {/* ③ Booking Info ───────────────────────────────────────────── */}
+              <FormSection label="Booking Information">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <Field label="Booking Date" required>
+                    <Input
+                      type="date"
+                      value={form.bookingDate}
+                      onChange={(e) => set("bookingDate", e.target.value)}
+                    />
+                  </Field>
+                  <Field label="Due Date">
+                    <Input
+                      type="date"
+                      value={form.dueDate}
+                      onChange={(e) => set("dueDate", e.target.value)}
+                    />
+                  </Field>
+                  <Field label="Booking Status">
+                    <Select
+                      value={form.status}
+                      onValueChange={(v) => set("status", v as BookingStatus)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {(
+                          [
+                            "Draft",
+                            "Pending",
+                            "Approved",
+                            "Rejected",
+                            "Booked",
+                            "Hold",
+                            "Received",
+                          ] as BookingStatus[]
+                        ).map((s) => (
+                          <SelectItem key={s} value={s}>
+                            {s}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Field label="Company" required>
+                    <Select
+                      value={form.companyId ? String(form.companyId) : ""}
+                      onValueChange={(v) =>
+                        set("companyId", v ? parseInt(v, 10) : null)
+                      }
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select company..." />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {companyOptions.map((c) => (
+                          <SelectItem key={c.id} value={String(c.id)}>
+                            {c.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field label="Basic Amount">
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs">
+                        Rs.
+                      </span>
+                      <Input
+                        type="number"
+                        min={0}
+                        value={form.basicAmount || ""}
+                        onChange={(e) =>
+                          set("basicAmount", parseFloat(e.target.value) || 0)
+                        }
+                        className="pl-9"
+                        placeholder="0.00"
+                      />
+                    </div>
+                  </Field>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Field label="CGST Rate (%)">
+                    <Input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={form.cgstRate}
+                      onChange={(e) =>
+                        set("cgstRate", parseFloat(e.target.value) || 0)
+                      }
+                      placeholder="18"
+                    />
+                  </Field>
+                  <Field label="SGST Rate (%)">
+                    <Input
+                      type="number"
+                      min={0}
+                      max={100}
+                      value={form.sgstRate}
+                      onChange={(e) =>
+                        set("sgstRate", parseFloat(e.target.value) || 0)
+                      }
+                      placeholder="0"
+                    />
+                  </Field>
+                </div>
+              </FormSection>
+
+              {/* ④ Billing Terms ──────────────────────────────────────────── */}
+              <FormSection label="Billing Terms">
+                <BillingTermsSection
+                  discount={form.discount}
+                  basicAmount={form.basicAmount}
+                  cgstRate={form.cgstRate}
+                  sgstRate={form.sgstRate}
+                  onChange={(d) => set("discount", d)}
+                />
+              </FormSection>
+
+              {/* ⑤ EMI — only when no billing term applied ────────────────── */}
+              {!billingTermApplied && (
+                <FormSection label="EMI / Installment Payment">
+                  <EmiSection
+                    emi={form.emi}
+                    netAmount={bd.netAmount}
+                    onChange={(emi) => set("emi", emi)}
                   />
                 </FormSection>
               )}
 
-              {/* ── EMI Options ─────────────────────────────────────────── */}
-              <FormSection label="EMI / Installment Options">
-                <EmiSection
-                  emi={form.emi}
-                  netAmount={bd.netAmount}
-                  onChange={(emi) => set("emi", emi)}
-                />
-              </FormSection>
+              {/* If billing term applied, show a net amount summary instead of EMI */}
+              {billingTermApplied && (
+                <FormSection label="Payment Summary">
+                  <div className="rounded-xl border border-primary/20 bg-primary/[0.03] px-4 py-4">
+                    <div className="flex items-center justify-between">
+                      <div className="space-y-0.5">
+                        <p className="text-xs text-muted-foreground font-heading uppercase tracking-wider">
+                          Net Payable (after billing term)
+                        </p>
+                        <p className="text-2xl font-mono font-bold text-foreground">
+                          Rs.{fmt(bd.netAmount)}
+                        </p>
+                        {form.discount.applicable && (
+                          <p className="text-[11px] text-emerald-600 font-medium mt-1">
+                            You save Rs.{fmt(bd.discountAmount)}
+                            {form.discount.type === "percentage"
+                              ? ` (${form.discount.value}% off)`
+                              : " (flat discount)"}
+                          </p>
+                        )}
+                      </div>
+                      <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-primary/10">
+                        <Receipt size={20} className="text-primary" />
+                      </div>
+                    </div>
+                  </div>
+                </FormSection>
+              )}
 
               {/* ── Approval Trail (edit mode only) ─────────────────────── */}
               {editingId && (
@@ -673,7 +1002,6 @@ export default function MaterialExpenseBooking() {
             )}
             {!loading && (
               <>
-                {/* ── Status filter bar ──────────────────────────────────── */}
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-xs text-muted-foreground font-medium shrink-0">
                     Filter:
@@ -753,6 +1081,7 @@ export default function MaterialExpenseBooking() {
                               Invoice Ref
                             </TableHead>
                             <TableHead>Basic Amt</TableHead>
+                            <TableHead>Billing Term</TableHead>
                             <TableHead>EMI</TableHead>
                             <TableHead>Net Amt</TableHead>
                             <TableHead>Status</TableHead>
@@ -791,7 +1120,20 @@ export default function MaterialExpenseBooking() {
                                   Rs.{fmt(rec.basicAmount)}
                                 </TableCell>
                                 <TableCell className="text-xs">
-                                  {rec.emi.enabled ? (
+                                  {rec.discount.masterTermName ? (
+                                    <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-heading border bg-primary/[0.06] text-primary border-primary/20">
+                                      <Receipt size={9} />
+                                      {rec.discount.masterTermName}
+                                    </span>
+                                  ) : (
+                                    <span className="text-muted-foreground">
+                                      —
+                                    </span>
+                                  )}
+                                </TableCell>
+                                <TableCell className="text-xs">
+                                  {!rec.discount.masterTermId &&
+                                  rec.emi.enabled ? (
                                     <span className="text-primary font-medium">
                                       {rec.emi.installmentCount}x
                                     </span>
@@ -839,7 +1181,7 @@ export default function MaterialExpenseBooking() {
                           {filteredRecords.length === 0 && (
                             <TableRow>
                               <TableCell
-                                colSpan={11}
+                                colSpan={12}
                                 className="text-center py-10 text-muted-foreground text-sm"
                               >
                                 {statusFilter
