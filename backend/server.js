@@ -1,5 +1,6 @@
 require("./config/env").loadEnv();
 const isDev = process.env.NODE_ENV === "development";
+const isTest = process.env.NODE_ENV === "test";
 const express = require("express");
 const helmet = require("helmet");
 const cors = require("cors");
@@ -46,7 +47,6 @@ function printBanner(port) {
   logger.info("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 }
 
-// Helper to create Redis-backed rate limit store
 function makeStore(prefix) {
   return new RedisStore({
     prefix,
@@ -54,14 +54,179 @@ function makeStore(prefix) {
   });
 }
 
+// ─── ALL routes shared by both createApp() and startServer() ─────────────────
+const ALL_ROUTES = [
+  { path: "/api/roles",                file: "./routes/roles" },
+  { path: "/api/user-rights",          file: "./routes/userRights" },
+  { path: "/api/account-group",        file: "./routes/accountGroup" },
+  { path: "/api/account-head",         file: "./routes/accountHeadMaster" },
+  { path: "/api/activity-master",      file: "./routes/activityMaster" },
+  { path: "/api/bank-master",          file: "./routes/bankMaster" },
+  { path: "/api/billing-terms",        file: "./routes/billingTerms" },
+  { path: "/api/card-master",          file: "./routes/cardMaster" },
+  { path: "/api/cheque-master",        file: "./routes/chequeMaster" },
+  { path: "/api/document-type",        file: "./routes/document-type" },
+  { path: "/api/fin-year",             file: "./routes/finYear" },
+  { path: "/api/general-ledger",       file: "./routes/generalLedger" },
+  { path: "/api/hsn",                  file: "./routes/hsn" },
+  { path: "/api/item-groups",          file: "./routes/itemGroup" },
+  { path: "/api/item-master",          file: "./routes/itemMaster" },
+  { path: "/api/tds-master",           file: "./routes/tdsMaster" },
+  { path: "/api/enterprises",          file: "./routes/enterprise" },
+  { path: "/api/entry-type",           file: "./routes/entryType" },
+  { path: "/api/expense-booking",      file: "./routes/expenseBooking" },
+  { path: "/api/amendments",           file: "./routes/amendments" },
+  { path: "/api/new-payment",          file: "./routes/newPayment" },
+  { path: "/api/received-payment",     file: "./routes/receivedPayment" },
+  { path: "/api/purchase-orders",      file: "./routes/purchaseOrders" },
+  { path: "/api/tenants",              file: "./routes/tenants" },
+  { path: "/api/work-orders",          file: "./routes/workOrder" },
+  { path: "/api/user-profile",         file: "./routes/userProfile" },
+  { path: "/api/uom-master",           file: "./routes/uomMaster" },
+  { path: "/api/debit-note",           file: "./routes/debitNote" },
+  { path: "/api/tc-master",            file: "./routes/tcMaster" },
+  { path: "/api/transactions",         file: "./routes/transactions" },
+  { path: "/api/grns",                 file: "./routes/grns" },
+  { path: "/api/stock-ledger",         file: "./routes/stockLedger" },
+  { path: "/api/brs",                  file: "./routes/brs" },
+  { path: "/api/reports",              file: "./routes/reports" },
+  { path: "/api/finance-dashboard",    file: "./routes/financeDashboard" },
+  { path: "/api/material-dashboard",   file: "./routes/materialDashboard" },
+  { path: "/api/admin-dashboard",      file: "./routes/adminDashboard" },
+  { path: "/api/user-activity",        file: "./routes/userActivity" },
+  { path: "/api/cheque-leaf",          file: "./routes/chequeLeaf" },
+  { path: "/api/contractor-category",  file: "./routes/contractorCategory" },
+  { path: "/api/approval-workflows",   file: "./routes/approvalWorkflows" },
+  { path: "/api/approval-inbox",       file: "./routes/approvalInbox" },
+  { path: "/api/tasks",                file: "./routes/tasks" },
+  { path: "/api/widgets",              file: "./routes/widgets" },
+  { path: "/api/tenant-reminders",     file: "./routes/tenantReminders" },
+  { path: "/api/reminders",            file: "./routes/tenantReminders" },
+  { path: "/api/followup-log",         file: "./routes/followupLog" },
+  { path: "/api/company-master",       file: "./routes/companyMaster" },
+  { path: "/api/project-master",       file: "./routes/projectMaster" },
+  { path: "/api/signatures",           file: "./routes/signatures" },
+  { path: "/api/communicator",         file: "./routes/communicator" },
+  { path: "/api/system/metrics",       file: "./routes/systemMetrics" },
+  { path: "/api/menu-master",          file: "./routes/menuMaster" },
+  { path: "/api/menu-type",            file: "./routes/menuType" },
+  { path: "/api/menu-types",           file: "./routes/menuType" },
+];
+
+// ─── createApp ────────────────────────────────────────────────────────────────
+// Builds and returns the Express app with all middleware and routes mounted,
+// but WITHOUT connecting to the DB, starting the Redis worker, or calling listen().
+// Used directly by supertest in test mode (all DB/Redis deps must be mocked first).
+async function createApp() {
+  const app = express();
+  app.disable("x-powered-by");
+  app.use(requestLogger);
+  app.use((req, res, next) => {
+    res.setHeader("X-Request-Id", req.id || "test");
+    next();
+  });
+
+  app.use(express.json({ limit: "10mb" }));
+  app.use(express.urlencoded({ extended: true, limit: "10mb" }));
+  app.use(helmet());
+  app.use(
+    cors({
+      origin: (origin, callback) => {
+        if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+          callback(null, true);
+        } else {
+          logger.warn(`[BLOCK] CORS rejected: ${origin}`);
+          callback(new Error("Not allowed by CORS"));
+        }
+      },
+      credentials: true,
+      methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+      allowedHeaders: [
+        "Content-Type",
+        "Authorization",
+        "X-Requested-With",
+        "X-Request-Id",
+      ],
+      optionsSuccessStatus: 204,
+    }),
+  );
+  app.use(compression());
+
+  // Global request tracking — skip in test (mocked but unnecessary noise)
+  if (!isTest) {
+    app.use(async (req, res, next) => {
+      incrGlobalRequests().catch(() => {});
+      trackHourLoad().catch(() => {});
+      next();
+    });
+  }
+
+  app.get("/", (req, res) => res.send("CivilierERP API running"));
+  app.get("/health", (req, res) => res.json({ status: "ok" }));
+
+  app.use("/api/users", require("./routes/users"));
+
+  // Active user tracking (auth required)
+  app.use("/api", authMiddleware, async (req, res, next) => {
+    if (req.user?.userId) {
+      pfaddActiveUser(req.user.userId).catch(() => {});
+    }
+    next();
+  });
+
+  if (!isTest) logger.info("[ROUTES] Loading routes...");
+
+  const routeResults = await safeLoadRoutes(app, ALL_ROUTES, {
+    baseDir: __dirname,
+    logger,
+    failFast: false,
+    verbose: isDev,
+  });
+
+  // DBA route
+  try {
+    app.use(
+      "/api/dba",
+      authMiddleware,
+      require("./middleware/role")("dba", "admin", "director"),
+      require("./routes/dba"),
+    );
+    routeResults.loaded.push("dba");
+  } catch (err) {
+    logger.error(`[ERR] Route failed [dba]: ${err.message}`);
+    routeResults.failed.push({ label: "dba", error: err.message });
+  }
+
+  if (!isTest) {
+    printRoutesSummary(routeResults, logger);
+    logger.info(`[OK] Routes loaded: ${routeResults.loaded.length}`);
+  }
+
+  // Global error handler
+  app.use((err, req, res, next) => {
+    req.log?.error(`[ERR] ERROR: ${err.message} -> ${req.method} ${req.url}`);
+    res.status(500).json({
+      error: "Internal Server Error",
+      requestId: req.id,
+    });
+  });
+
+  return app;
+}
+
+// ─── startServer ──────────────────────────────────────────────────────────────
+// Full production startup: DB connect → Redis worker → createApp() → rate
+// limiters → listen(). Never called in test mode.
 async function startServer() {
   try {
     logger.info("[DB] Connecting to database...");
     await connectDB();
-    require("./worker"); // start Redis engagement decay + cleanup worker
+    require("./worker"); // Redis engagement decay + cleanup worker
     logger.info("[OK] Database connected");
 
-    // Rate limiters
+    const app = await createApp();
+
+    // Rate limiters require real Redis — add after createApp() so tests skip them
     const loginLimiter = rateLimit({
       windowMs: 15 * 60 * 1000,
       max: 10,
@@ -101,157 +266,8 @@ async function startServer() {
       legacyHeaders: false,
     });
 
-    const app = express();
-    app.disable("x-powered-by");
-    app.use(requestLogger);
-    app.use((req, res, next) => {
-      res.setHeader("X-Request-Id", req.id);
-      next();
-    });
-
-    app.use(express.json({ limit: "10mb" }));
-    app.use(express.urlencoded({ extended: true, limit: "10mb" }));
-    app.use(helmet());
-    app.use(
-      cors({
-        origin: (origin, callback) => {
-          if (!origin || ALLOWED_ORIGINS.includes(origin)) {
-            callback(null, true);
-          } else {
-            logger.warn(`[BLOCK] CORS rejected: ${origin}`);
-            callback(new Error("Not allowed by CORS"));
-          }
-        },
-        credentials: true,
-        methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-        allowedHeaders: [
-          "Content-Type",
-          "Authorization",
-          "X-Requested-With",
-          "X-Request-Id",
-        ],
-        optionsSuccessStatus: 204,
-      }),
-    );
-    app.use(compression());
-
-    // Global request tracking
-    app.use(async (req, res, next) => {
-      incrGlobalRequests().catch(() => {});
-      trackHourLoad().catch(() => {});
-      next();
-    });
-
-    // Apply limiters
     app.use("/api/users/login", loginLimiter);
     app.use("/api", apiLimiter);
-
-    app.get("/", (req, res) => res.send("CivilierERP API running"));
-    app.get("/health", (req, res) => res.json({ status: "ok" }));
-
-    // Existing routes
-    app.use("/api/users", require("./routes/users"));
-
-    // Active user tracking
-    app.use("/api", authMiddleware, async (req, res, next) => {
-      if (req.user?.userId) {
-        pfaddActiveUser(req.user.userId).catch(() => {});
-      }
-      next();
-    });
-
-    logger.info("[ROUTES] Loading routes...");
-
-    const routes = [
-      { path: "/api/roles", file: "./routes/roles" },
-      { path: "/api/user-rights", file: "./routes/userRights" },
-      { path: "/api/account-group", file: "./routes/accountGroup" },
-      { path: "/api/account-head", file: "./routes/accountHeadMaster" },
-      { path: "/api/activity-master", file: "./routes/activityMaster" },
-      { path: "/api/bank-master", file: "./routes/bankMaster" },
-      { path: "/api/billing-terms", file: "./routes/billingTerms" },
-      { path: "/api/card-master", file: "./routes/cardMaster" },
-      { path: "/api/cheque-master", file: "./routes/chequeMaster" },
-      { path: "/api/document-type", file: "./routes/document-type" }, // ← Added / Fixed
-      { path: "/api/fin-year", file: "./routes/finYear" },
-      { path: "/api/general-ledger", file: "./routes/generalLedger" },
-      { path: "/api/hsn", file: "./routes/hsn" },
-      { path: "/api/item-groups", file: "./routes/itemGroup" },
-      { path: "/api/item-master", file: "./routes/itemMaster" },
-      { path: "/api/tds-master", file: "./routes/tdsMaster" },
-      { path: "/api/enterprises", file: "./routes/enterprise" },
-      { path: "/api/entry-type", file: "./routes/entryType" },
-      { path: "/api/expense-booking", file: "./routes/expenseBooking" },
-      { path: "/api/amendments", file: "./routes/amendments" },
-      { path: "/api/new-payment", file: "./routes/newPayment" },
-      { path: "/api/received-payment", file: "./routes/receivedPayment" },
-      { path: "/api/purchase-orders", file: "./routes/purchaseOrders" },
-      { path: "/api/tenants", file: "./routes/tenants" },
-      { path: "/api/work-orders", file: "./routes/workOrder" },
-      { path: "/api/user-profile", file: "./routes/userProfile" },
-      { path: "/api/uom-master", file: "./routes/uomMaster" },
-      { path: "/api/debit-note", file: "./routes/debitNote" },
-      { path: "/api/tc-master", file: "./routes/tcMaster" },
-      { path: "/api/transactions", file: "./routes/transactions" },
-      { path: "/api/grns", file: "./routes/grns" },
-      { path: "/api/stock-ledger", file: "./routes/stockLedger" },
-      { path: "/api/brs", file: "./routes/brs" },
-      { path: "/api/reports", file: "./routes/reports" },
-      { path: "/api/finance-dashboard", file: "./routes/financeDashboard" },
-      { path: "/api/material-dashboard", file: "./routes/materialDashboard" },
-      { path: "/api/admin-dashboard", file: "./routes/adminDashboard" },
-      { path: "/api/user-activity", file: "./routes/userActivity" },
-      { path: "/api/cheque-leaf", file: "./routes/chequeLeaf" },
-      { path: "/api/contractor-category", file: "./routes/contractorCategory" },
-      { path: "/api/approval-workflows", file: "./routes/approvalWorkflows" },
-      { path: "/api/approval-inbox", file: "./routes/approvalInbox" },
-      { path: "/api/tasks", file: "./routes/tasks" },
-      { path: "/api/widgets", file: "./routes/widgets" },
-      { path: "/api/tenant-reminders", file: "./routes/tenantReminders" },
-      { path: "/api/reminders", file: "./routes/tenantReminders" },
-      { path: "/api/followup-log", file: "./routes/followupLog" },
-      { path: "/api/company-master", file: "./routes/companyMaster" },
-      { path: "/api/project-master", file: "./routes/projectMaster" },
-      { path: "/api/signatures", file: "./routes/signatures" },
-      { path: "/api/communicator", file: "./routes/communicator" },
-      { path: "/api/system/metrics", file: "./routes/systemMetrics" },
-      { path: "/api/menu-master", file: "./routes/menuMaster" },
-      { path: "/api/menu-type", file: "./routes/menuType" },
-      { path: "/api/menu-types", file: "./routes/menuType" },
-    ];
-
-    const routeResults = await safeLoadRoutes(app, routes, {
-      baseDir: __dirname,
-      logger,
-      failFast: false,
-      verbose: isDev,
-    });
-
-    // DBA route
-    try {
-      app.use(
-        "/api/dba",
-        authMiddleware,
-        require("./middleware/role")("dba", "admin", "director"),
-        require("./routes/dba"),
-      );
-      routeResults.loaded.push("dba");
-    } catch (err) {
-      logger.error(`[ERR] Route failed [dba]: ${err.message}`);
-      routeResults.failed.push({ label: "dba", error: err.message });
-    }
-
-    printRoutesSummary(routeResults, logger);
-    logger.info(`[OK] Routes loaded: ${routeResults.loaded.length}`);
-
-    // Global error handler
-    app.use((err, req, res, next) => {
-      req.log?.error(`[ERR] ERROR: ${err.message} -> ${req.method} ${req.url}`);
-      res.status(500).json({
-        error: "Internal Server Error",
-        requestId: req.id,
-      });
-    });
 
     const PORT = process.env.PORT || 5000;
     app.listen(PORT, () => {
@@ -266,9 +282,12 @@ async function startServer() {
   }
 }
 
-// For Vercel / serverless compatibility
-const appPromise = startServer();
-module.exports = async (req, res) => {
-  const app = await appPromise;
-  return app(req, res);
-};
+// ─── Exports ──────────────────────────────────────────────────────────────────
+module.exports = { startServer, createApp };
+
+// Auto-start in non-test mode only
+if (!isTest) {
+  startServer().then((serverApp) => {
+    module.exports.app = serverApp;
+  });
+}
