@@ -6,6 +6,7 @@ import {
   type FieldDef,
   type DataChangeEvent,
 } from "@/components/MasterPage";
+import type { ExportColumn } from "@/lib/export";
 import { Ruler, Hash } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { getUomList, addUom, updateUom, deleteUom } from "@/api/uomApi";
@@ -186,6 +187,16 @@ export default function UnitOfMeasurementMaster() {
         initialData={mappedData}
         columnRenderers={columnRenderers}
         onDataEvent={handleDataEvent}
+        exportConfig={{
+          title: "Unit of Measurement Master",
+          filename: "uom-master",
+          columns: [
+            { header: "Code",   accessor: "code" },
+            { header: "Name",   accessor: "name" },
+            { header: "Symbol", accessor: "symbol" },
+            { header: "Status", accessor: "status" },
+          ],
+        }}
       />
     </>
   );

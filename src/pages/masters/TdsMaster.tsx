@@ -6,6 +6,7 @@ import {
   type DataChangeEvent,
   type RecordWithId,
 } from "@/components/MasterPage";
+import type { ExportColumn } from "@/lib/export";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -169,6 +170,16 @@ const TdsMaster: React.FC = () => {
         columnRenderers={columnRenderers}
         initialData={mappedData}
         onDataEvent={handleDataEvent}
+        exportConfig={{
+          title: "TDS Master",
+          filename: "tds-master",
+          columns: [
+            { header: "Nature",   accessor: "nature" },
+            { header: "Name",     accessor: "name" },
+            { header: "Rate (%)", accessor: "percentage" },
+            { header: "Status",   accessor: "status" },
+          ],
+        }}
       />
     </>
   );
