@@ -1,10 +1,10 @@
+// requestLogger.js
 const pinoHttp = require("pino-http");
 const pino = require("pino");
 const { v4: uuidv4 } = require("uuid");
 
 const isProd = process.env.NODE_ENV === "production";
 
-// Shared pretty logger so request logs go through pino-pretty too
 const logger = pino({
   level: process.env.LOG_LEVEL || "info",
   ...(isProd
@@ -17,63 +17,67 @@ const logger = pino({
             translateTime: "HH:MM:ss",
             ignore: "pid,hostname,reqId,req,res,responseTime",
             singleLine: true,
-            messageFormat: "{msg}",
           },
         },
       }),
   base: null,
 });
 
-// Routes to silence (high-frequency polling)
+// High-frequency routes to silence
 const SILENT_ROUTES = [
+  "/",
+  "/health",
+  "/favicon.ico",
+  "/api/user-activity",
   "/api/purchase-orders",
   "/api/grns",
   "/api/tds-master",
-  "/api/user-activity",
-  "/", // silence root health-check spam
+  "/api/cheque-master",
+  "/api/work-orders",
 ];
 
-function statusIcon(code) {
-  if (code >= 500) return "[5xx]";
-  if (code >= 400) return "[4xx]";
-  if (code >= 300) return "[3xx]";
-  return "[OK]";
-}
-
 module.exports = pinoHttp({
-  logger, // share the pretty logger
+  logger,
 
   genReqId: (req) => req.headers["x-request-id"] || uuidv4(),
 
-  // 3-arg signature: (req, res, err)
   customLogLevel: (req, res, err) => {
-    if (res.statusCode >= 500 || err) return "error";
+    if (err || res.statusCode >= 500) return "error";
     if (res.statusCode >= 400) return "warn";
-    if (res.responseTime > 1000) return "warn";
+    if (res.responseTime > 800) return "warn";
     return "info";
   },
 
-  // responseTime is the 3rd explicit param here
+  // Clean message without icons
   customSuccessMessage: (req, res, responseTime) => {
-    const icon = statusIcon(res.statusCode);
     const method = req.method.padEnd(6);
-    const url = req.url.padEnd(32);
-    return `${icon} ${method} ${url} ${res.statusCode}  ${responseTime}ms`;
+    const url =
+      req.url.length > 45
+        ? req.url.substring(0, 42) + "..."
+        : req.url.padEnd(45);
+
+    return `${method} ${url} ${res.statusCode} ${responseTime}ms`;
   },
 
   customErrorMessage: (req, res, err) => {
-    return `[ERR] ${req.method} ${req.url}  ERROR ${res.statusCode}  ${err?.message || ""}`;
+    return `ERROR ${req.method} ${req.url} → ${res.statusCode} ${err?.message || ""}`;
   },
 
-  // Strip bulky req/res objects from the log line
+  // Remove bulky objects from output
   serializers: {
     req: () => undefined,
     res: () => undefined,
   },
 
-  // Silence noisy polling routes
+  // Silence noisy routes
   autoLogging: {
-    ignore: (req) =>
-      SILENT_ROUTES.some((r) => req.url === r || req.url.startsWith(r + "?")),
+    ignore: (req) => {
+      return SILENT_ROUTES.some(
+        (route) =>
+          req.url === route ||
+          req.url.startsWith(route + "?") ||
+          req.url.startsWith(route + "/"),
+      );
+    },
   },
 });
