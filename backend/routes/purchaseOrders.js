@@ -12,6 +12,23 @@ const requireUserName = (req, res) => {
   return name;
 };
 
+// Helper to parse POItems safely
+const parseItems = (body) => {
+  const items = body.POItems;
+  if (!items) return '[]';
+  return typeof items === 'string' ? items : JSON.stringify(items);
+};
+
+// Helper to serialize items for response
+const serializeItems = (itemsStr) => {
+  if (!itemsStr) return [];
+  try {
+    return JSON.parse(itemsStr);
+  } catch {
+    return [];
+  }
+};
+
 // ── GET / ─────────────────────────────────────────────────────────────────────
 router.get("/", cache("purchase-orders", 300), async (req, res) => {
   try {
@@ -35,7 +52,7 @@ router.get("/", cache("purchase-orders", 300), async (req, res) => {
           po.ItemDescription, po.Quantity, po.Unit, po.Rate, po.TotalAmount,
           po.PaymentTerms, po.Remarks, po.Status,
           po.CreatedBy, po.CreatedAt, po.UpdatedAt, po.ApprovedBy, po.ApprovedAt,
-          po.DocTypeId, po.DocNo,
+          po.DocTypeId, po.DocNo, po.POItems,
           td.Prefix      AS DocTypePrefix,
           td.Description AS DocTypeDescription
         FROM dbo.PurchaseOrders po
@@ -47,7 +64,13 @@ router.get("/", cache("purchase-orders", 300), async (req, res) => {
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `);
 
-    res.json({ data: result.recordset, page, limit, total, totalPages: Math.ceil(total / limit) });
+    // Parse POItems JSON for each record
+    const data = result.recordset.map((po) => ({
+      ...po,
+      POItems: serializeItems(po.POItems),
+    }));
+
+    res.json({ data, page, limit, total, totalPages: Math.ceil(total / limit) });
   } catch (err) {
     console.error("GET PurchaseOrders error:", err);
     res.status(500).json({ error: err.message });
@@ -66,7 +89,11 @@ router.post("/", async (req, res) => {
     ItemDescription, Quantity, Unit, Rate, TotalAmount,
     PaymentTerms, Status, Remarks,
     DocTypeId, finYear,
+    POItems,
   } = req.body;
+
+  // Parse POItems JSON
+  const poItemsJson = parseItems({ POItems });
 
   try {
     const userEmail = requireUserName(req, res);
@@ -93,7 +120,7 @@ router.post("/", async (req, res) => {
       .input("ExpectedDeliveryDate", sql.Date,           ExpectedDeliveryDate || null)
       .input("SupplierID",           sql.Int,            SupplierID ? parseInt(SupplierID, 10) : null)
       .input("CompanyId",            sql.Int,            CompanyId  ? parseInt(CompanyId,  10) : null)
-      .input("ProjectId",            sql.Int,            ProjectId  ? parseInt(ProjectId,  10) : null)
+      .input("ProjectId",            sql.Int,            ProjectId  ? parseInt(ProjectId, 10) : null)
       .input("ItemDescription",      sql.NVarChar(510),  ItemDescription || null)
       .input("Quantity",             sql.Decimal(18, 2), parseFloat(Quantity)    || 0)
       .input("Unit",                 sql.NVarChar(50),   Unit || null)
@@ -106,19 +133,20 @@ router.post("/", async (req, res) => {
       .input("DocNo",                sql.NVarChar(100),  finalDocNo || null)
       .input("CreatedBy",            sql.NVarChar(100),  userEmail)
       .input("CreatedAt",            sql.DateTime2,      new Date())
+      .input("POItems",             sql.NVarChar(sql.MAX), poItemsJson)
       .query(`
         INSERT INTO dbo.PurchaseOrders (
           PurchaseOrderNo, PODate, ExpectedDeliveryDate,
           SupplierID, CompanyId, ProjectId,
           ItemDescription, Quantity, Unit, Rate, TotalAmount,
-          PaymentTerms, Status, Remarks, DocTypeId, DocNo, CreatedBy, CreatedAt
+          PaymentTerms, Status, Remarks, DocTypeId, DocNo, CreatedBy, CreatedAt, POItems
         )
         OUTPUT INSERTED.PurchaseOrderID
         VALUES (
           @PurchaseOrderNo, @PODate, @ExpectedDeliveryDate,
           @SupplierID, @CompanyId, @ProjectId,
           @ItemDescription, @Quantity, @Unit, @Rate, @TotalAmount,
-          @PaymentTerms, @Status, @Remarks, @DocTypeId, @DocNo, @CreatedBy, @CreatedAt
+          @PaymentTerms, @Status, @Remarks, @DocTypeId, @DocNo, @CreatedBy, @CreatedAt, @POItems
         )
       `);
 
@@ -149,7 +177,11 @@ router.put("/:id", async (req, res) => {
     SupplierID, CompanyId, ProjectId,
     ItemDescription, Quantity, Unit, Rate, TotalAmount,
     PaymentTerms, Status, Remarks, DocTypeId, DocNo,
+    POItems,
   } = req.body;
+
+  // Parse POItems JSON for update
+  const poItemsJson = parseItems({ POItems });
 
   try {
     const userEmail = requireUserName(req, res);
@@ -165,7 +197,7 @@ router.put("/:id", async (req, res) => {
       .input("ExpectedDeliveryDate", sql.Date,           ExpectedDeliveryDate || null)
       .input("SupplierID",           sql.Int,            SupplierID ? parseInt(SupplierID, 10) : null)
       .input("CompanyId",            sql.Int,            CompanyId  ? parseInt(CompanyId,  10) : null)
-      .input("ProjectId",            sql.Int,            ProjectId  ? parseInt(ProjectId,  10) : null)
+      .input("ProjectId",            sql.Int,            ProjectId  ? parseInt(ProjectId, 10) : null)
       .input("ItemDescription",      sql.NVarChar(510),  ItemDescription || null)
       .input("Quantity",             sql.Decimal(18, 2), parseFloat(Quantity)    || 0)
       .input("Unit",                 sql.NVarChar(50),   Unit || null)
@@ -178,6 +210,7 @@ router.put("/:id", async (req, res) => {
       .input("DocNo",                sql.NVarChar(100),  DocNo || null)
       .input("UpdatedBy",            sql.NVarChar(100),  userEmail)
       .input("UpdatedAt",            sql.DateTime2,      new Date())
+      .input("POItems",             sql.NVarChar(sql.MAX), poItemsJson)
       .query(`
         UPDATE dbo.PurchaseOrders SET
           PurchaseOrderNo = @PurchaseOrderNo, PODate = @PODate,
@@ -187,7 +220,8 @@ router.put("/:id", async (req, res) => {
           Rate = @Rate, TotalAmount = @TotalAmount, PaymentTerms = @PaymentTerms,
           Status = @Status, Remarks = @Remarks,
           DocTypeId = @DocTypeId, DocNo = @DocNo,
-          UpdatedBy = @UpdatedBy, UpdatedAt = @UpdatedAt
+          UpdatedBy = @UpdatedBy, UpdatedAt = @UpdatedAt,
+          POItems = @POItems
         WHERE PurchaseOrderID = @PurchaseOrderID
       `);
 
@@ -261,4 +295,3 @@ router.put("/:id/reject", async (req, res) => {
 });
 
 module.exports = router;
-
