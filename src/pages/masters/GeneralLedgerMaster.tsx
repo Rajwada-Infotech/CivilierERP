@@ -1,7 +1,12 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getAccountGroups } from "@/api/accountApi";
-import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import {
+  getLedgers,
+  addLedger,
+  updateLedger as updateLedgerApi,
+  deleteLedger as deleteLedgerApi,
+} from "@/api/generalLedgerApi";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
@@ -54,96 +59,6 @@ const EMPTY_FORM: LedgerForm = {
   LBelongsTo: "",
 };
 
-const BASE_URL = "/api/general-ledger";
-
-// ─── API Functions ───────────────────────────────────────────────────────────
-const fetchLedgers = async ({
-  page,
-  limit,
-  search,
-  groupId,
-}: {
-  page: number;
-  limit: number;
-  search?: string;
-  groupId?: string;
-}): Promise<PaginatedResponse<LedgerHead>> => {
-  const qs = new URLSearchParams({
-    page: String(page),
-    limit: String(limit),
-  });
-  if (search?.trim()) qs.set("search", search.trim());
-  if (groupId) qs.set("groupId", groupId);
-
-  const res = await fetchWithAuth(`${BASE_URL}?${qs.toString()}`);
-  if (!res.ok) throw new Error(`Failed to fetch ledgers: ${res.status}`);
-  const payload = await res.json();
-  if (Array.isArray(payload)) {
-    return {
-      data: payload,
-      page: 1,
-      limit: payload.length,
-      total: payload.length,
-      totalPages: 1,
-    };
-  }
-  return {
-    data: Array.isArray(payload?.data) ? payload.data : [],
-    page: Number(payload?.page || 1),
-    limit: Number(payload?.limit || limit),
-    total: Number(payload?.total || payload?.data?.length || 0),
-    totalPages: Number(payload?.totalPages || 1),
-  };
-};
-
-const createLedger = async (data: LedgerForm) => {
-  const res = await fetchWithAuth(BASE_URL, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      LHeadName: data.LHeadName.trim(),
-      LHeadCode: data.LHeadCode.trim().toUpperCase() || null,
-      LBelongsTo: data.LBelongsTo ? Number(data.LBelongsTo) : null,
-    }),
-  });
-  if (!res.ok) {
-    const e = await res.json();
-    throw new Error(e.error || "Failed to create");
-  }
-  return res.json();
-};
-
-const updateLedger = async ({ id, data }: { id: number; data: LedgerForm }) => {
-  const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
-    method: "PUT",
-    headers: {
-      "Content-Type": "application/json",
-    },
-      body: JSON.stringify({
-      LHeadName: data.LHeadName.trim(),
-      LHeadCode: data.LHeadCode.trim().toUpperCase() || null,
-      LBelongsTo: data.LBelongsTo ? Number(data.LBelongsTo) : null,
-    }),
-  });
-  if (!res.ok) {
-    const e = await res.json();
-    throw new Error(e.error || "Failed to update");
-  }
-  return res.json();
-};
-
-const deleteLedger = async (id: number) => {
-  const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
-    method: "DELETE",
-  });
-  if (!res.ok) {
-    const e = await res.json();
-    throw new Error(e.error || "Failed to delete");
-  }
-  return res.json();
-};
 
 // ─── Component ────────────────────────────────────────────────────────────────
 const GeneralLedgerMaster: React.FC = () => {
@@ -180,7 +95,7 @@ const GeneralLedgerMaster: React.FC = () => {
     isError: ledgersError,
   } = useQuery({
     queryKey: ["ledger-heads", page, limit, search, filterGroup],
-    queryFn: () => fetchLedgers({ page, limit, search, groupId: filterGroup }),
+    queryFn: () => getLedgers({ page, limit, search, groupId: filterGroup }),
   });
 
   const accountGroups: AccountGroup[] = useMemo(() => {
@@ -208,7 +123,12 @@ const GeneralLedgerMaster: React.FC = () => {
   const invalidate = () => qc.invalidateQueries({ queryKey: ["ledger-heads"] });
 
   const createMut = useMutation({
-    mutationFn: createLedger,
+    mutationFn: (data: LedgerForm) =>
+      addLedger({
+        LHeadName: data.LHeadName,
+        LHeadCode: data.LHeadCode || null,
+        LBelongsTo: data.LBelongsTo ? Number(data.LBelongsTo) : null,
+      }),
     onSuccess: () => {
       toast.success("Ledger account created");
       invalidate();
@@ -218,7 +138,12 @@ const GeneralLedgerMaster: React.FC = () => {
   });
 
   const updateMut = useMutation({
-    mutationFn: updateLedger,
+    mutationFn: ({ id, data }: { id: number; data: LedgerForm }) =>
+      updateLedgerApi(id, {
+        LHeadName: data.LHeadName,
+        LHeadCode: data.LHeadCode || null,
+        LBelongsTo: data.LBelongsTo ? Number(data.LBelongsTo) : null,
+      }),
     onSuccess: () => {
       toast.success("Ledger account updated");
       invalidate();
@@ -228,7 +153,7 @@ const GeneralLedgerMaster: React.FC = () => {
   });
 
   const deleteMut = useMutation({
-    mutationFn: deleteLedger,
+    mutationFn: (id: number) => deleteLedgerApi(id),
     onSuccess: () => {
       toast.success("Ledger account deleted");
       invalidate();
