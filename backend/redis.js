@@ -174,14 +174,72 @@ const redisZScore = (key, member) => safeExec((r) => r.zscore(key, member), 0);
 const redisZIncrBy = (key, increment, member, ttl = null) =>
   safeExec(async (r) => {
     await r.zincrby(key, increment, member);
-    await r.set(
-      `engagement:last:${member}`,
-      Date.now().toString(),
-      ttl ? "EX" : undefined,
-      ttl,
-    );
+    if (ttl) {
+      await r.set(`engagement:last:${member}`, Date.now().toString(), "EX", ttl);
+    } else {
+      await r.set(`engagement:last:${member}`, Date.now().toString());
+    }
     if (ttl) await r.expire(key, ttl);
   });
+
+const decayEngagement = () =>
+  safeExec(async (r) => {
+    const script = `
+      local key = KEYS[1]
+      local factor = tonumber(ARGV[1])
+      local minScore = tonumber(ARGV[2])
+      local members = redis.call('ZRANGE', key, 0, -1, 'WITHSCORES')
+      local updated = 0
+
+      for i = 1, #members, 2 do
+        local member = members[i]
+        local score = tonumber(members[i + 1]) or 0
+        local nextScore = score * factor
+
+        if nextScore < minScore then
+          redis.call('ZREM', key, member)
+          redis.call('DEL', 'engagement:last:' .. member)
+        else
+          redis.call('ZADD', key, nextScore, member)
+          updated = updated + 1
+        end
+      end
+
+      return updated
+    `;
+
+    return await r.eval(script, 1, "engagement:score", 0.95, 0.01);
+  }, 0);
+
+const cleanupInactiveUsers = (inactiveAfterMs = 30 * 24 * 60 * 60 * 1000) =>
+  safeExec(async (r) => {
+    let cursor = "0";
+    let removed = 0;
+    const cutoff = Date.now() - inactiveAfterMs;
+
+    do {
+      const [nextCursor, keys] = await r.scan(
+        cursor,
+        "MATCH",
+        "engagement:last:*",
+        "COUNT",
+        100,
+      );
+      cursor = nextCursor;
+
+      for (const key of keys) {
+        const lastSeen = Number(await r.get(key));
+        if (Number.isFinite(lastSeen) && lastSeen >= cutoff) continue;
+
+        const member = key.slice("engagement:last:".length);
+        await r.zrem("engagement:score", member);
+        await r.del(key);
+        removed += 1;
+      }
+    } while (cursor !== "0");
+
+    return removed;
+  }, 0);
 
 // ─────────────────────────────
 // GLOBAL METRICS COUNTERS
@@ -364,6 +422,8 @@ module.exports = {
   setStaleCache,
   redisZScore,
   redisZIncrBy,
+  decayEngagement,
+  cleanupInactiveUsers,
   incrGlobalRequests,
   incrGlobalCacheHit,
   incrGlobalCacheMiss,
