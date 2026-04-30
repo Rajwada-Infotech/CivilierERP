@@ -23,9 +23,12 @@ import {
   ChevronsRight,
   Search,
 } from "lucide-react";
+import { ExportMenu } from "@/components/ExportMenu";
+import type { ExportColumn } from "@/lib/export";
 
 // ─── Re-export ColumnDef so pages only import from here ──────────────────────
 export type { ColumnDef };
+export type { ExportColumn };
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 interface DataTableProps<TData extends RowData> {
@@ -56,6 +59,27 @@ interface DataTableProps<TData extends RowData> {
   loading?: boolean;
   /** Number of skeleton rows to show when loading */
   skeletonRows?: number;
+  /**
+   * When provided, an Export button appears in the toolbar.
+   * Pass ExportColumn[] — plain { header, accessor } descriptors separate
+   * from TanStack's ColumnDef so the export layer stays dependency-free.
+   *
+   * @example
+   * exportConfig={{
+   *   title: "Bank Master",
+   *   filename: "bank-master",
+   *   columns: [
+   *     { header: "Bank Name", accessor: "bankName" },
+   *     { header: "Account No", accessor: "accountNo" },
+   *   ],
+   * }}
+   */
+  exportConfig?: {
+    title: string;
+    filename?: string;
+    subtitle?: string;
+    columns: ExportColumn[];
+  };
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -72,6 +96,7 @@ export function DataTable<TData extends RowData>({
   rowClassName,
   loading = false,
   skeletonRows = 5,
+  exportConfig,
 }: DataTableProps<TData>) {
   const [sorting, setSorting] = useState<SortingState>([]);
   const [globalFilter, setGlobalFilter] = useState("");
@@ -111,20 +136,36 @@ export function DataTable<TData extends RowData>({
       {searchable && (
         <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-card/60">
           <p className="text-[11px] text-muted-foreground">
-            {loading ? "Loading..." : `${totalFiltered} record${totalFiltered !== 1 ? "s" : ""}`}
+            {loading
+              ? "Loading..."
+              : `${totalFiltered} record${totalFiltered !== 1 ? "s" : ""}`}
           </p>
-          <div className="relative">
-            <Search
-              size={13}
-              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-            />
-            <input
-              type="text"
-              value={globalFilter}
-              onChange={(e) => setGlobalFilter(e.target.value)}
-              placeholder={searchPlaceholder}
-              className="pl-8 pr-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary w-36 sm:w-44"
-            />
+          <div className="flex items-center gap-2">
+            {exportConfig && (
+              <ExportMenu
+                data={table
+                  .getFilteredRowModel()
+                  .rows.map((r) => r.original as Record<string, unknown>)}
+                columns={exportConfig.columns}
+                title={exportConfig.title}
+                filename={exportConfig.filename}
+                subtitle={exportConfig.subtitle}
+                disabled={loading || data.length === 0}
+              />
+            )}
+            <div className="relative">
+              <Search
+                size={13}
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+              />
+              <input
+                type="text"
+                value={globalFilter}
+                onChange={(e) => setGlobalFilter(e.target.value)}
+                placeholder={searchPlaceholder}
+                className="pl-8 pr-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary w-36 sm:w-44"
+              />
+            </div>
           </div>
         </div>
       )}
@@ -143,14 +184,23 @@ export function DataTable<TData extends RowData>({
                       key={header.id}
                       colSpan={header.colSpan}
                       className={`px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap select-none ${
-                        canSort ? "cursor-pointer hover:text-foreground transition-colors" : ""
+                        canSort
+                          ? "cursor-pointer hover:text-foreground transition-colors"
+                          : ""
                       }`}
-                      onClick={canSort ? header.column.getToggleSortingHandler() : undefined}
+                      onClick={
+                        canSort
+                          ? header.column.getToggleSortingHandler()
+                          : undefined
+                      }
                     >
                       <span className="inline-flex items-center gap-1">
                         {header.isPlaceholder
                           ? null
-                          : flexRender(header.column.columnDef.header, header.getContext())}
+                          : flexRender(
+                              header.column.columnDef.header,
+                              header.getContext(),
+                            )}
                         {canSort && (
                           <span className="text-muted-foreground/50">
                             {sorted === "asc" ? (
@@ -165,7 +215,7 @@ export function DataTable<TData extends RowData>({
                       </span>
                     </th>
                   );
-                })
+                }),
               )}
             </tr>
           </thead>
@@ -201,8 +251,14 @@ export function DataTable<TData extends RowData>({
                   }`}
                 >
                   {row.getVisibleCells().map((cell) => (
-                    <td key={cell.id} className="px-4 py-3 text-foreground text-sm">
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                    <td
+                      key={cell.id}
+                      className="px-4 py-3 text-foreground text-sm"
+                    >
+                      {flexRender(
+                        cell.column.columnDef.cell,
+                        cell.getContext(),
+                      )}
                     </td>
                   ))}
                 </tr>
@@ -221,7 +277,11 @@ export function DataTable<TData extends RowData>({
             <select
               value={pagination.pageSize}
               onChange={(e) =>
-                setPagination((p) => ({ ...p, pageSize: Number(e.target.value), pageIndex: 0 }))
+                setPagination((p) => ({
+                  ...p,
+                  pageSize: Number(e.target.value),
+                  pageIndex: 0,
+                }))
               }
               className="text-xs rounded-md bg-muted border border-border px-1.5 py-1 text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
             >
@@ -235,17 +295,37 @@ export function DataTable<TData extends RowData>({
 
           {/* Page info */}
           <span className="text-xs text-muted-foreground">
-            Page {table.getState().pagination.pageIndex + 1} of {table.getPageCount()} &middot;{" "}
-            {totalFiltered} total
+            Page {table.getState().pagination.pageIndex + 1} of{" "}
+            {table.getPageCount()} &middot; {totalFiltered} total
           </span>
 
           {/* Nav buttons */}
           <div className="flex items-center gap-1">
             {[
-              { icon: ChevronsLeft, fn: () => table.setPageIndex(0), disabled: !table.getCanPreviousPage(), label: "First" },
-              { icon: ChevronLeft, fn: () => table.previousPage(), disabled: !table.getCanPreviousPage(), label: "Prev" },
-              { icon: ChevronRight, fn: () => table.nextPage(), disabled: !table.getCanNextPage(), label: "Next" },
-              { icon: ChevronsRight, fn: () => table.setPageIndex(table.getPageCount() - 1), disabled: !table.getCanNextPage(), label: "Last" },
+              {
+                icon: ChevronsLeft,
+                fn: () => table.setPageIndex(0),
+                disabled: !table.getCanPreviousPage(),
+                label: "First",
+              },
+              {
+                icon: ChevronLeft,
+                fn: () => table.previousPage(),
+                disabled: !table.getCanPreviousPage(),
+                label: "Prev",
+              },
+              {
+                icon: ChevronRight,
+                fn: () => table.nextPage(),
+                disabled: !table.getCanNextPage(),
+                label: "Next",
+              },
+              {
+                icon: ChevronsRight,
+                fn: () => table.setPageIndex(table.getPageCount() - 1),
+                disabled: !table.getCanNextPage(),
+                label: "Last",
+              },
             ].map(({ icon: Icon, fn, disabled, label }) => (
               <button
                 key={label}
