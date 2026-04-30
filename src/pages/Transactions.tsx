@@ -10,6 +10,11 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { formatINR } from "@/utils/formatCurrency";
+import {
+  DataTable,
+  type ColumnDef,
+  type ExportColumn,
+} from "@/components/ui/DataTable";
 
 interface Transaction {
   id: string;
@@ -49,6 +54,119 @@ const STATUS_STYLE: Record<string, string> = {
 
 const fmt = (n: number) => formatINR(n);
 
+const COLUMNS: ColumnDef<Transaction, unknown>[] = [
+  {
+    accessorKey: "id",
+    header: "ID",
+    cell: ({ getValue }) => (
+      <span className="text-primary font-heading text-xs">
+        {getValue() as string}
+      </span>
+    ),
+  },
+  {
+    accessorKey: "date",
+    header: "Date",
+    cell: ({ getValue }) => {
+      const v = getValue() as string;
+      return (
+        <span className="whitespace-nowrap">
+          {v ? new Date(v).toLocaleDateString("en-IN") : "—"}
+        </span>
+      );
+    },
+  },
+  {
+    accessorKey: "type",
+    header: "Type",
+    cell: ({ getValue }) => {
+      const v = getValue() as string;
+      return (
+        <span
+          className={`px-2 py-0.5 rounded-full text-xs font-heading ${TYPE_STYLE[v] || "bg-muted text-muted-foreground"}`}
+        >
+          {v}
+        </span>
+      );
+    },
+  },
+  {
+    accessorKey: "party",
+    header: "Party",
+    cell: ({ getValue }) => (
+      <span className="font-medium whitespace-nowrap">
+        {getValue() as string}
+      </span>
+    ),
+  },
+  {
+    accessorKey: "description",
+    header: "Description",
+    cell: ({ getValue }) => (
+      <span className="text-muted-foreground max-w-[200px] truncate block">
+        {getValue() as string}
+      </span>
+    ),
+  },
+  {
+    accessorKey: "amount",
+    header: "Amount",
+    cell: ({ getValue }) => (
+      <span className="font-heading font-medium whitespace-nowrap">
+        {fmt(getValue() as number)}
+      </span>
+    ),
+  },
+  {
+    accessorKey: "mode",
+    header: "Mode",
+    cell: ({ getValue }) => (
+      <span className="text-muted-foreground whitespace-nowrap">
+        {getValue() as string}
+      </span>
+    ),
+  },
+  {
+    accessorKey: "status",
+    header: "Status",
+    cell: ({ getValue }) => {
+      const v = getValue() as string;
+      return (
+        <span
+          className={`px-2 py-0.5 rounded-full text-xs font-heading ${STATUS_STYLE[v] || "bg-muted text-muted-foreground"}`}
+        >
+          {v}
+        </span>
+      );
+    },
+  },
+  {
+    accessorKey: "createdBy",
+    header: "Created By",
+    cell: ({ getValue }) => (
+      <span className="text-muted-foreground whitespace-nowrap">
+        {(getValue() as string) ?? "—"}
+      </span>
+    ),
+  },
+];
+
+const EXPORT_COLUMNS: ExportColumn[] = [
+  { header: "ID", accessor: "id" },
+  {
+    header: "Date",
+    accessor: (r) =>
+      r.date ? new Date(r.date as string).toLocaleDateString("en-IN") : "",
+  },
+  { header: "Type", accessor: "type" },
+  { header: "Party", accessor: "party" },
+  { header: "Description", accessor: "description" },
+  { header: "Amount", accessor: (r) => fmt(r.amount as number) },
+  { header: "Mode", accessor: "mode" },
+  { header: "Status", accessor: "status" },
+  { header: "Created By", accessor: "createdBy" },
+];
+
 export default function Transactions() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [summary, setSummary] = useState<Summary | null>(null);
@@ -65,7 +183,9 @@ export default function Transactions() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetchWithAuth(`/api/transactions?page=${pg}&limit=${PAGE_SIZE}`);
+      const res = await fetchWithAuth(
+        `/api/transactions?page=${pg}&limit=${PAGE_SIZE}`,
+      );
       if (!res.ok) throw new Error("Failed to load transactions");
       const data = await res.json();
       setTransactions(data.transactions);
@@ -82,6 +202,12 @@ export default function Transactions() {
   useEffect(() => {
     fetchData(page);
   }, [page]);
+
+  // Resolve createdBy usernames before passing to table/export
+  const resolvedTransactions = transactions.map((t) => ({
+    ...t,
+    createdBy: resolveUser(t.createdBy),
+  }));
 
   const statCards = summary
     ? [
@@ -120,14 +246,14 @@ export default function Transactions() {
         <h1 className="text-xl font-heading font-bold text-foreground">
           Transactions
         </h1>
-  <button
-    onClick={() => fetchData()}
-    disabled={loading}
-    className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm hover:bg-accent transition disabled:opacity-50"
-  >
-    <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-    Refresh
-  </button>
+        <button
+          onClick={() => fetchData()}
+          disabled={loading}
+          className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border text-sm hover:bg-accent transition disabled:opacity-50"
+        >
+          <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+          Refresh
+        </button>
       </div>
 
       {error && (
@@ -169,113 +295,30 @@ export default function Transactions() {
             ))}
       </div>
 
-      {/* Transactions Table */}
+      {/* Transactions Table — DataTable replaces the old raw <table> */}
       <div className="rounded-xl bg-card border border-border overflow-hidden">
-        <div className="p-4 border-b border-border">
-          <h2 className="font-heading font-semibold text-foreground text-sm">
-            Recent Transactions
-          </h2>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border">
-                {[
-                  "ID",
-                  "Date",
-                  "Type",
-                  "Party",
-                  "Description",
-                  "Amount",
-                  "Mode",
-                  "Status",
-                "Created By",
-                ].map((h) => (
-                  <th
-                    key={h}
-                    className="px-4 py-3 text-left text-xs font-heading text-muted-foreground font-semibold whitespace-nowrap"
-                  >
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                Array.from({ length: 5 }).map((_, i) => (
-                  <tr key={i} className="border-b border-border">
-                    {Array.from({ length: 9 }).map((_, j) => (
-                      <td key={j} className="px-4 py-3">
-                        <div className="h-4 bg-muted rounded animate-pulse" />
-                      </td>
-                    ))}
-                  </tr>
-                ))
-              ) : transactions.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={9}
-                    className="px-4 py-10 text-center text-muted-foreground text-sm"
-                  >
-                    No transactions found.
-                  </td>
-                </tr>
-              ) : (
-                transactions.map((txn, i) => (
-                  <tr
-                    key={txn.id}
-                    className={`border-b border-border transition-colors hover:bg-muted/50 ${i % 2 === 1 ? "bg-muted/20" : ""}`}
-                  >
-                    <td className="px-4 py-3 text-primary font-heading text-xs">
-                      {txn.id}
-                    </td>
-                    <td className="px-4 py-3 text-foreground whitespace-nowrap">
-                      {txn.date
-                        ? new Date(txn.date).toLocaleDateString("en-IN")
-                        : "—"}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`px-2 py-0.5 rounded-full text-xs font-heading ${TYPE_STYLE[txn.type] || "bg-muted text-muted-foreground"}`}
-                      >
-                        {txn.type}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-foreground font-medium whitespace-nowrap">
-                      {txn.party}
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground max-w-[200px] truncate">
-                      {txn.description}
-                    </td>
-                    <td className="px-4 py-3 text-foreground font-heading font-medium whitespace-nowrap">
-                      {fmt(txn.amount)}
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
-                      {txn.mode}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`px-2 py-0.5 rounded-full text-xs font-heading ${STATUS_STYLE[txn.status] || "bg-muted text-muted-foreground"}`}
-                      >
-                        {txn.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
-                      {resolveUser(txn.createdBy)}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          data={resolvedTransactions}
+          columns={COLUMNS}
+          loading={loading}
+          searchPlaceholder="Search transactions..."
+          emptyMessage="No transactions found."
+          paginated={false}
+          exportConfig={{
+            title: "Transactions",
+            filename: "transactions",
+            subtitle: `Page ${page} of ${totalPages} · ${totalRecords} total records`,
+            columns: EXPORT_COLUMNS,
+          }}
+        />
       </div>
 
-      {/* Pagination */}
+      {/* Pagination (server-side — kept as-is) */}
       {totalPages > 1 && (
         <div className="flex items-center justify-between mt-4 px-1">
           <p className="text-xs text-muted-foreground">
-            Page {page} of {totalPages} &middot; {totalRecords} total transactions
+            Page {page} of {totalPages} &middot; {totalRecords} total
+            transactions
           </p>
           <div className="flex items-center gap-1">
             <button
@@ -315,4 +358,3 @@ export default function Transactions() {
     </>
   );
 }
-

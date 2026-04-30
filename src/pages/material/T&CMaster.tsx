@@ -7,6 +7,7 @@ import {
   type DataChangeEvent,
   type RecordWithId,
 } from "@/components/MasterPage";
+import type { ExportColumn } from "@/lib/export";
 import { FileText } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -184,6 +185,15 @@ export default function TCMaster() {
         initialData={rows}
         columnRenderers={columnRenderers}
         onDataEvent={handleDataEvent}
+        exportConfig={{
+          title: "T&C Master",
+          filename: "tc-master",
+          columns: [
+            { header: "Name",          accessor: "name" },
+            { header: "Terms Preview", accessor: "terms" },
+            { header: "Status",        accessor: "status" },
+          ],
+        }}
       />
     </>
   );

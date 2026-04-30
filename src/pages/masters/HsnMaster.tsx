@@ -6,6 +6,7 @@ import {
   type DataChangeEvent,
   type RecordWithId,
 } from "@/components/MasterPage";
+import type { ExportColumn } from "@/lib/export";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
@@ -195,6 +196,18 @@ const HsnMaster: React.FC = () => {
         columnRenderers={columnRenderers}
         initialData={mappedData}
         onDataEvent={handleDataEvent}
+        exportConfig={{
+          title: "HSN Master",
+          filename: "hsn-master",
+          columns: [
+            { header: "HSN Code",   accessor: "code" },
+            { header: "Short Desc", accessor: "shortDesc" },
+            { header: "IGST %",     accessor: "igstRate" },
+            { header: "CGST %",     accessor: "cgstRate" },
+            { header: "SGST %",     accessor: "sgstRate" },
+            { header: "Status",     accessor: "status" },
+          ],
+        }}
       />
     </>
   );
