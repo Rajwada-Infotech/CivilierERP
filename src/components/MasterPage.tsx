@@ -1,6 +1,8 @@
 import React, { useState } from "react";
 import { Search, Edit2, Trash2, Check, X, Plus, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
+import { ExportMenu } from "@/components/ExportMenu";
+import type { ExportColumn } from "@/lib/export";
 
 export interface FieldDef {
   name: string;
@@ -87,6 +89,26 @@ interface MasterPageProps {
   ) => Record<string, unknown> | null;
   externalFormPatch?: Record<string, unknown> | null;
   externalFormPatchKey?: string | number | null;
+  /**
+   * When provided, an Export button appears in the table toolbar.
+   * Pass ExportColumn[] — plain { header, accessor } descriptors.
+   *
+   * @example
+   * exportConfig={{
+   *   title: "Purchase Order",
+   *   filename: "purchase-orders",
+   *   columns: [
+   *     { header: "PO No", accessor: "poNumber" },
+   *     { header: "Supplier", accessor: "supplierName" },
+   *   ],
+   * }}
+   */
+  exportConfig?: {
+    title: string;
+    filename?: string;
+    subtitle?: string;
+    columns: ExportColumn[];
+  };
 }
 
 function getDefaults(f: FieldDef[]): Record<string, unknown> {
@@ -120,6 +142,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   onCustomSave,
   externalFormPatch,
   externalFormPatchKey,
+  exportConfig,
 }) => {
   const [data, setData] = useState<RecordWithId[]>(() =>
     seedWithIds(initialData),
@@ -153,7 +176,8 @@ export const MasterPage: React.FC<MasterPageProps> = ({
 
   const prevPatchKeyRef = React.useRef<string | number | null>(null);
   React.useEffect(() => {
-    if (externalFormPatchKey === null || externalFormPatchKey === undefined) return;
+    if (externalFormPatchKey === null || externalFormPatchKey === undefined)
+      return;
     if (prevPatchKeyRef.current === externalFormPatchKey) return;
     prevPatchKeyRef.current = externalFormPatchKey;
     setForm((current) => ({ ...current, ...(externalFormPatch ?? {}) }));
@@ -222,44 +246,44 @@ export const MasterPage: React.FC<MasterPageProps> = ({
     if (onCustomSave && Object.keys(finalData).length === 0) return;
 
     try {
-    if (editingId !== null) {
-      const next = data.map((row) =>
-        row._id === editingId ? { ...finalData, _id: editingId } : row,
-      );
-      const stripped = next.map(({ _id, ...rest }) => rest);
-      setData(next);
-      onDataChange?.(stripped);
-      await onDataEvent?.({
+      if (editingId !== null) {
+        const next = data.map((row) =>
+          row._id === editingId ? { ...finalData, _id: editingId } : row,
+        );
+        const stripped = next.map(({ _id, ...rest }) => rest);
+        setData(next);
+        onDataChange?.(stripped);
+        await onDataEvent?.({
           action: "update",
           id: editingId,
           record: finalData,
           records: stripped,
-      });
-      setEditingId(null);
-      toast.success("Record updated successfully ✓");
-      setForm({ ...getDefaults(fields), ...(externalFormPatch ?? {}) });
-    } else {
-      const newId = `record-${Date.now()}`;
-      const newRecord: RecordWithId = { ...finalData, _id: newId };
-      const next = [...data, newRecord];
-      const stripped = next.map(({ _id, ...rest }) => rest);
-      setData(next);
-      onDataChange?.(stripped);
-      const result = await onDataEvent?.({
-        action: "add",
-        record: finalData,
-        records: stripped,
-      });
-      toast.success("Record saved successfully ✓");
-      setForm({
-        ...getDefaults(fields),
-        ...(externalFormPatch ?? {}),
-        ...((result && typeof result === "object" && !Array.isArray(result))
-          ? result
-          : {}),
-      });
-      return;
-    }
+        });
+        setEditingId(null);
+        toast.success("Record updated successfully ✓");
+        setForm({ ...getDefaults(fields), ...(externalFormPatch ?? {}) });
+      } else {
+        const newId = `record-${Date.now()}`;
+        const newRecord: RecordWithId = { ...finalData, _id: newId };
+        const next = [...data, newRecord];
+        const stripped = next.map(({ _id, ...rest }) => rest);
+        setData(next);
+        onDataChange?.(stripped);
+        const result = await onDataEvent?.({
+          action: "add",
+          record: finalData,
+          records: stripped,
+        });
+        toast.success("Record saved successfully ✓");
+        setForm({
+          ...getDefaults(fields),
+          ...(externalFormPatch ?? {}),
+          ...(result && typeof result === "object" && !Array.isArray(result)
+            ? result
+            : {}),
+        });
+        return;
+      }
     } catch {
       // Page-level handlers already raise the most useful toast message.
     }
@@ -492,18 +516,30 @@ export const MasterPage: React.FC<MasterPageProps> = ({
               {filtered.length} record{filtered.length !== 1 ? "s" : ""}
             </p>
           </div>
-          <div className="relative">
-            <Search
-              size={13}
-              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
-            />
-            <input
-              type="text"
-              placeholder="Search..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-8 pr-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary w-40"
-            />
+          <div className="flex items-center gap-2">
+            {exportConfig && (
+              <ExportMenu
+                data={filtered as Record<string, unknown>[]}
+                columns={exportConfig.columns}
+                title={exportConfig.title}
+                filename={exportConfig.filename}
+                subtitle={exportConfig.subtitle}
+                disabled={filtered.length === 0}
+              />
+            )}
+            <div className="relative">
+              <Search
+                size={13}
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+              />
+              <input
+                type="text"
+                placeholder="Search..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-8 pr-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary w-40"
+              />
+            </div>
           </div>
         </div>
 
