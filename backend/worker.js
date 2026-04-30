@@ -1,31 +1,46 @@
-const logger = require('./logger');
-const { getRedis, decayEngagement, cleanupInactiveUsers } = require('./redis');
+const logger = require("./logger");
+const { getRedis, decayEngagement, cleanupInactiveUsers } = require("./redis");
 
-logger.info({ event: "WORKER_STARTED" }, "Redis Worker started — decay & cleanup every hour");
+logger.info(
+  { event: "WORKER_STARTED" },
+  "Redis Worker started - decay & cleanup every hour",
+);
 
-setInterval(async () => {
+async function runMaintenance(eventPrefix) {
   try {
-    // Heartbeat every hour
-    const { getRedis } = require('./redis');
-    await getRedis().set('worker:heartbeat', Date.now(), 'EX', 7200);
+    const redis = await getRedis();
+    await redis.set("worker:heartbeat", Date.now(), "EX", 7200);
     logger.debug({ event: "WORKER_HEARTBEAT" }, "Worker heartbeat sent");
 
-    logger.info({ event: "WORKER_DECAY_START" }, "Running engagement decay...");
-    await decayEngagement();
-    logger.info({ event: "WORKER_DECAY_DONE" }, "Engagement decay complete");
+    logger.info(
+      { event: `${eventPrefix}_DECAY_START` },
+      "Running engagement decay...",
+    );
+    const decayed = await decayEngagement();
+    logger.info(
+      { event: `${eventPrefix}_DECAY_DONE`, decayed },
+      "Engagement decay complete",
+    );
 
-    logger.info({ event: "WORKER_CLEANUP_START" }, "Running inactive user cleanup...");
-    await cleanupInactiveUsers();
-    logger.info({ event: "WORKER_CLEANUP_DONE" }, "Inactive user cleanup complete");
+    logger.info(
+      { event: `${eventPrefix}_CLEANUP_START` },
+      "Running inactive user cleanup...",
+    );
+    const removed = await cleanupInactiveUsers();
+    logger.info(
+      { event: `${eventPrefix}_CLEANUP_DONE`, removed },
+      "Inactive user cleanup complete",
+    );
   } catch (err) {
-    logger.error({ event: "WORKER_ERROR", err }, "Worker crashed");
+    logger.error(
+      { event: `${eventPrefix}_ERROR`, err },
+      "Worker maintenance failed",
+    );
   }
-}, 3600000); // 1 hour
+}
 
-// Run once on start
-(async () => {
-  logger.info({ event: "WORKER_INIT" }, "Running initial decay & cleanup...");
-  await decayEngagement();
-  await cleanupInactiveUsers();
-  logger.info({ event: "WORKER_INIT_DONE" }, "Initial decay & cleanup complete");
-})();
+setInterval(() => {
+  runMaintenance("WORKER");
+}, 3600000);
+
+runMaintenance("WORKER_INIT");
