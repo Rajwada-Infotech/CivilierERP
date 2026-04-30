@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useState } from "react";
+﻿import React, { useEffect, useState, useMemo } from "react";
 import { useUserMap } from "@/hooks/useUserMap";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -10,11 +10,7 @@ import {
   RefreshCw,
 } from "lucide-react";
 import { formatINR } from "@/utils/formatCurrency";
-import {
-  DataTable,
-  type ColumnDef,
-  type ExportColumn,
-} from "@/components/ui/DataTable";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
 interface Transaction {
   id: string;
@@ -27,7 +23,6 @@ interface Transaction {
   status: string;
   createdBy?: string;
 }
-
 interface Summary {
   totalPayments: number;
   totalPOs: number;
@@ -42,7 +37,6 @@ const TYPE_STYLE: Record<string, string> = {
   Journal: "bg-primary/15 text-primary",
   Contra: "bg-secondary/15 text-secondary",
 };
-
 const STATUS_STYLE: Record<string, string> = {
   Completed: "bg-green-500/15 text-green-500",
   Approved: "bg-green-500/15 text-green-500",
@@ -54,118 +48,105 @@ const STATUS_STYLE: Record<string, string> = {
 
 const fmt = (n: number) => formatINR(n);
 
-const COLUMNS: ColumnDef<Transaction, unknown>[] = [
-  {
-    accessorKey: "id",
-    header: "ID",
-    cell: ({ getValue }) => (
-      <span className="text-primary font-heading text-xs">
-        {getValue() as string}
-      </span>
-    ),
-  },
-  {
-    accessorKey: "date",
-    header: "Date",
-    cell: ({ getValue }) => {
-      const v = getValue() as string;
-      return (
-        <span className="whitespace-nowrap">
-          {v ? new Date(v).toLocaleDateString("en-IN") : "—"}
+function buildColumns(
+  resolveUser: (id?: string) => string,
+): ColumnDef<Transaction, unknown>[] {
+  return [
+    {
+      accessorKey: "id",
+      header: "ID",
+      cell: ({ getValue }) => (
+        <span className="text-primary font-heading text-xs">
+          {getValue() as string}
         </span>
-      );
+      ),
     },
-  },
-  {
-    accessorKey: "type",
-    header: "Type",
-    cell: ({ getValue }) => {
-      const v = getValue() as string;
-      return (
-        <span
-          className={`px-2 py-0.5 rounded-full text-xs font-heading ${TYPE_STYLE[v] || "bg-muted text-muted-foreground"}`}
-        >
-          {v}
+    {
+      accessorKey: "date",
+      header: "Date",
+      cell: ({ getValue }) => (
+        <span className="text-foreground whitespace-nowrap">
+          {getValue()
+            ? new Date(getValue() as string).toLocaleDateString("en-IN")
+            : "—"}
         </span>
-      );
+      ),
     },
-  },
-  {
-    accessorKey: "party",
-    header: "Party",
-    cell: ({ getValue }) => (
-      <span className="font-medium whitespace-nowrap">
-        {getValue() as string}
-      </span>
-    ),
-  },
-  {
-    accessorKey: "description",
-    header: "Description",
-    cell: ({ getValue }) => (
-      <span className="text-muted-foreground max-w-[200px] truncate block">
-        {getValue() as string}
-      </span>
-    ),
-  },
-  {
-    accessorKey: "amount",
-    header: "Amount",
-    cell: ({ getValue }) => (
-      <span className="font-heading font-medium whitespace-nowrap">
-        {fmt(getValue() as number)}
-      </span>
-    ),
-  },
-  {
-    accessorKey: "mode",
-    header: "Mode",
-    cell: ({ getValue }) => (
-      <span className="text-muted-foreground whitespace-nowrap">
-        {getValue() as string}
-      </span>
-    ),
-  },
-  {
-    accessorKey: "status",
-    header: "Status",
-    cell: ({ getValue }) => {
-      const v = getValue() as string;
-      return (
-        <span
-          className={`px-2 py-0.5 rounded-full text-xs font-heading ${STATUS_STYLE[v] || "bg-muted text-muted-foreground"}`}
-        >
-          {v}
+    {
+      accessorKey: "type",
+      header: "Type",
+      cell: ({ getValue }) => {
+        const v = getValue() as string;
+        return (
+          <span
+            className={`px-2 py-0.5 rounded-full text-xs font-heading ${TYPE_STYLE[v] || "bg-muted text-muted-foreground"}`}
+          >
+            {v}
+          </span>
+        );
+      },
+    },
+    {
+      accessorKey: "party",
+      header: "Party",
+      cell: ({ getValue }) => (
+        <span className="text-foreground font-medium whitespace-nowrap">
+          {getValue() as string}
         </span>
-      );
+      ),
     },
-  },
-  {
-    accessorKey: "createdBy",
-    header: "Created By",
-    cell: ({ getValue }) => (
-      <span className="text-muted-foreground whitespace-nowrap">
-        {(getValue() as string) ?? "—"}
-      </span>
-    ),
-  },
-];
-
-const EXPORT_COLUMNS: ExportColumn[] = [
-  { header: "ID", accessor: "id" },
-  {
-    header: "Date",
-    accessor: (r) =>
-      r.date ? new Date(r.date as string).toLocaleDateString("en-IN") : "",
-  },
-  { header: "Type", accessor: "type" },
-  { header: "Party", accessor: "party" },
-  { header: "Description", accessor: "description" },
-  { header: "Amount", accessor: (r) => fmt(r.amount as number) },
-  { header: "Mode", accessor: "mode" },
-  { header: "Status", accessor: "status" },
-  { header: "Created By", accessor: "createdBy" },
-];
+    {
+      accessorKey: "description",
+      header: "Description",
+      cell: ({ getValue }) => (
+        <span className="text-muted-foreground max-w-[200px] truncate block">
+          {getValue() as string}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "amount",
+      header: "Amount",
+      cell: ({ getValue }) => (
+        <span className="text-foreground font-heading font-medium whitespace-nowrap">
+          {fmt(getValue() as number)}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "mode",
+      header: "Mode",
+      cell: ({ getValue }) => (
+        <span className="text-muted-foreground whitespace-nowrap">
+          {getValue() as string}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "status",
+      header: "Status",
+      cell: ({ getValue }) => {
+        const v = getValue() as string;
+        return (
+          <span
+            className={`px-2 py-0.5 rounded-full text-xs font-heading ${STATUS_STYLE[v] || "bg-muted text-muted-foreground"}`}
+          >
+            {v}
+          </span>
+        );
+      },
+    },
+    {
+      accessorKey: "createdBy",
+      header: "Created By",
+      cell: ({ getValue }) => (
+        <span className="text-muted-foreground whitespace-nowrap">
+          {resolveUser(getValue() as string | undefined)}
+        </span>
+      ),
+    },
+  ];
+}
 
 export default function Transactions() {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -176,7 +157,6 @@ export default function Transactions() {
   const [totalPages, setTotalPages] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0);
   const PAGE_SIZE = 20;
-
   const resolveUser = useUserMap();
 
   const fetchData = async (pg = page) => {
@@ -202,12 +182,6 @@ export default function Transactions() {
   useEffect(() => {
     fetchData(page);
   }, [page]);
-
-  // Resolve createdBy usernames before passing to table/export
-  const resolvedTransactions = transactions.map((t) => ({
-    ...t,
-    createdBy: resolveUser(t.createdBy),
-  }));
 
   const statCards = summary
     ? [
@@ -238,10 +212,11 @@ export default function Transactions() {
       ]
     : [];
 
+  const columns = useMemo(() => buildColumns(resolveUser), [resolveUser]);
+
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Transactions"]} />
-
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-heading font-bold text-foreground">
           Transactions
@@ -295,30 +270,28 @@ export default function Transactions() {
             ))}
       </div>
 
-      {/* Transactions Table — DataTable replaces the old raw <table> */}
+      {/* Table — server-side pagination, DataTable search operates on current page */}
       <div className="rounded-xl bg-card border border-border overflow-hidden">
+        <div className="p-4 border-b border-border">
+          <h2 className="font-heading font-semibold text-foreground text-sm">
+            Recent Transactions
+          </h2>
+        </div>
         <DataTable
-          data={resolvedTransactions}
-          columns={COLUMNS}
+          data={transactions}
+          columns={columns}
           loading={loading}
-          searchPlaceholder="Search transactions..."
-          emptyMessage="No transactions found."
           paginated={false}
-          exportConfig={{
-            title: "Transactions",
-            filename: "transactions",
-            subtitle: `Page ${page} of ${totalPages} · ${totalRecords} total records`,
-            columns: EXPORT_COLUMNS,
-          }}
+          searchable={false}
+          emptyMessage="No transactions found."
         />
       </div>
 
-      {/* Pagination (server-side — kept as-is) */}
+      {/* Pagination */}
       {totalPages > 1 && (
         <div className="flex items-center justify-between mt-4 px-1">
           <p className="text-xs text-muted-foreground">
-            Page {page} of {totalPages} &middot; {totalRecords} total
-            transactions
+            Page {page} of {totalPages} · {totalRecords} total transactions
           </p>
           <div className="flex items-center gap-1">
             <button
@@ -335,11 +308,7 @@ export default function Transactions() {
                 <button
                   key={pg}
                   onClick={() => setPage(pg)}
-                  className={`px-3 py-1.5 rounded-md text-xs border transition-colors ${
-                    pg === page
-                      ? "border-primary bg-primary text-primary-foreground"
-                      : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"
-                  }`}
+                  className={`px-3 py-1.5 rounded-md text-xs border transition-colors ${pg === page ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"}`}
                 >
                   {pg}
                 </button>

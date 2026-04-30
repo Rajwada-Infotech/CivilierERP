@@ -181,12 +181,12 @@ export const MobileNav: React.FC = () => {
   // Module-specific Navigation Items
   const getModuleNavItems = (): NavItem[] => {
     switch (activeModule) {
-      case "material":
+case "material":
         return [
           {
             label: "Dashboard",
             icon: BarChart3,
-            path: "/material/amendments",
+            path: "/material",
           },
           {
             label: "Transaction",
