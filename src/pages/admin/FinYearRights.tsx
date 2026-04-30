@@ -1,6 +1,8 @@
 import React, { useCallback, useMemo, useState } from "react";
 import { useFinYear, type FinYear } from "@/contexts/FinYearContext";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "react-hook-form";
 import {
   Calendar,
   Edit3,
@@ -47,6 +49,7 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "sonner";
+import { finYearSchema, type FinYearForm } from "@/schemas/finYearSchema";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -58,15 +61,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-type FinYearFormState = {
-  year: string;
-  startDate: string;
-  endDate: string;
-  status: "Active" | "Closed";
-  locked: boolean;
-};
-
-const EMPTY_FORM: FinYearFormState = {
+const EMPTY_FORM: FinYearForm = {
   year: "",
   startDate: "",
   endDate: "",
@@ -91,7 +86,18 @@ export default function FinYearRights() {
   const [pendingLockId, setPendingLockId] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [formData, setFormData] = useState<FinYearFormState>(EMPTY_FORM);
+  const {
+    register,
+    handleSubmit,
+    reset,
+    setValue,
+    watch,
+    formState: { errors },
+  } = useForm<FinYearForm>({
+    resolver: zodResolver(finYearSchema),
+    defaultValues: EMPTY_FORM,
+  });
+  const formData = watch();
 
   const filteredFinYears = useMemo(
     () =>
@@ -110,20 +116,20 @@ export default function FinYearRights() {
   );
 
   const resetForm = useCallback(() => {
-    setFormData(EMPTY_FORM);
+    reset(EMPTY_FORM);
     setEditingFinYear(null);
     setShowDialog(false);
-  }, []);
+  }, [reset]);
 
   const openAddDialog = useCallback(() => {
     setEditingFinYear(null);
-    setFormData(EMPTY_FORM);
+    reset(EMPTY_FORM);
     setShowDialog(true);
-  }, []);
+  }, [reset]);
 
   const openEditDialog = useCallback((fy: FinYear) => {
     setEditingFinYear(fy);
-    setFormData({
+    reset({
       year: fy.year,
       startDate: fy.startDate,
       endDate: fy.endDate,
@@ -131,22 +137,17 @@ export default function FinYearRights() {
       locked: fy.locked,
     });
     setShowDialog(true);
-  }, []);
+  }, [reset]);
 
-  const handleSave = useCallback(async () => {
-    if (!formData.year || !formData.startDate || !formData.endDate) {
-      toast.error("Please fill all fields");
-      return;
-    }
-
+  const handleSave = useCallback(async (values: FinYearForm) => {
     setIsSaving(true);
     try {
       if (editingFinYear) {
-        await updateFinYear(editingFinYear.id, formData);
-        toast.success(`Financial year "${formData.year}" updated`);
+        await updateFinYear(editingFinYear.id, values);
+        toast.success(`Financial year "${values.year}" updated`);
       } else {
-        await addFinYear(formData);
-        toast.success(`Financial year "${formData.year}" added`);
+        await addFinYear(values);
+        toast.success(`Financial year "${values.year}" added`);
       }
       resetForm();
     } catch (err: any) {
@@ -154,7 +155,7 @@ export default function FinYearRights() {
     } finally {
       setIsSaving(false);
     }
-  }, [addFinYear, editingFinYear, formData, resetForm, updateFinYear]);
+  }, [addFinYear, editingFinYear, resetForm, updateFinYear]);
 
   const handleToggleLock = useCallback(
     async (id: string, currentlyLocked: boolean) => {
@@ -225,20 +226,17 @@ export default function FinYearRights() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 py-4">
+          <form className="space-y-4 py-4" onSubmit={handleSubmit(handleSave)}>
             <div className="space-y-2">
               <Label htmlFor="year">Year</Label>
               <Input
                 id="year"
-                value={formData.year}
-                onChange={(e) =>
-                  setFormData((current) => ({
-                    ...current,
-                    year: e.target.value,
-                  }))
-                }
+                {...register("year")}
                 placeholder="e.g. 2025-26"
               />
+              {errors.year && (
+                <p className="text-xs text-destructive">{errors.year.message}</p>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-4">
@@ -247,28 +245,26 @@ export default function FinYearRights() {
                 <Input
                   id="startDate"
                   type="date"
-                  value={formData.startDate}
-                  onChange={(e) =>
-                    setFormData((current) => ({
-                      ...current,
-                      startDate: e.target.value,
-                    }))
-                  }
+                  {...register("startDate")}
                 />
+                {errors.startDate && (
+                  <p className="text-xs text-destructive">
+                    {errors.startDate.message}
+                  </p>
+                )}
               </div>
               <div className="space-y-2">
                 <Label htmlFor="endDate">End Date</Label>
                 <Input
                   id="endDate"
                   type="date"
-                  value={formData.endDate}
-                  onChange={(e) =>
-                    setFormData((current) => ({
-                      ...current,
-                      endDate: e.target.value,
-                    }))
-                  }
+                  {...register("endDate")}
                 />
+                {errors.endDate && (
+                  <p className="text-xs text-destructive">
+                    {errors.endDate.message}
+                  </p>
+                )}
               </div>
             </div>
 
@@ -277,10 +273,9 @@ export default function FinYearRights() {
               <Select
                 value={formData.status}
                 onValueChange={(value) =>
-                  setFormData((current) => ({
-                    ...current,
-                    status: value as FinYearFormState["status"],
-                  }))
+                  setValue("status", value as FinYearForm["status"], {
+                    shouldValidate: true,
+                  })
                 }
               >
                 <SelectTrigger id="status">
@@ -298,35 +293,34 @@ export default function FinYearRights() {
                 id="locked"
                 checked={formData.locked}
                 onCheckedChange={(checked) =>
-                  setFormData((current) => ({ ...current, locked: checked }))
+                  setValue("locked", checked)
                 }
               />
               <Label htmlFor="locked" className="font-normal">
                 Locked (Read Only)
               </Label>
             </div>
-          </div>
-
-          <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={resetForm}
-              disabled={isSaving}
-            >
-              Cancel
-            </Button>
-            <Button onClick={handleSave} disabled={isSaving}>
-              {isSaving ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Saving...
-                </>
-              ) : (
-                "Save"
-              )}
-            </Button>
-          </DialogFooter>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={resetForm}
+                disabled={isSaving}
+              >
+                Cancel
+              </Button>
+              <Button type="submit" disabled={isSaving}>
+                {isSaving ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Saving...
+                  </>
+                ) : (
+                  "Save"
+                )}
+              </Button>
+            </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
 

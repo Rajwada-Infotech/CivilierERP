@@ -3,6 +3,11 @@ const router = express.Router()
 const { getPool, sql } = require("../db")
 const { cache } = require("../middleware/cache")
 const { bumpCacheVersion } = require("../redis")
+const { validateBody } = require("../middleware/validateRequest")
+const {
+  cardMasterCreateSchema,
+  cardMasterUpdateSchema,
+} = require("../validation/cardMasterSchemas")
 
 const requireUserEmail = (req, res) => {
   const email = req.user?.email;
@@ -32,7 +37,7 @@ router.get("/", cache("card-master", 300), async (req, res) => {
 })
 
 // POST - Create card
-router.post("/", async (req, res) => {
+router.post("/", validateBody(cardMasterCreateSchema), async (req, res) => {
   const {
     company_name, bank_name, account_number, ifsc_code,
     card_network, card_type, card_holder_name, card_number,
@@ -83,7 +88,7 @@ router.post("/", async (req, res) => {
 })
 
 // PUT - Update card
-router.put("/:id", async (req, res) => {
+router.put("/:id", validateBody(cardMasterUpdateSchema), async (req, res) => {
   const {
     company_name, bank_name, account_number, ifsc_code,
     card_network, card_type, card_holder_name, card_number,
