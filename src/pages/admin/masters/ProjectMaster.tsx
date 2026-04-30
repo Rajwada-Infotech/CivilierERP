@@ -116,6 +116,9 @@ const emptyProject: Project = {
 };
 
 function rowToForm(row: any): Project {
+  // belongs_to is a name string — we'll let the component resolve it into
+  // enterpriseId / companyId after mount using the loaded lists.
+  // Store it in belongsTo so the dropdowns can be pre-selected.
   return {
     Id: row.Id,
     code: row.Code ?? "",
@@ -202,9 +205,12 @@ export default function ProjectMaster() {
           payload[key] = value;
         }
       });
-      // belongsTo: company takes priority over enterprise
+      // belongsTo: company name takes priority over enterprise name
       const resolvedBelongsTo =
-        form.companyId || form.enterpriseId || form.belongsTo;
+        (form.companyId as string) ||
+        (form.enterpriseId as string) ||
+        (form.belongsTo as string) ||
+        null;
       if (resolvedBelongsTo) payload.belongsTo = resolvedBelongsTo;
 
       if (form.projectImage instanceof File) {
@@ -292,8 +298,18 @@ export default function ProjectMaster() {
 
   const openEdit = (row: any) => {
     const f = rowToForm(row);
+    const storedName = f.belongsTo as string;
+    // Try to match stored name to a company first, then enterprise
+    const matchedCompany = companies.find(
+      (c: any) => (c.Name ?? c.name) === storedName,
+    ) as any;
+    const matchedEnterprise = !matchedCompany
+      ? (enterprises.find((e: any) => (e.name ?? e.Name) === storedName) as any)
+      : null;
+    f.companyId = matchedCompany ? storedName : "";
+    f.enterpriseId = matchedEnterprise ? storedName : "";
     setForm(f);
-    setImagePreview(f.projectImage || "");
+    setImagePreview(typeof f.projectImage === "string" ? f.projectImage : "");
     setEditId(row.Id);
     setShowForm(true);
     setActiveTab("general");
@@ -443,34 +459,7 @@ export default function ProjectMaster() {
                             </div>
                           </td>
                           <td className="px-4 py-3 text-xs text-muted-foreground max-w-[140px] truncate">
-                            {(() => {
-                              if (!p.belongs_to) return "—";
-                              const co = companies.find(
-                                (c: any) => (c.Id ?? c.id) === p.belongs_to,
-                              ) as any;
-                              if (co)
-                                return (
-                                  <span className="flex flex-col">
-                                    <span>{co.Name ?? co.name}</span>
-                                    <span className="text-muted-foreground/60 text-[10px]">
-                                      Company
-                                    </span>
-                                  </span>
-                                );
-                              const ent = enterprises.find(
-                                (e: any) => (e.id ?? e.Id) === p.belongs_to,
-                              ) as any;
-                              if (ent)
-                                return (
-                                  <span className="flex flex-col">
-                                    <span>{ent.name ?? ent.Name}</span>
-                                    <span className="text-muted-foreground/60 text-[10px]">
-                                      Enterprise
-                                    </span>
-                                  </span>
-                                );
-                              return "—";
-                            })()}
+                            {p.belongs_to || "—"}
                           </td>
                           <td className="px-4 py-3 text-muted-foreground text-xs">
                             {p.ClientName}
@@ -627,18 +616,20 @@ export default function ProjectMaster() {
                         setForm((p) => ({
                           ...p,
                           enterpriseId: e.target.value,
-                          // clear company if enterprise changes
                           companyId: "",
                         }))
                       }
                       className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                     >
                       <option value="">— Select Enterprise —</option>
-                      {enterprises.map((e: any) => (
-                        <option key={e.id ?? e.Id} value={e.id ?? e.Id}>
-                          {e.name ?? e.Name}
-                        </option>
-                      ))}
+                      {enterprises.map((e: any) => {
+                        const name = e.name ?? e.Name ?? "";
+                        return (
+                          <option key={e.id ?? e.Id} value={name}>
+                            {name}
+                          </option>
+                        );
+                      })}
                     </select>
                   </div>
 
@@ -661,11 +652,14 @@ export default function ProjectMaster() {
                       className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                     >
                       <option value="">— Select Company —</option>
-                      {companies.map((c: any) => (
-                        <option key={c.Id ?? c.id} value={c.Id ?? c.id}>
-                          {c.Name ?? c.name}
-                        </option>
-                      ))}
+                      {companies.map((c: any) => {
+                        const name = c.Name ?? c.name ?? "";
+                        return (
+                          <option key={c.Id ?? c.id} value={name}>
+                            {name}
+                          </option>
+                        );
+                      })}
                     </select>
                   </div>
 

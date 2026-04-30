@@ -58,6 +58,7 @@ async function startServer() {
   try {
     logger.info("[DB] Connecting to database...");
     await connectDB();
+    require("./worker"); // start Redis engagement decay + cleanup worker
     logger.info("[OK] Database connected");
 
     // Rate limiters
