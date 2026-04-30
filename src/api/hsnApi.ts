@@ -16,7 +16,6 @@ export const getHsn = async () => {
 export const addHsn = async (data: Record<string, unknown>) => {
   const res = await fetch(BASE_URL, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
     headers: getAuthHeaders(),
     body: JSON.stringify(data),
   })
@@ -30,7 +29,6 @@ export const addHsn = async (data: Record<string, unknown>) => {
 export const updateHsn = async (code: string, data: Record<string, unknown>) => {
   const res = await fetch(`${BASE_URL}/${code}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
     headers: getAuthHeaders(),
     body: JSON.stringify(data),
   })

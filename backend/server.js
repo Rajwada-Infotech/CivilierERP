@@ -1,4 +1,4 @@
-require("dotenv").config();
+require("./config/env").loadEnv();
 const isDev = process.env.NODE_ENV === "development";
 const express = require("express");
 const helmet = require("helmet");

@@ -67,3 +67,17 @@ CivilierERP/
 │   └── assets/              # Styles, icons, and images
 ├── config/                  # Environment and application configuration
 └── docs/                    # Architecture diagrams, ERDs, and internal docs
+```
+
+## Environment
+
+Use one env file for the frontend and one env file for the backend:
+
+```bash
+.env
+backend\.env
+```
+
+The root `.env` is for frontend-only `VITE_` variables such as
+`VITE_API_URL=/api`. The backend `.env` is for server secrets such as database
+credentials, Redis settings, and `JWT_SECRET`.
