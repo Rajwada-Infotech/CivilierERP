@@ -491,6 +491,11 @@ const PurchaseOrderMaster = () => {
         onFieldChange={handleFieldChange}
         externalFormPatch={poFormPatch}
         externalFormPatchKey={poFormPatchKey}
+        exportConfig={{
+          title: "Purchase Order Master",
+          filename: "purchase-orders",
+          columns: EXPORT_COLUMNS,
+        }}
       />
       <div className="mt-4 flex items-center justify-between rounded-lg border border-border bg-card px-4 py-3 text-sm">
         <span className="text-muted-foreground">
