@@ -1,6 +1,8 @@
 import React, { useState } from "react";
 import { Search, Edit2, Trash2, Check, X, Plus, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
+import { ExportMenu } from "@/components/ExportMenu";
+import type { ExportColumn } from "@/lib/export";
 
 export interface FieldDef {
   name: string;
@@ -87,6 +89,26 @@ interface MasterPageProps {
   ) => Record<string, unknown> | null;
   externalFormPatch?: Record<string, unknown> | null;
   externalFormPatchKey?: string | number | null;
+  /**
+   * When provided, an Export button appears in the table toolbar.
+   * Pass ExportColumn[] — plain { header, accessor } descriptors.
+   *
+   * @example
+   * exportConfig={{
+   *   title: "Purchase Order",
+   *   filename: "purchase-orders",
+   *   columns: [
+   *     { header: "PO No", accessor: "poNumber" },
+   *     { header: "Supplier", accessor: "supplierName" },
+   *   ],
+   * }}
+   */
+  exportConfig?: {
+    title: string;
+    filename?: string;
+    subtitle?: string;
+    columns: ExportColumn[];
+  };
 }
 
 function getDefaults(f: FieldDef[]): Record<string, unknown> {
@@ -120,6 +142,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   onCustomSave,
   externalFormPatch,
   externalFormPatchKey,
+  exportConfig,
 }) => {
   const [data, setData] = useState<RecordWithId[]>(() =>
     seedWithIds(initialData),
@@ -492,18 +515,30 @@ export const MasterPage: React.FC<MasterPageProps> = ({
               {filtered.length} record{filtered.length !== 1 ? "s" : ""}
             </p>
           </div>
-          <div className="relative">
-            <Search
-              size={13}
-              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
-            />
-            <input
-              type="text"
-              placeholder="Search..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-8 pr-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary w-40"
-            />
+          <div className="flex items-center gap-2">
+            {exportConfig && (
+              <ExportMenu
+                data={filtered as Record<string, unknown>[]}
+                columns={exportConfig.columns}
+                title={exportConfig.title}
+                filename={exportConfig.filename}
+                subtitle={exportConfig.subtitle}
+                disabled={filtered.length === 0}
+              />
+            )}
+            <div className="relative">
+              <Search
+                size={13}
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+              />
+              <input
+                type="text"
+                placeholder="Search..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-8 pr-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary w-40"
+              />
+            </div>
           </div>
         </div>
 

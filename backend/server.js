@@ -1,4 +1,4 @@
-require("dotenv").config();
+require("./config/env").loadEnv();
 const isDev = process.env.NODE_ENV === "development";
 const express = require("express");
 const helmet = require("helmet");
@@ -58,6 +58,7 @@ async function startServer() {
   try {
     logger.info("[DB] Connecting to database...");
     await connectDB();
+    require("./worker"); // start Redis engagement decay + cleanup worker
     logger.info("[OK] Database connected");
 
     // Rate limiters

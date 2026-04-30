@@ -14,6 +14,7 @@ import {
   type ColumnDef,
   type DataChangeEvent,
 } from "@/components/MasterPage";
+import type { ExportColumn } from "@/lib/export";
 
 const SUPPLIER_TYPE = "S";
 
@@ -145,6 +146,17 @@ const SupplierMaster: React.FC = () => {
         columns={columns}
         initialData={mappedData}
         onDataEvent={handleDataEvent}
+        exportConfig={{
+          title: "Supplier Master",
+          filename: "supplier-master",
+          columns: [
+            { header: "Supplier Name",  accessor: "LHeadName" },
+            { header: "Contact Person", accessor: "LHeadContactPerson" },
+            { header: "Phone",          accessor: "LHeadPhone" },
+            { header: "GST No.",        accessor: "LGST" },
+            { header: "Status",         accessor: (r) => r.LHeadStatus ? "Active" : "Inactive" },
+          ],
+        }}
       />
     </>
   );

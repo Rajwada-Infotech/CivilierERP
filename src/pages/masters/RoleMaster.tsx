@@ -1,6 +1,8 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import {
   Users,
@@ -15,17 +17,11 @@ import {
   Calendar,
 } from "lucide-react";
 import { getRoles, addRole, updateRole, deleteRole, type RoleRecord } from "@/api/roleApi";
+import { roleMasterSchema, type RoleMasterForm } from "@/schemas/roleMasterSchema";
 
 // ─── Local form types ────────────────────────────────────────────────────────
-interface FormState {
-  RName: string;
-  RCode: string;
-  RDesc: string;
-}
-
-const EMPTY: FormState = {
+const EMPTY: RoleMasterForm = {
   RName: "",
-  RCode: "",
   RDesc: "",
 };
 
@@ -58,48 +54,39 @@ const RoleMaster: React.FC = () => {
 
   const dbRoles: RoleRecord[] = Array.isArray(dbData) ? dbData : [];
 
-  const [form, setForm] = useState<FormState>(EMPTY);
+  const {
+    register,
+    handleSubmit,
+    reset,
+    watch,
+    formState: { errors },
+  } = useForm<RoleMasterForm>({
+    resolver: zodResolver(roleMasterSchema),
+    defaultValues: EMPTY,
+  });
+
+  const form = watch();
+  const roleCode = generateRoleCode(form.RName);
   const [editingId, setEditingId] = useState<number | null>(null);
-  const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [search, setSearch] = useState("");
   const [deleteId, setDeleteId] = useState<number | null>(null);
 
-  // Auto-generate RCode on RName change (preview)
-  useEffect(() => {
-    const code = generateRoleCode(form.RName);
-    setForm(prev => ({ ...prev, RCode: code }));
-  }, [form.RName]);
-
-  const setField = (k: keyof FormState, v: string) => {
-    setForm((p) => ({ ...p, [k]: v }));
-    if (errors[k as string]) setErrors((e) => ({ ...e, [k as string]: false }));
-  };
-
-  const validate = useCallback(() => {
-    const e: Record<string, boolean> = {};
-    if (!form.RName.trim()) e.RName = true;
-    setErrors(e);
-    return Object.keys(e).length === 0;
-  }, [form.RName]);
-
-  const toPayload = () => ({
-    RName: form.RName.trim(),
-    RDesc: form.RDesc.trim() || undefined,
+  const toPayload = (values: RoleMasterForm) => ({
+    RName: values.RName.trim(),
+    RDesc: values.RDesc.trim() || undefined,
   });
 
-  const handleSave = async () => {
-    if (!validate()) return;
-
+  const handleSave = async (values: RoleMasterForm) => {
     try {
       if (editingId) {
-        await updateRole(editingId, toPayload());
+        await updateRole(editingId, toPayload(values));
         toast.success("Role updated!");
       } else {
-        await addRole(toPayload());
+        await addRole(toPayload(values));
         toast.success("Role saved!");
       }
       await queryClient.invalidateQueries({ queryKey: ["roles"] });
-      setForm(EMPTY);
+      reset(EMPTY);
       setEditingId(null);
     } catch (err: any) {
       toast.error("Failed: " + err.message);
@@ -107,9 +94,8 @@ const RoleMaster: React.FC = () => {
   };
 
   const handleEdit = (item: RoleRecord) => {
-    setForm({
+    reset({
       RName: item.RName,
-      RCode: item.RCode || "",
       RDesc: item.RDesc || "",
     });
     setEditingId(item.RId);
@@ -124,7 +110,7 @@ const RoleMaster: React.FC = () => {
       setDeleteId(null);
       if (editingId === id) {
         setEditingId(null);
-        setForm(EMPTY);
+        reset(EMPTY);
       }
     } catch (err: any) {
       toast.error("Delete failed: " + err.message);
@@ -132,9 +118,8 @@ const RoleMaster: React.FC = () => {
   };
 
   const handleReset = () => {
-    setForm(EMPTY);
+    reset(EMPTY);
     setEditingId(null);
-    setErrors({});
   };
 
   const filtered = dbRoles.filter((role) => {
@@ -176,7 +161,7 @@ const RoleMaster: React.FC = () => {
             )}
           </div>
 
-          <div className="p-5">
+          <form className="p-5" onSubmit={handleSubmit(handleSave)}>
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               {/* Role Name */}
               <div>
@@ -190,14 +175,15 @@ const RoleMaster: React.FC = () => {
                   />
                   <input
                     type="text"
-                    value={form.RName}
-                    onChange={(e) => setField("RName", e.target.value)}
+                    {...register("RName")}
                     placeholder="e.g. Branch Manager"
                     className={`${inp} pl-8 ${errors.RName ? "border-destructive" : ""}`}
                   />
                 </div>
                 {errors.RName && (
-                  <p className="text-[11px] text-destructive mt-1">Role name is required</p>
+                  <p className="text-[11px] text-destructive mt-1">
+                    {errors.RName.message}
+                  </p>
                 )}
               </div>
 
@@ -213,7 +199,7 @@ const RoleMaster: React.FC = () => {
                   />
                   <input
                     type="text"
-                    value={form.RCode}
+                    value={roleCode}
                     readOnly
                     placeholder="Auto-generated"
                     className={`${inp} pl-8 bg-muted/50 font-mono font-semibold tracking-wider text-primary`}
@@ -221,7 +207,7 @@ const RoleMaster: React.FC = () => {
                   />
                 </div>
                 <p className="text-[10px] text-muted-foreground mt-1 font-mono">
-                  {form.RName ? generateRoleCode(form.RName) : ""} (preview)
+                  {roleCode} (preview)
                 </p>
               </div>
 
@@ -237,8 +223,7 @@ const RoleMaster: React.FC = () => {
                   />
                   <textarea
                     rows={2}
-                    value={form.RDesc}
-                    onChange={(e) => setField("RDesc", e.target.value)}
+                    {...register("RDesc")}
                     placeholder="Optional role description..."
                     className={`${inp} pl-8 resize-none`}
                   />
@@ -248,13 +233,14 @@ const RoleMaster: React.FC = () => {
 
             <div className="flex items-center gap-2 mt-5 pt-4 border-t border-border">
               <button
-                onClick={handleSave}
+                type="submit"
                 className="flex items-center gap-1.5 px-4 py-2 rounded-lg font-heading text-sm font-semibold bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
               >
                 <Users size={15} />
                 {editingId ? "Update" : "Save Role"}
               </button>
               <button
+                type="button"
                 onClick={handleReset}
                 className="flex items-center gap-1.5 px-4 py-2 rounded-lg font-heading text-sm border border-border text-muted-foreground hover:bg-muted transition-all"
               >
@@ -262,7 +248,7 @@ const RoleMaster: React.FC = () => {
                 Reset
               </button>
             </div>
-          </div>
+          </form>
         </div>
 
         {/* ── Table ── */}
