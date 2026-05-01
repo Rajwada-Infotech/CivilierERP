@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=Sora:wght@300;400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,100..1000;1,9..40,100..1000&family=Noto+Sans:wght@400;500&family=Sora:wght@300;400;500;600;700;800&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -190,8 +190,9 @@
   * {
     @apply border-border;
   }
-  body {
+body {
     @apply bg-background text-foreground font-body antialiased;
+    font-family: 'DM Sans', 'Noto Sans', sans-serif;
   }
   h1, h2, h3, h4, h5, h6 {
     @apply font-heading;
