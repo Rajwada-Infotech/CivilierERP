@@ -62,6 +62,7 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
       .input("limit", sql.Int, limit).query(`
         SELECT
           eb.*,
+          eb.Eid AS id,
           CASE
             WHEN t.Prefix IS NOT NULL AND t.Description IS NOT NULL THEN t.Prefix + ' — ' + t.Description
             WHEN t.Prefix IS NOT NULL THEN t.Prefix
@@ -95,9 +96,10 @@ router.get("/:id", async (req, res) => {
     const pool = getPool();
     const result = await pool.request().input("Eid", sql.Int, id).query(`
         SELECT eb.*,
-          CASE
-            WHEN t.Prefix IS NOT NULL AND t.Description IS NOT NULL THEN t.Prefix + ' — ' + t.Description
-            WHEN t.Prefix IS NOT NULL THEN t.Prefix
+               eb.Eid AS id,
+               CASE
+                 WHEN t.Prefix IS NOT NULL AND t.Description IS NOT NULL THEN t.Prefix + ' — ' + t.Description
+                 WHEN t.Prefix IS NOT NULL THEN t.Prefix
             ELSE NULL
           END AS DocTypeName
         FROM dbo.ExpenseBooking eb
@@ -539,7 +541,7 @@ router.put("/:id", async (req, res) => {
 
   try {
     const pool = getPool();
-    await pool
+    const result = await pool
       .request()
       .input("Eid", sql.Int, numericId)
       // ... all other inputs (same as before)
@@ -590,6 +592,10 @@ router.put("/:id", async (req, res) => {
           EDocTypeId=@EDocTypeId, EFinYear=@EFinYear
         WHERE Eid = @Eid
       `);
+
+    if (!result.rowsAffected?.[0]) {
+      return res.status(404).json({ error: "Expense booking not found" });
+    }
 
     await bumpCacheVersion("expense-booking");
     res.json({ message: "Expense updated successfully" });

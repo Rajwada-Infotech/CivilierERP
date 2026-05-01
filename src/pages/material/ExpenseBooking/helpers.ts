@@ -150,8 +150,11 @@ export function dbToRecord(row: any): ExpenseRecord {
     /* ignore */
   }
 
+  const rawId = row.Eid ?? row.EId ?? row.eid ?? row.EID ?? row.id;
+  const id = rawId == null || rawId === "" ? "" : String(rawId);
+
   return {
-    id: String(row.Eid ?? row.eid ?? row.EID ?? ""),
+    id: String(id),
     bookingReference: row.EDocNo ?? "",
     docTypeName: row.DocTypeName ?? "",
     bookingDate: row.EDocDate ? row.EDocDate.slice(0, 10) : "",
