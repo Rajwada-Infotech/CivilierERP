@@ -15,6 +15,7 @@ import {
   FileText,
 } from "lucide-react";
 import * as grnApi from "@/api/grnApi";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { useFinYear } from "@/contexts/FinYearContext";
@@ -55,6 +56,67 @@ const parseJsonArray = <T,>(val: unknown): T[] => {
 
 const inp =
   "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground placeholder:text-muted-foreground/50";
+
+
+const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
+  {
+    accessorKey: "GRNNo",
+    header: "GRN No",
+    cell: ({ getValue }) => <span className="font-medium">{getValue() as string}</span>,
+  },
+  {
+    accessorKey: "DocNo",
+    header: "Doc No",
+    cell: ({ getValue }) => <span className="font-mono text-xs">{(getValue() as string) || "—"}</span>,
+  },
+  {
+    accessorKey: "PONumber",
+    header: "PO No",
+    cell: ({ getValue }) => <span>{(getValue() as string) || "—"}</span>,
+  },
+  {
+    accessorKey: "SupplierName",
+    header: "Supplier",
+    cell: ({ getValue }) => <span>{(getValue() as string) || "—"}</span>,
+  },
+  {
+    accessorKey: "GRNDate",
+    header: "Date",
+    cell: ({ getValue }) => {
+      const v = getValue() as string;
+      return <span>{v ? new Date(v).toLocaleDateString("en-IN") : "—"}</span>;
+    },
+  },
+  {
+    accessorKey: "Status",
+    header: "Status",
+    cell: ({ getValue }) => <StatusBadge status={(getValue() as string) || "Draft"} />,
+  },
+  {
+    id: "actions",
+    header: "",
+    enableSorting: false,
+    cell: ({ row }) => {
+      const grn = row.original;
+      return (
+        <div className="flex items-center justify-end gap-1.5 flex-wrap">
+          <ApprovalActions
+            status={grn.Status || "Draft"}
+            recordId={Number(grn.GRNID)}
+            endpoint="/api/grns"
+            onSuccess={() => queryClient.invalidateQueries({ queryKey: ["grns"] })}
+          />
+          <button onClick={() => onEdit(grn)} className="text-primary hover:bg-primary/10 p-2 rounded transition-colors">
+            <Edit3 size={18} />
+          </button>
+          <button onClick={() => deleteMutation.mutate(String(grn.GRNID))} className="text-destructive hover:bg-destructive/10 p-2 rounded transition-colors">
+            <Trash2 size={18} />
+          </button>
+        </div>
+      );
+    },
+  },
+];
 
 export default function GRN() {
   const queryClient = useQueryClient();
@@ -465,7 +527,6 @@ export default function GRN() {
                 </select>
               </div>
               <DocNumberPreview
-                module="GRN"
                 finYear={formData.finYear || undefined}
                 selectedDocTypeId={formData.docTypeId}
                 preview={formData.docNo}
@@ -711,67 +772,14 @@ export default function GRN() {
             </div>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-muted/50 border-b">
-                  <th className="px-6 py-4 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">GRN No</th>
-                  <th className="px-6 py-4 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">Doc No</th>
-                  <th className="px-6 py-4 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">PO No</th>
-                  <th className="px-6 py-4 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">Supplier</th>
-                  <th className="px-6 py-4 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">Date</th>
-                  <th className="px-6 py-4 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">Status</th>
-                  <th className="px-6 py-4 text-right">Actions</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {filteredGrns.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="px-6 py-12 text-center text-muted-foreground">
-                      No GRNs found
-                    </td>
-                  </tr>
-                ) : (
-                  filteredGrns.map((grn: any) => (
-                    <tr key={grn.GRNID} className="hover:bg-muted/30 transition-colors">
-                      <td className="px-6 py-4 font-medium">{grn.GRNNo}</td>
-                      <td className="px-6 py-4 font-mono text-xs">{grn.DocNo || "—"}</td>
-                      <td className="px-6 py-4">{grn.PONumber || "—"}</td>
-                      <td className="px-6 py-4">{grn.SupplierName || "—"}</td>
-                      <td className="px-6 py-4">
-                        {grn.GRNDate ? new Date(grn.GRNDate).toLocaleDateString("en-IN") : "—"}
-                      </td>
-                      <td className="px-6 py-4">
-                        <StatusBadge status={grn.Status || "Draft"} />
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <div className="flex items-center justify-end gap-1.5 flex-wrap">
-                          <ApprovalActions
-                            status={grn.Status || "Draft"}
-                            recordId={Number(grn.GRNID)}
-                            endpoint="/api/grns"
-                            onSuccess={() => queryClient.invalidateQueries({ queryKey: ["grns"] })}
-                          />
-                          <button
-                            onClick={() => onEdit(grn)}
-                            className="text-primary hover:bg-primary/10 p-2 rounded transition-colors"
-                          >
-                            <Edit3 size={18} />
-                          </button>
-                          <button
-                            onClick={() => deleteMutation.mutate(String(grn.GRNID))}
-                            className="text-destructive hover:bg-destructive/10 p-2 rounded transition-colors"
-                          >
-                            <Trash2 size={18} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            data={filteredGrns}
+            columns={GRN_LIST_COLUMNS}
+            searchable={false}
+            paginated={true}
+            defaultPageSize={20}
+            emptyMessage="No GRNs found."
+          />
           <div className="flex items-center justify-between border-t border-border px-6 py-3 text-sm">
             <span className="text-muted-foreground">
               Page {page} of {totalPages} ({totalRecords} records)
