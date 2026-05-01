@@ -65,13 +65,13 @@ export function ReadonlyField({
         className={
           "rounded-lg border px-3 py-2 text-sm font-mono min-h-[38px] flex items-center " +
           (highlight
-            ? "border-border bg-muted/40 text-foreground font-semibold"
+            ? "border-primary/30 bg-primary/5 text-foreground font-semibold"
             : "border-border/60 bg-muted/30 text-foreground")
         }
       >
         {value || (
           <span className="text-muted-foreground/50 font-sans font-normal text-xs">
-            Auto-filled from PO
+            Auto-filled
           </span>
         )}
       </div>
@@ -94,47 +94,41 @@ export function BreakdownRow({
   value: string;
   variant: BRVariant;
 }) {
-  const bg: Record<BRVariant, string> = {
-    neutral: "bg-background",
-    debit: "bg-background",
-    tax: "bg-amber-50/40 dark:bg-amber-900/10",
-    subtotal: "bg-muted/40",
-    total: "bg-muted/50",
+  const rowStyles: Record<BRVariant, string> = {
+    neutral: "bg-card",
+    debit: "bg-card",
+    tax: "bg-muted/30",
+    subtotal: "bg-muted/50",
+    total: "bg-muted/60",
   };
-  const vc: Record<BRVariant, string> = {
-    neutral: "text-foreground",
-    debit: "text-destructive",
-    tax: "text-amber-700 dark:text-amber-400",
-    subtotal: "text-foreground font-semibold",
-    total: "text-foreground font-bold text-sm",
+
+  const labelStyles: Record<BRVariant, string> = {
+    neutral: "text-foreground text-xs",
+    debit: "text-foreground text-xs",
+    tax: "text-foreground text-xs",
+    subtotal: "text-foreground text-xs font-semibold font-heading",
+    total: "text-foreground text-xs font-semibold font-heading",
+  };
+
+  const valueStyles: Record<BRVariant, string> = {
+    neutral: "text-foreground text-xs font-mono",
+    debit: "text-destructive text-xs font-mono",
+    tax: "text-primary text-xs font-mono",
+    subtotal: "text-foreground text-xs font-mono font-semibold",
+    total: "text-foreground text-sm font-mono font-bold",
   };
 
   return (
     <div
-      className={
-        "flex items-center justify-between px-3.5 py-2.5 " + bg[variant]
-      }
+      className={`flex items-center justify-between px-4 py-3 ${rowStyles[variant]}`}
     >
-      <div className="min-w-0 mr-2">
-        <p
-          className={
-            "text-xs truncate " +
-            (variant === "total" || variant === "subtotal"
-              ? "font-heading font-semibold text-foreground"
-              : "text-foreground")
-          }
-        >
-          {label}
-        </p>
+      <div className="min-w-0 mr-4">
+        <p className={labelStyles[variant]}>{label}</p>
         {sublabel && (
-          <p className="text-[10px] text-muted-foreground mt-0.5 hidden sm:block">
-            {sublabel}
-          </p>
+          <p className="text-[10px] text-muted-foreground mt-0.5">{sublabel}</p>
         )}
       </div>
-      <span className={"text-xs font-mono shrink-0 " + vc[variant]}>
-        {value}
-      </span>
+      <span className={`shrink-0 ${valueStyles[variant]}`}>{value}</span>
     </div>
   );
 }
@@ -153,11 +147,11 @@ export function PriceBreakdownPanel({
   hasDiscount: boolean;
 }) {
   return (
-    <div className="rounded-lg border border-border overflow-hidden divide-y divide-border/60 text-xs">
+    <div className="rounded-xl border border-border overflow-hidden divide-y divide-border/50">
       <BreakdownRow
         label="Basic Amount"
-        sublabel="From purchase order"
-        value={"Rs." + fmt(bd.basicAmount)}
+        sublabel="Pre-tax value from linked order"
+        value={"₹" + fmt(bd.basicAmount)}
         variant="neutral"
       />
 
@@ -165,7 +159,7 @@ export function PriceBreakdownPanel({
         <BreakdownRow
           label="Discount"
           sublabel="Applied before GST"
-          value={"- Rs." + fmt(bd.discountAmount)}
+          value={"− ₹" + fmt(bd.discountAmount)}
           variant="debit"
         />
       )}
@@ -174,7 +168,7 @@ export function PriceBreakdownPanel({
         <BreakdownRow
           label="Taxable Amount"
           sublabel="After discount"
-          value={"Rs." + fmt(bd.taxableAmount)}
+          value={"₹" + fmt(bd.taxableAmount)}
           variant="subtotal"
         />
       )}
@@ -182,20 +176,21 @@ export function PriceBreakdownPanel({
       <BreakdownRow
         label={`CGST @ ${cgstRate}%`}
         sublabel="Central GST"
-        value={"Rs." + fmt(bd.cgstAmount)}
+        value={"₹" + fmt(bd.cgstAmount)}
         variant="tax"
       />
+
       <BreakdownRow
         label={`SGST @ ${sgstRate}%`}
         sublabel="State GST"
-        value={"Rs." + fmt(bd.sgstAmount)}
+        value={"₹" + fmt(bd.sgstAmount)}
         variant="tax"
       />
 
       <BreakdownRow
         label="Gross Amount"
         sublabel={hasDiscount ? "Taxable + CGST + SGST" : "Basic + CGST + SGST"}
-        value={"Rs." + fmt(bd.grossAmount)}
+        value={"₹" + fmt(bd.grossAmount)}
         variant="subtotal"
       />
 
@@ -203,11 +198,7 @@ export function PriceBreakdownPanel({
         <BreakdownRow
           label="Round Off"
           sublabel="Nearest rupee"
-          value={
-            (bd.roundOff >= 0 ? "+" : "") +
-            "Rs." +
-            fmt(Math.abs(bd.roundOff))
-          }
+          value={(bd.roundOff >= 0 ? "+₹" : "−₹") + fmt(Math.abs(bd.roundOff))}
           variant="neutral"
         />
       )}
@@ -215,7 +206,7 @@ export function PriceBreakdownPanel({
       <BreakdownRow
         label="Net Payable"
         sublabel="Final amount due"
-        value={"Rs." + fmt(bd.netAmount)}
+        value={"₹" + fmt(bd.netAmount)}
         variant="total"
       />
     </div>

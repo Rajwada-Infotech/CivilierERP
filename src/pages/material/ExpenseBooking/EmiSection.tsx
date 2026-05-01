@@ -50,9 +50,11 @@ export function EmiSection({
     onChange({ ...emi, enabled, schedule: enabled ? emi.schedule : [] });
   };
 
-  const totalScheduled = emi.schedule.reduce((s, r) => s + r.amount, 0);
-  const paidCount = emi.schedule.filter((r) => r.status === "Paid").length;
-  const nextDue = emi.schedule.find((r) => r.status === "Pending");
+  const totalScheduled = (emi.schedule ?? []).reduce((s, r) => s + r.amount, 0);
+  const paidCount = (emi.schedule ?? []).filter(
+    (r) => r.status === "Paid",
+  ).length;
+  const nextDue = (emi.schedule ?? []).find((r) => r.status === "Pending");
 
   return (
     <div className="rounded-2xl border border-border overflow-hidden shadow-sm">
