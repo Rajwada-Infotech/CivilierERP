@@ -172,10 +172,11 @@ const ExpensesMaster: React.FC = () => {
       }));
   }, [groupsData]);
 
-  const ledgers: LedgerHead[] = useMemo(
-    () => (Array.isArray(ledgersData) ? ledgersData : []),
-    [ledgersData],
-  );
+  const ledgers: LedgerHead[] = useMemo(() => {
+    if (Array.isArray(ledgersData)) return ledgersData;
+    if (ledgersData?.data) return ledgersData.data;
+    return [];
+  }, [ledgersData]);
 
   // ── Local UI state ─────────────────────────────────────────────────────────
 
@@ -552,6 +553,7 @@ const ExpensesMaster: React.FC = () => {
               searchable={false}
               paginated={true}
               defaultPageSize={25}
+              getRowId={(row) => String(row.LHeadId)}
               emptyMessage={ledgers.length === 0 ? "No expense accounts yet." : "No results match your search."}
               rowClassName={(row) => row.original.LHeadId === editingId ? "bg-primary/5" : ""}
             />

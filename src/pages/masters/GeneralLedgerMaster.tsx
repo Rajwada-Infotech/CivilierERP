@@ -567,6 +567,7 @@ const GeneralLedgerMaster: React.FC = () => {
               searchable={false}
               paginated={true}
               defaultPageSize={25}
+              getRowId={(row) => String(row.LHeadId)}
               emptyMessage={ledgers.length === 0 ? "No ledger accounts yet." : "No results match your search."}
               rowClassName={(row) => row.original.LHeadId === editingId ? "bg-primary/5" : ""}
             />
