@@ -95,13 +95,13 @@ async function apiFetch(url: string, opts?: RequestInit) {
 // ─── Master option types ───────────────────────────────────────────────────────
 
 interface CompanyOption {
-  CompanyId: number;
-  CompanyName: string;
+  id: number;
+  label: string;
 }
 
 interface ProjectOption {
-  ProjectId: number;
-  ProjectName: string;
+  id: number;
+  label: string;
 }
 
 interface SupplierOption {
@@ -189,18 +189,18 @@ export default function MaterialExpenseBooking() {
   React.useEffect(() => {
     fetchRecords();
 
-    // Company master: enterprise where business_type = 'C'
-    apiFetch("/api/document-type/companies")
+// Company master: enterprise where business_type = 'C'
+    apiFetch("/api/enterprises/options?business_type=C")
       .then((list: CompanyOption[]) => setCompanyOptions(list ?? []))
       .catch(() => {});
 
     // Project master: enterprise where business_type = 'P'
-    apiFetch("/api/document-type/projects")
+    apiFetch("/api/enterprises/options?business_type=P")
       .then((list: ProjectOption[]) => setProjectOptions(list ?? []))
       .catch(() => {});
 
-    // Supplier master: AccountHeadMaster options
-    apiFetch("/api/account-head-master/options")
+// Supplier master: AccountHeadMaster options (filtered by type=S for suppliers)
+    apiFetch("/api/account-head/options?type=S")
       .then((list: SupplierOption[]) => setSupplierOptions(list ?? []))
       .catch(() => {});
   }, [fetchRecords]);
@@ -541,12 +541,12 @@ export default function MaterialExpenseBooking() {
                             No companies found
                           </SelectItem>
                         )}
-                        {companyOptions.map((c) => (
+{companyOptions.map((c) => (
                           <SelectItem
-                            key={c.CompanyId}
-                            value={String(c.CompanyId)}
+                            key={c.id}
+                            value={String(c.id)}
                           >
-                            {c.CompanyName}
+                            {c.label}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -607,12 +607,12 @@ export default function MaterialExpenseBooking() {
                             No projects found
                           </SelectItem>
                         )}
-                        {projectOptions.map((p) => (
+{projectOptions.map((p) => (
                           <SelectItem
-                            key={p.ProjectId}
-                            value={String(p.ProjectId)}
+                            key={p.id}
+                            value={String(p.id)}
                           >
-                            {p.ProjectName}
+                            {p.label}
                           </SelectItem>
                         ))}
                       </SelectContent>
