@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useFinYear } from "@/contexts/FinYearContext";
@@ -33,59 +33,53 @@ import {
   Edit,
   Trash2,
   ArrowLeft,
-  Link2,
-  BookOpen,
-  X,
-  BadgePercent,
-  Clock,
-  ChevronDown,
-  CreditCard,
-  ToggleLeft,
-  ToggleRight,
   Receipt,
+  Building2,
+  CalendarDays,
+  FileText,
+  BadgePercent,
+  CreditCard,
+  StickyNote,
+  CheckCircle2,
+  Clock,
+  AlertCircle,
+  TrendingUp,
+  FolderKanban,
+  ShoppingCart,
+  HardHat,
+  Search,
+  X,
+  ChevronDown,
+  ChevronRight,
+  Loader2,
+  Hash,
+  RefreshCw,
+  User,
+  Banknote,
 } from "lucide-react";
 import { toast } from "sonner";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
-import { getEnterprises } from "@/api/enterpriseApi";
-import {
-  useBillingTerms,
-  type BillingTerm,
-} from "@/contexts/BillingTermsContext";
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
-import {
-  FormSection,
-  Field,
-  ReadonlyField,
-  PriceBreakdownPanel,
-} from "./ExpenseBooking/FormPrimitives";
+import { Field, PriceBreakdownPanel } from "./ExpenseBooking/FormPrimitives";
+import { BillingAccordion } from "./ExpenseBooking/BillingAccordion";
 import { EmiSection } from "./ExpenseBooking/EmiSection";
-import {
-  DocNumberPreview,
-  fetchNextDocNumber,
-} from "./ExpenseBooking/DocNumberPreview";
 import { ApprovalTrailPanel } from "./ExpenseBooking/ApprovalTrailPanel";
 import { RecordCard } from "./ExpenseBooking/RecordCard";
 import {
   blankForm,
   computeBreakdown,
   dbToRecord,
-  defaultDiscount,
-  defaultEmi,
   fmt,
   recordToDb,
 } from "./ExpenseBooking/helpers";
 import type {
   BookingStatus,
-  DiscountConfig,
   ExpenseRecord,
   PageView,
-  PurchaseOrder,
 } from "./ExpenseBooking/types";
 
 // ─── API ──────────────────────────────────────────────────────────────────────
-
 const API = "/api/expense-booking";
 
 async function apiFetch(url: string, opts?: RequestInit) {
@@ -97,266 +91,551 @@ async function apiFetch(url: string, opts?: RequestInit) {
   return res.json();
 }
 
-// ─── BillingTermSelector (inline, no accordion) ───────────────────────────────
+// ─── Types ────────────────────────────────────────────────────────────────────
+interface CompanyOption {
+  id: number;
+  label: string;
+}
+interface ProjectOption {
+  id: number;
+  label: string;
+}
 
-const BILL_TYPE_COLORS: Record<string, string> = {
-  "Tax Invoice": "bg-blue-100 text-blue-700 border-blue-200",
-  "Proforma Invoice": "bg-violet-100 text-violet-700 border-violet-200",
-  "Credit Note": "bg-emerald-100 text-emerald-700 border-emerald-200",
-  "Debit Note": "bg-orange-100 text-orange-700 border-orange-200",
-  "Bill of Supply": "bg-amber-100 text-amber-700 border-amber-200",
-  "Receipt Voucher": "bg-cyan-100 text-cyan-700 border-cyan-200",
-  "Delivery Challan": "bg-pink-100 text-pink-700 border-pink-200",
-  "Self Invoice": "bg-slate-100 text-slate-700 border-slate-200",
+// From PO master
+interface POItem {
+  PurchaseOrderID: number;
+  PurchaseOrderNo: string;
+  DocNo?: string;
+  PODate: string;
+  SupplierName?: string;
+  CompanyId?: number;
+  ProjectId?: number;
+  TotalAmount?: number;
+  Status: string;
+}
+
+// From WO master
+interface WOItem {
+  Id: number;
+  DocumentNumber: string;
+  DocNo?: string;
+  DocumentDate: string;
+  ContractorName?: string; // WO uses contractor, not supplier
+  CompanyId?: number;
+  ProjectId?: number;
+  TotalAmount?: number;
+  Status: string;
+}
+
+// From Type of Doc master (everything else — invoices, etc.)
+interface TodItem {
+  TypeOfDocId: number;
+  Prefix: string;
+  FullPrefix?: string;
+  Description: string;
+  EntryType?: string;
+}
+
+type SourceKind = "PO" | "WO" | "TOD";
+
+interface SelectedDoc {
+  kind: SourceKind;
+  docNo: string; // The booking reference — the order/invoice doc number
+  sourceId: number;
+  vendorLabel?: string; // supplier (PO) or contractor (WO) — plain text, no FK lookup
+  companyId?: number;
+  projectId?: number;
+  amount?: number; // Auto-filled from the order
+  status?: string;
+  date?: string;
+}
+
+// ─── Section header ───────────────────────────────────────────────────────────
+const SECTION_ICONS: Record<string, React.ElementType> = {
+  "Document Selection": FileText,
+  "Booking Information": CalendarDays,
+  "Amount & GST": BadgePercent,
+  "Billing Terms": Receipt,
+  "EMI / Installment Options": CreditCard,
+  "Approval Workflow": CheckCircle2,
+  Remarks: StickyNote,
 };
 
-function BillingTermPickerDialog({
-  open,
-  onClose,
-  terms,
-  onSelect,
-}: {
-  open: boolean;
-  onClose: () => void;
-  terms: BillingTerm[];
-  onSelect: (term: BillingTerm) => void;
-}) {
+function SectionHeader({ label }: { label: string }) {
+  const Icon = SECTION_ICONS[label];
   return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="w-[calc(100vw-2rem)] max-w-xl max-h-[80vh] overflow-hidden flex flex-col">
-        <DialogHeader>
-          <DialogTitle className="font-heading flex items-center gap-2">
-            <BookOpen size={16} className="text-primary" />
-            Select Billing Term
-          </DialogTitle>
-          <DialogDescription>
-            Choose a billing term from master. A discount will be auto-applied
-            if the term includes one.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="flex-1 overflow-y-auto -mx-6 px-6 space-y-2 py-1">
-          {terms.length === 0 && (
-            <div className="flex flex-col items-center gap-2 py-10 text-center">
-              <BookOpen size={20} className="text-muted-foreground/40" />
-              <p className="text-sm text-muted-foreground">
-                No active billing terms found
-              </p>
-            </div>
-          )}
-          {terms.map((term) => (
-            <button
-              key={term._id}
-              type="button"
-              onClick={() => {
-                onSelect(term);
-                onClose();
-              }}
-              className="w-full text-left rounded-xl border border-border bg-background hover:border-primary/40 hover:bg-primary/[0.03] transition-all px-4 py-3 group"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="text-sm font-heading font-semibold text-foreground group-hover:text-primary transition-colors">
-                      {term.name}
-                    </p>
-                    <span
-                      className={
-                        "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-heading " +
-                        (BILL_TYPE_COLORS[term.billType] ??
-                          "bg-muted text-muted-foreground border-border")
-                      }
-                    >
-                      {term.billType}
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-muted-foreground mt-1 truncate">
-                    {term.description}
-                  </p>
-                  <div className="flex items-center gap-3 mt-1.5 text-[11px] text-muted-foreground flex-wrap">
-                    <span className="flex items-center gap-1">
-                      <BadgePercent size={10} />
-                      {term.discountType === "none"
-                        ? "No discount"
-                        : term.discountType === "percentage"
-                          ? `${term.discountValue}% discount`
-                          : `Rs.${fmt(term.discountValue)} flat off`}
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <Clock size={10} />
-                      {term.paymentDueDays === 0
-                        ? "Immediate"
-                        : `Net-${term.paymentDueDays}`}
-                    </span>
-                  </div>
-                </div>
-                <ChevronDown
-                  size={14}
-                  className="text-muted-foreground group-hover:text-primary rotate-[-90deg] shrink-0 mt-1 transition-colors"
-                />
-              </div>
-            </button>
-          ))}
+    <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
+      {Icon && (
+        <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
+          <Icon size={12} className="text-primary" />
         </div>
-
-        <DialogFooter className="pt-3 border-t border-border">
-          <Button variant="outline" size="sm" onClick={onClose}>
-            Cancel
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      )}
+      <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
+        {label}
+      </p>
+    </div>
   );
 }
 
-// ─── BillingTermsSection ──────────────────────────────────────────────────────
-// Always shown. If a billing term is applied → show amount / breakdown.
-// If no billing term → EMI section is shown below.
-
-function BillingTermsSection({
-  discount,
-  basicAmount,
-  cgstRate,
-  sgstRate,
-  onChange,
+// ─── Readonly info pill ───────────────────────────────────────────────────────
+function InfoPill({
+  icon: Icon,
+  label,
+  value,
 }: {
-  discount: DiscountConfig;
-  basicAmount: number;
-  cgstRate: number;
-  sgstRate: number;
-  onChange: (d: DiscountConfig) => void;
+  icon: React.ElementType;
+  label: string;
+  value: string;
 }) {
-  const { activeBillingTerms = [] } = useBillingTerms();
-  const [pickerOpen, setPickerOpen] = useState(false);
+  return (
+    <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-muted/40 border border-border/50">
+      <Icon size={11} className="text-muted-foreground shrink-0" />
+      <span className="text-[10px] text-muted-foreground">{label}:</span>
+      <span className="text-[10px] font-semibold text-foreground truncate">
+        {value}
+      </span>
+    </div>
+  );
+}
 
-  const bd = computeBreakdown(basicAmount, cgstRate, sgstRate, discount);
-  const hasBase = basicAmount > 0;
-  const termApplied = !!discount.masterTermId;
+// ─── Document Selector Panel ──────────────────────────────────────────────────
+interface DocSelectorProps {
+  poList: POItem[];
+  woList: WOItem[];
+  todList: TodItem[];
+  loadingPO: boolean;
+  loadingWO: boolean;
+  loadingTOD: boolean;
+  selected: SelectedDoc | null;
+  finYear?: string;
+  onSelect: (doc: SelectedDoc) => void;
+  onClear: () => void;
+}
 
-  const applyTerm = (term: BillingTerm) => {
-    const mapped: DiscountConfig = {
-      applicable: term.discountType !== "none",
-      type: term.discountType === "flat" ? "fixed" : "percentage",
-      value: term.discountValue,
-      appliedOn: "pre-gst",
-      masterTermId: term._id,
-      masterTermName: term.name,
-    };
-    onChange(mapped);
-    toast.success(`Billing term "${term.name}" applied`);
+function DocSelectorPanel({
+  poList,
+  woList,
+  todList,
+  loadingPO,
+  loadingWO,
+  loadingTOD,
+  selected,
+  finYear,
+  onSelect,
+  onClear,
+}: DocSelectorProps) {
+  const [tab, setTab] = useState<SourceKind>("PO");
+  const [search, setSearch] = useState("");
+  const [todFetching, setTodFetching] = useState(false);
+
+  // Fetch next doc number for a ToD type and resolve
+  const selectTod = async (tod: TodItem) => {
+    setTodFetching(true);
+    try {
+      const qs = finYear ? `?finYear=${encodeURIComponent(finYear)}` : "";
+      const data = await apiFetch(
+        `/api/document-type/${tod.TypeOfDocId}/next-number${qs}`,
+      );
+      const docNo: string =
+        data.nextDocNo ?? (tod.FullPrefix ?? tod.Prefix) + "/001";
+      onSelect({
+        kind: "TOD",
+        docNo,
+        sourceId: tod.TypeOfDocId,
+        vendorLabel: undefined,
+        companyId: undefined,
+        projectId: undefined,
+        amount: undefined,
+        status: undefined,
+        date: undefined,
+      });
+    } catch {
+      toast.error("Could not fetch next document number.");
+    } finally {
+      setTodFetching(false);
+    }
   };
 
-  const clearTerm = () => {
-    onChange(defaultDiscount());
-    toast.info("Billing term cleared");
-  };
+  const filteredPO = poList.filter(
+    (p) =>
+      (p.DocNo || p.PurchaseOrderNo)
+        .toLowerCase()
+        .includes(search.toLowerCase()) ||
+      (p.SupplierName || "").toLowerCase().includes(search.toLowerCase()),
+  );
+  const filteredWO = woList.filter(
+    (w) =>
+      (w.DocNo || w.DocumentNumber)
+        .toLowerCase()
+        .includes(search.toLowerCase()) ||
+      (w.ContractorName || "").toLowerCase().includes(search.toLowerCase()),
+  );
+  const filteredTOD = todList.filter(
+    (t) =>
+      (t.FullPrefix ?? t.Prefix).toLowerCase().includes(search.toLowerCase()) ||
+      t.Description.toLowerCase().includes(search.toLowerCase()),
+  );
+
+  // ── Selected state: show summary card ──
+  if (selected) {
+    const isPO = selected.kind === "PO";
+    const isWO = selected.kind === "WO";
+    const isTOD = selected.kind === "TOD";
+    const Icon = isPO ? ShoppingCart : isWO ? HardHat : FileText;
+    const colors = isPO
+      ? {
+          ring: "border-blue-500/30 bg-blue-500/5",
+          icon: "bg-blue-500/10",
+          text: "text-blue-500",
+          badge:
+            "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20",
+        }
+      : isWO
+        ? {
+            ring: "border-violet-500/30 bg-violet-500/5",
+            icon: "bg-violet-500/10",
+            text: "text-violet-500",
+            badge:
+              "bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/20",
+          }
+        : {
+            ring: "border-emerald-500/30 bg-emerald-500/5",
+            icon: "bg-emerald-500/10",
+            text: "text-emerald-500",
+            badge:
+              "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
+          };
+
+    const kindLabel = isPO
+      ? "Purchase Order"
+      : isWO
+        ? "Work Order"
+        : "Document";
+
+    return (
+      <div className={`rounded-xl border p-4 ${colors.ring}`}>
+        <div className="flex items-start gap-3">
+          <div
+            className={`w-9 h-9 rounded-lg ${colors.icon} flex items-center justify-center shrink-0`}
+          >
+            <Icon size={15} className={colors.text} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span
+                className={`text-xs font-heading font-semibold ${colors.text}`}
+              >
+                {kindLabel}
+              </span>
+              <span
+                className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold border ${colors.badge}`}
+              >
+                {selected.docNo}
+              </span>
+              {selected.status && (
+                <span className="px-2 py-0.5 rounded-full text-[10px] border border-border bg-muted/50 text-muted-foreground">
+                  {selected.status}
+                </span>
+              )}
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {selected.vendorLabel && (
+                <InfoPill
+                  icon={User}
+                  label={isPO ? "Supplier" : "Contractor"}
+                  value={selected.vendorLabel}
+                />
+              )}
+              {selected.amount != null && (
+                <InfoPill
+                  icon={Banknote}
+                  label="Order Value"
+                  value={`₹${fmt(selected.amount)}`}
+                />
+              )}
+              {selected.date && (
+                <InfoPill
+                  icon={CalendarDays}
+                  label="Date"
+                  value={selected.date.slice(0, 10)}
+                />
+              )}
+            </div>
+          </div>
+          <button
+            onClick={onClear}
+            className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-destructive transition-colors shrink-0 px-2 py-1 rounded-md hover:bg-destructive/5 border border-transparent hover:border-destructive/20 mt-0.5"
+          >
+            <X size={10} /> Change
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Picker state ──
+  const tabs: {
+    id: SourceKind;
+    label: string;
+    icon: React.ElementType;
+    count: number;
+  }[] = [
+    {
+      id: "PO",
+      label: "Purchase Orders",
+      icon: ShoppingCart,
+      count: poList.length,
+    },
+    { id: "WO", label: "Work Orders", icon: HardHat, count: woList.length },
+    {
+      id: "TOD",
+      label: "Other Documents",
+      icon: FileText,
+      count: todList.length,
+    },
+  ];
+
+  const loading =
+    tab === "PO" ? loadingPO : tab === "WO" ? loadingWO : loadingTOD;
 
   return (
-    <>
-      <BillingTermPickerDialog
-        open={pickerOpen}
-        onClose={() => setPickerOpen(false)}
-        terms={activeBillingTerms}
-        onSelect={applyTerm}
-      />
+    <div className="rounded-xl border border-border overflow-hidden">
+      {/* Tabs */}
+      <div className="flex border-b border-border bg-muted/20">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => {
+              setTab(t.id);
+              setSearch("");
+            }}
+            className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-heading font-semibold transition-colors border-b-2 -mb-px ${
+              tab === t.id
+                ? "border-primary text-primary bg-background"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            <t.icon size={11} />
+            {t.label}
+            <span className="ml-0.5 px-1.5 py-0.5 rounded-full bg-muted text-[10px] text-muted-foreground font-normal">
+              {t.count}
+            </span>
+          </button>
+        ))}
+      </div>
 
-      <div className="rounded-xl border border-border overflow-hidden">
-        {/* Header row */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 py-3.5 bg-muted/40">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-primary/10 shrink-0">
-              <Receipt size={14} className="text-primary" />
-            </div>
-            <div className="min-w-0">
-              <p className="text-sm font-heading font-semibold text-foreground">
-                Billing Terms
-              </p>
-              <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
-                {termApplied ? (
-                  <span className="text-primary font-medium">
-                    {discount.masterTermName}
-                    {discount.applicable && hasBase
-                      ? ` · Net Rs.${fmt(bd.netAmount)}`
-                      : ""}
-                  </span>
-                ) : (
-                  "No billing term applied — pick from master"
-                )}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 flex-wrap shrink-0">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setPickerOpen(true)}
-              className="h-7 gap-1.5 text-xs border-primary/30 text-primary hover:bg-primary/[0.06]"
+      {/* Search */}
+      <div className="p-3 border-b border-border/40 bg-background">
+        <div className="relative">
+          <Search
+            size={12}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+          />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder={
+              tab === "PO"
+                ? "Search by PO number or supplier…"
+                : tab === "WO"
+                  ? "Search by WO number or contractor…"
+                  : "Search document types…"
+            }
+            className="w-full pl-8 pr-8 py-2 text-xs rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 placeholder:text-muted-foreground"
+          />
+          {search && (
+            <button
+              onClick={() => setSearch("")}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
             >
-              <BookOpen size={12} />
-              {termApplied ? "Change Term" : "Pick from Master"}
-            </Button>
-            {termApplied && (
-              <button
-                type="button"
-                onClick={clearTerm}
-                className="flex items-center gap-1 text-[11px] text-destructive hover:underline"
-              >
-                <X size={10} /> Clear
-              </button>
-            )}
-          </div>
+              <X size={11} />
+            </button>
+          )}
         </div>
+      </div>
 
-        {/* Applied term detail */}
-        {termApplied && (
-          <div className="border-t border-border bg-card p-4">
-            {/* Term badge row */}
-            <div className="flex flex-wrap items-center gap-3 mb-4">
-              <div className="flex items-center gap-2">
-                <BadgePercent size={13} className="text-muted-foreground" />
-                <span className="text-xs text-foreground font-medium">
-                  {discount.applicable
-                    ? discount.type === "percentage"
-                      ? `${discount.value}% discount applied`
-                      : `Rs.${fmt(discount.value)} flat discount applied`
-                    : "No discount with this term"}
-                </span>
-              </div>
-            </div>
-
-            {/* Price breakdown if basic amount exists */}
-            {hasBase ? (
-              <PriceBreakdownPanel
-                bd={bd}
-                cgstRate={cgstRate}
-                sgstRate={sgstRate}
-                hasDiscount={discount.applicable}
-              />
-            ) : (
-              <p className="text-xs text-muted-foreground text-center py-4 border border-dashed border-border rounded-lg">
-                Enter a basic amount above to see the price breakdown
-              </p>
-            )}
+      {/* List */}
+      <div className="max-h-60 overflow-y-auto bg-background">
+        {loading || todFetching ? (
+          <div className="flex items-center justify-center py-10 gap-2 text-xs text-muted-foreground">
+            <Loader2 size={14} className="animate-spin" />
+            {todFetching ? "Fetching next document number…" : "Loading…"}
           </div>
+        ) : tab === "PO" ? (
+          filteredPO.length === 0 ? (
+            <EmptyState label="No purchase orders found" />
+          ) : (
+            filteredPO.map((po) => {
+              const docNo = po.DocNo || po.PurchaseOrderNo;
+              return (
+                <PickerRow
+                  key={po.PurchaseOrderID}
+                  icon={<ShoppingCart size={12} className="text-blue-500" />}
+                  iconBg="bg-blue-500/10"
+                  primary={docNo}
+                  primaryColor="text-blue-600 dark:text-blue-400"
+                  secondary={[po.SupplierName, po.PODate?.slice(0, 10)]
+                    .filter(Boolean)
+                    .join(" · ")}
+                  badge={po.Status}
+                  amount={po.TotalAmount}
+                  onClick={() =>
+                    onSelect({
+                      kind: "PO",
+                      docNo,
+                      sourceId: po.PurchaseOrderID,
+                      vendorLabel: po.SupplierName,
+                      companyId: po.CompanyId,
+                      projectId: po.ProjectId,
+                      amount: po.TotalAmount,
+                      status: po.Status,
+                      date: po.PODate,
+                    })
+                  }
+                />
+              );
+            })
+          )
+        ) : tab === "WO" ? (
+          filteredWO.length === 0 ? (
+            <EmptyState label="No work orders found" />
+          ) : (
+            filteredWO.map((wo) => {
+              const docNo = wo.DocNo || wo.DocumentNumber;
+              return (
+                <PickerRow
+                  key={wo.Id}
+                  icon={<HardHat size={12} className="text-violet-500" />}
+                  iconBg="bg-violet-500/10"
+                  primary={docNo}
+                  primaryColor="text-violet-600 dark:text-violet-400"
+                  secondary={[wo.ContractorName, wo.DocumentDate?.slice(0, 10)]
+                    .filter(Boolean)
+                    .join(" · ")}
+                  badge={wo.Status}
+                  amount={wo.TotalAmount}
+                  onClick={() =>
+                    onSelect({
+                      kind: "WO",
+                      docNo,
+                      sourceId: wo.Id,
+                      vendorLabel: wo.ContractorName, // contractor — not supplier
+                      companyId: wo.CompanyId,
+                      projectId: wo.ProjectId,
+                      amount: wo.TotalAmount,
+                      status: wo.Status,
+                      date: wo.DocumentDate,
+                    })
+                  }
+                />
+              );
+            })
+          )
+        ) : filteredTOD.length === 0 ? (
+          <EmptyState label="No document types found" />
+        ) : (
+          filteredTOD.map((tod) => (
+            <PickerRow
+              key={tod.TypeOfDocId}
+              icon={<Hash size={12} className="text-emerald-500" />}
+              iconBg="bg-emerald-500/10"
+              primary={tod.FullPrefix ?? tod.Prefix}
+              primaryColor="text-emerald-600 dark:text-emerald-400"
+              secondary={tod.Description}
+              badge={tod.EntryType}
+              onClick={() => selectTod(tod)}
+            />
+          ))
         )}
       </div>
-    </>
+    </div>
   );
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
+function EmptyState({ label }: { label: string }) {
+  return (
+    <div className="py-10 text-center text-xs text-muted-foreground">
+      <AlertCircle size={16} className="mx-auto mb-2 opacity-30" />
+      {label}
+    </div>
+  );
+}
 
+function PickerRow({
+  icon,
+  iconBg,
+  primary,
+  primaryColor,
+  secondary,
+  badge,
+  amount,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  iconBg: string;
+  primary: string;
+  primaryColor: string;
+  secondary?: string;
+  badge?: string;
+  amount?: number;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-full flex items-center gap-3 px-4 py-3 hover:bg-muted/30 transition-colors border-b border-border/30 last:border-0 text-left group"
+    >
+      <div
+        className={`w-7 h-7 rounded-lg ${iconBg} flex items-center justify-center shrink-0 transition-opacity`}
+      >
+        {icon}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className={`font-mono text-xs font-bold ${primaryColor}`}>
+            {primary}
+          </span>
+          {badge && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground border border-border/50">
+              {badge}
+            </span>
+          )}
+        </div>
+        {secondary && (
+          <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
+            {secondary}
+          </p>
+        )}
+      </div>
+      {amount != null && (
+        <span className="font-mono text-xs text-muted-foreground shrink-0">
+          ₹{fmt(amount)}
+        </span>
+      )}
+      <ChevronRight size={12} className="text-muted-foreground/30 shrink-0" />
+    </button>
+  );
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
 export default function MaterialExpenseBooking() {
   const { finYears } = useFinYear();
   const activeFinYears = finYears.filter((fy) => fy.status === "Active");
 
-  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
-  const [poLoading, setPoLoading] = useState(true);
-  const [companyOptions, setCompanyOptions] = useState<
-    { id: number; label: string }[]
-  >([]);
+  // Master data
+  const [companyOptions, setCompanyOptions] = useState<CompanyOption[]>([]);
+  const [projectOptions, setProjectOptions] = useState<ProjectOption[]>([]);
+  const [poList, setPoList] = useState<POItem[]>([]);
+  const [woList, setWoList] = useState<WOItem[]>([]);
+  const [todList, setTodList] = useState<TodItem[]>([]);
+  const [loadingPO, setLoadingPO] = useState(false);
+  const [loadingWO, setLoadingWO] = useState(false);
+  const [loadingTOD, setLoadingTOD] = useState(false);
+
+  // Document selection
+  const [selectedDoc, setSelectedDoc] = useState<SelectedDoc | null>(null);
+
+  // Page state
   const [records, setRecords] = useState<ExpenseRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<PageView>("list");
@@ -364,16 +643,12 @@ export default function MaterialExpenseBooking() {
   const [form, setForm] = useState<Omit<ExpenseRecord, "id">>(blankForm());
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const [selectedDocTypeId, setSelectedDocTypeId] = useState<number | null>(
-    null,
-  );
-  const [docNumberPreview, setDocNumberPreview] = useState("");
-  const [docRefreshTrigger, setDocRefreshTrigger] = useState(0);
-  const [statusFilter, setStatusFilter] = useState<string>("Received");
+  const [statusFilter, setStatusFilter] = useState<string>("All");
   const [approvalTrail, setApprovalTrail] =
     useState<ExpenseRecord["approvalTrail"]>(undefined);
 
-  const fetchRecords = React.useCallback(async () => {
+  // ── Fetch records ──
+  const fetchRecords = useCallback(async () => {
     try {
       setLoading(true);
       const data = await apiFetch(`${API}?limit=100`);
@@ -385,43 +660,35 @@ export default function MaterialExpenseBooking() {
     }
   }, []);
 
-  const fetchPurchaseOrders = React.useCallback(async () => {
-    try {
-      setPoLoading(true);
-      const data = await apiFetch(`${API}?limit=200`);
-      const rows: any[] = Array.isArray(data)
-        ? data
-        : Array.isArray(data?.data)
-          ? data.data
-          : Array.isArray(data?.recordset)
-            ? data.recordset
-            : [];
-      const mapped: PurchaseOrder[] = rows.map((row: any) => ({
-        id: row.POId ?? row.Eid ?? null,
-        poNumber:
-          row.PODocNo ??
-          row.EDocNo ??
-          ((row.POId ?? row.Eid) ? `PO-${row.POId ?? row.Eid}` : "N/A"),
-        supplier: row.SupplierName ?? row.EProjectName ?? "Unknown",
-        projectSite: row.ProjectName ?? row.EProjectName ?? "",
-        itemDescription: row.ItemDescription ?? row.EDocumentType ?? "Material",
-        quantity: parseFloat(row.Quantity) || 1,
-        unit: row.UOMCode ?? "Nos",
-        rate: parseFloat(row.Rate ?? row.EAmount) || 0,
-        totalAmount: parseFloat(row.TotalAmount ?? row.EAmount) || 0,
-        paymentTerms: row.PaymentTerms ?? "Net-30",
-        cgstRate: parseFloat(row.CGSTRate ?? row.ECgstRate) || 18,
-        sgstRate: parseFloat(row.SGSTRate ?? row.ESgstRate) || 0,
-        invoiceReference: row.InvoiceRef ?? row.EDocNo ?? "",
-      }));
-      setPurchaseOrders(mapped);
-    } catch (err: any) {
-      console.error("PO load failed:", err.message);
-      setPurchaseOrders([]);
-    } finally {
-      setPoLoading(false);
-    }
-  }, []);
+  // ── Fetch master lists ──
+  const fetchMasters = async () => {
+    // PO from PO master
+    setLoadingPO(true);
+    apiFetch("/api/purchase-orders?limit=500")
+      .then((r) => setPoList(Array.isArray(r) ? r : (r.data ?? [])))
+      .catch(() => {})
+      .finally(() => setLoadingPO(false));
+
+    // WO from WO master
+    setLoadingWO(true);
+    apiFetch("/api/work-orders?limit=500")
+      .then((r) => setWoList(Array.isArray(r) ? r : (r.data ?? [])))
+      .catch(() => {})
+      .finally(() => setLoadingWO(false));
+
+    // Everything else from Type of Doc (excluding PO/WO modules)
+    setLoadingTOD(true);
+    apiFetch("/api/document-type")
+      .then((r: TodItem[]) => {
+        // Filter out PO and WO types since those come from their own masters
+        const filtered = (Array.isArray(r) ? r : []).filter(
+          (t) => !["PO", "WO"].includes((t as any).ModuleTag ?? ""),
+        );
+        setTodList(filtered);
+      })
+      .catch(() => {})
+      .finally(() => setLoadingTOD(false));
+  };
 
   const fetchApprovalTrail = async (recordId: string) => {
     try {
@@ -432,53 +699,66 @@ export default function MaterialExpenseBooking() {
     }
   };
 
-  React.useEffect(() => {
+  useEffect(() => {
     fetchRecords();
-    fetchPurchaseOrders();
-    getEnterprises()
-      .then((list) => {
-        const companies = list
-          .filter(
-            (e) =>
-              (e.business_type ?? "").toUpperCase() === "C" && !e.discontinue,
-          )
-          .map((e) => ({ id: e.id, label: e.name ?? "" }))
-          .filter((o) => o.label !== "");
-        setCompanyOptions(companies);
-      })
-      .catch(() => {});
-  }, [fetchRecords, fetchPurchaseOrders]);
 
+    // Company master: enterprise where business_type = 'C'
+    apiFetch("/api/enterprises/options?business_type=C")
+      .then((list: CompanyOption[]) => setCompanyOptions(list ?? []))
+      .catch(() => {});
+
+    // Project master: enterprise where business_type = 'P'
+    apiFetch("/api/enterprises/options?business_type=P")
+      .then((list: ProjectOption[]) => setProjectOptions(list ?? []))
+      .catch(() => {});
+  }, [fetchRecords]);
+
+  // ── Form field setter ──
   const set = <K extends keyof Omit<ExpenseRecord, "id">>(
     field: K,
     value: Omit<ExpenseRecord, "id">[K],
   ) => setForm((prev) => ({ ...prev, [field]: value }));
 
-  const linkPO = (poNumber: string) => {
-    const po = purchaseOrders.find((p) => p.poNumber === poNumber);
-    if (!po) {
-      set("poId", null);
-      return;
-    }
+  // ── Apply selected doc → pre-fill form ──
+  const applyDoc = (doc: SelectedDoc) => {
+    setSelectedDoc(doc);
     setForm((prev) => ({
       ...prev,
-      poId: String(po.id ?? po.poNumber),
-      supplier: po.supplier,
-      projectSite: po.projectSite,
-      materialCategory: prev.materialCategory || po.itemDescription,
-      invoiceReference: po.invoiceReference,
-      basicAmount: po.totalAmount,
-      cgstRate: po.cgstRate,
-      sgstRate: po.sgstRate,
+      bookingReference: doc.docNo,
+      // Auto-fill amount from the order (no manual intervention)
+      basicAmount: doc.amount ?? prev.basicAmount,
+      // Auto-fill company and project if available
+      companyId: doc.companyId ?? prev.companyId,
+      projectSite: doc.projectId ? String(doc.projectId) : prev.projectSite,
+      // Vendor is stored as plain text — no FK, no dropdown
+      supplier: doc.vendorLabel ?? prev.supplier,
+      // EDocumentType: PO/WO kind directly, or prefix of TOD doc number
+      materialCategory:
+        doc.kind === "PO"
+          ? "PO"
+          : doc.kind === "WO"
+            ? "WO"
+            : doc.docNo.split("/")[0],
     }));
   };
 
+  const clearDoc = () => {
+    setSelectedDoc(null);
+    setForm((prev) => ({
+      ...prev,
+      bookingReference: "",
+      basicAmount: 0,
+      supplier: "",
+    }));
+  };
+
+  // ── Open forms ──
   const openNew = () => {
     setEditingId(null);
     setForm({ ...blankForm(), financialYear: activeFinYears[0]?.year || "" });
-    setSelectedDocTypeId(null);
-    setDocNumberPreview("");
     setApprovalTrail(undefined);
+    setSelectedDoc(null);
+    fetchMasters();
     setView("form");
   };
 
@@ -486,9 +766,10 @@ export default function MaterialExpenseBooking() {
     setEditingId(rec.id);
     const { id, ...rest } = rec;
     setForm(rest);
-    setSelectedDocTypeId(null);
-    setDocNumberPreview(rec.bookingReference);
+    setApprovalTrail(undefined);
+    setSelectedDoc(null);
     fetchApprovalTrail(rec.id);
+    fetchMasters();
     setView("form");
   };
 
@@ -497,37 +778,36 @@ export default function MaterialExpenseBooking() {
     setEditingId(null);
     setForm(blankForm());
     setApprovalTrail(undefined);
+    setSelectedDoc(null);
   };
 
-  const handleDocTypeSelect = (docTypeId: number | null, preview: string) => {
-    setSelectedDocTypeId(docTypeId);
-    const fy = form.financialYear;
-    const finalPreview =
-      preview && fy && !preview.includes(fy) ? `${preview}/${fy}` : preview;
-    setDocNumberPreview(finalPreview);
-    if (finalPreview) set("bookingReference", finalPreview);
-  };
-
+  // ── Save ──
   const handleSave = async () => {
-    if (!form.bookingReference.trim() || !form.bookingDate) {
-      toast.error("Booking reference and date are required.");
+    if (!form.bookingReference.trim()) {
+      toast.error("Please select a document (PO, WO, or Doc Type) first.");
+      return;
+    }
+    if (!form.bookingDate) {
+      toast.error("Booking date is required.");
       return;
     }
     if (!form.companyId) {
       toast.error("Please select a company.");
       return;
     }
+
     const bd = computeBreakdown(
       form.basicAmount,
       form.cgstRate,
       form.sgstRate,
       form.discount,
     );
-    const body = recordToDb(
-      form,
-      bd.netAmount,
-      editingId ? null : selectedDocTypeId,
-    );
+
+    const body = {
+      ...recordToDb(form, bd.netAmount, null),
+      ESourceType: selectedDoc?.kind ?? null,
+      ESourceId: selectedDoc?.sourceId ?? null,
+    };
 
     try {
       setSaving(true);
@@ -543,25 +823,10 @@ export default function MaterialExpenseBooking() {
           method: "POST",
           body: JSON.stringify(body),
         });
-        const confirmedDocNo = result?.docNo || form.bookingReference;
-        toast.success(`Expense booking created — Ref: ${confirmedDocNo}`);
-        await fetchRecords();
-        if (selectedDocTypeId) {
-          const nextDocNo = await fetchNextDocNumber(
-            selectedDocTypeId,
-            form.financialYear || undefined,
-          );
-          setForm({
-            ...blankForm(),
-            bookingReference: nextDocNo,
-            financialYear: form.financialYear,
-          });
-          setDocNumberPreview(nextDocNo);
-          setDocRefreshTrigger((c) => c + 1);
-        } else {
-          cancelForm();
-        }
-        return;
+        toast.success(
+          `Expense booking created — Ref: ${result?.docNo || form.bookingReference}`,
+        );
+        cancelForm();
       }
       await fetchRecords();
     } catch (err: any) {
@@ -589,41 +854,59 @@ export default function MaterialExpenseBooking() {
     form.discount,
   );
 
-  // EMI is only shown if no billing term is applied
-  const billingTermApplied = !!form.discount.masterTermId;
+  const ALL_STATUSES = [
+    "All",
+    "Draft",
+    "Pending",
+    "Approved",
+    "Rejected",
+    "Booked",
+    "Hold",
+    "Received",
+  ] as const;
+  const filteredRecords =
+    statusFilter && statusFilter !== "All"
+      ? records.filter((r) => r.status === statusFilter)
+      : records;
 
-  const filteredRecords = statusFilter
-    ? records.filter((r) => r.status === statusFilter)
-    : records;
+  const totalNet = records.reduce((s, r) => s + (r.netAmount ?? 0), 0);
+  const approvedCount = records.filter((r) => r.status === "Approved").length;
+  const pendingCount = records.filter((r) => r.status === "Pending").length;
+  const emiCount = records.filter((r) => r.emi?.enabled).length;
+
+  const vendorLabel =
+    selectedDoc?.kind === "WO" ? "Contractor" : "Supplier / Vendor";
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Material", "Expense Booking"]} />
-      <div className="space-y-4">
-        {/* ── Page Header ─────────────────────────────────────────────────── */}
+      <div className="space-y-5">
+        {/* ── Page Header ──────────────────────────────────────────────── */}
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h1 className="text-lg sm:text-xl font-heading font-bold text-foreground">
+            <h1 className="text-xl font-heading font-bold text-foreground">
               Expense Booking
             </h1>
-            <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
-              Record and manage material expense bookings
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Book expenses against purchase orders, work orders, or invoice
+              documents
             </p>
           </div>
           {view === "list" && (
-            <Button className="gradient-accent shrink-0" onClick={openNew}>
-              <Plus size={15} className="mr-1.5" />
-              <span className="hidden sm:inline">New Booking</span>
-              <span className="sm:hidden">New</span>
+            <Button
+              className="gradient-accent shrink-0 gap-1.5"
+              onClick={openNew}
+            >
+              <Plus size={14} /> New Booking
             </Button>
           )}
         </div>
 
-        {/* ── Form View ───────────────────────────────────────────────────── */}
+        {/* ── Form View ────────────────────────────────────────────────── */}
         {view === "form" && (
-          <Card className="border-primary/20 shadow-sm">
-            <CardHeader className="pb-4 border-b border-border px-4 sm:px-6">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <Card className="border-border shadow-sm">
+            <CardHeader className="pb-4 border-b border-border px-5 sm:px-6">
+              <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3 min-w-0">
                   <button
                     type="button"
@@ -631,14 +914,17 @@ export default function MaterialExpenseBooking() {
                     className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0"
                   >
                     <ArrowLeft size={15} />
-                    <span className="hidden sm:inline">Back to list</span>
+                    <span className="hidden sm:inline">Back</span>
                   </button>
-                  <span className="text-muted-foreground/40 hidden sm:inline">
-                    |
-                  </span>
-                  <CardTitle className="text-base sm:text-lg font-heading">
+                  <span className="text-border">|</span>
+                  <CardTitle className="text-base font-heading truncate">
                     {editingId ? "Edit Expense Booking" : "New Expense Booking"}
                   </CardTitle>
+                  {form.bookingReference && (
+                    <span className="hidden sm:inline font-mono text-xs bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-md shrink-0">
+                      {form.bookingReference}
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
                   <Button variant="outline" size="sm" onClick={cancelForm}>
@@ -650,146 +936,58 @@ export default function MaterialExpenseBooking() {
                     onClick={handleSave}
                     disabled={saving}
                   >
-                    {saving ? "Saving…" : editingId ? "Update" : "Save"}
+                    {saving ? "Saving…" : editingId ? "Update" : "Save Booking"}
                   </Button>
                 </div>
               </div>
             </CardHeader>
 
-            <CardContent className="pt-5 space-y-6 px-4 sm:px-6">
-              {/* ① Doc Type & Doc Number ──────────────────────────────────── */}
-              <FormSection label="Document">
-                <DocNumberPreview
+            <CardContent className="pt-6 space-y-7 px-5 sm:px-6">
+              {/* ── 0. Document Selection ─────────────────────────────── */}
+              <div className="space-y-3">
+                <SectionHeader label="Document Selection" />
+                <p className="text-[11px] text-muted-foreground -mt-1">
+                  Pick a Purchase Order or Work Order to auto-fill details, or
+                  choose a document type from the master for other expenses
+                  (invoices, etc.).
+                </p>
+                <DocSelectorPanel
+                  poList={poList}
+                  woList={woList}
+                  todList={todList}
+                  loadingPO={loadingPO}
+                  loadingWO={loadingWO}
+                  loadingTOD={loadingTOD}
+                  selected={selectedDoc}
                   finYear={form.financialYear || undefined}
-                  selectedDocTypeId={selectedDocTypeId}
-                  onSelect={handleDocTypeSelect}
-                  preview={docNumberPreview}
-                  refreshTrigger={docRefreshTrigger}
+                  onSelect={applyDoc}
+                  onClear={clearDoc}
                 />
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <Field
-                    label="Booking Reference"
-                    required
-                    hint="Auto-filled from doc type above, or enter manually."
-                  >
-                    <Input
-                      value={form.bookingReference}
-                      onChange={(e) => {
-                        set("bookingReference", e.target.value.toUpperCase());
-                        setDocNumberPreview(e.target.value.toUpperCase());
-                      }}
-                      placeholder="e.g. PR/REC/000500"
-                    />
-                  </Field>
-                  <Field label="Financial Year">
-                    <Select
-                      value={form.financialYear}
-                      onValueChange={(v) => {
-                        set("financialYear", v);
-                        if (selectedDocTypeId) {
-                          void fetchNextDocNumber(selectedDocTypeId, v).then(
-                            (n) => {
-                              setDocNumberPreview(n);
-                              if (n) set("bookingReference", n);
-                            },
-                          );
-                        }
-                      }}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select year..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {activeFinYears.map((fy) => (
-                          <SelectItem key={fy.id} value={fy.year}>
-                            {fy.year}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                </div>
-              </FormSection>
 
-              {/* ② Link PO ────────────────────────────────────────────────── */}
-              <FormSection label="Link Purchase Order">
+                {/* Booking reference — always read-only, driven by selected doc */}
                 <Field
-                  label="Purchase Order"
-                  hint="Selecting a PO auto-fills supplier, invoice reference, project site and amounts."
+                  label="Booking Reference"
+                  required
+                  hint={
+                    selectedDoc
+                      ? `Auto-filled from the selected ${selectedDoc.kind === "PO" ? "Purchase Order" : selectedDoc.kind === "WO" ? "Work Order" : "document"}.`
+                      : "Will be populated once you select a document above."
+                  }
                 >
-                  <Select
-                    value={form.poId ?? ""}
-                    onValueChange={linkPO}
-                    disabled={poLoading}
-                  >
-                    <SelectTrigger>
-                      <div className="flex items-center gap-2">
-                        <Link2
-                          size={13}
-                          className="text-muted-foreground shrink-0"
-                        />
-                        <SelectValue
-                          placeholder={
-                            poLoading
-                              ? "Loading purchase orders..."
-                              : purchaseOrders.length === 0
-                                ? "No POs found"
-                                : "Select purchase order..."
-                          }
-                        />
-                      </div>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {purchaseOrders.map((po) => (
-                        <SelectItem key={po.poNumber} value={po.poNumber}>
-                          <div className="flex items-center gap-2">
-                            <span className="font-mono text-xs font-semibold">
-                              {po.poNumber}
-                            </span>
-                            <span className="text-muted-foreground text-xs">
-                              — {po.supplier}
-                            </span>
-                            <span className="text-muted-foreground text-xs ml-auto">
-                              Rs.{fmt(po.totalAmount)}
-                            </span>
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Input
+                    value={form.bookingReference}
+                    readOnly
+                    placeholder="Auto-filled from selected document"
+                    className="font-mono bg-muted/30 cursor-not-allowed"
+                  />
                 </Field>
+              </div>
 
-                {form.poId && (
-                  <div className="rounded-xl border border-border/60 bg-muted/20 p-3 sm:p-4 space-y-3 mt-2">
-                    <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
-                      Auto-filled from PO
-                    </p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                      <ReadonlyField
-                        label="Vendor / Supplier"
-                        value={form.supplier}
-                      />
-                      <ReadonlyField
-                        label="Project / Site"
-                        value={form.projectSite}
-                      />
-                      <ReadonlyField
-                        label="Material Category"
-                        value={form.materialCategory}
-                      />
-                      <ReadonlyField
-                        label="Invoice Reference"
-                        value={form.invoiceReference}
-                        highlight
-                      />
-                    </div>
-                  </div>
-                )}
-              </FormSection>
+              {/* ── 1. Booking Information ────────────────────────────── */}
+              <div className="space-y-4">
+                <SectionHeader label="Booking Information" />
 
-              {/* ③ Booking Info ───────────────────────────────────────────── */}
-              <FormSection label="Booking Information">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                   <Field label="Booking Date" required>
                     <Input
                       type="date"
@@ -804,7 +1002,24 @@ export default function MaterialExpenseBooking() {
                       onChange={(e) => set("dueDate", e.target.value)}
                     />
                   </Field>
-                  <Field label="Booking Status">
+                  <Field label="Financial Year">
+                    <Select
+                      value={form.financialYear}
+                      onValueChange={(v) => set("financialYear", v)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select year…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {activeFinYears.map((fy) => (
+                          <SelectItem key={fy.id} value={fy.year}>
+                            {fy.year}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field label="Status">
                     <Select
                       value={form.status}
                       onValueChange={(v) => set("status", v as BookingStatus)}
@@ -842,9 +1057,20 @@ export default function MaterialExpenseBooking() {
                       }
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="Select company..." />
+                        <div className="flex items-center gap-2">
+                          <Building2
+                            size={13}
+                            className="text-muted-foreground shrink-0"
+                          />
+                          <SelectValue placeholder="Select company…" />
+                        </div>
                       </SelectTrigger>
                       <SelectContent>
+                        {companyOptions.length === 0 && (
+                          <SelectItem value="__none__" disabled>
+                            No companies found
+                          </SelectItem>
+                        )}
                         {companyOptions.map((c) => (
                           <SelectItem key={c.id} value={String(c.id)}>
                             {c.label}
@@ -853,131 +1079,235 @@ export default function MaterialExpenseBooking() {
                       </SelectContent>
                     </Select>
                   </Field>
-                  <Field label="Basic Amount">
+
+                  {/* Vendor / Supplier — plain text, no dropdown. Auto-filled from order. */}
+                  <Field
+                    label={vendorLabel}
+                    hint={
+                      selectedDoc?.vendorLabel
+                        ? `Auto-filled from ${selectedDoc.kind === "PO" ? "Purchase Order (supplier)" : "Work Order (contractor)"}`
+                        : "Auto-filled when a PO or WO is selected above"
+                    }
+                  >
                     <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs">
-                        Rs.
-                      </span>
+                      <User
+                        size={13}
+                        className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                      />
                       <Input
-                        type="number"
-                        min={0}
-                        value={form.basicAmount || ""}
+                        value={form.supplier}
+                        readOnly={!!selectedDoc?.vendorLabel}
                         onChange={(e) =>
-                          set("basicAmount", parseFloat(e.target.value) || 0)
+                          !selectedDoc?.vendorLabel &&
+                          set("supplier", e.target.value)
                         }
-                        className="pl-9"
-                        placeholder="0.00"
+                        placeholder="Auto-filled from linked order"
+                        className={`pl-8 ${selectedDoc?.vendorLabel ? "bg-muted/30 cursor-not-allowed" : ""}`}
                       />
                     </div>
                   </Field>
                 </div>
 
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <Field label="CGST Rate (%)">
-                    <Input
-                      type="number"
-                      min={0}
-                      max={100}
-                      value={form.cgstRate}
-                      onChange={(e) =>
-                        set("cgstRate", parseFloat(e.target.value) || 0)
-                      }
-                      placeholder="18"
-                    />
-                  </Field>
-                  <Field label="SGST Rate (%)">
-                    <Input
-                      type="number"
-                      min={0}
-                      max={100}
-                      value={form.sgstRate}
-                      onChange={(e) =>
-                        set("sgstRate", parseFloat(e.target.value) || 0)
-                      }
-                      placeholder="0"
-                    />
+                  <Field
+                    label="Project / Site"
+                    hint={
+                      selectedDoc?.projectId
+                        ? "Pre-filled from linked order"
+                        : undefined
+                    }
+                  >
+                    <Select
+                      value={form.projectSite || ""}
+                      onValueChange={(v) => set("projectSite", v || "")}
+                    >
+                      <SelectTrigger>
+                        <div className="flex items-center gap-2">
+                          <FolderKanban
+                            size={13}
+                            className="text-muted-foreground shrink-0"
+                          />
+                          <SelectValue placeholder="Select project…" />
+                        </div>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {projectOptions.length === 0 && (
+                          <SelectItem value="__none__" disabled>
+                            No projects found
+                          </SelectItem>
+                        )}
+                        {projectOptions.map((p) => (
+                          <SelectItem key={p.id} value={String(p.id)}>
+                            {p.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </Field>
                 </div>
-              </FormSection>
+              </div>
 
-              {/* ④ Billing Terms ──────────────────────────────────────────── */}
-              <FormSection label="Billing Terms">
-                <BillingTermsSection
-                  discount={form.discount}
+              {/* ── 2. Amount & GST ───────────────────────────────────── */}
+              <div className="space-y-4">
+                <SectionHeader label="Amount & GST" />
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  {/* Basic amount — auto-filled from order, read-only */}
+                  <Field
+                    label="Basic Amount (₹)"
+                    required
+                    hint={
+                      selectedDoc?.amount != null
+                        ? "Auto-filled from linked order value"
+                        : "Will be auto-filled when a PO or WO is selected"
+                    }
+                  >
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs font-semibold">
+                        ₹
+                      </span>
+                      <Input
+                        type="number"
+                        min={0}
+                        value={form.basicAmount || ""}
+                        readOnly={!!selectedDoc?.amount}
+                        onChange={(e) =>
+                          !selectedDoc?.amount &&
+                          set("basicAmount", parseFloat(e.target.value) || 0)
+                        }
+                        className={`pl-7 font-mono ${selectedDoc?.amount != null ? "bg-muted/30 cursor-not-allowed" : ""}`}
+                        placeholder="0.00"
+                      />
+                    </div>
+                  </Field>
+
+                  {/* CGST — editable */}
+                  <Field
+                    label="CGST Rate (%)"
+                    hint="Editable — adjust if needed"
+                  >
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs font-semibold">
+                        %
+                      </span>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={28}
+                        step={0.5}
+                        value={form.cgstRate ?? ""}
+                        onChange={(e) =>
+                          set("cgstRate", parseFloat(e.target.value) || 0)
+                        }
+                        className="pl-7 font-mono"
+                        placeholder="18"
+                      />
+                    </div>
+                  </Field>
+
+                  {/* SGST — editable */}
+                  <Field
+                    label="SGST Rate (%)"
+                    hint="Editable — adjust if needed"
+                  >
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs font-semibold">
+                        %
+                      </span>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={28}
+                        step={0.5}
+                        value={form.sgstRate ?? ""}
+                        onChange={(e) =>
+                          set("sgstRate", parseFloat(e.target.value) || 0)
+                        }
+                        className="pl-7 font-mono"
+                        placeholder="0"
+                      />
+                    </div>
+                  </Field>
+                </div>
+
+                {/* Breakdown — only show when there's an amount */}
+                {form.basicAmount > 0 && (
+                  <PriceBreakdownPanel
+                    bd={bd}
+                    cgstRate={form.cgstRate}
+                    sgstRate={form.sgstRate}
+                    hasDiscount={form.discount.applicable}
+                  />
+                )}
+
+                {form.basicAmount > 0 && (
+                  <div className="flex items-center justify-between rounded-xl bg-primary/8 border border-primary/20 px-5 py-4">
+                    <div className="flex items-center gap-2">
+                      <TrendingUp size={15} className="text-primary" />
+                      <span className="text-sm font-heading font-semibold text-foreground">
+                        Net Payable Amount
+                      </span>
+                    </div>
+                    <span className="font-mono text-xl font-bold text-primary">
+                      ₹{fmt(bd.netAmount)}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* ── 3. Billing Terms ──────────────────────────────────── */}
+              <div className="space-y-3">
+                <SectionHeader label="Billing Terms" />
+                <BillingAccordion
                   basicAmount={form.basicAmount}
                   cgstRate={form.cgstRate}
                   sgstRate={form.sgstRate}
+                  discount={form.discount}
                   onChange={(d) => set("discount", d)}
                 />
-              </FormSection>
+              </div>
 
-              {/* ⑤ EMI — only when no billing term applied ────────────────── */}
-              {!billingTermApplied && (
-                <FormSection label="EMI / Installment Payment">
-                  <EmiSection
-                    emi={form.emi}
-                    netAmount={bd.netAmount}
-                    onChange={(emi) => set("emi", emi)}
-                  />
-                </FormSection>
-              )}
+              {/* ── 4. EMI Options ────────────────────────────────────── */}
+              <div className="space-y-3">
+                <SectionHeader label="EMI / Installment Options" />
+                <EmiSection
+                  emi={form.emi}
+                  netAmount={bd.netAmount}
+                  baseDocNo={form.bookingReference}
+                  onChange={(emi) => set("emi", emi)}
+                />
+              </div>
 
-              {/* If billing term applied, show a net amount summary instead of EMI */}
-              {billingTermApplied && (
-                <FormSection label="Payment Summary">
-                  <div className="rounded-xl border border-primary/20 bg-primary/[0.03] px-4 py-4">
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-0.5">
-                        <p className="text-xs text-muted-foreground font-heading uppercase tracking-wider">
-                          Net Payable (after billing term)
-                        </p>
-                        <p className="text-2xl font-mono font-bold text-foreground">
-                          Rs.{fmt(bd.netAmount)}
-                        </p>
-                        {form.discount.applicable && (
-                          <p className="text-[11px] text-emerald-600 font-medium mt-1">
-                            You save Rs.{fmt(bd.discountAmount)}
-                            {form.discount.type === "percentage"
-                              ? ` (${form.discount.value}% off)`
-                              : " (flat discount)"}
-                          </p>
-                        )}
-                      </div>
-                      <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-primary/10">
-                        <Receipt size={20} className="text-primary" />
-                      </div>
-                    </div>
-                  </div>
-                </FormSection>
-              )}
-
-              {/* ── Approval Trail (edit mode only) ─────────────────────── */}
+              {/* ── 5. Approval Trail ─────────────────────────────────── */}
               {editingId && (
-                <FormSection label="Approval Workflow">
+                <div className="space-y-3">
+                  <SectionHeader label="Approval Workflow" />
                   <ApprovalTrailPanel
                     trail={approvalTrail}
                     currentStatus={form.status}
                   />
-                </FormSection>
+                </div>
               )}
 
-              {/* ── Remarks ─────────────────────────────────────────────── */}
-              <FormSection label="Remarks">
+              {/* ── 6. Remarks ────────────────────────────────────────── */}
+              <div className="space-y-3">
+                <SectionHeader label="Remarks" />
                 <textarea
                   value={form.remarks}
                   onChange={(e) => set("remarks", e.target.value)}
-                  placeholder="Optional notes..."
+                  placeholder="Optional notes or internal comments…"
                   rows={3}
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary resize-none"
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 resize-none text-foreground placeholder:text-muted-foreground"
                 />
-              </FormSection>
+              </div>
 
+              {/* ── Save row ──────────────────────────────────────────── */}
               <div className="flex justify-end gap-2 pt-2 border-t border-border">
                 <Button variant="outline" onClick={cancelForm}>
                   Cancel
                 </Button>
                 <Button
-                  className="gradient-accent"
+                  className="gradient-accent gap-1.5"
                   onClick={handleSave}
                   disabled={saving}
                 >
@@ -992,66 +1322,101 @@ export default function MaterialExpenseBooking() {
           </Card>
         )}
 
-        {/* ── List View ───────────────────────────────────────────────────── */}
+        {/* ── List View ────────────────────────────────────────────────── */}
         {view === "list" && (
           <>
+            {!loading && records.length > 0 && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[
+                  {
+                    label: "Total Booked",
+                    value: `₹${fmt(totalNet)}`,
+                    icon: Receipt,
+                    color: "text-primary bg-primary/10",
+                  },
+                  {
+                    label: "Approved",
+                    value: approvedCount,
+                    icon: CheckCircle2,
+                    color: "text-emerald-500 bg-emerald-500/10",
+                  },
+                  {
+                    label: "Pending",
+                    value: pendingCount,
+                    icon: Clock,
+                    color: "text-amber-500 bg-amber-500/10",
+                  },
+                  {
+                    label: "EMI Active",
+                    value: emiCount,
+                    icon: CreditCard,
+                    color: "text-violet-500 bg-violet-500/10",
+                  },
+                ].map((s) => (
+                  <div
+                    key={s.label}
+                    className="rounded-xl bg-card border border-border p-4 flex items-center gap-3"
+                  >
+                    <div className={`p-2 rounded-lg shrink-0 ${s.color}`}>
+                      <s.icon size={15} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[10px] text-muted-foreground font-heading uppercase tracking-wider truncate">
+                        {s.label}
+                      </p>
+                      <p className="text-base font-bold font-mono text-foreground mt-0.5">
+                        {s.value}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {loading && (
-              <div className="text-center py-12 text-muted-foreground text-sm">
+              <div className="text-center py-16 text-muted-foreground text-sm">
+                <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
                 Loading bookings…
               </div>
             )}
+
             {!loading && (
               <>
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs text-muted-foreground font-medium shrink-0">
-                    Filter:
-                  </span>
-                  {(
-                    [
-                      "Received",
-                      "Draft",
-                      "Pending",
-                      "Approved",
-                      "Rejected",
-                      "Booked",
-                      "Hold",
-                    ] as const
-                  ).map((s) => (
+                  {ALL_STATUSES.map((s) => (
                     <button
                       key={s}
                       type="button"
-                      onClick={() =>
-                        setStatusFilter(statusFilter === s ? "" : s)
-                      }
+                      onClick={() => setStatusFilter(s)}
                       className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
                         statusFilter === s
-                          ? "bg-primary text-primary-foreground border-primary"
+                          ? "bg-primary text-primary-foreground border-primary shadow-sm"
                           : "bg-background text-muted-foreground border-border hover:border-primary/40"
                       }`}
                     >
                       {s}
+                      {s !== "All" && (
+                        <span className="ml-1.5 text-[10px] opacity-70">
+                          ({records.filter((r) => r.status === s).length})
+                        </span>
+                      )}
                     </button>
                   ))}
-                  {statusFilter && (
-                    <button
-                      type="button"
-                      onClick={() => setStatusFilter("")}
-                      className="px-2 py-1 rounded-full text-xs text-muted-foreground hover:text-foreground border border-dashed border-border"
-                    >
-                      Clear
-                    </button>
-                  )}
                 </div>
 
                 {/* Mobile cards */}
                 <div className="flex flex-col gap-3 sm:hidden">
                   {filteredRecords.length === 0 && (
-                    <div className="text-center py-12 text-muted-foreground text-sm border rounded-xl border-dashed border-border">
+                    <div className="text-center py-16 text-muted-foreground text-sm border rounded-xl border-dashed border-border">
+                      <AlertCircle
+                        size={20}
+                        className="mx-auto mb-2 opacity-30"
+                      />
                       No bookings
-                      {statusFilter ? ` with status "${statusFilter}"` : ""}.{" "}
-                      {statusFilter
-                        ? "Try a different filter."
-                        : 'Tap "New" to get started.'}
+                      {statusFilter !== "All"
+                        ? ` with status "${statusFilter}"`
+                        : ""}
+                      .
                     </div>
                   )}
                   {filteredRecords.map((rec) => (
@@ -1066,26 +1431,45 @@ export default function MaterialExpenseBooking() {
                 </div>
 
                 {/* Desktop table */}
-                <Card className="hidden sm:block">
+                <Card className="hidden sm:block border-border shadow-sm">
                   <CardContent className="p-0">
                     <div className="rounded-md overflow-auto">
                       <Table>
                         <TableHeader>
-                          <TableRow>
-                            <TableHead>Doc Type</TableHead>
-                            <TableHead>Doc Number</TableHead>
-                            <TableHead>Date</TableHead>
-                            <TableHead>Due Date</TableHead>
-                            <TableHead>Supplier</TableHead>
-                            <TableHead className="hidden md:table-cell">
-                              Invoice Ref
+                          <TableRow className="bg-muted/30">
+                            <TableHead className="text-xs font-heading">
+                              Booking Ref
                             </TableHead>
-                            <TableHead>Basic Amt</TableHead>
-                            <TableHead>Billing Term</TableHead>
-                            <TableHead>EMI</TableHead>
-                            <TableHead>Net Amt</TableHead>
-                            <TableHead>Status</TableHead>
-                            <TableHead>Actions</TableHead>
+                            <TableHead className="text-xs font-heading">
+                              Type
+                            </TableHead>
+                            <TableHead className="text-xs font-heading">
+                              Date
+                            </TableHead>
+                            <TableHead className="text-xs font-heading">
+                              Vendor / Contractor
+                            </TableHead>
+                            <TableHead className="text-xs font-heading hidden md:table-cell">
+                              Basic Amt
+                            </TableHead>
+                            <TableHead className="text-xs font-heading hidden md:table-cell">
+                              CGST
+                            </TableHead>
+                            <TableHead className="text-xs font-heading hidden md:table-cell">
+                              SGST
+                            </TableHead>
+                            <TableHead className="text-xs font-heading">
+                              Net Amt
+                            </TableHead>
+                            <TableHead className="text-xs font-heading">
+                              EMI
+                            </TableHead>
+                            <TableHead className="text-xs font-heading">
+                              Status
+                            </TableHead>
+                            <TableHead className="text-xs font-heading">
+                              Actions
+                            </TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -1097,54 +1481,45 @@ export default function MaterialExpenseBooking() {
                               rec.discount,
                             );
                             return (
-                              <TableRow key={rec.id}>
-                                <TableCell className="text-xs text-muted-foreground max-w-[110px] truncate">
-                                  {rec.docTypeName || "—"}
-                                </TableCell>
+                              <TableRow
+                                key={rec.id}
+                                className="hover:bg-muted/20"
+                              >
                                 <TableCell className="font-mono text-xs font-semibold text-primary">
                                   {rec.bookingReference || "—"}
                                 </TableCell>
-                                <TableCell className="text-xs">
+                                <TableCell className="text-xs text-muted-foreground max-w-[90px] truncate">
+                                  {rec.docTypeName || "—"}
+                                </TableCell>
+                                <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
                                   {rec.bookingDate}
                                 </TableCell>
-                                <TableCell className="text-xs">
-                                  {rec.dueDate || "-"}
+                                <TableCell className="text-xs max-w-[120px] truncate">
+                                  {rec.supplier || "—"}
                                 </TableCell>
-                                <TableCell className="text-xs max-w-[110px] truncate">
-                                  {rec.supplier}
+                                <TableCell className="font-mono text-xs hidden md:table-cell text-muted-foreground">
+                                  ₹{fmt(rec.basicAmount)}
                                 </TableCell>
-                                <TableCell className="font-mono text-xs hidden md:table-cell">
-                                  {rec.invoiceReference || "-"}
+                                <TableCell className="font-mono text-xs hidden md:table-cell text-foreground/70">
+                                  {rec.cgstRate}%
                                 </TableCell>
-                                <TableCell className="font-mono text-xs">
-                                  Rs.{fmt(rec.basicAmount)}
+                                <TableCell className="font-mono text-xs hidden md:table-cell text-foreground/70">
+                                  {rec.sgstRate}%
                                 </TableCell>
-                                <TableCell className="text-xs">
-                                  {rec.discount.masterTermName ? (
-                                    <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-heading border bg-primary/[0.06] text-primary border-primary/20">
-                                      <Receipt size={9} />
-                                      {rec.discount.masterTermName}
-                                    </span>
-                                  ) : (
-                                    <span className="text-muted-foreground">
-                                      —
-                                    </span>
-                                  )}
+                                <TableCell className="font-mono text-xs font-semibold">
+                                  ₹{fmt(rbd.netAmount)}
                                 </TableCell>
-                                <TableCell className="text-xs">
-                                  {!rec.discount.masterTermId &&
-                                  rec.emi.enabled ? (
-                                    <span className="text-primary font-medium">
+                                <TableCell>
+                                  {rec.emi?.enabled ? (
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-heading font-semibold bg-violet-500/10 text-violet-500 border border-violet-500/20 px-2 py-0.5 rounded-full">
+                                      <CreditCard size={9} />
                                       {rec.emi.installmentCount}x
                                     </span>
                                   ) : (
-                                    <span className="text-muted-foreground">
+                                    <span className="text-muted-foreground text-xs">
                                       —
                                     </span>
                                   )}
-                                </TableCell>
-                                <TableCell className="font-mono text-xs font-semibold">
-                                  Rs.{fmt(rbd.netAmount)}
                                 </TableCell>
                                 <TableCell>
                                   <StatusBadge status={rec.status} />
@@ -1163,7 +1538,7 @@ export default function MaterialExpenseBooking() {
                                       className="h-7 w-7 p-0"
                                       onClick={() => openEdit(rec)}
                                     >
-                                      <Edit size={13} />
+                                      <Edit size={12} />
                                     </Button>
                                     <Button
                                       variant="destructive"
@@ -1171,7 +1546,7 @@ export default function MaterialExpenseBooking() {
                                       className="h-7 w-7 p-0"
                                       onClick={() => setDeleteId(rec.id)}
                                     >
-                                      <Trash2 size={13} />
+                                      <Trash2 size={12} />
                                     </Button>
                                   </div>
                                 </TableCell>
@@ -1181,10 +1556,14 @@ export default function MaterialExpenseBooking() {
                           {filteredRecords.length === 0 && (
                             <TableRow>
                               <TableCell
-                                colSpan={12}
-                                className="text-center py-10 text-muted-foreground text-sm"
+                                colSpan={11}
+                                className="text-center py-14 text-muted-foreground text-sm"
                               >
-                                {statusFilter
+                                <AlertCircle
+                                  size={18}
+                                  className="mx-auto mb-2 opacity-30"
+                                />
+                                {statusFilter !== "All"
                                   ? `No bookings with status "${statusFilter}". Try a different filter.`
                                   : `No bookings yet. Click "New Booking" to get started.`}
                               </TableCell>
@@ -1201,7 +1580,7 @@ export default function MaterialExpenseBooking() {
         )}
       </div>
 
-      {/* ── Delete Confirm ─────────────────────────────────────────────── */}
+      {/* ── Delete Confirm ───────────────────────────────────────────── */}
       <Dialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
         <DialogContent className="w-[calc(100vw-2rem)] max-w-sm">
           <DialogHeader>

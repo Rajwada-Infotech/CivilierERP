@@ -182,10 +182,15 @@ export const rejectPurchaseOrder = (id: number | string, note?: string) =>
 export const getSuppliers = () =>
   fetchWithAuth("/api/account-head?type=S").then((r) => r.json());
 
-// ─── All enterprises (unfiltered) ────────────────────────────────────────────
-// Returns [{ id, name, business_type, belongs_to, ... }]
-export const getAllEnterprises = () =>
-  fetchWithAuth("/api/enterprises").then((r) => r.json());
+// ─── Companies ────────────────────────────────────────────────────────────────
+// Returns [{ id, label, ... }] from enterprises/options?business_type=C
+export const getCompanies = () =>
+  fetchWithAuth("/api/enterprises/options?business_type=C").then((r) => r.json());
+
+// ─── Projects ────────────────────────────────────────────────────────────────
+// Returns [{ id, label, ... }] from enterprises/options?business_type=P
+export const getProjects = () =>
+  fetchWithAuth("/api/enterprises/options?business_type=P").then((r) => r.json());
 
 // ─── UOM ─────────────────────────────────────────────────────────────────────
 // Returns [{ Id, UOMName, UOMCode, Symbol, IsActive, ... }]

@@ -6,7 +6,8 @@ export type ReminderType =
   | "purchase_order"
   | "work_order"
   | "tds"
-  | "grn";
+  | "grn"
+  | "emi_installment";
 
 export interface ReminderItem {
   id: string | number;
@@ -16,7 +17,7 @@ export interface ReminderItem {
   dueDate: string;
   urgency: "overdue" | "today" | "soon" | "upcoming";
   amount?: number;
-  path: string; // Dynamic navigation target
+  path: string;
 }
 
 export function classifyUrgency(dueDateStr: string): ReminderItem["urgency"] {
@@ -47,6 +48,47 @@ export function formatDate(dateStr: string): string {
     day: "numeric",
     month: "short",
   });
+}
+
+async function fetchEmiReminders(): Promise<ReminderItem[]> {
+  try {
+    // Fetch all expense bookings and look for pending EMI installments due soon
+    const res = await fetchWithAuth("/api/expense-booking?limit=200");
+    if (!res.ok) return [];
+    const data = await res.json();
+    const rows: any[] = Array.isArray(data) ? data : (data.data ?? []);
+
+    const items: ReminderItem[] = [];
+
+    for (const row of rows) {
+      if (!row.EEmiPayment) continue;
+      let emiData: any = null;
+      try {
+        emiData = JSON.parse(row.EEmiData || "{}");
+      } catch {}
+      const schedule: any[] = emiData?.schedule ?? [];
+
+      for (const inst of schedule) {
+        if (inst.status === "Paid") continue;
+        const urgency = classifyUrgency(inst.dueDate);
+        if (urgency === "upcoming") continue; // only overdue / today / soon
+
+        items.push({
+          id: `emi-${row.Eid}-${inst.installmentNo}`,
+          type: "emi_installment",
+          title: `EMI #${inst.installmentNo} — ${inst.refNumber || row.EDocNo || "—"}`,
+          subtitle: `${row.EProjectName || "Expense Booking"} · Installment ${inst.installmentNo}/${emiData?.installmentCount ?? "?"}`,
+          dueDate: inst.dueDate,
+          urgency,
+          amount: inst.amount,
+          path: "/material/expense-booking",
+        });
+      }
+    }
+    return items;
+  } catch {
+    return [];
+  }
 }
 
 export async function fetchAllReminders(): Promise<ReminderItem[]> {
@@ -96,19 +138,24 @@ export async function fetchAllReminders(): Promise<ReminderItem[]> {
     }
   };
 
-  await Promise.all([
-    process(
-      poRes,
-      "purchase_order",
-      "PurchaseOrderID",
-      "PO",
-      "/material/purchase-order",
-    ),
-    process(grnRes, "grn", "GRNID", "GRN", "/material/grn"),
-    process(chequeRes, "cheque", "CId", "CHQ", "/masters/cheque"),
-    process(tdsRes, "tds", "Id", "TDS", "/masters/tds"),
-    process(woRes, "work_order", "Id", "WO", "/material/work-order"),
+  const [, emiItems] = await Promise.all([
+    Promise.all([
+      process(
+        poRes,
+        "purchase_order",
+        "PurchaseOrderID",
+        "PO",
+        "/material/purchase-order",
+      ),
+      process(grnRes, "grn", "GRNID", "GRN", "/material/grn"),
+      process(chequeRes, "cheque", "CId", "CHQ", "/masters/cheque"),
+      process(tdsRes, "tds", "Id", "TDS", "/masters/tds"),
+      process(woRes, "work_order", "Id", "WO", "/material/work-order"),
+    ]),
+    fetchEmiReminders(),
   ]);
+
+  items.push(...emiItems);
 
   return items.sort((a, b) => {
     const order = { overdue: 0, today: 1, soon: 2, upcoming: 3 };
@@ -117,7 +164,7 @@ export async function fetchAllReminders(): Promise<ReminderItem[]> {
 }
 
 export function useReminders(options: { pollingInterval?: number } = {}) {
-  const { pollingInterval = 30000 } = options; // Raised from 4s → 30s to reduce noise
+  const { pollingInterval = 30000 } = options;
   const [reminders, setReminders] = useState<ReminderItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
@@ -125,7 +172,6 @@ export function useReminders(options: { pollingInterval?: number } = {}) {
   const isFetching = useRef(false);
   const clickCount = useRef(0);
   const lockTimer = useRef<NodeJS.Timeout | null>(null);
-  // Consecutive backend-down failures — used for exponential backoff
   const failCount = useRef(0);
   const backoffTimer = useRef<NodeJS.Timeout | null>(null);
 
@@ -155,10 +201,8 @@ export function useReminders(options: { pollingInterval?: number } = {}) {
       try {
         const items = await fetchAllReminders();
         setReminders([...items]);
-        // Reset backoff on success
         failCount.current = 0;
       } catch {
-        // Count failures — backend may be offline; don't log here (fetchWithAuth already handles it)
         failCount.current += 1;
       } finally {
         setTimeout(() => {
@@ -172,24 +216,19 @@ export function useReminders(options: { pollingInterval?: number } = {}) {
 
   useEffect(() => {
     refresh();
-
-    // Adaptive polling: back off if backend is repeatedly unreachable
     const schedule = () => {
       const delay =
         failCount.current > 3
           ? Math.min(
               pollingInterval * Math.pow(2, failCount.current - 3),
               5 * 60 * 1000,
-            ) // max 5 min
+            )
           : pollingInterval;
-
       backoffTimer.current = setTimeout(() => {
         refresh(false).finally(schedule);
       }, delay);
     };
-
     schedule();
-
     return () => {
       if (backoffTimer.current) clearTimeout(backoffTimer.current);
     };

@@ -18,7 +18,7 @@ interface DocType {
 }
 
 interface Props {
-  entryTypeFilter?: string;
+  module?: "PO" | "WO" | "GRN";
   finYear?: string;
   selectedDocTypeId: number | null;
   onSelect: (docTypeId: number | null, preview: string) => void;
@@ -39,14 +39,15 @@ export async function fetchNextDocNumber(
   return data.nextDocNo ?? "";
 }
 
-async function fetchDocTypes(): Promise<DocType[]> {
-  const res = await fetchWithAuth("/api/document-type");
+async function fetchDocTypes(module?: string): Promise<DocType[]> {
+  const qs = module ? `?module=${encodeURIComponent(module)}` : "";
+  const res = await fetchWithAuth(`/api/document-type${qs}`);
   if (!res.ok) return [];
   return res.json();
 }
 
 export function DocNumberPreview({
-  entryTypeFilter,
+  module,
   finYear,
   selectedDocTypeId,
   onSelect,
@@ -59,25 +60,10 @@ export function DocNumberPreview({
 
   useEffect(() => {
     setDocTypesLoading(true);
-    fetchDocTypes()
-      .then((all) => {
-        const filtered = entryTypeFilter
-          ? all.filter(
-              (d) =>
-                d.EntryType?.toLowerCase().includes(
-                  entryTypeFilter.toLowerCase(),
-                ) ||
-                d.Description?.toLowerCase().includes(
-                  entryTypeFilter.toLowerCase(),
-                ) ||
-                d.Prefix?.toLowerCase().includes(entryTypeFilter.toLowerCase()),
-            )
-          : all;
-
-        setDocTypes(filtered);
-      })
+    fetchDocTypes(module)
+      .then((all) => setDocTypes(all))
       .finally(() => setDocTypesLoading(false));
-  }, [entryTypeFilter]);
+  }, [module]);
 
   const handleSelect = async (value: string) => {
     if (!value) {

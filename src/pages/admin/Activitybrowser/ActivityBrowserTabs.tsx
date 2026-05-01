@@ -13,6 +13,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import type { SessionEvent, ActivityActionType } from "@/api/userActivityApi";
 import { ROLE_COLORS, ACTION_COLORS } from "./constants";
 
@@ -65,6 +66,71 @@ function getActionLabel(event: SessionEvent) {
   if (event.event === "logout") return "LOGOUT";
   return (event.actionType || "action").toUpperCase();
 }
+
+const ACTION_LOG_COLUMNS: ColumnDef<SessionEvent, unknown>[] = [
+  {
+    id: "user",
+    header: "User",
+    cell: ({ row }) => (
+      <div>
+        <p className="font-medium text-sm text-foreground leading-tight">{row.original.userName}</p>
+        <p className="text-[11px] text-muted-foreground">{row.original.userEmail}</p>
+      </div>
+    ),
+  },
+  {
+    id: "action",
+    header: "Action",
+    cell: ({ row }) => {
+      const label = getActionLabel(row.original);
+      const color = ACTION_COLORS[row.original.actionType as keyof typeof ACTION_COLORS] ?? "bg-muted text-muted-foreground";
+      return (
+        <span className={`px-2 py-0.5 rounded-full text-[10px] font-heading font-semibold tracking-wide ${color}`}>
+          {label}
+        </span>
+      );
+    },
+  },
+  {
+    accessorKey: "resource",
+    header: "Resource",
+    cell: ({ getValue }) => (
+      <span className="font-mono text-xs text-muted-foreground truncate max-w-[180px] block">
+        {(getValue() as string) || "—"}
+      </span>
+    ),
+  },
+  {
+    accessorKey: "details",
+    header: "Details",
+    cell: ({ getValue }) => (
+      <span className="text-xs text-muted-foreground truncate max-w-[200px] block">
+        {(getValue() as string) || "—"}
+      </span>
+    ),
+  },
+  {
+    id: "timestamp",
+    header: "Time",
+    cell: ({ row }) => {
+      const { date, time } = (() => {
+        const iso = row.original.timestamp;
+        if (!iso) return { date: "—", time: "—" };
+        const d = new Date(iso);
+        return {
+          date: d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }),
+          time: d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: true }),
+        };
+      })();
+      return (
+        <div>
+          <p className="text-xs text-foreground">{date}</p>
+          <p className="text-[11px] text-muted-foreground">{time}</p>
+        </div>
+      );
+    },
+  },
+];
 
 export const ActivityBrowserTabs: React.FC<Props> = ({
   activeTab,
@@ -294,56 +360,14 @@ export const ActivityBrowserTabs: React.FC<Props> = ({
         </div>
       ) : (
         <div className="overflow-hidden rounded-2xl border border-border bg-card">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/40">
-              <tr className="text-left text-xs uppercase tracking-wider text-muted-foreground">
-                <th className="px-4 py-3">User</th>
-                <th className="px-4 py-3">Action</th>
-                <th className="px-4 py-3">Resource</th>
-                <th className="px-4 py-3">Time</th>
-                <th className="px-4 py-3">URL</th>
-                <th className="px-4 py-3">Session</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredActions.map((action: SessionEvent) => (
-                <tr key={action.id} className="border-t border-border/70">
-                  <td className="px-4 py-3">
-                    <div className="font-medium">{action.userName}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {action.userEmail}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={`rounded-full border px-2 py-1 text-xs font-heading ${ACTION_COLORS[action.actionType || "read"] || ""}`}
-                    >
-                      {getActionLabel(action)}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 capitalize">
-                    {action.resource || "—"}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Calendar size={12} />
-                      {formatDateTime(action.timestamp).date}
-                    </div>
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Clock size={12} />
-                      {formatDateTime(action.timestamp).time}
-                    </div>
-                  </td>
-                  <td className="max-w-[280px] px-4 py-3 text-xs text-muted-foreground">
-                    <div className="truncate">{action.requestUrl || "—"}</div>
-                  </td>
-                  <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                    {action.sessionId || "—"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+              <DataTable
+                data={filteredActions}
+                columns={ACTION_LOG_COLUMNS}
+                searchable={false}
+                paginated={true}
+                defaultPageSize={25}
+                emptyMessage="No actions found."
+              />
         </div>
       )}
     </>
