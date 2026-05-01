@@ -646,6 +646,7 @@ export default function MaterialExpenseBooking() {
   const [statusFilter, setStatusFilter] = useState<string>("All");
   const [approvalTrail, setApprovalTrail] =
     useState<ExpenseRecord["approvalTrail"]>(undefined);
+  const isEditing = editingId !== null;
 
   // ── Fetch records ──
   const fetchRecords = useCallback(async () => {
@@ -691,6 +692,11 @@ export default function MaterialExpenseBooking() {
   };
 
   const fetchApprovalTrail = async (recordId: string) => {
+    if (!recordId) {
+      setApprovalTrail(undefined);
+      return;
+    }
+
     try {
       const data = await apiFetch(`${API}/${recordId}/approval-trail`);
       setApprovalTrail(data);
@@ -763,6 +769,11 @@ export default function MaterialExpenseBooking() {
   };
 
   const openEdit = (rec: ExpenseRecord) => {
+    if (!rec.id) {
+      toast.error("Cannot edit this booking because its record id is missing.");
+      return;
+    }
+
     setEditingId(rec.id);
     const { id, ...rest } = rec;
     setForm(rest);
@@ -811,7 +822,7 @@ export default function MaterialExpenseBooking() {
 
     try {
       setSaving(true);
-      if (editingId) {
+      if (isEditing) {
         await apiFetch(`${API}/${editingId}`, {
           method: "PUT",
           body: JSON.stringify(body),
@@ -918,7 +929,7 @@ export default function MaterialExpenseBooking() {
                   </button>
                   <span className="text-border">|</span>
                   <CardTitle className="text-base font-heading truncate">
-                    {editingId ? "Edit Expense Booking" : "New Expense Booking"}
+                    {isEditing ? "Edit Expense Booking" : "New Expense Booking"}
                   </CardTitle>
                   {form.bookingReference && (
                     <span className="hidden sm:inline font-mono text-xs bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-md shrink-0">
@@ -936,7 +947,7 @@ export default function MaterialExpenseBooking() {
                     onClick={handleSave}
                     disabled={saving}
                   >
-                    {saving ? "Saving…" : editingId ? "Update" : "Save Booking"}
+                    {saving ? "Saving…" : isEditing ? "Update" : "Save Booking"}
                   </Button>
                 </div>
               </div>
@@ -1279,7 +1290,7 @@ export default function MaterialExpenseBooking() {
               </div>
 
               {/* ── 5. Approval Trail ─────────────────────────────────── */}
-              {editingId && (
+              {isEditing && (
                 <div className="space-y-3">
                   <SectionHeader label="Approval Workflow" />
                   <ApprovalTrailPanel
@@ -1313,7 +1324,7 @@ export default function MaterialExpenseBooking() {
                 >
                   {saving
                     ? "Saving…"
-                    : editingId
+                    : isEditing
                       ? "Update Booking"
                       : "Save Booking"}
                 </Button>
@@ -1419,9 +1430,9 @@ export default function MaterialExpenseBooking() {
                       .
                     </div>
                   )}
-                  {filteredRecords.map((rec) => (
+                  {filteredRecords.map((rec, index) => (
                     <RecordCard
-                      key={rec.id}
+                      key={rec.id ? `booking-card-${rec.id}` : `booking-card-${index}`}
                       rec={rec}
                       onEdit={() => openEdit(rec)}
                       onDelete={() => setDeleteId(rec.id)}
@@ -1473,7 +1484,7 @@ export default function MaterialExpenseBooking() {
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {filteredRecords.map((rec) => {
+                          {filteredRecords.map((rec, index) => {
                             const rbd = computeBreakdown(
                               rec.basicAmount,
                               rec.cgstRate,
@@ -1482,7 +1493,7 @@ export default function MaterialExpenseBooking() {
                             );
                             return (
                               <TableRow
-                                key={rec.id}
+                                key={rec.id ? `booking-row-${rec.id}` : `booking-row-${index}`}
                                 className="hover:bg-muted/20"
                               >
                                 <TableCell className="font-mono text-xs font-semibold text-primary">

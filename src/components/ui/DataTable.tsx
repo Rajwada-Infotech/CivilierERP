@@ -55,6 +55,8 @@ interface DataTableProps<TData extends RowData> {
    * Use this for highlight-on-edit patterns: (row) => isEditing(row.original.id) ? "bg-primary/5 border-l-2 border-l-primary" : ""
    */
   rowClassName?: (row: Row<TData>) => string;
+  /** Stable row id for React/TanStack when data has a database primary key */
+  getRowId?: (originalRow: TData, index: number, parent?: Row<TData>) => string;
   /** Show loading skeleton instead of rows */
   loading?: boolean;
   /** Number of skeleton rows to show when loading */
@@ -94,6 +96,7 @@ export function DataTable<TData extends RowData>({
   emptyMessage = "No records found.",
   className,
   rowClassName,
+  getRowId,
   loading = false,
   skeletonRows = 5,
   exportConfig,
@@ -123,6 +126,7 @@ export function DataTable<TData extends RowData>({
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
+    getRowId,
     // Reset to page 0 when filter changes
     autoResetPageIndex: true,
   });
@@ -245,7 +249,7 @@ export function DataTable<TData extends RowData>({
               // ── Data rows ──
               rows.map((row) => (
                 <tr
-                  key={row.id}
+                  key={row.id ? `row-${row.id}` : `row-${row.index}`}
                   className={`hover:bg-muted/20 transition-colors ${
                     rowClassName ? rowClassName(row) : ""
                   }`}
