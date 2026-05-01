@@ -474,7 +474,7 @@ const PurchaseOrderMaster = () => {
           Document Type &amp; Number
         </label>
         <DocNumberPreview
-          entryTypeFilter="Purchase Order"
+          module="PO"
           finYear={selectedFinYear || undefined}
           selectedDocTypeId={poDocTypeId}
           preview={poDocNo}

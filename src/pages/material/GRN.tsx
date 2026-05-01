@@ -465,7 +465,7 @@ export default function GRN() {
                 </select>
               </div>
               <DocNumberPreview
-                entryTypeFilter="GRN"
+                module="GRN"
                 finYear={formData.finYear || undefined}
                 selectedDocTypeId={formData.docTypeId}
                 preview={formData.docNo}
