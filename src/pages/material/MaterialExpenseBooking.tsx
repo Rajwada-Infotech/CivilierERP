@@ -93,12 +93,12 @@ async function apiFetch(url: string, opts?: RequestInit) {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface CompanyOption {
-  CompanyId: number;
-  CompanyName: string;
+  id: number;
+  label: string;
 }
 interface ProjectOption {
-  ProjectId: number;
-  ProjectName: string;
+  id: number;
+  label: string;
 }
 
 // From PO master
@@ -701,10 +701,14 @@ export default function MaterialExpenseBooking() {
 
   useEffect(() => {
     fetchRecords();
-    apiFetch("/api/document-type/companies")
+
+    // Company master: enterprise where business_type = 'C'
+    apiFetch("/api/enterprises/options?business_type=C")
       .then((list: CompanyOption[]) => setCompanyOptions(list ?? []))
       .catch(() => {});
-    apiFetch("/api/document-type/projects")
+
+    // Project master: enterprise where business_type = 'P'
+    apiFetch("/api/enterprises/options?business_type=P")
       .then((list: ProjectOption[]) => setProjectOptions(list ?? []))
       .catch(() => {});
   }, [fetchRecords]);
@@ -1068,11 +1072,8 @@ export default function MaterialExpenseBooking() {
                           </SelectItem>
                         )}
                         {companyOptions.map((c) => (
-                          <SelectItem
-                            key={c.CompanyId}
-                            value={String(c.CompanyId)}
-                          >
-                            {c.CompanyName}
+                          <SelectItem key={c.id} value={String(c.id)}>
+                            {c.label}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -1136,11 +1137,8 @@ export default function MaterialExpenseBooking() {
                           </SelectItem>
                         )}
                         {projectOptions.map((p) => (
-                          <SelectItem
-                            key={p.ProjectId}
-                            value={String(p.ProjectId)}
-                          >
-                            {p.ProjectName}
+                          <SelectItem key={p.id} value={String(p.id)}>
+                            {p.label}
                           </SelectItem>
                         ))}
                       </SelectContent>

@@ -24,7 +24,8 @@ import {
   updatePurchaseOrder,
   deletePurchaseOrder,
   getSuppliers,
-  getAllEnterprises,
+  getCompanies,
+  getProjects,
   getUOMs,
 } from "@/api/purchaseOrdersApi";
 
@@ -100,10 +101,15 @@ const PurchaseOrderMaster = () => {
     queryFn: getSuppliers,
   });
 
-  // Single fetch for ALL enterprise rows — we split into companies/projects below
-  const { data: enterprisesRaw = [] } = useQuery({
-    queryKey: ["all-enterprises"],
-    queryFn: getAllEnterprises,
+// Separate fetches for companies and projects
+  const { data: companiesRaw = [] } = useQuery({
+    queryKey: ["companies"],
+    queryFn: getCompanies,
+  });
+
+  const { data: projectsRaw = [] } = useQuery({
+    queryKey: ["projects"],
+    queryFn: getProjects,
   });
 
   // UOMMaster — fields: Id, UOMName (confirmed from uomMaster.js SELECT query)
@@ -117,39 +123,30 @@ const PurchaseOrderMaster = () => {
     suppliersRaw as any[]
   ).map((s) => ({ id: s.LHeadId, name: s.LHeadName }));
 
-  // Split enterprises into companies (business_type = 'C') and projects (business_type = 'P')
-  const allEnterprises: Array<{
-    id: number;
-    name: string;
-    businessType: string;
-    belongsTo: number | null;
-  }> = (enterprisesRaw as any[]).map((e) => ({
-    id: e.id,
-    name: e.name ?? "",
-    businessType: e.business_type ?? "",
-    belongsTo: e.belongs_to ?? null,
-  }));
-
+// Companies from API: account-head/options?type=C returns [{ id, label, ... }]
   const companies = useMemo(
-    () => allEnterprises.filter((e) => e.businessType === "C"),
-    [allEnterprises],
-  );
-
-  // All projects (business_type = 'P') — filtered further by selected company below
-  const allProjects = useMemo(
-    () => allEnterprises.filter((e) => e.businessType === "P"),
-    [allEnterprises],
-  );
-
-  // When a company is selected → show only its projects (belongs_to = company id)
-  // When no company selected → show all projects
-  const filteredProjects = useMemo(
     () =>
-      selectedCompanyId
-        ? allProjects.filter((p) => p.belongsTo === selectedCompanyId)
-        : allProjects,
-    [allProjects, selectedCompanyId],
+      (companiesRaw as any[]).map((c) => ({
+        id: c.id,
+        name: c.label ?? "",
+        belongsTo: null,
+      })),
+    [companiesRaw],
   );
+
+  // Projects from API: account-head/options?type=P returns [{ id, label, ... }]
+  const allProjects = useMemo(
+    () =>
+      (projectsRaw as any[]).map((p) => ({
+        id: p.id,
+        name: p.label ?? "",
+        belongsTo: null,
+      })),
+    [projectsRaw],
+  );
+
+  // Show all projects (can't filter by belongsTo since account-head options don't have that field)
+  const filteredProjects = useMemo(() => allProjects, [allProjects]);
 
   // UOM: field names from DB are "Id" and "UOMName" (confirmed from uomMaster.js)
   // Only show active UOMs (IsActive = true/1)
