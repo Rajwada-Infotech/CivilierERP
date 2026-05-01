@@ -20,11 +20,18 @@ const requireUserEmail = (req, res) => {
 router.get("/options", async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool.request().query(`
-      SELECT
+const result = await pool.request().query(`
+      SELECT DISTINCT
         Eid AS id,
         Eid AS value,
-        CONCAT(ISNULL(EDocNo,'N/A'),' — ',ISNULL(EProjectName,''),' (₹',ISNULL(CAST(EAmount AS VARCHAR(20)),'0'),')') AS label,
+CONCAT(
+          ISNULL(EDocNo,'N/A'),
+          ' — ',
+          ISNULL(EProjectName,''),
+          ' (₹',
+          FORMAT(ISNULL(EAmount,0), 'N0'),
+          ')'
+        ) AS label,
         ECreatedAt
       FROM dbo.ExpenseBooking
       ORDER BY ECreatedAt DESC
