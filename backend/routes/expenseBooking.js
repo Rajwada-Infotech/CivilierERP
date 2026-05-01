@@ -1,10 +1,12 @@
 const express = require("express");
 const router = express.Router();
+
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition, guardEdit } = require("../services/approvalService");
 
+// Helper: Require authenticated user email
 const requireUserEmail = (req, res) => {
   const email = req.user?.email;
   if (!email) {
@@ -14,7 +16,7 @@ const requireUserEmail = (req, res) => {
   return email;
 };
 
-// ─── /options ── must stay before /:id ────────────────────────────────────────
+// ─── GET /options ─────────────────────────────────────────────────────────────
 router.get("/options", async (req, res) => {
   try {
     const pool = getPool();
@@ -29,11 +31,12 @@ router.get("/options", async (req, res) => {
     `);
     res.json(result.recordset);
   } catch (err) {
+    console.error("Options error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ─── GET all ──────────────────────────────────────────────────────────────────
+// ─── GET all (paginated) ──────────────────────────────────────────────────────
 router.get("/", cache("expense-booking", 60), async (req, res) => {
   try {
     const pool = getPool();
@@ -53,8 +56,7 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
         SELECT
           eb.*,
           CASE
-            WHEN t.Prefix IS NOT NULL AND t.Description IS NOT NULL
-              THEN t.Prefix + ' — ' + t.Description
+            WHEN t.Prefix IS NOT NULL AND t.Description IS NOT NULL THEN t.Prefix + ' — ' + t.Description
             WHEN t.Prefix IS NOT NULL THEN t.Prefix
             ELSE NULL
           END AS DocTypeName
@@ -72,11 +74,12 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
       totalPages: Math.ceil(total / limit),
     });
   } catch (err) {
+    console.error("List error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ─── GET /:id/approval-trail ───────────────────────────────────────────────────
+// ─── GET /:id/approval-trail ──────────────────────────────────────────────────
 router.get("/:id/approval-trail", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0)
@@ -85,7 +88,6 @@ router.get("/:id/approval-trail", async (req, res) => {
   try {
     const pool = getPool();
 
-    // Get the workflow configured for expense-booking module
     const wfResult = await pool
       .request()
       .input("Module", sql.NVarChar(100), "expense-booking").query(`
@@ -97,7 +99,6 @@ router.get("/:id/approval-trail", async (req, res) => {
 
     const wf = wfResult.recordset[0];
 
-    // Get audit log entries for this record
     const logResult = await pool
       .request()
       .input("RecordId", sql.Int, id)
@@ -110,11 +111,11 @@ router.get("/:id/approval-trail", async (req, res) => {
 
     const logs = logResult.recordset;
 
-    // Get current record status
     const recResult = await pool
       .request()
       .input("Eid", sql.Int, id)
       .query("SELECT EStatus FROM dbo.ExpenseBooking WHERE Eid = @Eid");
+
     const currentStatus = recResult.recordset[0]?.EStatus ?? "Draft";
 
     if (!wf) {
@@ -133,11 +134,7 @@ router.get("/:id/approval-trail", async (req, res) => {
 
     const steps = Array.from({ length: levels }, (_, i) => {
       const lvl = i + 1;
-      const log =
-        logs.find((l) => l.Level === lvl && l.ActionStatus === "Approved") ||
-        logs.find((l) => l.Level === lvl && l.ActionStatus === "Rejected") ||
-        logs.find((l) => l.Level === lvl);
-
+      const log = logs.find((l) => l.Level === lvl);
       return {
         level: lvl,
         role: log?.Role ?? approverList[i] ?? "Approver",
@@ -163,7 +160,7 @@ router.get("/:id/approval-trail", async (req, res) => {
   }
 });
 
-// ─── POST — create ────────────────────────────────────────────────────────────
+// ─── POST Create (Fixed with Proper Transaction) ──────────────────────────────
 router.post("/", async (req, res) => {
   const {
     EProjectName,
@@ -182,62 +179,57 @@ router.post("/", async (req, res) => {
     EEmiStartDate,
     EReminder,
     ERemarks,
-    EStatus,
+    EStatus = "Draft",
     ECompanyId,
-    // NEW: doc type id and fin year so we can lock the sequence
     EDocTypeId,
     EFinYear,
   } = req.body;
 
+  const pool = getPool();
+  const transaction = pool.transaction();
+
+  let finalDocNo = EDocNo || null;
+
   try {
-    const pool = getPool();
+    await transaction.begin();
 
-    // ── 1. If a doc type was selected, generate + lock the next doc number ──
-    // This is the authoritative sequence commit — it prevents duplicates even
-    // if two users hit save at the same moment.
-    let finalDocNo = EDocNo || null;
-
+    // 1. Generate and lock Document Number inside transaction
     if (EDocTypeId) {
       const typeId = parseInt(EDocTypeId, 10);
+      const finYear = (EFinYear || "").toString().trim();
 
-      // Fetch doc type config
-      const typeResult = await pool
+      const typeResult = await transaction
         .request()
         .input("TypeOfDocId", sql.Int, typeId).query(`
-          SELECT t.Prefix, t.FullPrefix, t.StartingDocNo
-          FROM dbo.TypeOfDoc t
-          WHERE t.TypeOfDocId = @TypeOfDocId AND t.IsActive = 1
+          SELECT Prefix, FullPrefix, StartingDocNo
+          FROM dbo.TypeOfDoc
+          WHERE TypeOfDocId = @TypeOfDocId AND IsActive = 1
         `);
 
       const typeRow = typeResult.recordset[0];
       if (!typeRow) {
+        await transaction.rollback();
         return res
           .status(400)
           .json({ error: "Selected document type not found or inactive." });
       }
 
       const rawPrefix = typeRow.FullPrefix ?? typeRow.Prefix ?? "";
+      const prefix = rawPrefix.replace(/\d+$/, "");
       const startFrom = typeRow.StartingDocNo ?? 1;
 
-      // Strip trailing digits from FullPrefix (e.g. "PR/REC/000500" → "PR/REC/")
-      const prefix = rawPrefix.replace(/\d+$/, "");
-
-      // Find current max sequence for this prefix (only the 6-digit part)
-      const maxResult = await pool
+      // Get next sequence with lock
+      const maxResult = await transaction
         .request()
         .input("TypeOfDocId", sql.Int, typeId)
         .input("Prefix", sql.NVarChar(100), prefix + "%")
         .input(
           "FinYearPattern",
           sql.NVarChar(130),
-          EFinYear ? `%/${String(EFinYear).trim()}` : null,
+          finYear ? `%/${finYear}` : null,
         ).query(`
-          SELECT MAX(
-            TRY_CAST(
-              SUBSTRING(DocNo, LEN(@Prefix) + 1, 6) AS INT
-            )
-          ) AS MaxSeq
-          FROM dbo.DocNumberSequence
+          SELECT MAX(TRY_CAST(SUBSTRING(DocNo, LEN(@Prefix) + 1, 6) AS INT)) AS MaxSeq
+          FROM dbo.DocNumberSequence WITH (UPDLOCK, HOLDLOCK)
           WHERE TypeOfDocId = @TypeOfDocId
             AND DocNo LIKE @Prefix
             AND (@FinYearPattern IS NULL OR DocNo LIKE @FinYearPattern)
@@ -247,63 +239,24 @@ router.post("/", async (req, res) => {
       const nextSeq = Math.max(maxSeq + 1, startFrom);
       const padded = String(nextSeq).padStart(6, "0");
 
-      // Final format: PR/REC/000500/2024-25  (or  PR/REC/000500  without finYear)
-      const finYear = (EFinYear || "").toString().trim();
       finalDocNo = finYear
         ? `${prefix}${padded}/${finYear}`
         : `${prefix}${padded}`;
 
-      // Lock this number in DocNumberSequence BEFORE inserting the record
-      // Using MERGE to handle the unlikely race where two requests get the same seq
-      try {
-        await pool
-          .request()
-          .input("TypeOfDocId", sql.Int, typeId)
-          .input("DocNo", sql.NVarChar(100), finalDocNo)
-          .input("TableName", sql.NVarChar(100), "ExpenseBooking")
-          .input("IssuedBy", sql.NVarChar(200), req.user?.email || null).query(`
-            INSERT INTO dbo.DocNumberSequence (TypeOfDocId, DocNo, TableName, IssuedBy)
-            VALUES (@TypeOfDocId, @DocNo, @TableName, @IssuedBy)
-          `);
-      } catch (seqErr) {
-        // Unique constraint violation — another request grabbed this number
-        // Re-try by re-reading max and bumping by 1 more
-        const retryMax = await pool
-          .request()
-          .input("TypeOfDocId", sql.Int, typeId)
-          .input("Prefix", sql.NVarChar(100), prefix + "%")
-          .input(
-            "FinYearPattern",
-            sql.NVarChar(130),
-            finYear ? `%/${finYear}` : null,
-          ).query(`
-            SELECT MAX(
-              TRY_CAST(SUBSTRING(DocNo, LEN(@Prefix) + 1, 6) AS INT)
-            ) AS MaxSeq
-            FROM dbo.DocNumberSequence
-            WHERE TypeOfDocId = @TypeOfDocId
-              AND DocNo LIKE @Prefix
-              AND (@FinYearPattern IS NULL OR DocNo LIKE @FinYearPattern)
-          `);
-        const retrySeq = (retryMax.recordset[0]?.MaxSeq ?? nextSeq) + 1;
-        const retryPad = String(retrySeq).padStart(6, "0");
-        const retryBase = `${prefix}${retryPad}`;
-        finalDocNo = finYear ? `${retryBase}/${finYear}` : retryBase;
-
-        await pool
-          .request()
-          .input("TypeOfDocId", sql.Int, typeId)
-          .input("DocNo", sql.NVarChar(100), finalDocNo)
-          .input("TableName", sql.NVarChar(100), "ExpenseBooking")
-          .input("IssuedBy", sql.NVarChar(200), req.user?.email || null).query(`
-            INSERT INTO dbo.DocNumberSequence (TypeOfDocId, DocNo, TableName, IssuedBy)
-            VALUES (@TypeOfDocId, @DocNo, @TableName, @IssuedBy)
-          `);
-      }
+      // Insert into DocNumberSequence (locked inside transaction)
+      await transaction
+        .request()
+        .input("TypeOfDocId", sql.Int, typeId)
+        .input("DocNo", sql.NVarChar(100), finalDocNo)
+        .input("TableName", sql.NVarChar(100), "ExpenseBooking")
+        .input("IssuedBy", sql.NVarChar(200), req.user?.email || null).query(`
+          INSERT INTO dbo.DocNumberSequence (TypeOfDocId, DocNo, TableName, IssuedBy)
+          VALUES (@TypeOfDocId, @DocNo, @TableName, @IssuedBy)
+        `);
     }
 
-    // ── 2. Insert the expense booking with the locked doc number ─────────────
-    const insertResult = await pool
+    // 2. Insert Expense Booking
+    const insertResult = await transaction
       .request()
       .input("EProjectName", sql.NVarChar(150), EProjectName || null)
       .input("EDocumentType", sql.NVarChar(50), EDocumentType || null)
@@ -329,7 +282,7 @@ router.post("/", async (req, res) => {
       .input("EEmiStartDate", sql.Date, EEmiStartDate || null)
       .input("EReminder", sql.Date, EReminder || null)
       .input("ERemarks", sql.NVarChar(300), ERemarks || null)
-      .input("EStatus", sql.NVarChar(50), EStatus || "Draft")
+      .input("EStatus", sql.NVarChar(50), EStatus)
       .input("ECreatedAt", sql.DateTime2, new Date())
       .input("EUpdatedAt", sql.DateTime2, new Date())
       .input("ECreatedBy", sql.Int, req.user?.userId || null)
@@ -347,81 +300,93 @@ router.post("/", async (req, res) => {
       .input("EFinYear", sql.NVarChar(20), EFinYear || null).query(`
         INSERT INTO dbo.ExpenseBooking (
           EProjectName, EDocumentType, EDocDate, EAmount, ENetAmount,
-          ECgstRate, ESgstRate, EDiscountData,
-          EDocNo, EEmiPayment, EEmiData, EInstallmentCount, EEmiAmount, EEmiStartDate,
+          ECgstRate, ESgstRate, EDiscountData, EDocNo,
+          EEmiPayment, EEmiData, EInstallmentCount, EEmiAmount, EEmiStartDate,
           EReminder, ERemarks, EStatus,
-          ECreatedAt, EUpdatedAt, ECreatedBy, EApprovedBy, ECompanyId,
-          EDocTypeId, EFinYear
+          ECreatedAt, EUpdatedAt, ECreatedBy, EApprovedBy,
+          ECompanyId, EDocTypeId, EFinYear
         ) VALUES (
           @EProjectName, @EDocumentType, @EDocDate, @EAmount, @ENetAmount,
-          @ECgstRate, @ESgstRate, @EDiscountData,
-          @EDocNo, @EEmiPayment, @EEmiData, @EInstallmentCount, @EEmiAmount, @EEmiStartDate,
+          @ECgstRate, @ESgstRate, @EDiscountData, @EDocNo,
+          @EEmiPayment, @EEmiData, @EInstallmentCount, @EEmiAmount, @EEmiStartDate,
           @EReminder, @ERemarks, @EStatus,
-          @ECreatedAt, @EUpdatedAt, @ECreatedBy, @EApprovedBy, @ECompanyId,
-          @EDocTypeId, @EFinYear
+          @ECreatedAt, @EUpdatedAt, @ECreatedBy, @EApprovedBy,
+          @ECompanyId, @EDocTypeId, @EFinYear
         );
         SELECT SCOPE_IDENTITY() AS NewId;
       `);
 
-    // ── 3. Back-patch RecordId into DocNumberSequence now we have the new Eid ─
-    if (EDocTypeId && finalDocNo) {
-      const newId = insertResult.recordset[0]?.NewId;
-      if (newId) {
-        await pool
-          .request()
-          .input("DocNo", sql.NVarChar(100), finalDocNo)
-          .input("RecordId", sql.Int, parseInt(newId, 10)).query(`
-            UPDATE dbo.DocNumberSequence
-            SET RecordId = @RecordId
-            WHERE DocNo = @DocNo AND TableName = 'ExpenseBooking'
-          `);
-      }
+    const newExpenseId = insertResult.recordset[0]?.NewId;
+
+    // 3. Back-patch RecordId into DocNumberSequence
+    if (finalDocNo && newExpenseId) {
+      await transaction
+        .request()
+        .input("DocNo", sql.NVarChar(100), finalDocNo)
+        .input("RecordId", sql.Int, parseInt(newExpenseId, 10)).query(`
+          UPDATE dbo.DocNumberSequence
+          SET RecordId = @RecordId
+          WHERE DocNo = @DocNo AND TableName = 'ExpenseBooking'
+        `);
     }
 
-    // ── 4. If EMI enabled, insert installment rows into EmiInstallments ──────
-    const newExpenseId = insertResult.recordset[0]?.NewId;
-    if (EEmiPayment && EEmiData && newExpenseId) {
-      let emiParsed = null;
-      try {
-        emiParsed =
-          typeof EEmiData === "string" ? JSON.parse(EEmiData) : EEmiData;
-      } catch {}
+    await transaction.commit();
 
-      const schedule = emiParsed?.schedule ?? [];
+    // 4. Insert EMI Installments (after commit - non-critical)
+    if (EEmiPayment && EEmiData && newExpenseId) {
+      let schedule = [];
+      try {
+        const parsed =
+          typeof EEmiData === "string" ? JSON.parse(EEmiData) : EEmiData;
+        schedule = parsed?.schedule ?? [];
+      } catch (e) {
+        console.warn("Failed to parse EMI data");
+      }
+
       for (const row of schedule) {
         try {
           await pool
             .request()
-            .input("ExpenseBookingId", sql.Int, parseInt(newExpenseId, 10))
+            .input("ExpenseBookingId", sql.Int, newExpenseId)
             .input("InstallmentNo", sql.Int, row.installmentNo)
             .input("RefNumber", sql.NVarChar(150), row.refNumber || null)
             .input("DueDate", sql.Date, row.dueDate || null)
             .input("Amount", sql.Decimal(18, 2), row.amount || 0)
             .input("Status", sql.NVarChar(20), row.status || "Pending").query(`
               INSERT INTO dbo.EmiInstallments
-                (ExpenseBookingId, InstallmentNo, RefNumber, DueDate, Amount, Status)
-              VALUES
-                (@ExpenseBookingId, @InstallmentNo, @RefNumber, @DueDate, @Amount, @Status)
+              (ExpenseBookingId, InstallmentNo, RefNumber, DueDate, Amount, Status)
+              VALUES (@ExpenseBookingId, @InstallmentNo, @RefNumber, @DueDate, @Amount, @Status)
             `);
         } catch (rowErr) {
-          console.warn("EMI row insert warn:", rowErr.message);
+          console.warn("EMI insert warning:", rowErr.message);
         }
       }
     }
 
     await bumpCacheVersion("expense-booking");
-    res.json({ message: "Expense booked successfully", docNo: finalDocNo });
+
+    res.status(201).json({
+      message: "Expense booked successfully",
+      id: newExpenseId,
+      docNo: finalDocNo,
+    });
   } catch (err) {
+    try {
+      await transaction.rollback();
+    } catch (rbErr) {
+      console.error("Transaction rollback failed:", rbErr.message);
+    }
     console.error("EXPENSE INSERT ERROR:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ── GET /:id/emi-schedule — fetch installments for a booking ───────────────────
+// ─── GET /:id/emi-schedule ────────────────────────────────────────────────────
 router.get("/:id/emi-schedule", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0)
     return res.status(400).json({ error: "Invalid id" });
+
   try {
     const pool = getPool();
     const result = await pool.request().input("ExpenseBookingId", sql.Int, id)
@@ -436,15 +401,18 @@ router.get("/:id/emi-schedule", async (req, res) => {
   }
 });
 
-// ── PUT /:id/emi-schedule/:no/pay — mark installment as paid ──────────────────
+// ─── PUT Pay EMI Installment ──────────────────────────────────────────────────
 router.put("/:id/emi-schedule/:no/pay", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   const no = parseInt(req.params.no, 10);
   const { paymentRef } = req.body;
+
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
+
     const pool = getPool();
+
     await pool
       .request()
       .input("ExpenseBookingId", sql.Int, id)
@@ -453,16 +421,17 @@ router.put("/:id/emi-schedule/:no/pay", async (req, res) => {
       .input("PaidAt", sql.DateTime2, new Date())
       .input("PaidBy", sql.NVarChar(200), userEmail).query(`
         UPDATE dbo.EmiInstallments
-        SET Status='Paid', PaymentRef=@PaymentRef, PaidAt=@PaidAt, PaidBy=@PaidBy
-        WHERE ExpenseBookingId=@ExpenseBookingId AND InstallmentNo=@InstallmentNo
+        SET Status = 'Paid', PaymentRef = @PaymentRef, PaidAt = @PaidAt, PaidBy = @PaidBy
+        WHERE ExpenseBookingId = @ExpenseBookingId AND InstallmentNo = @InstallmentNo
       `);
-    // Sync schedule back to parent EEmiData
-    const schedRes = await pool
-      .request()
-      .input("ExpenseBookingId", sql.Int, id)
-      .query(
-        `SELECT InstallmentNo,DueDate,Amount,Status,RefNumber FROM dbo.EmiInstallments WHERE ExpenseBookingId=@ExpenseBookingId ORDER BY InstallmentNo`,
-      );
+
+    // Sync back to EEmiData JSON
+    const schedRes = await pool.request().input("ExpenseBookingId", sql.Int, id)
+      .query(`SELECT InstallmentNo, DueDate, Amount, Status, RefNumber
+              FROM dbo.EmiInstallments
+              WHERE ExpenseBookingId = @ExpenseBookingId
+              ORDER BY InstallmentNo`);
+
     const schedule = schedRes.recordset.map((r) => ({
       installmentNo: r.InstallmentNo,
       dueDate: r.DueDate?.toISOString?.().slice(0, 10) ?? r.DueDate,
@@ -470,20 +439,27 @@ router.put("/:id/emi-schedule/:no/pay", async (req, res) => {
       status: r.Status,
       refNumber: r.RefNumber,
     }));
+
     const existing = await pool
       .request()
       .input("Eid", sql.Int, id)
-      .query("SELECT EEmiData FROM dbo.ExpenseBooking WHERE Eid=@Eid");
+      .query("SELECT EEmiData FROM dbo.ExpenseBooking WHERE Eid = @Eid");
+
     let emiData = {};
     try {
       emiData = JSON.parse(existing.recordset[0]?.EEmiData || "{}");
     } catch {}
+
     emiData.schedule = schedule;
+
     await pool
       .request()
       .input("Eid", sql.Int, id)
       .input("EEmiData", sql.NVarChar(sql.MAX), JSON.stringify(emiData))
-      .query("UPDATE dbo.ExpenseBooking SET EEmiData=@EEmiData WHERE Eid=@Eid");
+      .query(
+        "UPDATE dbo.ExpenseBooking SET EEmiData = @EEmiData WHERE Eid = @Eid",
+      );
+
     await bumpCacheVersion("expense-booking");
     res.json({ message: "Installment marked as paid" });
   } catch (err) {
@@ -492,7 +468,7 @@ router.put("/:id/emi-schedule/:no/pay", async (req, res) => {
   }
 });
 
-// ─── PUT /:id — update ────────────────────────────────────────────────────────
+// ─── PUT Update ───────────────────────────────────────────────────────────────
 router.put("/:id", async (req, res) => {
   const numericId = parseInt(req.params.id, 10);
   if (!Number.isFinite(numericId) || numericId <= 0)
@@ -532,6 +508,7 @@ router.put("/:id", async (req, res) => {
     await pool
       .request()
       .input("Eid", sql.Int, numericId)
+      // ... all other inputs (same as before)
       .input("EProjectName", sql.NVarChar(150), EProjectName || null)
       .input("EDocumentType", sql.NVarChar(50), EDocumentType || null)
       .input("EDocDate", sql.Date, EDocDate || null)
@@ -570,26 +547,25 @@ router.put("/:id", async (req, res) => {
       )
       .input("EFinYear", sql.NVarChar(20), EFinYear || null).query(`
         UPDATE dbo.ExpenseBooking SET
-          EProjectName=@EProjectName, EDocumentType=@EDocumentType,
-          EDocDate=@EDocDate, EAmount=@EAmount, ENetAmount=@ENetAmount,
-          ECgstRate=@ECgstRate, ESgstRate=@ESgstRate, EDiscountData=@EDiscountData,
-          EDocNo=@EDocNo,
-          EEmiPayment=@EEmiPayment, EEmiData=@EEmiData,
-          EInstallmentCount=@EInstallmentCount, EEmiAmount=@EEmiAmount, EEmiStartDate=@EEmiStartDate,
-          EReminder=@EReminder, ERemarks=@ERemarks,
+          EProjectName=@EProjectName, EDocumentType=@EDocumentType, EDocDate=@EDocDate,
+          EAmount=@EAmount, ENetAmount=@ENetAmount, ECgstRate=@ECgstRate, ESgstRate=@ESgstRate,
+          EDiscountData=@EDiscountData, EDocNo=@EDocNo, EEmiPayment=@EEmiPayment,
+          EEmiData=@EEmiData, EInstallmentCount=@EInstallmentCount, EEmiAmount=@EEmiAmount,
+          EEmiStartDate=@EEmiStartDate, EReminder=@EReminder, ERemarks=@ERemarks,
           EStatus=@EStatus, EUpdatedAt=@EUpdatedAt, ECompanyId=@ECompanyId,
           EDocTypeId=@EDocTypeId, EFinYear=@EFinYear
-        WHERE Eid=@Eid
+        WHERE Eid = @Eid
       `);
+
     await bumpCacheVersion("expense-booking");
     res.json({ message: "Expense updated successfully" });
   } catch (err) {
-    console.error("EXPENSE UPDATE ERROR:", err.message);
+    console.error("Update error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ─── DELETE /:id ──────────────────────────────────────────────────────────────
+// ─── DELETE ───────────────────────────────────────────────────────────────────
 router.delete("/:id", async (req, res) => {
   const numericId = parseInt(req.params.id, 10);
   if (!Number.isFinite(numericId) || numericId <= 0)
@@ -600,16 +576,17 @@ router.delete("/:id", async (req, res) => {
     await pool
       .request()
       .input("Eid", sql.Int, numericId)
-      .query("DELETE FROM dbo.ExpenseBooking WHERE Eid=@Eid");
+      .query("DELETE FROM dbo.ExpenseBooking WHERE Eid = @Eid");
+
     await bumpCacheVersion("expense-booking");
     res.json({ message: "Expense deleted successfully" });
   } catch (err) {
-    console.error("EXPENSE DELETE ERROR:", err.message);
+    console.error("Delete error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ─── Approval transitions ──────────────────────────────────────────────────────
+// Approval Routes (kept as-is, minor cleanup)
 router.put("/:id/submit", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
