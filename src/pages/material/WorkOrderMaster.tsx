@@ -2465,6 +2465,7 @@ const WorkOrderMaster: React.FC = () => {
               </select>
             </div>
             <DocNumberPreview
+              entryTypeFilter="Work Order"
               finYear={selectedFinYear || undefined}
               selectedDocTypeId={woDocTypeId}
               preview={woDocNo}
