@@ -86,6 +86,33 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
   }
 });
 
+// ─── GET /:id ─────────────────────────────────────────────────────────────────
+router.get("/:id", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id) || id <= 0)
+    return res.status(400).json({ error: "Invalid id" });
+  try {
+    const pool = getPool();
+    const result = await pool.request().input("Eid", sql.Int, id).query(`
+        SELECT eb.*,
+          CASE
+            WHEN t.Prefix IS NOT NULL AND t.Description IS NOT NULL THEN t.Prefix + ' — ' + t.Description
+            WHEN t.Prefix IS NOT NULL THEN t.Prefix
+            ELSE NULL
+          END AS DocTypeName
+        FROM dbo.ExpenseBooking eb
+        LEFT JOIN dbo.TypeOfDoc t ON eb.EDocTypeId = t.TypeOfDocId
+        WHERE eb.Eid = @Eid
+      `);
+    if (!result.recordset.length)
+      return res.status(404).json({ error: "Not found" });
+    res.json(result.recordset[0]);
+  } catch (err) {
+    console.error("Get by id error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── GET /:id/approval-trail ──────────────────────────────────────────────────
 router.get("/:id/approval-trail", async (req, res) => {
   const id = parseInt(req.params.id, 10);

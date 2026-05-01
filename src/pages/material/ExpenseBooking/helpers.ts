@@ -122,7 +122,12 @@ export function dbToRecord(row: any): ExpenseRecord {
   let emi: EmiConfig = defaultEmi();
   try {
     if (row.EEmiData) {
-      emi = JSON.parse(row.EEmiData);
+      const parsed = JSON.parse(row.EEmiData);
+      emi = {
+        ...defaultEmi(),
+        ...parsed,
+        schedule: Array.isArray(parsed.schedule) ? parsed.schedule : [],
+      };
     } else if (row.EEmiPayment) {
       emi = {
         ...defaultEmi(),
@@ -139,7 +144,8 @@ export function dbToRecord(row: any): ExpenseRecord {
 
   let discount: DiscountConfig = defaultDiscount();
   try {
-    if (row.EDiscountData) discount = JSON.parse(row.EDiscountData);
+    if (row.EDiscountData)
+      discount = { ...defaultDiscount(), ...JSON.parse(row.EDiscountData) };
   } catch {
     /* ignore */
   }

@@ -2,6 +2,7 @@ import React, { useState, useMemo } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import {
   CreditCard,
   Eye,
@@ -11,6 +12,7 @@ import {
   Trash2,
   RotateCcw,
   X,
+  Search,
   Landmark,
   Hash,
   ShieldAlert,
@@ -32,7 +34,6 @@ import {
   type BankOption,
   type CompanyOption,
 } from "@/api/cardMasterApi";
-import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface CardRecord {
@@ -47,7 +48,7 @@ interface CardRecord {
   cardHolder: string;
   cardNumber: string;
   cvv: string;
-  expiryDate: string;
+  expiryDate: string; // MM/YY display format
   expiryMonth: number;
   expiryYear: number;
   reminderEnabled: boolean;
@@ -56,6 +57,7 @@ interface CardRecord {
   reminderDismissed: boolean;
 }
 
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 const CARD_NETWORKS = ["Visa", "Mastercard", "RuPay", "Amex", "Diners Club"];
 const CARD_TYPES = ["Debit", "Credit", "Prepaid", "Corporate"];
 const DEFAULT_REMINDER_DAYS = 30;
@@ -63,15 +65,18 @@ const DEFAULT_REMINDER_DAYS = 30;
 function parseExpiryToDate(expiry: string): Date | null {
   if (!/^\d{2}\/\d{2}$/.test(expiry)) return null;
   const [m, y] = expiry.split("/");
+  const month = parseInt(m) - 1;
   const year = 2000 + parseInt(y);
-  return new Date(year, parseInt(m) - 1 + 1, 0);
+  return new Date(year, month + 1, 0);
 }
+
 function calculateReminderDate(expiry: string, days: number): string {
   const d = parseExpiryToDate(expiry);
   if (!d) return "";
   d.setDate(d.getDate() - days);
   return d.toISOString().split("T")[0];
 }
+
 function formatDisplayDate(iso: string): string {
   if (!iso) return "—";
   return new Date(iso).toLocaleDateString("en-IN", {
@@ -80,14 +85,18 @@ function formatDisplayDate(iso: string): string {
     year: "numeric",
   });
 }
+
 function daysFromNow(iso: string): number {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
   return Math.round((new Date(iso).getTime() - today.getTime()) / 86400000);
 }
+
 function masked(num: string) {
-  return `•••• •••• •••• ${num.replace(/\D/g, "").slice(-4).padStart(4, "X")}`;
+  const last4 = num.replace(/\D/g, "").slice(-4).padStart(4, "X");
+  return `•••• •••• •••• ${last4}`;
 }
+
 function formatted(num: string) {
   return num
     .replace(/\D/g, "")
@@ -100,6 +109,7 @@ const inp =
   "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground placeholder:text-muted-foreground/50";
 
 type FormState = Omit<CardRecord, "_id" | "reminderDismissed">;
+
 const EMPTY: FormState = {
   companyName: "",
   bankId: "",
@@ -129,6 +139,7 @@ const ReminderBanner: React.FC<{
     c.reminderEnabled && c.expiryDate
       ? calculateReminderDate(c.expiryDate, c.reminderDays)
       : "";
+
   const due = cards.filter(
     (c) =>
       !c.reminderDismissed &&
@@ -144,7 +155,9 @@ const ReminderBanner: React.FC<{
       daysFromNow(reminderDate(c)) > 0 &&
       daysFromNow(reminderDate(c)) <= 7,
   );
+
   if (!due.length && !upcoming.length) return null;
+
   return (
     <div className="space-y-3">
       {due.map((card) => {
@@ -242,138 +255,111 @@ const ReminderBanner: React.FC<{
   );
 };
 
-// ─── Column definitions ───────────────────────────────────────────────────────
-function buildColumns(
+// ─── Column builder ───────────────────────────────────────────────────────────
+function buildCardColumns(
   editingId: string | null,
+  deleteId: string | null,
+  setDeleteId: (id: string | null) => void,
+  handleEdit: (id: string) => void,
+  handleDelete: (id: string) => void,
   revealedRows: Record<string, boolean>,
-  onToggleReveal: (id: string) => void,
-  onEdit: (id: string) => void,
-  onDelete: (id: string) => void,
+  setRevealedRows: React.Dispatch<
+    React.SetStateAction<Record<string, boolean>>
+  >,
+  dismissed: string[],
+  setDismissed: React.Dispatch<React.SetStateAction<string[]>>,
+  calculateReminderDate: (expiry: string, days: number) => string,
+  daysFromNow: (iso: string) => number,
 ): ColumnDef<CardRecord, unknown>[] {
   return [
+    {
+      accessorKey: "companyName",
+      header: "Company",
+      cell: ({ getValue }) => (
+        <span className="text-xs text-muted-foreground">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
+    },
     {
       accessorKey: "bankName",
       header: "Bank",
       cell: ({ getValue }) => (
-        <span className="font-medium text-foreground">
+        <span className="text-xs font-medium text-foreground">
           {(getValue() as string) || "—"}
         </span>
       ),
     },
     {
-      accessorKey: "accountNumber",
-      header: "Account No.",
-      enableSorting: false,
-      cell: ({ getValue }) => (
-        <span className="font-mono text-foreground">
-          {(getValue() as string) || "—"}
-        </span>
-      ),
-    },
-    {
-      id: "cardNumber",
+      accessorKey: "cardNumber",
       header: "Card Number",
-      enableSorting: false,
       cell: ({ row }) => {
-        const { _id, cardNumber } = row.original;
+        const id = row.original._id;
+        const num = row.original.cardNumber;
+        const revealed = revealedRows[id];
         return (
           <div className="flex items-center gap-2">
-            <span className="font-mono text-foreground tracking-widest">
-              {revealedRows[_id] ? formatted(cardNumber) : masked(cardNumber)}
+            <span className="font-mono text-xs">
+              {revealed ? formatted(num) : masked(num)}
             </span>
             <button
-              onClick={() => onToggleReveal(_id)}
-              className="p-1 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+              onClick={() => setRevealedRows((p) => ({ ...p, [id]: !p[id] }))}
+              className="p-1 rounded text-muted-foreground hover:text-primary"
             >
-              {revealedRows[_id] ? <EyeOff size={13} /> : <Eye size={13} />}
+              {revealed ? <EyeOff size={12} /> : <Eye size={12} />}
             </button>
           </div>
         );
       },
     },
     {
+      accessorKey: "cardHolder",
+      header: "Card Holder",
+      cell: ({ getValue }) => (
+        <span className="text-xs text-foreground">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
+    },
+    {
       accessorKey: "network",
       header: "Network",
       cell: ({ getValue }) => (
-        <span className="text-foreground">{(getValue() as string) || "—"}</span>
+        <span className="px-2 py-0.5 rounded-full text-xs bg-primary/10 text-primary">
+          {(getValue() as string) || "—"}
+        </span>
       ),
     },
     {
       accessorKey: "cardType",
       header: "Type",
       cell: ({ getValue }) => (
-        <span className="text-foreground">{(getValue() as string) || "—"}</span>
-      ),
-    },
-    {
-      accessorKey: "expiryDate",
-      header: "Expiry",
-      cell: ({ getValue }) => (
-        <span className="font-mono text-foreground">
+        <span className="text-xs text-muted-foreground">
           {(getValue() as string) || "—"}
         </span>
       ),
     },
     {
-      id: "reminder",
-      header: "Reminder",
-      enableSorting: false,
-      cell: ({ row }) => {
-        const c = row.original;
-        const rd =
-          c.reminderEnabled && c.expiryDate
-            ? calculateReminderDate(c.expiryDate, c.reminderDays)
-            : "";
-        const dfl = rd ? daysFromNow(rd) : null;
-        const isOverdue = dfl !== null && dfl <= 0 && !c.reminderDismissed;
-        const isUpcoming =
-          dfl !== null && dfl > 0 && dfl <= 7 && !c.reminderDismissed;
-        if (!c.reminderEnabled)
-          return (
-            <span className="text-[11px] text-muted-foreground font-heading">
-              Off
-            </span>
-          );
-        if (c.reminderDismissed)
-          return (
-            <span className="text-[11px] text-muted-foreground font-heading">
-              Dismissed
-            </span>
-          );
-        if (isOverdue)
-          return (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-heading border bg-destructive/10 text-destructive border-destructive/20">
-              <BellRing size={10} className="animate-pulse" /> Overdue{" "}
-              {Math.abs(dfl!)}d
-            </span>
-          );
-        if (isUpcoming)
-          return (
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-heading border bg-amber-500/10 text-amber-600 border-amber-500/20">
-              <Bell size={10} /> In {dfl}d
-            </span>
-          );
-        if (rd)
-          return (
-            <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground font-heading">
-              <Bell size={10} /> {formatDisplayDate(rd)}
-            </span>
-          );
-        return null;
+      accessorKey: "expiryDate",
+      header: "Expiry",
+      cell: ({ getValue }) => {
+        const val = getValue() as string;
+        return (
+          <span className="font-mono text-xs text-muted-foreground">
+            {val || "—"}
+          </span>
+        );
       },
     },
     {
       accessorKey: "status",
       header: "Status",
       cell: ({ getValue }) => {
-        const active = Boolean(getValue());
+        const active = getValue() as boolean;
         return (
           <span
-            className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${active ? "bg-primary/10 text-primary border-primary/20" : "bg-destructive/10 text-destructive border-destructive/20"}`}
+            className={`px-2 py-0.5 rounded-full text-xs font-medium ${active ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
           >
-            <span
-              className={`w-1.5 h-1.5 rounded-full mr-1.5 ${active ? "bg-primary" : "bg-destructive"}`}
-            />
             {active ? "Active" : "Inactive"}
           </span>
         );
@@ -381,24 +367,28 @@ function buildColumns(
     },
     {
       id: "actions",
-      header: "Actions",
+      header: "",
       enableSorting: false,
-      cell: ({ row }) => (
-        <div className="flex items-center justify-end gap-1">
-          <button
-            onClick={() => onEdit(row.original._id)}
-            className="p-1.5 rounded-lg text-primary hover:bg-primary/10 transition-colors"
-          >
-            <Edit2 size={13} />
-          </button>
-          <button
-            onClick={() => onDelete(row.original._id)}
-            className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"
-          >
-            <Trash2 size={13} />
-          </button>
-        </div>
-      ),
+      cell: ({ row }) => {
+        const id = row.original._id;
+        const isEditing = editingId === id;
+        return (
+          <div className="flex items-center justify-end gap-1">
+            <button
+              onClick={() => handleEdit(id)}
+              className={`p-1.5 rounded-lg transition-colors ${isEditing ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-primary hover:bg-primary/10"}`}
+            >
+              <Edit2 size={13} />
+            </button>
+            <button
+              onClick={() => setDeleteId(id)}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+            >
+              <Trash2 size={13} />
+            </button>
+          </div>
+        );
+      },
     },
   ];
 }
@@ -428,6 +418,7 @@ const CardMaster: React.FC = () => {
   const cards: CardRecord[] = dbItems.map((item) => {
     const mm = String(item.expiry_month ?? 0).padStart(2, "0");
     const yy = String(item.expiry_year ?? 0).slice(-2);
+    // Try to match back to a bank record by name so bankId is consistent
     const matchedBank = dbBanks.find((b) => b.label === item.bank_name);
     return {
       _id: String(item.id),
@@ -454,12 +445,14 @@ const CardMaster: React.FC = () => {
   const [form, setForm] = useState<FormState>(EMPTY);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
+  const [search, setSearch] = useState("");
   const [deleteId, setDeleteId] = useState<string | null>(null);
+
   const [revealedRows, setRevealedRows] = useState<Record<string, boolean>>({});
+  const [dismissed, setDismissed] = useState<string[]>([]);
   const [showCvc, setShowCvc] = useState(false);
   const [showFormCard, setShowFormCard] = useState(false);
   const [showReminderPanel, setShowReminderPanel] = useState(true);
-  const [dismissed, setDismissed] = useState<string[]>([]);
 
   const cardsWithDismiss = cards.map((c) => ({
     ...c,
@@ -477,6 +470,7 @@ const CardMaster: React.FC = () => {
     if (errors[k as string]) setErrors((p) => ({ ...p, [k as string]: false }));
   };
 
+  // ── Bank dropdown handler — auto-fills account number & IFSC ──────────────
   const handleBankChange = (bankId: string) => {
     const bank = dbBanks.find((b) => String(b.id) === bankId);
     setForm((p) => ({
@@ -598,6 +592,40 @@ const CardMaster: React.FC = () => {
     }
   };
 
+  const columns = useMemo(
+    () =>
+      buildCardColumns(
+        editingId,
+        deleteId,
+        setDeleteId,
+        handleEdit,
+        handleDelete,
+        revealedRows,
+        setRevealedRows,
+        dismissed,
+        setDismissed,
+        calculateReminderDate,
+        daysFromNow,
+      ),
+    [editingId, deleteId, revealedRows, dismissed],
+  );
+
+  const handleReset = () => {
+    setForm(EMPTY);
+    setEditingId(null);
+    setErrors({});
+    setShowCvc(false);
+  };
+
+  const filtered = cardsWithDismiss.filter(
+    (r) =>
+      !search ||
+      r.bankName.toLowerCase().includes(search.toLowerCase()) ||
+      r.cardHolder.toLowerCase().includes(search.toLowerCase()) ||
+      r.network.toLowerCase().includes(search.toLowerCase()) ||
+      r.cardNumber.slice(-4).includes(search),
+  );
+
   const overdueCount = cardsWithDismiss.filter(
     (c) =>
       c.reminderEnabled &&
@@ -615,25 +643,13 @@ const CardMaster: React.FC = () => {
   ).length;
   const hasAlerts = overdueCount > 0 || upcomingCount > 0;
 
-  const columns = useMemo(
-    () =>
-      buildColumns(
-        editingId,
-        revealedRows,
-        (id) => setRevealedRows((p) => ({ ...p, [id]: !p[id] })),
-        handleEdit,
-        setDeleteId,
-      ),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [editingId, revealedRows],
-  );
-
   if (loadingCards || loadingBanks)
     return <div className="p-6 text-muted-foreground">Loading...</div>;
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance Module", "Card Master"]} />
+
       <div className="flex items-center justify-between mb-4">
         <h1 className="text-xl font-heading font-bold text-foreground">
           Card Master
@@ -664,12 +680,7 @@ const CardMaster: React.FC = () => {
           <ReminderBanner
             cards={cardsWithDismiss}
             onDismiss={(id) => setDismissed((p) => [...p, id])}
-            onAddNew={() => {
-              setForm(EMPTY);
-              setEditingId(null);
-              setErrors({});
-              setShowCvc(false);
-            }}
+            onAddNew={handleReset}
           />
         )}
 
@@ -692,6 +703,7 @@ const CardMaster: React.FC = () => {
               </span>
             )}
           </div>
+
           <div className="p-5">
             {/* Card Preview */}
             <div className="mb-5 rounded-2xl bg-gradient-to-br from-primary/80 via-primary to-primary/60 p-5 flex items-end justify-between shadow-lg min-h-[110px] relative overflow-hidden">
@@ -730,7 +742,9 @@ const CardMaster: React.FC = () => {
               </div>
             </div>
 
+            {/* Fields */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* Bank dropdown — live from BankMaster DB */}
               <div>
                 <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                   Bank Name <span className="text-destructive">*</span>
@@ -760,6 +774,7 @@ const CardMaster: React.FC = () => {
                   </p>
                 )}
               </div>
+
               <div>
                 <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                   Company Name
@@ -777,9 +792,11 @@ const CardMaster: React.FC = () => {
                   ))}
                 </select>
               </div>
+
+              {/* Account Number — auto-filled from bank selection */}
               <div>
                 <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                  Account Number{" "}
+                  Account Number
                   <span className="ml-2 normal-case text-[10px] text-muted-foreground/60">
                     (auto-filled)
                   </span>
@@ -803,9 +820,11 @@ const CardMaster: React.FC = () => {
                   )}
                 </div>
               </div>
+
+              {/* IFSC — auto-filled, read-only */}
               <div>
                 <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                  IFSC Code{" "}
+                  IFSC Code
                   <span className="ml-2 normal-case text-[10px] text-muted-foreground/60">
                     (auto-filled)
                   </span>
@@ -829,6 +848,7 @@ const CardMaster: React.FC = () => {
                   )}
                 </div>
               </div>
+
               <div>
                 <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                   Card Network
@@ -846,6 +866,7 @@ const CardMaster: React.FC = () => {
                   ))}
                 </select>
               </div>
+
               <div>
                 <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                   Card Type
@@ -863,6 +884,7 @@ const CardMaster: React.FC = () => {
                   ))}
                 </select>
               </div>
+
               <div className="sm:col-span-2">
                 <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                   Card Holder Name
@@ -875,6 +897,7 @@ const CardMaster: React.FC = () => {
                   className={inp}
                 />
               </div>
+
               <div className="sm:col-span-2">
                 <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                   Card Number <span className="text-destructive">*</span>
@@ -910,6 +933,7 @@ const CardMaster: React.FC = () => {
                   </p>
                 )}
               </div>
+
               <div>
                 <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                   CVC / CVV <span className="text-destructive">*</span>
@@ -945,6 +969,7 @@ const CardMaster: React.FC = () => {
                   </p>
                 )}
               </div>
+
               <div>
                 <label className="block text-[11px] uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                   Expiry Date <span className="text-destructive">*</span>
@@ -970,7 +995,7 @@ const CardMaster: React.FC = () => {
                 )}
               </div>
 
-              {/* Reminder panel */}
+              {/* Reminder */}
               <div className="sm:col-span-2">
                 <div
                   className={`rounded-xl border p-4 transition-all ${form.reminderEnabled ? "border-primary/30 bg-primary/5" : "border-border bg-muted/30"}`}
@@ -1012,6 +1037,7 @@ const CardMaster: React.FC = () => {
                       />
                     </button>
                   </div>
+
                   {form.reminderEnabled && (
                     <div className="mt-4 pt-4 border-t border-primary/15 grid grid-cols-1 sm:grid-cols-2 gap-4">
                       <div>
@@ -1102,12 +1128,7 @@ const CardMaster: React.FC = () => {
                 {editingId ? "Update" : "Save"}
               </button>
               <button
-                onClick={() => {
-                  setForm(EMPTY);
-                  setEditingId(null);
-                  setErrors({});
-                  setShowCvc(false);
-                }}
+                onClick={handleReset}
                 className="flex items-center gap-1.5 px-4 py-2 rounded-lg font-heading text-sm border border-border text-muted-foreground hover:bg-muted transition-all"
               >
                 <RotateCcw size={14} />
@@ -1119,26 +1140,52 @@ const CardMaster: React.FC = () => {
 
         {/* Table */}
         <div className="rounded-xl bg-card/80 border border-border shadow-sm overflow-hidden">
-          <div className="px-5 py-3.5 border-b border-border bg-card/60">
-            <h3 className="font-heading font-semibold text-foreground text-sm">
-              Card Records
-            </h3>
+          <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-card/60">
+            <div>
+              <h3 className="font-heading font-semibold text-foreground text-sm">
+                Card Records
+              </h3>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                {filtered.length} record{filtered.length !== 1 ? "s" : ""}
+              </p>
+            </div>
+            <div className="relative">
+              <Search
+                size={13}
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+              />
+              <input
+                type="text"
+                placeholder="Search..."
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-8 pr-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary w-36 sm:w-44"
+              />
+            </div>
           </div>
-          <DataTable
-            data={cardsWithDismiss}
-            columns={columns}
-            loading={false}
-            searchPlaceholder="Search cards..."
-            emptyMessage="No cards yet. Add one above."
-            rowClassName={(row) =>
-              editingId === row.original._id
-                ? "bg-primary/5 border-l-2 border-l-primary"
-                : ""
-            }
-          />
+
+          <div className="overflow-x-auto">
+            <DataTable
+              data={filtered}
+              columns={columns}
+              searchable={false}
+              paginated={true}
+              defaultPageSize={20}
+              emptyMessage={
+                search
+                  ? "No cards match your search."
+                  : "No cards yet. Add one above."
+              }
+              rowClassName={(row) =>
+                row.original._id === editingId
+                  ? "bg-primary/5 border-l-2 border-l-primary"
+                  : ""
+              }
+            />
+          </div>
         </div>
 
-        {/* Delete Confirm Modal */}
+        {/* Delete Confirm */}
         {deleteId && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
             <div className="rounded-xl bg-card border border-border shadow-xl p-6 max-w-sm w-full mx-4">
