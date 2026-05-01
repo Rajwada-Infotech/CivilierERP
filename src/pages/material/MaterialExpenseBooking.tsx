@@ -33,33 +33,31 @@ import {
   Edit,
   Trash2,
   ArrowLeft,
-  Link2,
-  BookOpen,
-  X,
-  BadgePercent,
-  Clock,
-  ChevronDown,
-  CreditCard,
-  ToggleLeft,
-  ToggleRight,
   Receipt,
+  Building2,
+  CalendarDays,
+  FileText,
+  BadgePercent,
+  CreditCard,
+  StickyNote,
+  CheckCircle2,
+  Clock,
+  AlertCircle,
+  TrendingUp,
+  FolderKanban,
+  User2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
-import { getEnterprises } from "@/api/enterpriseApi";
-import {
-  useBillingTerms,
-  type BillingTerm,
-} from "@/contexts/BillingTermsContext";
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 import {
   FormSection,
   Field,
-  ReadonlyField,
   PriceBreakdownPanel,
 } from "./ExpenseBooking/FormPrimitives";
+import { BillingAccordion } from "./ExpenseBooking/BillingAccordion";
 import { EmiSection } from "./ExpenseBooking/EmiSection";
 import {
   DocNumberPreview,
@@ -71,17 +69,14 @@ import {
   blankForm,
   computeBreakdown,
   dbToRecord,
-  defaultDiscount,
   defaultEmi,
   fmt,
   recordToDb,
 } from "./ExpenseBooking/helpers";
 import type {
   BookingStatus,
-  DiscountConfig,
   ExpenseRecord,
   PageView,
-  PurchaseOrder,
 } from "./ExpenseBooking/types";
 
 // ─── API ──────────────────────────────────────────────────────────────────────
@@ -97,252 +92,48 @@ async function apiFetch(url: string, opts?: RequestInit) {
   return res.json();
 }
 
-// ─── BillingTermSelector (inline, no accordion) ───────────────────────────────
+// ─── Master option types ───────────────────────────────────────────────────────
 
-const BILL_TYPE_COLORS: Record<string, string> = {
-  "Tax Invoice": "bg-blue-100 text-blue-700 border-blue-200",
-  "Proforma Invoice": "bg-violet-100 text-violet-700 border-violet-200",
-  "Credit Note": "bg-emerald-100 text-emerald-700 border-emerald-200",
-  "Debit Note": "bg-orange-100 text-orange-700 border-orange-200",
-  "Bill of Supply": "bg-amber-100 text-amber-700 border-amber-200",
-  "Receipt Voucher": "bg-cyan-100 text-cyan-700 border-cyan-200",
-  "Delivery Challan": "bg-pink-100 text-pink-700 border-pink-200",
-  "Self Invoice": "bg-slate-100 text-slate-700 border-slate-200",
-};
-
-function BillingTermPickerDialog({
-  open,
-  onClose,
-  terms,
-  onSelect,
-}: {
-  open: boolean;
-  onClose: () => void;
-  terms: BillingTerm[];
-  onSelect: (term: BillingTerm) => void;
-}) {
-  return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="w-[calc(100vw-2rem)] max-w-xl max-h-[80vh] overflow-hidden flex flex-col">
-        <DialogHeader>
-          <DialogTitle className="font-heading flex items-center gap-2">
-            <BookOpen size={16} className="text-primary" />
-            Select Billing Term
-          </DialogTitle>
-          <DialogDescription>
-            Choose a billing term from master. A discount will be auto-applied
-            if the term includes one.
-          </DialogDescription>
-        </DialogHeader>
-
-        <div className="flex-1 overflow-y-auto -mx-6 px-6 space-y-2 py-1">
-          {terms.length === 0 && (
-            <div className="flex flex-col items-center gap-2 py-10 text-center">
-              <BookOpen size={20} className="text-muted-foreground/40" />
-              <p className="text-sm text-muted-foreground">
-                No active billing terms found
-              </p>
-            </div>
-          )}
-          {terms.map((term) => (
-            <button
-              key={term._id}
-              type="button"
-              onClick={() => {
-                onSelect(term);
-                onClose();
-              }}
-              className="w-full text-left rounded-xl border border-border bg-background hover:border-primary/40 hover:bg-primary/[0.03] transition-all px-4 py-3 group"
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <p className="text-sm font-heading font-semibold text-foreground group-hover:text-primary transition-colors">
-                      {term.name}
-                    </p>
-                    <span
-                      className={
-                        "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-heading " +
-                        (BILL_TYPE_COLORS[term.billType] ??
-                          "bg-muted text-muted-foreground border-border")
-                      }
-                    >
-                      {term.billType}
-                    </span>
-                  </div>
-                  <p className="text-[11px] text-muted-foreground mt-1 truncate">
-                    {term.description}
-                  </p>
-                  <div className="flex items-center gap-3 mt-1.5 text-[11px] text-muted-foreground flex-wrap">
-                    <span className="flex items-center gap-1">
-                      <BadgePercent size={10} />
-                      {term.discountType === "none"
-                        ? "No discount"
-                        : term.discountType === "percentage"
-                          ? `${term.discountValue}% discount`
-                          : `Rs.${fmt(term.discountValue)} flat off`}
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <Clock size={10} />
-                      {term.paymentDueDays === 0
-                        ? "Immediate"
-                        : `Net-${term.paymentDueDays}`}
-                    </span>
-                  </div>
-                </div>
-                <ChevronDown
-                  size={14}
-                  className="text-muted-foreground group-hover:text-primary rotate-[-90deg] shrink-0 mt-1 transition-colors"
-                />
-              </div>
-            </button>
-          ))}
-        </div>
-
-        <DialogFooter className="pt-3 border-t border-border">
-          <Button variant="outline" size="sm" onClick={onClose}>
-            Cancel
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
-  );
+interface CompanyOption {
+  CompanyId: number;
+  CompanyName: string;
 }
 
-// ─── BillingTermsSection ──────────────────────────────────────────────────────
-// Always shown. If a billing term is applied → show amount / breakdown.
-// If no billing term → EMI section is shown below.
+interface ProjectOption {
+  ProjectId: number;
+  ProjectName: string;
+}
 
-function BillingTermsSection({
-  discount,
-  basicAmount,
-  cgstRate,
-  sgstRate,
-  onChange,
-}: {
-  discount: DiscountConfig;
-  basicAmount: number;
-  cgstRate: number;
-  sgstRate: number;
-  onChange: (d: DiscountConfig) => void;
-}) {
-  const { activeBillingTerms = [] } = useBillingTerms();
-  const [pickerOpen, setPickerOpen] = useState(false);
+interface SupplierOption {
+  id: number;
+  label: string;
+}
 
-  const bd = computeBreakdown(basicAmount, cgstRate, sgstRate, discount);
-  const hasBase = basicAmount > 0;
-  const termApplied = !!discount.masterTermId;
+// ─── Section icon map ──────────────────────────────────────────────────────────
 
-  const applyTerm = (term: BillingTerm) => {
-    const mapped: DiscountConfig = {
-      applicable: term.discountType !== "none",
-      type: term.discountType === "flat" ? "fixed" : "percentage",
-      value: term.discountValue,
-      appliedOn: "pre-gst",
-      masterTermId: term._id,
-      masterTermName: term.name,
-    };
-    onChange(mapped);
-    toast.success(`Billing term "${term.name}" applied`);
-  };
+const SECTION_ICONS: Record<string, React.ElementType> = {
+  "Document Numbering": FileText,
+  "Booking Information": CalendarDays,
+  "Amount & GST": BadgePercent,
+  "Billing Terms": Receipt,
+  "EMI / Installment Options": CreditCard,
+  "Approval Workflow": CheckCircle2,
+  Remarks: StickyNote,
+};
 
-  const clearTerm = () => {
-    onChange(defaultDiscount());
-    toast.info("Billing term cleared");
-  };
-
+function SectionHeader({ label }: { label: string }) {
+  const Icon = SECTION_ICONS[label];
   return (
-    <>
-      <BillingTermPickerDialog
-        open={pickerOpen}
-        onClose={() => setPickerOpen(false)}
-        terms={activeBillingTerms}
-        onSelect={applyTerm}
-      />
-
-      <div className="rounded-xl border border-border overflow-hidden">
-        {/* Header row */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 py-3.5 bg-muted/40">
-          <div className="flex items-center gap-2.5 min-w-0">
-            <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-primary/10 shrink-0">
-              <Receipt size={14} className="text-primary" />
-            </div>
-            <div className="min-w-0">
-              <p className="text-sm font-heading font-semibold text-foreground">
-                Billing Terms
-              </p>
-              <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
-                {termApplied ? (
-                  <span className="text-primary font-medium">
-                    {discount.masterTermName}
-                    {discount.applicable && hasBase
-                      ? ` · Net Rs.${fmt(bd.netAmount)}`
-                      : ""}
-                  </span>
-                ) : (
-                  "No billing term applied — pick from master"
-                )}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2 flex-wrap shrink-0">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setPickerOpen(true)}
-              className="h-7 gap-1.5 text-xs border-primary/30 text-primary hover:bg-primary/[0.06]"
-            >
-              <BookOpen size={12} />
-              {termApplied ? "Change Term" : "Pick from Master"}
-            </Button>
-            {termApplied && (
-              <button
-                type="button"
-                onClick={clearTerm}
-                className="flex items-center gap-1 text-[11px] text-destructive hover:underline"
-              >
-                <X size={10} /> Clear
-              </button>
-            )}
-          </div>
+    <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
+      {Icon && (
+        <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
+          <Icon size={12} className="text-primary" />
         </div>
-
-        {/* Applied term detail */}
-        {termApplied && (
-          <div className="border-t border-border bg-card p-4">
-            {/* Term badge row */}
-            <div className="flex flex-wrap items-center gap-3 mb-4">
-              <div className="flex items-center gap-2">
-                <BadgePercent size={13} className="text-muted-foreground" />
-                <span className="text-xs text-foreground font-medium">
-                  {discount.applicable
-                    ? discount.type === "percentage"
-                      ? `${discount.value}% discount applied`
-                      : `Rs.${fmt(discount.value)} flat discount applied`
-                    : "No discount with this term"}
-                </span>
-              </div>
-            </div>
-
-            {/* Price breakdown if basic amount exists */}
-            {hasBase ? (
-              <PriceBreakdownPanel
-                bd={bd}
-                cgstRate={cgstRate}
-                sgstRate={sgstRate}
-                hasDiscount={discount.applicable}
-              />
-            ) : (
-              <p className="text-xs text-muted-foreground text-center py-4 border border-dashed border-border rounded-lg">
-                Enter a basic amount above to see the price breakdown
-              </p>
-            )}
-          </div>
-        )}
-      </div>
-    </>
+      )}
+      <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
+        {label}
+      </p>
+    </div>
   );
 }
 
@@ -352,11 +143,11 @@ export default function MaterialExpenseBooking() {
   const { finYears } = useFinYear();
   const activeFinYears = finYears.filter((fy) => fy.status === "Active");
 
-  const [purchaseOrders, setPurchaseOrders] = useState<PurchaseOrder[]>([]);
-  const [poLoading, setPoLoading] = useState(true);
-  const [companyOptions, setCompanyOptions] = useState<
-    { id: number; label: string }[]
-  >([]);
+  // ── Master lists fetched from their respective APIs ──────────────────────────
+  const [companyOptions, setCompanyOptions] = useState<CompanyOption[]>([]);
+  const [projectOptions, setProjectOptions] = useState<ProjectOption[]>([]);
+  const [supplierOptions, setSupplierOptions] = useState<SupplierOption[]>([]);
+
   const [records, setRecords] = useState<ExpenseRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState<PageView>("list");
@@ -369,7 +160,7 @@ export default function MaterialExpenseBooking() {
   );
   const [docNumberPreview, setDocNumberPreview] = useState("");
   const [docRefreshTrigger, setDocRefreshTrigger] = useState(0);
-  const [statusFilter, setStatusFilter] = useState<string>("Received");
+  const [statusFilter, setStatusFilter] = useState<string>("All");
   const [approvalTrail, setApprovalTrail] =
     useState<ExpenseRecord["approvalTrail"]>(undefined);
 
@@ -385,44 +176,6 @@ export default function MaterialExpenseBooking() {
     }
   }, []);
 
-  const fetchPurchaseOrders = React.useCallback(async () => {
-    try {
-      setPoLoading(true);
-      const data = await apiFetch(`${API}?limit=200`);
-      const rows: any[] = Array.isArray(data)
-        ? data
-        : Array.isArray(data?.data)
-          ? data.data
-          : Array.isArray(data?.recordset)
-            ? data.recordset
-            : [];
-      const mapped: PurchaseOrder[] = rows.map((row: any) => ({
-        id: row.POId ?? row.Eid ?? null,
-        poNumber:
-          row.PODocNo ??
-          row.EDocNo ??
-          ((row.POId ?? row.Eid) ? `PO-${row.POId ?? row.Eid}` : "N/A"),
-        supplier: row.SupplierName ?? row.EProjectName ?? "Unknown",
-        projectSite: row.ProjectName ?? row.EProjectName ?? "",
-        itemDescription: row.ItemDescription ?? row.EDocumentType ?? "Material",
-        quantity: parseFloat(row.Quantity) || 1,
-        unit: row.UOMCode ?? "Nos",
-        rate: parseFloat(row.Rate ?? row.EAmount) || 0,
-        totalAmount: parseFloat(row.TotalAmount ?? row.EAmount) || 0,
-        paymentTerms: row.PaymentTerms ?? "Net-30",
-        cgstRate: parseFloat(row.CGSTRate ?? row.ECgstRate) || 18,
-        sgstRate: parseFloat(row.SGSTRate ?? row.ESgstRate) || 0,
-        invoiceReference: row.InvoiceRef ?? row.EDocNo ?? "",
-      }));
-      setPurchaseOrders(mapped);
-    } catch (err: any) {
-      console.error("PO load failed:", err.message);
-      setPurchaseOrders([]);
-    } finally {
-      setPoLoading(false);
-    }
-  }, []);
-
   const fetchApprovalTrail = async (recordId: string) => {
     try {
       const data = await apiFetch(`${API}/${recordId}/approval-trail`);
@@ -432,46 +185,30 @@ export default function MaterialExpenseBooking() {
     }
   };
 
+  // ── Fetch masters in parallel on mount ────────────────────────────────────────
   React.useEffect(() => {
     fetchRecords();
-    fetchPurchaseOrders();
-    getEnterprises()
-      .then((list) => {
-        const companies = list
-          .filter(
-            (e) =>
-              (e.business_type ?? "").toUpperCase() === "C" && !e.discontinue,
-          )
-          .map((e) => ({ id: e.id, label: e.name ?? "" }))
-          .filter((o) => o.label !== "");
-        setCompanyOptions(companies);
-      })
+
+    // Company master: enterprise where business_type = 'C'
+    apiFetch("/api/document-type/companies")
+      .then((list: CompanyOption[]) => setCompanyOptions(list ?? []))
       .catch(() => {});
-  }, [fetchRecords, fetchPurchaseOrders]);
+
+    // Project master: enterprise where business_type = 'P'
+    apiFetch("/api/document-type/projects")
+      .then((list: ProjectOption[]) => setProjectOptions(list ?? []))
+      .catch(() => {});
+
+    // Supplier master: AccountHeadMaster options
+    apiFetch("/api/account-head-master/options")
+      .then((list: SupplierOption[]) => setSupplierOptions(list ?? []))
+      .catch(() => {});
+  }, [fetchRecords]);
 
   const set = <K extends keyof Omit<ExpenseRecord, "id">>(
     field: K,
     value: Omit<ExpenseRecord, "id">[K],
   ) => setForm((prev) => ({ ...prev, [field]: value }));
-
-  const linkPO = (poNumber: string) => {
-    const po = purchaseOrders.find((p) => p.poNumber === poNumber);
-    if (!po) {
-      set("poId", null);
-      return;
-    }
-    setForm((prev) => ({
-      ...prev,
-      poId: String(po.id ?? po.poNumber),
-      supplier: po.supplier,
-      projectSite: po.projectSite,
-      materialCategory: prev.materialCategory || po.itemDescription,
-      invoiceReference: po.invoiceReference,
-      basicAmount: po.totalAmount,
-      cgstRate: po.cgstRate,
-      sgstRate: po.sgstRate,
-    }));
-  };
 
   const openNew = () => {
     setEditingId(null);
@@ -589,58 +326,79 @@ export default function MaterialExpenseBooking() {
     form.discount,
   );
 
-  // EMI is only shown if no billing term is applied
-  const billingTermApplied = !!form.discount.masterTermId;
+  const ALL_STATUSES = [
+    "All",
+    "Draft",
+    "Pending",
+    "Approved",
+    "Rejected",
+    "Booked",
+    "Hold",
+    "Received",
+  ] as const;
 
-  const filteredRecords = statusFilter
-    ? records.filter((r) => r.status === statusFilter)
-    : records;
+  const filteredRecords =
+    statusFilter && statusFilter !== "All"
+      ? records.filter((r) => r.status === statusFilter)
+      : records;
+
+  // ── Summary stats ────────────────────────────────────────────────────────────
+  const totalNet = records.reduce((s, r) => s + (r.netAmount ?? 0), 0);
+  const approvedCount = records.filter((r) => r.status === "Approved").length;
+  const pendingCount = records.filter((r) => r.status === "Pending").length;
+  const emiCount = records.filter((r) => r.emi?.enabled).length;
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Material", "Expense Booking"]} />
-      <div className="space-y-4">
+      <div className="space-y-5">
         {/* ── Page Header ─────────────────────────────────────────────────── */}
         <div className="flex items-center justify-between gap-3">
           <div>
-            <h1 className="text-lg sm:text-xl font-heading font-bold text-foreground">
+            <h1 className="text-xl font-heading font-bold text-foreground">
               Expense Booking
             </h1>
-            <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
-              Record and manage material expense bookings
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Record and manage material expense bookings with EMI tracking
             </p>
           </div>
           {view === "list" && (
-            <Button className="gradient-accent shrink-0" onClick={openNew}>
-              <Plus size={15} className="mr-1.5" />
-              <span className="hidden sm:inline">New Booking</span>
-              <span className="sm:hidden">New</span>
+            <Button
+              className="gradient-accent shrink-0 gap-1.5"
+              onClick={openNew}
+            >
+              <Plus size={14} />
+              New Booking
             </Button>
           )}
         </div>
 
         {/* ── Form View ───────────────────────────────────────────────────── */}
         {view === "form" && (
-          <Card className="border-primary/20 shadow-sm">
-            <CardHeader className="pb-4 border-b border-border px-4 sm:px-6">
-              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0">
+          <Card className="border-border shadow-sm">
+            {/* Card header */}
+            <CardHeader className="pb-4 border-b border-border px-5 sm:px-6">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-3">
                   <button
                     type="button"
                     onClick={cancelForm}
-                    className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                    className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
                   >
                     <ArrowLeft size={15} />
-                    <span className="hidden sm:inline">Back to list</span>
+                    <span className="hidden sm:inline">Back</span>
                   </button>
-                  <span className="text-muted-foreground/40 hidden sm:inline">
-                    |
-                  </span>
-                  <CardTitle className="text-base sm:text-lg font-heading">
+                  <span className="text-border">|</span>
+                  <CardTitle className="text-base font-heading">
                     {editingId ? "Edit Expense Booking" : "New Expense Booking"}
                   </CardTitle>
+                  {form.bookingReference && (
+                    <span className="hidden sm:inline font-mono text-xs bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-md">
+                      {form.bookingReference}
+                    </span>
+                  )}
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
+                <div className="flex items-center gap-2">
                   <Button variant="outline" size="sm" onClick={cancelForm}>
                     Cancel
                   </Button>
@@ -650,15 +408,16 @@ export default function MaterialExpenseBooking() {
                     onClick={handleSave}
                     disabled={saving}
                   >
-                    {saving ? "Saving…" : editingId ? "Update" : "Save"}
+                    {saving ? "Saving…" : editingId ? "Update" : "Save Booking"}
                   </Button>
                 </div>
               </div>
             </CardHeader>
 
-            <CardContent className="pt-5 space-y-6 px-4 sm:px-6">
-              {/* ① Doc Type & Doc Number ──────────────────────────────────── */}
-              <FormSection label="Document">
+            <CardContent className="pt-6 space-y-7 px-5 sm:px-6">
+              {/* ── 1. Document Numbering ────────────────────────────────── */}
+              <div className="space-y-3">
+                <SectionHeader label="Document Numbering" />
                 <DocNumberPreview
                   finYear={form.financialYear || undefined}
                   selectedDocTypeId={selectedDocTypeId}
@@ -666,130 +425,27 @@ export default function MaterialExpenseBooking() {
                   preview={docNumberPreview}
                   refreshTrigger={docRefreshTrigger}
                 />
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <Field
-                    label="Booking Reference"
-                    required
-                    hint="Auto-filled from doc type above, or enter manually."
-                  >
-                    <Input
-                      value={form.bookingReference}
-                      onChange={(e) => {
-                        set("bookingReference", e.target.value.toUpperCase());
-                        setDocNumberPreview(e.target.value.toUpperCase());
-                      }}
-                      placeholder="e.g. PR/REC/000500"
-                    />
-                  </Field>
-                  <Field label="Financial Year">
-                    <Select
-                      value={form.financialYear}
-                      onValueChange={(v) => {
-                        set("financialYear", v);
-                        if (selectedDocTypeId) {
-                          void fetchNextDocNumber(selectedDocTypeId, v).then(
-                            (n) => {
-                              setDocNumberPreview(n);
-                              if (n) set("bookingReference", n);
-                            },
-                          );
-                        }
-                      }}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select year..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {activeFinYears.map((fy) => (
-                          <SelectItem key={fy.id} value={fy.year}>
-                            {fy.year}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                </div>
-              </FormSection>
-
-              {/* ② Link PO ────────────────────────────────────────────────── */}
-              <FormSection label="Link Purchase Order">
                 <Field
-                  label="Purchase Order"
-                  hint="Selecting a PO auto-fills supplier, invoice reference, project site and amounts."
+                  label="Booking Reference"
+                  required
+                  hint="Auto-filled when you pick a document type above; or enter manually."
                 >
-                  <Select
-                    value={form.poId ?? ""}
-                    onValueChange={linkPO}
-                    disabled={poLoading}
-                  >
-                    <SelectTrigger>
-                      <div className="flex items-center gap-2">
-                        <Link2
-                          size={13}
-                          className="text-muted-foreground shrink-0"
-                        />
-                        <SelectValue
-                          placeholder={
-                            poLoading
-                              ? "Loading purchase orders..."
-                              : purchaseOrders.length === 0
-                                ? "No POs found"
-                                : "Select purchase order..."
-                          }
-                        />
-                      </div>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {purchaseOrders.map((po) => (
-                        <SelectItem key={po.poNumber} value={po.poNumber}>
-                          <div className="flex items-center gap-2">
-                            <span className="font-mono text-xs font-semibold">
-                              {po.poNumber}
-                            </span>
-                            <span className="text-muted-foreground text-xs">
-                              — {po.supplier}
-                            </span>
-                            <span className="text-muted-foreground text-xs ml-auto">
-                              Rs.{fmt(po.totalAmount)}
-                            </span>
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                  <Input
+                    value={form.bookingReference}
+                    onChange={(e) => {
+                      set("bookingReference", e.target.value.toUpperCase());
+                      setDocNumberPreview(e.target.value.toUpperCase());
+                    }}
+                    placeholder="e.g. PR/REC/000500"
+                    className="font-mono"
+                  />
                 </Field>
+              </div>
 
-                {form.poId && (
-                  <div className="rounded-xl border border-border/60 bg-muted/20 p-3 sm:p-4 space-y-3 mt-2">
-                    <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
-                      Auto-filled from PO
-                    </p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                      <ReadonlyField
-                        label="Vendor / Supplier"
-                        value={form.supplier}
-                      />
-                      <ReadonlyField
-                        label="Project / Site"
-                        value={form.projectSite}
-                      />
-                      <ReadonlyField
-                        label="Material Category"
-                        value={form.materialCategory}
-                      />
-                      <ReadonlyField
-                        label="Invoice Reference"
-                        value={form.invoiceReference}
-                        highlight
-                      />
-                    </div>
-                  </div>
-                )}
-              </FormSection>
-
-              {/* ③ Booking Info ───────────────────────────────────────────── */}
-              <FormSection label="Booking Information">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+              {/* ── 2. Booking Information ───────────────────────────────── */}
+              <div className="space-y-3">
+                <SectionHeader label="Booking Information" />
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                   <Field label="Booking Date" required>
                     <Input
                       type="date"
@@ -804,7 +460,34 @@ export default function MaterialExpenseBooking() {
                       onChange={(e) => set("dueDate", e.target.value)}
                     />
                   </Field>
-                  <Field label="Booking Status">
+                  <Field label="Financial Year">
+                    <Select
+                      value={form.financialYear}
+                      onValueChange={(v) => {
+                        set("financialYear", v);
+                        if (selectedDocTypeId) {
+                          void fetchNextDocNumber(selectedDocTypeId, v).then(
+                            (next) => {
+                              setDocNumberPreview(next);
+                              if (next) set("bookingReference", next);
+                            },
+                          );
+                        }
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select year…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {activeFinYears.map((fy) => (
+                          <SelectItem key={fy.id} value={fy.year}>
+                            {fy.year}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field label="Status">
                     <Select
                       value={form.status}
                       onValueChange={(v) => set("status", v as BookingStatus)}
@@ -833,7 +516,9 @@ export default function MaterialExpenseBooking() {
                   </Field>
                 </div>
 
+                {/* ── Company + Supplier row ─────────────────────────────── */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Company — from enterprise where business_type = 'C' */}
                   <Field label="Company" required>
                     <Select
                       value={form.companyId ? String(form.companyId) : ""}
@@ -842,21 +527,109 @@ export default function MaterialExpenseBooking() {
                       }
                     >
                       <SelectTrigger>
-                        <SelectValue placeholder="Select company..." />
+                        <div className="flex items-center gap-2">
+                          <Building2
+                            size={13}
+                            className="text-muted-foreground shrink-0"
+                          />
+                          <SelectValue placeholder="Select company…" />
+                        </div>
                       </SelectTrigger>
                       <SelectContent>
+                        {companyOptions.length === 0 && (
+                          <SelectItem value="__none__" disabled>
+                            No companies found
+                          </SelectItem>
+                        )}
                         {companyOptions.map((c) => (
-                          <SelectItem key={c.id} value={String(c.id)}>
-                            {c.label}
+                          <SelectItem
+                            key={c.CompanyId}
+                            value={String(c.CompanyId)}
+                          >
+                            {c.CompanyName}
                           </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
                   </Field>
-                  <Field label="Basic Amount">
+
+                  {/* Supplier — from AccountHeadMaster */}
+                  <Field label="Vendor / Supplier">
+                    <Select
+                      value={form.supplier ? String(form.supplier) : ""}
+                      onValueChange={(v) => set("supplier", v || "")}
+                    >
+                      <SelectTrigger>
+                        <div className="flex items-center gap-2">
+                          <User2
+                            size={13}
+                            className="text-muted-foreground shrink-0"
+                          />
+                          <SelectValue placeholder="Select supplier…" />
+                        </div>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {supplierOptions.length === 0 && (
+                          <SelectItem value="__none__" disabled>
+                            No suppliers found
+                          </SelectItem>
+                        )}
+                        {supplierOptions.map((s) => (
+                          <SelectItem key={s.id} value={String(s.id)}>
+                            {s.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </div>
+
+                {/* ── Project row ───────────────────────────────────────── */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {/* Project — from enterprise where business_type = 'P' */}
+                  <Field label="Project / Site">
+                    <Select
+                      value={form.projectSite || ""}
+                      onValueChange={(v) => set("projectSite", v || "")}
+                    >
+                      <SelectTrigger>
+                        <div className="flex items-center gap-2">
+                          <FolderKanban
+                            size={13}
+                            className="text-muted-foreground shrink-0"
+                          />
+                          <SelectValue placeholder="Select project…" />
+                        </div>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {projectOptions.length === 0 && (
+                          <SelectItem value="__none__" disabled>
+                            No projects found
+                          </SelectItem>
+                        )}
+                        {projectOptions.map((p) => (
+                          <SelectItem
+                            key={p.ProjectId}
+                            value={String(p.ProjectId)}
+                          >
+                            {p.ProjectName}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  {/* Material Category removed */}
+                </div>
+              </div>
+
+              {/* ── 3. Amount & GST ──────────────────────────────────────── */}
+              <div className="space-y-4">
+                <SectionHeader label="Amount & GST" />
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <Field label="Basic Amount (₹)" required>
                     <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs">
-                        Rs.
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs font-semibold">
+                        ₹
                       </span>
                       <Input
                         type="number"
@@ -865,119 +638,132 @@ export default function MaterialExpenseBooking() {
                         onChange={(e) =>
                           set("basicAmount", parseFloat(e.target.value) || 0)
                         }
-                        className="pl-9"
+                        className="pl-7 font-mono"
                         placeholder="0.00"
+                      />
+                    </div>
+                  </Field>
+
+                  <Field label="CGST Rate (%)">
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs font-semibold">
+                        %
+                      </span>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={28}
+                        step={0.5}
+                        value={form.cgstRate ?? ""}
+                        onChange={(e) =>
+                          set("cgstRate", parseFloat(e.target.value) || 0)
+                        }
+                        className="pl-7 font-mono"
+                        placeholder="18"
+                      />
+                    </div>
+                  </Field>
+
+                  <Field label="SGST Rate (%)">
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs font-semibold">
+                        %
+                      </span>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={28}
+                        step={0.5}
+                        value={form.sgstRate ?? ""}
+                        onChange={(e) =>
+                          set("sgstRate", parseFloat(e.target.value) || 0)
+                        }
+                        className="pl-7 font-mono"
+                        placeholder="0"
                       />
                     </div>
                   </Field>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <Field label="CGST Rate (%)">
-                    <Input
-                      type="number"
-                      min={0}
-                      max={100}
-                      value={form.cgstRate}
-                      onChange={(e) =>
-                        set("cgstRate", parseFloat(e.target.value) || 0)
-                      }
-                      placeholder="18"
-                    />
-                  </Field>
-                  <Field label="SGST Rate (%)">
-                    <Input
-                      type="number"
-                      min={0}
-                      max={100}
-                      value={form.sgstRate}
-                      onChange={(e) =>
-                        set("sgstRate", parseFloat(e.target.value) || 0)
-                      }
-                      placeholder="0"
-                    />
-                  </Field>
-                </div>
-              </FormSection>
+                {/* Live price breakdown */}
+                {form.basicAmount > 0 && (
+                  <PriceBreakdownPanel
+                    bd={bd}
+                    cgstRate={form.cgstRate}
+                    sgstRate={form.sgstRate}
+                    hasDiscount={form.discount.applicable}
+                  />
+                )}
 
-              {/* ④ Billing Terms ──────────────────────────────────────────── */}
-              <FormSection label="Billing Terms">
-                <BillingTermsSection
-                  discount={form.discount}
+                {/* Net amount highlight */}
+                {form.basicAmount > 0 && (
+                  <div className="flex items-center justify-between rounded-xl bg-primary/5 border border-primary/20 px-5 py-3.5">
+                    <div className="flex items-center gap-2">
+                      <TrendingUp size={15} className="text-primary" />
+                      <span className="text-sm font-heading font-semibold text-foreground">
+                        Net Payable Amount
+                      </span>
+                    </div>
+                    <span className="font-mono text-lg font-bold text-primary">
+                      ₹{fmt(bd.netAmount)}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* ── 4. Billing Terms ─────────────────────────────────────── */}
+              <div className="space-y-3">
+                <SectionHeader label="Billing Terms" />
+                <BillingAccordion
                   basicAmount={form.basicAmount}
                   cgstRate={form.cgstRate}
                   sgstRate={form.sgstRate}
+                  discount={form.discount}
                   onChange={(d) => set("discount", d)}
                 />
-              </FormSection>
+              </div>
 
-              {/* ⑤ EMI — only when no billing term applied ────────────────── */}
-              {!billingTermApplied && (
-                <FormSection label="EMI / Installment Payment">
-                  <EmiSection
-                    emi={form.emi}
-                    netAmount={bd.netAmount}
-                    onChange={(emi) => set("emi", emi)}
-                  />
-                </FormSection>
-              )}
+              {/* ── 5. EMI Options ───────────────────────────────────────── */}
+              <div className="space-y-3">
+                <SectionHeader label="EMI / Installment Options" />
+                <EmiSection
+                  emi={form.emi}
+                  netAmount={bd.netAmount}
+                  baseDocNo={form.bookingReference}
+                  onChange={(emi) => set("emi", emi)}
+                />
+              </div>
 
-              {/* If billing term applied, show a net amount summary instead of EMI */}
-              {billingTermApplied && (
-                <FormSection label="Payment Summary">
-                  <div className="rounded-xl border border-primary/20 bg-primary/[0.03] px-4 py-4">
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-0.5">
-                        <p className="text-xs text-muted-foreground font-heading uppercase tracking-wider">
-                          Net Payable (after billing term)
-                        </p>
-                        <p className="text-2xl font-mono font-bold text-foreground">
-                          Rs.{fmt(bd.netAmount)}
-                        </p>
-                        {form.discount.applicable && (
-                          <p className="text-[11px] text-emerald-600 font-medium mt-1">
-                            You save Rs.{fmt(bd.discountAmount)}
-                            {form.discount.type === "percentage"
-                              ? ` (${form.discount.value}% off)`
-                              : " (flat discount)"}
-                          </p>
-                        )}
-                      </div>
-                      <div className="flex items-center justify-center w-12 h-12 rounded-xl bg-primary/10">
-                        <Receipt size={20} className="text-primary" />
-                      </div>
-                    </div>
-                  </div>
-                </FormSection>
-              )}
-
-              {/* ── Approval Trail (edit mode only) ─────────────────────── */}
+              {/* ── 6. Approval Trail ────────────────────────────────────── */}
               {editingId && (
-                <FormSection label="Approval Workflow">
+                <div className="space-y-3">
+                  <SectionHeader label="Approval Workflow" />
                   <ApprovalTrailPanel
                     trail={approvalTrail}
                     currentStatus={form.status}
                   />
-                </FormSection>
+                </div>
               )}
 
-              {/* ── Remarks ─────────────────────────────────────────────── */}
-              <FormSection label="Remarks">
+              {/* ── 7. Remarks ───────────────────────────────────────────── */}
+              <div className="space-y-3">
+                <SectionHeader label="Remarks" />
                 <textarea
                   value={form.remarks}
                   onChange={(e) => set("remarks", e.target.value)}
-                  placeholder="Optional notes..."
+                  placeholder="Optional notes or internal comments…"
                   rows={3}
-                  className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary resize-none"
+                  className="w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary resize-none text-foreground placeholder:text-muted-foreground"
                 />
-              </FormSection>
+              </div>
 
+              {/* ── Save row ─────────────────────────────────────────────── */}
               <div className="flex justify-end gap-2 pt-2 border-t border-border">
                 <Button variant="outline" onClick={cancelForm}>
                   Cancel
                 </Button>
                 <Button
-                  className="gradient-accent"
+                  className="gradient-accent gap-1.5"
                   onClick={handleSave}
                   disabled={saving}
                 >
@@ -995,63 +781,100 @@ export default function MaterialExpenseBooking() {
         {/* ── List View ───────────────────────────────────────────────────── */}
         {view === "list" && (
           <>
+            {/* ── Summary cards ────────────────────────────────────────────── */}
+            {!loading && records.length > 0 && (
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[
+                  {
+                    label: "Total Booked",
+                    value: `₹${fmt(totalNet)}`,
+                    icon: Receipt,
+                    color: "text-primary bg-primary/10",
+                  },
+                  {
+                    label: "Approved",
+                    value: approvedCount,
+                    icon: CheckCircle2,
+                    color: "text-emerald-600 bg-emerald-500/10",
+                  },
+                  {
+                    label: "Pending",
+                    value: pendingCount,
+                    icon: Clock,
+                    color: "text-amber-600 bg-amber-500/10",
+                  },
+                  {
+                    label: "EMI Active",
+                    value: emiCount,
+                    icon: CreditCard,
+                    color: "text-violet-600 bg-violet-500/10",
+                  },
+                ].map((s) => (
+                  <div
+                    key={s.label}
+                    className="rounded-xl bg-card border border-border p-4 flex items-center gap-3"
+                  >
+                    <div className={`p-2 rounded-lg shrink-0 ${s.color}`}>
+                      <s.icon size={15} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-[10px] text-muted-foreground font-heading uppercase tracking-wider truncate">
+                        {s.label}
+                      </p>
+                      <p className="text-base font-bold font-mono text-foreground mt-0.5">
+                        {s.value}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {loading && (
-              <div className="text-center py-12 text-muted-foreground text-sm">
+              <div className="text-center py-16 text-muted-foreground text-sm">
+                <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
                 Loading bookings…
               </div>
             )}
+
             {!loading && (
               <>
+                {/* ── Status filter tabs ──────────────────────────────────── */}
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs text-muted-foreground font-medium shrink-0">
-                    Filter:
-                  </span>
-                  {(
-                    [
-                      "Received",
-                      "Draft",
-                      "Pending",
-                      "Approved",
-                      "Rejected",
-                      "Booked",
-                      "Hold",
-                    ] as const
-                  ).map((s) => (
+                  {ALL_STATUSES.map((s) => (
                     <button
                       key={s}
                       type="button"
-                      onClick={() =>
-                        setStatusFilter(statusFilter === s ? "" : s)
-                      }
+                      onClick={() => setStatusFilter(s)}
                       className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
                         statusFilter === s
-                          ? "bg-primary text-primary-foreground border-primary"
+                          ? "bg-primary text-primary-foreground border-primary shadow-sm"
                           : "bg-background text-muted-foreground border-border hover:border-primary/40"
                       }`}
                     >
                       {s}
+                      {s !== "All" && (
+                        <span className="ml-1.5 text-[10px] opacity-70">
+                          ({records.filter((r) => r.status === s).length})
+                        </span>
+                      )}
                     </button>
                   ))}
-                  {statusFilter && (
-                    <button
-                      type="button"
-                      onClick={() => setStatusFilter("")}
-                      className="px-2 py-1 rounded-full text-xs text-muted-foreground hover:text-foreground border border-dashed border-border"
-                    >
-                      Clear
-                    </button>
-                  )}
                 </div>
 
                 {/* Mobile cards */}
                 <div className="flex flex-col gap-3 sm:hidden">
                   {filteredRecords.length === 0 && (
-                    <div className="text-center py-12 text-muted-foreground text-sm border rounded-xl border-dashed border-border">
+                    <div className="text-center py-16 text-muted-foreground text-sm border rounded-xl border-dashed border-border">
+                      <AlertCircle
+                        size={20}
+                        className="mx-auto mb-2 opacity-30"
+                      />
                       No bookings
-                      {statusFilter ? ` with status "${statusFilter}"` : ""}.{" "}
-                      {statusFilter
-                        ? "Try a different filter."
-                        : 'Tap "New" to get started.'}
+                      {statusFilter !== "All"
+                        ? ` with status "${statusFilter}"`
+                        : ""}
+                      .
                     </div>
                   )}
                   {filteredRecords.map((rec) => (
@@ -1066,26 +889,45 @@ export default function MaterialExpenseBooking() {
                 </div>
 
                 {/* Desktop table */}
-                <Card className="hidden sm:block">
+                <Card className="hidden sm:block border-border shadow-sm">
                   <CardContent className="p-0">
                     <div className="rounded-md overflow-auto">
                       <Table>
                         <TableHeader>
-                          <TableRow>
-                            <TableHead>Doc Type</TableHead>
-                            <TableHead>Doc Number</TableHead>
-                            <TableHead>Date</TableHead>
-                            <TableHead>Due Date</TableHead>
-                            <TableHead>Supplier</TableHead>
-                            <TableHead className="hidden md:table-cell">
-                              Invoice Ref
+                          <TableRow className="bg-muted/30">
+                            <TableHead className="text-xs font-heading">
+                              Doc Type
                             </TableHead>
-                            <TableHead>Basic Amt</TableHead>
-                            <TableHead>Billing Term</TableHead>
-                            <TableHead>EMI</TableHead>
-                            <TableHead>Net Amt</TableHead>
-                            <TableHead>Status</TableHead>
-                            <TableHead>Actions</TableHead>
+                            <TableHead className="text-xs font-heading">
+                              Doc Number
+                            </TableHead>
+                            <TableHead className="text-xs font-heading">
+                              Date
+                            </TableHead>
+                            <TableHead className="text-xs font-heading">
+                              Supplier
+                            </TableHead>
+                            <TableHead className="text-xs font-heading hidden md:table-cell">
+                              Basic Amt
+                            </TableHead>
+                            <TableHead className="text-xs font-heading hidden md:table-cell">
+                              CGST
+                            </TableHead>
+                            <TableHead className="text-xs font-heading hidden md:table-cell">
+                              SGST
+                            </TableHead>
+                            <TableHead className="text-xs font-heading">
+                              Net Amt
+                            </TableHead>
+                            <TableHead className="text-xs font-heading">
+                              EMI
+                            </TableHead>
+                            <TableHead className="text-xs font-heading">
+                              Status
+                            </TableHead>
+                            <TableHead className="text-xs font-heading">
+                              Actions
+                            </TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -1096,55 +938,54 @@ export default function MaterialExpenseBooking() {
                               rec.sgstRate,
                               rec.discount,
                             );
+                            // Resolve supplier label from options list for display
+                            const supplierLabel =
+                              supplierOptions.find(
+                                (s) => String(s.id) === String(rec.supplier),
+                              )?.label ??
+                              rec.supplier ??
+                              "—";
+
                             return (
-                              <TableRow key={rec.id}>
-                                <TableCell className="text-xs text-muted-foreground max-w-[110px] truncate">
+                              <TableRow
+                                key={rec.id}
+                                className="hover:bg-muted/20"
+                              >
+                                <TableCell className="text-xs text-muted-foreground max-w-[100px] truncate">
                                   {rec.docTypeName || "—"}
                                 </TableCell>
                                 <TableCell className="font-mono text-xs font-semibold text-primary">
                                   {rec.bookingReference || "—"}
                                 </TableCell>
-                                <TableCell className="text-xs">
+                                <TableCell className="text-xs text-muted-foreground">
                                   {rec.bookingDate}
                                 </TableCell>
-                                <TableCell className="text-xs">
-                                  {rec.dueDate || "-"}
-                                </TableCell>
                                 <TableCell className="text-xs max-w-[110px] truncate">
-                                  {rec.supplier}
+                                  {supplierLabel}
                                 </TableCell>
-                                <TableCell className="font-mono text-xs hidden md:table-cell">
-                                  {rec.invoiceReference || "-"}
+                                <TableCell className="font-mono text-xs hidden md:table-cell text-muted-foreground">
+                                  ₹{fmt(rec.basicAmount)}
                                 </TableCell>
-                                <TableCell className="font-mono text-xs">
-                                  Rs.{fmt(rec.basicAmount)}
+                                <TableCell className="font-mono text-xs hidden md:table-cell text-amber-600 dark:text-amber-400">
+                                  {rec.cgstRate}%
                                 </TableCell>
-                                <TableCell className="text-xs">
-                                  {rec.discount.masterTermName ? (
-                                    <span className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-heading border bg-primary/[0.06] text-primary border-primary/20">
-                                      <Receipt size={9} />
-                                      {rec.discount.masterTermName}
-                                    </span>
-                                  ) : (
-                                    <span className="text-muted-foreground">
-                                      —
-                                    </span>
-                                  )}
+                                <TableCell className="font-mono text-xs hidden md:table-cell text-amber-600 dark:text-amber-400">
+                                  {rec.sgstRate}%
                                 </TableCell>
-                                <TableCell className="text-xs">
-                                  {!rec.discount.masterTermId &&
-                                  rec.emi.enabled ? (
-                                    <span className="text-primary font-medium">
+                                <TableCell className="font-mono text-xs font-semibold">
+                                  ₹{fmt(rbd.netAmount)}
+                                </TableCell>
+                                <TableCell>
+                                  {rec.emi?.enabled ? (
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-heading font-semibold bg-violet-100 text-violet-700 border border-violet-200 dark:bg-violet-900/30 dark:text-violet-400 dark:border-violet-700 px-2 py-0.5 rounded-full">
+                                      <CreditCard size={9} />
                                       {rec.emi.installmentCount}x
                                     </span>
                                   ) : (
-                                    <span className="text-muted-foreground">
+                                    <span className="text-muted-foreground text-xs">
                                       —
                                     </span>
                                   )}
-                                </TableCell>
-                                <TableCell className="font-mono text-xs font-semibold">
-                                  Rs.{fmt(rbd.netAmount)}
                                 </TableCell>
                                 <TableCell>
                                   <StatusBadge status={rec.status} />
@@ -1163,7 +1004,7 @@ export default function MaterialExpenseBooking() {
                                       className="h-7 w-7 p-0"
                                       onClick={() => openEdit(rec)}
                                     >
-                                      <Edit size={13} />
+                                      <Edit size={12} />
                                     </Button>
                                     <Button
                                       variant="destructive"
@@ -1171,7 +1012,7 @@ export default function MaterialExpenseBooking() {
                                       className="h-7 w-7 p-0"
                                       onClick={() => setDeleteId(rec.id)}
                                     >
-                                      <Trash2 size={13} />
+                                      <Trash2 size={12} />
                                     </Button>
                                   </div>
                                 </TableCell>
@@ -1181,10 +1022,14 @@ export default function MaterialExpenseBooking() {
                           {filteredRecords.length === 0 && (
                             <TableRow>
                               <TableCell
-                                colSpan={12}
-                                className="text-center py-10 text-muted-foreground text-sm"
+                                colSpan={11}
+                                className="text-center py-14 text-muted-foreground text-sm"
                               >
-                                {statusFilter
+                                <AlertCircle
+                                  size={18}
+                                  className="mx-auto mb-2 opacity-30"
+                                />
+                                {statusFilter !== "All"
                                   ? `No bookings with status "${statusFilter}". Try a different filter.`
                                   : `No bookings yet. Click "New Booking" to get started.`}
                               </TableCell>
@@ -1201,7 +1046,7 @@ export default function MaterialExpenseBooking() {
         )}
       </div>
 
-      {/* ── Delete Confirm ─────────────────────────────────────────────── */}
+      {/* ── Delete Confirm ──────────────────────────────────────────────── */}
       <Dialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
         <DialogContent className="w-[calc(100vw-2rem)] max-w-sm">
           <DialogHeader>

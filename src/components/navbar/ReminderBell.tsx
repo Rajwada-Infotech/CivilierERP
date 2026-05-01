@@ -18,6 +18,7 @@ const TYPE_META: Record<string, any> = {
   cheque: { icon: BookOpen, label: "CHQ", color: "text-cyan-500" },
   tds: { icon: FileWarning, label: "TDS", color: "text-rose-500" },
   grn: { icon: Package, label: "GRN", color: "text-emerald-500" },
+  emi_installment: { icon: Lock, label: "EMI", color: "text-purple-500" },
 };
 
 export const ReminderBell = () => {
@@ -121,7 +122,14 @@ export const ReminderBell = () => {
           </div>
 
           <div className="p-2 flex gap-1 overflow-x-auto border-b bg-muted/5 no-scrollbar">
-            {["all", "purchase_order", "grn", "cheque", "tds"].map((t) => (
+            {[
+              "all",
+              "purchase_order",
+              "grn",
+              "cheque",
+              "tds",
+              "emi_installment",
+            ].map((t) => (
               <button
                 key={t}
                 onClick={(e) => {
