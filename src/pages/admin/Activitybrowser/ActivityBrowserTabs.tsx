@@ -294,56 +294,14 @@ export const ActivityBrowserTabs: React.FC<Props> = ({
         </div>
       ) : (
         <div className="overflow-hidden rounded-2xl border border-border bg-card">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/40">
-              <tr className="text-left text-xs uppercase tracking-wider text-muted-foreground">
-                <th className="px-4 py-3">User</th>
-                <th className="px-4 py-3">Action</th>
-                <th className="px-4 py-3">Resource</th>
-                <th className="px-4 py-3">Time</th>
-                <th className="px-4 py-3">URL</th>
-                <th className="px-4 py-3">Session</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredActions.map((action: SessionEvent) => (
-                <tr key={action.id} className="border-t border-border/70">
-                  <td className="px-4 py-3">
-                    <div className="font-medium">{action.userName}</div>
-                    <div className="text-xs text-muted-foreground">
-                      {action.userEmail}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span
-                      className={`rounded-full border px-2 py-1 text-xs font-heading ${ACTION_COLORS[action.actionType || "read"] || ""}`}
-                    >
-                      {getActionLabel(action)}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 capitalize">
-                    {action.resource || "—"}
-                  </td>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Calendar size={12} />
-                      {formatDateTime(action.timestamp).date}
-                    </div>
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <Clock size={12} />
-                      {formatDateTime(action.timestamp).time}
-                    </div>
-                  </td>
-                  <td className="max-w-[280px] px-4 py-3 text-xs text-muted-foreground">
-                    <div className="truncate">{action.requestUrl || "—"}</div>
-                  </td>
-                  <td className="px-4 py-3 font-mono text-xs text-muted-foreground">
-                    {action.sessionId || "—"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+              <DataTable
+                data={filteredActions}
+                columns={ACTION_LOG_COLUMNS}
+                searchable={false}
+                paginated={true}
+                defaultPageSize={25}
+                emptyMessage="No actions found."
+              />
         </div>
       )}
     </>

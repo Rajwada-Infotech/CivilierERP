@@ -38,6 +38,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -202,6 +203,75 @@ function PermGroup({
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
+
+const POST_APPROVAL_COLUMNS: ColumnDef<PermissionRow, unknown>[] = [
+  {
+    accessorKey: "name",
+    header: "User",
+    cell: ({ row }) => (
+      <div className="flex items-start gap-2.5">
+        <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+          <User size={13} className="text-primary" />
+        </div>
+        <div className="min-w-0">
+          <p className="font-semibold text-sm text-foreground truncate leading-tight">{row.original.name}</p>
+          <p className="text-[11px] text-muted-foreground truncate">{row.original.email}</p>
+          <div className="flex items-center gap-1.5 mt-1">
+            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${ROLE_DOT[row.original.role] ?? "bg-slate-400"}`} />
+            <span className="text-[10px] font-heading text-muted-foreground/70">{row.original.role}</span>
+          </div>
+        </div>
+      </div>
+    ),
+  },
+  {
+    accessorKey: "pageName",
+    header: "Page",
+    cell: ({ getValue }) => <span className="text-sm text-foreground font-medium">{getValue() as string}</span>,
+  },
+  {
+    accessorKey: "pageGroup",
+    header: "Module",
+    cell: ({ getValue }) => (
+      <span className="text-xs px-2 py-0.5 rounded-full bg-muted border border-border text-muted-foreground">
+        {getValue() as string}
+      </span>
+    ),
+  },
+  {
+    accessorKey: "status",
+    header: "Status",
+    cell: ({ getValue }) => {
+      const active = (getValue() as string) === "Active";
+      return (
+        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${active ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}>
+          <span className={`w-1.5 h-1.5 rounded-full ${active ? "bg-emerald-500" : "bg-muted-foreground/40"}`} />
+          {getValue() as string}
+        </span>
+      );
+    },
+  },
+  {
+    id: "toggle",
+    header: "Allow Post-Approval",
+    enableSorting: false,
+    cell: ({ row }) => {
+      const r = row.original;
+      const perm = pendingPermissions.find((p) => p.userId === r.userId && p.pageId === r.pageId);
+      const checked = perm ? perm.canPostApproval : r.canPostApproval;
+      return (
+        <div className="flex justify-center">
+          <button
+            onClick={() => togglePermission(r.userId, r.pageId, !checked)}
+            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${checked ? "bg-primary" : "bg-muted border border-border"}`}
+          >
+            <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${checked ? "translate-x-4" : "translate-x-0.5"}`} />
+          </button>
+        </div>
+      );
+    },
+  },
+];
 export default function PostApprovalRights() {
   const { allUsers, updateUserPagePermissions, toggleUserStatus, deleteUser } =
     useAuth();
@@ -498,153 +568,14 @@ export default function PostApprovalRights() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm border-collapse">
-              <thead>
-                <tr className="border-b border-border/60 bg-muted/30">
-                  <th className="text-left px-5 py-3 text-[11px] font-heading font-semibold uppercase tracking-wider text-muted-foreground w-56">
-                    User
-                  </th>
-                  <th className="text-left px-4 py-3 text-[11px] font-heading font-semibold uppercase tracking-wider text-muted-foreground">
-                    Page
-                  </th>
-                  <th className="text-left px-4 py-3 text-[11px] font-heading font-semibold uppercase tracking-wider text-muted-foreground">
-                    Permissions
-                  </th>
-                  <th className="text-center px-4 py-3 text-[11px] font-heading font-semibold uppercase tracking-wider text-muted-foreground w-24">
-                    Status
-                  </th>
-                  <th className="text-right px-5 py-3 text-[11px] font-heading font-semibold uppercase tracking-wider text-muted-foreground w-36">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/40">
-                {[...groupedByUser.entries()].map(([userId, rows]) => {
-                  const firstRow = rows[0];
-                  const user = allUsers.find((u) => u.id === userId);
-                  const isActive = firstRow.status === "Active";
-
-                  return rows.map((row, rowIdx) => (
-                    <tr
-                      key={row.id}
-                      className="hover:bg-muted/20 transition-colors group"
-                    >
-                      {/* User cell — only on first row of user group */}
-                      {rowIdx === 0 ? (
-                        <td
-                          rowSpan={rows.length}
-                          className="px-5 py-3 align-top border-r border-border/30"
-                        >
-                          <div className="flex items-start gap-2.5 sticky top-0">
-                            <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
-                              <User size={13} className="text-primary" />
-                            </div>
-                            <div className="min-w-0">
-                              <p className="font-semibold text-sm text-foreground truncate leading-tight">
-                                {firstRow.name}
-                              </p>
-                              <p className="text-[11px] text-muted-foreground truncate">
-                                {firstRow.email}
-                              </p>
-                              <div className="flex items-center gap-1.5 mt-1.5">
-                                <span
-                                  className={`w-1.5 h-1.5 rounded-full shrink-0 ${ROLE_DOT[firstRow.role] ?? "bg-slate-400"}`}
-                                />
-                                <span className="text-[10px] font-heading text-muted-foreground/70">
-                                  {firstRow.role}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        </td>
-                      ) : null}
-
-                      {/* Page */}
-                      <td className="px-4 py-2.5">
-                        <div>
-                          <span className="text-sm text-foreground/90">
-                            {row.pageLabel}
-                          </span>
-                          <p className="text-[10px] text-muted-foreground/50 mt-0.5">
-                            {row.pageGroup}
-                          </p>
-                        </div>
-                      </td>
-
-                      {/* Permissions */}
-                      <td className="px-4 py-2.5">
-                        <div className="flex flex-wrap gap-1">
-                          {row.actions.map((a) => {
-                            const cfg = getActionConfig(a);
-                            return (
-                              <span
-                                key={a}
-                                className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${cfg.color}`}
-                              >
-                                {cfg.label}
-                              </span>
-                            );
-                          })}
-                        </div>
-                      </td>
-
-                      {/* Status — only on first row */}
-                      {rowIdx === 0 ? (
-                        <td
-                          rowSpan={rows.length}
-                          className="px-4 py-2.5 text-center align-top"
-                        >
-                          <span
-                            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading border ${
-                              isActive
-                                ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                                : "bg-red-500/10 text-red-400 border-red-500/20"
-                            }`}
-                          >
-                            <span
-                              className={`w-1 h-1 rounded-full ${isActive ? "bg-emerald-400" : "bg-red-400"}`}
-                            />
-                            {firstRow.status}
-                          </span>
-                        </td>
-                      ) : null}
-
-                      {/* Actions — only on first row */}
-                      {rowIdx === 0 ? (
-                        <td
-                          rowSpan={rows.length}
-                          className="px-5 py-2.5 text-right align-top"
-                        >
-                          <div className="flex items-center justify-end gap-1">
-                            <button
-                              onClick={() => user && openEdit(user)}
-                              className="p-1.5 rounded-md hover:bg-primary/10 text-muted-foreground hover:text-primary transition-colors"
-                              title="Edit permissions"
-                            >
-                              <Edit3 size={13} />
-                            </button>
-                            <button
-                              onClick={() => handleToggle(userId)}
-                              className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-                              title={isActive ? "Deactivate" : "Activate"}
-                            >
-                              <UserCheck size={13} />
-                            </button>
-                            <button
-                              onClick={() => setDeletingId(userId)}
-                              className="p-1.5 rounded-md hover:bg-red-500/10 text-muted-foreground hover:text-red-400 transition-colors"
-                              title="Delete user"
-                            >
-                              <Trash2 size={13} />
-                            </button>
-                          </div>
-                        </td>
-                      ) : null}
-                    </tr>
-                  ));
-                })}
-              </tbody>
-            </table>
+              <DataTable
+                data={filteredData}
+                columns={POST_APPROVAL_COLUMNS}
+                searchable={false}
+                paginated={true}
+                defaultPageSize={25}
+                emptyMessage="No users found."
+              />
           </div>
         )}
       </div>
