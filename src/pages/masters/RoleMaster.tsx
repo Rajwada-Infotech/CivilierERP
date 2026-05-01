@@ -15,7 +15,13 @@ import {
   Search,
   Calendar,
 } from "lucide-react";
-import { getRoles, addRole, updateRole, deleteRole, type RoleRecord } from "@/api/roleApi";
+import {
+  getRoles,
+  addRole,
+  updateRole,
+  deleteRole,
+  type RoleRecord,
+} from "@/api/roleApi";
 
 // ─── Local form types ────────────────────────────────────────────────────────
 interface FormState {
@@ -33,14 +39,105 @@ const EMPTY: FormState = {
 const inp =
   "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground placeholder:text-muted-foreground/50";
 
+// ─── Column builder ───────────────────────────────────────────────────────────
+function buildRoleColumns(
+  editingId: number | null,
+  deleteId: number | null,
+  setDeleteId: (id: number | null) => void,
+  handleEdit: (item: RoleRecord) => void,
+  handleDelete: (id: number) => void,
+): ColumnDef<RoleRecord, unknown>[] {
+  return [
+    {
+      accessorKey: "RCode",
+      header: "Code",
+      cell: ({ getValue }) => (
+        <span className="font-mono text-xs font-semibold text-primary">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "RName",
+      header: "Role Name",
+      cell: ({ getValue }) => (
+        <span className="font-medium text-foreground">
+          {getValue() as string}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "RDesc",
+      header: "Description",
+      cell: ({ getValue }) => (
+        <span className="text-muted-foreground text-xs">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
+    },
+    {
+      id: "actions",
+      header: "",
+      enableSorting: false,
+      cell: ({ row }) => {
+        const id = row.original.RId;
+        if (deleteId === id) {
+          return (
+            <div className="flex items-center gap-1 justify-end">
+              <span className="text-[11px] text-muted-foreground mr-1">
+                Delete?
+              </span>
+              <button
+                onClick={() => handleDelete(id)}
+                className="p-1 rounded text-destructive hover:bg-destructive/10"
+              >
+                <Check size={12} />
+              </button>
+              <button
+                onClick={() => setDeleteId(null)}
+                className="p-1 rounded text-muted-foreground hover:bg-muted"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          );
+        }
+        return (
+          <div className="flex items-center justify-end gap-1">
+            <button
+              onClick={() => handleEdit(row.original)}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
+            >
+              <Edit2 size={13} />
+            </button>
+            <button
+              onClick={() => setDeleteId(id)}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+            >
+              <Trash2 size={13} />
+            </button>
+          </div>
+        );
+      },
+    },
+  ];
+}
+
 // Client-side code generator (preview only)
 function generateRoleCode(rName: string): string {
   if (!rName.trim()) return "";
-  const words = rName.trim().split(/\s+/).filter(w => w);
+  const words = rName
+    .trim()
+    .split(/\s+/)
+    .filter((w) => w);
   if (words.length === 1) {
     return words[0].slice(0, 3).toUpperCase();
   }
-  return words.map(w => w[0]).join('').slice(0, 5).toUpperCase();
+  return words
+    .map((w) => w[0])
+    .join("")
+    .slice(0, 5)
+    .toUpperCase();
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -65,15 +162,10 @@ const RoleMaster: React.FC = () => {
   const [search, setSearch] = useState("");
   const [deleteId, setDeleteId] = useState<number | null>(null);
 
-  const columns = useMemo(
-    () => buildRoleColumns(editingId, deleteId, setDeleteId, handleEdit, handleDelete),
-    [editingId, deleteId],
-  );
-
   // Auto-generate RCode on RName change (preview)
   useEffect(() => {
     const code = generateRoleCode(form.RName);
-    setForm(prev => ({ ...prev, RCode: code }));
+    setForm((prev) => ({ ...prev, RCode: code }));
   }, [form.RName]);
 
   const setField = (k: keyof FormState, v: string) => {
@@ -92,25 +184,6 @@ const RoleMaster: React.FC = () => {
     RName: form.RName.trim(),
     RDesc: form.RDesc.trim() || undefined,
   });
-
-  const handleSave = async () => {
-    if (!validate()) return;
-
-    try {
-      if (editingId) {
-        await updateRole(editingId, toPayload());
-        toast.success("Role updated!");
-      } else {
-        await addRole(toPayload());
-        toast.success("Role saved!");
-      }
-      await queryClient.invalidateQueries({ queryKey: ["roles"] });
-      setForm(EMPTY);
-      setEditingId(null);
-    } catch (err: any) {
-      toast.error("Failed: " + err.message);
-    }
-  };
 
   const handleEdit = (item: RoleRecord) => {
     setForm({
@@ -137,6 +210,38 @@ const RoleMaster: React.FC = () => {
     }
   };
 
+  const columns = useMemo(
+    () =>
+      buildRoleColumns(
+        editingId,
+        deleteId,
+        setDeleteId,
+        handleEdit,
+        handleDelete,
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [editingId, deleteId],
+  );
+
+  const handleSave = async () => {
+    if (!validate()) return;
+
+    try {
+      if (editingId) {
+        await updateRole(editingId, toPayload());
+        toast.success("Role updated!");
+      } else {
+        await addRole(toPayload());
+        toast.success("Role saved!");
+      }
+      await queryClient.invalidateQueries({ queryKey: ["roles"] });
+      setForm(EMPTY);
+      setEditingId(null);
+    } catch (err: any) {
+      toast.error("Failed: " + err.message);
+    }
+  };
+
   const handleReset = () => {
     setForm(EMPTY);
     setEditingId(null);
@@ -153,8 +258,10 @@ const RoleMaster: React.FC = () => {
     );
   });
 
-  if (isLoading) return <div className="p-6 text-muted-foreground">Loading roles...</div>;
-  if (error) return <div className="p-6 text-red-500">Failed to load roles.</div>;
+  if (isLoading)
+    return <div className="p-6 text-muted-foreground">Loading roles...</div>;
+  if (error)
+    return <div className="p-6 text-red-500">Failed to load roles.</div>;
 
   return (
     <>
@@ -172,7 +279,9 @@ const RoleMaster: React.FC = () => {
                 {editingId ? "Edit Role" : "Add Role"}
               </h2>
               <p className="text-[11px] text-muted-foreground mt-0.5">
-                {editingId ? "Modify role details below." : "Define a new user role."}
+                {editingId
+                  ? "Modify role details below."
+                  : "Define a new user role."}
               </p>
             </div>
             {editingId && (
@@ -203,7 +312,9 @@ const RoleMaster: React.FC = () => {
                   />
                 </div>
                 {errors.RName && (
-                  <p className="text-[11px] text-destructive mt-1">Role name is required</p>
+                  <p className="text-[11px] text-destructive mt-1">
+                    Role name is required
+                  </p>
                 )}
               </div>
 
@@ -304,8 +415,16 @@ const RoleMaster: React.FC = () => {
               searchable={false}
               paginated={true}
               defaultPageSize={25}
-              emptyMessage={search ? "No roles match your search." : "No roles yet. Add one above."}
-              rowClassName={(row) => row.original.RId === editingId ? "bg-primary/5 border-l-2 border-l-primary" : ""}
+              emptyMessage={
+                search
+                  ? "No roles match your search."
+                  : "No roles yet. Add one above."
+              }
+              rowClassName={(row) =>
+                row.original.RId === editingId
+                  ? "bg-primary/5 border-l-2 border-l-primary"
+                  : ""
+              }
             />
           </div>
         </div>

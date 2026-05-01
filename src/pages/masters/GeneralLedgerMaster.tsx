@@ -60,6 +60,103 @@ const EMPTY_FORM: LedgerForm = {
   LBelongsTo: "",
 };
 
+// ─── Column builder ────────────────────────────────────────────────────────────
+function buildGLColumns(
+  editingId: number | null,
+  deleteConfirm: number | null,
+  setDeleteConfirm: (id: number | null) => void,
+  startEdit: (l: LedgerHead) => void,
+  deleteMut: { mutate: (id: number) => void },
+): ColumnDef<LedgerHead, unknown>[] {
+  return [
+    {
+      accessorKey: "LHeadCode",
+      header: "Code",
+      cell: ({ getValue }) => (
+        <span className="font-mono text-xs font-semibold text-primary">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "LHeadName",
+      header: "Account Name",
+      cell: ({ getValue }) => (
+        <span className="font-medium text-foreground">
+          {getValue() as string}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "GroupName",
+      header: "Account Group",
+      cell: ({ getValue }) => (
+        <span className="text-xs text-muted-foreground">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "LHeadStatus",
+      header: "Status",
+      cell: ({ getValue }) => {
+        const active = getValue() as boolean;
+        return (
+          <span
+            className={`px-2 py-0.5 rounded-full text-xs font-medium ${active ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
+          >
+            {active ? "Active" : "Inactive"}
+          </span>
+        );
+      },
+    },
+    {
+      id: "actions",
+      header: "",
+      enableSorting: false,
+      cell: ({ row }) => {
+        const id = row.original.LHeadId;
+        if (deleteConfirm === id) {
+          return (
+            <div className="flex items-center gap-1 justify-end">
+              <span className="text-[11px] text-muted-foreground mr-1">
+                Delete?
+              </span>
+              <button
+                onClick={() => deleteMut.mutate(id)}
+                className="p-1 rounded text-destructive hover:bg-destructive/10"
+              >
+                <Check size={12} />
+              </button>
+              <button
+                onClick={() => setDeleteConfirm(null)}
+                className="p-1 rounded text-muted-foreground hover:bg-muted"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          );
+        }
+        return (
+          <div className="flex items-center justify-end gap-1">
+            <button
+              onClick={() => startEdit(row.original)}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
+            >
+              <Pencil size={13} />
+            </button>
+            <button
+              onClick={() => setDeleteConfirm(id)}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+            >
+              <Trash2 size={13} />
+            </button>
+          </div>
+        );
+      },
+    },
+  ];
+}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 const GeneralLedgerMaster: React.FC = () => {
@@ -71,10 +168,6 @@ const GeneralLedgerMaster: React.FC = () => {
   >({});
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
 
-  const columns = useMemo(
-    () => buildGLColumns(editingId, deleteConfirm, setDeleteConfirm, startEdit, deleteMut),
-    [editingId, deleteConfirm, deleteMut],
-  );
   const [search, setSearch] = useState("");
   const [filterGroup, setFilterGroup] = useState("");
   const [page, setPage] = useState(1);
@@ -223,6 +316,19 @@ const GeneralLedgerMaster: React.FC = () => {
     setErrors({});
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
+
+  const columns = useMemo(
+    () =>
+      buildGLColumns(
+        editingId,
+        deleteConfirm,
+        setDeleteConfirm,
+        startEdit,
+        deleteMut,
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [editingId, deleteConfirm],
+  );
 
   const resetForm = () => {
     setEditingId(null);
@@ -491,16 +597,22 @@ const GeneralLedgerMaster: React.FC = () => {
 
         {/* Table */}
         <div className="rounded-xl border border-border overflow-hidden bg-card">
-            <DataTable
-              data={filtered}
-              columns={columns}
-              loading={ledgersLoading}
-              searchable={false}
-              paginated={true}
-              defaultPageSize={25}
-              emptyMessage={ledgers.length === 0 ? "No ledger accounts yet." : "No results match your search."}
-              rowClassName={(row) => row.original.LHeadId === editingId ? "bg-primary/5" : ""}
-            />
+          <DataTable
+            data={filtered}
+            columns={columns}
+            loading={ledgersLoading}
+            searchable={false}
+            paginated={true}
+            defaultPageSize={25}
+            emptyMessage={
+              ledgers.length === 0
+                ? "No ledger accounts yet."
+                : "No results match your search."
+            }
+            rowClassName={(row) =>
+              row.original.LHeadId === editingId ? "bg-primary/5" : ""
+            }
+          />
         </div>
         <div className="flex items-center justify-between border-t border-border px-4 py-3 text-sm">
           <span className="text-muted-foreground">

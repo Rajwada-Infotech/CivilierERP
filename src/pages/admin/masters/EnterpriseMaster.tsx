@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useMemo, { useState, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Building2,
@@ -103,7 +103,11 @@ function LogoAvatar({
 }
 
 
-const ENTERPRISE_COLUMNS: ColumnDef<Enterprise, unknown>[] = [
+function buildEnterpriseColumns(
+  openEdit: (r: Enterprise) => void,
+  setDeleteTarget: (id: number) => void,
+): ColumnDef<Enterprise, unknown>[] {
+  return [
   {
     id: "logo",
     header: "Logo",
@@ -141,12 +145,13 @@ const ENTERPRISE_COLUMNS: ColumnDef<Enterprise, unknown>[] = [
     enableSorting: false,
     cell: ({ row }) => (
       <div className="flex items-center justify-end gap-1">
-        <button onClick={() => handleRowEdit(row.original)} className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"><Edit2 size={13} /></button>
-        <button onClick={() => handleRowDelete(row.original.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"><Trash2 size={13} /></button>
+        <button onClick={() => openEdit(row.original)} className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"><Edit2 size={13} /></button>
+        <button onClick={() => setDeleteTarget(row.original.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"><Trash2 size={13} /></button>
       </div>
     ),
   },
-];
+  ];
+}
 export default function EnterpriseMaster() {
   const queryClient = useQueryClient();
   const {
@@ -359,7 +364,7 @@ export default function EnterpriseMaster() {
             <div className="overflow-x-auto">
               <DataTable
                 data={filtered}
-                columns={ENTERPRISE_COLUMNS}
+                columns={columns}
                 searchable={false}
                 paginated={true}
                 defaultPageSize={20}
