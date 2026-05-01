@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useMemo, useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -195,44 +195,149 @@ function LogoAvatar({
   );
 }
 
-
-const COMPANY_COLUMNS: ColumnDef<any, unknown>[] = [
-  {
-    id: "logo",
-    header: "Logo",
-    enableSorting: false,
-    cell: ({ row }) => <LogoAvatar logoUrl={row.original.LogoUrl} name={row.original.Name || "?"} />,
-  },
-  { accessorKey: "Code", header: "Code",         cell: ({ getValue }) => <span className="font-mono text-xs font-medium text-primary">{getValue() as string}</span> },
-  { accessorKey: "Name", header: "Company Name", cell: ({ getValue }) => <span className="font-medium text-foreground max-w-[180px] truncate block">{getValue() as string}</span> },
-  { accessorKey: "belongs_to", header: "Enterprise", cell: ({ getValue }) => <span className="text-xs text-muted-foreground max-w-[140px] truncate block">{(getValue() as string) || "—"}</span> },
-  { accessorKey: "LegalName",  header: "Legal Name", cell: ({ getValue }) => <span className="text-muted-foreground text-xs max-w-[160px] truncate block">{(getValue() as string) || "—"}</span> },
-  { accessorKey: "Type",       header: "Type",       cell: ({ getValue }) => <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-500/10 text-emerald-600">{getValue() as string}</span> },
-  { accessorKey: "Industry",   header: "Industry",   cell: ({ getValue }) => <span className="text-muted-foreground text-xs">{(getValue() as string) || "—"}</span> },
-  { accessorKey: "City",       header: "City",       cell: ({ getValue }) => <span className="text-muted-foreground text-xs">{(getValue() as string) || "—"}</span> },
-  { accessorKey: "PAN",        header: "PAN",        cell: ({ getValue }) => <span className="font-mono text-xs text-muted-foreground">{(getValue() as string) || "—"}</span> },
-  { accessorKey: "GSTN",       header: "GST No.",    cell: ({ getValue }) => <span className="font-mono text-xs text-muted-foreground">{(getValue() as string) || "—"}</span> },
-  { accessorKey: "GSTType",    header: "GST Type",   cell: ({ getValue }) => <span className="text-muted-foreground text-xs">{(getValue() as string) || "—"}</span> },
-  {
-    accessorKey: "IsActive",
-    header: "Status",
-    cell: ({ getValue }) => {
-      const active = getValue() as boolean;
-      return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${active ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}>{active ? "Active" : "Inactive"}</span>;
+function buildCompanyColumns(
+  openEdit: (row: any) => void,
+  setDeleteConfirm: (id: number) => void,
+): ColumnDef<any, unknown>[] {
+  return [
+    {
+      id: "logo",
+      header: "Logo",
+      enableSorting: false,
+      cell: ({ row }) => (
+        <LogoAvatar
+          logoUrl={row.original.LogoUrl}
+          name={row.original.Name || "?"}
+        />
+      ),
     },
-  },
-  {
-    id: "actions",
-    header: "",
-    enableSorting: false,
-    cell: ({ row }) => (
-      <div className="flex items-center justify-end gap-1">
-        <button onClick={() => handleEdit(row.original)} className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"><Edit2 size={13} /></button>
-        <button onClick={() => handleDelete(row.original.Id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"><Trash2 size={13} /></button>
-      </div>
-    ),
-  },
-];
+    {
+      accessorKey: "Code",
+      header: "Code",
+      cell: ({ getValue }) => (
+        <span className="font-mono text-xs font-medium text-primary">
+          {getValue() as string}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "Name",
+      header: "Company Name",
+      cell: ({ getValue }) => (
+        <span className="font-medium text-foreground max-w-[180px] truncate block">
+          {getValue() as string}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "belongs_to",
+      header: "Enterprise",
+      cell: ({ getValue }) => (
+        <span className="text-xs text-muted-foreground max-w-[140px] truncate block">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "LegalName",
+      header: "Legal Name",
+      cell: ({ getValue }) => (
+        <span className="text-muted-foreground text-xs max-w-[160px] truncate block">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "Type",
+      header: "Type",
+      cell: ({ getValue }) => (
+        <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-500/10 text-emerald-600">
+          {getValue() as string}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "Industry",
+      header: "Industry",
+      cell: ({ getValue }) => (
+        <span className="text-muted-foreground text-xs">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "City",
+      header: "City",
+      cell: ({ getValue }) => (
+        <span className="text-muted-foreground text-xs">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "PAN",
+      header: "PAN",
+      cell: ({ getValue }) => (
+        <span className="font-mono text-xs text-muted-foreground">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "GSTN",
+      header: "GST No.",
+      cell: ({ getValue }) => (
+        <span className="font-mono text-xs text-muted-foreground">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "GSTType",
+      header: "GST Type",
+      cell: ({ getValue }) => (
+        <span className="text-muted-foreground text-xs">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "IsActive",
+      header: "Status",
+      cell: ({ getValue }) => {
+        const active = getValue() as boolean;
+        return (
+          <span
+            className={`px-2 py-0.5 rounded-full text-xs font-medium ${active ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
+          >
+            {active ? "Active" : "Inactive"}
+          </span>
+        );
+      },
+    },
+    {
+      id: "actions",
+      header: "",
+      enableSorting: false,
+      cell: ({ row }) => (
+        <div className="flex items-center justify-end gap-1">
+          <button
+            onClick={() => openEdit(row.original)}
+            className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
+          >
+            <Edit2 size={13} />
+          </button>
+          <button
+            onClick={() => setDeleteConfirm(row.original.Id)}
+            className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+          >
+            <Trash2 size={13} />
+          </button>
+        </div>
+      ),
+    },
+  ];
+}
 export default function CompanyMaster() {
   const qc = useQueryClient();
   const [form, setForm] = useState<Company>(empty);
@@ -442,7 +547,7 @@ export default function CompanyMaster() {
               <div className="overflow-x-auto">
                 <DataTable
                   data={filtered}
-                  columns={COMPANY_COLUMNS}
+                  columns={columns}
                   searchable={false}
                   paginated={true}
                   defaultPageSize={20}

@@ -13,6 +13,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import type { SessionEvent, ActivityActionType } from "@/api/userActivityApi";
 import { ROLE_COLORS, ACTION_COLORS } from "./constants";
 
@@ -65,6 +66,87 @@ function getActionLabel(event: SessionEvent) {
   if (event.event === "logout") return "LOGOUT";
   return (event.actionType || "action").toUpperCase();
 }
+
+const ACTION_LOG_COLUMNS: ColumnDef<SessionEvent, unknown>[] = [
+  {
+    id: "user",
+    header: "User",
+    cell: ({ row }) => (
+      <div>
+        <p className="font-medium text-sm text-foreground leading-tight">
+          {row.original.userName}
+        </p>
+        <p className="text-[11px] text-muted-foreground">
+          {row.original.userEmail}
+        </p>
+      </div>
+    ),
+  },
+  {
+    id: "action",
+    header: "Action",
+    cell: ({ row }) => {
+      const label = getActionLabel(row.original);
+      const color =
+        ACTION_COLORS[row.original.actionType as keyof typeof ACTION_COLORS] ??
+        "bg-muted text-muted-foreground";
+      return (
+        <span
+          className={`px-2 py-0.5 rounded-full text-[10px] font-heading font-semibold tracking-wide ${color}`}
+        >
+          {label}
+        </span>
+      );
+    },
+  },
+  {
+    accessorKey: "resource",
+    header: "Resource",
+    cell: ({ getValue }) => (
+      <span className="font-mono text-xs text-muted-foreground truncate max-w-[180px] block">
+        {(getValue() as string) || "—"}
+      </span>
+    ),
+  },
+  {
+    accessorKey: "details",
+    header: "Details",
+    cell: ({ getValue }) => (
+      <span className="text-xs text-muted-foreground truncate max-w-[200px] block">
+        {(getValue() as string) || "—"}
+      </span>
+    ),
+  },
+  {
+    id: "timestamp",
+    header: "Time",
+    cell: ({ row }) => {
+      const { date, time } = (() => {
+        const iso = row.original.timestamp;
+        if (!iso) return { date: "—", time: "—" };
+        const d = new Date(iso);
+        return {
+          date: d.toLocaleDateString("en-IN", {
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+          }),
+          time: d.toLocaleTimeString("en-IN", {
+            hour: "2-digit",
+            minute: "2-digit",
+            hour12: true,
+          }),
+        };
+      })();
+      return (
+        <div>
+          <p className="text-xs text-foreground">{date}</p>
+          <p className="text-[11px] text-muted-foreground">{time}</p>
+        </div>
+      );
+    },
+  },
+];
 
 export const ActivityBrowserTabs: React.FC<Props> = ({
   activeTab,
@@ -294,14 +376,14 @@ export const ActivityBrowserTabs: React.FC<Props> = ({
         </div>
       ) : (
         <div className="overflow-hidden rounded-2xl border border-border bg-card">
-              <DataTable
-                data={filteredActions}
-                columns={ACTION_LOG_COLUMNS}
-                searchable={false}
-                paginated={true}
-                defaultPageSize={25}
-                emptyMessage="No actions found."
-              />
+          <DataTable
+            data={filteredActions}
+            columns={ACTION_LOG_COLUMNS}
+            searchable={false}
+            paginated={true}
+            defaultPageSize={25}
+            emptyMessage="No actions found."
+          />
         </div>
       )}
     </>

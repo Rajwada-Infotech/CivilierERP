@@ -66,6 +66,127 @@ function calcTotal(start: number | "", end: number | ""): number {
 const inp =
   "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground placeholder:text-muted-foreground/50";
 
+// ─── Column builder ────────────────────────────────────────────────────────────
+function buildChequeColumns(
+  editingId: string | null,
+  deleteId: string | null,
+  setDeleteId: (id: string | null) => void,
+  handleEdit: (item: DbCheque) => void,
+  handleDelete: (id: string) => void,
+  dbBanks: BankOption[],
+): ColumnDef<DbCheque, unknown>[] {
+  return [
+    {
+      id: "bank",
+      header: "Bank",
+      cell: ({ row }) => {
+        const bank = dbBanks.find((b) => b.id === row.original.BankId);
+        return (
+          <span className="font-medium text-foreground">
+            {bank?.label || "—"}
+          </span>
+        );
+      },
+    },
+    {
+      accessorKey: "AccountNumber",
+      header: "Account Number",
+      cell: ({ getValue }) => (
+        <span className="font-mono text-xs">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "ChequeLotNumber",
+      header: "Lot Number",
+      cell: ({ getValue }) => (
+        <span className="font-mono text-xs text-primary">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
+    },
+    {
+      id: "range",
+      header: "Range",
+      cell: ({ row }) => (
+        <span className="font-mono text-xs text-muted-foreground">
+          {row.original.ChequeStartNumber ?? "—"} –{" "}
+          {row.original.ChequeEndNumber ?? "—"}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "TotalCheques",
+      header: "Total",
+      cell: ({ getValue }) => (
+        <span className="text-xs font-semibold text-foreground">
+          {((getValue() as number) || 0).toLocaleString()}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "Status",
+      header: "Status",
+      cell: ({ getValue }) => {
+        const active = getValue() as boolean;
+        return (
+          <span
+            className={`px-2 py-0.5 rounded-full text-xs font-medium ${active ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
+          >
+            {active ? "Active" : "Inactive"}
+          </span>
+        );
+      },
+    },
+    {
+      id: "actions",
+      header: "",
+      enableSorting: false,
+      cell: ({ row }) => {
+        const id = String(row.original.CId);
+        if (deleteId === id) {
+          return (
+            <div className="flex items-center gap-1 justify-end">
+              <span className="text-[11px] text-muted-foreground mr-1">
+                Delete?
+              </span>
+              <button
+                onClick={() => handleDelete(id)}
+                className="p-1 rounded text-destructive hover:bg-destructive/10"
+              >
+                <Check size={12} />
+              </button>
+              <button
+                onClick={() => setDeleteId(null)}
+                className="p-1 rounded text-muted-foreground hover:bg-muted"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          );
+        }
+        return (
+          <div className="flex items-center justify-end gap-1">
+            <button
+              onClick={() => handleEdit(row.original)}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
+            >
+              <Edit2 size={13} />
+            </button>
+            <button
+              onClick={() => setDeleteId(id)}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+            >
+              <Trash2 size={13} />
+            </button>
+          </div>
+        );
+      },
+    },
+  ];
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 const ChequeMaster: React.FC = () => {
   const queryClient = useQueryClient();
@@ -94,16 +215,6 @@ const ChequeMaster: React.FC = () => {
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [search, setSearch] = useState("");
   const [deleteId, setDeleteId] = useState<string | null>(null);
-
-  const columns = useMemo(
-    () => buildChequeColumns(editingId, deleteId, setDeleteId, handleEdit, handleDelete, dbBanks),
-    [editingId, deleteId, dbBanks],
-  );
-
-  // Auto-recalculate total
-  useEffect(() => {
-    setForm((p) => ({ ...p, totalCheques: calcTotal(p.chqStart, p.chqEnd) }));
-  }, [form.chqStart, form.chqEnd]);
 
   const handleBankChange = (bankId: string) => {
     const bank = dbBanks.find((b) => String(b.id) === bankId);
@@ -153,24 +264,6 @@ const ChequeMaster: React.FC = () => {
     Status: f.status,
   });
 
-  const handleSave = async () => {
-    if (!validate()) return;
-    try {
-      if (editingId) {
-        await updateCheque(editingId, toPayload(form));
-        toast.success("Cheque lot updated!");
-      } else {
-        await addCheque(toPayload(form));
-        toast.success("Cheque lot saved!");
-      }
-      await queryClient.invalidateQueries({ queryKey: ["cheques"] });
-      setForm(EMPTY);
-      setEditingId(null);
-    } catch (err: any) {
-      toast.error("Failed: " + err.message);
-    }
-  };
-
   const handleEdit = (item: DbCheque) => {
     const bank = dbBanks.find((b) => b.id === item.BankId);
     setForm({
@@ -205,11 +298,48 @@ const ChequeMaster: React.FC = () => {
     }
   };
 
+  const handleSave = async () => {
+    if (!validate()) return;
+    try {
+      if (editingId) {
+        await updateCheque(editingId, toPayload(form));
+        toast.success("Cheque lot updated!");
+      } else {
+        await addCheque(toPayload(form));
+        toast.success("Cheque lot saved!");
+      }
+      await queryClient.invalidateQueries({ queryKey: ["cheques"] });
+      setForm(EMPTY);
+      setEditingId(null);
+    } catch (err: any) {
+      toast.error("Failed: " + err.message);
+    }
+  };
+
   const handleReset = () => {
     setForm(EMPTY);
     setEditingId(null);
     setErrors({});
   };
+
+  const columns = useMemo(
+    () =>
+      buildChequeColumns(
+        editingId,
+        deleteId,
+        setDeleteId,
+        handleEdit,
+        handleDelete,
+        dbBanks,
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [editingId, deleteId, dbBanks],
+  );
+
+  // Auto-recalculate total
+  useEffect(() => {
+    setForm((p) => ({ ...p, totalCheques: calcTotal(p.chqStart, p.chqEnd) }));
+  }, [form.chqStart, form.chqEnd]);
 
   const filtered = dbCheques.filter((r) => {
     if (!search) return true;
@@ -605,8 +735,16 @@ const ChequeMaster: React.FC = () => {
               searchable={false}
               paginated={true}
               defaultPageSize={20}
-              emptyMessage={search ? "No cheque lots match your search." : "No cheque lots yet. Add one above."}
-              rowClassName={(row) => String(row.original.CId) === editingId ? "bg-primary/5 border-l-2 border-l-primary" : ""}
+              emptyMessage={
+                search
+                  ? "No cheque lots match your search."
+                  : "No cheque lots yet. Add one above."
+              }
+              rowClassName={(row) =>
+                String(row.original.CId) === editingId
+                  ? "bg-primary/5 border-l-2 border-l-primary"
+                  : ""
+              }
             />
           </div>
         </div>

@@ -73,6 +73,104 @@ function buildPreview(prefix: string, startingDocNo: string): string {
   return `${prefix}/${padDocNo(startingDocNo)}`;
 }
 
+// ── Column builder ────────────────────────────────────────────────────────────
+
+function buildDocColumns(
+  editingId: number | null,
+  openEdit: (item: DocType) => void,
+  handleDelete: (id: number) => void,
+): ColumnDef<DocType, unknown>[] {
+  return [
+    {
+      accessorKey: "EntryType",
+      header: "Entry Type",
+      cell: ({ getValue }) => (
+        <span className="text-sm font-medium text-foreground">
+          {getValue() as string}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "FullPrefix",
+      header: "Full Prefix",
+      cell: ({ getValue }) => (
+        <span className="font-mono text-xs font-semibold text-primary">
+          {getValue() as string}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "Prefix",
+      header: "Prefix",
+      cell: ({ getValue }) => (
+        <span className="font-mono text-xs">{getValue() as string}</span>
+      ),
+    },
+    {
+      accessorKey: "Description",
+      header: "Description",
+      cell: ({ getValue }) => (
+        <span className="text-sm text-muted-foreground">
+          {getValue() as string}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "CompanyName",
+      header: "Company",
+      cell: ({ getValue }) => (
+        <span className="text-xs text-muted-foreground">
+          {(getValue() as string) || "All"}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "ProjectName",
+      header: "Project",
+      cell: ({ getValue }) => (
+        <span className="text-xs text-muted-foreground">
+          {(getValue() as string) || "All"}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "IsActive",
+      header: "Status",
+      cell: ({ getValue }) => {
+        const active = getValue() as boolean;
+        return (
+          <span
+            className={`px-2 py-0.5 rounded-full text-xs font-medium ${active ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
+          >
+            {active ? "Active" : "Inactive"}
+          </span>
+        );
+      },
+    },
+    {
+      id: "actions",
+      header: "",
+      enableSorting: false,
+      cell: ({ row }) => (
+        <div className="flex items-center justify-end gap-1">
+          <button
+            onClick={() => openEdit(row.original)}
+            className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
+          >
+            <Edit size={13} />
+          </button>
+          <button
+            onClick={() => handleDelete(row.original.TypeOfDocId)}
+            className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+          >
+            <Trash2 size={13} />
+          </button>
+        </div>
+      ),
+    },
+  ];
+}
+
 // ── Component ────────────────────────────────────────────────────────────────
 
 const TypeOfDocMaster: React.FC = () => {
@@ -80,10 +178,6 @@ const TypeOfDocMaster: React.FC = () => {
   const [form, setForm] = useState(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
 
-  const columns = useMemo(
-    () => buildDocColumns(editingId, openEdit, handleDelete),
-    [editingId],
-  );
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   // ── Queries ───────────────────────────────────────────────────────────────
@@ -194,6 +288,12 @@ const TypeOfDocMaster: React.FC = () => {
     setDrawerOpen(true);
   };
 
+  const columns = useMemo(
+    () => buildDocColumns(editingId, openEdit, deleteMutation.mutate),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [editingId, deleteMutation.mutate],
+  );
+
   const isBusy = createMutation.isPending || updateMutation.isPending;
   const preview = buildPreview(form.Prefix, form.StartingDocNo);
 
@@ -243,7 +343,11 @@ const TypeOfDocMaster: React.FC = () => {
             paginated={true}
             defaultPageSize={20}
             emptyMessage="No document types yet."
-            rowClassName={(row) => row.original.TypeOfDocId === editingId ? "bg-primary/5 border-l-2 border-l-primary" : ""}
+            rowClassName={(row) =>
+              row.original.TypeOfDocId === editingId
+                ? "bg-primary/5 border-l-2 border-l-primary"
+                : ""
+            }
           />
         )}
       </div>

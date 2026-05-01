@@ -204,74 +204,105 @@ function PermGroup({
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-const POST_APPROVAL_COLUMNS: ColumnDef<PermissionRow, unknown>[] = [
-  {
-    accessorKey: "name",
-    header: "User",
-    cell: ({ row }) => (
-      <div className="flex items-start gap-2.5">
-        <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
-          <User size={13} className="text-primary" />
-        </div>
-        <div className="min-w-0">
-          <p className="font-semibold text-sm text-foreground truncate leading-tight">{row.original.name}</p>
-          <p className="text-[11px] text-muted-foreground truncate">{row.original.email}</p>
-          <div className="flex items-center gap-1.5 mt-1">
-            <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${ROLE_DOT[row.original.role] ?? "bg-slate-400"}`} />
-            <span className="text-[10px] font-heading text-muted-foreground/70">{row.original.role}</span>
+interface PostApprovalPendingPerm {
+  userId: string;
+  pageId: string;
+  canPostApproval: boolean;
+}
+
+function buildPostApprovalColumns(
+  pendingPermissions: PostApprovalPendingPerm[],
+  togglePermission: (userId: string, pageId: string, checked: boolean) => void,
+): ColumnDef<PermissionRow, unknown>[] {
+  return [
+    {
+      accessorKey: "name",
+      header: "User",
+      cell: ({ row }) => (
+        <div className="flex items-start gap-2.5">
+          <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0 mt-0.5">
+            <User size={13} className="text-primary" />
+          </div>
+          <div className="min-w-0">
+            <p className="font-semibold text-sm text-foreground truncate leading-tight">
+              {row.original.name}
+            </p>
+            <p className="text-[11px] text-muted-foreground truncate">
+              {row.original.email}
+            </p>
+            <div className="flex items-center gap-1.5 mt-1">
+              <span
+                className={`w-1.5 h-1.5 rounded-full shrink-0 ${ROLE_DOT[row.original.role] ?? "bg-slate-400"}`}
+              />
+              <span className="text-[10px] font-heading text-muted-foreground/70">
+                {row.original.role}
+              </span>
+            </div>
           </div>
         </div>
-      </div>
-    ),
-  },
-  {
-    accessorKey: "pageName",
-    header: "Page",
-    cell: ({ getValue }) => <span className="text-sm text-foreground font-medium">{getValue() as string}</span>,
-  },
-  {
-    accessorKey: "pageGroup",
-    header: "Module",
-    cell: ({ getValue }) => (
-      <span className="text-xs px-2 py-0.5 rounded-full bg-muted border border-border text-muted-foreground">
-        {getValue() as string}
-      </span>
-    ),
-  },
-  {
-    accessorKey: "status",
-    header: "Status",
-    cell: ({ getValue }) => {
-      const active = (getValue() as string) === "Active";
-      return (
-        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${active ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}>
-          <span className={`w-1.5 h-1.5 rounded-full ${active ? "bg-emerald-500" : "bg-muted-foreground/40"}`} />
+      ),
+    },
+    {
+      accessorKey: "pageName",
+      header: "Page",
+      cell: ({ getValue }) => (
+        <span className="text-sm text-foreground font-medium">
           {getValue() as string}
         </span>
-      );
+      ),
     },
-  },
-  {
-    id: "toggle",
-    header: "Allow Post-Approval",
-    enableSorting: false,
-    cell: ({ row }) => {
-      const r = row.original;
-      const perm = pendingPermissions.find((p) => p.userId === r.userId && p.pageId === r.pageId);
-      const checked = perm ? perm.canPostApproval : r.canPostApproval;
-      return (
-        <div className="flex justify-center">
-          <button
-            onClick={() => togglePermission(r.userId, r.pageId, !checked)}
-            className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${checked ? "bg-primary" : "bg-muted border border-border"}`}
+    {
+      accessorKey: "pageGroup",
+      header: "Module",
+      cell: ({ getValue }) => (
+        <span className="text-xs px-2 py-0.5 rounded-full bg-muted border border-border text-muted-foreground">
+          {getValue() as string}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "status",
+      header: "Status",
+      cell: ({ getValue }) => {
+        const active = (getValue() as string) === "Active";
+        return (
+          <span
+            className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium ${active ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
           >
-            <span className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${checked ? "translate-x-4" : "translate-x-0.5"}`} />
-          </button>
-        </div>
-      );
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${active ? "bg-emerald-500" : "bg-muted-foreground/40"}`}
+            />
+            {getValue() as string}
+          </span>
+        );
+      },
     },
-  },
-];
+    {
+      id: "toggle",
+      header: "Allow Post-Approval",
+      enableSorting: false,
+      cell: ({ row }) => {
+        const r = row.original;
+        const perm = pendingPermissions.find(
+          (p) => p.userId === r.userId && p.pageId === r.pageId,
+        );
+        const checked = perm ? perm.canPostApproval : r.canPostApproval;
+        return (
+          <div className="flex justify-center">
+            <button
+              onClick={() => togglePermission(r.userId, r.pageId, !checked)}
+              className={`relative inline-flex h-5 w-9 items-center rounded-full transition-colors ${checked ? "bg-primary" : "bg-muted border border-border"}`}
+            >
+              <span
+                className={`inline-block h-3.5 w-3.5 transform rounded-full bg-white shadow transition-transform ${checked ? "translate-x-4" : "translate-x-0.5"}`}
+              />
+            </button>
+          </div>
+        );
+      },
+    },
+  ];
+}
 export default function PostApprovalRights() {
   const { allUsers, updateUserPagePermissions, toggleUserStatus, deleteUser } =
     useAuth();
@@ -283,6 +314,38 @@ export default function PostApprovalRights() {
   const [deletingUserId, setDeletingId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [permLoading, setPermLoading] = useState(false);
+  const [postApprovalPending, setPostApprovalPending] = useState<
+    PostApprovalPendingPerm[]
+  >([]);
+
+  const togglePermission = (
+    userId: string,
+    pageId: string,
+    checked: boolean,
+  ) => {
+    setPostApprovalPending((prev: PostApprovalPendingPerm[]) => {
+      const idx = prev.findIndex(
+        (p) => p.userId === userId && p.pageId === pageId,
+      );
+      const newPerm: PostApprovalPendingPerm = {
+        userId,
+        pageId,
+        canPostApproval: checked,
+      };
+      if (idx >= 0) {
+        const c = [...prev];
+        c[idx] = newPerm;
+        return c;
+      }
+      return [...prev, newPerm];
+    });
+  };
+
+  const columns = useMemo(
+    () => buildPostApprovalColumns(postApprovalPending, togglePermission),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [postApprovalPending],
+  );
   const [userFilter, setUserFilter] = useState<string>("all");
 
   // ── Dropdown users fetched directly from the users table ─────────────────
@@ -568,14 +631,14 @@ export default function PostApprovalRights() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-              <DataTable
-                data={filteredData}
-                columns={POST_APPROVAL_COLUMNS}
-                searchable={false}
-                paginated={true}
-                defaultPageSize={25}
-                emptyMessage="No users found."
-              />
+            <DataTable
+              data={filteredData}
+              columns={columns}
+              searchable={false}
+              paginated={true}
+              defaultPageSize={25}
+              emptyMessage="No users found."
+            />
           </div>
         )}
       </div>
