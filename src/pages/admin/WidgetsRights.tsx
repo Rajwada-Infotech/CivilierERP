@@ -27,6 +27,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "sonner";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import {
   Select,
   SelectContent,
@@ -183,6 +184,67 @@ interface UserPermRow {
 }
 
 // ── Main component ────────────────────────────────────────────────────────────
+
+function buildWidgetsColumns(
+  onManage: (userId: string) => void,
+): ColumnDef<UserPermRow, unknown>[] {
+  return [
+  {
+    accessorKey: "name",
+    header: "User",
+    cell: ({ row }) => (
+      <div className="flex items-center gap-2.5">
+        <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+          <User size={13} className="text-primary" />
+        </div>
+        <p className="font-semibold text-sm text-foreground truncate leading-tight">{row.original.name}</p>
+      </div>
+    ),
+  },
+  {
+    accessorKey: "role",
+    header: "Role",
+    cell: ({ getValue }) => {
+      const v = getValue() as string;
+      return (
+        <div className="flex items-center gap-1.5">
+          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${ROLE_DOT[v] ?? "bg-slate-400"}`} />
+          <span className="text-[11px] font-heading text-muted-foreground/80">{v}</span>
+        </div>
+      );
+    },
+  },
+  {
+    accessorKey: "configuredPages",
+    header: "Configured Widgets",
+    cell: ({ getValue }) => {
+      const v = getValue() as number;
+      return v > 0 ? (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading border bg-primary/10 text-primary border-primary/20">
+          {v} {v !== 1 ? "widgets" : "widget"}
+        </span>
+      ) : (
+        <span className="text-[11px] text-muted-foreground/50 italic">None configured</span>
+      );
+    },
+  },
+  {
+    id: "manage",
+    header: "",
+    enableSorting: false,
+    cell: ({ row }) => (
+      <div className="flex justify-end">
+        <button
+          onClick={() => onManage(row.original.userId)}
+          className="px-3 py-1.5 rounded-lg text-xs font-medium border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+        >
+          Manage
+        </button>
+      </div>
+    ),
+  },
+  ];
+}
 export default function WidgetsRights() {
   // ── Users from DB ─────────────────────────────────────────────────────────
   const [dropdownUsers, setDropdownUsers] = useState<DropdownUser[]>([]);
@@ -198,6 +260,15 @@ export default function WidgetsRights() {
   // ── Panel state ───────────────────────────────────────────────────────────
   const [showPanel, setShowPanel] = useState(false);
   const [selectedUser, setSelectedUser] = useState<DropdownUser | null>(null);
+
+  const columns = useMemo(
+    () => buildWidgetsColumns((userId) => {
+      const u = dropdownUsers.find((d) => String(d.id) === String(userId));
+      if (u) setSelectedUser(u);
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [dropdownUsers]
+  );
   const [pendingPermissions, setPending] = useState<PagePermission[]>([]);
   const [permLoading, setPermLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -480,87 +551,14 @@ export default function WidgetsRights() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-sm border-collapse">
-              <thead>
-                <tr className="border-b border-border/60 bg-muted/30">
-                  <th className="text-left px-5 py-3 text-[11px] font-heading font-semibold uppercase tracking-wider text-muted-foreground w-56">
-                    User
-                  </th>
-                  <th className="text-left px-4 py-3 text-[11px] font-heading font-semibold uppercase tracking-wider text-muted-foreground">
-                    Role
-                  </th>
-                  <th className="text-left px-4 py-3 text-[11px] font-heading font-semibold uppercase tracking-wider text-muted-foreground">
-                    Widget Pages
-                  </th>
-                  <th className="text-right px-5 py-3 text-[11px] font-heading font-semibold uppercase tracking-wider text-muted-foreground w-32">
-                    Actions
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/40">
-                {filteredRows.map((row) => (
-                  <tr
-                    key={row.userId}
-                    className="hover:bg-muted/20 transition-colors group"
-                  >
-                    {/* User */}
-                    <td className="px-5 py-3">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
-                          <User size={13} className="text-primary" />
-                        </div>
-                        <p className="font-semibold text-sm text-foreground truncate leading-tight">
-                          {row.name}
-                        </p>
-                      </div>
-                    </td>
-
-                    {/* Role */}
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-1.5">
-                        <span
-                          className={`w-1.5 h-1.5 rounded-full shrink-0 ${ROLE_DOT[row.role] ?? "bg-slate-400"}`}
-                        />
-                        <span className="text-[11px] font-heading text-muted-foreground/80">
-                          {row.role}
-                        </span>
-                      </div>
-                    </td>
-
-                    {/* Configured pages */}
-                    <td className="px-4 py-3">
-                      {row.configuredPages > 0 ? (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading border bg-primary/10 text-primary border-primary/20">
-                          {row.configuredPages}{" "}
-                          {row.configuredPages !== 1 ? "pages" : "page"}
-                        </span>
-                      ) : (
-                        <span className="text-[11px] text-muted-foreground/50 italic">
-                          Not configured
-                        </span>
-                      )}
-                    </td>
-
-                    {/* Actions */}
-                    <td className="px-5 py-3 text-right">
-                      <button
-                        onClick={() =>
-                          openEdit({
-                            id: row.userId,
-                            name: row.name,
-                            role: row.role,
-                          })
-                        }
-                        className="p-1.5 rounded-md hover:bg-primary/10 text-muted-foreground hover:text-primary transition-colors"
-                        title="Edit permissions"
-                      >
-                        <Edit3 size={13} />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+              <DataTable
+                data={filteredRows}
+                columns={columns}
+                searchable={false}
+                paginated={true}
+                defaultPageSize={25}
+                emptyMessage="No users found."
+              />
           </div>
         )}
       </div>

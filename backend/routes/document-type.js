@@ -15,14 +15,36 @@ const bypassOrCheck = (module, subModule, action = "CanView") => [
   },
 ];
 
-// ── GET / — list all ──────────────────────────────────────────────────────────
+// ── Module → EntryType keyword map ───────────────────────────────────────────
+// Maps ?module= query param to SQL LIKE patterns applied to et.EntryType
+const MODULE_KEYWORDS = {
+  PO:  ["purchase order", "purchase"],
+  WO:  ["work order"],
+  GRN: ["goods receipt", "grn", "goods received"],
+};
+
+// ── GET / — list all (or filtered by ?module=PO|WO|GRN) ──────────────────────
 router.get(
   "/",
   ...bypassOrCheck("Admin", "DocumentType", "CanView"),
   async (req, res) => {
     try {
       const pool = getPool();
-      const result = await pool.request().query(`
+      const module = (req.query.module || "").toString().toUpperCase().trim();
+      const keywords = MODULE_KEYWORDS[module];
+
+      // Build WHERE clause: if a module is specified, filter by EntryType name
+      let entryTypeWhere = "";
+      const request = pool.request();
+      if (keywords && keywords.length > 0) {
+        const conditions = keywords.map((kw, i) => {
+          request.input(`kw${i}`, sql.NVarChar(100), `%${kw}%`);
+          return `et.EntryType LIKE @kw${i}`;
+        });
+        entryTypeWhere = `AND (${conditions.join(" OR ")})`;
+      }
+
+      const result = await request.query(`
         SELECT
           t.TypeOfDocId,
           t.Prefix,
@@ -45,6 +67,7 @@ router.get(
         LEFT JOIN dbo.enterprise c  ON t.CompanyId = c.id AND c.business_type = 'C'
         LEFT JOIN dbo.enterprise p  ON t.ProjectId = p.id AND p.business_type = 'P'
         WHERE t.IsActive = 1
+        ${entryTypeWhere}
         ORDER BY et.EntryType, t.Prefix;
       `);
       res.json(result.recordset);

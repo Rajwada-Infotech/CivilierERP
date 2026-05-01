@@ -192,7 +192,7 @@ router.post("/", async (req, res) => {
 router.get("/options", async (req, res) => {
   try {
     const pool = getPool();
-    let query = `SELECT LHeadId AS id, ISNULL(DisplayName, LHeadName) AS label
+    let query = `SELECT LHeadId AS id, LHeadName AS label
                  FROM dbo.AccountHeadMaster WHERE LHeadStatus = 1`;
     const request = pool.request();
     if (req.query.type) {
@@ -212,7 +212,7 @@ router.get("/bank-options", async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT LHeadId AS id, ISNULL(DisplayName, LHeadName) AS label,
+      SELECT LHeadId AS id, LHeadName AS label,
              LAccountNo AS accountNumber, LIFSCCode AS ifscCode
       FROM dbo.AccountHeadMaster
       WHERE LHeadType = 'B' AND LHeadStatus = 1

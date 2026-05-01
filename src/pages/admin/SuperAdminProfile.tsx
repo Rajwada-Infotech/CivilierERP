@@ -32,6 +32,7 @@ import {
   Camera,
   Trash2,
 } from "lucide-react";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
 const inp =
   "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground placeholder:text-muted-foreground/50";
@@ -76,6 +77,38 @@ const SA_PERMISSIONS = [
     label: "Audit Override",
     desc: "View and export full system audit logs",
     icon: Activity,
+  },
+];
+
+
+// ─── Activity table columns ───────────────────────────────────────────────────
+const ACTIVITY_COLUMNS = [
+  {
+    accessorKey: "CreatedAt",
+    header: "Time",
+    accessorFn: (row: any) => row.CreatedAt,
+    cell: ({ getValue }: any) => (
+      <span className="font-mono text-xs text-muted-foreground whitespace-nowrap">
+        {new Date(getValue()).toLocaleString("en-IN")}
+      </span>
+    ),
+  },
+  {
+    id: "action",
+    header: "Action",
+    accessorFn: (row: any) => row.ActionType ?? row.EventType ?? "—",
+    cell: ({ getValue }: any) => (
+      <span className="text-foreground">{getValue()}</span>
+    ),
+  },
+  {
+    accessorKey: "Resource",
+    header: "Module",
+    cell: ({ getValue }: any) => (
+      <span className="text-[10px] font-heading px-2 py-0.5 rounded-full bg-muted border border-border text-muted-foreground">
+        {(getValue() as string) ?? "—"}
+      </span>
+    ),
   },
 ];
 
@@ -515,38 +548,12 @@ export default function SuperAdminProfile() {
                 No activity recorded yet
               </div>
             ) : (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-border bg-muted/30">
-                    <th className="text-left px-5 py-3 text-[10px] uppercase tracking-wider font-heading text-muted-foreground">
-                      Time
-                    </th>
-                    <th className="text-left px-4 py-3 text-[10px] uppercase tracking-wider font-heading text-muted-foreground">
-                      Action
-                    </th>
-                    <th className="text-left px-4 py-3 text-[10px] uppercase tracking-wider font-heading text-muted-foreground">
-                      Module
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-border">
-                  {activity.map((log: any, i: number) => (
-                    <tr key={i} className="hover:bg-muted/20 transition-colors">
-                      <td className="px-5 py-3 font-mono text-xs text-muted-foreground whitespace-nowrap">
-                        {new Date(log.CreatedAt).toLocaleString("en-IN")}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-foreground">
-                        {log.ActionType ?? log.EventType}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className="text-[10px] font-heading px-2 py-0.5 rounded-full bg-muted border border-border text-muted-foreground">
-                          {log.Resource ?? "—"}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <DataTable
+                data={activity}
+                columns={ACTIVITY_COLUMNS}
+                searchPlaceholder="Search activity…"
+                defaultPageSize={25}
+              />
             )}
           </ProfileSection>
         )}

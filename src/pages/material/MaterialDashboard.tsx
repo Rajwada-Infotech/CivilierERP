@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { DashboardBackground } from "@/components/DashboardBackground";
 import {
   Package,
@@ -303,6 +304,100 @@ function StatusBreakdown({
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
+
+function makeRecentCols(
+  docNoKey: string,
+  docNoFallback: string,
+  partyKey: string,
+  dateKey: string,
+  amountKey: string,
+  statusKey: string,
+  defaultStatus = "Draft",
+): ColumnDef<any, unknown>[] {
+  return [
+    {
+      accessorKey: docNoKey,
+      header: "Doc No",
+      cell: ({ row }: any) => (
+        <span className="font-mono text-xs font-medium text-primary">
+          {row.original[docNoKey] || `#${row.original[docNoFallback]}`}
+        </span>
+      ),
+    },
+    {
+      accessorKey: partyKey,
+      header: "Party / Project",
+      cell: ({ getValue }: any) => (
+        <span className="text-xs text-muted-foreground max-w-[110px] truncate block">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
+    },
+    {
+      accessorKey: dateKey,
+      header: "Date",
+      cell: ({ getValue }: any) => (
+        <span className="text-xs text-muted-foreground">
+          {fmtDate(getValue() as string)}
+        </span>
+      ),
+    },
+    {
+      accessorKey: amountKey,
+      header: "Amount",
+      cell: ({ getValue }: any) => {
+        const v = getValue() as number | null;
+        return (
+          <span className="text-xs font-medium">
+            {v != null ? fmt(v) : "—"}
+          </span>
+        );
+      },
+    },
+    {
+      accessorKey: statusKey,
+      header: "Status",
+      cell: ({ getValue }: any) => (
+        <StatusBadge status={(getValue() as string) || defaultStatus} />
+      ),
+    },
+  ];
+}
+
+const GRN_DASH_COLS = makeRecentCols(
+  "GRNNo",
+  "GRNID",
+  "SupplierName",
+  "GRNDate",
+  "TotalAmount",
+  "Status",
+);
+const PO_DASH_COLS = makeRecentCols(
+  "PurchaseOrderNo",
+  "PurchaseOrderID",
+  "SupplierName",
+  "PODate",
+  "TotalAmount",
+  "Status",
+);
+const WO_DASH_COLS = makeRecentCols(
+  "DocumentNumber",
+  "Id",
+  "ProjectName",
+  "DocumentDate",
+  "TotalAmount",
+  "Status",
+);
+const EXP_DASH_COLS = makeRecentCols(
+  "EDocNo",
+  "Eid",
+  "EProjectName",
+  "EDocDate",
+  "EAmount",
+  "EStatus",
+  "Pending",
+);
+
 export default function MaterialDashboard() {
   const navigate = useNavigate();
 
@@ -548,48 +643,13 @@ export default function MaterialDashboard() {
             ) : !data?.recentGRNs.length ? (
               <EmptyState label="No GRNs recorded yet" />
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/50">
-                    <tr>
-                      {["GRN No", "Supplier", "Date", "Amount", "Status"].map(
-                        (h) => (
-                          <th
-                            key={h}
-                            className="px-4 py-2 text-left text-xs font-heading text-muted-foreground"
-                          >
-                            {h}
-                          </th>
-                        ),
-                      )}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {data.recentGRNs.map((grn: any) => (
-                      <tr
-                        key={grn.GRNID}
-                        className="hover:bg-muted/30 transition-colors"
-                      >
-                        <td className="px-4 py-2.5 font-mono text-xs font-medium text-primary">
-                          {grn.GRNNo || `#${grn.GRNID}`}
-                        </td>
-                        <td className="px-4 py-2.5 text-xs text-muted-foreground max-w-[110px] truncate">
-                          {grn.SupplierName || "—"}
-                        </td>
-                        <td className="px-4 py-2.5 text-xs text-muted-foreground">
-                          {fmtDate(grn.GRNDate)}
-                        </td>
-                        <td className="px-4 py-2.5 text-xs font-medium">
-                          {grn.TotalAmount != null ? fmt(grn.TotalAmount) : "—"}
-                        </td>
-                        <td className="px-4 py-2.5">
-                          <StatusBadge status={grn.Status || "Draft"} />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable
+                data={data.recentGRNs}
+                columns={GRN_DASH_COLS}
+                searchable={false}
+                paginated={false}
+                emptyMessage="No recent GRNs."
+              />
             )}
           </div>
 
@@ -609,48 +669,13 @@ export default function MaterialDashboard() {
             ) : !data?.recentPOs.length ? (
               <EmptyState label="No purchase orders yet" />
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/50">
-                    <tr>
-                      {["PO No", "Supplier", "Date", "Value", "Status"].map(
-                        (h) => (
-                          <th
-                            key={h}
-                            className="px-4 py-2 text-left text-xs font-heading text-muted-foreground"
-                          >
-                            {h}
-                          </th>
-                        ),
-                      )}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {data.recentPOs.map((po: any) => (
-                      <tr
-                        key={po.PurchaseOrderID}
-                        className="hover:bg-muted/30 transition-colors"
-                      >
-                        <td className="px-4 py-2.5 font-mono text-xs font-medium text-primary">
-                          {po.PurchaseOrderNo || `#${po.PurchaseOrderID}`}
-                        </td>
-                        <td className="px-4 py-2.5 text-xs text-muted-foreground max-w-[110px] truncate">
-                          {po.SupplierName || "—"}
-                        </td>
-                        <td className="px-4 py-2.5 text-xs text-muted-foreground">
-                          {fmtDate(po.PODate)}
-                        </td>
-                        <td className="px-4 py-2.5 text-xs font-medium">
-                          {po.TotalAmount != null ? fmt(po.TotalAmount) : "—"}
-                        </td>
-                        <td className="px-4 py-2.5">
-                          <StatusBadge status={po.Status || "Draft"} />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable
+                data={data.recentPOs}
+                columns={PO_DASH_COLS}
+                searchable={false}
+                paginated={false}
+                emptyMessage="No recent POs."
+              />
             )}
           </div>
         </div>
@@ -673,48 +698,13 @@ export default function MaterialDashboard() {
             ) : !data?.recentWOs.length ? (
               <EmptyState label="No work orders yet" />
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/50">
-                    <tr>
-                      {["Doc No", "Project", "Date", "Value", "Status"].map(
-                        (h) => (
-                          <th
-                            key={h}
-                            className="px-4 py-2 text-left text-xs font-heading text-muted-foreground"
-                          >
-                            {h}
-                          </th>
-                        ),
-                      )}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {data.recentWOs.map((wo: any) => (
-                      <tr
-                        key={wo.Id}
-                        className="hover:bg-muted/30 transition-colors"
-                      >
-                        <td className="px-4 py-2.5 font-mono text-xs font-medium text-primary">
-                          {wo.DocumentNumber || `#${wo.Id}`}
-                        </td>
-                        <td className="px-4 py-2.5 text-xs text-muted-foreground max-w-[110px] truncate">
-                          {wo.ProjectName || wo.CompanyName || "—"}
-                        </td>
-                        <td className="px-4 py-2.5 text-xs text-muted-foreground">
-                          {fmtDate(wo.DocumentDate)}
-                        </td>
-                        <td className="px-4 py-2.5 text-xs font-medium">
-                          {wo.TotalAmount != null ? fmt(wo.TotalAmount) : "—"}
-                        </td>
-                        <td className="px-4 py-2.5">
-                          <StatusBadge status={wo.Status || "Draft"} />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable
+                data={data.recentWOs}
+                columns={WO_DASH_COLS}
+                searchable={false}
+                paginated={false}
+                emptyMessage="No recent Work Orders."
+              />
             )}
           </div>
 
@@ -734,48 +724,13 @@ export default function MaterialDashboard() {
             ) : !data?.recentExpenses.length ? (
               <EmptyState label="No expense bookings yet" />
             ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/50">
-                    <tr>
-                      {["Doc No", "Project", "Date", "Amount", "Status"].map(
-                        (h) => (
-                          <th
-                            key={h}
-                            className="px-4 py-2 text-left text-xs font-heading text-muted-foreground"
-                          >
-                            {h}
-                          </th>
-                        ),
-                      )}
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border">
-                    {data.recentExpenses.map((ex: any) => (
-                      <tr
-                        key={ex.Eid}
-                        className="hover:bg-muted/30 transition-colors"
-                      >
-                        <td className="px-4 py-2.5 font-mono text-xs font-medium text-primary">
-                          {ex.EDocNo || `#${ex.Eid}`}
-                        </td>
-                        <td className="px-4 py-2.5 text-xs text-muted-foreground max-w-[110px] truncate">
-                          {ex.EProjectName || "—"}
-                        </td>
-                        <td className="px-4 py-2.5 text-xs text-muted-foreground">
-                          {fmtDate(ex.EDocDate)}
-                        </td>
-                        <td className="px-4 py-2.5 text-xs font-medium">
-                          {ex.EAmount != null ? fmt(ex.EAmount) : "—"}
-                        </td>
-                        <td className="px-4 py-2.5">
-                          <StatusBadge status={ex.EStatus || "Pending"} />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <DataTable
+                data={data.recentExpenses}
+                columns={EXP_DASH_COLS}
+                searchable={false}
+                paginated={false}
+                emptyMessage="No recent Expenses."
+              />
             )}
           </div>
         </div>

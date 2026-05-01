@@ -233,6 +233,7 @@ const NamedEntryTypeMaster: React.FC = () => {
       "BOQ",
       "Purchase Order",
       "Work Order",
+      "GRN",
     ];
     if (!Array.isArray(menuMasterData) || menuMasterData.length === 0)
       return fallback;

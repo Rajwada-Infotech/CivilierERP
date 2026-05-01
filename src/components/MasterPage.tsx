@@ -176,7 +176,8 @@ export const MasterPage: React.FC<MasterPageProps> = ({
 
   const prevPatchKeyRef = React.useRef<string | number | null>(null);
   React.useEffect(() => {
-    if (externalFormPatchKey === null || externalFormPatchKey === undefined) return;
+    if (externalFormPatchKey === null || externalFormPatchKey === undefined)
+      return;
     if (prevPatchKeyRef.current === externalFormPatchKey) return;
     prevPatchKeyRef.current = externalFormPatchKey;
     setForm((current) => ({ ...current, ...(externalFormPatch ?? {}) }));
@@ -245,44 +246,44 @@ export const MasterPage: React.FC<MasterPageProps> = ({
     if (onCustomSave && Object.keys(finalData).length === 0) return;
 
     try {
-    if (editingId !== null) {
-      const next = data.map((row) =>
-        row._id === editingId ? { ...finalData, _id: editingId } : row,
-      );
-      const stripped = next.map(({ _id, ...rest }) => rest);
-      setData(next);
-      onDataChange?.(stripped);
-      await onDataEvent?.({
+      if (editingId !== null) {
+        const next = data.map((row) =>
+          row._id === editingId ? { ...finalData, _id: editingId } : row,
+        );
+        const stripped = next.map(({ _id, ...rest }) => rest);
+        setData(next);
+        onDataChange?.(stripped);
+        await onDataEvent?.({
           action: "update",
           id: editingId,
           record: finalData,
           records: stripped,
-      });
-      setEditingId(null);
-      toast.success("Record updated successfully ✓");
-      setForm({ ...getDefaults(fields), ...(externalFormPatch ?? {}) });
-    } else {
-      const newId = `record-${Date.now()}`;
-      const newRecord: RecordWithId = { ...finalData, _id: newId };
-      const next = [...data, newRecord];
-      const stripped = next.map(({ _id, ...rest }) => rest);
-      setData(next);
-      onDataChange?.(stripped);
-      const result = await onDataEvent?.({
-        action: "add",
-        record: finalData,
-        records: stripped,
-      });
-      toast.success("Record saved successfully ✓");
-      setForm({
-        ...getDefaults(fields),
-        ...(externalFormPatch ?? {}),
-        ...((result && typeof result === "object" && !Array.isArray(result))
-          ? result
-          : {}),
-      });
-      return;
-    }
+        });
+        setEditingId(null);
+        toast.success("Record updated successfully ✓");
+        setForm({ ...getDefaults(fields), ...(externalFormPatch ?? {}) });
+      } else {
+        const newId = `record-${Date.now()}`;
+        const newRecord: RecordWithId = { ...finalData, _id: newId };
+        const next = [...data, newRecord];
+        const stripped = next.map(({ _id, ...rest }) => rest);
+        setData(next);
+        onDataChange?.(stripped);
+        const result = await onDataEvent?.({
+          action: "add",
+          record: finalData,
+          records: stripped,
+        });
+        toast.success("Record saved successfully ✓");
+        setForm({
+          ...getDefaults(fields),
+          ...(externalFormPatch ?? {}),
+          ...(result && typeof result === "object" && !Array.isArray(result)
+            ? result
+            : {}),
+        });
+        return;
+      }
     } catch {
       // Page-level handlers already raise the most useful toast message.
     }
@@ -331,8 +332,8 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   return (
     <div className="space-y-5">
       {/* ── FORM CARD ── */}
-      <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-card/60">
+      <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-visible">
+        <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-card/60 rounded-t-xl">
           <div>
             <h2 className="font-heading font-semibold text-foreground text-sm">
               {editingId !== null ? `Edit ${title}` : `Add ${title}`}

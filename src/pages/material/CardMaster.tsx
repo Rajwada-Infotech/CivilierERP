@@ -1,56 +1,75 @@
-import React from 'react'
-import { Breadcrumbs } from '@/components/Breadcrumbs'
-import { MasterPage, type DataChangeEvent, type RecordWithId } from '@/components/MasterPage';
-import type { ExportColumn } from '@/lib/export'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { toast } from 'sonner'
-import { BadgeCheck, CalendarRange, FileBadge2, ShieldCheck } from "lucide-react"
+import React from "react";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
+import {
+  MasterPage,
+  type DataChangeEvent,
+  type RecordWithId,
+} from "@/components/MasterPage";
+import type { ExportColumn } from "@/lib/export";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import {
+  BadgeCheck,
+  CalendarRange,
+  FileBadge2,
+  ShieldCheck,
+} from "lucide-react";
 import {
   getCardMasters,
   addCardMaster,
   updateCardMaster,
   deleteCardMaster,
-} from '@/api/cardMasterApi'
-
-
+} from "@/api/cardMasterApi";
 
 const columns = [
-  { key: 'cardNumber', label: 'Card No.' },
-  { key: 'holderName', label: 'Holder' },
-  { key: 'cardType', label: 'Card Type', hideOnMobile: true },
-  { key: 'siteProject', label: 'Site / Project', hideOnMobile: true },
-  { key: 'accessLevel', label: 'Access', hideOnMobile: true },
-  { key: 'validity', label: 'Validity', hideOnMobile: true },
-  { key: 'status', label: 'Status' },
+  { key: "cardNumber", label: "Card No." },
+  { key: "holderName", label: "Holder" },
+  { key: "cardType", label: "Card Type", hideOnMobile: true },
+  { key: "siteProject", label: "Site / Project", hideOnMobile: true },
+  { key: "accessLevel", label: "Access", hideOnMobile: true },
+  { key: "validity", label: "Validity", hideOnMobile: true },
+  { key: "status", label: "Status" },
 ];
 
-
+const EXPORT_COLUMNS: ExportColumn[] = [
+  { header: "Card No.", accessor: "cardNumber" },
+  { header: "Holder", accessor: "holderName" },
+  { header: "Card Type", accessor: "cardType" },
+  { header: "Site / Project", accessor: "siteProject" },
+  { header: "Access Level", accessor: "accessLevel" },
+  { header: "Validity", accessor: "validity" },
+  { header: "Status", accessor: "status" },
+];
 
 const CardMaster = () => {
-  const queryClient = useQueryClient()
+  const queryClient = useQueryClient();
 
-  const { data: dbData, isLoading, error } = useQuery({
-    queryKey: ['card-masters'],
+  const {
+    data: dbData,
+    isLoading,
+    error,
+  } = useQuery({
+    queryKey: ["card-masters"],
     queryFn: getCardMasters,
     staleTime: 5 * 60 * 1000,
-  })
+  });
 
-  const dbItems = Array.isArray(dbData) ? dbData : []
+  const dbItems = Array.isArray(dbData) ? dbData : [];
 
-  const mappedData: RecordWithId[] = dbItems.map(item => ({
+  const mappedData: RecordWithId[] = dbItems.map((item) => ({
     _id: String(item.CardId || item.id || item._id),
-    cardNumber: item.CardNumber || item.cardNumber || '',
-    cardType: item.CardType || item.cardType || '',
-    holderName: item.HolderName || item.holderName || '',
-    issuedFor: item.IssuedFor || item.issuedFor || '',
-    vendorContractor: item.VendorContractor || item.vendorContractor || '',
-    siteProject: item.SiteProject || item.siteProject || '',
-    materialCategory: item.MaterialCategory || item.materialCategory || '',
-    validity: item.Validity || item.validity || '',
-    accessLevel: item.AccessLevel || item.accessLevel || '',
-    remarks: item.Remarks || item.remarks || '',
+    cardNumber: item.CardNumber || item.cardNumber || "",
+    cardType: item.CardType || item.cardType || "",
+    holderName: item.HolderName || item.holderName || "",
+    issuedFor: item.IssuedFor || item.issuedFor || "",
+    vendorContractor: item.VendorContractor || item.vendorContractor || "",
+    siteProject: item.SiteProject || item.siteProject || "",
+    materialCategory: item.MaterialCategory || item.materialCategory || "",
+    validity: item.Validity || item.validity || "",
+    accessLevel: item.AccessLevel || item.accessLevel || "",
+    remarks: item.Remarks || item.remarks || "",
     status: item.Status !== false,
-  }))
+  }));
 
   const toPayload = (r: Record<string, unknown>) => ({
     CardNumber: (r.cardNumber as string) || null,
@@ -64,31 +83,37 @@ const CardMaster = () => {
     AccessLevel: (r.accessLevel as string) || null,
     Remarks: (r.remarks as string) || null,
     Status: r.status !== false,
-  })
+  });
 
   const handleDataEvent = async (event: DataChangeEvent) => {
-    if (event.action === 'add') {
+    if (event.action === "add") {
       try {
-        await addCardMaster(toPayload(event.record))
-        toast.success('Card saved!')
-        await queryClient.invalidateQueries({ queryKey: ['card-masters'] })
-      } catch (err: any) { toast.error('Save failed: ' + err.message) }
+        await addCardMaster(toPayload(event.record));
+        toast.success("Card saved!");
+        await queryClient.invalidateQueries({ queryKey: ["card-masters"] });
+      } catch (err: any) {
+        toast.error("Save failed: " + err.message);
+      }
     }
-    if (event.action === 'update') {
+    if (event.action === "update") {
       try {
-        await updateCardMaster(event.id, toPayload(event.record))
-        toast.success('Card updated!')
-        await queryClient.invalidateQueries({ queryKey: ['card-masters'] })
-      } catch (err: any) { toast.error('Update failed: ' + err.message) }
+        await updateCardMaster(event.id, toPayload(event.record));
+        toast.success("Card updated!");
+        await queryClient.invalidateQueries({ queryKey: ["card-masters"] });
+      } catch (err: any) {
+        toast.error("Update failed: " + err.message);
+      }
     }
-    if (event.action === 'delete') {
+    if (event.action === "delete") {
       try {
-        await deleteCardMaster(event.id)
-        toast.success('Card deleted!')
-        await queryClient.invalidateQueries({ queryKey: ['card-masters'] })
-      } catch (err: any) { toast.error('Delete failed: ' + err.message) }
+        await deleteCardMaster(event.id);
+        toast.success("Card deleted!");
+        await queryClient.invalidateQueries({ queryKey: ["card-masters"] });
+      } catch (err: any) {
+        toast.error("Delete failed: " + err.message);
+      }
     }
-  }
+  };
 
   const columnRenderers = {
     cardNumber: (value: unknown) => (
@@ -124,15 +149,19 @@ const CardMaster = () => {
         </span>
       </div>
     ),
-  }
+  };
 
-  if (isLoading) return <div className="p-6 text-muted-foreground">Loading cards...</div>
-  if (error) return <div className="p-6 text-destructive">Failed to load cards.</div>
+  if (isLoading)
+    return <div className="p-6 text-muted-foreground">Loading cards...</div>;
+  if (error)
+    return <div className="p-6 text-destructive">Failed to load cards.</div>;
 
   return (
     <>
-      <Breadcrumbs items={['Dashboard', 'Material Module', 'Card Master']} />
-      <h1 className="text-xl font-heading font-bold text-foreground mb-4">Card Master</h1>
+      <Breadcrumbs items={["Dashboard", "Material Module", "Card Master"]} />
+      <h1 className="text-xl font-heading font-bold text-foreground mb-4">
+        Card Master
+      </h1>
       <MasterPage
         title="Card"
         fields={fields}
@@ -140,22 +169,10 @@ const CardMaster = () => {
         columnRenderers={columnRenderers}
         initialData={mappedData}
         onDataEvent={handleDataEvent}
-        exportConfig={{
-          title: "Card Master",
-          filename: "card-master",
-          columns: [
-            { header: "Card No.",     accessor: "cardNumber" },
-            { header: "Holder",       accessor: "holderName" },
-            { header: "Card Type",    accessor: "cardType" },
-            { header: "Site/Project", accessor: "siteProject" },
-            { header: "Access Level", accessor: "accessLevel" },
-            { header: "Validity",     accessor: "validity" },
-            { header: "Status",       accessor: "status" },
-          ],
-        }}
+        exportConfig={{ columns: EXPORT_COLUMNS, filename: "card-master" }}
       />
     </>
-  )
-}
+  );
+};
 
-export default CardMaster
+export default CardMaster;

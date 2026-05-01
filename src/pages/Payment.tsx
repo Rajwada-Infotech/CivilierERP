@@ -1,12 +1,5 @@
-import React from "react";
+import React, { useState, useCallback } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import {
-  MasterPage,
-  type DataChangeEvent,
-  type FieldDef,
-  type RecordWithId,
-} from "@/components/MasterPage";
-import type { ExportColumn } from "@/lib/export";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getPayments,
@@ -14,13 +7,41 @@ import {
   updatePayment,
   deletePayment,
 } from "@/api/newPaymentApi";
-import { toast } from "sonner";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-
-import { Banknote, Clock, CheckCircle2 } from "lucide-react";
+import { toast } from "sonner";
+import { formatINR } from "@/utils/formatCurrency";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
-import { formatINR } from "@/utils/formatCurrency";
+import {
+  Banknote,
+  CheckCircle2,
+  Clock,
+  ArrowLeft,
+  Plus,
+  Edit,
+  Trash2,
+  AlertCircle,
+  CreditCard,
+  Download,
+  FileText,
+  FileSpreadsheet,
+  ChevronDown,
+  Receipt,
+  Building2,
+  FolderKanban,
+  CalendarDays,
+  Landmark,
+  Wallet,
+  Link2,
+  X,
+  ChevronLeft,
+  ChevronRight,
+  TrendingUp,
+} from "lucide-react";
+import { exportToCsv, exportToPdf } from "@/lib/export";
+import type { ExportColumn } from "@/lib/export";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface DbPayment {
   PPaymentID: number;
@@ -33,413 +54,1135 @@ interface DbPayment {
   PBankName: string | null;
   PProject: string | null;
   PCompany: string | null;
+  PExpenseRef: string | null;
+  Status?: string;
 }
 
 interface BankOption {
-  BId: number;
-  BName: string;
+  id: number;
+  label: string;
+  accountNumber?: string;
+  ifscCode?: string;
 }
 
-// Project shape returned by the updated GET /api/project-master (includes CompanyName)
-interface ProjectOption {
-  Id: number;
-  Name: string;
-  CompanyName: string | null;
+interface ExpenseOption {
+  id: string;
+  value: string;
+  label: string;
 }
 
-// ── Fetch banks from API ───────────────────────────────────────────────────────
-const fetchBanks = async (): Promise<BankOption[]> => {
-  const res = await fetchWithAuth("/api/bank-master");
-  if (!res.ok) throw new Error("Failed to fetch banks");
-  const data = await res.json();
-  return (Array.isArray(data) ? data : data.data ?? []).map((b: any) => ({
-    BId: b.BId,
-    BName: b.BName,
-  }));
+interface ExpenseDetail {
+  Eid: number;
+  EDocNo: string | null;
+  EProjectName: string | null;
+  ECompanyId: number | null;
+  EAmount: number | null;
+  ENetAmount: number | null;
+  EDocumentType: string | null;
+  DocTypeName: string | null;
+}
+
+interface PaymentRecord {
+  id: string;
+  paymentName: string;
+  mode: string;
+  amount: number | null;
+  date: string;
+  bankId: number | null;
+  bankName: string;
+  project: string;
+  company: string;
+  expenseRef: string;
+  expenseId: string;
+  docType: string;
+  status: string;
+}
+
+// ─── Fetchers ─────────────────────────────────────────────────────────────────
+
+const fetchBankOptions = async (): Promise<BankOption[]> => {
+  const res = await fetchWithAuth("/api/account-head-master/bank-options");
+  if (!res.ok) return [];
+  return res.json();
 };
 
-// ── Fetch projects from API (now includes CompanyName via JOIN) ────────────────
-const fetchProjects = async (): Promise<ProjectOption[]> => {
-  const res = await fetchWithAuth("/api/project-master");
-  if (!res.ok) throw new Error("Failed to fetch projects");
-  const data = await res.json();
-  return (Array.isArray(data) ? data : []).map((p: any) => ({
-    Id: p.Id,
-    Name: p.Name ?? "",
-    CompanyName: p.CompanyName ?? "",
-  }));
+const fetchExpenseOptions = async (): Promise<ExpenseOption[]> => {
+  const res = await fetchWithAuth("/api/expense-booking/options");
+  if (!res.ok) return [];
+  return res.json();
 };
 
-const toPayload = (r: Record<string, unknown>) => {
-  // bank field value is "BId|BName" from optionsProvider; split to get ID and name
-  let PBankID: number | null = null;
-  let PBankName: string | null = null;
-
-  if (r.bank && typeof r.bank === "string" && r.bank.includes("|")) {
-    const [idStr, name] = (r.bank as string).split("|");
-    PBankID = Number(idStr) || null;
-    PBankName = name || null;
-  } else if (r.bankId) {
-    PBankID = Number(r.bankId) || null;
-    PBankName = (r.bankName as string) || null;
-  }
-
-  return {
-    PPaymentName: (r.paymentName as string) || null,
-    PMode: (r.mode as string) || null,
-    PAmount: r.amount ? Number(r.amount) : null,
-    PDocType: (r.docType as string) || null,
-    PDate: (r.date as string) || null,
-    PBankID,
-    PBankName,
-    PProject: (r.project as string) || null,
-    PCompany: (r.company as string) || null,
-  };
+const fetchExpenseDetail = async (
+  id: string,
+): Promise<ExpenseDetail | null> => {
+  if (!id) return null;
+  const res = await fetchWithAuth(`/api/expense-booking/${id}`);
+  if (!res.ok) return null;
+  return res.json();
 };
 
-// ── Mode badge renderer ────────────────────────────────────────────────────────
-function modeRenderer(value: unknown) {
-  const v = (value as string) || "";
-  const map: Record<string, { bg: string; dot: string }> = {
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+const PAYMENT_MODES = [
+  "Cash",
+  "Cheque",
+  "UPI",
+  "Card",
+  "NEFT",
+  "RTGS",
+] as const;
+
+const MODE_STYLE: Record<string, { ring: string; text: string; dot: string }> =
+  {
     Cash: {
-      bg: "bg-emerald-500/10 border-emerald-500/20 text-emerald-600 dark:text-emerald-400",
+      ring: "ring-emerald-500/30 bg-emerald-500/10",
+      text: "text-emerald-600 dark:text-emerald-400",
       dot: "bg-emerald-500",
     },
     Cheque: {
-      bg: "bg-blue-500/10 border-blue-500/20 text-blue-600 dark:text-blue-400",
+      ring: "ring-blue-500/30 bg-blue-500/10",
+      text: "text-blue-600 dark:text-blue-400",
       dot: "bg-blue-500",
     },
     UPI: {
-      bg: "bg-violet-500/10 border-violet-500/20 text-violet-600 dark:text-violet-400",
+      ring: "ring-violet-500/30 bg-violet-500/10",
+      text: "text-violet-600 dark:text-violet-400",
       dot: "bg-violet-500",
     },
     Card: {
-      bg: "bg-amber-500/10 border-amber-500/20 text-amber-600 dark:text-amber-400",
+      ring: "ring-amber-500/30 bg-amber-500/10",
+      text: "text-amber-600 dark:text-amber-400",
       dot: "bg-amber-500",
     },
     NEFT: {
-      bg: "bg-cyan-500/10 border-cyan-500/20 text-cyan-600 dark:text-cyan-400",
+      ring: "ring-cyan-500/30 bg-cyan-500/10",
+      text: "text-cyan-600 dark:text-cyan-400",
       dot: "bg-cyan-500",
     },
     RTGS: {
-      bg: "bg-orange-500/10 border-orange-500/20 text-orange-600 dark:text-orange-400",
+      ring: "ring-orange-500/30 bg-orange-500/10",
+      text: "text-orange-600 dark:text-orange-400",
       dot: "bg-orange-500",
     },
   };
-  const s = map[v] ?? {
-    bg: "bg-muted border-border text-muted-foreground",
+
+function ModeBadge({ mode }: { mode: string }) {
+  const s = MODE_STYLE[mode] ?? {
+    ring: "ring-border bg-muted",
+    text: "text-muted-foreground",
     dot: "bg-muted-foreground",
   };
   return (
     <span
-      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${s.bg}`}
+      className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-heading font-semibold ring-1 ${s.ring} ${s.text}`}
     >
-      <span className={`w-1.5 h-1.5 rounded-full mr-1.5 ${s.dot}`} />
-      {v || "—"}
+      <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
+      {mode || "—"}
     </span>
   );
 }
 
-// ── Main component ─────────────────────────────────────────────────────────────
+function dbToRecord(item: DbPayment): PaymentRecord {
+  return {
+    id: String(item.PPaymentID),
+    paymentName: item.PPaymentName || "",
+    mode: item.PMode || "",
+    amount: item.PAmount ?? null,
+    date: item.PDate?.slice(0, 10) || "",
+    bankId: item.PBankID ?? null,
+    bankName: item.PBankName || "",
+    project: item.PProject || "",
+    company: item.PCompany || "",
+    expenseRef: item.PExpenseRef || "",
+    expenseId: "",
+    docType: item.PDocType || "",
+    status: (item as any).Status || "Draft",
+  };
+}
+
+function blankForm(): Omit<PaymentRecord, "id"> {
+  return {
+    paymentName: "",
+    mode: "",
+    amount: null,
+    date: new Date().toISOString().slice(0, 10),
+    bankId: null,
+    bankName: "",
+    project: "",
+    company: "",
+    expenseRef: "",
+    expenseId: "",
+    docType: "",
+    status: "Draft",
+  };
+}
+
+// ─── Export ───────────────────────────────────────────────────────────────────
+
+const EXPORT_COLUMNS: ExportColumn[] = [
+  { header: "Payment Name", accessor: "paymentName" },
+  { header: "Expense Ref", accessor: "expenseRef" },
+  { header: "Project", accessor: "project" },
+  { header: "Company", accessor: "company" },
+  { header: "Mode", accessor: "mode" },
+  { header: "Date", accessor: "date" },
+  { header: "Amount", accessor: (r) => formatINR(Number(r.amount || 0)) },
+  { header: "Bank", accessor: "bankName" },
+  { header: "Status", accessor: "status" },
+];
+
+function ExportButton({ data }: { data: PaymentRecord[] }) {
+  const [open, setOpen] = useState(false);
+  const ref = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    const h = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node))
+        setOpen(false);
+    };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, []);
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading border border-border bg-card text-muted-foreground hover:text-foreground hover:border-primary/40 transition-all"
+      >
+        <Download size={13} /> Export{" "}
+        <ChevronDown
+          size={11}
+          className={`transition-transform ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 w-44 rounded-lg border border-border bg-card shadow-lg z-50 py-1">
+          <button
+            onClick={() => {
+              exportToCsv(data as any, EXPORT_COLUMNS, "payments");
+              setOpen(false);
+            }}
+            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          >
+            <FileSpreadsheet size={13} /> Export CSV
+          </button>
+          <button
+            onClick={() => {
+              exportToPdf(data as any, EXPORT_COLUMNS, {
+                title: "Payment Management",
+                filename: "payments",
+              });
+              setOpen(false);
+            }}
+            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          >
+            <FileText size={13} /> Export PDF
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Form field wrapper ───────────────────────────────────────────────────────
+
+function Field({
+  label,
+  required,
+  hint,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+        {label}
+        {required && <span className="text-destructive">*</span>}
+      </label>
+      {children}
+      {hint && <p className="text-[11px] text-muted-foreground/70">{hint}</p>}
+    </div>
+  );
+}
+
+// ─── Section header ───────────────────────────────────────────────────────────
+
+function SectionHeader({
+  icon: Icon,
+  label,
+}: {
+  icon: React.ElementType;
+  label: string;
+}) {
+  return (
+    <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
+      <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
+        <Icon size={12} className="text-primary" />
+      </div>
+      <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
+        {label}
+      </p>
+    </div>
+  );
+}
+
+// ─── Auto-fill banner ─────────────────────────────────────────────────────────
+
+function AutoFillBanner({
+  docNo,
+  onClear,
+}: {
+  docNo: string;
+  onClear: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-lg bg-primary/5 border border-primary/20 px-4 py-2.5">
+      <div className="flex items-center gap-2 min-w-0">
+        <Link2 size={13} className="text-primary shrink-0" />
+        <span className="text-xs text-muted-foreground">Linked to expense</span>
+        <span className="font-mono text-xs font-semibold text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-md truncate">
+          {docNo}
+        </span>
+      </div>
+      <button
+        onClick={onClear}
+        className="shrink-0 p-1 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+        title="Clear expense link"
+      >
+        <X size={13} />
+      </button>
+    </div>
+  );
+}
+
+// ─── Read-only display field ──────────────────────────────────────────────────
+
+function ReadOnlyField({
+  value,
+  placeholder,
+}: {
+  value: string;
+  placeholder?: string;
+}) {
+  return (
+    <div className="w-full px-3 py-2 rounded-lg text-sm bg-muted/30 border border-border/60 text-muted-foreground cursor-not-allowed truncate min-h-[38px] flex items-center">
+      {value || (
+        <span className="text-muted-foreground/50 italic text-xs">
+          {placeholder ?? "Auto-filled from expense booking"}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
+
 const Payment: React.FC = () => {
   const queryClient = useQueryClient();
-  const [page, setPage] = React.useState(1);
+  const [page, setPage] = useState(1);
   const PAGE_SIZE = 20;
 
-  const {
-    data: dbData,
-    isLoading,
-    error,
-  } = useQuery({
+  const [view, setView] = useState<"list" | "form">("list");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState<Omit<PaymentRecord, "id">>(blankForm());
+  const [saving, setSaving] = useState(false);
+  const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [loadingExpense, setLoadingExpense] = useState(false);
+
+  // ── Queries ────────────────────────────────────────────────────────────────
+
+  const { data: dbData, isLoading } = useQuery({
     queryKey: ["payments", page],
     queryFn: () => getPayments(page, PAGE_SIZE),
   });
 
-  // Fetch banks for dropdown
   const { data: banks = [] } = useQuery<BankOption[]>({
-    queryKey: ["banks-for-payment"],
-    queryFn: fetchBanks,
+    queryKey: ["bank-options-payment"],
+    queryFn: fetchBankOptions,
   });
 
-  // Fetch projects for dropdown (includes CompanyName from backend JOIN)
-  const { data: projects = [] } = useQuery<ProjectOption[]>({
-    queryKey: ["projects-for-payment"],
-    queryFn: fetchProjects,
+  const { data: expenseOptions = [] } = useQuery<ExpenseOption[]>({
+    queryKey: ["expense-options-payment"],
+    queryFn: fetchExpenseOptions,
   });
 
   const dbItems: DbPayment[] = Array.isArray(dbData?.data) ? dbData.data : [];
   const totalPages: number = dbData?.totalPages ?? 1;
   const totalRecords: number = dbData?.total ?? 0;
+  const records: PaymentRecord[] = dbItems.map(dbToRecord);
 
-  // ── Summary stats ────────────────────────────────────────────────────────────
-  const totalAmount = dbItems.reduce((sum, p) => sum + (p.PAmount || 0), 0);
-  const cashCount = dbItems.filter((p) => p.PMode === "Cash").length;
+  // ── Stats ──────────────────────────────────────────────────────────────────
+
+  const totalAmount = dbItems.reduce((s, p) => s + (p.PAmount || 0), 0);
   const chequeCount = dbItems.filter((p) => p.PMode === "Cheque").length;
+  const cashCount = dbItems.filter((p) => p.PMode === "Cash").length;
 
-  const mappedData = dbItems.map((item) => ({
-    _id: String(item.PPaymentID),
-    paymentName: item.PPaymentName || "",
-    mode: item.PMode || "",
-    amount: item.PAmount ?? "",
-    docType: item.PDocType || "",
-    date: item.PDate?.slice(0, 10) || "",
-    bank: item.PBankID ? `${item.PBankID}|${item.PBankName || ""}` : "",
-    bankId: item.PBankID ?? "",
-    bankName: item.PBankName || "",
-    project: item.PProject || "",
-    company: item.PCompany || "",
-    status: (item as any).Status || "Draft",
-  }));
+  // ── Form helpers ───────────────────────────────────────────────────────────
 
-  const handleDataEvent = async (event: DataChangeEvent) => {
-    if (event.action === "add") {
-      try {
-        await addPayment(toPayload(event.record));
-        toast.success("Payment saved!");
-        queryClient.invalidateQueries({ queryKey: ["payments"] });
-      } catch (err: any) {
-        toast.error("Save failed: " + err.message);
-      }
+  const set = <K extends keyof Omit<PaymentRecord, "id">>(
+    field: K,
+    value: Omit<PaymentRecord, "id">[K],
+  ) => setForm((prev) => ({ ...prev, [field]: value }));
+
+  const openNew = () => {
+    setEditingId(null);
+    setForm(blankForm());
+    setView("form");
+  };
+
+  const openEdit = (rec: PaymentRecord) => {
+    setEditingId(rec.id);
+    const { id, ...rest } = rec;
+    setForm(rest);
+    setView("form");
+  };
+
+  const cancelForm = () => {
+    setView("list");
+    setEditingId(null);
+    setForm(blankForm());
+  };
+
+  // ── Expense booking selection → auto-fill ──────────────────────────────────
+
+  const handleExpenseSelect = useCallback(async (expenseId: string) => {
+    if (!expenseId) {
+      setForm((prev) => ({
+        ...prev,
+        expenseId: "",
+        expenseRef: "",
+        project: "",
+        company: "",
+        amount: null,
+        docType: "",
+      }));
+      return;
     }
-    if (event.action === "update") {
-      try {
-        await updatePayment(event.id, toPayload(event.record));
-        toast.success("Payment updated!");
-        await queryClient.invalidateQueries({ queryKey: ["payments"] });
-      } catch (err: any) {
-        toast.error("Update failed: " + err.message);
-      }
+    setLoadingExpense(true);
+    try {
+      const detail = await fetchExpenseDetail(expenseId);
+      if (!detail) throw new Error("Not found");
+      setForm((prev) => ({
+        ...prev,
+        expenseId,
+        expenseRef: detail.EDocNo || "",
+        project: detail.EProjectName || "",
+        company: String(detail.ECompanyId ?? ""),
+        amount: detail.ENetAmount ?? detail.EAmount ?? null,
+        docType: detail.DocTypeName || detail.EDocumentType || "",
+      }));
+    } catch {
+      toast.error("Could not load expense booking details.");
+    } finally {
+      setLoadingExpense(false);
     }
-    if (event.action === "delete") {
-      try {
-        await deletePayment(event.id);
-        toast.success("Payment deleted!");
-        await queryClient.invalidateQueries({ queryKey: ["payments"] });
-      } catch (err: any) {
-        toast.error("Delete failed: " + err.message);
+  }, []);
+
+  const clearExpenseLink = () => {
+    setForm((prev) => ({
+      ...prev,
+      expenseId: "",
+      expenseRef: "",
+      project: "",
+      company: "",
+      amount: null,
+      docType: "",
+    }));
+  };
+
+  // ── Bank selection ─────────────────────────────────────────────────────────
+
+  const handleBankSelect = (bankIdStr: string) => {
+    if (!bankIdStr) {
+      set("bankId", null);
+      set("bankName", "");
+      return;
+    }
+    const bank = banks.find((b) => String(b.id) === bankIdStr);
+    set("bankId", bank?.id ?? null);
+    set("bankName", bank?.label ?? "");
+  };
+
+  // ── Save ───────────────────────────────────────────────────────────────────
+
+  const handleSave = async () => {
+    if (!form.paymentName.trim()) {
+      toast.error("Payment name is required.");
+      return;
+    }
+    if (!form.mode) {
+      toast.error("Please select a payment mode.");
+      return;
+    }
+    if (!form.date) {
+      toast.error("Payment date is required.");
+      return;
+    }
+
+    const payload = {
+      PPaymentName: form.paymentName || null,
+      PMode: form.mode || null,
+      PAmount: form.amount ?? null,
+      PDocType: form.docType || null,
+      PDate: form.date || null,
+      PBankID: form.bankId ?? null,
+      PBankName: form.bankName || null,
+      PProject: form.project || null,
+      PCompany: form.company || null,
+      PExpenseRef: form.expenseRef || null,
+    };
+
+    try {
+      setSaving(true);
+      if (editingId) {
+        await updatePayment(editingId, payload);
+        toast.success("Payment updated.");
+      } else {
+        await addPayment(payload);
+        toast.success("Payment saved.");
       }
+      queryClient.invalidateQueries({ queryKey: ["payments"] });
+      cancelForm();
+    } catch (err: any) {
+      toast.error("Save failed: " + err.message);
+    } finally {
+      setSaving(false);
     }
   };
 
-  const columnRenderers: Record<
-    string,
-    (value: unknown, row: RecordWithId, data: RecordWithId[]) => React.ReactNode
-  > = {
-    mode: (value) => modeRenderer(value),
-    amount: (value) => (
-      <span className="font-mono text-sm">
-        {formatINR(Number(value || 0))}
-      </span>
-    ),
-    status: (value, row) => (
-      <div className="flex flex-col gap-1.5">
-        <StatusBadge status={String(value || "Draft")} />
-        <ApprovalActions
-          status={String(value || "Draft")}
-          recordId={Number(row._id)}
-          endpoint="/api/new-payment"
-          onSuccess={() => queryClient.invalidateQueries({ queryKey: ["payments"] })}
-        />
-      </div>
-    ),
-  };
+  // ── Delete ─────────────────────────────────────────────────────────────────
 
-  // optionsProvider for banks: value="BId|BName" (parsed in toPayload), label=bank name only
-  const bankOptionsProvider = () =>
-    banks.map((b) => ({ value: `${b.BId}|${b.BName}`, label: b.BName ?? "" }));
-
-  // optionsProvider for projects: value=project Name (stored as PProject), label=project name
-  // Using Name as value so it matches how PProject is stored in DB as a string
-  const projectOptionsProvider = () =>
-    projects.map((p) => ({ value: p.Name, label: p.Name }));
-
-  // onFieldChange: when "project" changes, auto-fill "company" from the loaded projects list
-  const handleFieldChange = (
-    form: Record<string, unknown>,
-    fieldName: string,
-  ): Record<string, unknown> => {
-    if (fieldName === "project") {
-      const selected = projects.find((p) => p.Name === form.project);
-      return {
-        ...form,
-        company: selected?.CompanyName ?? "",
-      };
+  const handleDelete = async (id: string) => {
+    try {
+      await deletePayment(id);
+      toast.success("Payment deleted.");
+      queryClient.invalidateQueries({ queryKey: ["payments"] });
+      setDeleteId(null);
+    } catch (err: any) {
+      toast.error("Delete failed: " + err.message);
     }
-    return form;
   };
 
-  if (isLoading)
-    return <div className="p-6 text-muted-foreground">Loading...</div>;
-  if (error)
-    return <div className="p-6 text-red-500">Failed to load payments.</div>;
+  // ─────────────────────────────────────────────────────────────────────────────
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance", "Payments"]} />
-      <h1 className="text-xl font-heading font-bold text-foreground mb-4">
-        Payment Management
-      </h1>
-
-      {/* ── Summary stats ── */}
-      <div className="grid grid-cols-3 gap-3 mb-5">
-        <div className="rounded-xl bg-card border border-border p-4 flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-emerald-500/10">
-            <Banknote size={18} className="text-emerald-600" />
-          </div>
+      <div className="space-y-5">
+        {/* ── Page header ──────────────────────────────────────────────────── */}
+        <div className="flex items-center justify-between gap-3">
           <div>
-            <p className="text-[11px] text-muted-foreground">Total</p>
-            <p className="text-base font-bold">
-              {formatINR(totalAmount)}
+            <h1 className="text-xl font-heading font-bold text-foreground">
+              Payment Management
+            </h1>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              Record and track payments linked to expense bookings
             </p>
           </div>
-        </div>
-        <div className="rounded-xl bg-card border border-border p-4 flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-amber-500/10">
-            <Clock size={18} className="text-amber-600" />
-          </div>
-          <div>
-            <p className="text-[11px] text-muted-foreground">Cheque</p>
-            <p className="text-base font-bold text-amber-600">{chequeCount}</p>
-          </div>
-        </div>
-        <div className="rounded-xl bg-card border border-border p-4 flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-green-500/10">
-            <CheckCircle2 size={18} className="text-green-600" />
-          </div>
-          <div>
-            <p className="text-[11px] text-muted-foreground">Cash</p>
-            <p className="text-base font-bold text-green-600">{cashCount}</p>
+          <div className="flex items-center gap-2">
+            {view === "list" && <ExportButton data={records} />}
+            {view === "list" && (
+              <button
+                onClick={openNew}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-white shadow-sm"
+              >
+                <Plus size={13} /> New Payment
+              </button>
+            )}
           </div>
         </div>
+
+        {/* ── Summary stats (list only) ─────────────────────────────────────── */}
+        {view === "list" && !isLoading && dbItems.length > 0 && (
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {[
+              {
+                label: "Total Paid",
+                value: formatINR(totalAmount),
+                icon: Banknote,
+                color: "text-primary bg-primary/10",
+              },
+              {
+                label: "By Cheque",
+                value: chequeCount,
+                icon: Clock,
+                color: "text-amber-600 bg-amber-500/10",
+              },
+              {
+                label: "By Cash",
+                value: cashCount,
+                icon: CheckCircle2,
+                color: "text-emerald-600 bg-emerald-500/10",
+              },
+            ].map((s) => (
+              <div
+                key={s.label}
+                className="rounded-xl bg-card border border-border p-4 flex items-center gap-3"
+              >
+                <div className={`p-2 rounded-lg shrink-0 ${s.color}`}>
+                  <s.icon size={15} />
+                </div>
+                <div className="min-w-0">
+                  <p className="text-[10px] text-muted-foreground font-heading uppercase tracking-wider truncate">
+                    {s.label}
+                  </p>
+                  <p className="text-base font-bold font-mono text-foreground mt-0.5">
+                    {s.value}
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* ══════════════════════════════════════════════════════════════════ */}
+        {/* FORM VIEW                                                          */}
+        {/* ══════════════════════════════════════════════════════════════════ */}
+        {view === "form" && (
+          <div className="rounded-xl border border-border bg-card shadow-sm">
+            {/* Card header */}
+            <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-b border-border">
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={cancelForm}
+                  className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <ArrowLeft size={15} />
+                  <span className="hidden sm:inline">Back</span>
+                </button>
+                <span className="text-border/60">|</span>
+                <h2 className="text-base font-heading font-semibold text-foreground">
+                  {editingId ? "Edit Payment" : "New Payment"}
+                </h2>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={cancelForm}
+                  className="px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSave}
+                  disabled={saving}
+                  className="px-4 py-1.5 rounded-lg text-xs font-heading font-semibold gradient-accent text-white disabled:opacity-60"
+                >
+                  {saving ? "Saving…" : editingId ? "Update" : "Save Payment"}
+                </button>
+              </div>
+            </div>
+
+            <div className="px-5 sm:px-6 py-6 space-y-7">
+              {/* ── 1. Link Expense Booking ─────────────────────────────── */}
+              <div className="space-y-3">
+                <SectionHeader icon={Link2} label="Expense Booking" />
+
+                {form.expenseRef ? (
+                  <AutoFillBanner
+                    docNo={form.expenseRef}
+                    onClear={clearExpenseLink}
+                  />
+                ) : (
+                  <Field
+                    label="Select Expense Booking"
+                    hint="Selecting a booking auto-fills project, company, amount & doc type."
+                  >
+                    <div className="relative">
+                      <select
+                        value={form.expenseId}
+                        onChange={(e) => handleExpenseSelect(e.target.value)}
+                        disabled={loadingExpense}
+                        className="w-full appearance-none px-3 py-2 pr-9 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-60 disabled:cursor-wait"
+                      >
+                        <option value="">— Choose expense booking —</option>
+                        {expenseOptions.map((e) => (
+                          <option key={e.id} value={e.id}>
+                            {e.label}
+                          </option>
+                        ))}
+                      </select>
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground">
+                        {loadingExpense ? (
+                          <div className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                        ) : (
+                          <ChevronDown size={14} />
+                        )}
+                      </div>
+                    </div>
+                  </Field>
+                )}
+
+                {/* Auto-filled read-only fields */}
+                {form.expenseRef && (
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-1">
+                    <Field label="Project / Site">
+                      <div className="flex items-center gap-2">
+                        <FolderKanban
+                          size={13}
+                          className="text-muted-foreground shrink-0"
+                        />
+                        <ReadOnlyField
+                          value={form.project}
+                          placeholder="Fetched from expense booking"
+                        />
+                      </div>
+                    </Field>
+                    <Field label="Company">
+                      <div className="flex items-center gap-2">
+                        <Building2
+                          size={13}
+                          className="text-muted-foreground shrink-0"
+                        />
+                        <ReadOnlyField
+                          value={form.company}
+                          placeholder="Fetched from expense booking"
+                        />
+                      </div>
+                    </Field>
+                    <Field label="Doc Type">
+                      <div className="flex items-center gap-2">
+                        <FileText
+                          size={13}
+                          className="text-muted-foreground shrink-0"
+                        />
+                        <ReadOnlyField
+                          value={form.docType}
+                          placeholder="Fetched from expense booking"
+                        />
+                      </div>
+                    </Field>
+                  </div>
+                )}
+              </div>
+
+              {/* ── 2. Payment Details ──────────────────────────────────── */}
+              <div className="space-y-3">
+                <SectionHeader icon={Receipt} label="Payment Details" />
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Field label="Payment Name" required>
+                    <input
+                      type="text"
+                      value={form.paymentName}
+                      onChange={(e) => set("paymentName", e.target.value)}
+                      placeholder="e.g. Advance payment for cement"
+                      className="w-full px-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary placeholder:text-muted-foreground/60"
+                    />
+                  </Field>
+                  <Field label="Payment Date" required>
+                    <div className="relative">
+                      <CalendarDays
+                        size={13}
+                        className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                      />
+                      <input
+                        type="date"
+                        value={form.date}
+                        onChange={(e) => set("date", e.target.value)}
+                        className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                      />
+                    </div>
+                  </Field>
+                </div>
+
+                {/* Amount — auto-filled if expense linked, else manual */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Field
+                    label="Amount (₹)"
+                    required
+                    hint={
+                      form.expenseRef
+                        ? "Net amount fetched from expense booking — editable if needed."
+                        : undefined
+                    }
+                  >
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs font-semibold pointer-events-none">
+                        ₹
+                      </span>
+                      <input
+                        type="number"
+                        min={0}
+                        step={0.01}
+                        value={form.amount ?? ""}
+                        onChange={(e) =>
+                          set("amount", parseFloat(e.target.value) || null)
+                        }
+                        placeholder="0.00"
+                        className="w-full pl-7 pr-3 py-2 rounded-lg text-sm font-mono bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary placeholder:text-muted-foreground/60"
+                      />
+                    </div>
+                  </Field>
+
+                  {/* Net amount highlight if set */}
+                  {(form.amount ?? 0) > 0 && (
+                    <div className="flex items-center gap-3 rounded-xl bg-primary/5 border border-primary/20 px-4 py-2 self-end mb-0.5">
+                      <TrendingUp size={14} className="text-primary shrink-0" />
+                      <div>
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-heading">
+                          Net Payable
+                        </p>
+                        <p className="font-mono text-base font-bold text-primary">
+                          {formatINR(form.amount ?? 0)}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* ── 3. Payment Mode ─────────────────────────────────────── */}
+              <div className="space-y-3">
+                <SectionHeader icon={Wallet} label="Payment Mode" />
+                <Field label="Mode" required>
+                  <div className="flex flex-wrap gap-2">
+                    {PAYMENT_MODES.map((m) => {
+                      const s = MODE_STYLE[m];
+                      const active = form.mode === m;
+                      return (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => set("mode", m)}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-heading font-semibold border transition-all ring-1 ${
+                            active
+                              ? `${s.ring} ${s.text} border-transparent shadow-sm`
+                              : "bg-background border-border text-muted-foreground ring-transparent hover:border-primary/40"
+                          }`}
+                        >
+                          {active && (
+                            <span
+                              className={`w-1.5 h-1.5 rounded-full ${s.dot}`}
+                            />
+                          )}
+                          {m}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </Field>
+              </div>
+
+              {/* ── 4. Bank ─────────────────────────────────────────────── */}
+              <div className="space-y-3">
+                <SectionHeader icon={Landmark} label="Bank Account" />
+                <Field
+                  label="Bank"
+                  hint="Required for Cheque / NEFT / RTGS payments."
+                >
+                  <div className="relative">
+                    <Landmark
+                      size={13}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                    <select
+                      value={form.bankId ? String(form.bankId) : ""}
+                      onChange={(e) => handleBankSelect(e.target.value)}
+                      className="w-full appearance-none pl-8 pr-9 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                    >
+                      <option value="">— Select bank account —</option>
+                      {banks.map((b) => (
+                        <option key={b.id} value={String(b.id)}>
+                          {b.label}
+                        </option>
+                      ))}
+                    </select>
+                    <ChevronDown
+                      size={14}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                    />
+                  </div>
+                </Field>
+              </div>
+
+              {/* ── Save footer ──────────────────────────────────────────── */}
+              <div className="flex justify-end gap-2 pt-2 border-t border-border">
+                <button
+                  onClick={cancelForm}
+                  className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSave}
+                  disabled={saving}
+                  className="px-5 py-2 rounded-lg text-sm font-heading font-semibold gradient-accent text-white disabled:opacity-60"
+                >
+                  {saving
+                    ? "Saving…"
+                    : editingId
+                      ? "Update Payment"
+                      : "Save Payment"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ══════════════════════════════════════════════════════════════════ */}
+        {/* LIST VIEW                                                          */}
+        {/* ══════════════════════════════════════════════════════════════════ */}
+        {view === "list" && (
+          <>
+            {isLoading && (
+              <div className="text-center py-16 text-muted-foreground text-sm">
+                <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+                Loading payments…
+              </div>
+            )}
+
+            {!isLoading && (
+              <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+                {/* ── Mobile cards ── */}
+                <div className="sm:hidden divide-y divide-border">
+                  {records.length === 0 && (
+                    <div className="text-center py-14 text-muted-foreground text-sm">
+                      <AlertCircle
+                        size={20}
+                        className="mx-auto mb-2 opacity-30"
+                      />
+                      No payments yet.
+                    </div>
+                  )}
+                  {records.map((rec) => (
+                    <div key={rec.id} className="p-4 space-y-2">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-heading font-semibold text-sm text-foreground truncate">
+                          {rec.paymentName}
+                        </span>
+                        <ModeBadge mode={rec.mode} />
+                      </div>
+                      {rec.expenseRef && (
+                        <span className="inline-block font-mono text-[11px] bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-md">
+                          {rec.expenseRef}
+                        </span>
+                      )}
+                      <div className="flex items-center justify-between text-xs text-muted-foreground">
+                        <span>{rec.date}</span>
+                        <span className="font-mono font-semibold text-foreground">
+                          {formatINR(rec.amount ?? 0)}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between gap-2">
+                        <StatusBadge status={rec.status} />
+                        <div className="flex items-center gap-1.5">
+                          <ApprovalActions
+                            status={rec.status}
+                            recordId={Number(rec.id)}
+                            endpoint="/api/new-payment"
+                            onSuccess={() =>
+                              queryClient.invalidateQueries({
+                                queryKey: ["payments"],
+                              })
+                            }
+                          />
+                          <button
+                            onClick={() => openEdit(rec)}
+                            className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                          >
+                            <Edit size={12} />
+                          </button>
+                          <button
+                            onClick={() => setDeleteId(rec.id)}
+                            className="p-1.5 rounded-md border border-destructive/30 text-destructive/70 hover:text-destructive hover:bg-destructive/10 transition-colors"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* ── Desktop table ── */}
+                <div className="hidden sm:block overflow-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-muted/30 border-b border-border">
+                        {[
+                          "Payment Name",
+                          "Expense Ref",
+                          "Project",
+                          "Mode",
+                          "Date",
+                          "Amount",
+                          "Bank",
+                          "Status",
+                          "Actions",
+                        ].map((h) => (
+                          <th
+                            key={h}
+                            className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground whitespace-nowrap"
+                          >
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {records.length === 0 && (
+                        <tr>
+                          <td
+                            colSpan={9}
+                            className="text-center py-14 text-muted-foreground text-sm"
+                          >
+                            <AlertCircle
+                              size={18}
+                              className="mx-auto mb-2 opacity-30"
+                            />
+                            No payments yet. Click "New Payment" to get started.
+                          </td>
+                        </tr>
+                      )}
+                      {records.map((rec) => (
+                        <tr
+                          key={rec.id}
+                          className="hover:bg-muted/20 transition-colors"
+                        >
+                          <td className="px-4 py-3 font-heading font-medium text-foreground max-w-[160px] truncate">
+                            {rec.paymentName || "—"}
+                          </td>
+                          <td className="px-4 py-3">
+                            {rec.expenseRef ? (
+                              <span className="font-mono text-xs bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-md">
+                                {rec.expenseRef}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground text-xs">
+                                —
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-xs text-muted-foreground max-w-[120px] truncate">
+                            {rec.project || "—"}
+                          </td>
+                          <td className="px-4 py-3">
+                            <ModeBadge mode={rec.mode} />
+                          </td>
+                          <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
+                            {rec.date || "—"}
+                          </td>
+                          <td className="px-4 py-3 font-mono text-xs font-semibold whitespace-nowrap">
+                            {formatINR(rec.amount ?? 0)}
+                          </td>
+                          <td className="px-4 py-3 text-xs text-muted-foreground max-w-[100px] truncate">
+                            {rec.bankName || "—"}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex flex-col gap-1">
+                              <StatusBadge status={rec.status} />
+                              <ApprovalActions
+                                status={rec.status}
+                                recordId={Number(rec.id)}
+                                endpoint="/api/new-payment"
+                                onSuccess={() =>
+                                  queryClient.invalidateQueries({
+                                    queryKey: ["payments"],
+                                  })
+                                }
+                              />
+                            </div>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                onClick={() => openEdit(rec)}
+                                className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                              >
+                                <Edit size={12} />
+                              </button>
+                              <button
+                                onClick={() => setDeleteId(rec.id)}
+                                className="p-1.5 rounded-md border border-destructive/30 text-destructive/70 hover:text-destructive hover:bg-destructive/10 transition-colors"
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between mt-2 px-1">
+                <p className="text-xs text-muted-foreground">
+                  Page {page} of {totalPages} · {totalRecords} total
+                </p>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={page === 1}
+                    className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors"
+                  >
+                    <ChevronLeft size={14} />
+                  </button>
+                  {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                    const pg = page <= 3 ? i + 1 : page - 2 + i;
+                    if (pg < 1 || pg > totalPages) return null;
+                    return (
+                      <button
+                        key={pg}
+                        onClick={() => setPage(pg)}
+                        className={`px-2.5 py-1 rounded-md text-xs border transition-colors ${pg === page ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"}`}
+                      >
+                        {pg}
+                      </button>
+                    );
+                  })}
+                  <button
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={page === totalPages}
+                    className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors"
+                  >
+                    <ChevronRight size={14} />
+                  </button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
       </div>
 
-      <MasterPage
-        title="Payment"
-        onFieldChange={handleFieldChange}
-        fields={[
-          {
-            name: "paymentName",
-            label: "Payment Name",
-            type: "text",
-            required: true,
-          },
-          {
-            name: "project",
-            label: "Project",
-            type: "select",
-            required: true,
-            // Dynamic from API — no more hardcoded list
-            optionsProvider: projectOptionsProvider,
-          },
-          {
-            name: "company",
-            label: "Company",
-            type: "text",
-            // Read-only via custom render — auto-filled when project is selected
-            render: ({ value }) => (
-              <input
-                type="text"
-                value={(value as string) || ""}
-                readOnly
-                placeholder="Auto-filled on project select"
-                className="w-full px-3 py-2 rounded-lg text-sm font-body bg-muted/40 border border-border text-muted-foreground cursor-not-allowed"
-              />
-            ),
-          },
-          {
-            name: "mode",
-            label: "Payment Mode",
-            type: "select",
-            required: true,
-            options: ["Cash", "Cheque", "UPI", "Card", "NEFT", "RTGS"],
-          },
-          {
-            name: "docType",
-            label: "Doc Type",
-            type: "select",
-            required: true,
-            options: ["Invoice", "Bill", "Receipt", "Voucher"],
-          },
-          { name: "date", label: "Payment Date", type: "date", required: true },
-          {
-            name: "amount",
-            label: "Amount (₹)",
-            type: "number",
-            required: true,
-          },
-          {
-            name: "bank",
-            label: "Bank",
-            type: "select",
-            optionsProvider: bankOptionsProvider,
-          },
-        ]}
-        columns={[
-          { key: "paymentName", label: "Payment Name" },
-          { key: "project", label: "Project", hideOnMobile: true },
-          { key: "mode", label: "Mode" },
-          { key: "date", label: "Date", hideOnMobile: true },
-          { key: "amount", label: "Amount" },
-          { key: "bankName", label: "Bank", hideOnMobile: true },
-          { key: "docType", label: "Doc Type", hideOnMobile: true },
-          { key: "status", label: "Status" },
-        ]}
-        columnRenderers={columnRenderers}
-        initialData={mappedData}
-        onDataEvent={handleDataEvent}
-        exportConfig={{
-          title: "Payment",
-          filename: "payments",
-          columns: [            { header: "Payment Name", accessor: "paymentName" },
-            { header: "Project",      accessor: "project" },
-            { header: "Mode",         accessor: "mode" },
-            { header: "Date",         accessor: "date" },
-            { header: "Amount",       accessor: "amount" },
-            { header: "Bank",         accessor: "bankName" },
-            { header: "Doc Type",     accessor: "docType" },
-            { header: "Status",       accessor: "status" },
-          ],
-        }}
-      />
-
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between mt-4 px-1">
-          <p className="text-xs text-muted-foreground">
-            Showing page {page} of {totalPages} &middot; {totalRecords} total records
-          </p>
-          <div className="flex items-center gap-1">
-            <button
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page === 1}
-              className="px-3 py-1.5 rounded-md text-xs border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors"
-            >
-              Previous
-            </button>
-            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-              const pg = page <= 3 ? i + 1 : page - 2 + i;
-              if (pg < 1 || pg > totalPages) return null;
-              return (
-                <button
-                  key={pg}
-                  onClick={() => setPage(pg)}
-                  className={`px-3 py-1.5 rounded-md text-xs border transition-colors ${
-                    pg === page
-                      ? "border-primary bg-primary text-primary-foreground"
-                      : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"
-                  }`}
-                >
-                  {pg}
-                </button>
-              );
-            })}
-            <button
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={page === totalPages}
-              className="px-3 py-1.5 rounded-md text-xs border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors"
-            >
-              Next
-            </button>
+      {/* ── Delete confirm dialog ────────────────────────────────────────── */}
+      {deleteId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="w-full max-w-sm rounded-xl bg-card border border-border shadow-xl p-6 space-y-4">
+            <div className="flex items-start gap-3">
+              <div className="p-2 rounded-lg bg-destructive/10 shrink-0">
+                <Trash2 size={16} className="text-destructive" />
+              </div>
+              <div>
+                <h3 className="font-heading font-semibold text-foreground">
+                  Delete Payment
+                </h3>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Are you sure you want to delete this payment? This action
+                  cannot be undone.
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                onClick={() => setDeleteId(null)}
+                className="px-4 py-2 rounded-lg text-sm font-heading border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => deleteId && handleDelete(deleteId)}
+                className="px-4 py-2 rounded-lg text-sm font-heading font-semibold bg-destructive text-destructive-foreground hover:bg-destructive/90 transition-colors"
+              >
+                Delete
+              </button>
+            </div>
           </div>
         </div>
       )}

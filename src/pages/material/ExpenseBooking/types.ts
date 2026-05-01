@@ -41,6 +41,8 @@ export interface EmiScheduleRow {
   dueDate: string;
   amount: number;
   status: "Pending" | "Paid";
+  /** Auto-generated ref: base doc number + "-EMI-01", "-EMI-02", etc. */
+  refNumber: string;
 }
 
 export interface EmiConfig {
@@ -69,7 +71,7 @@ export interface ApprovalTrail {
 export interface ExpenseRecord {
   id: string;
   bookingReference: string;
-  docTypeName: string; // e.g. "PR/REC — Received Payment"
+  docTypeName: string;
   bookingDate: string;
   dueDate: string;
   financialYear: string;
