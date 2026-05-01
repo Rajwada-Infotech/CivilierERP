@@ -65,10 +65,15 @@ export function computeBreakdown(
   };
 }
 
+/**
+ * Generates EMI schedule rows with reference numbers.
+ * refNumber format: {baseDocNo}-EMI-01, -EMI-02, etc.
+ */
 export function generateEmiSchedule(
   netAmount: number,
   installmentCount: number,
   startDate: string,
+  baseDocNo = "",
 ): EmiScheduleRow[] {
   if (!installmentCount || !startDate || installmentCount <= 0) return [];
   const baseAmount = Math.floor((netAmount / installmentCount) * 100) / 100;
@@ -78,11 +83,13 @@ export function generateEmiSchedule(
   return Array.from({ length: installmentCount }, (_, i) => {
     const d = new Date(startDate);
     d.setMonth(d.getMonth() + i);
+    const padded = String(i + 1).padStart(2, "0");
     return {
       installmentNo: i + 1,
       dueDate: d.toISOString().slice(0, 10),
       amount: i === installmentCount - 1 ? lastAmount : baseAmount,
       status: "Pending" as const,
+      refNumber: baseDocNo ? `${baseDocNo}-EMI-${padded}` : `EMI-${padded}`,
     };
   });
 }
@@ -140,7 +147,7 @@ export function dbToRecord(row: any): ExpenseRecord {
   return {
     id: String(row.Eid ?? row.eid ?? row.EID ?? ""),
     bookingReference: row.EDocNo ?? "",
-    docTypeName: row.DocTypeName ?? "", // joined from TypeOfDoc via backend
+    docTypeName: row.DocTypeName ?? "",
     bookingDate: row.EDocDate ? row.EDocDate.slice(0, 10) : "",
     dueDate: row.EReminder ? row.EReminder.slice(0, 10) : "",
     financialYear: "",
@@ -178,8 +185,8 @@ export function recordToDb(
     ESgstRate: form.sgstRate,
     EDiscountData: JSON.stringify(form.discount),
     EDocNo: form.bookingReference || null,
-    EDocTypeId: docTypeId ?? null, // NEW — triggers server-side sequence commit
-    EFinYear: form.financialYear || null, // NEW — appended to doc number
+    EDocTypeId: docTypeId ?? null,
+    EFinYear: form.financialYear || null,
     EEmiPayment: form.emi.enabled,
     EEmiData: JSON.stringify(form.emi),
     EInstallmentCount: form.emi.enabled ? form.emi.installmentCount : null,
