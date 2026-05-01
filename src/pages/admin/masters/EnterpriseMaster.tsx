@@ -1,4 +1,4 @@
-import React, { useMemo, { useState, useRef } from "react";
+import React, { useMemo, useState, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Building2,
@@ -145,7 +145,7 @@ function buildEnterpriseColumns(
     enableSorting: false,
     cell: ({ row }) => (
       <div className="flex items-center justify-end gap-1">
-        <button onClick={() => openEdit(row.original)} className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"><Edit2 size={13} /></button>
+        <button onClick={() => openEdit(row.original)} className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"><Pencil size={13} /></button>
         <button onClick={() => setDeleteTarget(row.original.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"><Trash2 size={13} /></button>
       </div>
     ),
@@ -202,6 +202,12 @@ export default function EnterpriseMaster() {
     setShowForm(true);
     setTab("general");
   };
+
+  const columns = useMemo(
+    () => buildEnterpriseColumns(openEdit, setDeleteTarget),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
 
   const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];

@@ -146,128 +146,62 @@ function rowToForm(row: any): Project {
   };
 }
 
+
 function buildProjectColumns(
   openEdit: (row: any) => void,
   setDeleteConfirm: (id: number) => void,
 ): ColumnDef<any, unknown>[] {
   return [
-    {
-      accessorKey: "Code",
-      header: "Code",
-      cell: ({ getValue }) => (
-        <span className="font-mono text-xs font-medium text-primary">
-          {getValue() as string}
-        </span>
-      ),
+  { accessorKey: "Code", header: "Code", cell: ({ getValue }) => <span className="font-mono text-xs font-medium text-primary">{getValue() as string}</span> },
+  {
+    accessorKey: "Name",
+    header: "Project Name",
+    cell: ({ row }) => (
+      <div className="flex items-center gap-2">
+        <ProjectAvatar imageUrl={row.original.ProjectImage} name={row.original.Name || "?"} />
+        <span className="font-medium text-foreground max-w-[160px] truncate">{row.original.Name}</span>
+      </div>
+    ),
+  },
+  { accessorKey: "belongs_to", header: "Enterprise / Company", cell: ({ getValue }) => <span className="text-xs text-muted-foreground max-w-[140px] truncate block">{(getValue() as string) || "—"}</span> },
+  { accessorKey: "ClientName",  header: "Client",   cell: ({ getValue }) => <span className="text-muted-foreground text-xs">{getValue() as string}</span> },
+  { accessorKey: "Type",        header: "Type",     cell: ({ getValue }) => <span className="text-xs text-muted-foreground">{getValue() as string}</span> },
+  {
+    accessorKey: "Status",
+    header: "Status",
+    cell: ({ getValue }) => {
+      const v = getValue() as string;
+      return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${v === "Active" ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}>{v || "—"}</span>;
     },
-    {
-      accessorKey: "Name",
-      header: "Project Name",
-      cell: ({ row }) => (
-        <div className="flex items-center gap-2">
-          <ProjectAvatar
-            imageUrl={row.original.ProjectImage}
-            name={row.original.Name || "?"}
-          />
-          <span className="font-medium text-foreground max-w-[160px] truncate">
-            {row.original.Name}
-          </span>
-        </div>
-      ),
+  },
+  {
+    accessorKey: "Priority",
+    header: "Priority",
+    cell: ({ getValue }) => {
+      const v = getValue() as string;
+      const styles: Record<string,string> = { High: "text-red-500 bg-red-500/10", Medium: "text-amber-500 bg-amber-500/10", Low: "text-emerald-500 bg-emerald-500/10" };
+      return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${styles[v] || "bg-muted text-muted-foreground"}`}>{v || "—"}</span>;
     },
-    {
-      accessorKey: "belongs_to",
-      header: "Enterprise / Company",
-      cell: ({ getValue }) => (
-        <span className="text-xs text-muted-foreground max-w-[140px] truncate block">
-          {(getValue() as string) || "—"}
-        </span>
-      ),
+  },
+  {
+    accessorKey: "IsActive",
+    header: "Active",
+    cell: ({ getValue }) => {
+      const active = getValue() as boolean;
+      return <span className={`w-2 h-2 rounded-full inline-block ${active ? "bg-emerald-500" : "bg-muted-foreground/40"}`} />;
     },
-    {
-      accessorKey: "ClientName",
-      header: "Client",
-      cell: ({ getValue }) => (
-        <span className="text-muted-foreground text-xs">
-          {getValue() as string}
-        </span>
-      ),
-    },
-    {
-      accessorKey: "Type",
-      header: "Type",
-      cell: ({ getValue }) => (
-        <span className="text-xs text-muted-foreground">
-          {getValue() as string}
-        </span>
-      ),
-    },
-    {
-      accessorKey: "Status",
-      header: "Status",
-      cell: ({ getValue }) => {
-        const v = getValue() as string;
-        return (
-          <span
-            className={`px-2 py-0.5 rounded-full text-xs font-medium ${v === "Active" ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
-          >
-            {v || "—"}
-          </span>
-        );
-      },
-    },
-    {
-      accessorKey: "Priority",
-      header: "Priority",
-      cell: ({ getValue }) => {
-        const v = getValue() as string;
-        const styles: Record<string, string> = {
-          High: "text-red-500 bg-red-500/10",
-          Medium: "text-amber-500 bg-amber-500/10",
-          Low: "text-emerald-500 bg-emerald-500/10",
-        };
-        return (
-          <span
-            className={`px-2 py-0.5 rounded-full text-xs font-medium ${styles[v] || "bg-muted text-muted-foreground"}`}
-          >
-            {v || "—"}
-          </span>
-        );
-      },
-    },
-    {
-      accessorKey: "IsActive",
-      header: "Active",
-      cell: ({ getValue }) => {
-        const active = getValue() as boolean;
-        return (
-          <span
-            className={`w-2 h-2 rounded-full inline-block ${active ? "bg-emerald-500" : "bg-muted-foreground/40"}`}
-          />
-        );
-      },
-    },
-    {
-      id: "actions",
-      header: "",
-      enableSorting: false,
-      cell: ({ row }) => (
-        <div className="flex items-center justify-end gap-1">
-          <button
-            onClick={() => openEdit(row.original)}
-            className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
-          >
-            <Edit2 size={13} />
-          </button>
-          <button
-            onClick={() => setDeleteConfirm(row.original.Id)}
-            className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-          >
-            <Trash2 size={13} />
-          </button>
-        </div>
-      ),
-    },
+  },
+  {
+    id: "actions",
+    header: "",
+    enableSorting: false,
+    cell: ({ row }) => (
+      <div className="flex items-center justify-end gap-1">
+        <button onClick={() => openEdit(row.original)} className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"><Pencil size={13} /></button>
+        <button onClick={() => setDeleteConfirm(row.original.Id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"><Trash2 size={13} /></button>
+      </div>
+    ),
+  },
   ];
 }
 export default function ProjectMaster() {
@@ -439,6 +373,12 @@ export default function ProjectMaster() {
     setShowForm(true);
     setActiveTab("general");
   };
+
+  const columns = useMemo(
+    () => buildProjectColumns(openEdit, setDeleteConfirm),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
 
   const fi = (label: string, key: keyof Project, type = "text", ph = "") => (
     <div key={key}>
