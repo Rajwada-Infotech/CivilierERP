@@ -1,10 +1,11 @@
-import React, { useState, useRef, useMemo } from "react";
+import React, { useState, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   Building2,
   Plus,
   Pencil,
   Trash2,
+  Search,
   ToggleLeft,
   ToggleRight,
   Upload,
@@ -18,8 +19,8 @@ import {
   deleteEnterprise,
   type Enterprise,
 } from "@/api/enterpriseApi";
-import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { toast } from "sonner";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
 const ENTITY_TYPES = ["Enterprise", "Company", "Business Unit"];
 const GST_TYPES = [
@@ -72,6 +73,7 @@ const ENTITY_COLORS: Record<string, string> = {
   "Business Unit": "bg-amber-500/10 text-amber-600",
 };
 
+// Logo avatar shown in the table beside enterprise name
 function LogoAvatar({
   logo,
   name,
@@ -100,115 +102,51 @@ function LogoAvatar({
   );
 }
 
-function buildColumns(
-  onEdit: (r: Enterprise) => void,
-  onDelete: (id: number) => void,
-): ColumnDef<Enterprise, unknown>[] {
-  return [
-    {
-      id: "logo",
-      header: "Logo",
-      enableSorting: false,
-      cell: ({ row }) => (
-        <LogoAvatar logo={row.original.logo} name={row.original.name || "?"} />
-      ),
-    },
-    {
-      accessorKey: "name",
-      header: "Name",
-      cell: ({ getValue }) => (
-        <span className="font-medium text-foreground">{getValue() as string}</span>
-      ),
-    },
-    {
-      accessorKey: "short_name",
-      header: "Short Name",
-      cell: ({ getValue }) => (
-        <span className="text-muted-foreground">
-          {(getValue() as string) || "—"}
-        </span>
-      ),
-    },
-    {
-      accessorKey: "entity_type",
-      header: "Type",
-      cell: ({ getValue }) => {
-        const v = (getValue() as string) || "";
-        return (
-          <span
-            className={`px-2 py-0.5 rounded-full text-xs font-medium ${ENTITY_COLORS[v] || "bg-muted text-muted-foreground"}`}
-          >
-            {v || "—"}
-          </span>
-        );
-      },
-    },
-    {
-      accessorKey: "pan",
-      header: "PAN",
-      cell: ({ getValue }) => (
-        <span className="font-mono text-xs text-muted-foreground">
-          {(getValue() as string) || "—"}
-        </span>
-      ),
-    },
-    {
-      accessorKey: "gst_type",
-      header: "GST Type",
-      cell: ({ getValue }) => (
-        <span className="text-muted-foreground">
-          {(getValue() as string) || "—"}
-        </span>
-      ),
-    },
-    {
-      accessorKey: "phone_number",
-      header: "Phone",
-      cell: ({ getValue }) => (
-        <span className="text-muted-foreground">
-          {(getValue() as string) || "—"}
-        </span>
-      ),
-    },
-    {
-      id: "status",
-      header: "Status",
-      enableSorting: false,
-      cell: ({ row }) => {
-        const r = row.original;
-        return (
-          <span
-            className={`px-2 py-0.5 rounded-full text-xs font-medium ${r.discontinue ? "bg-red-500/10 text-red-500" : "bg-emerald-500/10 text-emerald-600"}`}
-          >
-            {r.discontinue ? "Discontinued" : r.status || "Active"}
-          </span>
-        );
-      },
-    },
-    {
-      id: "actions",
-      header: "Actions",
-      enableSorting: false,
-      cell: ({ row }) => (
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => onEdit(row.original)}
-            className="p-1.5 rounded-md hover:bg-primary/10 text-muted-foreground hover:text-primary transition-colors"
-          >
-            <Pencil size={13} />
-          </button>
-          <button
-            onClick={() => onDelete(row.original.id)}
-            className="p-1.5 rounded-md hover:bg-red-500/10 text-muted-foreground hover:text-red-500 transition-colors"
-          >
-            <Trash2 size={13} />
-          </button>
-        </div>
-      ),
-    },
-  ];
-}
 
+const ENTERPRISE_COLUMNS: ColumnDef<Enterprise, unknown>[] = [
+  {
+    id: "logo",
+    header: "Logo",
+    enableSorting: false,
+    cell: ({ row }) => <LogoAvatar logo={row.original.logo} name={row.original.name || "?"} />,
+  },
+  { accessorKey: "name",       header: "Name",       cell: ({ getValue }) => <span className="font-medium text-foreground">{getValue() as string}</span> },
+  { accessorKey: "short_name", header: "Short Name", cell: ({ getValue }) => <span className="text-muted-foreground">{(getValue() as string) || "—"}</span> },
+  {
+    accessorKey: "entity_type",
+    header: "Type",
+    cell: ({ getValue }) => {
+      const v = getValue() as string;
+      return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${ENTITY_COLORS[v || ""] || "bg-muted text-muted-foreground"}`}>{v || "—"}</span>;
+    },
+  },
+  { accessorKey: "pan",          header: "PAN",      cell: ({ getValue }) => <span className="font-mono text-xs text-muted-foreground">{(getValue() as string) || "—"}</span> },
+  { accessorKey: "gst_type",     header: "GST Type", cell: ({ getValue }) => <span className="text-muted-foreground">{(getValue() as string) || "—"}</span> },
+  { accessorKey: "phone_number", header: "Phone",    cell: ({ getValue }) => <span className="text-muted-foreground">{(getValue() as string) || "—"}</span> },
+  {
+    accessorKey: "active",
+    header: "Status",
+    cell: ({ getValue }) => {
+      const active = getValue() as boolean;
+      return (
+        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${active ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}>
+          {active ? "Active" : "Inactive"}
+        </span>
+      );
+    },
+  },
+  {
+    id: "actions",
+    header: "",
+    enableSorting: false,
+    cell: ({ row }) => (
+      <div className="flex items-center justify-end gap-1">
+        <button onClick={() => handleRowEdit(row.original)} className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"><Edit2 size={13} /></button>
+        <button onClick={() => handleRowDelete(row.original.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"><Trash2 size={13} /></button>
+      </div>
+    ),
+  },
+];
 export default function EnterpriseMaster() {
   const queryClient = useQueryClient();
   const {
@@ -224,11 +162,19 @@ export default function EnterpriseMaster() {
   const [form, setForm] = useState<Partial<Enterprise>>(empty);
   const [editId, setEditId] = useState<number | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [search, setSearch] = useState("");
   const [tab, setTab] = useState<Tab>("general");
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [logoPreview, setLogoPreview] = useState<string>("");
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const filtered = (rows as Enterprise[]).filter(
+    (r) =>
+      (r.name || "").toLowerCase().includes(search.toLowerCase()) ||
+      (r.short_name || "").toLowerCase().includes(search.toLowerCase()) ||
+      (r.entity_type || "").toLowerCase().includes(search.toLowerCase()),
+  );
 
   const openNew = () => {
     setForm({ ...empty });
@@ -237,7 +183,6 @@ export default function EnterpriseMaster() {
     setShowForm(true);
     setTab("general");
   };
-
   const openEdit = (r: Enterprise) => {
     setForm({
       ...r,
@@ -252,12 +197,6 @@ export default function EnterpriseMaster() {
     setShowForm(true);
     setTab("general");
   };
-
-  const columns = useMemo(
-    () => buildColumns(openEdit, (id) => setDeleteTarget(id)),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [],
-  );
 
   const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -395,13 +334,39 @@ export default function EnterpriseMaster() {
       {/* Table */}
       {!showForm && (
         <div className="rounded-xl border border-border bg-card overflow-hidden">
-          <DataTable
-            data={rows as Enterprise[]}
-            columns={columns}
-            loading={isLoading}
-            searchPlaceholder="Search name, type…"
-            emptyMessage="No enterprises found. Add one above."
-          />
+          <div className="p-4 border-b border-border flex items-center gap-3">
+            <div className="relative flex-1 max-w-sm">
+              <Search
+                size={15}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+              />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search name, type…"
+                className="w-full pl-9 pr-3 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30"
+              />
+            </div>
+            <span className="text-xs text-muted-foreground">
+              {filtered.length} record{filtered.length !== 1 ? "s" : ""}
+            </span>
+          </div>
+          {isLoading ? (
+            <div className="p-10 text-center text-muted-foreground text-sm">
+              Loading…
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <DataTable
+                data={filtered}
+                columns={ENTERPRISE_COLUMNS}
+                searchable={false}
+                paginated={true}
+                defaultPageSize={20}
+                emptyMessage="No records found."
+              />
+            </div>
+          )}
         </div>
       )}
 
@@ -410,6 +375,7 @@ export default function EnterpriseMaster() {
         <div className="rounded-xl border border-border bg-card overflow-hidden">
           <div className="p-4 border-b border-border flex items-center justify-between bg-muted/30">
             <div className="flex items-center gap-3">
+              {/* Live logo preview in form header */}
               <LogoAvatar
                 logo={logoPreview || null}
                 name={form.name || "?"}
@@ -429,6 +395,7 @@ export default function EnterpriseMaster() {
             </button>
           </div>
 
+          {/* Tabs */}
           <div className="flex gap-1 p-3 border-b border-border bg-muted/20">
             {(["general", "address", "legal"] as Tab[]).map((t) => (
               <button
@@ -442,8 +409,10 @@ export default function EnterpriseMaster() {
           </div>
 
           <div className="p-6">
+            {/* General */}
             {tab === "general" && (
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                {/* Logo upload — full width */}
                 <div className="col-span-full">
                   <label className="block text-xs font-medium text-muted-foreground mb-2">
                     Enterprise Logo
@@ -465,7 +434,10 @@ export default function EnterpriseMaster() {
                       </div>
                     ) : (
                       <div className="w-16 h-16 rounded-xl border-2 border-dashed border-border bg-muted/20 flex items-center justify-center">
-                        <Building2 size={20} className="text-muted-foreground/40" />
+                        <Building2
+                          size={20}
+                          className="text-muted-foreground/40"
+                        />
                       </div>
                     )}
                     <div>
@@ -496,7 +468,12 @@ export default function EnterpriseMaster() {
                 {sel("Type", "entity_type", ENTITY_TYPES)}
                 {field("Description", "description", "text")}
                 {field("Start Date", "start_date", "date")}
-                {field("Start Financial Year", "start_fin_year", "text", "e.g. 2024-25")}
+                {field(
+                  "Start Financial Year",
+                  "start_fin_year",
+                  "text",
+                  "e.g. 2024-25",
+                )}
                 {sel("Status", "status", ["Active", "Inactive", "Suspended"])}
                 <div className="flex items-center gap-3 pt-5">
                   <button
@@ -508,7 +485,13 @@ export default function EnterpriseMaster() {
                     ) : (
                       <ToggleLeft size={24} className="text-muted-foreground" />
                     )}
-                    <span className={form.discontinue ? "text-red-500" : "text-muted-foreground"}>
+                    <span
+                      className={
+                        form.discontinue
+                          ? "text-red-500"
+                          : "text-muted-foreground"
+                      }
+                    >
                       {form.discontinue ? "Discontinued" : "Not Discontinued"}
                     </span>
                   </button>
@@ -516,10 +499,15 @@ export default function EnterpriseMaster() {
               </div>
             )}
 
+            {/* Address */}
             {tab === "address" && (
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                <div className="col-span-full">{field("Address Line 1", "address")}</div>
-                <div className="col-span-full">{field("Address Line 2", "address_line2")}</div>
+                <div className="col-span-full">
+                  {field("Address Line 1", "address")}
+                </div>
+                <div className="col-span-full">
+                  {field("Address Line 2", "address_line2")}
+                </div>
                 {field("City", "city")}
                 {field("State", "state")}
                 {field("Country", "country")}
@@ -532,6 +520,7 @@ export default function EnterpriseMaster() {
               </div>
             )}
 
+            {/* Legal / Compliance */}
             {tab === "legal" && (
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                 {sel("GST Type", "gst_type", GST_TYPES)}
@@ -544,7 +533,11 @@ export default function EnterpriseMaster() {
                 {field("RERA Date", "rera_date", "date")}
                 {field("Trade License", "trade_license")}
                 {field("Date of Entry", "date_of_entry", "date")}
-                {field("Date of Establishment", "date_of_establishment", "date")}
+                {field(
+                  "Date of Establishment",
+                  "date_of_establishment",
+                  "date",
+                )}
               </div>
             )}
           </div>
@@ -567,6 +560,7 @@ export default function EnterpriseMaster() {
         </div>
       )}
 
+      {/* Delete Confirm */}
       {deleteTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
           <div className="bg-card border border-border rounded-xl p-6 w-80 shadow-xl">
