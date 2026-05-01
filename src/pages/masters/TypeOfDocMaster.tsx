@@ -13,9 +13,9 @@ import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 interface EntryType { EntryTypeId: string; EntryType: string; Eprefix: string | null; EDOC_N: number | null; }
 interface Company { CompanyId: number; CompanyName: string; }
 interface Project { ProjectId: number; ProjectName: string; ProjectCode: string | null; }
-interface DocType { TypeOfDocId: number; Prefix: string; Description: string; CompanyId: number | null; ProjectId: number | null; EntryTypeId: string; IsActive: boolean; StartingDocNo: number; EntryType: string; Eprefix: string | null; FullPrefix: string; CompanyName: string; ProjectName: string; }
+interface DocType { TypeOfDocId: number; Prefix: string; Description: string; CompanyId: number | null; ProjectId: number | null; EntryTypeId: string; IsActive: boolean; StartingDocNo: number; EntryType: string; Eprefix: string | null; FullPrefix: string; CompanyName: string; ProjectName: string; ModuleTag: string | null; }
 
-const emptyForm = { Prefix: "", Description: "", CompanyId: "" as string | number, ProjectId: "" as string | number, EntryTypeId: "", StartingDocNo: "1" };
+const emptyForm = { Prefix: "", Description: "", CompanyId: "" as string | number, ProjectId: "" as string | number, EntryTypeId: "", StartingDocNo: "1", ModuleTag: "" };
 
 function padDocNo(n: string | number): string { return String(parseInt(String(n)) || 1).padStart(6, "0"); }
 function buildPreview(prefix: string, startingDocNo: string): string { if (!prefix) return ""; return `${prefix}/${padDocNo(startingDocNo)}`; }
@@ -36,6 +36,23 @@ function buildColumns(
     },
     { accessorKey: "Description", header: "Description", cell: ({ getValue }) => <span className="text-foreground">{getValue() as string}</span> },
     { accessorKey: "EntryType", header: "Entry Type", cell: ({ getValue }) => <span className="text-foreground">{getValue() as string}</span> },
+    {
+      accessorKey: "ModuleTag", header: "Module Tag",
+      cell: ({ getValue }) => {
+        const tag = getValue() as string | null;
+        if (!tag) return <span className="text-muted-foreground text-xs italic">All pages</span>;
+        const colours: Record<string, string> = {
+          PO: "bg-blue-500/10 text-blue-600 border-blue-500/20",
+          WO: "bg-amber-500/10 text-amber-600 border-amber-500/20",
+          GRN: "bg-emerald-500/10 text-emerald-600 border-emerald-500/20",
+        };
+        return (
+          <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${colours[tag] ?? "bg-muted text-foreground border-border"}`}>
+            {tag}
+          </span>
+        );
+      },
+    },
     { accessorKey: "CompanyName", header: "Company", cell: ({ getValue }) => <span className="text-muted-foreground text-xs">{getValue() as string}</span> },
     { accessorKey: "ProjectName", header: "Project", cell: ({ getValue }) => <span className="text-muted-foreground text-xs">{getValue() as string}</span> },
     {
@@ -90,13 +107,13 @@ const TypeOfDocMaster: React.FC = () => {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!form.Prefix || !form.Description || !form.EntryTypeId) { toast.error("Entry Type, Prefix and Description are required"); return; }
-    const payload = { Prefix: form.Prefix.toUpperCase().trim(), Description: form.Description.trim(), EntryTypeId: form.EntryTypeId, CompanyId: form.CompanyId !== "" ? Number(form.CompanyId) : null, ProjectId: form.ProjectId !== "" ? Number(form.ProjectId) : null, StartingDocNo: parseInt(form.StartingDocNo) || 1 };
+    const payload = { Prefix: form.Prefix.toUpperCase().trim(), Description: form.Description.trim(), EntryTypeId: form.EntryTypeId, CompanyId: form.CompanyId !== "" ? Number(form.CompanyId) : null, ProjectId: form.ProjectId !== "" ? Number(form.ProjectId) : null, StartingDocNo: parseInt(form.StartingDocNo) || 1, ModuleTag: form.ModuleTag || null };
     if (editingId !== null) updateMutation.mutate({ id: editingId, data: payload });
     else createMutation.mutate(payload);
   };
 
   const openEdit = (item: DocType) => {
-    setForm({ Prefix: item.Prefix ?? "", Description: item.Description ?? "", CompanyId: item.CompanyId ?? "", ProjectId: item.ProjectId ?? "", EntryTypeId: item.EntryTypeId ?? "", StartingDocNo: String(item.StartingDocNo ?? 1) });
+    setForm({ Prefix: item.Prefix ?? "", Description: item.Description ?? "", CompanyId: item.CompanyId ?? "", ProjectId: item.ProjectId ?? "", EntryTypeId: item.EntryTypeId ?? "", StartingDocNo: String(item.StartingDocNo ?? 1), ModuleTag: item.ModuleTag ?? "" });
     setEditingId(item.TypeOfDocId); setDrawerOpen(true);
   };
 
@@ -160,6 +177,25 @@ const TypeOfDocMaster: React.FC = () => {
                   <option value="">Select entry type…</option>
                   {entryTypes.map((et) => <option key={et.EntryTypeId} value={et.EntryTypeId}>{et.EntryType}{et.Eprefix ? ` — ${et.Eprefix}` : ""}</option>)}
                 </select>
+              </div>
+              <div>
+                <label className="block text-xs font-heading font-medium text-muted-foreground mb-1.5 uppercase tracking-wide">
+                  Module Tag
+                  <span className="ml-1 text-[10px] normal-case text-muted-foreground font-normal">(controls which page shows this doc type)</span>
+                </label>
+                <select
+                  value={form.ModuleTag}
+                  onChange={(e) => setForm({ ...form, ModuleTag: e.target.value })}
+                  className="w-full border border-border rounded-lg px-3 py-2.5 text-sm bg-background focus:outline-none focus:ring-1 focus:ring-primary"
+                >
+                  <option value="">— All pages (Expense Booking etc.) —</option>
+                  <option value="PO">PO — Purchase Order page only</option>
+                  <option value="WO">WO — Work Order page only</option>
+                  <option value="GRN">GRN — GRN page only</option>
+                </select>
+                <p className="mt-1 text-[11px] text-muted-foreground font-heading">
+                  Leave blank to show in all pages. Set to PO / WO / GRN to restrict this doc type to that page only.
+                </p>
               </div>
               <div>
                 <label className="block text-xs font-heading font-medium text-muted-foreground mb-1.5 uppercase tracking-wide">Document Prefix <span className="text-destructive">*</span></label>
