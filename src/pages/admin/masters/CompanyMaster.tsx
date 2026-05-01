@@ -224,7 +224,7 @@ function buildCompanyColumns(
       accessorKey: "Name",
       header: "Company Name",
       cell: ({ getValue }) => (
-        <span className="font-medium text-foreground max-w-[180px] truncate block">
+        <span className="font-medium text-foreground">
           {getValue() as string}
         </span>
       ),
@@ -233,16 +233,7 @@ function buildCompanyColumns(
       accessorKey: "belongs_to",
       header: "Enterprise",
       cell: ({ getValue }) => (
-        <span className="text-xs text-muted-foreground max-w-[140px] truncate block">
-          {(getValue() as string) || "—"}
-        </span>
-      ),
-    },
-    {
-      accessorKey: "LegalName",
-      header: "Legal Name",
-      cell: ({ getValue }) => (
-        <span className="text-muted-foreground text-xs max-w-[160px] truncate block">
+        <span className="text-xs text-muted-foreground">
           {(getValue() as string) || "—"}
         </span>
       ),
@@ -270,24 +261,6 @@ function buildCompanyColumns(
       header: "City",
       cell: ({ getValue }) => (
         <span className="text-muted-foreground text-xs">
-          {(getValue() as string) || "—"}
-        </span>
-      ),
-    },
-    {
-      accessorKey: "PAN",
-      header: "PAN",
-      cell: ({ getValue }) => (
-        <span className="font-mono text-xs text-muted-foreground">
-          {(getValue() as string) || "—"}
-        </span>
-      ),
-    },
-    {
-      accessorKey: "GSTN",
-      header: "GST No.",
-      cell: ({ getValue }) => (
-        <span className="font-mono text-xs text-muted-foreground">
           {(getValue() as string) || "—"}
         </span>
       ),
@@ -325,7 +298,7 @@ function buildCompanyColumns(
             onClick={() => openEdit(row.original)}
             className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
           >
-            <Edit2 size={13} />
+            <Pencil size={13} />
           </button>
           <button
             onClick={() => setDeleteConfirm(row.original.Id)}
@@ -432,6 +405,12 @@ export default function CompanyMaster() {
     setShowForm(true);
     setActiveTab("general");
   };
+
+  const columns = useMemo(
+    () => buildCompanyColumns(openEdit, setDeleteConfirm),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 
   const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -544,7 +523,7 @@ export default function CompanyMaster() {
                 />
               </div>
             ) : (
-              <div className="overflow-x-auto">
+              <div>
                 <DataTable
                   data={filtered}
                   columns={columns}

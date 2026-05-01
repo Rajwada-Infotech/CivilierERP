@@ -81,29 +81,21 @@ function buildChequeColumns(
       header: "Bank",
       cell: ({ row }) => {
         const bank = dbBanks.find((b) => b.id === row.original.BankId);
-        return (
-          <span className="font-medium text-foreground">
-            {bank?.label || "—"}
-          </span>
-        );
+        return <span className="font-medium text-foreground">{bank?.label || "—"}</span>;
       },
     },
     {
       accessorKey: "AccountNumber",
       header: "Account Number",
       cell: ({ getValue }) => (
-        <span className="font-mono text-xs">
-          {(getValue() as string) || "—"}
-        </span>
+        <span className="font-mono text-xs">{(getValue() as string) || "—"}</span>
       ),
     },
     {
       accessorKey: "ChequeLotNumber",
       header: "Lot Number",
       cell: ({ getValue }) => (
-        <span className="font-mono text-xs text-primary">
-          {(getValue() as string) || "—"}
-        </span>
+        <span className="font-mono text-xs text-primary">{(getValue() as string) || "—"}</span>
       ),
     },
     {
@@ -111,8 +103,7 @@ function buildChequeColumns(
       header: "Range",
       cell: ({ row }) => (
         <span className="font-mono text-xs text-muted-foreground">
-          {row.original.ChequeStartNumber ?? "—"} –{" "}
-          {row.original.ChequeEndNumber ?? "—"}
+          {row.original.ChequeStartNumber ?? "—"} – {row.original.ChequeEndNumber ?? "—"}
         </span>
       ),
     },
@@ -131,9 +122,7 @@ function buildChequeColumns(
       cell: ({ getValue }) => {
         const active = getValue() as boolean;
         return (
-          <span
-            className={`px-2 py-0.5 rounded-full text-xs font-medium ${active ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
-          >
+          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${active ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}>
             {active ? "Active" : "Inactive"}
           </span>
         );
@@ -148,38 +137,16 @@ function buildChequeColumns(
         if (deleteId === id) {
           return (
             <div className="flex items-center gap-1 justify-end">
-              <span className="text-[11px] text-muted-foreground mr-1">
-                Delete?
-              </span>
-              <button
-                onClick={() => handleDelete(id)}
-                className="p-1 rounded text-destructive hover:bg-destructive/10"
-              >
-                <Check size={12} />
-              </button>
-              <button
-                onClick={() => setDeleteId(null)}
-                className="p-1 rounded text-muted-foreground hover:bg-muted"
-              >
-                <X size={12} />
-              </button>
+              <span className="text-[11px] text-muted-foreground mr-1">Delete?</span>
+              <button onClick={() => handleDelete(id)} className="p-1 rounded text-destructive hover:bg-destructive/10"><Check size={12} /></button>
+              <button onClick={() => setDeleteId(null)} className="p-1 rounded text-muted-foreground hover:bg-muted"><X size={12} /></button>
             </div>
           );
         }
         return (
           <div className="flex items-center justify-end gap-1">
-            <button
-              onClick={() => handleEdit(row.original)}
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
-            >
-              <Edit2 size={13} />
-            </button>
-            <button
-              onClick={() => setDeleteId(id)}
-              className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
-            >
-              <Trash2 size={13} />
-            </button>
+            <button onClick={() => handleEdit(row.original)} className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"><Edit2 size={13} /></button>
+            <button onClick={() => setDeleteId(id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"><Trash2 size={13} /></button>
           </div>
         );
       },
@@ -323,15 +290,7 @@ const ChequeMaster: React.FC = () => {
   };
 
   const columns = useMemo(
-    () =>
-      buildChequeColumns(
-        editingId,
-        deleteId,
-        setDeleteId,
-        handleEdit,
-        handleDelete,
-        dbBanks,
-      ),
+    () => buildChequeColumns(editingId, deleteId, setDeleteId, handleEdit, handleDelete, dbBanks),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [editingId, deleteId, dbBanks],
   );
@@ -735,16 +694,8 @@ const ChequeMaster: React.FC = () => {
               searchable={false}
               paginated={true}
               defaultPageSize={20}
-              emptyMessage={
-                search
-                  ? "No cheque lots match your search."
-                  : "No cheque lots yet. Add one above."
-              }
-              rowClassName={(row) =>
-                String(row.original.CId) === editingId
-                  ? "bg-primary/5 border-l-2 border-l-primary"
-                  : ""
-              }
+              emptyMessage={search ? "No cheque lots match your search." : "No cheque lots yet. Add one above."}
+              rowClassName={(row) => String(row.original.CId) === editingId ? "bg-primary/5 border-l-2 border-l-primary" : ""}
             />
           </div>
         </div>

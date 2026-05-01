@@ -85,18 +85,14 @@ function buildDocColumns(
       accessorKey: "EntryType",
       header: "Entry Type",
       cell: ({ getValue }) => (
-        <span className="text-sm font-medium text-foreground">
-          {getValue() as string}
-        </span>
+        <span className="text-sm font-medium text-foreground">{getValue() as string}</span>
       ),
     },
     {
       accessorKey: "FullPrefix",
       header: "Full Prefix",
       cell: ({ getValue }) => (
-        <span className="font-mono text-xs font-semibold text-primary">
-          {getValue() as string}
-        </span>
+        <span className="font-mono text-xs font-semibold text-primary">{getValue() as string}</span>
       ),
     },
     {
@@ -110,27 +106,21 @@ function buildDocColumns(
       accessorKey: "Description",
       header: "Description",
       cell: ({ getValue }) => (
-        <span className="text-sm text-muted-foreground">
-          {getValue() as string}
-        </span>
+        <span className="text-sm text-muted-foreground">{getValue() as string}</span>
       ),
     },
     {
       accessorKey: "CompanyName",
       header: "Company",
       cell: ({ getValue }) => (
-        <span className="text-xs text-muted-foreground">
-          {(getValue() as string) || "All"}
-        </span>
+        <span className="text-xs text-muted-foreground">{(getValue() as string) || "All"}</span>
       ),
     },
     {
       accessorKey: "ProjectName",
       header: "Project",
       cell: ({ getValue }) => (
-        <span className="text-xs text-muted-foreground">
-          {(getValue() as string) || "All"}
-        </span>
+        <span className="text-xs text-muted-foreground">{(getValue() as string) || "All"}</span>
       ),
     },
     {
@@ -139,9 +129,7 @@ function buildDocColumns(
       cell: ({ getValue }) => {
         const active = getValue() as boolean;
         return (
-          <span
-            className={`px-2 py-0.5 rounded-full text-xs font-medium ${active ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
-          >
+          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${active ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}>
             {active ? "Active" : "Inactive"}
           </span>
         );
@@ -343,11 +331,7 @@ const TypeOfDocMaster: React.FC = () => {
             paginated={true}
             defaultPageSize={20}
             emptyMessage="No document types yet."
-            rowClassName={(row) =>
-              row.original.TypeOfDocId === editingId
-                ? "bg-primary/5 border-l-2 border-l-primary"
-                : ""
-            }
+            rowClassName={(row) => row.original.TypeOfDocId === editingId ? "bg-primary/5 border-l-2 border-l-primary" : ""}
           />
         )}
       </div>

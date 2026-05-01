@@ -255,6 +255,144 @@ const ReminderBanner: React.FC<{
   );
 };
 
+// ─── Column builder ───────────────────────────────────────────────────────────
+function buildCardColumns(
+  editingId: string | null,
+  deleteId: string | null,
+  setDeleteId: (id: string | null) => void,
+  handleEdit: (id: string) => void,
+  handleDelete: (id: string) => void,
+  revealedRows: Record<string, boolean>,
+  setRevealedRows: React.Dispatch<
+    React.SetStateAction<Record<string, boolean>>
+  >,
+  dismissed: string[],
+  setDismissed: React.Dispatch<React.SetStateAction<string[]>>,
+  calculateReminderDate: (expiry: string, days: number) => string,
+  daysFromNow: (iso: string) => number,
+): ColumnDef<CardRecord, unknown>[] {
+  return [
+    {
+      accessorKey: "companyName",
+      header: "Company",
+      cell: ({ getValue }) => (
+        <span className="text-xs text-muted-foreground">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "bankName",
+      header: "Bank",
+      cell: ({ getValue }) => (
+        <span className="text-xs font-medium text-foreground">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "cardNumber",
+      header: "Card Number",
+      cell: ({ row }) => {
+        const id = row.original._id;
+        const num = row.original.cardNumber;
+        const revealed = revealedRows[id];
+        return (
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-xs">
+              {revealed ? formatted(num) : masked(num)}
+            </span>
+            <button
+              onClick={() => setRevealedRows((p) => ({ ...p, [id]: !p[id] }))}
+              className="p-1 rounded text-muted-foreground hover:text-primary"
+            >
+              {revealed ? <EyeOff size={12} /> : <Eye size={12} />}
+            </button>
+          </div>
+        );
+      },
+    },
+    {
+      accessorKey: "cardHolder",
+      header: "Card Holder",
+      cell: ({ getValue }) => (
+        <span className="text-xs text-foreground">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "network",
+      header: "Network",
+      cell: ({ getValue }) => (
+        <span className="px-2 py-0.5 rounded-full text-xs bg-primary/10 text-primary">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "cardType",
+      header: "Type",
+      cell: ({ getValue }) => (
+        <span className="text-xs text-muted-foreground">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "expiryDate",
+      header: "Expiry",
+      cell: ({ getValue }) => {
+        const val = getValue() as string;
+        return (
+          <span className="font-mono text-xs text-muted-foreground">
+            {val || "—"}
+          </span>
+        );
+      },
+    },
+    {
+      accessorKey: "status",
+      header: "Status",
+      cell: ({ getValue }) => {
+        const active = getValue() as boolean;
+        return (
+          <span
+            className={`px-2 py-0.5 rounded-full text-xs font-medium ${active ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
+          >
+            {active ? "Active" : "Inactive"}
+          </span>
+        );
+      },
+    },
+    {
+      id: "actions",
+      header: "",
+      enableSorting: false,
+      cell: ({ row }) => {
+        const id = row.original._id;
+        const isEditing = editingId === id;
+        return (
+          <div className="flex items-center justify-end gap-1">
+            <button
+              onClick={() => handleEdit(id)}
+              className={`p-1.5 rounded-lg transition-colors ${isEditing ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-primary hover:bg-primary/10"}`}
+            >
+              <Edit2 size={13} />
+            </button>
+            <button
+              onClick={() => setDeleteId(id)}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+            >
+              <Trash2 size={13} />
+            </button>
+          </div>
+        );
+      },
+    },
+  ];
+}
+
 // ─── Component ────────────────────────────────────────────────────────────────
 const CardMaster: React.FC = () => {
   const queryClient = useQueryClient();
@@ -310,28 +448,11 @@ const CardMaster: React.FC = () => {
   const [search, setSearch] = useState("");
   const [deleteId, setDeleteId] = useState<string | null>(null);
 
-  const columns = useMemo(
-    () =>
-      buildCardColumns(
-        editingId,
-        deleteId,
-        setDeleteId,
-        handleEdit,
-        handleDelete,
-        revealedRows,
-        setRevealedRows,
-        dismissed,
-        setDismissed,
-        calculateReminderDate,
-        daysFromNow,
-      ),
-    [editingId, deleteId, revealedRows, dismissed],
-  );
   const [revealedRows, setRevealedRows] = useState<Record<string, boolean>>({});
+  const [dismissed, setDismissed] = useState<string[]>([]);
   const [showCvc, setShowCvc] = useState(false);
   const [showFormCard, setShowFormCard] = useState(false);
   const [showReminderPanel, setShowReminderPanel] = useState(true);
-  const [dismissed, setDismissed] = useState<string[]>([]);
 
   const cardsWithDismiss = cards.map((c) => ({
     ...c,
@@ -470,6 +591,24 @@ const CardMaster: React.FC = () => {
       toast.error("Delete failed: " + err.message);
     }
   };
+
+  const columns = useMemo(
+    () =>
+      buildCardColumns(
+        editingId,
+        deleteId,
+        setDeleteId,
+        handleEdit,
+        handleDelete,
+        revealedRows,
+        setRevealedRows,
+        dismissed,
+        setDismissed,
+        calculateReminderDate,
+        daysFromNow,
+      ),
+    [editingId, deleteId, revealedRows, dismissed],
+  );
 
   const handleReset = () => {
     setForm(EMPTY);

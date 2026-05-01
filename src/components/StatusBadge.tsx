@@ -41,6 +41,22 @@ const STATUS_CONFIG: Record<
     icon: XCircle,
     classes: "bg-red-50 text-red-700 border-red-200",
   },
+  // Expense booking domain statuses
+  Booked: {
+    label: "Booked",
+    icon: CheckCircle2,
+    classes: "bg-blue-50 text-blue-700 border-blue-200",
+  },
+  Hold: {
+    label: "Hold",
+    icon: Clock,
+    classes: "bg-yellow-50 text-yellow-700 border-yellow-200",
+  },
+  Received: {
+    label: "Received",
+    icon: PackageCheck,
+    classes: "bg-teal-50 text-teal-700 border-teal-200",
+  },
   // GoodsReceiptNotes domain statuses
   "Partially Received": {
     label: "Partial",
@@ -75,7 +91,7 @@ export function StatusBadge({ status, className }: StatusBadgeProps) {
       className={cn(
         "inline-flex items-center gap-1 px-2 py-0.5 rounded-md border text-xs font-medium",
         config.classes,
-        className
+        className,
       )}
     >
       <Icon className="w-3 h-3 shrink-0" />
