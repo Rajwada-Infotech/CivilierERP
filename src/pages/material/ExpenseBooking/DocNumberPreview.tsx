@@ -61,16 +61,17 @@ export function DocNumberPreview({
     setDocTypesLoading(true);
     fetchDocTypes()
       .then((all) => {
+        // When entryTypeFilter is provided, show only doc types whose EntryType
+        // exactly matches the filter (case-insensitive). This ensures:
+        //   - Purchase Order page → only PO doc types
+        //   - Work Order page    → only WO doc types
+        //   - GRN page           → only GRN doc types
+        //   - Expense Booking    → all doc types (no filter passed)
         const filtered = entryTypeFilter
           ? all.filter(
               (d) =>
-                d.EntryType?.toLowerCase().includes(
-                  entryTypeFilter.toLowerCase(),
-                ) ||
-                d.Description?.toLowerCase().includes(
-                  entryTypeFilter.toLowerCase(),
-                ) ||
-                d.Prefix?.toLowerCase().includes(entryTypeFilter.toLowerCase()),
+                d.EntryType?.trim().toLowerCase() ===
+                entryTypeFilter.trim().toLowerCase(),
             )
           : all;
 
