@@ -109,6 +109,13 @@ interface ProjectOption {
   label: string;
 }
 
+// GST config as stored on PO/WO
+interface GSTConfig {
+  applicable: boolean;
+  type: "none" | "cgst_sgst" | "igst";
+  rate: number; // total %, e.g. 18 → CGST 9% + SGST 9%
+}
+
 // From PO master
 interface POItem {
   PurchaseOrderID: number;
@@ -121,6 +128,7 @@ interface POItem {
   ProjectId?: number;
   TotalAmount?: number;
   Status: string;
+  GST?: GSTConfig | null; // GST linked to this PO
 }
 
 // From WO master
@@ -135,6 +143,7 @@ interface WOItem {
   ProjectId?: number;
   TotalAmount?: number;
   Status: string;
+  GST?: GSTConfig | null; // GST linked to this WO
 }
 
 // From Type of Doc master (everything else — invoices, etc.)
@@ -159,6 +168,7 @@ interface SelectedDoc {
   amount?: number; // Auto-filled from the order
   status?: string;
   date?: string;
+  gst?: GSTConfig | null; // GST config from the linked PO/WO
 }
 
 // ─── Section header ───────────────────────────────────────────────────────────
@@ -510,6 +520,7 @@ function DocSelectorPanel({
                       amount: po.TotalAmount,
                       status: po.Status,
                       date: po.PODate,
+                      gst: po.GST ?? null,
                     })
                   }
                 />
@@ -546,6 +557,7 @@ function DocSelectorPanel({
                       amount: wo.TotalAmount,
                       status: wo.Status,
                       date: wo.DocumentDate,
+                      gst: wo.GST ?? null,
                     })
                   }
                 />
@@ -805,6 +817,34 @@ export default function MaterialExpenseBooking() {
   // ── Apply selected doc → pre-fill form ──
   const applyDoc = (doc: SelectedDoc) => {
     setSelectedDoc(doc);
+
+    // ── Resolve GST rates from the linked PO/WO ──────────────────────────
+    // Only PO and WO carry a GST config. TOD keeps CGST/SGST as manual entry.
+    let resolvedCgst = form.cgstRate;
+    let resolvedSgst = form.sgstRate;
+
+    if ((doc.kind === "PO" || doc.kind === "WO") && doc.gst?.applicable) {
+      const gst = doc.gst;
+      if (gst.type === "cgst_sgst") {
+        // Split the total rate evenly between CGST and SGST
+        resolvedCgst = gst.rate / 2;
+        resolvedSgst = gst.rate / 2;
+      } else if (gst.type === "igst") {
+        // IGST — map entirely to CGST field, zero out SGST
+        resolvedCgst = gst.rate;
+        resolvedSgst = 0;
+      } else {
+        // "none" — zero both
+        resolvedCgst = 0;
+        resolvedSgst = 0;
+      }
+    } else if (doc.kind === "PO" || doc.kind === "WO") {
+      // PO/WO exists but GST not applicable — zero out
+      resolvedCgst = 0;
+      resolvedSgst = 0;
+    }
+    // For TOD: leave cgstRate/sgstRate unchanged (user fills manually)
+
     setForm((prev) => ({
       ...prev,
       bookingReference: doc.docNo,
@@ -824,6 +864,9 @@ export default function MaterialExpenseBooking() {
           : doc.kind === "WO"
             ? "WO"
             : doc.docNo.split("/")[0],
+      // GST rates — auto-filled for PO/WO, manual for TOD
+      cgstRate: resolvedCgst,
+      sgstRate: resolvedSgst,
     }));
   };
 
@@ -1311,6 +1354,43 @@ export default function MaterialExpenseBooking() {
               <div className="space-y-4">
                 <SectionHeader label="Amount & GST" />
 
+                {/* GST source indicator — shown when a PO/WO is linked */}
+                {selectedDoc &&
+                  (selectedDoc.kind === "PO" || selectedDoc.kind === "WO") && (
+                    <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/20 text-xs">
+                      <BadgePercent
+                        size={12}
+                        className="text-primary shrink-0"
+                      />
+                      {selectedDoc.gst?.applicable ? (
+                        <span className="text-foreground">
+                          GST auto-filled from linked{" "}
+                          <span className="font-semibold">
+                            {selectedDoc.kind === "PO"
+                              ? "Purchase Order"
+                              : "Work Order"}
+                          </span>
+                          {" — "}
+                          {selectedDoc.gst.type === "cgst_sgst"
+                            ? `CGST ${selectedDoc.gst.rate / 2}% + SGST ${selectedDoc.gst.rate / 2}% (total ${selectedDoc.gst.rate}%)`
+                            : selectedDoc.gst.type === "igst"
+                              ? `IGST ${selectedDoc.gst.rate}% (mapped to CGST)`
+                              : "GST not applicable"}
+                          . Editable if needed.
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">
+                          Linked{" "}
+                          {selectedDoc.kind === "PO"
+                            ? "Purchase Order"
+                            : "Work Order"}{" "}
+                          has no GST applied — rates set to 0. Editable if
+                          needed.
+                        </span>
+                      )}
+                    </div>
+                  )}
+
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   {/* Basic amount — auto-filled from order, read-only */}
                   <Field
@@ -1341,10 +1421,18 @@ export default function MaterialExpenseBooking() {
                     </div>
                   </Field>
 
-                  {/* CGST — editable */}
+                  {/* CGST — auto-filled from PO/WO, always editable */}
                   <Field
                     label="CGST Rate (%)"
-                    hint="Editable — adjust if needed"
+                    hint={
+                      selectedDoc?.kind === "PO" || selectedDoc?.kind === "WO"
+                        ? selectedDoc.gst?.applicable
+                          ? selectedDoc.gst.type === "igst"
+                            ? "IGST mapped here — editable"
+                            : "Auto-filled from linked order — editable"
+                          : "No GST on this order — editable"
+                        : "Enter CGST rate manually"
+                    }
                   >
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs font-semibold">
@@ -1359,16 +1447,34 @@ export default function MaterialExpenseBooking() {
                         onChange={(e) =>
                           set("cgstRate", parseFloat(e.target.value) || 0)
                         }
-                        className="pl-7 font-mono"
-                        placeholder="18"
+                        className={`pl-7 font-mono ${
+                          (selectedDoc?.kind === "PO" ||
+                            selectedDoc?.kind === "WO") &&
+                          selectedDoc.gst?.applicable
+                            ? "border-primary/40 bg-primary/5"
+                            : ""
+                        }`}
+                        placeholder="0"
                       />
                     </div>
                   </Field>
 
-                  {/* SGST — editable */}
+                  {/* SGST — auto-filled from PO/WO (hidden for IGST type), always editable */}
                   <Field
-                    label="SGST Rate (%)"
-                    hint="Editable — adjust if needed"
+                    label={
+                      selectedDoc?.gst?.type === "igst"
+                        ? "SGST Rate (%) — N/A for IGST"
+                        : "SGST Rate (%)"
+                    }
+                    hint={
+                      selectedDoc?.kind === "PO" || selectedDoc?.kind === "WO"
+                        ? selectedDoc.gst?.type === "igst"
+                          ? "IGST order — SGST is 0"
+                          : selectedDoc.gst?.applicable
+                            ? "Auto-filled from linked order — editable"
+                            : "No GST on this order — editable"
+                        : "Enter SGST rate manually"
+                    }
                   >
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs font-semibold">
@@ -1383,7 +1489,13 @@ export default function MaterialExpenseBooking() {
                         onChange={(e) =>
                           set("sgstRate", parseFloat(e.target.value) || 0)
                         }
-                        className="pl-7 font-mono"
+                        className={`pl-7 font-mono ${
+                          (selectedDoc?.kind === "PO" ||
+                            selectedDoc?.kind === "WO") &&
+                          selectedDoc.gst?.applicable
+                            ? "border-primary/40 bg-primary/5"
+                            : ""
+                        }`}
                         placeholder="0"
                       />
                     </div>
