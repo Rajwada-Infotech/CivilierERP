@@ -7,10 +7,19 @@ const { getPool, sql } = require("../db");
 
 // Map module slug → { table, pkCol, statusCol }
 const MODULE_MAP = {
-  "expense-booking": { table: "dbo.ExpenseBooking",   pk: "Eid",   status: "EStatus" },
-  "purchase-orders": { table: "dbo.PurchaseOrders",   pk: "POId",  status: "POStatus" },
-  "work-order":      { table: "dbo.WorkOrder",         pk: "WOId",  status: "WOStatus" },
-  "grn":             { table: "dbo.GRN",               pk: "GRNId", status: "GRNStatus" },
+  "expense-booking": {
+    table: "dbo.ExpenseBooking",
+    pk: "Eid",
+    status: "EStatus",
+  },
+  "purchase-orders": {
+    table: "dbo.PurchaseOrders",
+    pk: "POId",
+    status: "POStatus",
+  },
+  "work-order": { table: "dbo.WorkOrder", pk: "WOId", status: "WOStatus" },
+  grn: { table: "dbo.GRN", pk: "GRNId", status: "GRNStatus" },
+  payments: { table: "dbo.NewPayment", pk: "PPaymentID", status: "Status" },
 };
 
 const APPROVER_ROLES = ["admin", "super_admin", "dba"];
@@ -21,8 +30,7 @@ const APPROVER_ROLES = ["admin", "super_admin", "dba"];
  */
 async function getWorkflow(module) {
   const pool = getPool();
-  const result = await pool.request()
-    .input("Module", sql.NVarChar(100), module)
+  const result = await pool.request().input("Module", sql.NVarChar(100), module)
     .query(`
       SELECT TOP 1 Id, Levels, Approvers
       FROM dbo.ApprovalWorkflows
@@ -40,9 +48,12 @@ async function getRecordStatus(module, id) {
   if (!map) throw new Error(`Unknown module: ${module}`);
 
   const pool = getPool();
-  const result = await pool.request()
+  const result = await pool
+    .request()
     .input("Id", sql.Int, id)
-    .query(`SELECT ${map.status} AS status FROM ${map.table} WHERE ${map.pk} = @Id`);
+    .query(
+      `SELECT ${map.status} AS status FROM ${map.table} WHERE ${map.pk} = @Id`,
+    );
 
   const row = result.recordset[0];
   if (!row) throw new Error(`Record ${id} not found in ${module}`);
@@ -55,26 +66,37 @@ async function getRecordStatus(module, id) {
 async function setRecordStatus(module, id, newStatus, pool) {
   const map = MODULE_MAP[module];
   const p = pool ?? getPool();
-  await p.request()
-    .input("Id",     sql.Int,          id)
+  await p
+    .request()
+    .input("Id", sql.Int, id)
     .input("Status", sql.NVarChar(50), newStatus)
-    .query(`UPDATE ${map.table} SET ${map.status} = @Status WHERE ${map.pk} = @Id`);
+    .query(
+      `UPDATE ${map.table} SET ${map.status} = @Status WHERE ${map.pk} = @Id`,
+    );
 }
 
 /**
  * Write an audit log entry.
  */
-async function writeAuditLog(tableName, recordId, level, role, approverEmail, actionStatus, note) {
+async function writeAuditLog(
+  tableName,
+  recordId,
+  level,
+  role,
+  approverEmail,
+  actionStatus,
+  note,
+) {
   const pool = getPool();
-  await pool.request()
-    .input("TableName",     sql.NVarChar(100), tableName)
-    .input("RecordId",      sql.Int,           recordId)
-    .input("Level",         sql.Int,           level)
-    .input("Role",          sql.NVarChar(100), role || null)
+  await pool
+    .request()
+    .input("TableName", sql.NVarChar(100), tableName)
+    .input("RecordId", sql.Int, recordId)
+    .input("Level", sql.Int, level)
+    .input("Role", sql.NVarChar(100), role || null)
     .input("ApproverEmail", sql.NVarChar(200), approverEmail || null)
-    .input("ActionStatus",  sql.NVarChar(50),  actionStatus)
-    .input("Note",          sql.NVarChar(500), note || null)
-    .query(`
+    .input("ActionStatus", sql.NVarChar(50), actionStatus)
+    .input("Note", sql.NVarChar(500), note || null).query(`
       INSERT INTO dbo.ApprovalAuditLog
         (TableName, RecordId, Level, Role, ApproverEmail, ActionStatus, Note, ActionAt)
       VALUES
@@ -87,10 +109,10 @@ async function writeAuditLog(tableName, recordId, level, role, approverEmail, ac
  */
 async function getApprovedLevelCount(tableName, recordId) {
   const pool = getPool();
-  const result = await pool.request()
+  const result = await pool
+    .request()
     .input("TableName", sql.NVarChar(100), tableName)
-    .input("RecordId",  sql.Int,           recordId)
-    .query(`
+    .input("RecordId", sql.Int, recordId).query(`
       SELECT MAX(Level) AS maxApprovedLevel
       FROM dbo.ApprovalAuditLog
       WHERE TableName = @TableName AND RecordId = @RecordId AND ActionStatus = 'Approved'
@@ -104,7 +126,9 @@ async function getApprovedLevelCount(tableName, recordId) {
 async function guardEdit(module, id) {
   const status = await getRecordStatus(module, parseInt(id, 10));
   if (status === "Pending") {
-    throw new Error("Cannot edit a record that is pending approval. Reject it first.");
+    throw new Error(
+      "Cannot edit a record that is pending approval. Reject it first.",
+    );
   }
   if (status === "Approved") {
     throw new Error("Cannot edit an approved record.");
@@ -124,7 +148,14 @@ async function guardEdit(module, id) {
  * @param {string} userRole
  * @param {string|null} note
  */
-async function transition(module, id, targetStatus, userEmail, userRole, note = null) {
+async function transition(
+  module,
+  id,
+  targetStatus,
+  userEmail,
+  userRole,
+  note = null,
+) {
   const map = MODULE_MAP[module];
   if (!map) throw new Error(`Unknown module: ${module}`);
 
@@ -147,12 +178,22 @@ async function transition(module, id, targetStatus, userEmail, userRole, note = 
   }
 
   if (currentStatus !== "Pending") {
-    throw new Error(`Cannot ${targetStatus.toLowerCase()} from status "${currentStatus}"`);
+    throw new Error(
+      `Cannot ${targetStatus.toLowerCase()} from status "${currentStatus}"`,
+    );
   }
 
   if (targetStatus === "Rejected") {
     await setRecordStatus(module, id, "Rejected");
-    await writeAuditLog(tableName, id, 0, userRole, userEmail, "Rejected", note);
+    await writeAuditLog(
+      tableName,
+      id,
+      0,
+      userRole,
+      userEmail,
+      "Rejected",
+      note,
+    );
     return { newStatus: "Rejected" };
   }
 
@@ -164,7 +205,15 @@ async function transition(module, id, targetStatus, userEmail, userRole, note = 
     const nextLevel = approvedSoFar + 1;
 
     // Write this level's approval
-    await writeAuditLog(tableName, id, nextLevel, userRole, userEmail, "Approved", note);
+    await writeAuditLog(
+      tableName,
+      id,
+      nextLevel,
+      userRole,
+      userEmail,
+      "Approved",
+      note,
+    );
 
     if (nextLevel >= totalLevels) {
       // All levels done — fully approved
@@ -172,7 +221,12 @@ async function transition(module, id, targetStatus, userEmail, userRole, note = 
       return { newStatus: "Approved", level: nextLevel, totalLevels };
     } else {
       // More levels required — stays Pending
-      return { newStatus: "Pending", level: nextLevel, totalLevels, remainingLevels: totalLevels - nextLevel };
+      return {
+        newStatus: "Pending",
+        level: nextLevel,
+        totalLevels,
+        remainingLevels: totalLevels - nextLevel,
+      };
     }
   }
 

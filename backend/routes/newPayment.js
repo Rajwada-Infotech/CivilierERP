@@ -3,7 +3,7 @@ const router = express.Router();
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
-const { transition, guardEdit } = require("../services/approvalService");
+const { transition } = require("../services/approvalService");
 
 const requireUserEmail = (req, res) => {
   const email = req.user?.email;
@@ -68,8 +68,6 @@ router.post("/", async (req, res) => {
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-
-    await guardEdit("payments", req.params.id);
 
     const pool = getPool();
     await pool
