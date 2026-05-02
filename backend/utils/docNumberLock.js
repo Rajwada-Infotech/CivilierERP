@@ -23,45 +23,66 @@
  * Generate and lock the next doc number.
  * Returns the locked string, e.g. "GRN/000042/2024-25"
  * Throws on failure so the caller can return 500.
+ *
+ * Checks BOTH DocNumberSequence (reserved/locked numbers) AND the actual
+ * ExpenseBooking table (committed numbers) so the counter is always accurate
+ * even if older rows were inserted before the sequence table existed.
  */
-async function lockNextDocNumber(pool, sql, { docTypeId, finYear, tableName, issuedBy }) {
+async function lockNextDocNumber(
+  pool,
+  sql,
+  { docTypeId, finYear, tableName, issuedBy },
+) {
   // 1. Fetch doc-type config from TypeOfDoc
   const typeResult = await pool
     .request()
-    .input("TypeOfDocId", sql.Int, docTypeId)
-    .query(`
+    .input("TypeOfDocId", sql.Int, docTypeId).query(`
       SELECT Prefix, FullPrefix, StartingDocNo
       FROM   dbo.TypeOfDoc
       WHERE  TypeOfDocId = @TypeOfDocId AND IsActive = 1
     `);
 
   const typeRow = typeResult.recordset[0];
-  if (!typeRow) throw new Error("Selected document type not found or inactive.");
+  if (!typeRow)
+    throw new Error("Selected document type not found or inactive.");
 
   const rawPrefix = typeRow.FullPrefix ?? typeRow.Prefix ?? "";
   const startFrom = typeRow.StartingDocNo ?? 1;
 
   // Strip trailing digits so "GRN/000500" → "GRN/"
   const prefix = rawPrefix.replace(/\d+$/, "");
-  const fy     = (finYear || "").toString().trim();
+  const fy = (finYear || "").toString().trim();
 
-  // 2. Find current max sequence already locked for this prefix
-  const maxResult = await pool
-    .request()
-    .input("TypeOfDocId", sql.Int, docTypeId)
-    .input("Prefix", sql.NVarChar(100), prefix + "%")
-    .input("FinYearPattern", sql.NVarChar(130), fy ? `%/${fy}` : null)
-    .query(`
-      SELECT MAX(TRY_CAST(SUBSTRING(DocNo, LEN(@Prefix) + 1, 6) AS INT)) AS MaxSeq
-      FROM   dbo.DocNumberSequence
-      WHERE  TypeOfDocId = @TypeOfDocId
-        AND  DocNo LIKE @Prefix
-        AND  (@FinYearPattern IS NULL OR DocNo LIKE @FinYearPattern)
-    `);
+  // 2. Find current max sequence from BOTH sources (global — all fin years)
+  const getGlobalMax = async () => {
+    const dnsResult = await pool
+      .request()
+      .input("TypeOfDocId", sql.Int, docTypeId)
+      .input("Prefix", sql.NVarChar(100), prefix + "%").query(`
+        SELECT MAX(TRY_CAST(SUBSTRING(DocNo, LEN(@Prefix) + 1, 6) AS INT)) AS MaxSeq
+        FROM   dbo.DocNumberSequence
+        WHERE  TypeOfDocId = @TypeOfDocId
+          AND  DocNo LIKE @Prefix
+      `);
 
-  const maxSeq  = maxResult.recordset[0]?.MaxSeq ?? startFrom - 1;
+    const ebResult = await pool
+      .request()
+      .input("EDocTypeId", sql.Int, docTypeId)
+      .input("Prefix2", sql.NVarChar(100), prefix + "%").query(`
+        SELECT MAX(TRY_CAST(SUBSTRING(EDocNo, LEN(@Prefix2) + 1, 6) AS INT)) AS MaxSeq
+        FROM   dbo.ExpenseBooking
+        WHERE  EDocTypeId = @EDocTypeId
+          AND  EDocNo LIKE @Prefix2
+      `);
+
+    const fromDNS = dnsResult.recordset[0]?.MaxSeq ?? 0;
+    const fromEB = ebResult.recordset[0]?.MaxSeq ?? 0;
+    return Math.max(fromDNS, fromEB);
+  };
+
+  const maxSeq = await getGlobalMax();
   const nextSeq = Math.max(maxSeq + 1, startFrom);
-  const padded  = String(nextSeq).padStart(6, "0");
+  const padded = String(nextSeq).padStart(6, "0");
 
   // Final format:  PREFIX/000042/2024-25  or  PREFIX/000042
   let finalDocNo = fy ? `${prefix}${padded}/${fy}` : `${prefix}${padded}`;
@@ -70,11 +91,10 @@ async function lockNextDocNumber(pool, sql, { docTypeId, finYear, tableName, iss
   const tryInsert = async (docNo) => {
     await pool
       .request()
-      .input("TypeOfDocId", sql.Int,          docTypeId)
-      .input("DocNo",       sql.NVarChar(100), docNo)
-      .input("TableName",   sql.NVarChar(100), tableName)
-      .input("IssuedBy",    sql.NVarChar(200), issuedBy || null)
-      .query(`
+      .input("TypeOfDocId", sql.Int, docTypeId)
+      .input("DocNo", sql.NVarChar(100), docNo)
+      .input("TableName", sql.NVarChar(100), tableName)
+      .input("IssuedBy", sql.NVarChar(200), issuedBy || null).query(`
         INSERT INTO dbo.DocNumberSequence (TypeOfDocId, DocNo, TableName, IssuedBy)
         VALUES (@TypeOfDocId, @DocNo, @TableName, @IssuedBy)
       `);
@@ -84,22 +104,11 @@ async function lockNextDocNumber(pool, sql, { docTypeId, finYear, tableName, iss
     await tryInsert(finalDocNo);
   } catch (_seqErr) {
     // Unique-constraint collision: another request grabbed this exact number.
-    // Re-read the max and bump by 1 more.
-    const retryMax = await pool
-      .request()
-      .input("TypeOfDocId", sql.Int, docTypeId)
-      .input("Prefix", sql.NVarChar(100), prefix + "%")
-      .input("FinYearPattern", sql.NVarChar(130), fy ? `%/${fy}` : null)
-      .query(`
-        SELECT MAX(TRY_CAST(SUBSTRING(DocNo, LEN(@Prefix) + 1, 6) AS INT)) AS MaxSeq
-        FROM   dbo.DocNumberSequence
-        WHERE  TypeOfDocId = @TypeOfDocId
-          AND  DocNo LIKE @Prefix
-          AND  (@FinYearPattern IS NULL OR DocNo LIKE @FinYearPattern)
-      `);
-    const retrySeq  = (retryMax.recordset[0]?.MaxSeq ?? nextSeq) + 1;
+    // Re-read the global max (both tables) and bump by 1 more.
+    const retryMax = await getGlobalMax();
+    const retrySeq = Math.max(retryMax + 1, nextSeq + 1);
     const retryBase = `${prefix}${String(retrySeq).padStart(6, "0")}`;
-    finalDocNo      = fy ? `${retryBase}/${fy}` : retryBase;
+    finalDocNo = fy ? `${retryBase}/${fy}` : retryBase;
     await tryInsert(finalDocNo);
   }
 
@@ -113,10 +122,9 @@ async function backPatchRecordId(pool, sql, docNo, tableName, recordId) {
   if (!docNo || !recordId) return;
   await pool
     .request()
-    .input("DocNo",     sql.NVarChar(100), docNo)
+    .input("DocNo", sql.NVarChar(100), docNo)
     .input("TableName", sql.NVarChar(100), tableName)
-    .input("RecordId",  sql.Int,           parseInt(recordId, 10))
-    .query(`
+    .input("RecordId", sql.Int, parseInt(recordId, 10)).query(`
       UPDATE dbo.DocNumberSequence
       SET    RecordId = @RecordId
       WHERE  DocNo = @DocNo AND TableName = @TableName
@@ -124,4 +132,3 @@ async function backPatchRecordId(pool, sql, docNo, tableName, recordId) {
 }
 
 module.exports = { lockNextDocNumber, backPatchRecordId };
-

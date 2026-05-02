@@ -8,6 +8,7 @@ import {
   deletePayment,
 } from "@/api/newPaymentApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { getBanks } from "@/api/bankMasterApi";
 import { toast } from "sonner";
 import { formatINR } from "@/utils/formatCurrency";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -61,14 +62,29 @@ interface DbPayment {
 interface BankOption {
   id: number;
   label: string;
-  accountNumber?: string;
-  ifscCode?: string;
+  accountNumber?: string | null;
+  ifscCode?: string | null;
+  branch?: string | null;
+  accountType?: string | null;
 }
 
 interface ExpenseOption {
   id: string;
   value: string;
   label: string;
+  // Present on all options
+  type?: "booking" | "emi";
+  expenseBookingId?: number;
+  docNo?: string;
+  projectName?: string;
+  amount?: number;
+  companyId?: number | null;
+  // EMI-specific
+  installmentNo?: number;
+  refNumber?: string | null;
+  dueDate?: string | null;
+  status?: string;
+  parentDocNo?: string;
 }
 
 interface ExpenseDetail {
@@ -101,9 +117,19 @@ interface PaymentRecord {
 // ─── Fetchers ─────────────────────────────────────────────────────────────────
 
 const fetchBankOptions = async (): Promise<BankOption[]> => {
-  const res = await fetchWithAuth("/api/account-head-master/bank-options");
-  if (!res.ok) return [];
-  return res.json();
+  const banks = await getBanks();
+  return banks
+    .filter((b) => b.BStatus)
+    .map((b) => ({
+      id: b.BId,
+      label: b.BName
+        ? `${b.BName}${b.BAccountNumber ? ` — ${b.BAccountNumber}` : ""}`
+        : `Bank #${b.BId}`,
+      accountNumber: b.BAccountNumber,
+      ifscCode: b.BIfscCode,
+      branch: b.BBranch,
+      accountType: b.BAccountType,
+    }));
 };
 
 const fetchExpenseOptions = async (): Promise<ExpenseOption[]> => {
@@ -436,7 +462,11 @@ const Payment: React.FC = () => {
   const openEdit = (rec: PaymentRecord) => {
     setEditingId(rec.id);
     const { id, ...rest } = rec;
-    setForm(rest);
+    // Resolve expenseId from the stored expenseRef doc number so the banner stays linked
+    const matchedOption = rest.expenseRef
+      ? expenseOptions.find((o) => o.label.startsWith(rest.expenseRef))
+      : undefined;
+    setForm({ ...rest, expenseId: matchedOption?.id ?? "" });
     setView("form");
   };
 
@@ -448,38 +478,64 @@ const Payment: React.FC = () => {
 
   // ── Expense booking selection → auto-fill ──────────────────────────────────
 
-  const handleExpenseSelect = useCallback(async (expenseId: string) => {
-    if (!expenseId) {
-      setForm((prev) => ({
-        ...prev,
-        expenseId: "",
-        expenseRef: "",
-        project: "",
-        company: "",
-        amount: null,
-        docType: "",
-      }));
-      return;
-    }
-    setLoadingExpense(true);
-    try {
-      const detail = await fetchExpenseDetail(expenseId);
-      if (!detail) throw new Error("Not found");
-      setForm((prev) => ({
-        ...prev,
-        expenseId,
-        expenseRef: detail.EDocNo || "",
-        project: detail.EProjectName || "",
-        company: String(detail.ECompanyId ?? ""),
-        amount: detail.ENetAmount ?? detail.EAmount ?? null,
-        docType: detail.DocTypeName || detail.EDocumentType || "",
-      }));
-    } catch {
-      toast.error("Could not load expense booking details.");
-    } finally {
-      setLoadingExpense(false);
-    }
-  }, []);
+  const handleExpenseSelect = useCallback(
+    async (expenseId: string) => {
+      if (!expenseId) {
+        setForm((prev) => ({
+          ...prev,
+          expenseId: "",
+          expenseRef: "",
+          project: "",
+          company: "",
+          amount: null,
+          docType: "",
+        }));
+        return;
+      }
+
+      // EMI installment options have id like "emi-{bookingId}-{no}".
+      // The detail endpoint only accepts numeric booking IDs, so for EMI options
+      // we auto-fill directly from the option data without any API call.
+      const selectedOption = expenseOptions.find((o) => o.id === expenseId);
+      if (selectedOption?.type === "emi") {
+        // Derive a short doc type from the ref: "CI/WO/000001/2025-2026-EMI-01" → "WO/EMI-01"
+        const ref = selectedOption.refNumber || "";
+        const emiTag = ref.match(/EMI-\d+$/)?.[0] ?? "EMI";
+        const woTag = ref.match(/\/(WO|PO|EXP)\//)?.[1] ?? "EXP";
+        const shortDocType = `${woTag}/${emiTag}`;
+        setForm((prev) => ({
+          ...prev,
+          expenseId,
+          expenseRef: ref || selectedOption.docNo || "",
+          project: selectedOption.projectName || "",
+          company: String(selectedOption.companyId ?? ""),
+          amount: selectedOption.amount ?? null,
+          docType: shortDocType,
+        }));
+        return;
+      }
+
+      setLoadingExpense(true);
+      try {
+        const detail = await fetchExpenseDetail(expenseId);
+        if (!detail) throw new Error("Not found");
+        setForm((prev) => ({
+          ...prev,
+          expenseId,
+          expenseRef: detail.EDocNo || "",
+          project: detail.EProjectName || "",
+          company: String(detail.ECompanyId ?? ""),
+          amount: detail.ENetAmount ?? detail.EAmount ?? null,
+          docType: detail.DocTypeName || detail.EDocumentType || "",
+        }));
+      } catch {
+        toast.error("Could not load expense booking details.");
+      } finally {
+        setLoadingExpense(false);
+      }
+    },
+    [expenseOptions],
+  );
 
   const clearExpenseLink = () => {
     setForm((prev) => ({
@@ -503,7 +559,8 @@ const Payment: React.FC = () => {
     }
     const bank = banks.find((b) => String(b.id) === bankIdStr);
     set("bankId", bank?.id ?? null);
-    set("bankName", bank?.label ?? "");
+    // Store just the base name (before the " — accountNumber" suffix)
+    set("bankName", bank?.label?.split(" — ")[0] ?? "");
   };
 
   // ── Save ───────────────────────────────────────────────────────────────────
@@ -515,6 +572,10 @@ const Payment: React.FC = () => {
     }
     if (!form.mode) {
       toast.error("Please select a payment mode.");
+      return;
+    }
+    if (!form.bankId) {
+      toast.error("Please select a bank account.");
       return;
     }
     if (!form.date) {
@@ -544,7 +605,7 @@ const Payment: React.FC = () => {
         await addPayment(payload);
         toast.success("Payment saved.");
       }
-      queryClient.invalidateQueries({ queryKey: ["payments"] });
+      queryClient.invalidateQueries({ queryKey: ["payments"], exact: false });
       cancelForm();
     } catch (err: any) {
       toast.error("Save failed: " + err.message);
@@ -559,7 +620,7 @@ const Payment: React.FC = () => {
     try {
       await deletePayment(id);
       toast.success("Payment deleted.");
-      queryClient.invalidateQueries({ queryKey: ["payments"] });
+      queryClient.invalidateQueries({ queryKey: ["payments"], exact: false });
       setDeleteId(null);
     } catch (err: any) {
       toast.error("Delete failed: " + err.message);
@@ -895,6 +956,22 @@ const Payment: React.FC = () => {
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                     />
                   </div>
+                  {form.bankId &&
+                    (() => {
+                      const selected = banks.find((b) => b.id === form.bankId);
+                      if (!selected) return null;
+                      const details = [
+                        selected.ifscCode && `IFSC: ${selected.ifscCode}`,
+                        selected.branch && `Branch: ${selected.branch}`,
+                        selected.accountType && `Type: ${selected.accountType}`,
+                      ].filter(Boolean);
+                      if (!details.length) return null;
+                      return (
+                        <p className="text-[11px] text-muted-foreground/70 mt-1 pl-1">
+                          {details.join(" · ")}
+                        </p>
+                      );
+                    })()}
                 </Field>
               </div>
 
@@ -976,6 +1053,7 @@ const Payment: React.FC = () => {
                             onSuccess={() =>
                               queryClient.invalidateQueries({
                                 queryKey: ["payments"],
+                                exact: false,
                               })
                             }
                           />
@@ -1081,6 +1159,7 @@ const Payment: React.FC = () => {
                                 onSuccess={() =>
                                   queryClient.invalidateQueries({
                                     queryKey: ["payments"],
+                                    exact: false,
                                   })
                                 }
                               />

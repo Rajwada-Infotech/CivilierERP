@@ -18,8 +18,8 @@ const bypassOrCheck = (module, subModule, action = "CanView") => [
 // ── Module → EntryType keyword map ───────────────────────────────────────────
 // Maps ?module= query param to SQL LIKE patterns applied to et.EntryType
 const MODULE_KEYWORDS = {
-  PO:  ["purchase order", "purchase"],
-  WO:  ["work order"],
+  PO: ["purchase order", "purchase"],
+  WO: ["work order"],
   GRN: ["goods receipt", "grn", "goods received"],
 };
 
@@ -77,8 +77,9 @@ router.get(
   },
 );
 
-// ── GET /:id/next-number — generate the next doc number for a type ─────────────
-// Called by the DocNumberPreview component in the frontend.
+// ── GET /:id/next-number — preview the next doc number (read-only, no lock) ───
+// Called by the DocNumberPreview component and DocSelectorPanel in the frontend.
+// Updates in real-time when finYear changes.
 // Query params:
 //   finYear  — e.g. "2024-25"  appended as suffix: PREFIX/000500/2024-25
 router.get("/:id/next-number", authMiddleware, async (req, res) => {
@@ -109,17 +110,18 @@ router.get("/:id/next-number", authMiddleware, async (req, res) => {
     const rawPrefix = typeRow.FullPrefix ?? typeRow.Prefix ?? "";
     const startFrom = typeRow.StartingDocNo ?? 1;
 
-    // FullPrefix in the DB may already include the starting number
-    // e.g. "PR/REC/000500" — strip trailing digits to get the true prefix "PR/REC/"
+    // Strip trailing digits so "CI/OTH/000001" → "CI/OTH/"
     const truePrefix = rawPrefix.replace(/\d+$/, "");
 
-    // Find the current max sequence for this true prefix
-    const maxResult = await pool
+    // ── Strategy: max sequence number across ALL fin years (global counter) ──
+    // The fin year is only a cosmetic suffix — the counter never resets per year.
+    // This matches exactly what lockNextDocNumber does when it issues numbers.
+
+    // Max already locked in DocNumberSequence (all fin years, same prefix)
+    const maxDNSResult = await pool
       .request()
       .input("TypeOfDocId", sql.Int, id)
-      .input("Prefix", sql.NVarChar(100), truePrefix + "%")
-      .input("FinYearPattern", sql.NVarChar(130), finYear ? `%/${finYear}` : null)
-      .query(`
+      .input("Prefix", sql.NVarChar(100), truePrefix + "%").query(`
         SELECT MAX(
           TRY_CAST(
             SUBSTRING(DocNo, LEN(@Prefix) + 1, 6) AS INT
@@ -128,19 +130,31 @@ router.get("/:id/next-number", authMiddleware, async (req, res) => {
         FROM dbo.DocNumberSequence
         WHERE TypeOfDocId = @TypeOfDocId
           AND DocNo LIKE @Prefix
-          AND (@FinYearPattern IS NULL OR DocNo LIKE @FinYearPattern)
       `);
 
-    let maxSeq = maxResult.recordset[0]?.MaxSeq ?? null;
+    // Max already committed in ExpenseBooking (all fin years, same prefix)
+    const maxEBResult = await pool
+      .request()
+      .input("EDocTypeId", sql.Int, id)
+      .input("Prefix2", sql.NVarChar(100), truePrefix + "%").query(`
+        SELECT MAX(
+          TRY_CAST(
+            SUBSTRING(EDocNo, LEN(@Prefix2) + 1, 6) AS INT
+          )
+        ) AS MaxSeq
+        FROM dbo.ExpenseBooking
+        WHERE EDocTypeId = @EDocTypeId
+          AND EDocNo LIKE @Prefix2
+      `);
 
-    if (maxSeq === null) {
-      maxSeq = startFrom - 1;
-    }
+    const seqFromDNS = maxDNSResult.recordset[0]?.MaxSeq ?? null;
+    const seqFromEB = maxEBResult.recordset[0]?.MaxSeq ?? null;
+    const globalMax = Math.max(seqFromDNS ?? 0, seqFromEB ?? 0);
 
-    const nextSeq = Math.max(maxSeq + 1, startFrom);
+    const nextSeq = Math.max(globalMax + 1, startFrom);
     const paddedSeq = String(nextSeq).padStart(6, "0");
 
-    // Final format: PR/REC/000500/2024-25  (or  PR/REC/000500  without finYear)
+    // Final format: CI/OTH/000002/2025-26  (or  CI/OTH/000002  without finYear)
     const nextDocNo = finYear
       ? `${truePrefix}${paddedSeq}/${finYear}`
       : `${truePrefix}${paddedSeq}`;

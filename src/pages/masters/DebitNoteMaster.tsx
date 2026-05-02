@@ -273,7 +273,10 @@ const DebitNoteMaster: React.FC = () => {
   const { finYears } = useFinYear();
   const [dnDocTypeId, setDnDocTypeId] = useState<number | null>(null);
   const [dnDocNo, setDnDocNo] = useState("");
-  const [dnFormPatch, setDnFormPatch] = useState<Record<string, unknown> | null>(null);
+  const [dnFormPatch, setDnFormPatch] = useState<Record<
+    string,
+    unknown
+  > | null>(null);
   const [dnFormPatchKey, setDnFormPatchKey] = useState(0);
   const [docRefreshTrigger, setDocRefreshTrigger] = useState(0);
   const activeFinYear =
@@ -325,9 +328,17 @@ const DebitNoteMaster: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: enterpriseData } = useQuery({
-    queryKey: ["enterprises"],
-    queryFn: () => fetchWithAuth("/api/enterprises").then((r) => r.json()),
+  const { data: companyData } = useQuery({
+    queryKey: ["enterprise-companies"],
+    queryFn: () =>
+      fetchWithAuth("/api/debit-note/options/companies").then((r) => r.json()),
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const { data: projectData } = useQuery({
+    queryKey: ["enterprise-projects"],
+    queryFn: () =>
+      fetchWithAuth("/api/debit-note/options/projects").then((r) => r.json()),
     staleTime: 5 * 60 * 1000,
   });
 
@@ -338,13 +349,19 @@ const DebitNoteMaster: React.FC = () => {
     staleTime: 5 * 60 * 1000,
   });
 
-  const { data: expenseData, refetch: refetchExpenses, error: expenseError } = useQuery({
+  const {
+    data: expenseData,
+    refetch: refetchExpenses,
+    error: expenseError,
+  } = useQuery({
     queryKey: ["expense-booking-options"],
     queryFn: async () => {
       const r = await fetchWithAuth("/api/expense-booking/options");
       if (!r.ok) {
         const body = await r.json().catch(() => ({}));
-        throw new Error(body.error || `Failed to load expense options (${r.status})`);
+        throw new Error(
+          body.error || `Failed to load expense options (${r.status})`,
+        );
       }
       return r.json();
     },
@@ -354,24 +371,18 @@ const DebitNoteMaster: React.FC = () => {
     gcTime: 0,
   });
 
-  // Options
-  const ALL_ENTERPRISES: Array<{
-    id: number;
-    name: string | null;
-    business_type: string | null;
-  }> = Array.isArray(enterpriseData) ? enterpriseData : [];
-
-  const COMPANY_OPTIONS = ALL_ENTERPRISES.filter(
-    (enterprise) => (enterprise.business_type ?? "").toUpperCase() === "C",
+  // Options — each endpoint already returns only the correct business_type
+  const COMPANY_OPTIONS: { id: number; label: string }[] = Array.isArray(
+    companyData,
   )
-    .map((enterprise) => ({ id: enterprise.id, label: enterprise.name ?? "" }))
-    .filter((option) => option.label !== "");
+    ? companyData.filter((o: any) => o.label)
+    : [];
 
-  const PROJECT_OPTIONS = ALL_ENTERPRISES.filter(
-    (enterprise) => (enterprise.business_type ?? "").toUpperCase() === "P",
+  const PROJECT_OPTIONS: { id: number; label: string }[] = Array.isArray(
+    projectData,
   )
-    .map((enterprise) => ({ id: enterprise.id, label: enterprise.name ?? "" }))
-    .filter((option) => option.label !== "");
+    ? projectData.filter((o: any) => o.label)
+    : [];
 
   const SUPPLIER_OPTIONS: { id: number; label: string }[] = Array.isArray(
     accountHeadData,
@@ -386,12 +397,14 @@ const DebitNoteMaster: React.FC = () => {
       (b: any) => b.value === selectedValue || String(b.id) === selectedValue,
     )?.id ?? null;
 
-  // Map DB data to UI
+  // Map DB data to UI — company_name / project_name now come from the backend JOIN
   const mappedData: RecordWithId[] = Array.isArray(dbData)
     ? dbData.map((item: any) => ({
         _id: String(item.id),
-        company: labelById(COMPANY_OPTIONS, item.company_id),
-        project: labelById(PROJECT_OPTIONS, item.project_id),
+        company:
+          item.company_name ?? labelById(COMPANY_OPTIONS, item.company_id),
+        project:
+          item.project_name ?? labelById(PROJECT_OPTIONS, item.project_id),
         supplier: labelById(SUPPLIER_OPTIONS, item.supplier_id),
         billDiscountGroup: {
           billNumber:
@@ -587,8 +600,8 @@ const DebitNoteMaster: React.FC = () => {
       />
       {expenseError && (
         <div className="mb-3 px-4 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-500 text-sm">
-          ⚠️ Could not load expense documents:{" "}
-          {(expenseError as Error).message}. Bill dropdown will be empty.
+          ⚠️ Could not load expense documents: {(expenseError as Error).message}
+          . Bill dropdown will be empty.
         </div>
       )}
       <div className="flex items-center gap-3 mb-4">
@@ -642,13 +655,13 @@ const DebitNoteMaster: React.FC = () => {
           title: "Debit Note Master",
           filename: "debit-note-master",
           columns: [
-            { header: "Company",  accessor: "company" },
-            { header: "Project",  accessor: "project" },
+            { header: "Company", accessor: "company" },
+            { header: "Project", accessor: "project" },
             { header: "Supplier", accessor: "supplier" },
-            { header: "Doc No.",  accessor: "docNo" },
+            { header: "Doc No.", accessor: "docNo" },
             { header: "Bill/Doc", accessor: "billDiscountGroup" },
             { header: "Discount", accessor: "discountDisplay" },
-            { header: "Status",   accessor: "status" },
+            { header: "Status", accessor: "status" },
           ],
         }}
       />
