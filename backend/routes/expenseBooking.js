@@ -17,69 +17,140 @@ const requireUserEmail = (req, res) => {
 };
 
 // ─── GET /options ─────────────────────────────────────────────────────────────
-router.get("/options", async (req, res) => {
-  try {
-    const pool = getPool();
-    const result = await pool.request().query(`
-      SELECT DISTINCT
-        Eid AS id,
-        Eid AS value,
-CONCAT(
+router.get(
+  "/options",
+  cache("expense-booking-options", 120),
+  async (req, res) => {
+    try {
+      const pool = getPool();
+
+      const bookingsResult = await pool.request().query(`
+      SELECT
+        Eid                          AS id,
+        Eid                          AS value,
+        ISNULL(EDocNo, 'N/A')        AS docNo,
+        ISNULL(EProjectName, '')     AS projectName,
+        ISNULL(ENetAmount, ISNULL(EAmount, 0)) AS amount,
+        ISNULL(ECompanyId, 0)        AS companyId,
+        EEmiPayment                  AS emiEnabled,
+        CONCAT(
           ISNULL(EDocNo,'N/A'),
           N' — ',
           ISNULL(EProjectName,''),
           N' (₹',
-          FORMAT(ISNULL(EAmount,0), 'N0'),
+          CAST(CAST(ISNULL(ENetAmount, ISNULL(EAmount,0)) AS BIGINT) AS NVARCHAR(20)),
           ')'
-        ) AS label,
-        ECreatedAt
+        ) AS label
       FROM dbo.ExpenseBooking
-      ORDER BY ECreatedAt DESC
+      ORDER BY Eid DESC
     `);
-    res.json(result.recordset);
-  } catch (err) {
-    console.error("Options error:", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
+
+      const emiResult = await pool.request().query(`
+      SELECT
+        ei.Id                        AS id,
+        ei.ExpenseBookingId          AS expenseBookingId,
+        ei.InstallmentNo             AS installmentNo,
+        ei.RefNumber                 AS refNumber,
+        ei.DueDate                   AS dueDate,
+        ei.Amount                    AS amount,
+        ei.Status                    AS status,
+        eb.EProjectName              AS projectName,
+        eb.ECompanyId                AS companyId,
+        eb.EDocNo                    AS parentDocNo,
+        CONCAT(
+          ISNULL(ei.RefNumber, CONCAT('EMI-', RIGHT('00' + CAST(ei.InstallmentNo AS VARCHAR), 2))),
+          N' — ',
+          ISNULL(eb.EProjectName, ''),
+          N' (₹',
+          CAST(CAST(ISNULL(ei.Amount,0) AS BIGINT) AS NVARCHAR(20)),
+          N') — Installment #',
+          CAST(ei.InstallmentNo AS NVARCHAR(10)),
+          CASE WHEN ei.Status = 'Paid' THEN N' ✓ Paid' ELSE '' END
+        ) AS label
+      FROM dbo.EmiInstallments ei
+      INNER JOIN dbo.ExpenseBooking eb ON eb.Eid = ei.ExpenseBookingId
+      WHERE eb.EEmiPayment = 1
+      ORDER BY ei.ExpenseBookingId DESC, ei.InstallmentNo ASC
+    `);
+
+      const bookingOptions = bookingsResult.recordset.map((r) => ({
+        id: String(r.id),
+        value: String(r.value),
+        label: r.label,
+        type: "booking",
+        expenseBookingId: r.id,
+        docNo: r.docNo,
+        projectName: r.projectName,
+        amount: parseFloat(r.amount) || 0,
+        companyId: r.companyId || null,
+      }));
+
+      const emiOptions = emiResult.recordset.map((r) => ({
+        id: `emi-${r.expenseBookingId}-${r.installmentNo}`,
+        value: `emi-${r.expenseBookingId}-${r.installmentNo}`,
+        label: r.label,
+        type: "emi",
+        expenseBookingId: r.expenseBookingId,
+        installmentNo: r.installmentNo,
+        refNumber: r.refNumber,
+        dueDate: r.dueDate ? String(r.dueDate).slice(0, 10) : null,
+        docNo: r.refNumber || r.parentDocNo,
+        projectName: r.projectName,
+        amount: parseFloat(r.amount) || 0,
+        companyId: r.companyId || null,
+        status: r.status,
+        parentDocNo: r.parentDocNo,
+      }));
+
+      res.json([...bookingOptions, ...emiOptions]);
+    } catch (err) {
+      console.error("Options error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
 // ─── GET all (paginated) ──────────────────────────────────────────────────────
 router.get("/", cache("expense-booking", 60), async (req, res) => {
   try {
     const pool = getPool();
     const page = Math.max(parseInt(req.query.page) || 1, 1);
-    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 100);
     const offset = (page - 1) * limit;
-
-    const countResult = await pool
-      .request()
-      .query("SELECT COUNT(*) AS total FROM dbo.ExpenseBooking");
-    const total = parseInt(countResult.recordset[0].total);
 
     const result = await pool
       .request()
       .input("offset", sql.Int, offset)
       .input("limit", sql.Int, limit).query(`
         SELECT
-          eb.*,
-          eb.Eid AS id,
+          eb.Eid, eb.Eid AS id,
+          eb.EProjectName, eb.EDocumentType, eb.EDocDate,
+          eb.EAmount, eb.ENetAmount, eb.ECgstRate, eb.ESgstRate,
+          eb.EDocNo, eb.EEmiPayment, eb.EInstallmentCount, eb.EEmiAmount,
+          eb.EEmiStartDate, eb.EReminder, eb.ERemarks, eb.EStatus,
+          eb.ECreatedAt, eb.EUpdatedAt, eb.ECompanyId, eb.EDocTypeId,
+          eb.EFinYear, eb.ECreatedBy,
           CASE
-            WHEN t.Prefix IS NOT NULL AND t.Description IS NOT NULL THEN t.Prefix + ' — ' + t.Description
+            WHEN t.Prefix IS NOT NULL AND t.Description IS NOT NULL THEN t.Prefix + N' — ' + t.Description
             WHEN t.Prefix IS NOT NULL THEN t.Prefix
             ELSE NULL
-          END AS DocTypeName
+          END AS DocTypeName,
+          COUNT(*) OVER() AS _total
         FROM dbo.ExpenseBooking eb
         LEFT JOIN dbo.TypeOfDoc t ON eb.EDocTypeId = t.TypeOfDocId
         ORDER BY eb.Eid DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `);
 
+    const rows = result.recordset;
+    const total = rows.length > 0 ? parseInt(rows[0]._total) : 0;
+
     res.json({
-      data: result.recordset,
+      data: rows.map(({ _total, ...r }) => r),
       page,
       limit,
       total,
-      totalPages: Math.ceil(total / limit),
+      totalPages: Math.ceil(total / limit) || 1,
     });
   } catch (err) {
     console.error("List error:", err.message);
@@ -196,7 +267,7 @@ router.get("/:id/approval-trail", async (req, res) => {
   }
 });
 
-// ─── POST Create (Fixed with Proper Transaction) ──────────────────────────────
+// ─── POST Create ──────────────────────────────────────────────────────────────
 router.post("/", async (req, res) => {
   const {
     EProjectName,
@@ -229,7 +300,6 @@ router.post("/", async (req, res) => {
   try {
     await transaction.begin();
 
-    // 1. Generate and lock Document Number inside transaction
     if (EDocTypeId) {
       const typeId = parseInt(EDocTypeId, 10);
       const finYear = (EFinYear || "").toString().trim();
@@ -254,7 +324,6 @@ router.post("/", async (req, res) => {
       const prefix = rawPrefix.replace(/\d+$/, "");
       const startFrom = typeRow.StartingDocNo ?? 1;
 
-      // Get next sequence with lock
       const maxResult = await transaction
         .request()
         .input("TypeOfDocId", sql.Int, typeId)
@@ -279,7 +348,6 @@ router.post("/", async (req, res) => {
         ? `${prefix}${padded}/${finYear}`
         : `${prefix}${padded}`;
 
-      // Insert into DocNumberSequence (locked inside transaction)
       await transaction
         .request()
         .input("TypeOfDocId", sql.Int, typeId)
@@ -291,7 +359,6 @@ router.post("/", async (req, res) => {
         `);
     }
 
-    // 2. Insert Expense Booking
     const insertResult = await transaction
       .request()
       .input("EProjectName", sql.NVarChar(150), EProjectName || null)
@@ -354,7 +421,6 @@ router.post("/", async (req, res) => {
 
     const newExpenseId = insertResult.recordset[0]?.NewId;
 
-    // 3. Back-patch RecordId into DocNumberSequence
     if (finalDocNo && newExpenseId) {
       await transaction
         .request()
@@ -368,7 +434,6 @@ router.post("/", async (req, res) => {
 
     await transaction.commit();
 
-    // 4. Insert EMI Installments (after commit - non-critical)
     if (EEmiPayment && EEmiData && newExpenseId) {
       let schedule = [];
       try {
@@ -381,12 +446,18 @@ router.post("/", async (req, res) => {
 
       for (const row of schedule) {
         try {
+          if (!row.dueDate) {
+            console.warn(
+              `EMI row ${row.installmentNo} skipped — missing dueDate`,
+            );
+            continue;
+          }
           await pool
             .request()
             .input("ExpenseBookingId", sql.Int, newExpenseId)
             .input("InstallmentNo", sql.Int, row.installmentNo)
-            .input("RefNumber", sql.NVarChar(150), row.refNumber || null)
-            .input("DueDate", sql.Date, row.dueDate || null)
+            .input("RefNumber", sql.NVarChar(200), row.refNumber || null)
+            .input("DueDate", sql.Date, row.dueDate)
             .input("Amount", sql.Decimal(18, 2), row.amount || 0)
             .input("Status", sql.NVarChar(20), row.status || "Pending").query(`
               INSERT INTO dbo.EmiInstallments
@@ -461,7 +532,6 @@ router.put("/:id/emi-schedule/:no/pay", async (req, res) => {
         WHERE ExpenseBookingId = @ExpenseBookingId AND InstallmentNo = @InstallmentNo
       `);
 
-    // Sync back to EEmiData JSON
     const schedRes = await pool.request().input("ExpenseBookingId", sql.Int, id)
       .query(`SELECT InstallmentNo, DueDate, Amount, Status, RefNumber
               FROM dbo.EmiInstallments
@@ -500,6 +570,92 @@ router.put("/:id/emi-schedule/:no/pay", async (req, res) => {
     res.json({ message: "Installment marked as paid" });
   } catch (err) {
     console.error("EMI pay error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── PUT Toggle EMI off ───────────────────────────────────────────────────────
+router.put("/:id/emi-toggle", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id) || id <= 0)
+    return res.status(400).json({ error: "Invalid id" });
+
+  const { enabled, deleteUnpaid = true } = req.body;
+
+  try {
+    const userEmail = requireUserEmail(req, res);
+    if (!userEmail) return;
+
+    const pool = getPool();
+
+    const stats = await pool.request().input("ExpenseBookingId", sql.Int, id)
+      .query(`
+        SELECT
+          COUNT(*) AS total,
+          SUM(CASE WHEN Status = 'Paid' THEN 1 ELSE 0 END) AS paid,
+          SUM(CASE WHEN Status = 'Paid' THEN Amount ELSE 0 END) AS paidAmount,
+          SUM(CASE WHEN Status != 'Paid' THEN Amount ELSE 0 END) AS remainingAmount
+        FROM dbo.EmiInstallments
+        WHERE ExpenseBookingId = @ExpenseBookingId
+      `);
+
+    const { total, paid, paidAmount, remainingAmount } = stats.recordset[0];
+
+    if (!enabled) {
+      if (deleteUnpaid) {
+        await pool.request().input("ExpenseBookingId", sql.Int, id).query(`
+            DELETE FROM dbo.EmiInstallments
+            WHERE ExpenseBookingId = @ExpenseBookingId AND Status != 'Paid'
+          `);
+      }
+
+      const existingRes = await pool
+        .request()
+        .input("Eid", sql.Int, id)
+        .query("SELECT EEmiData FROM dbo.ExpenseBooking WHERE Eid = @Eid");
+      let emiData = {};
+      try {
+        emiData = JSON.parse(existingRes.recordset[0]?.EEmiData || "{}");
+      } catch {}
+      emiData.enabled = false;
+      if (deleteUnpaid && Array.isArray(emiData.schedule)) {
+        emiData.schedule = emiData.schedule.filter((r) => r.status === "Paid");
+      }
+
+      await pool
+        .request()
+        .input("Eid", sql.Int, id)
+        .input("EEmiPayment", sql.Bit, 0)
+        .input("EEmiData", sql.NVarChar(sql.MAX), JSON.stringify(emiData))
+        .query(`
+          UPDATE dbo.ExpenseBooking
+          SET EEmiPayment = @EEmiPayment, EEmiData = @EEmiData
+          WHERE Eid = @Eid
+        `);
+    } else {
+      await pool
+        .request()
+        .input("Eid", sql.Int, id)
+        .input("EEmiPayment", sql.Bit, 1)
+        .query(
+          "UPDATE dbo.ExpenseBooking SET EEmiPayment = @EEmiPayment WHERE Eid = @Eid",
+        );
+    }
+
+    await bumpCacheVersion("expense-booking");
+    await bumpCacheVersion("expense-booking-options");
+
+    res.json({
+      message: enabled ? "EMI re-enabled" : "EMI disabled",
+      stats: {
+        total: parseInt(total) || 0,
+        paid: parseInt(paid) || 0,
+        paidAmount: parseFloat(paidAmount) || 0,
+        remainingAmount: parseFloat(remainingAmount) || 0,
+      },
+    });
+  } catch (err) {
+    console.error("EMI toggle error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
@@ -544,7 +700,6 @@ router.put("/:id", async (req, res) => {
     const result = await pool
       .request()
       .input("Eid", sql.Int, numericId)
-      // ... all other inputs (same as before)
       .input("EProjectName", sql.NVarChar(150), EProjectName || null)
       .input("EDocumentType", sql.NVarChar(50), EDocumentType || null)
       .input("EDocDate", sql.Date, EDocDate || null)
@@ -626,7 +781,7 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
-// Approval Routes (kept as-is, minor cleanup)
+// ─── Approval Routes ──────────────────────────────────────────────────────────
 router.put("/:id/submit", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {
