@@ -20,15 +20,15 @@ const requireUserEmail = (req, res) => {
 router.get("/options", async (req, res) => {
   try {
     const pool = getPool();
-const result = await pool.request().query(`
+    const result = await pool.request().query(`
       SELECT DISTINCT
         Eid AS id,
         Eid AS value,
 CONCAT(
           ISNULL(EDocNo,'N/A'),
-          ' — ',
+          N' — ',
           ISNULL(EProjectName,''),
-          ' (₹',
+          N' (₹',
           FORMAT(ISNULL(EAmount,0), 'N0'),
           ')'
         ) AS label,
