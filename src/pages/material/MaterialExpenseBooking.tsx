@@ -50,6 +50,7 @@ import {
   Search,
   X,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Loader2,
   Hash,
@@ -90,6 +91,13 @@ async function apiFetch(url: string, opts?: RequestInit) {
   }
   return res.json();
 }
+
+// Module-level cache so masters are only fetched once per session
+const _mastersCache: {
+  po: POItem[] | null;
+  wo: WOItem[] | null;
+  tod: TodItem[] | null;
+} = { po: null, wo: null, tod: null };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface CompanyOption {
@@ -638,6 +646,10 @@ export default function MaterialExpenseBooking() {
   // Page state
   const [records, setRecords] = useState<ExpenseRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalRecords, setTotalRecords] = useState(0);
+  const PAGE_SIZE = 20;
   const [view, setView] = useState<PageView>("list");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<Omit<ExpenseRecord, "id">>(blankForm());
@@ -646,14 +658,21 @@ export default function MaterialExpenseBooking() {
   const [statusFilter, setStatusFilter] = useState<string>("All");
   const [approvalTrail, setApprovalTrail] =
     useState<ExpenseRecord["approvalTrail"]>(undefined);
+  const [liveEmiSchedule, setLiveEmiSchedule] = useState<
+    import("./ExpenseBooking/types").EmiScheduleRow[] | null
+  >(null);
+  const [loadingEmi, setLoadingEmi] = useState(false);
   const isEditing = editingId !== null;
 
   // ── Fetch records ──
-  const fetchRecords = useCallback(async () => {
+  const fetchRecords = useCallback(async (p = 1) => {
     try {
       setLoading(true);
-      const data = await apiFetch(`${API}?limit=100`);
+      const data = await apiFetch(`${API}?page=${p}&limit=${PAGE_SIZE}`);
       setRecords((data.data ?? []).map(dbToRecord));
+      setTotalPages(data.totalPages ?? 1);
+      setTotalRecords(data.total ?? 0);
+      setPage(p);
     } catch (err: any) {
       toast.error("Failed to load bookings: " + err.message);
     } finally {
@@ -661,34 +680,49 @@ export default function MaterialExpenseBooking() {
     }
   }, []);
 
-  // ── Fetch master lists ──
+  // ── Fetch master lists (cached per session) ──
   const fetchMasters = async () => {
-    // PO from PO master
-    setLoadingPO(true);
-    apiFetch("/api/purchase-orders?limit=500")
-      .then((r) => setPoList(Array.isArray(r) ? r : (r.data ?? [])))
-      .catch(() => {})
-      .finally(() => setLoadingPO(false));
+    if (!_mastersCache.po) {
+      setLoadingPO(true);
+      apiFetch("/api/purchase-orders?limit=500")
+        .then((r) => {
+          _mastersCache.po = Array.isArray(r) ? r : (r.data ?? []);
+          setPoList(_mastersCache.po!);
+        })
+        .catch(() => {})
+        .finally(() => setLoadingPO(false));
+    } else {
+      setPoList(_mastersCache.po);
+    }
 
-    // WO from WO master
-    setLoadingWO(true);
-    apiFetch("/api/work-orders?limit=500")
-      .then((r) => setWoList(Array.isArray(r) ? r : (r.data ?? [])))
-      .catch(() => {})
-      .finally(() => setLoadingWO(false));
+    if (!_mastersCache.wo) {
+      setLoadingWO(true);
+      apiFetch("/api/work-orders?limit=500")
+        .then((r) => {
+          _mastersCache.wo = Array.isArray(r) ? r : (r.data ?? []);
+          setWoList(_mastersCache.wo!);
+        })
+        .catch(() => {})
+        .finally(() => setLoadingWO(false));
+    } else {
+      setWoList(_mastersCache.wo);
+    }
 
-    // Everything else from Type of Doc (excluding PO/WO modules)
-    setLoadingTOD(true);
-    apiFetch("/api/document-type")
-      .then((r: TodItem[]) => {
-        // Filter out PO and WO types since those come from their own masters
-        const filtered = (Array.isArray(r) ? r : []).filter(
-          (t) => !["PO", "WO"].includes((t as any).ModuleTag ?? ""),
-        );
-        setTodList(filtered);
-      })
-      .catch(() => {})
-      .finally(() => setLoadingTOD(false));
+    if (!_mastersCache.tod) {
+      setLoadingTOD(true);
+      apiFetch("/api/document-type")
+        .then((r: TodItem[]) => {
+          const filtered = (Array.isArray(r) ? r : []).filter(
+            (t) => !["PO", "WO"].includes((t as any).ModuleTag ?? ""),
+          );
+          _mastersCache.tod = filtered;
+          setTodList(filtered);
+        })
+        .catch(() => {})
+        .finally(() => setLoadingTOD(false));
+    } else {
+      setTodList(_mastersCache.tod);
+    }
   };
 
   const fetchApprovalTrail = async (recordId: string) => {
@@ -706,7 +740,7 @@ export default function MaterialExpenseBooking() {
   };
 
   useEffect(() => {
-    fetchRecords();
+    fetchRecords(1);
 
     // Company master: enterprise where business_type = 'C'
     apiFetch("/api/enterprises/options?business_type=C")
@@ -779,6 +813,31 @@ export default function MaterialExpenseBooking() {
     setForm(rest);
     setApprovalTrail(undefined);
     setSelectedDoc(null);
+    setLiveEmiSchedule(null); // reset first
+
+    // Fetch live EMI schedule from DB if EMI is enabled
+    if (rec.emi?.enabled) {
+      setLoadingEmi(true);
+      apiFetch(`${API}/${rec.id}/emi-schedule`)
+        .then((rows: any[]) => {
+          const mapped = rows.map((r) => ({
+            installmentNo: r.InstallmentNo ?? r.installmentNo,
+            dueDate: r.DueDate
+              ? String(r.DueDate).slice(0, 10)
+              : (r.dueDate ?? ""),
+            amount: parseFloat(r.Amount ?? r.amount) || 0,
+            status: (r.Status ?? r.status ?? "Pending") as "Pending" | "Paid",
+            refNumber: r.RefNumber ?? r.refNumber ?? "",
+          }));
+          setLiveEmiSchedule(mapped);
+        })
+        .catch(() => {
+          // Non-critical: fall back to form schedule
+          setLiveEmiSchedule(null);
+        })
+        .finally(() => setLoadingEmi(false));
+    }
+
     fetchApprovalTrail(rec.id);
     fetchMasters();
     setView("form");
@@ -790,6 +849,18 @@ export default function MaterialExpenseBooking() {
     setForm(blankForm());
     setApprovalTrail(undefined);
     setSelectedDoc(null);
+    setLiveEmiSchedule(null);
+  };
+
+  // ── Disable EMI ──
+  const disableEmi = async () => {
+    if (!editingId) return;
+    await apiFetch(`${API}/${editingId}/emi-toggle`, {
+      method: "PUT",
+      body: JSON.stringify({ enabled: false, deleteUnpaid: true }),
+    });
+    toast.success("EMI disabled. Unpaid installments removed.");
+    setLiveEmiSchedule(null);
   };
 
   // ── Save ──
@@ -839,7 +910,7 @@ export default function MaterialExpenseBooking() {
         );
         cancelForm();
       }
-      await fetchRecords();
+      await fetchRecords(page);
     } catch (err: any) {
       toast.error("Save failed: " + err.message);
     } finally {
@@ -852,7 +923,7 @@ export default function MaterialExpenseBooking() {
       await apiFetch(`${API}/${id}`, { method: "DELETE" });
       setDeleteId(null);
       toast.success("Booking deleted.");
-      await fetchRecords();
+      await fetchRecords(page);
     } catch (err: any) {
       toast.error("Delete failed: " + err.message);
     }
@@ -1286,6 +1357,9 @@ export default function MaterialExpenseBooking() {
                   netAmount={bd.netAmount}
                   baseDocNo={form.bookingReference}
                   onChange={(emi) => set("emi", emi)}
+                  liveSchedule={isEditing ? liveEmiSchedule : null}
+                  loadingEmi={loadingEmi}
+                  onDisableEmi={isEditing ? disableEmi : undefined}
                 />
               </div>
 
@@ -1432,7 +1506,11 @@ export default function MaterialExpenseBooking() {
                   )}
                   {filteredRecords.map((rec, index) => (
                     <RecordCard
-                      key={rec.id ? `booking-card-${rec.id}` : `booking-card-${index}`}
+                      key={
+                        rec.id
+                          ? `booking-card-${rec.id}`
+                          : `booking-card-${index}`
+                      }
                       rec={rec}
                       onEdit={() => openEdit(rec)}
                       onDelete={() => setDeleteId(rec.id)}
@@ -1493,7 +1571,11 @@ export default function MaterialExpenseBooking() {
                             );
                             return (
                               <TableRow
-                                key={rec.id ? `booking-row-${rec.id}` : `booking-row-${index}`}
+                                key={
+                                  rec.id
+                                    ? `booking-row-${rec.id}`
+                                    : `booking-row-${index}`
+                                }
                                 className="hover:bg-muted/20"
                               >
                                 <TableCell className="font-mono text-xs font-semibold text-primary">
@@ -1585,6 +1667,49 @@ export default function MaterialExpenseBooking() {
                     </div>
                   </CardContent>
                 </Card>
+
+                {/* ── Pagination ─────────────────────────────────────── */}
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-between mt-2 px-1">
+                    <p className="text-xs text-muted-foreground">
+                      Page {page} of {totalPages} · {totalRecords} total
+                    </p>
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => fetchRecords(Math.max(1, page - 1))}
+                        disabled={page === 1}
+                        className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors"
+                      >
+                        <ChevronLeft size={14} />
+                      </button>
+                      {Array.from(
+                        { length: Math.min(5, totalPages) },
+                        (_, i) => {
+                          const pg = page <= 3 ? i + 1 : page - 2 + i;
+                          if (pg < 1 || pg > totalPages) return null;
+                          return (
+                            <button
+                              key={pg}
+                              onClick={() => fetchRecords(pg)}
+                              className={`px-2.5 py-1 rounded-md text-xs border transition-colors ${pg === page ? "border-primary bg-primary text-primary-foreground" : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"}`}
+                            >
+                              {pg}
+                            </button>
+                          );
+                        },
+                      )}
+                      <button
+                        onClick={() =>
+                          fetchRecords(Math.min(totalPages, page + 1))
+                        }
+                        disabled={page === totalPages}
+                        className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors"
+                      >
+                        <ChevronRight size={14} />
+                      </button>
+                    </div>
+                  </div>
+                )}
               </>
             )}
           </>
