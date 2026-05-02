@@ -5,10 +5,6 @@ const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition, guardEdit } = require("../services/approvalService");
-const {
-  lockNextDocNumber,
-  backPatchRecordId,
-} = require("../utils/docNumberLock");
 
 // Helper: Require authenticated user email
 const requireUserEmail = (req, res) => {
@@ -21,98 +17,115 @@ const requireUserEmail = (req, res) => {
 };
 
 // ─── GET /options ─────────────────────────────────────────────────────────────
-router.get(
-  "/options",
-  cache("expense-booking-options", 120),
-  async (req, res) => {
-    try {
-      const pool = getPool();
+router.get("/options", async (req, res) => {
+  try {
+    const pool = getPool();
+    const finYear = (req.query.finYear || "").toString().trim() || null;
 
-      const bookingsResult = await pool.request().query(`
-      SELECT
-        Eid                          AS id,
-        Eid                          AS value,
-        ISNULL(EDocNo, 'N/A')        AS docNo,
-        ISNULL(EProjectName, '')     AS projectName,
-        ISNULL(ENetAmount, ISNULL(EAmount, 0)) AS amount,
-        ISNULL(ECompanyId, 0)        AS companyId,
-        EEmiPayment                  AS emiEnabled,
-        CONCAT(
-          ISNULL(EDocNo,'N/A'),
-          N' — ',
-          ISNULL(EProjectName,''),
-          N' (₹',
-          CAST(CAST(ISNULL(ENetAmount, ISNULL(EAmount,0)) AS BIGINT) AS NVARCHAR(20)),
-          ')'
-        ) AS label
-      FROM dbo.ExpenseBooking
-      ORDER BY Eid DESC
-    `);
+    // Regular bookings: exclude EMI-enabled ones (they are paid via installments)
+    // and exclude any already linked to an active DebitNote
+    const bookingsResult = await pool
+      .request()
+      .input("FinYear", sql.NVarChar(20), finYear).query(`
+        SELECT
+          eb.Eid                          AS id,
+          eb.Eid                          AS value,
+          ISNULL(eb.EDocNo, 'N/A')        AS docNo,
+          ISNULL(eb.EProjectName, '')     AS projectName,
+          ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0)) AS amount,
+          ISNULL(eb.ECompanyId, 0)        AS companyId,
+          eb.EEmiPayment                  AS emiEnabled,
+          CONCAT(
+            ISNULL(eb.EDocNo,'N/A'),
+            N' — ',
+            ISNULL(eb.EProjectName,''),
+            N' (₹',
+            CAST(CAST(ISNULL(eb.ENetAmount, ISNULL(eb.EAmount,0)) AS BIGINT) AS NVARCHAR(20)),
+            ')'
+          ) AS label
+        FROM dbo.ExpenseBooking eb
+        WHERE
+          (eb.EEmiPayment = 0 OR eb.EEmiPayment IS NULL)
+          AND NOT EXISTS (
+            SELECT 1 FROM dbo.DebitNote dn
+            WHERE dn.bill_id = eb.Eid AND dn.is_active = 1
+          )
+          AND (@FinYear IS NULL OR eb.EFinYear = @FinYear)
+        ORDER BY eb.Eid DESC
+      `);
 
-      const emiResult = await pool.request().query(`
-      SELECT
-        ei.Id                        AS id,
-        ei.ExpenseBookingId          AS expenseBookingId,
-        ei.InstallmentNo             AS installmentNo,
-        ei.RefNumber                 AS refNumber,
-        ei.DueDate                   AS dueDate,
-        ei.Amount                    AS amount,
-        ei.Status                    AS status,
-        eb.EProjectName              AS projectName,
-        eb.ECompanyId                AS companyId,
-        eb.EDocNo                    AS parentDocNo,
-        CONCAT(
-          ISNULL(ei.RefNumber, CONCAT('EMI-', RIGHT('00' + CAST(ei.InstallmentNo AS VARCHAR), 2))),
-          N' — ',
-          ISNULL(eb.EProjectName, ''),
-          N' (₹',
-          CAST(CAST(ISNULL(ei.Amount,0) AS BIGINT) AS NVARCHAR(20)),
-          N') — Installment #',
-          CAST(ei.InstallmentNo AS NVARCHAR(10)),
-          CASE WHEN ei.Status = 'Paid' THEN N' ✓ Paid' ELSE '' END
-        ) AS label
-      FROM dbo.EmiInstallments ei
-      INNER JOIN dbo.ExpenseBooking eb ON eb.Eid = ei.ExpenseBookingId
-      WHERE eb.EEmiPayment = 1
-      ORDER BY ei.ExpenseBookingId DESC, ei.InstallmentNo ASC
-    `);
+    // EMI installments: only show Pending ones
+    const emiResult = await pool
+      .request()
+      .input("FinYear", sql.NVarChar(20), finYear).query(`
+        SELECT
+          ei.Id                        AS id,
+          ei.ExpenseBookingId          AS expenseBookingId,
+          ei.InstallmentNo             AS installmentNo,
+          ei.RefNumber                 AS refNumber,
+          ei.DueDate                   AS dueDate,
+          ei.Amount                    AS amount,
+          ei.Status                    AS status,
+          eb.EProjectName              AS projectName,
+          eb.ECompanyId                AS companyId,
+          eb.EDocNo                    AS parentDocNo,
+          CONCAT(
+            ISNULL(ei.RefNumber, CONCAT('EMI-', RIGHT('00' + CAST(ei.InstallmentNo AS VARCHAR), 2))),
+            N' — ',
+            ISNULL(eb.EProjectName, ''),
+            N' (₹',
+            CAST(CAST(ISNULL(ei.Amount,0) AS BIGINT) AS NVARCHAR(20)),
+            N') — Installment #',
+            CAST(ei.InstallmentNo AS NVARCHAR(10))
+          ) AS label
+        FROM dbo.EmiInstallments ei
+        INNER JOIN dbo.ExpenseBooking eb ON eb.Eid = ei.ExpenseBookingId
+        WHERE
+          eb.EEmiPayment = 1
+          AND ei.Status = 'Pending'
+          AND NOT EXISTS (
+            SELECT 1 FROM dbo.DebitNote dn
+            WHERE dn.bill_id = ei.Id AND dn.is_active = 1
+          )
+          AND (@FinYear IS NULL OR eb.EFinYear = @FinYear)
+        ORDER BY ei.ExpenseBookingId DESC, ei.InstallmentNo ASC
+      `);
 
-      const bookingOptions = bookingsResult.recordset.map((r) => ({
-        id: String(r.id),
-        value: String(r.value),
-        label: r.label,
-        type: "booking",
-        expenseBookingId: r.id,
-        docNo: r.docNo,
-        projectName: r.projectName,
-        amount: parseFloat(r.amount) || 0,
-        companyId: r.companyId || null,
-      }));
+    const bookingOptions = bookingsResult.recordset.map((r) => ({
+      id: String(r.id),
+      value: String(r.value),
+      label: r.label,
+      type: "booking",
+      expenseBookingId: r.id,
+      docNo: r.docNo,
+      projectName: r.projectName,
+      amount: parseFloat(r.amount) || 0,
+      companyId: r.companyId || null,
+    }));
 
-      const emiOptions = emiResult.recordset.map((r) => ({
-        id: `emi-${r.expenseBookingId}-${r.installmentNo}`,
-        value: `emi-${r.expenseBookingId}-${r.installmentNo}`,
-        label: r.label,
-        type: "emi",
-        expenseBookingId: r.expenseBookingId,
-        installmentNo: r.installmentNo,
-        refNumber: r.refNumber,
-        dueDate: r.dueDate ? String(r.dueDate).slice(0, 10) : null,
-        docNo: r.refNumber || r.parentDocNo,
-        projectName: r.projectName,
-        amount: parseFloat(r.amount) || 0,
-        companyId: r.companyId || null,
-        status: r.status,
-        parentDocNo: r.parentDocNo,
-      }));
+    const emiOptions = emiResult.recordset.map((r) => ({
+      id: `emi-${r.expenseBookingId}-${r.installmentNo}`,
+      value: `emi-${r.expenseBookingId}-${r.installmentNo}`,
+      label: r.label,
+      type: "emi",
+      expenseBookingId: r.expenseBookingId,
+      installmentNo: r.installmentNo,
+      refNumber: r.refNumber,
+      dueDate: r.dueDate ? String(r.dueDate).slice(0, 10) : null,
+      docNo: r.refNumber || r.parentDocNo,
+      projectName: r.projectName,
+      amount: parseFloat(r.amount) || 0,
+      companyId: r.companyId || null,
+      status: r.status,
+      parentDocNo: r.parentDocNo,
+    }));
 
-      res.json([...bookingOptions, ...emiOptions]);
-    } catch (err) {
-      console.error("Options error:", err.message);
-      res.status(500).json({ error: err.message });
-    }
-  },
-);
+    res.json([...bookingOptions, ...emiOptions]);
+  } catch (err) {
+    console.error("Options error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // ─── GET all (paginated) ──────────────────────────────────────────────────────
 router.get("/", cache("expense-booking", 60), async (req, res) => {
@@ -306,23 +319,71 @@ router.post("/", async (req, res) => {
     await transaction.begin();
 
     if (EDocTypeId) {
-      // Use the shared lock helper — handles UPSERT-style collision retry
-      // so we never hit the UQ_DocNumberSequence_DocNo duplicate key error.
-      // The transaction is intentionally NOT passed here: lockNextDocNumber
-      // uses the pool directly with its own internal retry on collision.
-      try {
+      const typeId = parseInt(EDocTypeId, 10);
+      const finYear = (EFinYear || "").toString().trim();
+
+      const typeResult = await transaction
+        .request()
+        .input("TypeOfDocId", sql.Int, typeId).query(`
+          SELECT Prefix, FullPrefix, StartingDocNo
+          FROM dbo.TypeOfDoc
+          WHERE TypeOfDocId = @TypeOfDocId AND IsActive = 1
+        `);
+
+      const typeRow = typeResult.recordset[0];
+      if (!typeRow) {
         await transaction.rollback();
-      } catch (_) {}
+        return res
+          .status(400)
+          .json({ error: "Selected document type not found or inactive." });
+      }
 
-      finalDocNo = await lockNextDocNumber(pool, sql, {
-        docTypeId: parseInt(EDocTypeId, 10),
-        finYear: (EFinYear || "").toString().trim(),
-        tableName: "ExpenseBooking",
-        issuedBy: req.user?.email || null,
-      });
+      const rawPrefix = typeRow.FullPrefix ?? typeRow.Prefix ?? "";
+      const prefix = rawPrefix.replace(/\d+$/, "");
+      const startFrom = typeRow.StartingDocNo ?? 1;
 
-      // Re-open the transaction for the main INSERT below
-      await transaction.begin();
+      // Count globally across ALL fin years — fin year is only a suffix
+      const maxResult = await transaction
+        .request()
+        .input("TypeOfDocId", sql.Int, typeId)
+        .input("Prefix", sql.NVarChar(100), prefix + "%").query(`
+          SELECT MAX(TRY_CAST(SUBSTRING(DocNo, LEN(@Prefix) + 1, 6) AS INT)) AS MaxSeq
+          FROM dbo.DocNumberSequence WITH (UPDLOCK, HOLDLOCK)
+          WHERE TypeOfDocId = @TypeOfDocId
+            AND DocNo LIKE @Prefix
+        `);
+
+      // Also check ExpenseBooking across ALL fin years
+      const ebMaxResult = await transaction
+        .request()
+        .input("EDocTypeId2", sql.Int, typeId)
+        .input("Prefix2", sql.NVarChar(100), prefix + "%").query(`
+          SELECT MAX(TRY_CAST(SUBSTRING(EDocNo, LEN(@Prefix2) + 1, 6) AS INT)) AS MaxSeq
+          FROM dbo.ExpenseBooking WITH (UPDLOCK, HOLDLOCK)
+          WHERE EDocTypeId = @EDocTypeId2
+            AND EDocNo LIKE @Prefix2
+        `);
+
+      const seqFromDNS = maxResult.recordset[0]?.MaxSeq ?? null;
+      const seqFromEB = ebMaxResult.recordset[0]?.MaxSeq ?? null;
+      const combinedMax = Math.max(seqFromDNS ?? 0, seqFromEB ?? 0);
+      const maxSeq = combinedMax > 0 ? combinedMax : startFrom - 1;
+      const nextSeq = Math.max(maxSeq + 1, startFrom);
+      const padded = String(nextSeq).padStart(6, "0");
+
+      finalDocNo = finYear
+        ? `${prefix}${padded}/${finYear}`
+        : `${prefix}${padded}`;
+
+      await transaction
+        .request()
+        .input("TypeOfDocId", sql.Int, typeId)
+        .input("DocNo", sql.NVarChar(100), finalDocNo)
+        .input("TableName", sql.NVarChar(100), "ExpenseBooking")
+        .input("IssuedBy", sql.NVarChar(200), req.user?.email || null).query(`
+          INSERT INTO dbo.DocNumberSequence (TypeOfDocId, DocNo, TableName, IssuedBy)
+          VALUES (@TypeOfDocId, @DocNo, @TableName, @IssuedBy)
+        `);
     }
 
     const insertResult = await transaction
@@ -389,13 +450,14 @@ router.post("/", async (req, res) => {
     const newExpenseId = insertResult.recordset[0]?.NewId;
 
     if (finalDocNo && newExpenseId) {
-      await backPatchRecordId(
-        pool,
-        sql,
-        finalDocNo,
-        "ExpenseBooking",
-        newExpenseId,
-      );
+      await transaction
+        .request()
+        .input("DocNo", sql.NVarChar(100), finalDocNo)
+        .input("RecordId", sql.Int, parseInt(newExpenseId, 10)).query(`
+          UPDATE dbo.DocNumberSequence
+          SET RecordId = @RecordId
+          WHERE DocNo = @DocNo AND TableName = 'ExpenseBooking'
+        `);
     }
 
     await transaction.commit();
