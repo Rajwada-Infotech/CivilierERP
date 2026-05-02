@@ -235,16 +235,19 @@ router.post("/", async (req, res) => {
       : JSON.stringify(GST)
     : null;
 
+  let transaction;
   try {
     const userEmail = requireUserName(req, res);
     if (!userEmail) return;
 
     const pool = getPool();
+    transaction = pool.transaction();
+    await transaction.begin();
 
     // Generate document number if DocTypeId is provided
     let finalDocNo = poNoFromClient || null;
     if (DocTypeId) {
-      finalDocNo = await lockNextDocNumber(pool, sql, {
+      finalDocNo = await lockNextDocNumber(transaction, sql, {
         docTypeId: parseInt(DocTypeId, 10),
         finYear,
         tableName: "PurchaseOrders",
@@ -252,7 +255,7 @@ router.post("/", async (req, res) => {
       });
     }
 
-    const result = await pool
+    const result = await transaction
       .request()
       .input("PurchaseOrderNo", sql.NVarChar(100), finalDocNo || null)
       .input("PODate", sql.Date, PODate || null)
@@ -297,9 +300,16 @@ router.post("/", async (req, res) => {
     const newId = result.recordset[0].PurchaseOrderID;
 
     if (DocTypeId && finalDocNo) {
-      await backPatchRecordId(pool, sql, finalDocNo, "PurchaseOrders", newId);
+      await backPatchRecordId(
+        transaction,
+        sql,
+        finalDocNo,
+        "PurchaseOrders",
+        newId,
+      );
     }
 
+    await transaction.commit();
     await bumpCacheVersion("purchase-orders");
 
     res.status(201).json({
@@ -308,6 +318,11 @@ router.post("/", async (req, res) => {
       PurchaseOrderNo: finalDocNo,
     });
   } catch (err) {
+    try {
+      if (transaction) await transaction.rollback();
+    } catch (_) {
+      // ignore rollback failure
+    }
     console.error("POST PurchaseOrders error:", err);
     res.status(500).json({ error: err.message });
   }
