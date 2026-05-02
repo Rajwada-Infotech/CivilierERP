@@ -27,6 +27,8 @@ import {
   getCompanies,
   getProjects,
   getUOMs,
+  type GSTConfig,
+  type GSTType,
 } from "@/api/purchaseOrdersApi";
 
 const PurchaseOrderMaster = () => {
@@ -200,6 +202,9 @@ const PurchaseOrderMaster = () => {
       docTypeId: item.DocTypeId ?? null,
       docNo: item.DocNo ?? "",
       docTypePrefix: item.DocTypePrefix ?? "",
+      gstApplicable: item.GST?.applicable ? "Yes" : "No",
+      gstType: item.GST?.type ?? "cgst_sgst",
+      gstRate: item.GST?.rate ?? 18,
     };
   });
 
@@ -231,6 +236,11 @@ const PurchaseOrderMaster = () => {
       DocTypeId: (r.docTypeId as number | null) ?? poDocTypeId,
       DocNo: finalNumber || (r.docNo as string) || poDocNo || null,
       finYear: selectedFinYear || null,
+      GST: {
+        applicable: (r.gstApplicable as string) === "Yes",
+        type: ((r.gstType as GSTType) || "cgst_sgst"),
+        rate: Number(r.gstRate) || 0,
+      },
     };
   };
 
@@ -397,6 +407,19 @@ const PurchaseOrderMaster = () => {
       required: true,
       options: ["Draft", "Issued", "Partially Received", "Received", "Closed"],
     },
+    {
+      name: "gstApplicable",
+      label: "GST Applicable",
+      type: "select",
+      options: ["No", "Yes"],
+    },
+    {
+      name: "gstType",
+      label: "GST Type",
+      type: "select",
+      options: ["cgst_sgst", "igst"],
+    },
+    { name: "gstRate", label: "GST Rate (%)", type: "number" },
     { name: "remarks", label: "Remarks", type: "textarea", fullWidth: true },
   ];
 

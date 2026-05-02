@@ -45,6 +45,16 @@ const serializeDiscount = (discountStr) => {
   }
 };
 
+// Helper to serialize GST for response
+const serializeGST = (gstStr) => {
+  if (!gstStr) return null;
+  try {
+    return JSON.parse(gstStr);
+  } catch {
+    return null;
+  }
+};
+
 // ── GET / (List with Pagination) ─────────────────────────────────────────────
 router.get("/", cache("purchase-orders", 300), async (req, res) => {
   try {
@@ -91,6 +101,7 @@ router.get("/", cache("purchase-orders", 300), async (req, res) => {
           po.DocNo,
           po.POItems,
           po.Discount,                    -- Discount column added
+          po.GST,                         -- GST column added
           td.Prefix AS DocTypePrefix,
           td.Description AS DocTypeDescription
         FROM dbo.PurchaseOrders po
@@ -108,6 +119,7 @@ router.get("/", cache("purchase-orders", 300), async (req, res) => {
       ...po,
       POItems: serializeItems(po.POItems),
       Discount: serializeDiscount(po.Discount),
+      GST: serializeGST(po.GST),
     }));
 
     res.json({
@@ -158,6 +170,7 @@ router.get("/:id", async (req, res) => {
           po.DocNo,
           po.POItems,
           po.Discount,                    -- Discount column added
+          po.GST,                         -- GST column added
           td.Prefix AS DocTypePrefix,
           td.Description AS DocTypeDescription
         FROM dbo.PurchaseOrders po
@@ -178,6 +191,7 @@ router.get("/:id", async (req, res) => {
       ...po,
       POItems: serializeItems(po.POItems),
       Discount: serializeDiscount(po.Discount),
+      GST: serializeGST(po.GST),
     });
   } catch (err) {
     console.error("GET PurchaseOrder by id error:", err);
@@ -206,6 +220,7 @@ router.post("/", async (req, res) => {
     finYear,
     POItems,
     Discount,
+    GST,
   } = req.body;
 
   const poItemsJson = parseItems({ POItems });
@@ -214,17 +229,25 @@ router.post("/", async (req, res) => {
       ? Discount
       : JSON.stringify(Discount)
     : null;
+  const gstJson = GST
+    ? typeof GST === "string"
+      ? GST
+      : JSON.stringify(GST)
+    : null;
 
+  let transaction;
   try {
     const userEmail = requireUserName(req, res);
     if (!userEmail) return;
 
     const pool = getPool();
+    transaction = pool.transaction();
+    await transaction.begin();
 
     // Generate document number if DocTypeId is provided
     let finalDocNo = poNoFromClient || null;
     if (DocTypeId) {
-      finalDocNo = await lockNextDocNumber(pool, sql, {
+      finalDocNo = await lockNextDocNumber(transaction, sql, {
         docTypeId: parseInt(DocTypeId, 10),
         finYear,
         tableName: "PurchaseOrders",
@@ -232,7 +255,7 @@ router.post("/", async (req, res) => {
       });
     }
 
-    const result = await pool
+    const result = await transaction
       .request()
       .input("PurchaseOrderNo", sql.NVarChar(100), finalDocNo || null)
       .input("PODate", sql.Date, PODate || null)
@@ -257,28 +280,36 @@ router.post("/", async (req, res) => {
       .input("CreatedBy", sql.NVarChar(100), userEmail)
       .input("CreatedAt", sql.DateTime2, new Date())
       .input("POItems", sql.NVarChar(sql.MAX), poItemsJson)
-      .input("Discount", sql.NVarChar(sql.MAX), discountJson).query(`
+      .input("Discount", sql.NVarChar(sql.MAX), discountJson)
+      .input("GST", sql.NVarChar(sql.MAX), gstJson).query(`
         INSERT INTO dbo.PurchaseOrders (
           PurchaseOrderNo, PODate, ExpectedDeliveryDate, SupplierID, CompanyId,
           ProjectId, ItemDescription, Quantity, Unit, Rate, TotalAmount,
           PaymentTerms, Status, Remarks, DocTypeId, DocNo, CreatedBy, CreatedAt,
-          POItems, Discount
+          POItems, Discount, GST
         )
         OUTPUT INSERTED.PurchaseOrderID
         VALUES (
           @PurchaseOrderNo, @PODate, @ExpectedDeliveryDate, @SupplierID, @CompanyId,
           @ProjectId, @ItemDescription, @Quantity, @Unit, @Rate, @TotalAmount,
           @PaymentTerms, @Status, @Remarks, @DocTypeId, @DocNo, @CreatedBy, @CreatedAt,
-          @POItems, @Discount
+          @POItems, @Discount, @GST
         )
       `);
 
     const newId = result.recordset[0].PurchaseOrderID;
 
     if (DocTypeId && finalDocNo) {
-      await backPatchRecordId(pool, sql, finalDocNo, "PurchaseOrders", newId);
+      await backPatchRecordId(
+        transaction,
+        sql,
+        finalDocNo,
+        "PurchaseOrders",
+        newId,
+      );
     }
 
+    await transaction.commit();
     await bumpCacheVersion("purchase-orders");
 
     res.status(201).json({
@@ -287,6 +318,11 @@ router.post("/", async (req, res) => {
       PurchaseOrderNo: finalDocNo,
     });
   } catch (err) {
+    try {
+      if (transaction) await transaction.rollback();
+    } catch (_) {
+      // ignore rollback failure
+    }
     console.error("POST PurchaseOrders error:", err);
     res.status(500).json({ error: err.message });
   }
@@ -314,6 +350,7 @@ router.put("/:id", async (req, res) => {
     DocNo,
     POItems,
     Discount,
+    GST,
   } = req.body;
 
   const poItemsJson = parseItems({ POItems });
@@ -321,6 +358,11 @@ router.put("/:id", async (req, res) => {
     ? typeof Discount === "string"
       ? Discount
       : JSON.stringify(Discount)
+    : null;
+  const gstJson = GST
+    ? typeof GST === "string"
+      ? GST
+      : JSON.stringify(GST)
     : null;
 
   try {
@@ -357,7 +399,8 @@ router.put("/:id", async (req, res) => {
       .input("UpdatedBy", sql.NVarChar(100), userEmail)
       .input("UpdatedAt", sql.DateTime2, new Date())
       .input("POItems", sql.NVarChar(sql.MAX), poItemsJson)
-      .input("Discount", sql.NVarChar(sql.MAX), discountJson).query(`
+      .input("Discount", sql.NVarChar(sql.MAX), discountJson)
+      .input("GST", sql.NVarChar(sql.MAX), gstJson).query(`
         UPDATE dbo.PurchaseOrders
         SET
           PurchaseOrderNo = @PurchaseOrderNo,
@@ -379,7 +422,8 @@ router.put("/:id", async (req, res) => {
           UpdatedBy = @UpdatedBy,
           UpdatedAt = @UpdatedAt,
           POItems = @POItems,
-          Discount = @Discount
+          Discount = @Discount,
+          GST = @GST
         WHERE PurchaseOrderID = @PurchaseOrderID
       `);
 
