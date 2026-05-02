@@ -106,7 +106,7 @@ function DisableDialog({
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Remaining amount</span>
                 <span className="font-mono font-semibold text-foreground">
-                  &#8377;{fmt(remainingAmount)}
+                  ₹{fmt(remainingAmount)}
                 </span>
               </div>
             </>
@@ -241,7 +241,7 @@ export function EmiSection({
               <p className="text-[11px] text-muted-foreground mt-0.5">
                 {emi.enabled
                   ? emi.installmentCount > 0
-                    ? `${emi.installmentCount} installments · &#8377;${fmt(emi.emiAmount)}/mo`
+                    ? `${emi.installmentCount} installments · ₹${fmt(emi.emiAmount)}/mo`
                     : "Configure installments below"
                   : "Split payment into monthly installments"}
               </p>
@@ -286,7 +286,7 @@ export function EmiSection({
                     Total
                   </span>
                   <span className="text-sm font-bold font-mono text-foreground">
-                    &#8377;{fmt(totalScheduled)}
+                    ₹{fmt(totalScheduled)}
                   </span>
                 </div>
                 <div className="px-4 py-3 flex flex-col gap-0.5">
@@ -297,7 +297,7 @@ export function EmiSection({
                     {paidCount}/{displaySchedule.length}
                     {paidAmount > 0 && (
                       <span className="font-mono text-[11px] ml-1">
-                        (&#8377;{fmt(paidAmount)})
+                        (₹{fmt(paidAmount)})
                       </span>
                     )}
                   </span>
@@ -309,7 +309,7 @@ export function EmiSection({
                   <span
                     className={`text-sm font-bold font-mono ${allPaid ? "text-emerald-600 dark:text-emerald-400" : "text-rose-500 dark:text-rose-400"}`}
                   >
-                    {allPaid ? "Fully Paid" : `&#8377;${fmt(remainingAmount)}`}
+                    {allPaid ? "Fully Paid" : `₹${fmt(remainingAmount)}`}
                   </span>
                 </div>
                 <div className="px-4 py-3 flex flex-col gap-0.5">
@@ -345,7 +345,7 @@ export function EmiSection({
                   <Field label="Per Installment">
                     <div className="relative">
                       <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs font-semibold">
-                        &#8377;
+                        ₹
                       </span>
                       <Input
                         type="number"
@@ -379,8 +379,7 @@ export function EmiSection({
                     &nbsp;installments
                   </span>
                   <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-muted/60 border border-border text-muted-foreground">
-                    <Banknote size={11} />
-                    &#8377;
+                    <Banknote size={11} />₹
                     <span className="font-mono font-semibold text-foreground">
                       {fmt(emi.emiAmount)}
                     </span>
@@ -501,7 +500,7 @@ export function EmiSection({
                                 {row.dueDate}
                               </td>
                               <td className="px-3 py-2.5 font-mono text-right font-semibold text-foreground">
-                                &#8377;{fmt(row.amount)}
+                                ₹{fmt(row.amount)}
                               </td>
                               <td className="px-3 py-2.5 hidden sm:table-cell">
                                 {isPaid ? (
@@ -532,12 +531,12 @@ export function EmiSection({
                         {displaySchedule.length} installments · {paidCount} paid
                         {remainingAmount > 0 && !allPaid && (
                           <span className="ml-2 text-rose-500">
-                            · &#8377;{fmt(remainingAmount)} remaining
+                            · ₹{fmt(remainingAmount)} remaining
                           </span>
                         )}
                       </span>
                       <span className="font-mono text-sm font-bold text-foreground">
-                        &#8377;{fmt(totalScheduled)}
+                        ₹{fmt(totalScheduled)}
                       </span>
                     </div>
                   </div>

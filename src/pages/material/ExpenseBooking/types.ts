@@ -70,6 +70,7 @@ export interface ApprovalTrail {
 
 export interface ExpenseRecord {
   id: string;
+  bookingName: string;
   bookingReference: string;
   docTypeName: string;
   bookingDate: string;

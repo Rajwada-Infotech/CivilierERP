@@ -270,6 +270,7 @@ router.get("/:id/approval-trail", async (req, res) => {
 // ─── POST Create ──────────────────────────────────────────────────────────────
 router.post("/", async (req, res) => {
   const {
+    EName,
     EProjectName,
     EDocumentType,
     EDocDate,
@@ -324,23 +325,32 @@ router.post("/", async (req, res) => {
       const prefix = rawPrefix.replace(/\d+$/, "");
       const startFrom = typeRow.StartingDocNo ?? 1;
 
+      // Count globally across ALL fin years — fin year is only a suffix
       const maxResult = await transaction
         .request()
         .input("TypeOfDocId", sql.Int, typeId)
-        .input("Prefix", sql.NVarChar(100), prefix + "%")
-        .input(
-          "FinYearPattern",
-          sql.NVarChar(130),
-          finYear ? `%/${finYear}` : null,
-        ).query(`
+        .input("Prefix", sql.NVarChar(100), prefix + "%").query(`
           SELECT MAX(TRY_CAST(SUBSTRING(DocNo, LEN(@Prefix) + 1, 6) AS INT)) AS MaxSeq
           FROM dbo.DocNumberSequence WITH (UPDLOCK, HOLDLOCK)
           WHERE TypeOfDocId = @TypeOfDocId
             AND DocNo LIKE @Prefix
-            AND (@FinYearPattern IS NULL OR DocNo LIKE @FinYearPattern)
         `);
 
-      const maxSeq = maxResult.recordset[0]?.MaxSeq ?? startFrom - 1;
+      // Also check ExpenseBooking across ALL fin years
+      const ebMaxResult = await transaction
+        .request()
+        .input("EDocTypeId2", sql.Int, typeId)
+        .input("Prefix2", sql.NVarChar(100), prefix + "%").query(`
+          SELECT MAX(TRY_CAST(SUBSTRING(EDocNo, LEN(@Prefix2) + 1, 6) AS INT)) AS MaxSeq
+          FROM dbo.ExpenseBooking WITH (UPDLOCK, HOLDLOCK)
+          WHERE EDocTypeId = @EDocTypeId2
+            AND EDocNo LIKE @Prefix2
+        `);
+
+      const seqFromDNS = maxResult.recordset[0]?.MaxSeq ?? null;
+      const seqFromEB = ebMaxResult.recordset[0]?.MaxSeq ?? null;
+      const combinedMax = Math.max(seqFromDNS ?? 0, seqFromEB ?? 0);
+      const maxSeq = combinedMax > 0 ? combinedMax : startFrom - 1;
       const nextSeq = Math.max(maxSeq + 1, startFrom);
       const padded = String(nextSeq).padStart(6, "0");
 
@@ -361,6 +371,7 @@ router.post("/", async (req, res) => {
 
     const insertResult = await transaction
       .request()
+      .input("EName", sql.NVarChar(200), EName || null)
       .input("EProjectName", sql.NVarChar(150), EProjectName || null)
       .input("EDocumentType", sql.NVarChar(50), EDocumentType || null)
       .input("EDocDate", sql.Date, EDocDate || null)
@@ -402,14 +413,14 @@ router.post("/", async (req, res) => {
       )
       .input("EFinYear", sql.NVarChar(20), EFinYear || null).query(`
         INSERT INTO dbo.ExpenseBooking (
-          EProjectName, EDocumentType, EDocDate, EAmount, ENetAmount,
+          EName, EProjectName, EDocumentType, EDocDate, EAmount, ENetAmount,
           ECgstRate, ESgstRate, EDiscountData, EDocNo,
           EEmiPayment, EEmiData, EInstallmentCount, EEmiAmount, EEmiStartDate,
           EReminder, ERemarks, EStatus,
           ECreatedAt, EUpdatedAt, ECreatedBy, EApprovedBy,
           ECompanyId, EDocTypeId, EFinYear
         ) VALUES (
-          @EProjectName, @EDocumentType, @EDocDate, @EAmount, @ENetAmount,
+          @EName, @EProjectName, @EDocumentType, @EDocDate, @EAmount, @ENetAmount,
           @ECgstRate, @ESgstRate, @EDiscountData, @EDocNo,
           @EEmiPayment, @EEmiData, @EInstallmentCount, @EEmiAmount, @EEmiStartDate,
           @EReminder, @ERemarks, @EStatus,
@@ -673,6 +684,7 @@ router.put("/:id", async (req, res) => {
   }
 
   const {
+    EName,
     EProjectName,
     EDocumentType,
     EDocDate,
@@ -700,6 +712,7 @@ router.put("/:id", async (req, res) => {
     const result = await pool
       .request()
       .input("Eid", sql.Int, numericId)
+      .input("EName", sql.NVarChar(200), EName || null)
       .input("EProjectName", sql.NVarChar(150), EProjectName || null)
       .input("EDocumentType", sql.NVarChar(50), EDocumentType || null)
       .input("EDocDate", sql.Date, EDocDate || null)
@@ -738,7 +751,7 @@ router.put("/:id", async (req, res) => {
       )
       .input("EFinYear", sql.NVarChar(20), EFinYear || null).query(`
         UPDATE dbo.ExpenseBooking SET
-          EProjectName=@EProjectName, EDocumentType=@EDocumentType, EDocDate=@EDocDate,
+          EName=@EName, EProjectName=@EProjectName, EDocumentType=@EDocumentType, EDocDate=@EDocDate,
           EAmount=@EAmount, ENetAmount=@ENetAmount, ECgstRate=@ECgstRate, ESgstRate=@ESgstRate,
           EDiscountData=@EDiscountData, EDocNo=@EDocNo, EEmiPayment=@EEmiPayment,
           EEmiData=@EEmiData, EInstallmentCount=@EInstallmentCount, EEmiAmount=@EEmiAmount,

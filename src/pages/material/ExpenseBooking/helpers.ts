@@ -96,6 +96,7 @@ export function generateEmiSchedule(
 
 export function blankForm(): Omit<ExpenseRecord, "id"> {
   return {
+    bookingName: "",
     bookingReference: "",
     docTypeName: "",
     bookingDate: "",
@@ -155,6 +156,7 @@ export function dbToRecord(row: any): ExpenseRecord {
 
   return {
     id: String(id),
+    bookingName: row.EName ?? "",
     bookingReference: row.EDocNo ?? "",
     docTypeName: row.DocTypeName ?? "",
     bookingDate: row.EDocDate ? row.EDocDate.slice(0, 10) : "",
@@ -185,6 +187,7 @@ export function recordToDb(
   docTypeId?: number | null,
 ) {
   return {
+    EName: form.bookingName || null,
     EProjectName: form.supplier || form.projectSite || null,
     EDocumentType: form.materialCategory || null,
     EDocDate: form.bookingDate || null,
