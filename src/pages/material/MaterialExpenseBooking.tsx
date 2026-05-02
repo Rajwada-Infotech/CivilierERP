@@ -115,6 +115,7 @@ interface POItem {
   PurchaseOrderNo: string;
   DocNo?: string;
   PODate: string;
+  ItemDescription?: string;
   SupplierName?: string;
   CompanyId?: number;
   ProjectId?: number;
@@ -129,6 +130,7 @@ interface WOItem {
   DocNo?: string;
   DocumentDate: string;
   ContractorName?: string; // WO uses contractor, not supplier
+  Remarks?: string;
   CompanyId?: number;
   ProjectId?: number;
   TotalAmount?: number;
@@ -150,6 +152,7 @@ interface SelectedDoc {
   kind: SourceKind;
   docNo: string; // The booking reference — the order/invoice doc number
   sourceId: number;
+  nameLabel?: string; // description auto-filled into bookingName
   vendorLabel?: string; // supplier (PO) or contractor (WO) — plain text, no FK lookup
   companyId?: number;
   projectId?: number;
@@ -218,6 +221,7 @@ interface DocSelectorProps {
   finYear?: string;
   onSelect: (doc: SelectedDoc) => void;
   onClear: () => void;
+  onTodSelected?: (tod: TodItem | null) => void;
 }
 
 function DocSelectorPanel({
@@ -231,6 +235,7 @@ function DocSelectorPanel({
   finYear,
   onSelect,
   onClear,
+  onTodSelected,
 }: DocSelectorProps) {
   const [tab, setTab] = useState<SourceKind>("PO");
   const [search, setSearch] = useState("");
@@ -246,10 +251,12 @@ function DocSelectorPanel({
       );
       const docNo: string =
         data.nextDocNo ?? (tod.FullPrefix ?? tod.Prefix) + "/001";
+      onTodSelected?.(tod);
       onSelect({
         kind: "TOD",
         docNo,
         sourceId: tod.TypeOfDocId,
+        nameLabel: tod.Description,
         vendorLabel: undefined,
         companyId: undefined,
         projectId: undefined,
@@ -258,6 +265,7 @@ function DocSelectorPanel({
         date: undefined,
       });
     } catch {
+      onTodSelected?.(null);
       toast.error("Could not fetch next document number.");
     } finally {
       setTodFetching(false);
@@ -371,7 +379,10 @@ function DocSelectorPanel({
             </div>
           </div>
           <button
-            onClick={onClear}
+            onClick={() => {
+              onTodSelected?.(null);
+              onClear();
+            }}
             className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-destructive transition-colors shrink-0 px-2 py-1 rounded-md hover:bg-destructive/5 border border-transparent hover:border-destructive/20 mt-0.5"
           >
             <X size={10} /> Change
@@ -397,7 +408,7 @@ function DocSelectorPanel({
     { id: "WO", label: "Work Orders", icon: HardHat, count: woList.length },
     {
       id: "TOD",
-      label: "Other Documents",
+      label: "Other Expenses",
       icon: FileText,
       count: todList.length,
     },
@@ -492,6 +503,7 @@ function DocSelectorPanel({
                       kind: "PO",
                       docNo,
                       sourceId: po.PurchaseOrderID,
+                      nameLabel: po.ItemDescription,
                       vendorLabel: po.SupplierName,
                       companyId: po.CompanyId,
                       projectId: po.ProjectId,
@@ -527,6 +539,7 @@ function DocSelectorPanel({
                       kind: "WO",
                       docNo,
                       sourceId: wo.Id,
+                      nameLabel: wo.Remarks,
                       vendorLabel: wo.ContractorName, // contractor — not supplier
                       companyId: wo.CompanyId,
                       projectId: wo.ProjectId,
@@ -540,7 +553,7 @@ function DocSelectorPanel({
             })
           )
         ) : filteredTOD.length === 0 ? (
-          <EmptyState label="No document types found" />
+          <EmptyState label="No other expense types found" />
         ) : (
           filteredTOD.map((tod) => (
             <PickerRow
@@ -642,6 +655,7 @@ export default function MaterialExpenseBooking() {
 
   // Document selection
   const [selectedDoc, setSelectedDoc] = useState<SelectedDoc | null>(null);
+  const [selectedTod, setSelectedTod] = useState<TodItem | null>(null);
 
   // Page state
   const [records, setRecords] = useState<ExpenseRecord[]>([]);
@@ -725,6 +739,35 @@ export default function MaterialExpenseBooking() {
     }
   };
 
+  // Re-fetch next doc number when finYear changes while a TOD is selected
+  useEffect(() => {
+    if (!selectedTod || !selectedDoc || selectedDoc.kind !== "TOD") return;
+    let cancelled = false;
+    const refetch = async () => {
+      try {
+        const qs = form.financialYear
+          ? `?finYear=${encodeURIComponent(form.financialYear)}`
+          : "";
+        const data = await apiFetch(
+          `/api/document-type/${selectedTod.TypeOfDocId}/next-number${qs}`,
+        );
+        if (cancelled) return;
+        const docNo: string =
+          data.nextDocNo ??
+          (selectedTod.FullPrefix ?? selectedTod.Prefix) + "/001";
+        setSelectedDoc((prev) => (prev ? { ...prev, docNo } : prev));
+        setForm((prev) => ({ ...prev, bookingReference: docNo }));
+      } catch {
+        // silently ignore
+      }
+    };
+    refetch();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [form.financialYear, selectedTod]);
+
   const fetchApprovalTrail = async (recordId: string) => {
     if (!recordId) {
       setApprovalTrail(undefined);
@@ -765,6 +808,8 @@ export default function MaterialExpenseBooking() {
     setForm((prev) => ({
       ...prev,
       bookingReference: doc.docNo,
+      // Auto-fill name/description from the selected document
+      bookingName: doc.nameLabel ?? prev.bookingName,
       // Auto-fill amount from the order (no manual intervention)
       basicAmount: doc.amount ?? prev.basicAmount,
       // Auto-fill company and project if available
@@ -784,6 +829,7 @@ export default function MaterialExpenseBooking() {
 
   const clearDoc = () => {
     setSelectedDoc(null);
+    setSelectedTod(null);
     setForm((prev) => ({
       ...prev,
       bookingReference: "",
@@ -798,6 +844,7 @@ export default function MaterialExpenseBooking() {
     setForm({ ...blankForm(), financialYear: activeFinYears[0]?.year || "" });
     setApprovalTrail(undefined);
     setSelectedDoc(null);
+    setSelectedTod(null);
     fetchMasters();
     setView("form");
   };
@@ -886,7 +933,12 @@ export default function MaterialExpenseBooking() {
     );
 
     const body = {
-      ...recordToDb(form, bd.netAmount, null),
+      ...recordToDb(
+        form,
+        bd.netAmount,
+        // Only pass docTypeId for TOD (Other Expense) — PO/WO don't use DocNumberSequence
+        selectedDoc?.kind === "TOD" ? (selectedDoc.sourceId ?? null) : null,
+      ),
       ESourceType: selectedDoc?.kind ?? null,
       ESourceId: selectedDoc?.sourceId ?? null,
     };
@@ -1044,6 +1096,7 @@ export default function MaterialExpenseBooking() {
                   finYear={form.financialYear || undefined}
                   onSelect={applyDoc}
                   onClear={clearDoc}
+                  onTodSelected={setSelectedTod}
                 />
 
                 {/* Booking reference — always read-only, driven by selected doc */}
@@ -1061,6 +1114,24 @@ export default function MaterialExpenseBooking() {
                     readOnly
                     placeholder="Auto-filled from selected document"
                     className="font-mono bg-muted/30 cursor-not-allowed"
+                  />
+                </Field>
+              </div>
+
+              {/* ── Booking Name ─────────────────────────────────────── */}
+              <div className="space-y-2">
+                <Field
+                  label="Booking Name"
+                  hint={
+                    selectedDoc?.nameLabel
+                      ? "Auto-filled from selected document — editable"
+                      : undefined
+                  }
+                >
+                  <Input
+                    value={form.bookingName}
+                    onChange={(e) => set("bookingName", e.target.value)}
+                    placeholder="e.g. Cement supply for Block A, Q1 contractor payment…"
                   />
                 </Field>
               </div>
@@ -1084,7 +1155,14 @@ export default function MaterialExpenseBooking() {
                       onChange={(e) => set("dueDate", e.target.value)}
                     />
                   </Field>
-                  <Field label="Financial Year">
+                  <Field
+                    label="Financial Year"
+                    hint={
+                      selectedTod
+                        ? "Changing year updates the booking reference number"
+                        : undefined
+                    }
+                  >
                     <Select
                       value={form.financialYear}
                       onValueChange={(v) => set("financialYear", v)}

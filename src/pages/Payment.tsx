@@ -72,6 +72,19 @@ interface ExpenseOption {
   id: string;
   value: string;
   label: string;
+  // Present on all options
+  type?: "booking" | "emi";
+  expenseBookingId?: number;
+  docNo?: string;
+  projectName?: string;
+  amount?: number;
+  companyId?: number | null;
+  // EMI-specific
+  installmentNo?: number;
+  refNumber?: string | null;
+  dueDate?: string | null;
+  status?: string;
+  parentDocNo?: string;
 }
 
 interface ExpenseDetail {
@@ -465,38 +478,64 @@ const Payment: React.FC = () => {
 
   // ── Expense booking selection → auto-fill ──────────────────────────────────
 
-  const handleExpenseSelect = useCallback(async (expenseId: string) => {
-    if (!expenseId) {
-      setForm((prev) => ({
-        ...prev,
-        expenseId: "",
-        expenseRef: "",
-        project: "",
-        company: "",
-        amount: null,
-        docType: "",
-      }));
-      return;
-    }
-    setLoadingExpense(true);
-    try {
-      const detail = await fetchExpenseDetail(expenseId);
-      if (!detail) throw new Error("Not found");
-      setForm((prev) => ({
-        ...prev,
-        expenseId,
-        expenseRef: detail.EDocNo || "",
-        project: detail.EProjectName || "",
-        company: String(detail.ECompanyId ?? ""),
-        amount: detail.ENetAmount ?? detail.EAmount ?? null,
-        docType: detail.DocTypeName || detail.EDocumentType || "",
-      }));
-    } catch {
-      toast.error("Could not load expense booking details.");
-    } finally {
-      setLoadingExpense(false);
-    }
-  }, []);
+  const handleExpenseSelect = useCallback(
+    async (expenseId: string) => {
+      if (!expenseId) {
+        setForm((prev) => ({
+          ...prev,
+          expenseId: "",
+          expenseRef: "",
+          project: "",
+          company: "",
+          amount: null,
+          docType: "",
+        }));
+        return;
+      }
+
+      // EMI installment options have id like "emi-{bookingId}-{no}".
+      // The detail endpoint only accepts numeric booking IDs, so for EMI options
+      // we auto-fill directly from the option data without any API call.
+      const selectedOption = expenseOptions.find((o) => o.id === expenseId);
+      if (selectedOption?.type === "emi") {
+        // Derive a short doc type from the ref: "CI/WO/000001/2025-2026-EMI-01" → "WO/EMI-01"
+        const ref = selectedOption.refNumber || "";
+        const emiTag = ref.match(/EMI-\d+$/)?.[0] ?? "EMI";
+        const woTag = ref.match(/\/(WO|PO|EXP)\//)?.[1] ?? "EXP";
+        const shortDocType = `${woTag}/${emiTag}`;
+        setForm((prev) => ({
+          ...prev,
+          expenseId,
+          expenseRef: ref || selectedOption.docNo || "",
+          project: selectedOption.projectName || "",
+          company: String(selectedOption.companyId ?? ""),
+          amount: selectedOption.amount ?? null,
+          docType: shortDocType,
+        }));
+        return;
+      }
+
+      setLoadingExpense(true);
+      try {
+        const detail = await fetchExpenseDetail(expenseId);
+        if (!detail) throw new Error("Not found");
+        setForm((prev) => ({
+          ...prev,
+          expenseId,
+          expenseRef: detail.EDocNo || "",
+          project: detail.EProjectName || "",
+          company: String(detail.ECompanyId ?? ""),
+          amount: detail.ENetAmount ?? detail.EAmount ?? null,
+          docType: detail.DocTypeName || detail.EDocumentType || "",
+        }));
+      } catch {
+        toast.error("Could not load expense booking details.");
+      } finally {
+        setLoadingExpense(false);
+      }
+    },
+    [expenseOptions],
+  );
 
   const clearExpenseLink = () => {
     setForm((prev) => ({
@@ -535,6 +574,10 @@ const Payment: React.FC = () => {
       toast.error("Please select a payment mode.");
       return;
     }
+    if (!form.bankId) {
+      toast.error("Please select a bank account.");
+      return;
+    }
     if (!form.date) {
       toast.error("Payment date is required.");
       return;
@@ -562,7 +605,7 @@ const Payment: React.FC = () => {
         await addPayment(payload);
         toast.success("Payment saved.");
       }
-      queryClient.invalidateQueries({ queryKey: ["payments"] });
+      queryClient.invalidateQueries({ queryKey: ["payments"], exact: false });
       cancelForm();
     } catch (err: any) {
       toast.error("Save failed: " + err.message);
@@ -577,7 +620,7 @@ const Payment: React.FC = () => {
     try {
       await deletePayment(id);
       toast.success("Payment deleted.");
-      queryClient.invalidateQueries({ queryKey: ["payments"] });
+      queryClient.invalidateQueries({ queryKey: ["payments"], exact: false });
       setDeleteId(null);
     } catch (err: any) {
       toast.error("Delete failed: " + err.message);
@@ -1010,6 +1053,7 @@ const Payment: React.FC = () => {
                             onSuccess={() =>
                               queryClient.invalidateQueries({
                                 queryKey: ["payments"],
+                                exact: false,
                               })
                             }
                           />
@@ -1115,6 +1159,7 @@ const Payment: React.FC = () => {
                                 onSuccess={() =>
                                   queryClient.invalidateQueries({
                                     queryKey: ["payments"],
+                                    exact: false,
                                   })
                                 }
                               />

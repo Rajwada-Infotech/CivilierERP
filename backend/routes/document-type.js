@@ -18,8 +18,8 @@ const bypassOrCheck = (module, subModule, action = "CanView") => [
 // ── Module → EntryType keyword map ───────────────────────────────────────────
 // Maps ?module= query param to SQL LIKE patterns applied to et.EntryType
 const MODULE_KEYWORDS = {
-  PO:  ["purchase order", "purchase"],
-  WO:  ["work order"],
+  PO: ["purchase order", "purchase"],
+  WO: ["work order"],
   GRN: ["goods receipt", "grn", "goods received"],
 };
 
@@ -113,13 +113,12 @@ router.get("/:id/next-number", authMiddleware, async (req, res) => {
     // e.g. "PR/REC/000500" — strip trailing digits to get the true prefix "PR/REC/"
     const truePrefix = rawPrefix.replace(/\d+$/, "");
 
-    // Find the current max sequence for this true prefix
+    // Find the global max sequence for this prefix across ALL fin years
+    // (fin year is only a suffix — the sequence counter is shared across years)
     const maxResult = await pool
       .request()
       .input("TypeOfDocId", sql.Int, id)
-      .input("Prefix", sql.NVarChar(100), truePrefix + "%")
-      .input("FinYearPattern", sql.NVarChar(130), finYear ? `%/${finYear}` : null)
-      .query(`
+      .input("Prefix", sql.NVarChar(100), truePrefix + "%").query(`
         SELECT MAX(
           TRY_CAST(
             SUBSTRING(DocNo, LEN(@Prefix) + 1, 6) AS INT
@@ -128,10 +127,28 @@ router.get("/:id/next-number", authMiddleware, async (req, res) => {
         FROM dbo.DocNumberSequence
         WHERE TypeOfDocId = @TypeOfDocId
           AND DocNo LIKE @Prefix
-          AND (@FinYearPattern IS NULL OR DocNo LIKE @FinYearPattern)
       `);
 
-    let maxSeq = maxResult.recordset[0]?.MaxSeq ?? null;
+    // Also check ExpenseBooking across ALL fin years for committed doc numbers
+    const ebMaxResult = await pool
+      .request()
+      .input("EDocTypeId2", sql.Int, id)
+      .input("Prefix2", sql.NVarChar(100), truePrefix + "%").query(`
+        SELECT MAX(
+          TRY_CAST(
+            SUBSTRING(EDocNo, LEN(@Prefix2) + 1, 6) AS INT
+          )
+        ) AS MaxSeq
+        FROM dbo.ExpenseBooking
+        WHERE EDocTypeId = @EDocTypeId2
+          AND EDocNo LIKE @Prefix2
+      `);
+
+    const seqFromDNS = maxResult.recordset[0]?.MaxSeq ?? null;
+    const seqFromEB = ebMaxResult.recordset[0]?.MaxSeq ?? null;
+    const combinedMax = Math.max(seqFromDNS ?? 0, seqFromEB ?? 0);
+
+    let maxSeq = combinedMax > 0 ? combinedMax : null;
 
     if (maxSeq === null) {
       maxSeq = startFrom - 1;
