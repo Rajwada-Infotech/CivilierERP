@@ -5,6 +5,10 @@ const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition, guardEdit } = require("../services/approvalService");
+const {
+  lockNextDocNumber,
+  backPatchRecordId,
+} = require("../utils/docNumberLock");
 
 // Helper: Require authenticated user email
 const requireUserEmail = (req, res) => {
@@ -302,71 +306,23 @@ router.post("/", async (req, res) => {
     await transaction.begin();
 
     if (EDocTypeId) {
-      const typeId = parseInt(EDocTypeId, 10);
-      const finYear = (EFinYear || "").toString().trim();
-
-      const typeResult = await transaction
-        .request()
-        .input("TypeOfDocId", sql.Int, typeId).query(`
-          SELECT Prefix, FullPrefix, StartingDocNo
-          FROM dbo.TypeOfDoc
-          WHERE TypeOfDocId = @TypeOfDocId AND IsActive = 1
-        `);
-
-      const typeRow = typeResult.recordset[0];
-      if (!typeRow) {
+      // Use the shared lock helper — handles UPSERT-style collision retry
+      // so we never hit the UQ_DocNumberSequence_DocNo duplicate key error.
+      // The transaction is intentionally NOT passed here: lockNextDocNumber
+      // uses the pool directly with its own internal retry on collision.
+      try {
         await transaction.rollback();
-        return res
-          .status(400)
-          .json({ error: "Selected document type not found or inactive." });
-      }
+      } catch (_) {}
 
-      const rawPrefix = typeRow.FullPrefix ?? typeRow.Prefix ?? "";
-      const prefix = rawPrefix.replace(/\d+$/, "");
-      const startFrom = typeRow.StartingDocNo ?? 1;
+      finalDocNo = await lockNextDocNumber(pool, sql, {
+        docTypeId: parseInt(EDocTypeId, 10),
+        finYear: (EFinYear || "").toString().trim(),
+        tableName: "ExpenseBooking",
+        issuedBy: req.user?.email || null,
+      });
 
-      // Count globally across ALL fin years — fin year is only a suffix
-      const maxResult = await transaction
-        .request()
-        .input("TypeOfDocId", sql.Int, typeId)
-        .input("Prefix", sql.NVarChar(100), prefix + "%").query(`
-          SELECT MAX(TRY_CAST(SUBSTRING(DocNo, LEN(@Prefix) + 1, 6) AS INT)) AS MaxSeq
-          FROM dbo.DocNumberSequence WITH (UPDLOCK, HOLDLOCK)
-          WHERE TypeOfDocId = @TypeOfDocId
-            AND DocNo LIKE @Prefix
-        `);
-
-      // Also check ExpenseBooking across ALL fin years
-      const ebMaxResult = await transaction
-        .request()
-        .input("EDocTypeId2", sql.Int, typeId)
-        .input("Prefix2", sql.NVarChar(100), prefix + "%").query(`
-          SELECT MAX(TRY_CAST(SUBSTRING(EDocNo, LEN(@Prefix2) + 1, 6) AS INT)) AS MaxSeq
-          FROM dbo.ExpenseBooking WITH (UPDLOCK, HOLDLOCK)
-          WHERE EDocTypeId = @EDocTypeId2
-            AND EDocNo LIKE @Prefix2
-        `);
-
-      const seqFromDNS = maxResult.recordset[0]?.MaxSeq ?? null;
-      const seqFromEB = ebMaxResult.recordset[0]?.MaxSeq ?? null;
-      const combinedMax = Math.max(seqFromDNS ?? 0, seqFromEB ?? 0);
-      const maxSeq = combinedMax > 0 ? combinedMax : startFrom - 1;
-      const nextSeq = Math.max(maxSeq + 1, startFrom);
-      const padded = String(nextSeq).padStart(6, "0");
-
-      finalDocNo = finYear
-        ? `${prefix}${padded}/${finYear}`
-        : `${prefix}${padded}`;
-
-      await transaction
-        .request()
-        .input("TypeOfDocId", sql.Int, typeId)
-        .input("DocNo", sql.NVarChar(100), finalDocNo)
-        .input("TableName", sql.NVarChar(100), "ExpenseBooking")
-        .input("IssuedBy", sql.NVarChar(200), req.user?.email || null).query(`
-          INSERT INTO dbo.DocNumberSequence (TypeOfDocId, DocNo, TableName, IssuedBy)
-          VALUES (@TypeOfDocId, @DocNo, @TableName, @IssuedBy)
-        `);
+      // Re-open the transaction for the main INSERT below
+      await transaction.begin();
     }
 
     const insertResult = await transaction
@@ -433,14 +389,13 @@ router.post("/", async (req, res) => {
     const newExpenseId = insertResult.recordset[0]?.NewId;
 
     if (finalDocNo && newExpenseId) {
-      await transaction
-        .request()
-        .input("DocNo", sql.NVarChar(100), finalDocNo)
-        .input("RecordId", sql.Int, parseInt(newExpenseId, 10)).query(`
-          UPDATE dbo.DocNumberSequence
-          SET RecordId = @RecordId
-          WHERE DocNo = @DocNo AND TableName = 'ExpenseBooking'
-        `);
+      await backPatchRecordId(
+        pool,
+        sql,
+        finalDocNo,
+        "ExpenseBooking",
+        newExpenseId,
+      );
     }
 
     await transaction.commit();
