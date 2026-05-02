@@ -650,19 +650,37 @@ router.post("/:id/save-full", async (req, res) => {
   try {
     const pool = getPool();
 
+    const currentHeader = await pool.request()
+      .input("Id", sql.Int, headerId)
+      .query(`
+        SELECT DocumentNumber, DocNo
+        FROM dbo.WorkOrderHeader
+        WHERE Id = @Id
+      `);
+    const existingHeader = currentHeader.recordset[0];
+    if (!existingHeader) {
+      return res.status(404).json({ error: "Work order not found" });
+    }
+    const stableDocNo =
+      existingHeader.DocNo ||
+      existingHeader.DocumentNumber ||
+      header.DocNo ||
+      header.DocumentNumber ||
+      null;
+
     // 1. Update header
     await pool.request()
       .input("Id",                 sql.Int,               headerId)
       .input("CompanyId",          sql.Int,               header.CompanyId          || null)
       .input("ProjectId",          sql.Int,               header.ProjectId          || null)
-      .input("DocumentNumber",     sql.NVarChar(100),     header.DocumentNumber     || null)
+      .input("DocumentNumber",     sql.NVarChar(100),     stableDocNo)
       .input("DocumentDate",       sql.Date,              header.DocumentDate       || null)
       .input("ContractorId",       sql.Int,               header.ContractorId       || null)
       .input("TotalAmount",        sql.Decimal(18,2),     header.TotalAmount        || 0)
       .input("Remarks",            sql.NVarChar(500),     header.Remarks            || null)
       .input("TermsAndConditions", sql.NVarChar(sql.MAX), header.TermsAndConditions || null)
       .input("DocTypeId",          sql.Int,               header.DocTypeId ? parseInt(header.DocTypeId, 10) : null)
-      .input("DocNo",              sql.NVarChar(100),     header.DocNo              || null)
+      .input("DocNo",              sql.NVarChar(100),     stableDocNo)
       .input("UpdatedBy",          sql.NVarChar(100),     req.user?.name           || null)
       .input("UpdatedAt",          sql.DateTime,          new Date())
       .input("GST",                sql.NVarChar(sql.MAX), header.GST ? (typeof header.GST === "string" ? header.GST : JSON.stringify(header.GST)) : null)
@@ -678,10 +696,7 @@ router.post("/:id/save-full", async (req, res) => {
       `);
 
     // 2. Re-fetch DocumentNumber to use as DocNo FK in every INSERT
-    const hdrRow = await pool.request()
-      .input("HId", sql.Int, headerId)
-      .query("SELECT DocumentNumber FROM dbo.WorkOrderHeader WHERE Id = @HId");
-    const docNo = hdrRow.recordset[0]?.DocumentNumber || null;
+    const docNo = stableDocNo;
 
     const keptActivityIds = [];
 

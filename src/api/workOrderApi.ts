@@ -162,6 +162,8 @@ export interface WorkOrderFullPayload {
     TotalAmount?: number;
     Remarks?: string;
     TermsAndConditions?: string;
+    DocTypeId?: number | string | null;
+    DocNo?: string | null;
     UpdatedBy?: number;
     /** GST configuration stored as JSON in WorkOrderHeader.GST column */
     GST?: {
