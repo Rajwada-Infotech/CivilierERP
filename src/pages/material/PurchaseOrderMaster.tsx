@@ -376,7 +376,16 @@ const PurchaseOrderMaster: React.FC = () => {
     () =>
       ensureArray<any>(hsnRaw).map((h) => ({
         code: String(h.HCode ?? h.code ?? ""),
-        shortDesc: String(h.HShortDesc ?? h.shortDesc ?? ""),
+        // API returns HShortDescription — fall back through HDescription then the code itself
+        shortDesc: String(
+          h.HShortDescription ??
+            h.HShortDesc ??
+            h.shortDesc ??
+            h.HDescription ??
+            h.description ??
+            h.HCode ??
+            "",
+        ),
         description: String(h.HDescription ?? h.description ?? ""),
         igstRate: Number(h.HIGST ?? h.igstRate ?? 0),
         cgstRate: Number(h.HCGST ?? h.cgstRate ?? 0),
@@ -1143,7 +1152,9 @@ const PurchaseOrderMaster: React.FC = () => {
               <FieldLabel>HSN Code</FieldLabel>
               {isReadOnly ? (
                 <div className={`${inputCls} bg-muted/30`}>
-                  {form.hsnCode || "—"}
+                  {form.hsnCode
+                    ? `${form.hsnCode}${hsnRecords.find((h) => h.code === form.hsnCode)?.shortDesc ? ` — ${hsnRecords.find((h) => h.code === form.hsnCode)!.shortDesc}` : ""}`
+                    : "—"}
                 </div>
               ) : (
                 <select
@@ -1163,13 +1174,18 @@ const PurchaseOrderMaster: React.FC = () => {
                     .filter((h) => h.status)
                     .map((h) => (
                       <option key={h.code} value={h.code}>
-                        {h.code} — {h.shortDesc}
+                        {h.code}
+                        {h.shortDesc && h.shortDesc !== h.code
+                          ? ` — ${h.shortDesc}`
+                          : ""}
                       </option>
                     ))}
                 </select>
               )}
+              {/* Show full description below the dropdown when selected */}
               {form.hsnCode &&
-                hsnRecords.find((h) => h.code === form.hsnCode) && (
+                hsnRecords.find((h) => h.code === form.hsnCode)
+                  ?.description && (
                   <p className="text-[11px] text-muted-foreground mt-1 truncate">
                     {
                       hsnRecords.find((h) => h.code === form.hsnCode)!
