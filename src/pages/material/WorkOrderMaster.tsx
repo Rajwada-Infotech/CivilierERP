@@ -75,6 +75,8 @@ interface MaterialItem {
   uomId: number | null;
   unit: string;
   price: number;
+  /** GST rate % auto-filled from HSN when item is selected */
+  gstRate: number;
 }
 
 interface Activity {
@@ -96,8 +98,6 @@ interface ActivityGroup {
   expanded: boolean;
 }
 
-type WOGSTType = "none" | "cgst_sgst" | "igst";
-
 interface WorkOrderForm {
   companyId: string;
   projectId: string;
@@ -106,9 +106,6 @@ interface WorkOrderForm {
   contractorId: string;
   remarks: string;
   termsAndConditions: string;
-  gstApplicable: boolean;
-  gstType: WOGSTType;
-  gstRate: number;
 }
 
 interface DropdownOption {
@@ -116,10 +113,8 @@ interface DropdownOption {
   name: string;
 }
 
-interface ItemOption {
-  id: string;
-  name: string;
-}
+// ItemOption now includes gstRate from HSN Master
+type ItemOption = WOItemOption;
 
 interface ActivityOption {
   id: number;
@@ -224,9 +219,6 @@ const EMPTY_FORM = (): WorkOrderForm => ({
   contractorId: "",
   remarks: "",
   termsAndConditions: "",
-  gstApplicable: false,
-  gstType: "cgst_sgst",
-  gstRate: 18,
 });
 
 const EMPTY_MATERIAL = (): MaterialItem => ({
@@ -237,6 +229,7 @@ const EMPTY_MATERIAL = (): MaterialItem => ({
   uomId: null,
   unit: "",
   price: 0,
+  gstRate: 0,
 });
 
 const EMPTY_ACTIVITY = (): Activity => ({
@@ -345,6 +338,7 @@ const MaterialBreakdownModal: React.FC<{
     updateMaterial(idx, {
       itemId: found ? found.id : "",
       itemName: found ? found.name : "",
+      gstRate: found ? (found.gstRate ?? 0) : 0,
     });
   };
 
@@ -516,13 +510,18 @@ const MaterialBreakdownModal: React.FC<{
                             </div>
                           </div>
                         </div>
+                        {mat.gstRate > 0 && (
+                          <div className="mt-1 text-[11px] text-violet-600 dark:text-violet-400 font-medium">
+                            GST {mat.gstRate}% (from HSN) = {fmt(lineTotal * mat.gstRate / 100)}
+                          </div>
+                        )}
                         {lineTotal > 0 && (
                           <div className="flex items-center justify-between pt-1 border-t border-border/50">
                             <span className="text-xs text-muted-foreground">
                               {mat.quantity} {mat.unit} × ₹{mat.price}
                             </span>
                             <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">
-                              {fmt(lineTotal)}
+                              {fmt(lineTotal + lineTotal * (mat.gstRate || 0) / 100)}
                             </span>
                           </div>
                         )}
@@ -547,6 +546,7 @@ const MaterialBreakdownModal: React.FC<{
                           </span>
                           <span className="text-muted-foreground shrink-0">{mat.quantity > 0 ? `${mat.quantity} ${mat.unit}` : "—"}</span>
                           <span className="text-muted-foreground shrink-0">{mat.price > 0 ? `× ₹${mat.price}` : "—"}</span>
+                          {mat.gstRate > 0 && <span className="text-violet-500 shrink-0">GST {mat.gstRate}%</span>}
                           <span className={`font-semibold shrink-0 w-24 text-right ${lt > 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}>
                             {lt > 0 ? fmt(lt) : "—"}
                           </span>
@@ -1680,6 +1680,7 @@ const WorkOrderEditPanel: React.FC<{
                     // Store the DB row Id so save-full can UPDATE instead of INSERT
                     dbId: m.Id,
                     itemId: m.ItemIdStr || (m.ItemId ? String(m.ItemId) : ""),
+                    gstRate: Number(m.GSTRate ?? 0),
                     itemName: m.ItemName || "",
                     quantity: m.Quantity || 0,
                     uomId: m.UOMId ? Number(m.UOMId) : null,
@@ -1705,19 +1706,22 @@ const WorkOrderEditPanel: React.FC<{
     loadAll();
   }, [workOrderId]);
 
-  const { grandLabourTotal, grandMaterialsTotal, grandSubtotal, gstAmount, grandTotal } = useMemo(() => {
+  const { grandLabourTotal, grandMaterialsTotal, grandMaterialsGST, grandTotal } = useMemo(() => {
     let labour = 0;
     let materials = 0;
+    let materialsGST = 0;
     for (const g of groups) {
       for (const a of g.activities) {
         labour += a.ratePerUnit * a.area;
-        materials += a.materials.reduce((s, m) => s + m.quantity * m.price, 0);
+        for (const m of a.materials) {
+          const lineAmt = m.quantity * m.price;
+          materials += lineAmt;
+          materialsGST += (lineAmt * (m.gstRate || 0)) / 100;
+        }
       }
     }
-    const subtotal = labour + materials;
-    const gst = form.gstApplicable && form.gstRate > 0 ? (subtotal * form.gstRate) / 100 : 0;
-    return { grandLabourTotal: labour, grandMaterialsTotal: materials, grandSubtotal: subtotal, gstAmount: gst, grandTotal: subtotal + gst };
-  }, [groups, form.gstApplicable, form.gstRate]);
+    return { grandLabourTotal: labour, grandMaterialsTotal: materials, grandMaterialsGST: materialsGST, grandTotal: labour + materials + materialsGST };
+  }, [groups]);
 
   const setField = (key: keyof WorkOrderForm, value: string) => {
     setFormState((p) => ({ ...p, [key]: value }));
@@ -1767,6 +1771,7 @@ const WorkOrderEditPanel: React.FC<{
               UOMId: m.uomId ?? null,
               Quantity: m.quantity || null,
               Rate: m.price || null,
+              GSTRate: m.gstRate ?? 0,
               Remarks: null,
               UpdatedBy: userId,
             })),
@@ -1783,11 +1788,7 @@ const WorkOrderEditPanel: React.FC<{
           Remarks: form.remarks || null,
           TermsAndConditions: form.termsAndConditions || null,
           UpdatedBy: userId,
-          GST: {
-            applicable: form.gstApplicable,
-            type: form.gstType,
-            rate: form.gstRate,
-          },
+        // GST is now per-material, not at header level
         },
         activities,
       });
@@ -1935,56 +1936,6 @@ const WorkOrderEditPanel: React.FC<{
               <p className="text-[11px] text-muted-foreground mt-1">Auto-calculated from activities</p>
             </div>
             <div className="col-span-1 sm:col-span-2 lg:col-span-3">
-              <div className="rounded-xl border border-border bg-muted/10 p-4 space-y-4">
-                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
-                  <Receipt size={11} className="text-primary" />GST Details
-                </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <div>
-                    <FieldLabel>GST Applicable</FieldLabel>
-                    <select
-                      value={form.gstApplicable ? "Yes" : "No"}
-                      onChange={(e) => setFormState((p) => ({ ...p, gstApplicable: e.target.value === "Yes" }))}
-                      className={inputCls}
-                    >
-                      <option value="No">No</option>
-                      <option value="Yes">Yes</option>
-                    </select>
-                  </div>
-                  {form.gstApplicable && (
-                    <>
-                      <div>
-                        <FieldLabel>GST Type</FieldLabel>
-                        <select
-                          value={form.gstType}
-                          onChange={(e) => setFormState((p) => ({ ...p, gstType: e.target.value as WOGSTType }))}
-                          className={inputCls}
-                        >
-                          <option value="cgst_sgst">CGST + SGST</option>
-                          <option value="igst">IGST</option>
-                        </select>
-                      </div>
-                      <div>
-                        <FieldLabel>GST Rate (%)</FieldLabel>
-                        <input
-                          type="number"
-                          min={0}
-                          max={100}
-                          step={0.01}
-                          value={form.gstRate}
-                          onChange={(e) => setFormState((p) => ({ ...p, gstRate: parseFloat(e.target.value) || 0 }))}
-                          className={inputCls}
-                        />
-                        {form.gstApplicable && form.gstType === "cgst_sgst" && (
-                          <p className="text-[11px] text-muted-foreground mt-1">CGST {(form.gstRate / 2).toFixed(2)}% + SGST {(form.gstRate / 2).toFixed(2)}%</p>
-                        )}
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
-            <div className="col-span-1 sm:col-span-2 lg:col-span-3">
               <FieldLabel>Remarks</FieldLabel>
               <input value={form.remarks} onChange={(e) => setField("remarks", e.target.value)} placeholder="Any additional remarks…" className={inputCls} />
             </div>
@@ -2031,7 +1982,7 @@ const WorkOrderEditPanel: React.FC<{
           ))}
         </div>
         <div className="border-t border-border bg-muted/10">
-          <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-border/50">
+          <div className="grid grid-cols-1 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-border/50">
             <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3">
               <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide"><Package size={11} className="text-amber-500" />Raw Materials</span>
               <span className="text-base font-bold text-amber-600 dark:text-amber-400">{fmt(grandMaterialsTotal)}</span>
@@ -2040,24 +1991,15 @@ const WorkOrderEditPanel: React.FC<{
               <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide"><Hammer size={11} className="text-blue-500" />Labour</span>
               <span className="text-base font-bold text-blue-600 dark:text-blue-400">{fmt(grandLabourTotal)}</span>
             </div>
+            <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3">
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide"><Receipt size={11} className="text-primary" />GST (from HSN)</span>
+              <span className="text-base font-bold text-violet-600 dark:text-violet-400">{fmt(grandMaterialsGST)}</span>
+            </div>
             <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3 bg-muted/20">
-              <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide"><Receipt size={11} className="text-primary" />Grand Total (incl. GST)</span>
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide"><Receipt size={11} className="text-primary" />Grand Total</span>
               <span className="text-xl font-bold text-foreground">{fmt(grandTotal)}</span>
             </div>
           </div>
-          {form.gstApplicable && gstAmount > 0 && (
-            <div className="border-t border-border/50 px-4 sm:px-6 py-2 flex flex-wrap gap-4 text-xs text-muted-foreground">
-              <span>Subtotal: <strong className="text-foreground">{fmt(grandSubtotal)}</strong></span>
-              {form.gstType === "cgst_sgst" ? (
-                <>
-                  <span>CGST ({(form.gstRate / 2).toFixed(2)}%): <strong className="text-foreground">{fmt(gstAmount / 2)}</strong></span>
-                  <span>SGST ({(form.gstRate / 2).toFixed(2)}%): <strong className="text-foreground">{fmt(gstAmount / 2)}</strong></span>
-                </>
-              ) : (
-                <span>IGST ({form.gstRate}%): <strong className="text-foreground">{fmt(gstAmount)}</strong></span>
-              )}
-            </div>
-          )}
         </div>
       </div>
 
@@ -2201,19 +2143,22 @@ const WorkOrderMaster: React.FC = () => {
   }, []);
 
   // ── Totals ────────────────────────────────────────────────────────────────
-  const { grandLabourTotal, grandMaterialsTotal, grandSubtotal, gstAmount, grandTotal } = useMemo(() => {
+  const { grandLabourTotal, grandMaterialsTotal, grandMaterialsGST, grandTotal } = useMemo(() => {
     let labour = 0;
     let materials = 0;
+    let materialsGST = 0;
     for (const g of groups) {
       for (const a of g.activities) {
         labour += a.ratePerUnit * a.area;
-        materials += a.materials.reduce((s, m) => s + m.quantity * m.price, 0);
+        for (const m of a.materials) {
+          const lineAmt = m.quantity * m.price;
+          materials += lineAmt;
+          materialsGST += (lineAmt * (m.gstRate || 0)) / 100;
+        }
       }
     }
-    const subtotal = labour + materials;
-    const gst = form.gstApplicable && form.gstRate > 0 ? (subtotal * form.gstRate) / 100 : 0;
-    return { grandLabourTotal: labour, grandMaterialsTotal: materials, grandSubtotal: subtotal, gstAmount: gst, grandTotal: subtotal + gst };
-  }, [groups, form.gstApplicable, form.gstRate]);
+    return { grandLabourTotal: labour, grandMaterialsTotal: materials, grandMaterialsGST: materialsGST, grandTotal: labour + materials + materialsGST };
+  }, [groups]);
 
   const setField = (key: keyof WorkOrderForm, value: string) => {
     setForm((p) => ({ ...p, [key]: value }));
@@ -2272,11 +2217,7 @@ const WorkOrderMaster: React.FC = () => {
         DocNo: form.docNumber || woDocNo || null,
         finYear: selectedFinYear || null,
         CreatedBy: userId,
-        GST: {
-          applicable: form.gstApplicable,
-          type: form.gstType,
-          rate: form.gstRate,
-        },
+        // GST is now per-material, not at header level
       });
       const newHeaderId: number = created.Id;
       const confirmedDocNumber =
@@ -2302,6 +2243,7 @@ const WorkOrderMaster: React.FC = () => {
                 UOMId: m.uomId ?? null,
                 Quantity: m.quantity || null,
                 Rate: m.price || null,
+                GSTRate: m.gstRate ?? 0,
                 Remarks: null,
                 CreatedBy: userId,
               })),
@@ -2321,11 +2263,7 @@ const WorkOrderMaster: React.FC = () => {
           DocTypeId: woDocTypeId,
           DocNo: confirmedDocNumber || null,
           UpdatedBy: userId,
-          GST: {
-            applicable: form.gstApplicable,
-            type: form.gstType,
-            rate: form.gstRate,
-          },
+          // GST is now per-material, not at header level
         },
         activities,
       });
@@ -2616,56 +2554,6 @@ const WorkOrderMaster: React.FC = () => {
                   <p className="text-[11px] text-muted-foreground mt-1">Auto-calculated from activities</p>
                 </div>
                 <div className="col-span-1 sm:col-span-2 lg:col-span-3">
-                  <div className="rounded-xl border border-border bg-muted/10 p-4 space-y-4">
-                    <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
-                      <Receipt size={11} className="text-primary" />GST Details
-                    </h3>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                      <div>
-                        <FieldLabel>GST Applicable</FieldLabel>
-                        <select
-                          value={form.gstApplicable ? "Yes" : "No"}
-                          onChange={(e) => setForm((p) => ({ ...p, gstApplicable: e.target.value === "Yes" }))}
-                          className={inputCls}
-                        >
-                          <option value="No">No</option>
-                          <option value="Yes">Yes</option>
-                        </select>
-                      </div>
-                      {form.gstApplicable && (
-                        <>
-                          <div>
-                            <FieldLabel>GST Type</FieldLabel>
-                            <select
-                              value={form.gstType}
-                              onChange={(e) => setForm((p) => ({ ...p, gstType: e.target.value as WOGSTType }))}
-                              className={inputCls}
-                            >
-                              <option value="cgst_sgst">CGST + SGST</option>
-                              <option value="igst">IGST</option>
-                            </select>
-                          </div>
-                          <div>
-                            <FieldLabel>GST Rate (%)</FieldLabel>
-                            <input
-                              type="number"
-                              min={0}
-                              max={100}
-                              step={0.01}
-                              value={form.gstRate}
-                              onChange={(e) => setForm((p) => ({ ...p, gstRate: parseFloat(e.target.value) || 0 }))}
-                              className={inputCls}
-                            />
-                            {form.gstApplicable && form.gstType === "cgst_sgst" && (
-                              <p className="text-[11px] text-muted-foreground mt-1">CGST {(form.gstRate / 2).toFixed(2)}% + SGST {(form.gstRate / 2).toFixed(2)}%</p>
-                            )}
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                <div className="col-span-1 sm:col-span-2 lg:col-span-3">
                   <FieldLabel>Remarks</FieldLabel>
                   <input value={form.remarks} onChange={(e) => setField("remarks", e.target.value)} placeholder="Any additional remarks…" className={inputCls} />
                 </div>
@@ -2712,7 +2600,7 @@ const WorkOrderMaster: React.FC = () => {
               ))}
             </div>
             <div className="border-t border-border bg-muted/10">
-              <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-border/50">
+              <div className="grid grid-cols-1 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-border/50">
                 <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3">
                   <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide"><Package size={11} className="text-amber-500" />Raw Materials</span>
                   <span className="text-base font-bold text-amber-600 dark:text-amber-400">{fmt(grandMaterialsTotal)}</span>
@@ -2721,24 +2609,15 @@ const WorkOrderMaster: React.FC = () => {
                   <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide"><Hammer size={11} className="text-blue-500" />Labour</span>
                   <span className="text-base font-bold text-blue-600 dark:text-blue-400">{fmt(grandLabourTotal)}</span>
                 </div>
+                <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3">
+                  <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide"><Receipt size={11} className="text-primary" />GST (from HSN)</span>
+                  <span className="text-base font-bold text-violet-600 dark:text-violet-400">{fmt(grandMaterialsGST)}</span>
+                </div>
                 <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3 bg-muted/20">
-                  <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide"><Receipt size={11} className="text-primary" />Grand Total (incl. GST)</span>
+                  <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide"><Receipt size={11} className="text-primary" />Grand Total</span>
                   <span className="text-xl font-bold text-foreground">{fmt(grandTotal)}</span>
                 </div>
               </div>
-              {form.gstApplicable && gstAmount > 0 && (
-                <div className="border-t border-border/50 px-4 sm:px-6 py-2 flex flex-wrap gap-4 text-xs text-muted-foreground">
-                  <span>Subtotal: <strong className="text-foreground">{fmt(grandSubtotal)}</strong></span>
-                  {form.gstType === "cgst_sgst" ? (
-                    <>
-                      <span>CGST ({(form.gstRate / 2).toFixed(2)}%): <strong className="text-foreground">{fmt(gstAmount / 2)}</strong></span>
-                      <span>SGST ({(form.gstRate / 2).toFixed(2)}%): <strong className="text-foreground">{fmt(gstAmount / 2)}</strong></span>
-                    </>
-                  ) : (
-                    <span>IGST ({form.gstRate}%): <strong className="text-foreground">{fmt(gstAmount)}</strong></span>
-                  )}
-                </div>
-              )}
             </div>
           </div>
 

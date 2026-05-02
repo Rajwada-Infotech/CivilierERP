@@ -7,6 +7,8 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface POLineItem {
+  itemId?: string;
+  itemName?: string;
   itemDescription: string;
   unit: string;
   quantity: number;
@@ -127,12 +129,9 @@ function enrichPayload(payload: CreatePOPayload): CreatePOPayload {
     : 0;
   const taxableAmount = Math.max(0, subtotal - discountAmount);
   const taxMultiplier = subtotal > 0 ? taxableAmount / subtotal : 0;
-  const gst = payload.GST;
-  const gstAmount =
-    gst?.applicable && gst.rate > 0
-      ? (taxableAmount * gst.rate) / 100
-      : 0;
-  const grandTotal = Math.round(taxableAmount + totalTax * taxMultiplier + gstAmount);
+  // GST is now captured per line item via the `tax` field (from HSN)
+  // The header-level GST object is kept for reference only; line tax drives the total.
+  const grandTotal = Math.round(taxableAmount + totalTax * taxMultiplier);
 
   return {
     ...payload,
@@ -214,3 +213,25 @@ export const getProjects = () =>
 // Returns [{ Id, UOMName, UOMCode, Symbol, IsActive, ... }]
 export const getUOMs = () =>
   fetchWithAuth("/api/uom-master").then((r) => r.json());
+
+// ─── Items with HSN GST rates ─────────────────────────────────────────────────
+// Returns items with their resolved GST rate from HSN Master
+// Used by PO to auto-fill GST rate when an item is selected
+export interface POItemOption {
+  id: string;
+  name: string;
+  gstRate: number;
+  hsnCode: string | null;
+}
+
+export const getItemsWithGST = (): Promise<POItemOption[]> =>
+  fetchWithAuth("/api/work-orders/meta/items")
+    .then((r) => r.json())
+    .then((data: any[]) =>
+      (Array.isArray(data) ? data : []).map((i) => ({
+        id: String(i.id),
+        name: String(i.name),
+        gstRate: Number(i.gstRate ?? 0),
+        hsnCode: i.hsnCode ?? null,
+      }))
+    );
