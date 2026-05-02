@@ -77,8 +77,9 @@ router.get(
   },
 );
 
-// ── GET /:id/next-number — generate the next doc number for a type ─────────────
-// Called by the DocNumberPreview component in the frontend.
+// ── GET /:id/next-number — preview the next doc number (read-only, no lock) ───
+// Called by the DocNumberPreview component and DocSelectorPanel in the frontend.
+// Updates in real-time when finYear changes.
 // Query params:
 //   finYear  — e.g. "2024-25"  appended as suffix: PREFIX/000500/2024-25
 router.get("/:id/next-number", authMiddleware, async (req, res) => {
@@ -109,13 +110,15 @@ router.get("/:id/next-number", authMiddleware, async (req, res) => {
     const rawPrefix = typeRow.FullPrefix ?? typeRow.Prefix ?? "";
     const startFrom = typeRow.StartingDocNo ?? 1;
 
-    // FullPrefix in the DB may already include the starting number
-    // e.g. "PR/REC/000500" — strip trailing digits to get the true prefix "PR/REC/"
+    // Strip trailing digits so "CI/OTH/000001" → "CI/OTH/"
     const truePrefix = rawPrefix.replace(/\d+$/, "");
 
-    // Find the global max sequence for this prefix across ALL fin years
-    // (fin year is only a suffix — the sequence counter is shared across years)
-    const maxResult = await pool
+    // ── Strategy: max sequence number across ALL fin years (global counter) ──
+    // The fin year is only a cosmetic suffix — the counter never resets per year.
+    // This matches exactly what lockNextDocNumber does when it issues numbers.
+
+    // Max already locked in DocNumberSequence (all fin years, same prefix)
+    const maxDNSResult = await pool
       .request()
       .input("TypeOfDocId", sql.Int, id)
       .input("Prefix", sql.NVarChar(100), truePrefix + "%").query(`
@@ -129,10 +132,10 @@ router.get("/:id/next-number", authMiddleware, async (req, res) => {
           AND DocNo LIKE @Prefix
       `);
 
-    // Also check ExpenseBooking across ALL fin years for committed doc numbers
-    const ebMaxResult = await pool
+    // Max already committed in ExpenseBooking (all fin years, same prefix)
+    const maxEBResult = await pool
       .request()
-      .input("EDocTypeId2", sql.Int, id)
+      .input("EDocTypeId", sql.Int, id)
       .input("Prefix2", sql.NVarChar(100), truePrefix + "%").query(`
         SELECT MAX(
           TRY_CAST(
@@ -140,24 +143,18 @@ router.get("/:id/next-number", authMiddleware, async (req, res) => {
           )
         ) AS MaxSeq
         FROM dbo.ExpenseBooking
-        WHERE EDocTypeId = @EDocTypeId2
+        WHERE EDocTypeId = @EDocTypeId
           AND EDocNo LIKE @Prefix2
       `);
 
-    const seqFromDNS = maxResult.recordset[0]?.MaxSeq ?? null;
-    const seqFromEB = ebMaxResult.recordset[0]?.MaxSeq ?? null;
-    const combinedMax = Math.max(seqFromDNS ?? 0, seqFromEB ?? 0);
+    const seqFromDNS = maxDNSResult.recordset[0]?.MaxSeq ?? null;
+    const seqFromEB = maxEBResult.recordset[0]?.MaxSeq ?? null;
+    const globalMax = Math.max(seqFromDNS ?? 0, seqFromEB ?? 0);
 
-    let maxSeq = combinedMax > 0 ? combinedMax : null;
-
-    if (maxSeq === null) {
-      maxSeq = startFrom - 1;
-    }
-
-    const nextSeq = Math.max(maxSeq + 1, startFrom);
+    const nextSeq = Math.max(globalMax + 1, startFrom);
     const paddedSeq = String(nextSeq).padStart(6, "0");
 
-    // Final format: PR/REC/000500/2024-25  (or  PR/REC/000500  without finYear)
+    // Final format: CI/OTH/000002/2025-26  (or  CI/OTH/000002  without finYear)
     const nextDocNo = finYear
       ? `${truePrefix}${paddedSeq}/${finYear}`
       : `${truePrefix}${paddedSeq}`;
