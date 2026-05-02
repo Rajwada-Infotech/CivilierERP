@@ -163,6 +163,12 @@ export interface WorkOrderFullPayload {
     Remarks?: string;
     TermsAndConditions?: string;
     UpdatedBy?: number;
+    /** GST configuration stored as JSON in WorkOrderHeader.GST column */
+    GST?: {
+      applicable: boolean;
+      type: "none" | "cgst_sgst" | "igst";
+      rate: number;
+    } | null;
   };
   activities: ActivityPayload[];
 }
