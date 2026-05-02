@@ -8,6 +8,7 @@ import {
   deletePayment,
 } from "@/api/newPaymentApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { getBanks } from "@/api/bankMasterApi";
 import { toast } from "sonner";
 import { formatINR } from "@/utils/formatCurrency";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -61,8 +62,10 @@ interface DbPayment {
 interface BankOption {
   id: number;
   label: string;
-  accountNumber?: string;
-  ifscCode?: string;
+  accountNumber?: string | null;
+  ifscCode?: string | null;
+  branch?: string | null;
+  accountType?: string | null;
 }
 
 interface ExpenseOption {
@@ -101,9 +104,19 @@ interface PaymentRecord {
 // ─── Fetchers ─────────────────────────────────────────────────────────────────
 
 const fetchBankOptions = async (): Promise<BankOption[]> => {
-  const res = await fetchWithAuth("/api/account-head-master/bank-options");
-  if (!res.ok) return [];
-  return res.json();
+  const banks = await getBanks();
+  return banks
+    .filter((b) => b.BStatus)
+    .map((b) => ({
+      id: b.BId,
+      label: b.BName
+        ? `${b.BName}${b.BAccountNumber ? ` — ${b.BAccountNumber}` : ""}`
+        : `Bank #${b.BId}`,
+      accountNumber: b.BAccountNumber,
+      ifscCode: b.BIfscCode,
+      branch: b.BBranch,
+      accountType: b.BAccountType,
+    }));
 };
 
 const fetchExpenseOptions = async (): Promise<ExpenseOption[]> => {
@@ -503,7 +516,8 @@ const Payment: React.FC = () => {
     }
     const bank = banks.find((b) => String(b.id) === bankIdStr);
     set("bankId", bank?.id ?? null);
-    set("bankName", bank?.label ?? "");
+    // Store just the base name (before the " — accountNumber" suffix)
+    set("bankName", bank?.label?.split(" — ")[0] ?? "");
   };
 
   // ── Save ───────────────────────────────────────────────────────────────────
@@ -895,6 +909,22 @@ const Payment: React.FC = () => {
                       className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                     />
                   </div>
+                  {form.bankId &&
+                    (() => {
+                      const selected = banks.find((b) => b.id === form.bankId);
+                      if (!selected) return null;
+                      const details = [
+                        selected.ifscCode && `IFSC: ${selected.ifscCode}`,
+                        selected.branch && `Branch: ${selected.branch}`,
+                        selected.accountType && `Type: ${selected.accountType}`,
+                      ].filter(Boolean);
+                      if (!details.length) return null;
+                      return (
+                        <p className="text-[11px] text-muted-foreground/70 mt-1 pl-1">
+                          {details.join(" · ")}
+                        </p>
+                      );
+                    })()}
                 </Field>
               </div>
 
