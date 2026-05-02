@@ -449,7 +449,11 @@ const Payment: React.FC = () => {
   const openEdit = (rec: PaymentRecord) => {
     setEditingId(rec.id);
     const { id, ...rest } = rec;
-    setForm(rest);
+    // Resolve expenseId from the stored expenseRef doc number so the banner stays linked
+    const matchedOption = rest.expenseRef
+      ? expenseOptions.find((o) => o.label.startsWith(rest.expenseRef))
+      : undefined;
+    setForm({ ...rest, expenseId: matchedOption?.id ?? "" });
     setView("form");
   };
 
