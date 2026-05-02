@@ -15,12 +15,14 @@ async function getAccountHeadColumnMeta() {
   if (!accountHeadColumnMetaPromise) {
     accountHeadColumnMetaPromise = getPool()
       .request()
-      .query(`
+      .query(
+        `
         SELECT COLUMN_NAME
         FROM INFORMATION_SCHEMA.COLUMNS
         WHERE TABLE_SCHEMA = 'dbo'
           AND TABLE_NAME = 'AccountHeadMaster'
-      `)
+      `,
+      )
       .then((result) => {
         const meta = new Map();
         result.recordset.forEach((row) => {
@@ -28,7 +30,10 @@ async function getAccountHeadColumnMeta() {
         });
         return meta;
       })
-      .catch(() => new Map());
+      .catch(() => {
+        accountHeadColumnMetaPromise = null; // allow retry on next request
+        return new Map();
+      });
   }
 
   return accountHeadColumnMetaPromise;
@@ -82,7 +87,9 @@ router.get("/", cache("bank-master", 300), async (req, res) => {
 
     const selectColumns = [
       "LHeadId AS BId",
-      "ISNULL(DisplayName, LHeadName) AS BName",
+      hasColumn(columnMeta, "DisplayName")
+        ? "ISNULL(DisplayName, LHeadName) AS BName"
+        : "LHeadName AS BName",
       "LBranchName AS BBranch",
       "LAccountNo AS BAccountNumber",
       "LIFSCCode AS BIfscCode",
@@ -97,17 +104,17 @@ router.get("/", cache("bank-master", 300), async (req, res) => {
       "LHeadCode AS BCode",
     ];
 
-    if (hasColumn(columnMeta, "CreatedAt"))  selectColumns.push("CreatedAt");
-    if (hasColumn(columnMeta, "UpdatedAt"))  selectColumns.push("UpdatedAt");
+    if (hasColumn(columnMeta, "CreatedAt")) selectColumns.push("CreatedAt");
+    if (hasColumn(columnMeta, "UpdatedAt")) selectColumns.push("UpdatedAt");
     if (hasColumn(columnMeta, "ApprovedBy")) selectColumns.push("ApprovedBy");
 
     // CreatedBy and UpdatedBy now store email strings directly — no JOIN needed
-    if (hasColumn(columnMeta, "CreatedBy")) selectColumns.push("CreatedBy AS CreatedByEmail");
-    if (hasColumn(columnMeta, "UpdatedBy")) selectColumns.push("UpdatedBy AS UpdatedByEmail");
+    if (hasColumn(columnMeta, "CreatedBy"))
+      selectColumns.push("CreatedBy AS CreatedByEmail");
+    if (hasColumn(columnMeta, "UpdatedBy"))
+      selectColumns.push("UpdatedBy AS UpdatedByEmail");
 
-    const result = await pool
-      .request()
-      .input("type", sql.VarChar(50), "B")
+    const result = await pool.request().input("type", sql.VarChar(50), "B")
       .query(`
         SELECT
           ${selectColumns.join(",\n          ")}
@@ -119,7 +126,9 @@ router.get("/", cache("bank-master", 300), async (req, res) => {
     res.json(result.recordset);
   } catch (err) {
     console.error("GET BANK ERROR:", err);
-    res.status(500).json({ error: "Failed to fetch banks", message: err.message });
+    res
+      .status(500)
+      .json({ error: "Failed to fetch banks", message: err.message });
   }
 });
 
@@ -153,28 +162,56 @@ router.post("/", validateBody(bankMasterCreateSchema), async (req, res) => {
 
     const request = pool
       .request()
-      .input("LHeadName",          sql.NVarChar(200),  BName.trim())
-      .input("LHeadType",          sql.VarChar(50),    "B")
-      .input("LHeadCode",          sql.NVarChar(20),   null)
-      .input("LBranchName",        sql.VarChar(100),   cleanStr(BBranch, 100) || "Main Branch")
-      .input("LAccountNo",         sql.VarChar(20),    cleanStr(BAccountNumber, 20))
-      .input("LIFSCCode",          sql.NVarChar(11),   cleanIfsc(BIfscCode))
-      .input("LAccountType",       sql.NVarChar(50),   cleanStr(BAccountType, 50))
-      .input("LBankType",          sql.NVarChar(50),   cleanStr(BBankType, 50))
-      .input("AccountHolderName",  sql.NVarChar(150),  cleanStr(BAccountHolderName, 150))
-      .input("BankOpeningBalance", sql.Decimal(18, 2), cleanDecimal(BOpeningBalance))
-      .input("LHeadAddress",       sql.NVarChar(300),  cleanStr(BAddress, 300) || "N/A")
-      .input("LHeadContactPerson", sql.NVarChar(100),  cleanStr(BAccountHolderName, 100) || "System Admin")
-      .input("LHeadPhone",         sql.NVarChar(15),   null)
-      .input("LHeadEmail",         sql.NVarChar(100),  null)
-      .input("LHeadStatus",        sql.Bit,            Boolean(BStatus) ? 1 : 0)
-      .input("LHeadPaymentTerms",  sql.NVarChar(100),  "N/A")
-      .input("LHeadCreditLimit",   sql.Decimal(18, 2), 0);
+      .input("LHeadName", sql.NVarChar(200), BName.trim())
+      .input("LHeadType", sql.VarChar(50), "B")
+      .input("LHeadCode", sql.NVarChar(20), null)
+      .input(
+        "LBranchName",
+        sql.VarChar(100),
+        cleanStr(BBranch, 100) || "Main Branch",
+      )
+      .input("LAccountNo", sql.VarChar(20), cleanStr(BAccountNumber, 20))
+      .input("LIFSCCode", sql.NVarChar(11), cleanIfsc(BIfscCode))
+      .input("LAccountType", sql.NVarChar(50), cleanStr(BAccountType, 50))
+      .input("LBankType", sql.NVarChar(50), cleanStr(BBankType, 50))
+      .input(
+        "AccountHolderName",
+        sql.NVarChar(150),
+        cleanStr(BAccountHolderName, 150),
+      )
+      .input(
+        "BankOpeningBalance",
+        sql.Decimal(18, 2),
+        cleanDecimal(BOpeningBalance),
+      )
+      .input(
+        "LHeadAddress",
+        sql.NVarChar(300),
+        cleanStr(BAddress, 300) || "N/A",
+      )
+      .input(
+        "LHeadContactPerson",
+        sql.NVarChar(100),
+        cleanStr(BAccountHolderName, 100) || "System Admin",
+      )
+      .input("LHeadPhone", sql.NVarChar(15), null)
+      .input("LHeadEmail", sql.NVarChar(100), null)
+      .input("LHeadStatus", sql.Bit, Boolean(BStatus) ? 1 : 0)
+      .input("LHeadPaymentTerms", sql.NVarChar(100), "N/A")
+      .input("LHeadCreditLimit", sql.Decimal(18, 2), 0);
 
     if (companyColumn === "LDescription") {
-      request.input("LDescription", sql.NVarChar(4000), cleanStr(BCompanyName, 500) || null);
+      request.input(
+        "LDescription",
+        sql.NVarChar(4000),
+        cleanStr(BCompanyName, 500) || null,
+      );
     } else {
-      request.input(companyColumn,  sql.NVarChar(500),  cleanStr(BCompanyName, 500) || null);
+      request.input(
+        companyColumn,
+        sql.NVarChar(500),
+        cleanStr(BCompanyName, 500) || null,
+      );
     }
 
     if (hasColumn(columnMeta, "CreatedBy")) {
@@ -185,11 +222,24 @@ router.post("/", validateBody(bankMasterCreateSchema), async (req, res) => {
     }
 
     const insertColumns = [
-      "LHeadName", "LHeadType", "LHeadCode",
-      "LBranchName", "LAccountNo", "LIFSCCode",
-      "LAccountType", "LBankType", "AccountHolderName", "BankOpeningBalance",
-      "LHeadAddress", "LHeadContactPerson", "LHeadPhone", "LHeadEmail",
-      "LHeadStatus", companyColumn, "LHeadPaymentTerms", "LHeadCreditLimit",
+      "LHeadName",
+      "LHeadType",
+      "LHeadCode",
+      "LBranchName",
+      "LAccountNo",
+      "LIFSCCode",
+      "LAccountType",
+      "LBankType",
+      "AccountHolderName",
+      "BankOpeningBalance",
+      "LHeadAddress",
+      "LHeadContactPerson",
+      "LHeadPhone",
+      "LHeadEmail",
+      "LHeadStatus",
+      companyColumn,
+      "LHeadPaymentTerms",
+      "LHeadCreditLimit",
     ];
     const insertValues = insertColumns.map((col) => `@${col}`);
 
@@ -234,7 +284,9 @@ router.post("/", validateBody(bankMasterCreateSchema), async (req, res) => {
         message: err.originalError?.info?.message || err.message,
       });
     }
-    res.status(500).json({ error: "Failed to create bank", message: err.message });
+    res
+      .status(500)
+      .json({ error: "Failed to create bank", message: err.message });
   }
 });
 
@@ -269,22 +321,42 @@ router.put("/:id", validateBody(bankMasterUpdateSchema), async (req, res) => {
 
     const request = pool
       .request()
-      .input("LHeadId",            sql.Int,            parseInt(id))
-      .input("LHeadName",          sql.NVarChar(200),  cleanStr(BName, 200))
-      .input("LBranchName",        sql.VarChar(100),   cleanStr(BBranch, 100))
-      .input("LAccountNo",         sql.VarChar(20),    cleanStr(BAccountNumber, 20))
-      .input("LIFSCCode",          sql.NVarChar(11),   cleanIfsc(BIfscCode))
-      .input("LAccountType",       sql.NVarChar(50),   cleanStr(BAccountType, 50))
-      .input("LBankType",          sql.NVarChar(50),   cleanStr(BBankType, 50))
-      .input("AccountHolderName",  sql.NVarChar(150),  cleanStr(BAccountHolderName, 150))
-      .input("BankOpeningBalance", sql.Decimal(18, 2), BOpeningBalance != null ? cleanDecimal(BOpeningBalance) : null)
-      .input("LHeadAddress",       sql.NVarChar(300),  cleanStr(BAddress, 300))
-      .input("LHeadStatus",        sql.Bit,            BStatus !== undefined ? (Boolean(BStatus) ? 1 : 0) : null);
+      .input("LHeadId", sql.Int, parseInt(id))
+      .input("LHeadName", sql.NVarChar(200), cleanStr(BName, 200))
+      .input("LBranchName", sql.VarChar(100), cleanStr(BBranch, 100))
+      .input("LAccountNo", sql.VarChar(20), cleanStr(BAccountNumber, 20))
+      .input("LIFSCCode", sql.NVarChar(11), cleanIfsc(BIfscCode))
+      .input("LAccountType", sql.NVarChar(50), cleanStr(BAccountType, 50))
+      .input("LBankType", sql.NVarChar(50), cleanStr(BBankType, 50))
+      .input(
+        "AccountHolderName",
+        sql.NVarChar(150),
+        cleanStr(BAccountHolderName, 150),
+      )
+      .input(
+        "BankOpeningBalance",
+        sql.Decimal(18, 2),
+        BOpeningBalance != null ? cleanDecimal(BOpeningBalance) : null,
+      )
+      .input("LHeadAddress", sql.NVarChar(300), cleanStr(BAddress, 300))
+      .input(
+        "LHeadStatus",
+        sql.Bit,
+        BStatus !== undefined ? (Boolean(BStatus) ? 1 : 0) : null,
+      );
 
     if (companyColumn === "LDescription") {
-      request.input("LDescription", sql.NVarChar(4000), cleanStr(BCompanyName, 500));
+      request.input(
+        "LDescription",
+        sql.NVarChar(4000),
+        cleanStr(BCompanyName, 500),
+      );
     } else {
-      request.input(companyColumn,  sql.NVarChar(500),  cleanStr(BCompanyName, 500));
+      request.input(
+        companyColumn,
+        sql.NVarChar(500),
+        cleanStr(BCompanyName, 500),
+      );
     }
 
     const updates = [
@@ -325,7 +397,9 @@ router.put("/:id", validateBody(bankMasterUpdateSchema), async (req, res) => {
     res.json({ success: true, message: "Bank updated successfully" });
   } catch (err) {
     console.error("UPDATE BANK ERROR:", err);
-    res.status(500).json({ error: "Failed to update bank", message: err.message });
+    res
+      .status(500)
+      .json({ error: "Failed to update bank", message: err.message });
   }
 });
 
@@ -333,9 +407,7 @@ router.put("/:id", validateBody(bankMasterUpdateSchema), async (req, res) => {
 router.delete("/:id", async (req, res) => {
   try {
     const pool = await getPool();
-    await pool
-      .request()
-      .input("LHeadId", sql.Int, parseInt(req.params.id))
+    await pool.request().input("LHeadId", sql.Int, parseInt(req.params.id))
       .query(`
         DELETE FROM dbo.AccountHeadMaster
         WHERE LHeadId = @LHeadId AND LHeadType = 'B'
@@ -345,7 +417,9 @@ router.delete("/:id", async (req, res) => {
     res.json({ success: true, message: "Bank deleted successfully" });
   } catch (err) {
     console.error("DELETE BANK ERROR:", err);
-    res.status(500).json({ error: "Failed to delete bank", message: err.message });
+    res
+      .status(500)
+      .json({ error: "Failed to delete bank", message: err.message });
   }
 });
 

@@ -3,7 +3,7 @@ const router = express.Router();
 const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
-const { transition, guardEdit } = require("../services/approvalService");
+const { transition } = require("../services/approvalService");
 
 const requireUserEmail = (req, res) => {
   const email = req.user?.email;
@@ -69,20 +69,18 @@ router.post("/", async (req, res) => {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
 
-    await guardEdit("payments", req.params.id);
-
     const pool = getPool();
     await pool
       .request()
-      .input("PPaymentName", sql.VarChar, PPaymentName || null)
-      .input("PMode", sql.VarChar, PMode || null)
+      .input("PPaymentName", sql.VarChar, PPaymentName || "")
+      .input("PMode", sql.VarChar, PMode || "")
       .input("PAmount", sql.Decimal(18, 2), PAmount || null)
-      .input("PDocType", sql.VarChar, PDocType || null)
+      .input("PDocType", sql.VarChar, PDocType || "N/A")
       .input("PDate", sql.Date, PDate || null)
       .input("PBankID", sql.Int, PBankID || null)
-      .input("PBankName", sql.VarChar, PBankName || null)
-      .input("PProject", sql.VarChar, PProject || null)
-      .input("PCompany", sql.VarChar, PCompany || null)
+      .input("PBankName", sql.VarChar, PBankName || "N/A")
+      .input("PProject", sql.VarChar, PProject || "")
+      .input("PCompany", sql.VarChar, PCompany || "")
       .input("PExpenseRef", sql.NVarChar(100), PExpenseRef || null)
       .input("PCreatedAt", sql.DateTime, new Date())
       .input("PCreatedBy", sql.NVarChar(100), userEmail)
@@ -129,15 +127,15 @@ router.put("/:id", async (req, res) => {
     await pool
       .request()
       .input("PPaymentID", sql.Int, id)
-      .input("PPaymentName", sql.VarChar, PPaymentName || null)
-      .input("PMode", sql.VarChar, PMode || null)
+      .input("PPaymentName", sql.VarChar, PPaymentName || "")
+      .input("PMode", sql.VarChar, PMode || "")
       .input("PAmount", sql.Decimal(18, 2), PAmount || null)
-      .input("PDocType", sql.VarChar, PDocType || null)
+      .input("PDocType", sql.VarChar, PDocType || "N/A")
       .input("PDate", sql.Date, PDate || null)
       .input("PBankID", sql.Int, PBankID || null)
-      .input("PBankName", sql.VarChar, PBankName || null)
-      .input("PProject", sql.VarChar, PProject || null)
-      .input("PCompany", sql.VarChar, PCompany || null)
+      .input("PBankName", sql.VarChar, PBankName || "N/A")
+      .input("PProject", sql.VarChar, PProject || "")
+      .input("PCompany", sql.VarChar, PCompany || "")
       .input("PExpenseRef", sql.NVarChar(100), PExpenseRef || null)
       .input("PUpdatedBy", sql.NVarChar(100), userEmail).query(`
         UPDATE dbo.NewPayment SET
@@ -202,6 +200,8 @@ router.put("/:id/approve", async (req, res) => {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
 
+    const pool = getPool();
+
     const result = await transition(
       "payments",
       id,
@@ -209,7 +209,72 @@ router.put("/:id/approve", async (req, res) => {
       userEmail,
       req.user?.role,
     );
-    await bumpCacheVersion("payments");
+
+    // If this payment is linked to an EMI installment ref (e.g. CI/WO/000001/2025-2026-EMI-01),
+    // mark that installment as Paid in dbo.EmiInstallments so the EMI schedule reflects it.
+    try {
+      const payRec = await pool
+        .request()
+        .input("PPaymentID", sql.Int, id)
+        .query(
+          "SELECT PExpenseRef FROM dbo.NewPayment WHERE PPaymentID = @PPaymentID",
+        );
+      const expenseRef = payRec.recordset[0]?.PExpenseRef || "";
+      if (/-EMI-\d+$/.test(expenseRef)) {
+        await pool
+          .request()
+          .input("RefNumber", sql.NVarChar(200), expenseRef)
+          .input("PaidBy", sql.NVarChar(200), userEmail)
+          .input("PaidAt", sql.DateTime2, new Date()).query(`
+            UPDATE dbo.EmiInstallments
+            SET Status = 'Paid', PaidBy = @PaidBy, PaidAt = @PaidAt
+            WHERE RefNumber = @RefNumber AND Status != 'Paid'
+          `);
+        // Also sync EEmiData JSON on the parent ExpenseBooking
+        const parentRes = await pool
+          .request()
+          .input("RefNumber", sql.NVarChar(200), expenseRef).query(`
+            SELECT ei.ExpenseBookingId, eb.EEmiData
+            FROM dbo.EmiInstallments ei
+            JOIN dbo.ExpenseBooking eb ON eb.Eid = ei.ExpenseBookingId
+            WHERE ei.RefNumber = @RefNumber
+          `);
+        if (parentRes.recordset.length) {
+          const { ExpenseBookingId, EEmiData } = parentRes.recordset[0];
+          const schedRes = await pool
+            .request()
+            .input("ExpenseBookingId", sql.Int, ExpenseBookingId)
+            .query(`SELECT InstallmentNo, DueDate, Amount, Status, RefNumber
+                    FROM dbo.EmiInstallments
+                    WHERE ExpenseBookingId = @ExpenseBookingId
+                    ORDER BY InstallmentNo`);
+          let emiData = {};
+          try {
+            emiData = JSON.parse(EEmiData || "{}");
+          } catch {}
+          emiData.schedule = schedRes.recordset.map((r) => ({
+            installmentNo: r.InstallmentNo,
+            dueDate: r.DueDate?.toISOString?.().slice(0, 10) ?? r.DueDate,
+            amount: parseFloat(r.Amount),
+            status: r.Status,
+            refNumber: r.RefNumber,
+          }));
+          await pool
+            .request()
+            .input("Eid", sql.Int, ExpenseBookingId)
+            .input("EEmiData", sql.NVarChar(sql.MAX), JSON.stringify(emiData))
+            .query(
+              "UPDATE dbo.ExpenseBooking SET EEmiData = @EEmiData WHERE Eid = @Eid",
+            );
+          await bumpCacheVersion("expense-booking");
+        }
+      }
+    } catch (emiErr) {
+      // Non-critical — don't fail the approval if EMI sync fails
+      console.warn("EMI sync on approve failed:", emiErr.message);
+    }
+
+    await bumpCacheVersion("new-payment");
     res.json({ message: "Payment approved", ...result });
   } catch (err) {
     console.error("Payment approve error:", err.message);
