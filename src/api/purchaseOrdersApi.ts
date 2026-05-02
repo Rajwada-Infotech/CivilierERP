@@ -25,6 +25,15 @@ export interface DiscountConfig {
   masterTermName: string | null;
 }
 
+// GST configuration
+export type GSTType = "none" | "cgst_sgst" | "igst";
+
+export interface GSTConfig {
+  applicable: boolean;
+  type: GSTType;          // "none" | "cgst_sgst" | "igst"
+  rate: number;           // total GST %, e.g. 18 → CGST 9% + SGST 9%, or IGST 18%
+}
+
 export interface PurchaseOrder {
   PurchaseOrderID: number;
   PurchaseOrderNo: string;
@@ -58,6 +67,8 @@ export interface PurchaseOrder {
   ApprovedAt?: string;
   // Billing terms / discount configuration
   Discount?: DiscountConfig;
+  // GST configuration
+  GST?: GSTConfig;
 }
 
 export interface POListResponse {
@@ -91,6 +102,8 @@ export interface CreatePOPayload {
   finYear?: string | null;
   // Billing terms / discount configuration
   Discount?: DiscountConfig | null;
+  // GST configuration
+  GST?: GSTConfig | null;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -114,7 +127,12 @@ function enrichPayload(payload: CreatePOPayload): CreatePOPayload {
     : 0;
   const taxableAmount = Math.max(0, subtotal - discountAmount);
   const taxMultiplier = subtotal > 0 ? taxableAmount / subtotal : 0;
-  const grandTotal = Math.round(taxableAmount + totalTax * taxMultiplier);
+  const gst = payload.GST;
+  const gstAmount =
+    gst?.applicable && gst.rate > 0
+      ? (taxableAmount * gst.rate) / 100
+      : 0;
+  const grandTotal = Math.round(taxableAmount + totalTax * taxMultiplier + gstAmount);
 
   return {
     ...payload,
@@ -196,4 +214,3 @@ export const getProjects = () =>
 // Returns [{ Id, UOMName, UOMCode, Symbol, IsActive, ... }]
 export const getUOMs = () =>
   fetchWithAuth("/api/uom-master").then((r) => r.json());
-

@@ -12,6 +12,11 @@ const requireUserName = (req, res) => {
   return email;
 };
 
+const serializeGST = (gstStr) => {
+  if (!gstStr) return null;
+  try { return JSON.parse(gstStr); } catch { return null; }
+};
+
 // =============================================
 //  META / DROPDOWN DATA  —  /api/work-orders/meta/*
 //  MUST be defined BEFORE /:id routes so Express
@@ -163,7 +168,7 @@ router.get("/", cache("work-orders", 300), async (req, res) => {
           ep.name AS ProjectName, h.ProjectId,
           ahm.LHeadName AS ContractorName, h.ContractorId,
           h.Remarks, h.TermsAndConditions, h.CreatedBy, h.UpdatedBy,
-          h.DocTypeId, h.DocNo,
+          h.DocTypeId, h.DocNo, h.GST,
           td.Prefix AS DocTypePrefix, td.Description AS DocTypeDescription,
           COUNT(DISTINCT a.Id) AS ActivityCount
         FROM dbo.WorkOrderHeader h
@@ -175,13 +180,14 @@ router.get("/", cache("work-orders", 300), async (req, res) => {
         GROUP BY h.Id, h.DocumentNumber, h.DocumentDate, h.TotalAmount, h.Status,
           h.CreatedAt, h.UpdatedAt, h.CompanyId, h.ProjectId,
           h.ContractorId, h.Remarks, h.TermsAndConditions,
-          h.CreatedBy, h.UpdatedBy, h.DocTypeId, h.DocNo,
+          h.CreatedBy, h.UpdatedBy, h.DocTypeId, h.DocNo, h.GST,
           ec.name, ep.name, ahm.LHeadName, td.Prefix, td.Description
         ORDER BY h.CreatedAt DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `);
 
-    res.json({ data: result.recordset, page, limit, total, totalPages: Math.ceil(total / limit) });
+    const data = result.recordset.map((r) => ({ ...r, GST: serializeGST(r.GST) }));
+    res.json({ data, page, limit, total, totalPages: Math.ceil(total / limit) });
   } catch (err) {
     console.error("[GET /work-orders]", err.message);
     res.status(500).json({ error: err.message });
@@ -240,7 +246,8 @@ router.get("/:id", cache("work-orders", 300), async (req, res) => {
       materials: materialsMap[a.Id] || [],
     }));
 
-    res.json({ ...headerResult.recordset[0], activities });
+    const hdr = headerResult.recordset[0];
+    res.json({ ...hdr, GST: serializeGST(hdr.GST), activities });
   } catch (err) {
     console.error("[GET /work-orders/:id]", err.message);
     res.status(500).json({ error: err.message });
@@ -250,7 +257,8 @@ router.get("/:id", cache("work-orders", 300), async (req, res) => {
 router.post("/", async (req, res) => {
   const { CompanyId, ProjectId, DocumentNumber, DocumentDate,
           ContractorId, TotalAmount, Remarks, TermsAndConditions,
-          DocTypeId, DocNo, finYear } = req.body;
+          DocTypeId, DocNo, finYear, GST } = req.body;
+  const gstJson = GST ? (typeof GST === "string" ? GST : JSON.stringify(GST)) : null;
   let transaction;
   try {
     const pool = getPool();
@@ -281,14 +289,15 @@ router.post("/", async (req, res) => {
       .input("DocNo",              sql.NVarChar(100),     finalDocNo         || null)
       .input("CreatedBy",          sql.NVarChar(100),     req.user?.name     || null)
       .input("CreatedAt",          sql.DateTime,          new Date())
+      .input("GST",                sql.NVarChar(sql.MAX), gstJson)
       .query(`
         INSERT INTO dbo.WorkOrderHeader
           (CompanyId, ProjectId, DocumentNumber, DocumentDate, ContractorId,
-           TotalAmount, Remarks, TermsAndConditions, DocTypeId, DocNo, CreatedBy, CreatedAt)
+           TotalAmount, Remarks, TermsAndConditions, DocTypeId, DocNo, CreatedBy, CreatedAt, GST)
         OUTPUT INSERTED.Id
         VALUES
           (@CompanyId, @ProjectId, @DocumentNumber, @DocumentDate, @ContractorId,
-           @TotalAmount, @Remarks, @TermsAndConditions, @DocTypeId, @DocNo, @CreatedBy, @CreatedAt)
+           @TotalAmount, @Remarks, @TermsAndConditions, @DocTypeId, @DocNo, @CreatedBy, @CreatedAt, @GST)
       `);
     const newId = result.recordset[0].Id;
 
@@ -327,7 +336,8 @@ router.put("/:id", async (req, res) => {
 
   const { CompanyId, ProjectId, DocumentNumber, DocumentDate,
           ContractorId, TotalAmount, Remarks, TermsAndConditions,
-          DocTypeId, DocNo } = req.body;
+          DocTypeId, DocNo, GST } = req.body;
+  const gstJson = GST ? (typeof GST === "string" ? GST : JSON.stringify(GST)) : null;
   try {
     const pool = getPool();
     await pool.request()
@@ -344,6 +354,7 @@ router.put("/:id", async (req, res) => {
       .input("DocNo",              sql.NVarChar(100),     DocNo              || null)
       .input("UpdatedBy",          sql.NVarChar(100),     req.user?.name    || null)
       .input("UpdatedAt",          sql.DateTime,          new Date())
+      .input("GST",                sql.NVarChar(sql.MAX), gstJson)
       .query(`
         UPDATE dbo.WorkOrderHeader SET
           CompanyId=@CompanyId, ProjectId=@ProjectId,
@@ -351,7 +362,7 @@ router.put("/:id", async (req, res) => {
           ContractorId=@ContractorId, TotalAmount=@TotalAmount,
           Remarks=@Remarks, TermsAndConditions=@TermsAndConditions,
           DocTypeId=@DocTypeId, DocNo=@DocNo,
-          UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt
+          UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt, GST=@GST
         WHERE Id=@Id
       `);
     await bumpCacheVersion("work-orders");
@@ -654,6 +665,7 @@ router.post("/:id/save-full", async (req, res) => {
       .input("DocNo",              sql.NVarChar(100),     header.DocNo              || null)
       .input("UpdatedBy",          sql.NVarChar(100),     req.user?.name           || null)
       .input("UpdatedAt",          sql.DateTime,          new Date())
+      .input("GST",                sql.NVarChar(sql.MAX), header.GST ? (typeof header.GST === "string" ? header.GST : JSON.stringify(header.GST)) : null)
       .query(`
         UPDATE dbo.WorkOrderHeader SET
           CompanyId=@CompanyId, ProjectId=@ProjectId,
@@ -661,7 +673,7 @@ router.post("/:id/save-full", async (req, res) => {
           ContractorId=@ContractorId, TotalAmount=@TotalAmount,
           Remarks=@Remarks, TermsAndConditions=@TermsAndConditions,
           DocTypeId=@DocTypeId, DocNo=@DocNo,
-          UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt
+          UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt, GST=@GST
         WHERE Id=@Id
       `);
 
