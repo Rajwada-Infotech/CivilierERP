@@ -49,19 +49,16 @@ import {
   HardHat,
   Search,
   X,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Loader2,
   Hash,
-  RefreshCw,
   User,
   Banknote,
 } from "lucide-react";
 import { toast } from "sonner";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
-
 import { Field, PriceBreakdownPanel } from "./ExpenseBooking/FormPrimitives";
 import { BillingAccordion } from "./ExpenseBooking/BillingAccordion";
 import { EmiSection } from "./ExpenseBooking/EmiSection";
@@ -72,6 +69,7 @@ import {
   computeBreakdown,
   dbToRecord,
   fmt,
+  generateEmiSchedule,
   recordToDb,
 } from "./ExpenseBooking/helpers";
 import type {
@@ -80,7 +78,6 @@ import type {
   PageView,
 } from "./ExpenseBooking/types";
 
-// ─── API ──────────────────────────────────────────────────────────────────────
 const API = "/api/expense-booking";
 
 async function apiFetch(url: string, opts?: RequestInit) {
@@ -92,7 +89,6 @@ async function apiFetch(url: string, opts?: RequestInit) {
   return res.json();
 }
 
-// Module-level cache so masters are only fetched once per session
 const _mastersCache: {
   po: POItem[] | null;
   wo: WOItem[] | null;
@@ -108,15 +104,11 @@ interface ProjectOption {
   id: number;
   label: string;
 }
-
-// GST config as stored on PO/WO
 interface GSTConfig {
   applicable: boolean;
   type: "none" | "cgst_sgst" | "igst";
-  rate: number; // total %, e.g. 18 → CGST 9% + SGST 9%
+  rate: number;
 }
-
-// From PO master
 interface POItem {
   PurchaseOrderID: number;
   PurchaseOrderNo: string;
@@ -128,25 +120,21 @@ interface POItem {
   ProjectId?: number;
   TotalAmount?: number;
   Status: string;
-  GST?: GSTConfig | null; // GST linked to this PO
+  GST?: GSTConfig | null;
 }
-
-// From WO master
 interface WOItem {
   Id: number;
   DocumentNumber: string;
   DocNo?: string;
   DocumentDate: string;
-  ContractorName?: string; // WO uses contractor, not supplier
+  ContractorName?: string;
   Remarks?: string;
   CompanyId?: number;
   ProjectId?: number;
   TotalAmount?: number;
   Status: string;
-  GST?: GSTConfig | null; // GST linked to this WO
+  GST?: GSTConfig | null;
 }
-
-// From Type of Doc master (everything else — invoices, etc.)
 interface TodItem {
   TypeOfDocId: number;
   Prefix: string;
@@ -154,24 +142,22 @@ interface TodItem {
   Description: string;
   EntryType?: string;
 }
-
 type SourceKind = "PO" | "WO" | "TOD";
-
 interface SelectedDoc {
   kind: SourceKind;
-  docNo: string; // The booking reference — the order/invoice doc number
+  docNo: string;
   sourceId: number;
-  nameLabel?: string; // description auto-filled into bookingName
-  vendorLabel?: string; // supplier (PO) or contractor (WO) — plain text, no FK lookup
+  nameLabel?: string;
+  vendorLabel?: string;
   companyId?: number;
   projectId?: number;
-  amount?: number; // Auto-filled from the order
+  amount?: number;
   status?: string;
   date?: string;
-  gst?: GSTConfig | null; // GST config from the linked PO/WO
+  gst?: GSTConfig | null;
 }
 
-// ─── Section header ───────────────────────────────────────────────────────────
+// ─── Small UI helpers ─────────────────────────────────────────────────────────
 const SECTION_ICONS: Record<string, React.ElementType> = {
   "Document Selection": FileText,
   "Booking Information": CalendarDays,
@@ -198,7 +184,6 @@ function SectionHeader({ label }: { label: string }) {
   );
 }
 
-// ─── Readonly info pill ───────────────────────────────────────────────────────
 function InfoPill({
   icon: Icon,
   label,
@@ -215,6 +200,127 @@ function InfoPill({
       <span className="text-[10px] font-semibold text-foreground truncate">
         {value}
       </span>
+    </div>
+  );
+}
+
+function EmptyState({ label }: { label: string }) {
+  return (
+    <div className="py-10 text-center text-xs text-muted-foreground">
+      <AlertCircle size={16} className="mx-auto mb-2 opacity-30" />
+      {label}
+    </div>
+  );
+}
+
+function PickerRow({
+  icon,
+  iconBg,
+  primary,
+  primaryColor,
+  secondary,
+  badge,
+  amount,
+  onClick,
+}: {
+  icon: React.ReactNode;
+  iconBg: string;
+  primary: string;
+  primaryColor: string;
+  secondary?: string;
+  badge?: string;
+  amount?: number;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className="w-full flex items-center gap-3 px-4 py-3 hover:bg-muted/30 transition-colors border-b border-border/30 last:border-0 text-left group"
+    >
+      <div
+        className={`w-7 h-7 rounded-lg ${iconBg} flex items-center justify-center shrink-0`}
+      >
+        {icon}
+      </div>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className={`font-mono text-xs font-bold ${primaryColor}`}>
+            {primary}
+          </span>
+          {badge && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground border border-border/50">
+              {badge}
+            </span>
+          )}
+        </div>
+        {secondary && (
+          <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
+            {secondary}
+          </p>
+        )}
+      </div>
+      {amount != null && (
+        <span className="font-mono text-xs text-muted-foreground shrink-0">
+          ₹{fmt(amount)}
+        </span>
+      )}
+      <ChevronRight size={12} className="text-muted-foreground/30 shrink-0" />
+    </button>
+  );
+}
+
+function StatCard({
+  label,
+  value,
+  icon: Icon,
+  color,
+}: {
+  label: string;
+  value: string | number;
+  icon: React.ElementType;
+  color: string;
+}) {
+  return (
+    <div className="rounded-xl bg-card border border-border p-4 flex items-center gap-3">
+      <div className={`p-2 rounded-lg shrink-0 ${color}`}>
+        <Icon size={15} />
+      </div>
+      <div className="min-w-0">
+        <p className="text-[10px] text-muted-foreground font-heading uppercase tracking-wider truncate">
+          {label}
+        </p>
+        <p className="text-base font-bold font-mono text-foreground mt-0.5">
+          {value}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function RateInput({
+  value,
+  onChange,
+  highlighted,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+  highlighted: boolean;
+}) {
+  return (
+    <div className="relative">
+      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs font-semibold">
+        %
+      </span>
+      <Input
+        type="number"
+        min={0}
+        max={28}
+        step={0.5}
+        value={value ?? ""}
+        onChange={(e) => onChange(parseFloat(e.target.value) || 0)}
+        className={`pl-7 font-mono ${highlighted ? "border-primary/40 bg-primary/5" : ""}`}
+        placeholder="0"
+      />
     </div>
   );
 }
@@ -251,7 +357,6 @@ function DocSelectorPanel({
   const [search, setSearch] = useState("");
   const [todFetching, setTodFetching] = useState(false);
 
-  // Fetch next doc number for a ToD type and resolve
   const selectTod = async (tod: TodItem) => {
     setTodFetching(true);
     try {
@@ -259,20 +364,13 @@ function DocSelectorPanel({
       const data = await apiFetch(
         `/api/document-type/${tod.TypeOfDocId}/next-number${qs}`,
       );
-      const docNo: string =
-        data.nextDocNo ?? (tod.FullPrefix ?? tod.Prefix) + "/001";
+      const docNo = data.nextDocNo ?? (tod.FullPrefix ?? tod.Prefix) + "/001";
       onTodSelected?.(tod);
       onSelect({
         kind: "TOD",
         docNo,
         sourceId: tod.TypeOfDocId,
         nameLabel: tod.Description,
-        vendorLabel: undefined,
-        companyId: undefined,
-        projectId: undefined,
-        amount: undefined,
-        status: undefined,
-        date: undefined,
       });
     } catch {
       onTodSelected?.(null);
@@ -282,31 +380,26 @@ function DocSelectorPanel({
     }
   };
 
+  const q = search.toLowerCase();
   const filteredPO = poList.filter(
     (p) =>
-      (p.DocNo || p.PurchaseOrderNo)
-        .toLowerCase()
-        .includes(search.toLowerCase()) ||
-      (p.SupplierName || "").toLowerCase().includes(search.toLowerCase()),
+      (p.DocNo || p.PurchaseOrderNo).toLowerCase().includes(q) ||
+      (p.SupplierName || "").toLowerCase().includes(q),
   );
   const filteredWO = woList.filter(
     (w) =>
-      (w.DocNo || w.DocumentNumber)
-        .toLowerCase()
-        .includes(search.toLowerCase()) ||
-      (w.ContractorName || "").toLowerCase().includes(search.toLowerCase()),
+      (w.DocNo || w.DocumentNumber).toLowerCase().includes(q) ||
+      (w.ContractorName || "").toLowerCase().includes(q),
   );
   const filteredTOD = todList.filter(
     (t) =>
-      (t.FullPrefix ?? t.Prefix).toLowerCase().includes(search.toLowerCase()) ||
-      t.Description.toLowerCase().includes(search.toLowerCase()),
+      (t.FullPrefix ?? t.Prefix).toLowerCase().includes(q) ||
+      t.Description.toLowerCase().includes(q),
   );
 
-  // ── Selected state: show summary card ──
   if (selected) {
-    const isPO = selected.kind === "PO";
-    const isWO = selected.kind === "WO";
-    const isTOD = selected.kind === "TOD";
+    const isPO = selected.kind === "PO",
+      isWO = selected.kind === "WO";
     const Icon = isPO ? ShoppingCart : isWO ? HardHat : FileText;
     const colors = isPO
       ? {
@@ -331,13 +424,6 @@ function DocSelectorPanel({
             badge:
               "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
           };
-
-    const kindLabel = isPO
-      ? "Purchase Order"
-      : isWO
-        ? "Work Order"
-        : "Document";
-
     return (
       <div className={`rounded-xl border p-4 ${colors.ring}`}>
         <div className="flex items-start gap-3">
@@ -351,7 +437,7 @@ function DocSelectorPanel({
               <span
                 className={`text-xs font-heading font-semibold ${colors.text}`}
               >
-                {kindLabel}
+                {isPO ? "Purchase Order" : isWO ? "Work Order" : "Document"}
               </span>
               <span
                 className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold border ${colors.badge}`}
@@ -402,7 +488,6 @@ function DocSelectorPanel({
     );
   }
 
-  // ── Picker state ──
   const tabs: {
     id: SourceKind;
     label: string;
@@ -423,13 +508,17 @@ function DocSelectorPanel({
       count: todList.length,
     },
   ];
-
   const loading =
     tab === "PO" ? loadingPO : tab === "WO" ? loadingWO : loadingTOD;
+  const placeholder =
+    tab === "PO"
+      ? "Search by PO number or supplier…"
+      : tab === "WO"
+        ? "Search by WO number or contractor…"
+        : "Search document types…";
 
   return (
     <div className="rounded-xl border border-border overflow-hidden">
-      {/* Tabs */}
       <div className="flex border-b border-border bg-muted/20">
         {tabs.map((t) => (
           <button
@@ -438,11 +527,7 @@ function DocSelectorPanel({
               setTab(t.id);
               setSearch("");
             }}
-            className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-heading font-semibold transition-colors border-b-2 -mb-px ${
-              tab === t.id
-                ? "border-primary text-primary bg-background"
-                : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
+            className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-heading font-semibold transition-colors border-b-2 -mb-px ${tab === t.id ? "border-primary text-primary bg-background" : "border-transparent text-muted-foreground hover:text-foreground"}`}
           >
             <t.icon size={11} />
             {t.label}
@@ -452,8 +537,6 @@ function DocSelectorPanel({
           </button>
         ))}
       </div>
-
-      {/* Search */}
       <div className="p-3 border-b border-border/40 bg-background">
         <div className="relative">
           <Search
@@ -463,13 +546,7 @@ function DocSelectorPanel({
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder={
-              tab === "PO"
-                ? "Search by PO number or supplier…"
-                : tab === "WO"
-                  ? "Search by WO number or contractor…"
-                  : "Search document types…"
-            }
+            placeholder={placeholder}
             className="w-full pl-8 pr-8 py-2 text-xs rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 placeholder:text-muted-foreground"
           />
           {search && (
@@ -482,8 +559,6 @@ function DocSelectorPanel({
           )}
         </div>
       </div>
-
-      {/* List */}
       <div className="max-h-60 overflow-y-auto bg-background">
         {loading || todFetching ? (
           <div className="flex items-center justify-center py-10 gap-2 text-xs text-muted-foreground">
@@ -551,7 +626,7 @@ function DocSelectorPanel({
                       docNo,
                       sourceId: wo.Id,
                       nameLabel: wo.Remarks,
-                      vendorLabel: wo.ContractorName, // contractor — not supplier
+                      vendorLabel: wo.ContractorName,
                       companyId: wo.CompanyId,
                       projectId: wo.ProjectId,
                       amount: wo.TotalAmount,
@@ -585,77 +660,39 @@ function DocSelectorPanel({
   );
 }
 
-function EmptyState({ label }: { label: string }) {
-  return (
-    <div className="py-10 text-center text-xs text-muted-foreground">
-      <AlertCircle size={16} className="mx-auto mb-2 opacity-30" />
-      {label}
-    </div>
-  );
-}
-
-function PickerRow({
-  icon,
-  iconBg,
-  primary,
-  primaryColor,
-  secondary,
-  badge,
-  amount,
-  onClick,
-}: {
-  icon: React.ReactNode;
-  iconBg: string;
-  primary: string;
-  primaryColor: string;
-  secondary?: string;
-  badge?: string;
-  amount?: number;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      onClick={onClick}
-      className="w-full flex items-center gap-3 px-4 py-3 hover:bg-muted/30 transition-colors border-b border-border/30 last:border-0 text-left group"
-    >
-      <div
-        className={`w-7 h-7 rounded-lg ${iconBg} flex items-center justify-center shrink-0 transition-opacity`}
-      >
-        {icon}
-      </div>
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className={`font-mono text-xs font-bold ${primaryColor}`}>
-            {primary}
-          </span>
-          {badge && (
-            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground border border-border/50">
-              {badge}
-            </span>
-          )}
-        </div>
-        {secondary && (
-          <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
-            {secondary}
-          </p>
-        )}
-      </div>
-      {amount != null && (
-        <span className="font-mono text-xs text-muted-foreground shrink-0">
-          ₹{fmt(amount)}
-        </span>
-      )}
-      <ChevronRight size={12} className="text-muted-foreground/30 shrink-0" />
-    </button>
-  );
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function resolveGstRates(
+  doc: SelectedDoc,
+  fallbackCgst: number,
+  fallbackSgst: number,
+) {
+  if ((doc.kind === "PO" || doc.kind === "WO") && doc.gst?.applicable) {
+    const { type, rate } = doc.gst;
+    if (type === "cgst_sgst") return { cgst: rate / 2, sgst: rate / 2 };
+    if (type === "igst") return { cgst: rate, sgst: 0 };
+    return { cgst: 0, sgst: 0 };
+  }
+  if (doc.kind === "PO" || doc.kind === "WO") return { cgst: 0, sgst: 0 };
+  return { cgst: fallbackCgst, sgst: fallbackSgst };
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
+const BOOKING_STATUSES: BookingStatus[] = [
+  "Draft",
+  "Pending",
+  "Approved",
+  "Rejected",
+  "Booked",
+  "Hold",
+  "Received",
+];
+const ALL_STATUSES = ["All", ...BOOKING_STATUSES] as const;
+const PAGE_SIZE = 20;
+
 export default function MaterialExpenseBooking() {
   const { finYears } = useFinYear();
   const activeFinYears = finYears.filter((fy) => fy.status === "Active");
 
-  // Master data
   const [companyOptions, setCompanyOptions] = useState<CompanyOption[]>([]);
   const [projectOptions, setProjectOptions] = useState<ProjectOption[]>([]);
   const [poList, setPoList] = useState<POItem[]>([]);
@@ -664,18 +701,13 @@ export default function MaterialExpenseBooking() {
   const [loadingPO, setLoadingPO] = useState(false);
   const [loadingWO, setLoadingWO] = useState(false);
   const [loadingTOD, setLoadingTOD] = useState(false);
-
-  // Document selection
   const [selectedDoc, setSelectedDoc] = useState<SelectedDoc | null>(null);
   const [selectedTod, setSelectedTod] = useState<TodItem | null>(null);
-
-  // Page state
   const [records, setRecords] = useState<ExpenseRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalRecords, setTotalRecords] = useState(0);
-  const PAGE_SIZE = 20;
   const [view, setView] = useState<PageView>("list");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState<Omit<ExpenseRecord, "id">>(blankForm());
@@ -688,9 +720,9 @@ export default function MaterialExpenseBooking() {
     import("./ExpenseBooking/types").EmiScheduleRow[] | null
   >(null);
   const [loadingEmi, setLoadingEmi] = useState(false);
+
   const isEditing = editingId !== null;
 
-  // ── Fetch records ──
   const fetchRecords = useCallback(async (p = 1) => {
     try {
       setLoading(true);
@@ -706,56 +738,45 @@ export default function MaterialExpenseBooking() {
     }
   }, []);
 
-  // ── Fetch master lists (cached per session) ──
-  const fetchMasters = async () => {
-    if (!_mastersCache.po) {
-      setLoadingPO(true);
-      apiFetch("/api/purchase-orders?limit=500")
+  const fetchMasters = () => {
+    const load = <T,>(
+      key: keyof typeof _mastersCache,
+      url: string,
+      setter: (v: T[]) => void,
+      setLd: (v: boolean) => void,
+      transform?: (r: any) => T[],
+    ) => {
+      if (_mastersCache[key]) {
+        setter(_mastersCache[key] as T[]);
+        return;
+      }
+      setLd(true);
+      apiFetch(url)
         .then((r) => {
-          _mastersCache.po = Array.isArray(r) ? r : (r.data ?? []);
-          setPoList(_mastersCache.po!);
+          const list: T[] = transform
+            ? transform(r)
+            : Array.isArray(r)
+              ? r
+              : (r.data ?? []);
+          (_mastersCache as any)[key] = list;
+          setter(list);
         })
         .catch(() => {})
-        .finally(() => setLoadingPO(false));
-    } else {
-      setPoList(_mastersCache.po);
-    }
-
-    if (!_mastersCache.wo) {
-      setLoadingWO(true);
-      apiFetch("/api/work-orders?limit=500")
-        .then((r) => {
-          _mastersCache.wo = Array.isArray(r) ? r : (r.data ?? []);
-          setWoList(_mastersCache.wo!);
-        })
-        .catch(() => {})
-        .finally(() => setLoadingWO(false));
-    } else {
-      setWoList(_mastersCache.wo);
-    }
-
-    if (!_mastersCache.tod) {
-      setLoadingTOD(true);
-      apiFetch("/api/document-type")
-        .then((r: TodItem[]) => {
-          const filtered = (Array.isArray(r) ? r : []).filter(
-            (t) => !["PO", "WO"].includes((t as any).ModuleTag ?? ""),
-          );
-          _mastersCache.tod = filtered;
-          setTodList(filtered);
-        })
-        .catch(() => {})
-        .finally(() => setLoadingTOD(false));
-    } else {
-      setTodList(_mastersCache.tod);
-    }
+        .finally(() => setLd(false));
+    };
+    load("po", "/api/purchase-orders?limit=500", setPoList, setLoadingPO);
+    load("wo", "/api/work-orders?limit=500", setWoList, setLoadingWO);
+    load<TodItem>("tod", "/api/document-type", setTodList, setLoadingTOD, (r) =>
+      (Array.isArray(r) ? r : []).filter(
+        (t) => !["PO", "WO"].includes((t as any).ModuleTag ?? ""),
+      ),
+    );
   };
 
-  // Re-fetch next doc number when finYear changes while a TOD is selected
   useEffect(() => {
     if (!selectedTod || !selectedDoc || selectedDoc.kind !== "TOD") return;
     let cancelled = false;
-    const refetch = async () => {
+    (async () => {
       try {
         const qs = form.financialYear
           ? `?finYear=${encodeURIComponent(form.financialYear)}`
@@ -764,109 +785,55 @@ export default function MaterialExpenseBooking() {
           `/api/document-type/${selectedTod.TypeOfDocId}/next-number${qs}`,
         );
         if (cancelled) return;
-        const docNo: string =
+        const docNo =
           data.nextDocNo ??
           (selectedTod.FullPrefix ?? selectedTod.Prefix) + "/001";
         setSelectedDoc((prev) => (prev ? { ...prev, docNo } : prev));
         setForm((prev) => ({ ...prev, bookingReference: docNo }));
       } catch {
-        // silently ignore
+        /* silently ignore */
       }
-    };
-    refetch();
+    })();
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [form.financialYear, selectedTod]);
 
-  const fetchApprovalTrail = async (recordId: string) => {
-    if (!recordId) {
-      setApprovalTrail(undefined);
-      return;
-    }
-
-    try {
-      const data = await apiFetch(`${API}/${recordId}/approval-trail`);
-      setApprovalTrail(data);
-    } catch {
-      setApprovalTrail(undefined);
-    }
-  };
-
   useEffect(() => {
     fetchRecords(1);
-
-    // Company master: enterprise where business_type = 'C'
     apiFetch("/api/enterprises/options?business_type=C")
       .then((list: CompanyOption[]) => setCompanyOptions(list ?? []))
       .catch(() => {});
-
-    // Project master: enterprise where business_type = 'P'
     apiFetch("/api/enterprises/options?business_type=P")
       .then((list: ProjectOption[]) => setProjectOptions(list ?? []))
       .catch(() => {});
   }, [fetchRecords]);
 
-  // ── Form field setter ──
   const set = <K extends keyof Omit<ExpenseRecord, "id">>(
     field: K,
     value: Omit<ExpenseRecord, "id">[K],
   ) => setForm((prev) => ({ ...prev, [field]: value }));
 
-  // ── Apply selected doc → pre-fill form ──
   const applyDoc = (doc: SelectedDoc) => {
     setSelectedDoc(doc);
-
-    // ── Resolve GST rates from the linked PO/WO ──────────────────────────
-    // Only PO and WO carry a GST config. TOD keeps CGST/SGST as manual entry.
-    let resolvedCgst = form.cgstRate;
-    let resolvedSgst = form.sgstRate;
-
-    if ((doc.kind === "PO" || doc.kind === "WO") && doc.gst?.applicable) {
-      const gst = doc.gst;
-      if (gst.type === "cgst_sgst") {
-        // Split the total rate evenly between CGST and SGST
-        resolvedCgst = gst.rate / 2;
-        resolvedSgst = gst.rate / 2;
-      } else if (gst.type === "igst") {
-        // IGST — map entirely to CGST field, zero out SGST
-        resolvedCgst = gst.rate;
-        resolvedSgst = 0;
-      } else {
-        // "none" — zero both
-        resolvedCgst = 0;
-        resolvedSgst = 0;
-      }
-    } else if (doc.kind === "PO" || doc.kind === "WO") {
-      // PO/WO exists but GST not applicable — zero out
-      resolvedCgst = 0;
-      resolvedSgst = 0;
-    }
-    // For TOD: leave cgstRate/sgstRate unchanged (user fills manually)
-
+    const { cgst, sgst } = resolveGstRates(doc, form.cgstRate, form.sgstRate);
     setForm((prev) => ({
       ...prev,
       bookingReference: doc.docNo,
-      // Auto-fill name/description from the selected document
       bookingName: doc.nameLabel ?? prev.bookingName,
-      // Auto-fill amount from the order (no manual intervention)
       basicAmount: doc.amount ?? prev.basicAmount,
-      // Auto-fill company and project if available
       companyId: doc.companyId ?? prev.companyId,
       projectSite: doc.projectId ? String(doc.projectId) : prev.projectSite,
-      // Vendor is stored as plain text — no FK, no dropdown
       supplier: doc.vendorLabel ?? prev.supplier,
-      // EDocumentType: PO/WO kind directly, or prefix of TOD doc number
       materialCategory:
         doc.kind === "PO"
           ? "PO"
           : doc.kind === "WO"
             ? "WO"
             : doc.docNo.split("/")[0],
-      // GST rates — auto-filled for PO/WO, manual for TOD
-      cgstRate: resolvedCgst,
-      sgstRate: resolvedSgst,
+      cgstRate: cgst,
+      sgstRate: sgst,
     }));
   };
 
@@ -881,13 +848,18 @@ export default function MaterialExpenseBooking() {
     }));
   };
 
-  // ── Open forms ──
-  const openNew = () => {
+  const resetForm = () => {
     setEditingId(null);
-    setForm({ ...blankForm(), financialYear: activeFinYears[0]?.year || "" });
+    setForm(blankForm());
     setApprovalTrail(undefined);
     setSelectedDoc(null);
     setSelectedTod(null);
+    setLiveEmiSchedule(null);
+  };
+
+  const openNew = () => {
+    resetForm();
+    setForm({ ...blankForm(), financialYear: activeFinYears[0]?.year || "" });
     fetchMasters();
     setView("form");
   };
@@ -897,63 +869,61 @@ export default function MaterialExpenseBooking() {
       toast.error("Cannot edit this booking because its record id is missing.");
       return;
     }
-
     setEditingId(rec.id);
     const { id, ...rest } = rec;
     setForm(rest);
     setApprovalTrail(undefined);
     setSelectedDoc(null);
-    setLiveEmiSchedule(null); // reset first
-
-    // Fetch live EMI schedule from DB if EMI is enabled
+    setLiveEmiSchedule(null);
     if (rec.emi?.enabled) {
       setLoadingEmi(true);
       apiFetch(`${API}/${rec.id}/emi-schedule`)
         .then((rows: any[]) => {
-          const mapped = rows.map((r) => ({
-            installmentNo: r.InstallmentNo ?? r.installmentNo,
-            dueDate: r.DueDate
-              ? String(r.DueDate).slice(0, 10)
-              : (r.dueDate ?? ""),
-            amount: parseFloat(r.Amount ?? r.amount) || 0,
-            status: (r.Status ?? r.status ?? "Pending") as "Pending" | "Paid",
-            refNumber: r.RefNumber ?? r.refNumber ?? "",
-          }));
-          setLiveEmiSchedule(mapped);
+          setLiveEmiSchedule(
+            rows.map((r) => ({
+              installmentNo: r.InstallmentNo ?? r.installmentNo,
+              dueDate: r.DueDate
+                ? String(r.DueDate).slice(0, 10)
+                : (r.dueDate ?? ""),
+              amount: parseFloat(r.Amount ?? r.amount) || 0,
+              status: (r.Status ?? r.status ?? "Pending") as "Pending" | "Paid",
+              refNumber: r.RefNumber ?? r.refNumber ?? "",
+            })),
+          );
         })
-        .catch(() => {
-          // Non-critical: fall back to form schedule
-          setLiveEmiSchedule(null);
-        })
+        .catch(() => setLiveEmiSchedule(null))
         .finally(() => setLoadingEmi(false));
     }
-
-    fetchApprovalTrail(rec.id);
+    apiFetch(`${API}/${rec.id}/approval-trail`)
+      .then(setApprovalTrail)
+      .catch(() => setApprovalTrail(undefined));
     fetchMasters();
     setView("form");
   };
 
   const cancelForm = () => {
     setView("list");
-    setEditingId(null);
-    setForm(blankForm());
-    setApprovalTrail(undefined);
-    setSelectedDoc(null);
-    setLiveEmiSchedule(null);
+    resetForm();
   };
 
-  // ── Disable EMI ──
   const disableEmi = async () => {
     if (!editingId) return;
-    await apiFetch(`${API}/${editingId}/emi-toggle`, {
+    const result = await apiFetch(`${API}/${editingId}/emi-toggle`, {
       method: "PUT",
       body: JSON.stringify({ enabled: false, deleteUnpaid: true }),
     });
-    toast.success("EMI disabled. Unpaid installments removed.");
+    if (result?.lumpSum) {
+      const ref = result.lumpSum.docNo || `#${result.lumpSum.id}`;
+      toast.success(
+        `EMI disabled. Remaining balance created as lump-sum booking ${ref}.`,
+        { duration: 6000 },
+      );
+    } else {
+      toast.success("EMI disabled. Unpaid installments removed.");
+    }
     setLiveEmiSchedule(null);
   };
 
-  // ── Save ──
   const handleSave = async () => {
     if (!form.bookingReference.trim()) {
       toast.error("Please select a document (PO, WO, or Doc Type) first.");
@@ -967,7 +937,6 @@ export default function MaterialExpenseBooking() {
       toast.error("Please select a company.");
       return;
     }
-
     const bd = computeBreakdown(
       form.basicAmount,
       form.cgstRate,
@@ -975,17 +944,33 @@ export default function MaterialExpenseBooking() {
       form.discount,
     );
 
+    // Guarantee the EMI schedule is always fresh at save time — the useEffect in
+    // EmiSection may not have fired yet if the user saves quickly after configuring EMI.
+    let emiForSave = form.emi;
+    if (
+      !isEditing &&
+      form.emi.enabled &&
+      form.emi.installmentCount > 0 &&
+      form.emi.startDate
+    ) {
+      const freshSchedule = generateEmiSchedule(
+        bd.netAmount,
+        form.emi.installmentCount,
+        form.emi.startDate,
+        form.bookingReference,
+      );
+      emiForSave = { ...form.emi, schedule: freshSchedule };
+    }
+
     const body = {
       ...recordToDb(
-        form,
+        { ...form, emi: emiForSave },
         bd.netAmount,
-        // Only pass docTypeId for TOD (Other Expense) — PO/WO don't use DocNumberSequence
         selectedDoc?.kind === "TOD" ? (selectedDoc.sourceId ?? null) : null,
       ),
       ESourceType: selectedDoc?.kind ?? null,
       ESourceId: selectedDoc?.sourceId ?? null,
     };
-
     try {
       setSaving(true);
       if (isEditing) {
@@ -994,7 +979,6 @@ export default function MaterialExpenseBooking() {
           body: JSON.stringify(body),
         });
         toast.success("Expense booking updated.");
-        cancelForm();
       } else {
         const result = await apiFetch(API, {
           method: "POST",
@@ -1003,8 +987,8 @@ export default function MaterialExpenseBooking() {
         toast.success(
           `Expense booking created — Ref: ${result?.docNo || form.bookingReference}`,
         );
-        cancelForm();
       }
+      cancelForm();
       await fetchRecords(page);
     } catch (err: any) {
       toast.error("Save failed: " + err.message);
@@ -1030,35 +1014,24 @@ export default function MaterialExpenseBooking() {
     form.sgstRate,
     form.discount,
   );
-
-  const ALL_STATUSES = [
-    "All",
-    "Draft",
-    "Pending",
-    "Approved",
-    "Rejected",
-    "Booked",
-    "Hold",
-    "Received",
-  ] as const;
   const filteredRecords =
     statusFilter && statusFilter !== "All"
       ? records.filter((r) => r.status === statusFilter)
       : records;
-
   const totalNet = records.reduce((s, r) => s + (r.netAmount ?? 0), 0);
   const approvedCount = records.filter((r) => r.status === "Approved").length;
   const pendingCount = records.filter((r) => r.status === "Pending").length;
   const emiCount = records.filter((r) => r.emi?.enabled).length;
-
   const vendorLabel =
     selectedDoc?.kind === "WO" ? "Contractor" : "Supplier / Vendor";
+  const isPOorWO = selectedDoc?.kind === "PO" || selectedDoc?.kind === "WO";
+  const gstHighlighted = isPOorWO && !!selectedDoc?.gst?.applicable;
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Material", "Expense Booking"]} />
       <div className="space-y-5">
-        {/* ── Page Header ──────────────────────────────────────────────── */}
+        {/* Page Header */}
         <div className="flex items-center justify-between gap-3">
           <div>
             <h1 className="text-xl font-heading font-bold text-foreground">
@@ -1079,7 +1052,7 @@ export default function MaterialExpenseBooking() {
           )}
         </div>
 
-        {/* ── Form View ────────────────────────────────────────────────── */}
+        {/* Form View */}
         {view === "form" && (
           <Card className="border-border shadow-sm">
             <CardHeader className="pb-4 border-b border-border px-5 sm:px-6">
@@ -1120,13 +1093,12 @@ export default function MaterialExpenseBooking() {
             </CardHeader>
 
             <CardContent className="pt-6 space-y-7 px-5 sm:px-6">
-              {/* ── 0. Document Selection ─────────────────────────────── */}
+              {/* 0. Document Selection */}
               <div className="space-y-3">
                 <SectionHeader label="Document Selection" />
                 <p className="text-[11px] text-muted-foreground -mt-1">
                   Pick a Purchase Order or Work Order to auto-fill details, or
-                  choose a document type from the master for other expenses
-                  (invoices, etc.).
+                  choose a document type from the master for other expenses.
                 </p>
                 <DocSelectorPanel
                   poList={poList}
@@ -1141,8 +1113,6 @@ export default function MaterialExpenseBooking() {
                   onClear={clearDoc}
                   onTodSelected={setSelectedTod}
                 />
-
-                {/* Booking reference — always read-only, driven by selected doc */}
                 <Field
                   label="Booking Reference"
                   required
@@ -1161,7 +1131,7 @@ export default function MaterialExpenseBooking() {
                 </Field>
               </div>
 
-              {/* ── Booking Name ─────────────────────────────────────── */}
+              {/* Booking Name */}
               <div className="space-y-2">
                 <Field
                   label="Booking Name"
@@ -1179,10 +1149,9 @@ export default function MaterialExpenseBooking() {
                 </Field>
               </div>
 
-              {/* ── 1. Booking Information ────────────────────────────── */}
+              {/* 1. Booking Information */}
               <div className="space-y-4">
                 <SectionHeader label="Booking Information" />
-
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                   <Field label="Booking Date" required>
                     <Input
@@ -1231,17 +1200,7 @@ export default function MaterialExpenseBooking() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        {(
-                          [
-                            "Draft",
-                            "Pending",
-                            "Approved",
-                            "Rejected",
-                            "Booked",
-                            "Hold",
-                            "Received",
-                          ] as BookingStatus[]
-                        ).map((s) => (
+                        {BOOKING_STATUSES.map((s) => (
                           <SelectItem key={s} value={s}>
                             {s}
                           </SelectItem>
@@ -1250,7 +1209,6 @@ export default function MaterialExpenseBooking() {
                     </Select>
                   </Field>
                 </div>
-
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <Field label="Company" required>
                     <Select
@@ -1282,8 +1240,6 @@ export default function MaterialExpenseBooking() {
                       </SelectContent>
                     </Select>
                   </Field>
-
-                  {/* Vendor / Supplier — plain text, no dropdown. Auto-filled from order. */}
                   <Field
                     label={vendorLabel}
                     hint={
@@ -1310,7 +1266,6 @@ export default function MaterialExpenseBooking() {
                     </div>
                   </Field>
                 </div>
-
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <Field
                     label="Project / Site"
@@ -1350,49 +1305,40 @@ export default function MaterialExpenseBooking() {
                 </div>
               </div>
 
-              {/* ── 2. Amount & GST ───────────────────────────────────── */}
+              {/* 2. Amount & GST */}
               <div className="space-y-4">
                 <SectionHeader label="Amount & GST" />
-
-                {/* GST source indicator — shown when a PO/WO is linked */}
-                {selectedDoc &&
-                  (selectedDoc.kind === "PO" || selectedDoc.kind === "WO") && (
-                    <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/20 text-xs">
-                      <BadgePercent
-                        size={12}
-                        className="text-primary shrink-0"
-                      />
-                      {selectedDoc.gst?.applicable ? (
-                        <span className="text-foreground">
-                          GST auto-filled from linked{" "}
-                          <span className="font-semibold">
-                            {selectedDoc.kind === "PO"
-                              ? "Purchase Order"
-                              : "Work Order"}
-                          </span>
-                          {" — "}
-                          {selectedDoc.gst.type === "cgst_sgst"
-                            ? `CGST ${selectedDoc.gst.rate / 2}% + SGST ${selectedDoc.gst.rate / 2}% (total ${selectedDoc.gst.rate}%)`
-                            : selectedDoc.gst.type === "igst"
-                              ? `IGST ${selectedDoc.gst.rate}% (mapped to CGST)`
-                              : "GST not applicable"}
-                          . Editable if needed.
-                        </span>
-                      ) : (
-                        <span className="text-muted-foreground">
-                          Linked{" "}
-                          {selectedDoc.kind === "PO"
+                {isPOorWO && (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/20 text-xs">
+                    <BadgePercent size={12} className="text-primary shrink-0" />
+                    {selectedDoc!.gst?.applicable ? (
+                      <span className="text-foreground">
+                        GST auto-filled from linked{" "}
+                        <span className="font-semibold">
+                          {selectedDoc!.kind === "PO"
                             ? "Purchase Order"
-                            : "Work Order"}{" "}
-                          has no GST applied — rates set to 0. Editable if
-                          needed.
+                            : "Work Order"}
                         </span>
-                      )}
-                    </div>
-                  )}
-
+                        {" — "}
+                        {selectedDoc!.gst!.type === "cgst_sgst"
+                          ? `CGST ${selectedDoc!.gst!.rate / 2}% + SGST ${selectedDoc!.gst!.rate / 2}% (total ${selectedDoc!.gst!.rate}%)`
+                          : selectedDoc!.gst!.type === "igst"
+                            ? `IGST ${selectedDoc!.gst!.rate}% (mapped to CGST)`
+                            : "GST not applicable"}
+                        . Editable if needed.
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">
+                        Linked{" "}
+                        {selectedDoc!.kind === "PO"
+                          ? "Purchase Order"
+                          : "Work Order"}{" "}
+                        has no GST applied — rates set to 0. Editable if needed.
+                      </span>
+                    )}
+                  </div>
+                )}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  {/* Basic amount — auto-filled from order, read-only */}
                   <Field
                     label="Basic Amount (₹)"
                     required
@@ -1420,46 +1366,24 @@ export default function MaterialExpenseBooking() {
                       />
                     </div>
                   </Field>
-
-                  {/* CGST — auto-filled from PO/WO, always editable */}
                   <Field
                     label="CGST Rate (%)"
                     hint={
-                      selectedDoc?.kind === "PO" || selectedDoc?.kind === "WO"
-                        ? selectedDoc.gst?.applicable
-                          ? selectedDoc.gst.type === "igst"
+                      isPOorWO
+                        ? selectedDoc!.gst?.applicable
+                          ? selectedDoc!.gst!.type === "igst"
                             ? "IGST mapped here — editable"
                             : "Auto-filled from linked order — editable"
                           : "No GST on this order — editable"
                         : "Enter CGST rate manually"
                     }
                   >
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs font-semibold">
-                        %
-                      </span>
-                      <Input
-                        type="number"
-                        min={0}
-                        max={28}
-                        step={0.5}
-                        value={form.cgstRate ?? ""}
-                        onChange={(e) =>
-                          set("cgstRate", parseFloat(e.target.value) || 0)
-                        }
-                        className={`pl-7 font-mono ${
-                          (selectedDoc?.kind === "PO" ||
-                            selectedDoc?.kind === "WO") &&
-                          selectedDoc.gst?.applicable
-                            ? "border-primary/40 bg-primary/5"
-                            : ""
-                        }`}
-                        placeholder="0"
-                      />
-                    </div>
+                    <RateInput
+                      value={form.cgstRate}
+                      onChange={(v) => set("cgstRate", v)}
+                      highlighted={gstHighlighted}
+                    />
                   </Field>
-
-                  {/* SGST — auto-filled from PO/WO (hidden for IGST type), always editable */}
                   <Field
                     label={
                       selectedDoc?.gst?.type === "igst"
@@ -1467,67 +1391,46 @@ export default function MaterialExpenseBooking() {
                         : "SGST Rate (%)"
                     }
                     hint={
-                      selectedDoc?.kind === "PO" || selectedDoc?.kind === "WO"
-                        ? selectedDoc.gst?.type === "igst"
+                      isPOorWO
+                        ? selectedDoc!.gst?.type === "igst"
                           ? "IGST order — SGST is 0"
-                          : selectedDoc.gst?.applicable
+                          : selectedDoc!.gst?.applicable
                             ? "Auto-filled from linked order — editable"
                             : "No GST on this order — editable"
                         : "Enter SGST rate manually"
                     }
                   >
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs font-semibold">
-                        %
-                      </span>
-                      <Input
-                        type="number"
-                        min={0}
-                        max={28}
-                        step={0.5}
-                        value={form.sgstRate ?? ""}
-                        onChange={(e) =>
-                          set("sgstRate", parseFloat(e.target.value) || 0)
-                        }
-                        className={`pl-7 font-mono ${
-                          (selectedDoc?.kind === "PO" ||
-                            selectedDoc?.kind === "WO") &&
-                          selectedDoc.gst?.applicable
-                            ? "border-primary/40 bg-primary/5"
-                            : ""
-                        }`}
-                        placeholder="0"
-                      />
-                    </div>
+                    <RateInput
+                      value={form.sgstRate}
+                      onChange={(v) => set("sgstRate", v)}
+                      highlighted={gstHighlighted}
+                    />
                   </Field>
                 </div>
-
-                {/* Breakdown — only show when there's an amount */}
                 {form.basicAmount > 0 && (
-                  <PriceBreakdownPanel
-                    bd={bd}
-                    cgstRate={form.cgstRate}
-                    sgstRate={form.sgstRate}
-                    hasDiscount={form.discount.applicable}
-                  />
-                )}
-
-                {form.basicAmount > 0 && (
-                  <div className="flex items-center justify-between rounded-xl bg-primary/8 border border-primary/20 px-5 py-4">
-                    <div className="flex items-center gap-2">
-                      <TrendingUp size={15} className="text-primary" />
-                      <span className="text-sm font-heading font-semibold text-foreground">
-                        Net Payable Amount
+                  <>
+                    <PriceBreakdownPanel
+                      bd={bd}
+                      cgstRate={form.cgstRate}
+                      sgstRate={form.sgstRate}
+                      hasDiscount={form.discount.applicable}
+                    />
+                    <div className="flex items-center justify-between rounded-xl bg-primary/8 border border-primary/20 px-5 py-4">
+                      <div className="flex items-center gap-2">
+                        <TrendingUp size={15} className="text-primary" />
+                        <span className="text-sm font-heading font-semibold text-foreground">
+                          Net Payable Amount
+                        </span>
+                      </div>
+                      <span className="font-mono text-xl font-bold text-primary">
+                        ₹{fmt(bd.netAmount)}
                       </span>
                     </div>
-                    <span className="font-mono text-xl font-bold text-primary">
-                      ₹{fmt(bd.netAmount)}
-                    </span>
-                  </div>
+                  </>
                 )}
               </div>
 
-              {/* ── 3. Billing Terms ──────────────────────────────────── */}
+              {/* 3. Billing Terms */}
               <div className="space-y-3">
                 <SectionHeader label="Billing Terms" />
                 <BillingAccordion
@@ -1539,7 +1442,7 @@ export default function MaterialExpenseBooking() {
                 />
               </div>
 
-              {/* ── 4. EMI Options ────────────────────────────────────── */}
+              {/* 4. EMI Options */}
               <div className="space-y-3">
                 <SectionHeader label="EMI / Installment Options" />
                 <EmiSection
@@ -1553,7 +1456,7 @@ export default function MaterialExpenseBooking() {
                 />
               </div>
 
-              {/* ── 5. Approval Trail ─────────────────────────────────── */}
+              {/* 5. Approval Trail */}
               {isEditing && (
                 <div className="space-y-3">
                   <SectionHeader label="Approval Workflow" />
@@ -1564,7 +1467,7 @@ export default function MaterialExpenseBooking() {
                 </div>
               )}
 
-              {/* ── 6. Remarks ────────────────────────────────────────── */}
+              {/* 6. Remarks */}
               <div className="space-y-3">
                 <SectionHeader label="Remarks" />
                 <textarea
@@ -1576,7 +1479,7 @@ export default function MaterialExpenseBooking() {
                 />
               </div>
 
-              {/* ── Save row ──────────────────────────────────────────── */}
+              {/* Save row */}
               <div className="flex justify-end gap-2 pt-2 border-t border-border">
                 <Button variant="outline" onClick={cancelForm}>
                   Cancel
@@ -1597,64 +1500,43 @@ export default function MaterialExpenseBooking() {
           </Card>
         )}
 
-        {/* ── List View ────────────────────────────────────────────────── */}
+        {/* List View */}
         {view === "list" && (
           <>
             {!loading && records.length > 0 && (
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {[
-                  {
-                    label: "Total Booked",
-                    value: `₹${fmt(totalNet)}`,
-                    icon: Receipt,
-                    color: "text-primary bg-primary/10",
-                  },
-                  {
-                    label: "Approved",
-                    value: approvedCount,
-                    icon: CheckCircle2,
-                    color: "text-emerald-500 bg-emerald-500/10",
-                  },
-                  {
-                    label: "Pending",
-                    value: pendingCount,
-                    icon: Clock,
-                    color: "text-amber-500 bg-amber-500/10",
-                  },
-                  {
-                    label: "EMI Active",
-                    value: emiCount,
-                    icon: CreditCard,
-                    color: "text-violet-500 bg-violet-500/10",
-                  },
-                ].map((s) => (
-                  <div
-                    key={s.label}
-                    className="rounded-xl bg-card border border-border p-4 flex items-center gap-3"
-                  >
-                    <div className={`p-2 rounded-lg shrink-0 ${s.color}`}>
-                      <s.icon size={15} />
-                    </div>
-                    <div className="min-w-0">
-                      <p className="text-[10px] text-muted-foreground font-heading uppercase tracking-wider truncate">
-                        {s.label}
-                      </p>
-                      <p className="text-base font-bold font-mono text-foreground mt-0.5">
-                        {s.value}
-                      </p>
-                    </div>
-                  </div>
-                ))}
+                <StatCard
+                  label="Total Booked"
+                  value={`₹${fmt(totalNet)}`}
+                  icon={Receipt}
+                  color="text-primary bg-primary/10"
+                />
+                <StatCard
+                  label="Approved"
+                  value={approvedCount}
+                  icon={CheckCircle2}
+                  color="text-emerald-500 bg-emerald-500/10"
+                />
+                <StatCard
+                  label="Pending"
+                  value={pendingCount}
+                  icon={Clock}
+                  color="text-amber-500 bg-amber-500/10"
+                />
+                <StatCard
+                  label="EMI Active"
+                  value={emiCount}
+                  icon={CreditCard}
+                  color="text-violet-500 bg-violet-500/10"
+                />
               </div>
             )}
-
             {loading && (
               <div className="text-center py-16 text-muted-foreground text-sm">
                 <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
                 Loading bookings…
               </div>
             )}
-
             {!loading && (
               <>
                 <div className="flex flex-wrap items-center gap-2">
@@ -1663,11 +1545,7 @@ export default function MaterialExpenseBooking() {
                       key={s}
                       type="button"
                       onClick={() => setStatusFilter(s)}
-                      className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
-                        statusFilter === s
-                          ? "bg-primary text-primary-foreground border-primary shadow-sm"
-                          : "bg-background text-muted-foreground border-border hover:border-primary/40"
-                      }`}
+                      className={`px-3 py-1 rounded-full text-xs font-medium border transition-colors ${statusFilter === s ? "bg-primary text-primary-foreground border-primary shadow-sm" : "bg-background text-muted-foreground border-border hover:border-primary/40"}`}
                     >
                       {s}
                       {s !== "All" && (
@@ -1716,39 +1594,26 @@ export default function MaterialExpenseBooking() {
                       <Table>
                         <TableHeader>
                           <TableRow className="bg-muted/30">
-                            <TableHead className="text-xs font-heading">
-                              Booking Ref
-                            </TableHead>
-                            <TableHead className="text-xs font-heading">
-                              Type
-                            </TableHead>
-                            <TableHead className="text-xs font-heading">
-                              Date
-                            </TableHead>
-                            <TableHead className="text-xs font-heading">
-                              Vendor / Contractor
-                            </TableHead>
-                            <TableHead className="text-xs font-heading hidden md:table-cell">
-                              Basic Amt
-                            </TableHead>
-                            <TableHead className="text-xs font-heading hidden md:table-cell">
-                              CGST
-                            </TableHead>
-                            <TableHead className="text-xs font-heading hidden md:table-cell">
-                              SGST
-                            </TableHead>
-                            <TableHead className="text-xs font-heading">
-                              Net Amt
-                            </TableHead>
-                            <TableHead className="text-xs font-heading">
-                              EMI
-                            </TableHead>
-                            <TableHead className="text-xs font-heading">
-                              Status
-                            </TableHead>
-                            <TableHead className="text-xs font-heading">
-                              Actions
-                            </TableHead>
+                            {[
+                              "Booking Ref",
+                              "Type",
+                              "Date",
+                              "Vendor / Contractor",
+                              "Basic Amt",
+                              "CGST",
+                              "SGST",
+                              "Net Amt",
+                              "EMI",
+                              "Status",
+                              "Actions",
+                            ].map((h, i) => (
+                              <TableHead
+                                key={h}
+                                className={`text-xs font-heading${[4, 5, 6].includes(i) ? " hidden md:table-cell" : ""}`}
+                              >
+                                {h}
+                              </TableHead>
+                            ))}
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -1858,7 +1723,7 @@ export default function MaterialExpenseBooking() {
                   </CardContent>
                 </Card>
 
-                {/* ── Pagination ─────────────────────────────────────── */}
+                {/* Pagination */}
                 {totalPages > 1 && (
                   <div className="flex items-center justify-between mt-2 px-1">
                     <p className="text-xs text-muted-foreground">
@@ -1906,7 +1771,7 @@ export default function MaterialExpenseBooking() {
         )}
       </div>
 
-      {/* ── Delete Confirm ───────────────────────────────────────────── */}
+      {/* Delete Confirm */}
       <Dialog open={!!deleteId} onOpenChange={() => setDeleteId(null)}>
         <DialogContent className="w-[calc(100vw-2rem)] max-w-sm">
           <DialogHeader>
