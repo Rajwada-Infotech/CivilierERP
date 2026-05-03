@@ -912,16 +912,24 @@ export default function MaterialExpenseBooking() {
       method: "PUT",
       body: JSON.stringify({ enabled: false, deleteUnpaid: true }),
     });
-    if (result?.lumpSum) {
-      const ref = result.lumpSum.docNo || `#${result.lumpSum.id}`;
+    const ref =
+      result?.lumpSum?.docNo ||
+      (result?.lumpSum ? `#${result.lumpSum.id}` : null);
+    if (ref) {
       toast.success(
-        `EMI disabled. Remaining balance created as lump-sum booking ${ref}.`,
-        { duration: 6000 },
+        `EMI disabled. Remaining balance created as new booking ${ref}. This booking has been reset to Draft for re-approval.`,
+        { duration: 8000 },
       );
     } else {
-      toast.success("EMI disabled. Unpaid installments removed.");
+      toast.success(
+        "EMI disabled. Booking reset to Draft — please resubmit for approval.",
+        { duration: 6000 },
+      );
     }
-    setLiveEmiSchedule(null);
+    // emi-toggle already committed everything to the DB — exit edit mode
+    // and refresh without going through handleSave (which guardEdit blocks).
+    cancelForm();
+    await fetchRecords(page);
   };
 
   const handleSave = async () => {
