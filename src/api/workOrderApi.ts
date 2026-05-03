@@ -115,12 +115,20 @@ export const fetchActivities = async (
 /**
  * Items from Item_Master_Group — used for the Material Name dropdown.
  * id is a UUID string (uniqueidentifier), name is M_Name.
+ * gstRate is resolved from HSN Master server-side.
  */
-export const fetchItems = async (): Promise<{ id: string; name: string }[]> => {
+export interface WOItemOption {
+  id: string;
+  name: string;
+  gstRate: number;
+  hsnCode: string | null;
+}
+
+export const fetchItems = async (): Promise<WOItemOption[]> => {
   try {
     const res = await fetchWithAuth(`${BASE_URL}/meta/items`);
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return safeArray<{ id: string; name: string }>(await res.json());
+    return safeArray<WOItemOption>(await res.json());
   } catch (err) { console.error("[workOrderApi] fetchItems failed:", err); return []; }
 };
 
@@ -133,6 +141,8 @@ export interface MaterialPayload {
   UOMId?: number | null;
   Quantity?: number;
   Rate?: number;
+  /** GST rate % auto-filled from HSN Master via the item */
+  GSTRate?: number;
   Remarks?: string;
   CreatedBy?: number;
   UpdatedBy?: number;
@@ -165,12 +175,7 @@ export interface WorkOrderFullPayload {
     DocTypeId?: number | string | null;
     DocNo?: string | null;
     UpdatedBy?: number;
-    /** GST configuration stored as JSON in WorkOrderHeader.GST column */
-    GST?: {
-      applicable: boolean;
-      type: "none" | "cgst_sgst" | "igst";
-      rate: number;
-    } | null;
+    // GST is now per-material (GSTRate on each material line), not at header level
   };
   activities: ActivityPayload[];
 }
