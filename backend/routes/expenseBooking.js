@@ -375,15 +375,45 @@ router.post("/", async (req, res) => {
         ? `${prefix}${padded}/${finYear}`
         : `${prefix}${padded}`;
 
-      await transaction
+      // The preview endpoint may have already reserved this doc number (RecordId IS NULL).
+      // Reuse it if unassigned; bump if already committed to another record.
+      const existingSeq = await transaction
         .request()
-        .input("TypeOfDocId", sql.Int, typeId)
-        .input("DocNo", sql.NVarChar(100), finalDocNo)
-        .input("TableName", sql.NVarChar(100), "ExpenseBooking")
-        .input("IssuedBy", sql.NVarChar(200), req.user?.email || null).query(`
-          INSERT INTO dbo.DocNumberSequence (TypeOfDocId, DocNo, TableName, IssuedBy)
-          VALUES (@TypeOfDocId, @DocNo, @TableName, @IssuedBy)
+        .input("DocNoCheck", sql.NVarChar(100), finalDocNo).query(`
+          SELECT RecordId FROM dbo.DocNumberSequence WHERE DocNo = @DocNoCheck
         `);
+
+      if (existingSeq.recordset.length > 0) {
+        if (existingSeq.recordset[0]?.RecordId) {
+          // Already committed — bump by 1 and insert fresh
+          const bumpPadded = String(nextSeq + 1).padStart(6, "0");
+          finalDocNo = finYear
+            ? `${prefix}${bumpPadded}/${finYear}`
+            : `${prefix}${bumpPadded}`;
+          await transaction
+            .request()
+            .input("TypeOfDocId", sql.Int, typeId)
+            .input("DocNo", sql.NVarChar(100), finalDocNo)
+            .input("TableName", sql.NVarChar(100), "ExpenseBooking")
+            .input("IssuedBy", sql.NVarChar(200), req.user?.email || null)
+            .query(`
+              INSERT INTO dbo.DocNumberSequence (TypeOfDocId, DocNo, TableName, IssuedBy)
+              VALUES (@TypeOfDocId, @DocNo, @TableName, @IssuedBy)
+            `);
+        }
+        // else: reserved by preview (RecordId IS NULL) — reuse as-is
+      } else {
+        // Not yet reserved — insert fresh
+        await transaction
+          .request()
+          .input("TypeOfDocId", sql.Int, typeId)
+          .input("DocNo", sql.NVarChar(100), finalDocNo)
+          .input("TableName", sql.NVarChar(100), "ExpenseBooking")
+          .input("IssuedBy", sql.NVarChar(200), req.user?.email || null).query(`
+            INSERT INTO dbo.DocNumberSequence (TypeOfDocId, DocNo, TableName, IssuedBy)
+            VALUES (@TypeOfDocId, @DocNo, @TableName, @IssuedBy)
+          `);
+      }
     }
 
     const insertResult = await transaction

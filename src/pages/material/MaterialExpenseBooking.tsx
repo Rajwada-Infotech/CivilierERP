@@ -69,6 +69,7 @@ import {
   computeBreakdown,
   dbToRecord,
   fmt,
+  generateEmiSchedule,
   recordToDb,
 } from "./ExpenseBooking/helpers";
 import type {
@@ -934,9 +935,28 @@ export default function MaterialExpenseBooking() {
       form.sgstRate,
       form.discount,
     );
+
+    // Guarantee the EMI schedule is always fresh at save time — the useEffect in
+    // EmiSection may not have fired yet if the user saves quickly after configuring EMI.
+    let emiForSave = form.emi;
+    if (
+      !isEditing &&
+      form.emi.enabled &&
+      form.emi.installmentCount > 0 &&
+      form.emi.startDate
+    ) {
+      const freshSchedule = generateEmiSchedule(
+        bd.netAmount,
+        form.emi.installmentCount,
+        form.emi.startDate,
+        form.bookingReference,
+      );
+      emiForSave = { ...form.emi, schedule: freshSchedule };
+    }
+
     const body = {
       ...recordToDb(
-        form,
+        { ...form, emi: emiForSave },
         bd.netAmount,
         selectedDoc?.kind === "TOD" ? (selectedDoc.sourceId ?? null) : null,
       ),
