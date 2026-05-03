@@ -120,18 +120,37 @@ router.get("/meta/uoms", cache("wo-meta-uoms", 600), async (req, res) => {
 /**
  * GET /api/work-orders/meta/items
  * Returns all items from Item_Master_Group for the material name dropdown.
- * Response shape: [{ id: string (uniqueidentifier), name: string }]
+ * Response shape: [{ id, name, gstRate, hsnCode }]
+ * gstRate is resolved from HSN Master using the item's M_HSN code.
  */
-router.get("/meta/items", cache("wo-meta-items", 600), async (req, res) => {
+router.get("/meta/items", async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT CAST(M_Id AS NVARCHAR(36)) AS id,
-             M_Name                     AS name
-      FROM   dbo.Item_Master_Group
-      ORDER  BY M_Name
+      SELECT
+        CAST(i.M_Id AS NVARCHAR(36)) AS id,
+        i.M_Name                     AS name,
+        i.M_HSN                      AS hsnCode,
+        ISNULL(
+          CASE
+            WHEN ISNULL(h.HIGST, 0) > 0 THEN h.HIGST
+            ELSE ISNULL(h.HCGST, 0) + ISNULL(h.HSGST, 0)
+          END,
+          CASE
+            WHEN ISNULL(i.M_IGST, 0) > 0 THEN i.M_IGST
+            ELSE ISNULL(i.M_CGST, 0) + ISNULL(i.M_SGST, 0)
+          END
+        ) AS gstRate
+      FROM dbo.Item_Master_Group i
+      LEFT JOIN dbo.HSN h ON h.HCode = i.M_HSN AND h.HStatus = 1
+      ORDER BY i.M_Name
     `);
-    res.json((result.recordset || []).map((r) => ({ id: r.id, name: r.name })));
+    res.json((result.recordset || []).map((r) => ({
+      id: r.id,
+      name: r.name,
+      hsnCode: r.hsnCode || null,
+      gstRate: r.gstRate ? Number(r.gstRate) : 0,
+    })));
   } catch (err) {
     console.error("[wo-meta-items]", err.message);
     res.status(500).json({ error: err.message });
@@ -226,7 +245,8 @@ router.get("/:id", cache("work-orders", 300), async (req, res) => {
       .input("WorkOrderHeaderId", sql.Int, req.params.id)
       .query(`
         SELECT m.*, img.M_Name AS ItemName, uom.UOMName,
-          CAST(m.ItemId AS NVARCHAR(36)) AS ItemIdStr
+          CAST(m.ItemId AS NVARCHAR(36)) AS ItemIdStr,
+          ISNULL(m.GSTRate, 0) AS GSTRate
         FROM dbo.WorkOrderActivityMaterials m
         INNER JOIN dbo.WorkOrderActivities  a   ON a.Id    = m.WorkOrderActivityId
         LEFT  JOIN dbo.Item_Master_Group    img ON img.M_Id = m.ItemId
@@ -768,17 +788,22 @@ router.post("/:id/save-full", async (req, res) => {
             .input("UOMId",               sql.Int,              mat.UOMId    || null)
             .input("Quantity",            sql.Decimal(18,2),    mat.Quantity || null)
             .input("Rate",                sql.Decimal(18,2),    mat.Rate     || null)
+<<<<<<< HEAD
+            .input("Remarks",             sql.NVarChar(400),    mat.Remarks  || null)
+            .input("GSTRate",             sql.Decimal(5,2),     mat.GSTRate != null ? Number(mat.GSTRate) : 0)
+=======
             .input("Remarks",             sql.NVarChar(sql.MAX),    mat.Remarks  || null)
+>>>>>>> origin/dev
             // ↓ DocNo FK — required by FK_WorkOrderActivityMaterials_DocNo
             .input("DocNo",               sql.NVarChar(100),    docNo)
             .input("CreatedBy",           sql.NVarChar(100),    req.user?.name || null)
             .input("CreatedAt",           sql.DateTime2,        new Date())
             .query(`
               INSERT INTO dbo.WorkOrderActivityMaterials
-                (WorkOrderActivityId, ItemId, UOMId, Quantity, Rate, Remarks, DocNo, CreatedBy, CreatedAt)
+                (WorkOrderActivityId, ItemId, UOMId, Quantity, Rate, Remarks, GSTRate, DocNo, CreatedBy, CreatedAt)
               OUTPUT INSERTED.Id
               VALUES
-                (@WorkOrderActivityId, @ItemId, @UOMId, @Quantity, @Rate, @Remarks, @DocNo, @CreatedBy, @CreatedAt)
+                (@WorkOrderActivityId, @ItemId, @UOMId, @Quantity, @Rate, @Remarks, @GSTRate, @DocNo, @CreatedBy, @CreatedAt)
             `);
           materialDbId = r.recordset[0].Id;
         } else {
@@ -788,13 +813,18 @@ router.post("/:id/save-full", async (req, res) => {
             .input("UOMId",     sql.Int,              mat.UOMId    || null)
             .input("Quantity",  sql.Decimal(18,2),    mat.Quantity || null)
             .input("Rate",      sql.Decimal(18,2),    mat.Rate     || null)
+<<<<<<< HEAD
+            .input("Remarks",   sql.NVarChar(400),    mat.Remarks  || null)
+            .input("GSTRate",   sql.Decimal(5,2),     mat.GSTRate != null ? Number(mat.GSTRate) : 0)
+=======
             .input("Remarks",   sql.NVarChar(sql.MAX),    mat.Remarks  || null)
+>>>>>>> origin/dev
             .input("UpdatedBy", sql.NVarChar(100),    req.user?.name || null)
             .input("UpdatedAt", sql.DateTime2,        new Date())
             .query(`
               UPDATE dbo.WorkOrderActivityMaterials SET
                 ItemId=@ItemId, UOMId=@UOMId, Quantity=@Quantity,
-                Rate=@Rate, Remarks=@Remarks,
+                Rate=@Rate, Remarks=@Remarks, GSTRate=@GSTRate,
                 UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt
               WHERE Id=@Id
             `);
