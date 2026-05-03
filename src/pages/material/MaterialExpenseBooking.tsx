@@ -908,11 +908,19 @@ export default function MaterialExpenseBooking() {
 
   const disableEmi = async () => {
     if (!editingId) return;
-    await apiFetch(`${API}/${editingId}/emi-toggle`, {
+    const result = await apiFetch(`${API}/${editingId}/emi-toggle`, {
       method: "PUT",
       body: JSON.stringify({ enabled: false, deleteUnpaid: true }),
     });
-    toast.success("EMI disabled. Unpaid installments removed.");
+    if (result?.lumpSum) {
+      const ref = result.lumpSum.docNo || `#${result.lumpSum.id}`;
+      toast.success(
+        `EMI disabled. Remaining balance created as lump-sum booking ${ref}.`,
+        { duration: 6000 },
+      );
+    } else {
+      toast.success("EMI disabled. Unpaid installments removed.");
+    }
     setLiveEmiSchedule(null);
   };
 
