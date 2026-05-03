@@ -36,8 +36,12 @@ router.post("/", async (req, res) => {
     await pool
       .request()
       .input("Name", sql.NVarChar(100), Name || null)
-      .input("TermsAndCondition", sql.NVarChar(500), TermsAndCondition || null)
-      .input("Remarks", sql.NVarChar(200), Remarks || null)
+      .input(
+        "TermsAndCondition",
+        sql.NVarChar(sql.MAX),
+        TermsAndCondition || null,
+      )
+      .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
       .input("isActive", sql.Bit, isActive !== false ? 1 : 0)
       .input("CreatedBy", sql.Int, createdBy)
       .input("CreatedDate", sql.DateTime2(7), new Date()).query(`
@@ -65,8 +69,12 @@ router.put("/:id", async (req, res) => {
       .request()
       .input("Id", sql.Int, req.params.id)
       .input("Name", sql.NVarChar(100), Name || null)
-      .input("TermsAndCondition", sql.NVarChar(500), TermsAndCondition || null)
-      .input("Remarks", sql.NVarChar(200), Remarks || null)
+      .input(
+        "TermsAndCondition",
+        sql.NVarChar(sql.MAX),
+        TermsAndCondition || null,
+      )
+      .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
       .input("isActive", sql.Bit, isActive !== false ? 1 : 0)
       .input("UpdatedBy", sql.Int, updatedBy)
       .input("UpdatedDate", sql.DateTime2(7), new Date()).query(`
