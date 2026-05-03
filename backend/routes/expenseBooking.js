@@ -308,6 +308,8 @@ router.post("/", async (req, res) => {
     ECompanyId,
     EDocTypeId,
     EFinYear,
+    ESourceType,
+    ESourceId,
   } = req.body;
 
   const pool = getPool();
@@ -458,21 +460,25 @@ router.post("/", async (req, res) => {
         sql.Int,
         EDocTypeId ? parseInt(EDocTypeId, 10) : null,
       )
-      .input("EFinYear", sql.NVarChar(20), EFinYear || null).query(`
+      .input("EFinYear", sql.NVarChar(20), EFinYear || null)
+      .input("ESourceType", sql.NVarChar(20), ESourceType || null)
+      .input("ESourceId", sql.Int, ESourceId ? parseInt(ESourceId, 10) : null).query(`
         INSERT INTO dbo.ExpenseBooking (
           EName, EProjectName, EDocumentType, EDocDate, EAmount, ENetAmount,
           ECgstRate, ESgstRate, EDiscountData, EDocNo,
           EEmiPayment, EEmiData, EInstallmentCount, EEmiAmount, EEmiStartDate,
           EReminder, ERemarks, EStatus,
           ECreatedAt, EUpdatedAt, ECreatedBy, EApprovedBy,
-          ECompanyId, EDocTypeId, EFinYear
+          ECompanyId, EDocTypeId, EFinYear,
+          ESourceType, ESourceId
         ) VALUES (
           @EName, @EProjectName, @EDocumentType, @EDocDate, @EAmount, @ENetAmount,
           @ECgstRate, @ESgstRate, @EDiscountData, @EDocNo,
           @EEmiPayment, @EEmiData, @EInstallmentCount, @EEmiAmount, @EEmiStartDate,
           @EReminder, @ERemarks, @EStatus,
           @ECreatedAt, @EUpdatedAt, @ECreatedBy, @EApprovedBy,
-          @ECompanyId, @EDocTypeId, @EFinYear
+          @ECompanyId, @EDocTypeId, @EFinYear,
+          @ESourceType, @ESourceId
         );
         SELECT SCOPE_IDENTITY() AS NewId;
       `);
@@ -910,6 +916,8 @@ router.put("/:id", async (req, res) => {
     ECompanyId,
     EDocTypeId,
     EFinYear,
+    ESourceType,
+    ESourceId,
   } = req.body;
 
   try {
@@ -954,7 +962,9 @@ router.put("/:id", async (req, res) => {
         sql.Int,
         EDocTypeId ? parseInt(EDocTypeId, 10) : null,
       )
-      .input("EFinYear", sql.NVarChar(20), EFinYear || null).query(`
+      .input("EFinYear", sql.NVarChar(20), EFinYear || null)
+      .input("ESourceType", sql.NVarChar(20), ESourceType || null)
+      .input("ESourceId", sql.Int, ESourceId ? parseInt(ESourceId, 10) : null).query(`
         UPDATE dbo.ExpenseBooking SET
           EName=@EName, EProjectName=@EProjectName, EDocumentType=@EDocumentType, EDocDate=@EDocDate,
           EAmount=@EAmount, ENetAmount=@ENetAmount, ECgstRate=@ECgstRate, ESgstRate=@ESgstRate,
@@ -962,7 +972,8 @@ router.put("/:id", async (req, res) => {
           EEmiData=@EEmiData, EInstallmentCount=@EInstallmentCount, EEmiAmount=@EEmiAmount,
           EEmiStartDate=@EEmiStartDate, EReminder=@EReminder, ERemarks=@ERemarks,
           EStatus=@EStatus, EUpdatedAt=@EUpdatedAt, ECompanyId=@ECompanyId,
-          EDocTypeId=@EDocTypeId, EFinYear=@EFinYear
+          EDocTypeId=@EDocTypeId, EFinYear=@EFinYear,
+          ESourceType=@ESourceType, ESourceId=@ESourceId
         WHERE Eid = @Eid
       `);
 
@@ -1102,6 +1113,93 @@ router.put("/:id/reject", async (req, res) => {
   } catch (err) {
     const status = err.message.includes("not authorized") ? 403 : 400;
     res.status(status).json({ error: err.message });
+  }
+});
+
+// ─── GET /chain-status ────────────────────────────────────────────────────────
+// Used by PO / WO / GRN detail panels to show "Expense Booked ✓ / Paid ✓" badges.
+// Query params: sourceType (PO | WO | GRN), sourceId (numeric DB id)
+router.get("/chain-status", async (req, res) => {
+  const { sourceType, sourceId } = req.query;
+  const srcId = parseInt(sourceId, 10);
+
+  if (!sourceType || !srcId || !Number.isFinite(srcId)) {
+    return res.status(400).json({ error: "sourceType and sourceId are required" });
+  }
+
+  try {
+    const pool = getPool();
+
+    // All expense bookings linked to this source
+    const expResult = await pool
+      .request()
+      .input("ESourceType", sql.NVarChar(20), String(sourceType))
+      .input("ESourceId", sql.Int, srcId).query(`
+        SELECT
+          eb.Eid,
+          eb.EDocNo,
+          eb.EStatus,
+          eb.ENetAmount,
+          eb.EAmount
+        FROM dbo.ExpenseBooking eb
+        WHERE eb.ESourceType = @ESourceType AND eb.ESourceId = @ESourceId
+        ORDER BY eb.Eid DESC
+      `);
+
+    const expenses = expResult.recordset;
+    const expenseCount = expenses.length;
+    const latestExpense = expenses[0] ?? null;
+
+    if (expenseCount === 0) {
+      return res.json({
+        expenseCount: 0,
+        latestExpenseDocNo: null,
+        latestExpenseStatus: null,
+        latestExpenseAmount: null,
+        paymentCount: 0,
+        latestPaymentAmount: null,
+        isPaid: false,
+      });
+    }
+
+    // All payments linked to any of these expense bookings
+    const expenseDocNos = expenses
+      .map((e) => e.EDocNo)
+      .filter(Boolean)
+      .map((d) => `'${d.replace(/'/g, "''")}'`)
+      .join(",");
+
+    let paymentCount = 0;
+    let latestPaymentAmount = null;
+    let isPaid = false;
+
+    if (expenseDocNos.length > 0) {
+      const payResult = await pool
+        .request().query(`
+          SELECT COUNT(*) AS payCount,
+                 SUM(PAmount) AS totalPaid
+          FROM dbo.NewPayment
+          WHERE PExpenseRef IN (${expenseDocNos})
+        `);
+      paymentCount = parseInt(payResult.recordset[0]?.payCount) || 0;
+      latestPaymentAmount = payResult.recordset[0]?.totalPaid
+        ? parseFloat(payResult.recordset[0].totalPaid)
+        : null;
+      isPaid = paymentCount > 0;
+    }
+
+    res.json({
+      expenseCount,
+      latestExpenseDocNo: latestExpense?.EDocNo ?? null,
+      latestExpenseStatus: latestExpense?.EStatus ?? null,
+      latestExpenseAmount: latestExpense?.ENetAmount ?? latestExpense?.EAmount ?? null,
+      paymentCount,
+      latestPaymentAmount,
+      isPaid,
+    });
+  } catch (err) {
+    console.error("Chain status error:", err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
