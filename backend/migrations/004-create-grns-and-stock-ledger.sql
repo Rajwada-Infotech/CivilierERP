@@ -1,7 +1,7 @@
 -- Migration 004: Create GoodsReceiptNotes and StockLedger tables
 -- Run: sqlcmd or SSMS on your DB
 
-USE [Civilier]; -- Replace with actual DB name
+USE [YourDatabaseName]; -- Replace with actual DB name
 
 -- Create GoodsReceiptNotes table
 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'GoodsReceiptNotes')
