@@ -186,8 +186,13 @@ router.post("/", async (req, res) => {
 
 // PUT - Update GRN
 router.put("/:id", async (req, res) => {
+  try {
+    await guardEdit("goods-receipt", req.params.id);
+  } catch (err) {
+    return res.status(400).json({ error: err.message });
+  }
+
   const { grnNo, grnDate, supplierId, poId, grnItems, status, remarks, docTypeId, docNo } =
-  await guardEdit("goods-receipt", req.params.id);
     req.body;
   const grnId = parseInt(req.params.id, 10);
 
