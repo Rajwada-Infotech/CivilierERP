@@ -671,7 +671,7 @@ router.put("/:id/emi-toggle", async (req, res) => {
       }
 
       const existingRes = await pool.request().input("Eid", sql.Int, id).query(`
-          SELECT EEmiData, EDocNo, EProjectName, EDocumentType, EDocDate,
+          SELECT EEmiData, EDocNo, EName, EProjectName, EDocumentType, EDocDate,
                  ECgstRate, ESgstRate, ECompanyId, EDocTypeId, EFinYear,
                  ECreatedBy, ERemarks, EStatus
           FROM dbo.ExpenseBooking WHERE Eid = @Eid
@@ -686,14 +686,22 @@ router.put("/:id/emi-toggle", async (req, res) => {
         emiData.schedule = emiData.schedule.filter((r) => r.status === "Paid");
       }
 
+      // If the booking was Approved, reset it to Draft so it re-enters
+      // the approval workflow after the structural EMI change.
+      const wasApproved = (parentRow.EStatus || "") === "Approved";
+
       await pool
         .request()
         .input("Eid", sql.Int, id)
         .input("EEmiPayment", sql.Bit, 0)
         .input("EEmiData", sql.NVarChar(sql.MAX), JSON.stringify(emiData))
-        .query(`
+        .input(
+          "EStatus",
+          sql.NVarChar(50),
+          wasApproved ? "Draft" : parentRow.EStatus || "Draft",
+        ).query(`
           UPDATE dbo.ExpenseBooking
-          SET EEmiPayment = @EEmiPayment, EEmiData = @EEmiData
+          SET EEmiPayment = @EEmiPayment, EEmiData = @EEmiData, EStatus = @EStatus
           WHERE Eid = @Eid
         `);
 
@@ -706,6 +714,13 @@ router.put("/:id/emi-toggle", async (req, res) => {
 
         const lumpInsert = await pool
           .request()
+          .input(
+            "EName",
+            sql.NVarChar(200),
+            parentRow.EName
+              ? `${parentRow.EName} (Lump-sum balance)`
+              : `Lump-sum balance from ${parentRow.EDocNo || `booking #${id}`}`,
+          )
           .input(
             "EProjectName",
             sql.NVarChar(150),
@@ -732,13 +747,13 @@ router.put("/:id/emi-toggle", async (req, res) => {
           .input("ECreatedAt", sql.DateTime2, new Date())
           .input("EUpdatedAt", sql.DateTime2, new Date()).query(`
             INSERT INTO dbo.ExpenseBooking (
-              EProjectName, EDocumentType, EDocDate,
+              EName, EProjectName, EDocumentType, EDocDate,
               EAmount, ENetAmount, ECgstRate, ESgstRate,
               EEmiPayment, ERemarks, EStatus,
               ECompanyId, EDocTypeId, EFinYear, ECreatedBy,
               EParentEmiRef, ECreatedAt, EUpdatedAt
             ) VALUES (
-              @EProjectName, @EDocumentType, @EDocDate,
+              @EName, @EProjectName, @EDocumentType, @EDocDate,
               @EAmount, @ENetAmount, @ECgstRate, @ESgstRate,
               @EEmiPayment, @ERemarks, @EStatus,
               @ECompanyId, @EDocTypeId, @EFinYear, @ECreatedBy,
@@ -846,6 +861,7 @@ router.put("/:id/emi-toggle", async (req, res) => {
 
     res.json({
       message: enabled ? "EMI re-enabled" : "EMI disabled",
+      statusReset: !enabled && (lumpSumId !== null || true) ? true : false,
       stats: {
         total: parseInt(total) || 0,
         paid: parseInt(paid) || 0,
