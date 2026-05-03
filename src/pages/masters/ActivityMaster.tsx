@@ -1,14 +1,21 @@
-import React from "react";
+import React, { useState } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   MasterPage,
   type DataChangeEvent,
   type RecordWithId,
 } from "@/components/MasterPage";
-import type { ExportColumn } from "@/lib/export";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Activity, Layers, Tag } from "lucide-react";
+import {
+  Activity,
+  Layers,
+  Tag,
+  ChevronDown,
+  ChevronRight,
+  Search,
+  Download,
+} from "lucide-react";
 import {
   getActivities,
   addActivity,
@@ -18,10 +25,143 @@ import {
   type DbActivity,
 } from "@/api/activityMasterApi";
 
-// ─── Component ────────────────────────────────────────────────────────────────
+// ─── Status badge ─────────────────────────────────────────────────────────────
+const StatusBadge = ({ active }: { active: boolean }) => (
+  <span
+    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold border ${
+      active
+        ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
+        : "bg-red-500/10 border-red-500/20 text-red-400"
+    }`}
+  >
+    <span
+      className={`w-1.5 h-1.5 rounded-full ${active ? "bg-emerald-400" : "bg-red-400"}`}
+    />
+    {active ? "Active" : "Inactive"}
+  </span>
+);
 
+// ─── Collapsible Group Row ────────────────────────────────────────────────────
+const GroupRow = ({
+  group,
+  activities,
+  search,
+}: {
+  group: DbActivity;
+  activities: DbActivity[];
+  search: string;
+}) => {
+  const [open, setOpen] = useState(true);
+
+  const filtered = activities.filter((a) =>
+    search
+      ? a.activity_name.toLowerCase().includes(search.toLowerCase())
+      : true,
+  );
+
+  if (
+    search &&
+    !group.activity_name.toLowerCase().includes(search.toLowerCase()) &&
+    filtered.length === 0
+  )
+    return null;
+
+  return (
+    <div className="rounded-xl border border-border overflow-hidden">
+      {/* Group header */}
+      <div
+        className="flex items-center gap-3 px-4 py-3 bg-muted/40 cursor-pointer select-none hover:bg-muted/60 transition-colors"
+        onClick={() => setOpen((p) => !p)}
+      >
+        <span className="text-muted-foreground shrink-0">
+          {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        </span>
+        <Layers size={14} className="text-violet-400 shrink-0" />
+        <span className="font-semibold text-sm text-foreground flex-1">
+          {group.activity_name}
+        </span>
+        <span className="px-2 py-0.5 rounded-md text-[10px] bg-violet-500/10 text-violet-400 font-mono mr-2">
+          {filtered.length} {filtered.length === 1 ? "activity" : "activities"}
+        </span>
+        <span className="hidden sm:block text-xs text-muted-foreground font-mono mr-3 truncate max-w-[220px]">
+          {group.short_description}
+        </span>
+        <StatusBadge active={group.is_active} />
+      </div>
+
+      {/* Activities */}
+      {open && (
+        <div className="divide-y divide-border/40">
+          {filtered.length === 0 ? (
+            <div className="px-10 py-2.5 text-xs text-muted-foreground italic flex items-center gap-2">
+              <Tag size={11} className="opacity-50" /> No activities in this
+              group
+            </div>
+          ) : (
+            filtered.map((activity) => (
+              <div
+                key={activity.id}
+                className="flex items-center gap-3 px-4 py-2.5 pl-10 hover:bg-muted/20 transition-colors"
+              >
+                <div className="w-3 h-px bg-border/60 shrink-0" />
+                <Tag size={12} className="text-teal-400 shrink-0" />
+                <span className="text-sm text-foreground flex-1 truncate">
+                  {activity.activity_name}
+                </span>
+                <span className="hidden md:block text-xs text-muted-foreground font-mono truncate max-w-[260px]">
+                  {activity.short_description}
+                </span>
+                <StatusBadge active={activity.is_active} />
+              </div>
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ─── CSV Export Helper ────────────────────────────────────────────────────────
+const exportToCSV = (items: DbActivity[], groups: DbActivity[]) => {
+  const headers = [
+    "Activity Name",
+    "Short Description",
+    "Type",
+    "Group",
+    "Status",
+  ];
+  const rows = items.map((item) => {
+    const group = groups.find((g) => g.id === item.group_id);
+    return [
+      item.activity_name,
+      item.short_description,
+      item.activity_type === 0 ? "Group" : "Activity",
+      group?.activity_name ?? "—",
+      item.is_active ? "Active" : "Inactive",
+    ];
+  });
+
+  const csv = [headers, ...rows]
+    .map((row) =>
+      row
+        .map((cell) => `"${String(cell ?? "").replace(/"/g, '""')}"`)
+        .join(","),
+    )
+    .join("\n");
+
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = "activity-master.csv";
+  link.click();
+  URL.revokeObjectURL(url);
+};
+
+// ─── Main Component ───────────────────────────────────────────────────────────
 const ActivityMaster: React.FC = () => {
   const queryClient = useQueryClient();
+  const [treeSearch, setTreeSearch] = useState("");
 
   const {
     data: dbData,
@@ -30,16 +170,17 @@ const ActivityMaster: React.FC = () => {
   } = useQuery<DbActivity[]>({
     queryKey: ["activities"],
     queryFn: getActivities,
-    staleTime: 5 * 60 * 1000,
+    staleTime: 0,
+    refetchOnMount: true,
   });
 
   const dbItems: DbActivity[] = Array.isArray(dbData) ? dbData : [];
-
-  // activity_type === 0 means Group
   const groups = dbItems.filter((i) => i.activity_type === 0);
+  const activityItems = dbItems.filter((i) => i.activity_type === 1);
+  const ungrouped = activityItems.filter(
+    (a) => !a.group_id || !groups.find((g) => g.id === a.group_id),
+  );
 
-  // groupOptions: value = numeric id string, label = display name
-  // Passed to toPayload() so it can resolve label → numeric id correctly
   const groupOptions = groups.map((g) => ({
     value: String(g.id),
     label: g.activity_name,
@@ -48,109 +189,54 @@ const ActivityMaster: React.FC = () => {
   const mappedData: RecordWithId[] = dbItems.map((item) => {
     const group = groups.find((g) => g.id === item.group_id);
     return {
-      _id:          String(item.id),
+      _id: String(item.id),
       activityName: item.activity_name || "",
-      shortDesc:    item.short_description || "",
+      shortDesc: item.short_description || "",
       activityType: item.activity_type === 0 ? "Group" : "Activity",
-      // Store the group's label so the select field pre-selects correctly.
-      // toPayload() resolves this label back to a numeric id via groupOptions.
-      groupId:      group?.activity_name || "",
-      groupName:    group?.activity_name || "",
-      belongsTo:    item.belongsTo ?? "",
-      status:       item.is_active,
+      groupId: group?.activity_name || "",
+      groupName: group?.activity_name || "",
+      belongsTo: item.belongsTo ?? "",
+      status: item.is_active,
     };
   });
+
+  const refetch = async () => {
+    queryClient.removeQueries({ queryKey: ["activities"] });
+    await queryClient.fetchQuery({
+      queryKey: ["activities"],
+      queryFn: getActivities,
+    });
+  };
 
   const handleDataEvent = async (event: DataChangeEvent) => {
     if (event.action === "add") {
       try {
         await addActivity(toPayload(event.record, groupOptions));
         toast.success("Activity saved!");
-        await queryClient.invalidateQueries({ queryKey: ["activities"] });
+        await refetch();
       } catch (err: any) {
         toast.error("Save failed: " + err.message);
       }
     }
-
     if (event.action === "update") {
       try {
         await updateActivity(event.id, toPayload(event.record, groupOptions));
         toast.success("Activity updated!");
-        await queryClient.invalidateQueries({ queryKey: ["activities"] });
+        await refetch();
       } catch (err: any) {
         toast.error("Update failed: " + err.message);
       }
     }
-
     if (event.action === "delete") {
       try {
         await deleteActivity(event.id);
         toast.success("Activity deleted!");
-        await queryClient.invalidateQueries({ queryKey: ["activities"] });
+        await refetch();
       } catch (err: any) {
         toast.error("Delete failed: " + err.message);
       }
     }
   };
-
-  // ─── Column Renderers ────────────────────────────────────────────────────────
-
-  const columnRenderers: Record<
-    string,
-    (value: unknown, row: RecordWithId) => React.ReactNode
-  > = {
-    activityType: (value) => {
-      const isGroup = value === "Group";
-      return (
-        <span
-          className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-heading border ${
-            isGroup
-              ? "bg-violet-500/10 border-violet-500/20 text-violet-600"
-              : "bg-teal-500/10 border-teal-500/20 text-teal-600"
-          }`}
-        >
-          {isGroup ? <Layers size={10} /> : <Tag size={10} />}
-          {String(value || "—")}
-        </span>
-      );
-    },
-
-    status: (value) => (
-      <span
-        className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${
-          value
-            ? "bg-green-500/10 border-green-500/20 text-green-600"
-            : "bg-red-500/10 border-red-500/20 text-red-600"
-        }`}
-      >
-        <span
-          className={`w-1.5 h-1.5 rounded-full mr-1.5 ${
-            value ? "bg-green-500" : "bg-red-500"
-          }`}
-        />
-        {value ? "Active" : "Inactive"}
-      </span>
-    ),
-
-    shortDesc: (value) => (
-      <span className="font-mono text-xs tracking-wide text-muted-foreground">
-        {String(value || "—")}
-      </span>
-    ),
-
-    groupName: (value, row) => {
-      if (row.activityType !== "Activity")
-        return <span className="text-muted-foreground text-xs">—</span>;
-      return (
-        <span className="inline-flex items-center gap-1 text-xs text-violet-600">
-          <Layers size={11} />
-          {String(value || "—")}
-        </span>
-      );
-    },
-  };
-
-  // ─── Render ──────────────────────────────────────────────────────────────────
 
   if (isLoading)
     return <div className="p-6 text-muted-foreground">Loading...</div>;
@@ -159,71 +245,165 @@ const ActivityMaster: React.FC = () => {
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "Finance Module", "Activity Master"]} />
+      <Breadcrumbs items={["Dashboard", "Material", "Activity Master"]} />
       <div className="flex items-center gap-3 mb-4">
         <Activity className="w-5 h-5 text-primary" />
         <h1 className="text-xl font-heading font-bold text-foreground">
           Activity Master
         </h1>
       </div>
-      <MasterPage
-        title="Activity"
-        fields={[
-          {
-            name: "activityName",
-            label: "Activity Name",
-            type: "text",
-            required: true,
-          },
-          {
-            name: "shortDesc",
-            label: "Short Description",
-            type: "text",
-            required: true,
-          },
-          {
-            name: "activityType",
-            label: "Activity Type",
-            type: "select",
-            options: ["Group", "Activity"],
-            required: true,
-            defaultValue: "Group",
-          },
-          {
-            name: "groupId",
-            label: "Belongs To Group",
-            type: "select",
-            // Labels only — toPayload() resolves label → numeric id via groupOptions
-            options: groupOptions.map((o) => o.label),
-          },
-          {
-            name: "status",
-            label: "Status",
-            type: "toggle",
-            defaultValue: true,
-          },
-        ]}
-        columns={[
-          { key: "activityName", label: "Activity Name" },
-          { key: "shortDesc",    label: "Short Desc", hideOnMobile: true },
-          { key: "activityType", label: "Type" },
-          { key: "groupName",    label: "Group", hideOnMobile: true },
-          { key: "status",       label: "Status" },
-        ]}
-        columnRenderers={columnRenderers}
-        initialData={mappedData}
-        onDataEvent={handleDataEvent}
-        exportConfig={{
-          title: "Activity Master",
-          filename: "activity-master",
-          columns: [            { header: "Activity Name", accessor: "activityName" },
-            { header: "Short Desc",    accessor: "shortDesc" },
-            { header: "Type",          accessor: "activityType" },
-            { header: "Group",         accessor: "groupName" },
-            { header: "Status",        accessor: "status" },
-          ],
-        }}
-      />
+
+      {/* ── Form only (table hidden via hideTable prop) ── */}
+      <div>
+        <MasterPage
+          title="Activity"
+          hideTable
+          fields={[
+            {
+              name: "activityName",
+              label: "Activity Name",
+              type: "text",
+              required: true,
+            },
+            {
+              name: "shortDesc",
+              label: "Short Description",
+              type: "text",
+              required: true,
+            },
+            {
+              name: "activityType",
+              label: "Activity Type",
+              type: "select",
+              options: ["Group", "Activity"],
+              required: true,
+              defaultValue: "Group",
+            },
+            {
+              name: "groupId",
+              label: "Belongs To Group",
+              type: "select",
+              options: groupOptions.map((o) => o.label),
+            },
+            {
+              name: "status",
+              label: "Status",
+              type: "toggle",
+              defaultValue: true,
+            },
+          ]}
+          columns={[
+            { key: "activityName", label: "Activity Name" },
+            { key: "shortDesc", label: "Short Desc", hideOnMobile: true },
+            { key: "activityType", label: "Type" },
+            { key: "groupName", label: "Group", hideOnMobile: true },
+            { key: "status", label: "Status" },
+          ]}
+          initialData={mappedData}
+          onDataEvent={handleDataEvent}
+        />
+      </div>
+
+      {/* ── Grouped Tree View ── */}
+      <div className="mt-8">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-2">
+            <Layers size={15} className="text-violet-400" />
+            <h2 className="text-base font-semibold text-foreground">
+              Activities by Group
+            </h2>
+            <span className="px-2 py-0.5 rounded-md text-[10px] bg-muted text-muted-foreground font-mono">
+              {groups.length} groups · {activityItems.length} activities
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* Export Button */}
+            <button
+              onClick={() => exportToCSV(dbItems, groups)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-border bg-background hover:bg-muted transition-colors text-foreground"
+            >
+              <Download size={12} />
+              Export
+            </button>
+
+            {/* Search */}
+            <div className="relative">
+              <Search
+                size={12}
+                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+              />
+              <input
+                type="text"
+                value={treeSearch}
+                onChange={(e) => setTreeSearch(e.target.value)}
+                placeholder="Filter…"
+                className="pl-7 pr-3 py-1.5 text-xs bg-background border border-border rounded-lg text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/40 w-36"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Legend */}
+        <div className="flex items-center gap-4 mb-3 px-1">
+          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <Layers size={11} className="text-violet-400" /> Group
+          </div>
+          <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+            <Tag size={11} className="text-teal-400" /> Activity (nested under
+            its group)
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          {groups.map((group) => (
+            <GroupRow
+              key={group.id}
+              group={group}
+              activities={activityItems.filter((a) => a.group_id === group.id)}
+              search={treeSearch}
+            />
+          ))}
+
+          {ungrouped.length > 0 && (
+            <div className="rounded-xl border border-dashed border-border overflow-hidden">
+              <div className="flex items-center gap-2 px-4 py-3 bg-muted/20">
+                <Tag size={13} className="text-muted-foreground" />
+                <span className="text-sm font-medium text-muted-foreground">
+                  Ungrouped Activities
+                </span>
+                <span className="px-1.5 py-0.5 rounded text-[10px] bg-muted text-muted-foreground font-mono">
+                  {ungrouped.length}
+                </span>
+              </div>
+              <div className="divide-y divide-border/50">
+                {ungrouped.map((a) => (
+                  <div
+                    key={a.id}
+                    className="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/20"
+                  >
+                    <Tag size={12} className="text-muted-foreground shrink-0" />
+                    <span className="text-sm text-foreground flex-1 truncate">
+                      {a.activity_name}
+                    </span>
+                    <span className="text-xs text-muted-foreground font-mono hidden md:block truncate max-w-[240px]">
+                      {a.short_description}
+                    </span>
+                    <StatusBadge active={a.is_active} />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {groups.length === 0 && ungrouped.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-12 text-muted-foreground gap-2">
+              <Activity size={28} className="opacity-30" />
+              <p className="text-sm">No groups or activities yet.</p>
+            </div>
+          )}
+        </div>
+      </div>
     </>
   );
 };
