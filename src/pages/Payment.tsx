@@ -498,15 +498,32 @@ const Payment: React.FC = () => {
       // we auto-fill directly from the option data without any API call.
       const selectedOption = expenseOptions.find((o) => o.id === expenseId);
       if (selectedOption?.type === "emi") {
+        // Build the installment-specific ref: either the stored refNumber, or
+        // derive it from parentDocNo + installment number (matching backend SQL logic:
+        // CONCAT(parentDocNo, '-EMI-', RIGHT('00' + CAST(installmentNo AS VARCHAR), 2)))
+        const padded = String(selectedOption.installmentNo ?? 1).padStart(
+          2,
+          "0",
+        );
+        const emiSuffix = `EMI-${padded}`;
+        const ref =
+          selectedOption.refNumber ||
+          (selectedOption.parentDocNo
+            ? `${selectedOption.parentDocNo}-${emiSuffix}`
+            : selectedOption.docNo
+              ? `${selectedOption.docNo}-${emiSuffix}`
+              : emiSuffix);
         // Derive a short doc type from the ref: "CI/WO/000001/2025-2026-EMI-01" → "WO/EMI-01"
-        const ref = selectedOption.refNumber || "";
-        const emiTag = ref.match(/EMI-\d+$/)?.[0] ?? "EMI";
-        const woTag = ref.match(/\/(WO|PO|EXP)\//)?.[1] ?? "EXP";
-        const shortDocType = `${woTag}/${emiTag}`;
+        const emiTag = `EMI-${padded}`;
+        const woTag =
+          (ref.match(/\/(WO|PO|OTH)\//)?.[1] ?? ref.match(/\/(WO|PO|OTH)\//))
+            ? ""
+            : "EXP";
+        const shortDocType = woTag ? `${woTag}/${emiTag}` : emiTag;
         setForm((prev) => ({
           ...prev,
           expenseId,
-          expenseRef: ref || selectedOption.docNo || "",
+          expenseRef: ref,
           project: selectedOption.projectName || "",
           company: String(selectedOption.companyId ?? ""),
           amount: selectedOption.amount ?? null,
@@ -1050,6 +1067,7 @@ const Payment: React.FC = () => {
                             status={rec.status}
                             recordId={Number(rec.id)}
                             endpoint="/api/new-payment"
+                            submitOnly
                             onSuccess={() =>
                               queryClient.invalidateQueries({
                                 queryKey: ["payments"],
@@ -1156,6 +1174,7 @@ const Payment: React.FC = () => {
                                 status={rec.status}
                                 recordId={Number(rec.id)}
                                 endpoint="/api/new-payment"
+                                submitOnly
                                 onSuccess={() =>
                                   queryClient.invalidateQueries({
                                     queryKey: ["payments"],

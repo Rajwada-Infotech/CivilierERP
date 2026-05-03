@@ -10,7 +10,7 @@
 -- ⚠️  Back up your data before running this migration.
 -- Run in SQL Server Management Studio against the correct database.
 
-USE [CivilierERP]; -- Update if your database name differs
+USE [Civilier]; -- Update if your database name differs
 
 -- Check current column type
 SELECT 
