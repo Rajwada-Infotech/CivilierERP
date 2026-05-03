@@ -157,15 +157,17 @@ export function dbToRecord(row: any): ExpenseRecord {
   return {
     id: String(id),
     bookingName: row.EName ?? "",
-    bookingReference: row.EDocNo ?? "",
+    // Fall back to a human-readable draft label when EDocNo hasn't been assigned yet
+    bookingReference: row.EDocNo ?? (id ? `Draft #${id}` : ""),
     docTypeName: row.DocTypeName ?? "",
     bookingDate: row.EDocDate ? row.EDocDate.slice(0, 10) : "",
     dueDate: row.EReminder ? row.EReminder.slice(0, 10) : "",
     financialYear: "",
     companyId: row.ECompanyId ? parseInt(row.ECompanyId, 10) : null,
     poId: null,
-    supplier: row.EProjectName ?? "",
-    projectSite: row.EProjectName ?? "",
+    // EProjectName holds the project/vendor name; empty string means unknown
+    supplier: row.EProjectName || "",
+    projectSite: row.EProjectName || "",
     materialCategory: row.EDocumentType ?? "",
     invoiceReference: row.EDocNo ?? "",
     basicAmount: parseFloat(row.EAmount) || 0,
