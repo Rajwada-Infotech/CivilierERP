@@ -303,7 +303,7 @@ router.post("/", async (req, res) => {
       .input("DocumentDate",       sql.Date,              DocumentDate       || null)
       .input("ContractorId",       sql.Int,               ContractorId       || null)
       .input("TotalAmount",        sql.Decimal(18,2),     TotalAmount        || 0)
-      .input("Remarks",            sql.NVarChar(500),     Remarks            || null)
+      .input("Remarks",            sql.NVarChar(sql.MAX), Remarks            || null)
       .input("TermsAndConditions", sql.NVarChar(sql.MAX), TermsAndConditions || null)
       .input("DocTypeId",          sql.Int,               DocTypeId ? parseInt(DocTypeId, 10) : null)
       .input("DocNo",              sql.NVarChar(100),     finalDocNo         || null)
@@ -368,7 +368,7 @@ router.put("/:id", async (req, res) => {
       .input("DocumentDate",       sql.Date,              DocumentDate       || null)
       .input("ContractorId",       sql.Int,               ContractorId       || null)
       .input("TotalAmount",        sql.Decimal(18,2),     TotalAmount        || 0)
-      .input("Remarks",            sql.NVarChar(500),     Remarks            || null)
+      .input("Remarks",            sql.NVarChar(sql.MAX), Remarks            || null)
       .input("TermsAndConditions", sql.NVarChar(sql.MAX), TermsAndConditions || null)
       .input("DocTypeId",          sql.Int,               DocTypeId ? parseInt(DocTypeId, 10) : null)
       .input("DocNo",              sql.NVarChar(100),     DocNo              || null)
@@ -592,7 +592,7 @@ router.post("/:id/activities/:activityId/materials", async (req, res) => {
       .input("UOMId",               sql.Int,              UOMId    || null)
       .input("Quantity",            sql.Decimal(18,2),    Quantity || null)
       .input("Rate",                sql.Decimal(18,2),    Rate     || null)
-      .input("Remarks",             sql.NVarChar(400),    Remarks  || null)
+      .input("Remarks",             sql.NVarChar(sql.MAX),    Remarks  || null)
       .input("DocNo",               sql.NVarChar(100),    docNo)
       .input("CreatedBy",           sql.NVarChar(100),    req.user?.name || null)
       .input("CreatedAt",           sql.DateTime2,        new Date())
@@ -621,7 +621,7 @@ router.put("/:id/activities/:activityId/materials/:materialId", async (req, res)
       .input("UOMId",     sql.Int,              UOMId    || null)
       .input("Quantity",  sql.Decimal(18,2),    Quantity || null)
       .input("Rate",      sql.Decimal(18,2),    Rate     || null)
-      .input("Remarks",   sql.NVarChar(400),    Remarks  || null)
+      .input("Remarks",   sql.NVarChar(sql.MAX),    Remarks  || null)
       .input("UpdatedBy", sql.NVarChar(100),    req.user?.name || null)
       .input("UpdatedAt", sql.DateTime2,        new Date())
       .query(`
@@ -697,7 +697,7 @@ router.post("/:id/save-full", async (req, res) => {
       .input("DocumentDate",       sql.Date,              header.DocumentDate       || null)
       .input("ContractorId",       sql.Int,               header.ContractorId       || null)
       .input("TotalAmount",        sql.Decimal(18,2),     header.TotalAmount        || 0)
-      .input("Remarks",            sql.NVarChar(500),     header.Remarks            || null)
+      .input("Remarks",            sql.NVarChar(sql.MAX), header.Remarks            || null)
       .input("TermsAndConditions", sql.NVarChar(sql.MAX), header.TermsAndConditions || null)
       .input("DocTypeId",          sql.Int,               header.DocTypeId ? parseInt(header.DocTypeId, 10) : null)
       .input("DocNo",              sql.NVarChar(100),     stableDocNo)
@@ -788,8 +788,12 @@ router.post("/:id/save-full", async (req, res) => {
             .input("UOMId",               sql.Int,              mat.UOMId    || null)
             .input("Quantity",            sql.Decimal(18,2),    mat.Quantity || null)
             .input("Rate",                sql.Decimal(18,2),    mat.Rate     || null)
+<<<<<<< HEAD
             .input("Remarks",             sql.NVarChar(400),    mat.Remarks  || null)
             .input("GSTRate",             sql.Decimal(5,2),     mat.GSTRate != null ? Number(mat.GSTRate) : 0)
+=======
+            .input("Remarks",             sql.NVarChar(sql.MAX),    mat.Remarks  || null)
+>>>>>>> origin/dev
             // ↓ DocNo FK — required by FK_WorkOrderActivityMaterials_DocNo
             .input("DocNo",               sql.NVarChar(100),    docNo)
             .input("CreatedBy",           sql.NVarChar(100),    req.user?.name || null)
@@ -809,8 +813,12 @@ router.post("/:id/save-full", async (req, res) => {
             .input("UOMId",     sql.Int,              mat.UOMId    || null)
             .input("Quantity",  sql.Decimal(18,2),    mat.Quantity || null)
             .input("Rate",      sql.Decimal(18,2),    mat.Rate     || null)
+<<<<<<< HEAD
             .input("Remarks",   sql.NVarChar(400),    mat.Remarks  || null)
             .input("GSTRate",   sql.Decimal(5,2),     mat.GSTRate != null ? Number(mat.GSTRate) : 0)
+=======
+            .input("Remarks",   sql.NVarChar(sql.MAX),    mat.Remarks  || null)
+>>>>>>> origin/dev
             .input("UpdatedBy", sql.NVarChar(100),    req.user?.name || null)
             .input("UpdatedAt", sql.DateTime2,        new Date())
             .query(`

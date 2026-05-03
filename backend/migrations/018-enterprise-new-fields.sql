@@ -1,7 +1,7 @@
 -- Migration 018: Add new columns to dbo.enterprise
 -- Run: node run-migration.cjs 018-enterprise-new-fields.sql
 
-USE [Civilier]; -- Update if your DB name differs
+USE [CivilierERP]; -- Update if your DB name differs
 
 -- short_name
 IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.enterprise') AND name = 'short_name')

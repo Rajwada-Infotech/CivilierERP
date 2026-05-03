@@ -1121,6 +1121,35 @@ export default function MaterialExpenseBooking() {
                   onClear={clearDoc}
                   onTodSelected={setSelectedTod}
                 />
+
+                {/* ── Source chain banner ───────────────────────────────── */}
+                {selectedDoc && (selectedDoc.kind === "WO" || selectedDoc.kind === "PO") && (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-primary/30 bg-primary/5 text-xs text-primary font-medium">
+                    <span className="shrink-0">←</span>
+                    <span className="font-mono font-semibold">{selectedDoc.docNo}</span>
+                    {selectedDoc.vendorLabel && (
+                      <>
+                        <span className="text-muted-foreground">|</span>
+                        <span className="text-foreground">{selectedDoc.vendorLabel}</span>
+                      </>
+                    )}
+                    {selectedDoc.amount != null && selectedDoc.amount > 0 && (
+                      <>
+                        <span className="text-muted-foreground">|</span>
+                        <span className="text-foreground font-semibold">
+                          ₹{selectedDoc.amount.toLocaleString("en-IN")}
+                        </span>
+                      </>
+                    )}
+                    <span className={`ml-auto shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                      selectedDoc.kind === "WO"
+                        ? "bg-orange-100 dark:bg-orange-950/40 text-orange-700 dark:text-orange-400"
+                        : "bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400"
+                    }`}>
+                      {selectedDoc.kind === "WO" ? "Work Order" : "Purchase Order"}
+                    </span>
+                  </div>
+                )}
                 <Field
                   label="Booking Reference"
                   required

@@ -86,7 +86,7 @@ interface NavItem {
 
 // ── Finance module sidebar ──────────────────────────────────────────────────
 const buildFinanceNavItems = (overdueCount: number): NavItem[] => [
-  { label: "Amendments", icon: BarChart3, path: "/finance" }, // ← Changed here
+  { label: "Amendments", icon: BarChart3, path: "/finance" },
   {
     label: "Query",
     icon: Scale,
@@ -185,10 +185,10 @@ const buildMaterialNavItems = (): NavItem[] => [
     label: "Transaction",
     icon: Receipt,
     children: [
-      { label: "GRN", path: "/material/grn" },
-      { label: "Expense Booking", path: "/material/expense-booking" },
       { label: "Work Order", path: "/material/work-order" },
       { label: "Purchase Order", path: "/material/purchase-order" },
+      { label: "GRN", path: "/material/grn" },
+      { label: "Expense Booking", path: "/material/expense-booking" },
     ],
   },
   {

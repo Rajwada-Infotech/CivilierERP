@@ -40,6 +40,7 @@ import {
   Clock,
   XCircle,
   MoreVertical,
+  Link2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/contexts/AuthContext";
@@ -66,6 +67,34 @@ import {
   DocNumberPreview,
   fetchNextDocNumber,
 } from "@/pages/material/ExpenseBooking/DocNumberPreview";
+
+// ─── WO Chain Status Hook ─────────────────────────────────────────────────────
+interface WOChainStatus {
+  expenseCount: number;
+  latestExpenseDocNo: string | null;
+  latestExpenseStatus: string | null;
+  latestExpenseAmount: number | null;
+  paymentCount: number;
+  latestPaymentAmount: number | null;
+  isPaid: boolean;
+}
+
+function useWOChainStatus(woId: number | null) {
+  const [status, setStatus] = React.useState<WOChainStatus | null>(null);
+  const [loading, setLoading] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!woId) { setStatus(null); return; }
+    setLoading(true);
+    fetchWithAuth(`/api/expense-booking/chain-status?sourceType=WO&sourceId=${woId}`)
+      .then((r) => r.json())
+      .then(setStatus)
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [woId]);
+
+  return { status, loading };
+}
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1152,6 +1181,8 @@ const WorkOrderDetailPanel: React.FC<{
   const [deleting, setDeleting] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
 
+  const { status: chainStatus } = useWOChainStatus(workOrderId ?? null);
+
   useEffect(() => {
     const load = async () => {
       setLoading(true);
@@ -1407,6 +1438,67 @@ const WorkOrderDetailPanel: React.FC<{
                   {detail.TermsAndConditions}
                 </p>
               </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* ── Flow Status ─────────────────────────────────────────────────────── */}
+      <div className="rounded-xl border border-border bg-card overflow-hidden">
+        <div className="px-4 sm:px-5 py-3 border-b border-border flex items-center gap-2">
+          <Link2 size={14} className="text-primary shrink-0" />
+          <h2 className="text-sm font-semibold text-foreground">Flow Status</h2>
+        </div>
+        <div className="p-4 sm:p-5 flex flex-wrap gap-3">
+          {/* Step 1: Expense Booking */}
+          <div className={`flex-1 min-w-[140px] rounded-lg border px-3 py-2.5 ${
+            (chainStatus?.expenseCount ?? 0) > 0
+              ? "border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-950/30"
+              : "border-border bg-muted/30"
+          }`}>
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">
+              Expense Booking
+            </p>
+            {(chainStatus?.expenseCount ?? 0) > 0 ? (
+              <>
+                <p className="text-xs font-semibold text-green-700 dark:text-green-400">
+                  ✓ Booked ({chainStatus!.expenseCount})
+                </p>
+                {chainStatus?.latestExpenseDocNo && (
+                  <p className="text-[10px] text-muted-foreground font-mono mt-0.5">
+                    {chainStatus.latestExpenseDocNo}
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="text-xs text-muted-foreground">Not booked yet</p>
+            )}
+          </div>
+
+          {/* Step 2: Payment */}
+          <div className={`flex-1 min-w-[140px] rounded-lg border px-3 py-2.5 ${
+            chainStatus?.isPaid
+              ? "border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-950/30"
+              : "border-border bg-muted/30"
+          }`}>
+            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">
+              Payment
+            </p>
+            {chainStatus?.isPaid ? (
+              <>
+                <p className="text-xs font-semibold text-blue-700 dark:text-blue-400">
+                  ✓ Paid ({chainStatus.paymentCount})
+                </p>
+                {chainStatus.latestPaymentAmount != null && (
+                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                    ₹{chainStatus.latestPaymentAmount.toLocaleString("en-IN")}
+                  </p>
+                )}
+              </>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                {(chainStatus?.expenseCount ?? 0) > 0 ? "Pending payment" : "—"}
+              </p>
             )}
           </div>
         </div>
