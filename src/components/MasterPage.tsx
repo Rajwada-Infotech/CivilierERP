@@ -109,6 +109,8 @@ interface MasterPageProps {
     subtitle?: string;
     columns: ExportColumn[];
   };
+  /** When true, hides the records table and shows only the form card */
+  hideTable?: boolean;
 }
 
 function getDefaults(f: FieldDef[]): Record<string, unknown> {
@@ -143,6 +145,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   externalFormPatch,
   externalFormPatchKey,
   exportConfig,
+  hideTable,
 }) => {
   const [data, setData] = useState<RecordWithId[]>(() =>
     seedWithIds(initialData),
@@ -506,154 +509,156 @@ export const MasterPage: React.FC<MasterPageProps> = ({
       </div>
 
       {/* ── TABLE CARD ── */}
-      <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden">
-        <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-card/60">
-          <div>
-            <h3 className="font-heading font-semibold text-foreground text-sm">
-              {title} Records
-            </h3>
-            <p className="text-[11px] text-muted-foreground mt-0.5">
-              {filtered.length} record{filtered.length !== 1 ? "s" : ""}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            {exportConfig && (
-              <ExportMenu
-                data={filtered as Record<string, unknown>[]}
-                columns={exportConfig.columns}
-                title={exportConfig.title}
-                filename={exportConfig.filename}
-                subtitle={exportConfig.subtitle}
-                disabled={filtered.length === 0}
-              />
-            )}
-            <div className="relative">
-              <Search
-                size={13}
-                className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
-              />
-              <input
-                type="text"
-                placeholder="Search..."
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-8 pr-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary w-40"
-              />
+      {!hideTable && (
+        <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden">
+          <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-card/60">
+            <div>
+              <h3 className="font-heading font-semibold text-foreground text-sm">
+                {title} Records
+              </h3>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                {filtered.length} record{filtered.length !== 1 ? "s" : ""}
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {exportConfig && (
+                <ExportMenu
+                  data={filtered as Record<string, unknown>[]}
+                  columns={exportConfig.columns}
+                  title={exportConfig.title}
+                  filename={exportConfig.filename}
+                  subtitle={exportConfig.subtitle}
+                  disabled={filtered.length === 0}
+                />
+              )}
+              <div className="relative">
+                <Search
+                  size={13}
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+                />
+                <input
+                  type="text"
+                  placeholder="Search..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="pl-8 pr-3 py-1.5 rounded-lg text-xs font-body bg-muted border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary w-40"
+                />
+              </div>
             </div>
           </div>
-        </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/30">
-                {columns.map((col) => (
-                  <th
-                    key={col.key}
-                    className={`px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap${col.hideOnMobile ? " hidden sm:table-cell" : ""}`}
-                  >
-                    {col.label}
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/30">
+                  {columns.map((col) => (
+                    <th
+                      key={col.key}
+                      className={`px-4 py-3 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground whitespace-nowrap${col.hideOnMobile ? " hidden sm:table-cell" : ""}`}
+                    >
+                      {col.label}
+                    </th>
+                  ))}
+                  <th className="px-4 py-3 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
+                    Actions
                   </th>
-                ))}
-                <th className="px-4 py-3 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
-                  Actions
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {filtered.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={columns.length + 1}
-                    className="px-4 py-10 text-center text-muted-foreground text-sm"
-                  >
-                    {search
-                      ? "No records match your search."
-                      : "No records yet. Add one above."}
-                  </td>
                 </tr>
-              ) : (
-                filtered.map((row) => (
-                  <tr
-                    key={row._id}
-                    className={`hover:bg-muted/20 transition-colors ${editingId === row._id ? "bg-primary/5 border-l-2 border-l-primary" : ""}`}
-                  >
-                    {columns.map((col) => (
-                      <td
-                        key={col.key}
-                        className={`px-4 py-3 text-foreground text-sm${col.hideOnMobile ? " hidden sm:table-cell" : ""}`}
-                      >
-                        {columnRenderers && columnRenderers[col.key] ? (
-                          columnRenderers[col.key](row[col.key], row, data)
-                        ) : col.key === "status" ? (
-                          <span
-                            className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${
-                              row[col.key]
-                                ? "bg-primary/10 text-primary border-primary/20"
-                                : "bg-destructive/10 text-destructive border-destructive/20"
-                            }`}
-                          >
-                            <span
-                              className={`w-1.5 h-1.5 rounded-full mr-1.5 ${row[col.key] ? "bg-primary" : "bg-destructive"}`}
-                            />
-                            {row[col.key] ? "Active" : "Inactive"}
-                          </span>
-                        ) : (
-                          <span className="text-foreground">
-                            {String(row[col.key] ?? "")}
-                          </span>
-                        )}
-                      </td>
-                    ))}
-                    <td className="px-4 py-3">
-                      <div className="flex items-center justify-end gap-1">
-                        {deleteConfirmId === row._id ? (
-                          <>
-                            <span className="text-[11px] text-muted-foreground mr-1">
-                              Confirm?
-                            </span>
-                            <button
-                              onClick={() => handleDelete(row._id)}
-                              className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"
-                              title="Confirm delete"
-                            >
-                              <Check size={13} />
-                            </button>
-                            <button
-                              onClick={() => setDeleteConfirmId(null)}
-                              className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors"
-                              title="Cancel"
-                            >
-                              <X size={13} />
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <button
-                              onClick={() => handleEdit(row._id)}
-                              className="p-1.5 rounded-lg text-primary hover:bg-primary/10 transition-colors"
-                              title="Edit"
-                            >
-                              <Edit2 size={13} />
-                            </button>
-                            <button
-                              onClick={() => setDeleteConfirmId(row._id)}
-                              className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"
-                              title="Delete"
-                            >
-                              <Trash2 size={13} />
-                            </button>
-                          </>
-                        )}
-                      </div>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {filtered.length === 0 ? (
+                  <tr>
+                    <td
+                      colSpan={columns.length + 1}
+                      className="px-4 py-10 text-center text-muted-foreground text-sm"
+                    >
+                      {search
+                        ? "No records match your search."
+                        : "No records yet. Add one above."}
                     </td>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
+                ) : (
+                  filtered.map((row) => (
+                    <tr
+                      key={row._id}
+                      className={`hover:bg-muted/20 transition-colors ${editingId === row._id ? "bg-primary/5 border-l-2 border-l-primary" : ""}`}
+                    >
+                      {columns.map((col) => (
+                        <td
+                          key={col.key}
+                          className={`px-4 py-3 text-foreground text-sm${col.hideOnMobile ? " hidden sm:table-cell" : ""}`}
+                        >
+                          {columnRenderers && columnRenderers[col.key] ? (
+                            columnRenderers[col.key](row[col.key], row, data)
+                          ) : col.key === "status" ? (
+                            <span
+                              className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-heading border ${
+                                row[col.key]
+                                  ? "bg-primary/10 text-primary border-primary/20"
+                                  : "bg-destructive/10 text-destructive border-destructive/20"
+                              }`}
+                            >
+                              <span
+                                className={`w-1.5 h-1.5 rounded-full mr-1.5 ${row[col.key] ? "bg-primary" : "bg-destructive"}`}
+                              />
+                              {row[col.key] ? "Active" : "Inactive"}
+                            </span>
+                          ) : (
+                            <span className="text-foreground">
+                              {String(row[col.key] ?? "")}
+                            </span>
+                          )}
+                        </td>
+                      ))}
+                      <td className="px-4 py-3">
+                        <div className="flex items-center justify-end gap-1">
+                          {deleteConfirmId === row._id ? (
+                            <>
+                              <span className="text-[11px] text-muted-foreground mr-1">
+                                Confirm?
+                              </span>
+                              <button
+                                onClick={() => handleDelete(row._id)}
+                                className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"
+                                title="Confirm delete"
+                              >
+                                <Check size={13} />
+                              </button>
+                              <button
+                                onClick={() => setDeleteConfirmId(null)}
+                                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors"
+                                title="Cancel"
+                              >
+                                <X size={13} />
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => handleEdit(row._id)}
+                                className="p-1.5 rounded-lg text-primary hover:bg-primary/10 transition-colors"
+                                title="Edit"
+                              >
+                                <Edit2 size={13} />
+                              </button>
+                              <button
+                                onClick={() => setDeleteConfirmId(row._id)}
+                                className="p-1.5 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"
+                                title="Delete"
+                              >
+                                <Trash2 size={13} />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };
