@@ -1,6 +1,6 @@
 -- Migration: 001-enhance-activity-tracking.sql
 -- Replace [YourDatabaseName] with actual DB name before running
-USE [CivilierERP]; -- Update this line
+USE [Civilier]; -- Update this line
 
 IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'UserActivityLog')
 BEGIN
