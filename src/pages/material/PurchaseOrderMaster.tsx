@@ -474,6 +474,11 @@ const PurchaseOrderMaster: React.FC = () => {
     return { subtotal: sub, gstAmount: gst, grandTotal: sub + gst };
   }, [lineItems, form.gstRate]);
 
+  // Chain status — must be here (before any early returns) to satisfy Rules of Hooks
+  const { status: poChainStatus, loading: poChainLoading } = usePOChainStatus(
+    editingId ?? null
+  );
+
   // ── Doc number helpers ────────────────────────────────────────────────────
   const applyPoDocNumber = (docTypeId: number | null, docNo: string) => {
     setPoDocTypeId(docTypeId);
@@ -910,11 +915,6 @@ const PurchaseOrderMaster: React.FC = () => {
   // ─────────────────────────────────────────────────────────────────────────
 
   const isReadOnly = viewMode === "view";
-
-  // Chain status — only fetched when viewing an existing PO (not creating)
-  const { status: poChainStatus, loading: poChainLoading } = usePOChainStatus(
-    isReadOnly && editingId ? editingId : null
-  );
 
   return (
     <>
