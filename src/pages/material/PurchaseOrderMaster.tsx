@@ -19,12 +19,10 @@ import {
   getCompanies,
   getProjects,
   getUOMs,
-  type GSTConfig,
-  type GSTType,
   type PurchaseOrder,
 } from "@/api/purchaseOrdersApi";
 import { getItems, type DbItem } from "@/api/itemMasterApi";
-import { getHsn } from "@/api/hsnApi";
+import { getTCRecords } from "@/api/tcMasterApi";
 import {
   Plus,
   Trash2,
@@ -35,7 +33,6 @@ import {
   Hash,
   Building2,
   FolderPlus,
-  Receipt,
   FileText,
   IndianRupee,
   Eye,
@@ -73,7 +70,12 @@ interface POLineItem {
   uomId: number | null;
   unit: string;
   rate: number;
-  amount: number;
+  cgstRate: number; // from item master M_CGST
+  sgstRate: number; // from item master M_SGST
+  igstRate: number; // from item master M_IGST
+  gstRate: number; // effective total GST % (igst if set, else cgst+sgst)
+  taxAmount: number; // qty * rate * gstRate / 100
+  amount: number; // qty * rate + taxAmount (inclusive of GST)
 }
 
 interface POForm {
@@ -83,29 +85,21 @@ interface POForm {
   supplierId: string;
   companyId: string;
   projectId: string;
-  status: string;
-  hsnCode: string;
-  gstType: GSTType;
-  gstRate: number;
   paymentTerms: string;
   remarks: string;
   docTypeId: number | null;
   docNo: string;
 }
 
-interface HsnRecord {
-  code: string;
-  shortDesc: string;
-  description: string;
-  igstRate: number;
-  cgstRate: number;
-  sgstRate: number;
-  status: boolean;
-}
-
 interface DropdownOption {
   id: number | string;
   name: string;
+}
+
+interface TCRecord {
+  id: number;
+  name: string;
+  terms: string;
 }
 
 interface POListItem {
@@ -162,6 +156,11 @@ const EMPTY_LINE = (): POLineItem => ({
   uomId: null,
   unit: "",
   rate: 0,
+  cgstRate: 0,
+  sgstRate: 0,
+  igstRate: 0,
+  gstRate: 0,
+  taxAmount: 0,
   amount: 0,
 });
 
@@ -172,10 +171,6 @@ const EMPTY_FORM = (): POForm => ({
   supplierId: "",
   companyId: "",
   projectId: "",
-  status: "Draft",
-  hsnCode: "",
-  gstType: "cgst_sgst",
-  gstRate: 0,
   paymentTerms: "",
   remarks: "",
   docTypeId: null,
@@ -291,6 +286,8 @@ const PurchaseOrderMaster: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const [selectedTCs, setSelectedTCs] = useState<TCRecord[]>([]);
+  const [tcDropdownOpen, setTcDropdownOpen] = useState(false);
 
   // ── Remote data ───────────────────────────────────────────────────────────
   const { data: dbData, isLoading } = useQuery({
@@ -318,9 +315,9 @@ const PurchaseOrderMaster: React.FC = () => {
     queryKey: ["item-master"],
     queryFn: getItems,
   });
-  const { data: hsnRaw = [] } = useQuery({
-    queryKey: ["hsn-master"],
-    queryFn: getHsn,
+  const { data: tcRaw = [] } = useQuery({
+    queryKey: ["tc-master"],
+    queryFn: getTCRecords,
   });
 
   // ── Normalise data ────────────────────────────────────────────────────────
@@ -355,7 +352,11 @@ const PurchaseOrderMaster: React.FC = () => {
     () =>
       (uomsRaw as any[])
         .filter((u) => u.IsActive !== false && u.IsActive !== 0)
-        .map((u) => ({ id: Number(u.Id), name: u.UOMName ?? "" }))
+        .map((u) => ({
+          id: Number(u.Id),
+          name: u.UOMName ?? "",
+          code: (u.UOMCode ?? "").toString().trim(),
+        }))
         .filter((u) => u.name !== ""),
     [uomsRaw],
   );
@@ -368,31 +369,23 @@ const PurchaseOrderMaster: React.FC = () => {
         description: i.M_Description ?? "",
         hsn: i.M_HSN ?? "",
         uom: i.M_UOM ?? "",
+        cgst: Number(i.M_CGST ?? 0),
+        sgst: Number(i.M_SGST ?? 0),
+        igst: Number(i.M_IGST ?? 0),
       })),
     [itemsRaw],
   );
 
-  const hsnRecords = useMemo(
+  const tcRecords = useMemo(
     () =>
-      ensureArray<any>(hsnRaw).map((h) => ({
-        code: String(h.HCode ?? h.code ?? ""),
-        // API returns HShortDescription — fall back through HDescription then the code itself
-        shortDesc: String(
-          h.HShortDescription ??
-            h.HShortDesc ??
-            h.shortDesc ??
-            h.HDescription ??
-            h.description ??
-            h.HCode ??
-            "",
-        ),
-        description: String(h.HDescription ?? h.description ?? ""),
-        igstRate: Number(h.HIGST ?? h.igstRate ?? 0),
-        cgstRate: Number(h.HCGST ?? h.cgstRate ?? 0),
-        sgstRate: Number(h.HSGST ?? h.sgstRate ?? 0),
-        status: Boolean(h.HStatus ?? h.status ?? true),
-      })),
-    [hsnRaw],
+      ensureArray<any>(tcRaw)
+        .filter((t) => t.isActive !== false)
+        .map((t) => ({
+          id: Number(t.Id),
+          name: String(t.Name ?? ""),
+          terms: String(t.TermsAndCondition ?? ""),
+        })),
+    [tcRaw],
   );
 
   // ── Derived list data ─────────────────────────────────────────────────────
@@ -435,11 +428,31 @@ const PurchaseOrderMaster: React.FC = () => {
   }, [listData, searchQuery]);
 
   // ── Computed totals ───────────────────────────────────────────────────────
-  const { subtotal, gstAmount, grandTotal } = useMemo(() => {
-    const sub = lineItems.reduce((s, li) => s + li.quantity * li.rate, 0);
-    const gst = form.gstRate > 0 ? (sub * form.gstRate) / 100 : 0;
-    return { subtotal: sub, gstAmount: gst, grandTotal: sub + gst };
-  }, [lineItems, form.gstRate]);
+  const { subtotal, totalCgst, totalSgst, totalIgst, totalTax, grandTotal } =
+    useMemo(() => {
+      const sub = lineItems.reduce((s, li) => s + li.quantity * li.rate, 0);
+      const cgst = lineItems.reduce((s, li) => {
+        if (li.igstRate > 0) return s; // IGST item — no CGST
+        return s + (li.quantity * li.rate * li.cgstRate) / 100;
+      }, 0);
+      const sgst = lineItems.reduce((s, li) => {
+        if (li.igstRate > 0) return s; // IGST item — no SGST
+        return s + (li.quantity * li.rate * li.sgstRate) / 100;
+      }, 0);
+      const igst = lineItems.reduce((s, li) => {
+        if (li.igstRate <= 0) return s;
+        return s + (li.quantity * li.rate * li.igstRate) / 100;
+      }, 0);
+      const tax = cgst + sgst + igst;
+      return {
+        subtotal: sub,
+        totalCgst: cgst,
+        totalSgst: sgst,
+        totalIgst: igst,
+        totalTax: tax,
+        grandTotal: sub + tax,
+      };
+    }, [lineItems]);
 
   // ── Doc number helpers ────────────────────────────────────────────────────
   const applyPoDocNumber = (docTypeId: number | null, docNo: string) => {
@@ -472,7 +485,9 @@ const PurchaseOrderMaster: React.FC = () => {
       prev.map((li, i) => {
         if (i !== idx) return li;
         const updated = { ...li, ...patch };
-        updated.amount = updated.quantity * updated.rate;
+        const baseAmount = updated.quantity * updated.rate;
+        updated.taxAmount = (baseAmount * updated.gstRate) / 100;
+        updated.amount = baseAmount + updated.taxAmount;
         return updated;
       }),
     );
@@ -488,13 +503,25 @@ const PurchaseOrderMaster: React.FC = () => {
   const handleItemSelect = (idx: number, itemId: string) => {
     const item = items.find((i) => i.id === itemId);
     if (!item) return;
-    const uomMatch = uoms.find((u) => u.name === item.uom);
+    const itemUomNorm = item.uom.trim().toLowerCase();
+    const uomMatch = uoms.find(
+      (u) =>
+        u.code.toLowerCase() === itemUomNorm ||
+        u.name.toLowerCase() === itemUomNorm,
+    );
+    // Use CGST+SGST when both are set (intra-state); fall back to IGST (inter-state)
+    const useCgstSgst = item.cgst > 0 && item.sgst > 0;
+    const gstRate = useCgstSgst ? item.cgst + item.sgst : item.igst;
     updateLine(idx, {
       itemId,
       itemName: item.name,
       itemDescription: item.description,
       uomId: uomMatch?.id ?? null,
       unit: uomMatch?.name ?? item.uom,
+      cgstRate: useCgstSgst ? item.cgst : 0,
+      sgstRate: useCgstSgst ? item.sgst : 0,
+      igstRate: useCgstSgst ? 0 : item.igst,
+      gstRate,
     });
   };
 
@@ -538,20 +565,18 @@ const PurchaseOrderMaster: React.FC = () => {
         unit: li.unit,
         quantity: li.quantity,
         rate: li.rate,
-        tax: 0,
+        tax: li.gstRate,
         amount: li.amount,
       })),
-      PaymentTerms: form.paymentTerms || null,
-      Status: form.status || "Draft",
+      PaymentTerms:
+        selectedTCs.length > 0
+          ? selectedTCs.map((tc) => `${tc.name}: ${tc.terms}`).join("\n\n")
+          : form.paymentTerms || null,
+      Status: "Draft",
       Remarks: form.remarks || null,
       DocTypeId: form.docTypeId ?? poDocTypeId,
       DocNo: form.poNumber || form.docNo || poDocNo || null,
       finYear: selectedFinYear || null,
-      GST: {
-        applicable: form.gstRate > 0,
-        type: form.gstType as GSTType,
-        rate: form.gstRate,
-      } as GSTConfig,
     };
   };
 
@@ -608,12 +633,14 @@ const PurchaseOrderMaster: React.FC = () => {
     setEditingId(null);
     setForm(EMPTY_FORM());
     setLineItems([EMPTY_LINE()]);
+    setSelectedTCs([]);
     setErrors({});
   };
 
   const goToCreate = () => {
     setForm(EMPTY_FORM());
     setLineItems([EMPTY_LINE()]);
+    setSelectedTCs([]);
     setErrors({});
     setViewMode("create");
   };
@@ -635,10 +662,6 @@ const PurchaseOrderMaster: React.FC = () => {
       supplierId: supplier?.id ?? "",
       companyId: company?.id ?? "",
       projectId: project?.id ?? "",
-      status: raw.Status ?? "Draft",
-      hsnCode: raw.GST?.hsnCode ?? "",
-      gstType: (raw.GST?.type as GSTType) ?? "cgst_sgst",
-      gstRate: raw.GST?.rate ?? 0,
       paymentTerms: raw.PaymentTerms ?? "",
       remarks: raw.Remarks ?? "",
       docTypeId: raw.DocTypeId ?? null,
@@ -649,34 +672,61 @@ const PurchaseOrderMaster: React.FC = () => {
     const poItems = raw.POItems ?? [];
     if (poItems.length > 0) {
       setLineItems(
-        poItems.map((pi: any) => ({
-          id: uid(),
-          itemId: "",
-          itemName: pi.itemDescription ?? "",
-          itemDescription: "",
-          quantity: Number(pi.quantity ?? 0),
-          uomId: null,
-          unit: pi.unit ?? "",
-          rate: Number(pi.rate ?? 0),
-          amount: Number(pi.amount ?? pi.quantity * pi.rate ?? 0),
-        })),
+        poItems.map((pi: any) => {
+          const qty = Number(pi.quantity ?? 0);
+          const rate = Number(pi.rate ?? 0);
+          const gstRate = Number(pi.tax ?? 0);
+          const taxAmount = (qty * rate * gstRate) / 100;
+          const unitStr = (pi.unit ?? "").trim().toLowerCase();
+          const uomMatch = uoms.find(
+            (u) =>
+              u.code.toLowerCase() === unitStr ||
+              u.name.toLowerCase() === unitStr,
+          );
+          // We don't have individual rates on saved items — keep gstRate as total
+          // igst assumed if no split available; user can re-select item to restore split
+          return {
+            id: uid(),
+            itemId: "",
+            itemName: pi.itemDescription ?? "",
+            itemDescription: "",
+            quantity: qty,
+            uomId: uomMatch?.id ?? null,
+            unit: uomMatch?.name ?? pi.unit ?? "",
+            rate,
+            cgstRate: 0,
+            sgstRate: 0,
+            igstRate: gstRate, // store as igst so totalTax still sums correctly
+            gstRate,
+            taxAmount,
+            amount: qty * rate + taxAmount,
+          };
+        }),
       );
     } else {
+      const qty = Number(raw.Quantity ?? 0);
+      const rate = Number(raw.Rate ?? 0);
       setLineItems([
         {
           id: uid(),
           itemId: "",
           itemName: raw.ItemDescription ?? "",
           itemDescription: "",
-          quantity: Number(raw.Quantity ?? 0),
+          quantity: qty,
           uomId: null,
           unit: raw.Unit ?? "",
-          rate: Number(raw.Rate ?? 0),
-          amount: Number(raw.TotalAmount ?? 0),
+          rate,
+          cgstRate: 0,
+          sgstRate: 0,
+          igstRate: 0,
+          gstRate: 0,
+          taxAmount: 0,
+          amount: qty * rate,
         },
       ]);
     }
     setEditingId(item._id);
+    setSelectedTCs([]); // T&C restored from PaymentTerms text — user can re-select
     setViewMode("edit");
   };
 
@@ -907,11 +957,6 @@ const PurchaseOrderMaster: React.FC = () => {
                   ? "Edit Purchase Order"
                   : `Purchase Order — ${form.poNumber || "—"}`}
             </h1>
-            {viewMode !== "create" && form.status && (
-              <div className="mt-1">
-                <StatusChip status={form.status} />
-              </div>
-            )}
           </div>
         </div>
 
@@ -1109,140 +1154,6 @@ const PurchaseOrderMaster: React.FC = () => {
                 </select>
               )}
             </div>
-
-            {/* Status */}
-            <div>
-              <FieldLabel>Status</FieldLabel>
-              {isReadOnly ? (
-                <div className="mt-1">
-                  <StatusChip status={form.status} />
-                </div>
-              ) : (
-                <select
-                  value={form.status}
-                  onChange={(e) => setField("status", e.target.value)}
-                  className={selectCls}
-                >
-                  {[
-                    "Draft",
-                    "Issued",
-                    "Partially Received",
-                    "Received",
-                    "Closed",
-                  ].map((s) => (
-                    <option key={s} value={s}>
-                      {s}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </div>
-          </div>
-        </div>
-
-        {/* ── GST Details Card ──────────────────────────────────────────────── */}
-        <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-4">
-            <Receipt size={11} className="text-primary" />
-            GST Details
-          </h3>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-            {/* HSN Code */}
-            <div>
-              <FieldLabel>HSN Code</FieldLabel>
-              {isReadOnly ? (
-                <div className={`${inputCls} bg-muted/30`}>
-                  {form.hsnCode
-                    ? `${form.hsnCode}${hsnRecords.find((h) => h.code === form.hsnCode)?.shortDesc ? ` — ${hsnRecords.find((h) => h.code === form.hsnCode)!.shortDesc}` : ""}`
-                    : "—"}
-                </div>
-              ) : (
-                <select
-                  value={form.hsnCode}
-                  onChange={(e) => {
-                    const code = e.target.value;
-                    const hsn = hsnRecords.find((h) => h.code === code);
-                    const rate = hsn
-                      ? hsn.igstRate || hsn.cgstRate + hsn.sgstRate
-                      : 0;
-                    setForm((p) => ({ ...p, hsnCode: code, gstRate: rate }));
-                  }}
-                  className={selectCls}
-                >
-                  <option value="">— Select HSN Code —</option>
-                  {hsnRecords
-                    .filter((h) => h.status)
-                    .map((h) => (
-                      <option key={h.code} value={h.code}>
-                        {h.code}
-                        {h.shortDesc && h.shortDesc !== h.code
-                          ? ` — ${h.shortDesc}`
-                          : ""}
-                      </option>
-                    ))}
-                </select>
-              )}
-              {/* Show full description below the dropdown when selected */}
-              {form.hsnCode &&
-                hsnRecords.find((h) => h.code === form.hsnCode)
-                  ?.description && (
-                  <p className="text-[11px] text-muted-foreground mt-1 truncate">
-                    {
-                      hsnRecords.find((h) => h.code === form.hsnCode)!
-                        .description
-                    }
-                  </p>
-                )}
-            </div>
-
-            {/* GST Type */}
-            <div>
-              <FieldLabel>GST Type</FieldLabel>
-              {isReadOnly ? (
-                <div className={`${inputCls} bg-muted/30`}>
-                  {form.gstType === "cgst_sgst"
-                    ? "CGST + SGST"
-                    : form.gstType === "igst"
-                      ? "IGST"
-                      : "—"}
-                </div>
-              ) : (
-                <select
-                  value={form.gstType}
-                  onChange={(e) =>
-                    setField("gstType", e.target.value as GSTType)
-                  }
-                  className={selectCls}
-                >
-                  <option value="cgst_sgst">CGST + SGST</option>
-                  <option value="igst">IGST</option>
-                </select>
-              )}
-            </div>
-
-            {/* GST Rate */}
-            <div>
-              <FieldLabel>GST Rate (%)</FieldLabel>
-              <input
-                type="number"
-                min={0}
-                max={100}
-                step={0.01}
-                value={form.gstRate}
-                readOnly={!!form.hsnCode || isReadOnly}
-                onChange={(e) =>
-                  !form.hsnCode &&
-                  setField("gstRate", parseFloat(e.target.value) || 0)
-                }
-                className={`${inputCls} ${form.hsnCode || isReadOnly ? "bg-muted/50 text-muted-foreground cursor-not-allowed" : ""}`}
-              />
-              {form.gstRate > 0 && form.gstType === "cgst_sgst" && (
-                <p className="text-[11px] text-muted-foreground mt-1">
-                  CGST {(form.gstRate / 2).toFixed(2)}% + SGST{" "}
-                  {(form.gstRate / 2).toFixed(2)}%
-                </p>
-              )}
-            </div>
           </div>
         </div>
 
@@ -1289,6 +1200,9 @@ const PurchaseOrderMaster: React.FC = () => {
                   </th>
                   <th className="px-3 py-2.5 text-right text-[11px] font-semibold text-muted-foreground uppercase tracking-wider w-28">
                     Rate (₹)
+                  </th>
+                  <th className="px-3 py-2.5 text-center text-[11px] font-semibold text-muted-foreground uppercase tracking-wider w-20">
+                    GST %
                   </th>
                   <th className="px-3 py-2.5 text-right text-[11px] font-semibold text-muted-foreground uppercase tracking-wider w-28">
                     Amount (₹)
@@ -1421,15 +1335,47 @@ const PurchaseOrderMaster: React.FC = () => {
                       )}
                     </td>
 
-                    {/* Amount (computed) */}
+                    {/* GST % — shows breakdown label */}
+                    <td className="px-3 py-2 text-center">
+                      {li.gstRate > 0 ? (
+                        <div className="flex flex-col items-center gap-0.5">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[11px] font-semibold">
+                            {li.gstRate}%
+                          </span>
+                          {li.igstRate > 0 ? (
+                            <span className="text-[10px] text-muted-foreground font-medium">
+                              IGST
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-muted-foreground font-medium">
+                              CGST+SGST
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                    </td>
+
+                    {/* Amount (base + GST) */}
                     <td className="px-3 py-2 text-right">
                       <span className="text-sm font-semibold font-mono text-foreground">
                         ₹
-                        {(li.quantity * li.rate).toLocaleString("en-IN", {
+                        {li.amount.toLocaleString("en-IN", {
                           minimumFractionDigits: 2,
                           maximumFractionDigits: 2,
                         })}
                       </span>
+                      {li.taxAmount > 0 && (
+                        <span className="block text-[10px] text-muted-foreground font-normal">
+                          +₹
+                          {li.taxAmount.toLocaleString("en-IN", {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2,
+                          })}{" "}
+                          GST
+                        </span>
+                      )}
                     </td>
 
                     {/* Remove */}
@@ -1451,23 +1397,119 @@ const PurchaseOrderMaster: React.FC = () => {
           </div>
 
           {/* Totals footer */}
-          <div className="border-t border-border bg-muted/10 px-5 py-4">
+          <div className="border-t border-border bg-muted/10 px-5 py-5 space-y-4">
+            {/* Tax rate breakdown — shown only when at least one item has GST */}
+            {totalTax > 0 && (
+              <div>
+                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest mb-2">
+                  Tax Rates{" "}
+                  <span className="text-primary font-medium normal-case tracking-normal">
+                    (auto-filled from Item Master)
+                  </span>
+                </p>
+                <div className="grid grid-cols-3 gap-3">
+                  {/* CGST */}
+                  <div>
+                    <p className="text-[11px] text-muted-foreground mb-1">
+                      CGST (%)
+                    </p>
+                    <div className="flex items-center rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm font-mono text-foreground">
+                      <span className="flex-1">
+                        {totalCgst > 0
+                          ? (lineItems.find((li) => li.cgstRate > 0)
+                              ?.cgstRate ?? 0)
+                          : 0}
+                      </span>
+                      <span className="text-muted-foreground text-xs ml-1">
+                        %
+                      </span>
+                    </div>
+                    {totalCgst > 0 && (
+                      <p className="text-[11px] text-muted-foreground mt-1 font-mono">
+                        {fmt(totalCgst)}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* SGST */}
+                  <div>
+                    <p className="text-[11px] text-muted-foreground mb-1">
+                      SGST (%)
+                    </p>
+                    <div className="flex items-center rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm font-mono text-foreground">
+                      <span className="flex-1">
+                        {totalSgst > 0
+                          ? (lineItems.find((li) => li.sgstRate > 0)
+                              ?.sgstRate ?? 0)
+                          : 0}
+                      </span>
+                      <span className="text-muted-foreground text-xs ml-1">
+                        %
+                      </span>
+                    </div>
+                    {totalSgst > 0 && (
+                      <p className="text-[11px] text-muted-foreground mt-1 font-mono">
+                        {fmt(totalSgst)}
+                      </p>
+                    )}
+                  </div>
+
+                  {/* IGST */}
+                  <div>
+                    <p className="text-[11px] text-muted-foreground mb-1">
+                      IGST (%)
+                    </p>
+                    <div className="flex items-center rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm font-mono text-foreground">
+                      <span className="flex-1">
+                        {totalIgst > 0
+                          ? (lineItems.find((li) => li.igstRate > 0)
+                              ?.igstRate ?? 0)
+                          : 0}
+                      </span>
+                      <span className="text-muted-foreground text-xs ml-1">
+                        %
+                      </span>
+                    </div>
+                    {totalIgst > 0 && (
+                      <p className="text-[11px] text-muted-foreground mt-1 font-mono">
+                        {fmt(totalIgst)}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Amount summary */}
             <div className="flex justify-end">
               <div className="w-full max-w-xs space-y-2">
                 <div className="flex justify-between text-sm text-muted-foreground">
-                  <span>Subtotal</span>
+                  <span>Subtotal (excl. GST)</span>
                   <span className="font-mono">{fmt(subtotal)}</span>
                 </div>
-                {form.gstRate > 0 && (
+                {totalCgst > 0 && (
                   <div className="flex justify-between text-sm text-muted-foreground">
-                    <span>
-                      GST ({form.gstRate}%
-                      {form.gstType === "cgst_sgst"
-                        ? ` — CGST ${form.gstRate / 2}% + SGST ${form.gstRate / 2}%`
-                        : " — IGST"}
-                      )
-                    </span>
-                    <span className="font-mono">{fmt(gstAmount)}</span>
+                    <span>CGST</span>
+                    <span className="font-mono">{fmt(totalCgst)}</span>
+                  </div>
+                )}
+                {totalSgst > 0 && (
+                  <div className="flex justify-between text-sm text-muted-foreground">
+                    <span>SGST</span>
+                    <span className="font-mono">{fmt(totalSgst)}</span>
+                  </div>
+                )}
+                {totalIgst > 0 && (
+                  <div className="flex justify-between text-sm text-muted-foreground">
+                    <span>IGST</span>
+                    <span className="font-mono">{fmt(totalIgst)}</span>
+                  </div>
+                )}
+                {/* Combined total tax row when both CGST/SGST and IGST exist */}
+                {totalTax > 0 && totalCgst > 0 && totalIgst > 0 && (
+                  <div className="flex justify-between text-sm text-muted-foreground border-t border-dashed border-border pt-1">
+                    <span>Total Tax</span>
+                    <span className="font-mono">{fmt(totalTax)}</span>
                   </div>
                 )}
                 <div className="flex justify-between text-base font-bold text-foreground border-t border-border pt-2">
@@ -1481,35 +1523,153 @@ const PurchaseOrderMaster: React.FC = () => {
           </div>
         </div>
 
-        {/* ── Terms & Remarks Card ──────────────────────────────────────────── */}
+        {/* ── Terms & Conditions Card ───────────────────────────────────────── */}
         <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-          <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-4">
-            <ClipboardList size={11} className="text-primary" />
-            Terms &amp; Remarks
-          </h3>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <FieldLabel>Payment Terms</FieldLabel>
-              <textarea
-                value={form.paymentTerms}
-                onChange={(e) => setField("paymentTerms", e.target.value)}
-                readOnly={isReadOnly}
-                rows={3}
-                placeholder="e.g. Net 30 days, 50% advance…"
-                className={`${inputCls} resize-none ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""}`}
-              />
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
+              <ClipboardList size={11} className="text-primary" />
+              Terms &amp; Conditions
+            </h3>
+            {!isReadOnly && (
+              <div className="relative">
+                <button
+                  onClick={() => setTcDropdownOpen((o) => !o)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/20 transition"
+                >
+                  <Plus size={13} />
+                  Add T&amp;C
+                </button>
+                {tcDropdownOpen && (
+                  <>
+                    {/* Backdrop */}
+                    <div
+                      className="fixed inset-0 z-10"
+                      onClick={() => setTcDropdownOpen(false)}
+                    />
+                    {/* Dropdown */}
+                    <div className="absolute right-0 top-full mt-1 z-20 w-72 rounded-xl border border-border bg-card shadow-lg overflow-hidden">
+                      <div className="px-3 py-2 border-b border-border">
+                        <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                          Select Terms &amp; Conditions
+                        </p>
+                      </div>
+                      <div className="max-h-56 overflow-y-auto divide-y divide-border">
+                        {tcRecords.length === 0 ? (
+                          <p className="px-4 py-6 text-xs text-center text-muted-foreground">
+                            No T&amp;C records found
+                          </p>
+                        ) : (
+                          tcRecords.map((tc) => {
+                            const isSelected = selectedTCs.some(
+                              (s) => s.id === tc.id,
+                            );
+                            return (
+                              <button
+                                key={tc.id}
+                                onClick={() => {
+                                  setSelectedTCs((prev) =>
+                                    isSelected
+                                      ? prev.filter((s) => s.id !== tc.id)
+                                      : [...prev, tc],
+                                  );
+                                }}
+                                className={`w-full text-left px-4 py-2.5 flex items-start gap-2.5 hover:bg-muted/40 transition ${isSelected ? "bg-primary/5" : ""}`}
+                              >
+                                <span
+                                  className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition ${isSelected ? "bg-primary border-primary" : "border-border"}`}
+                                >
+                                  {isSelected && (
+                                    <Check
+                                      size={10}
+                                      className="text-primary-foreground"
+                                    />
+                                  )}
+                                </span>
+                                <span className="flex-1 min-w-0">
+                                  <span className="block text-sm font-medium text-foreground truncate">
+                                    {tc.name}
+                                  </span>
+                                  <span className="block text-[11px] text-muted-foreground truncate mt-0.5">
+                                    {tc.terms}
+                                  </span>
+                                </span>
+                              </button>
+                            );
+                          })
+                        )}
+                      </div>
+                      <div className="px-3 py-2 border-t border-border">
+                        <button
+                          onClick={() => setTcDropdownOpen(false)}
+                          className="w-full text-xs text-center text-muted-foreground hover:text-foreground transition py-1"
+                        >
+                          Done
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Selected T&C list */}
+          {selectedTCs.length > 0 ? (
+            <div className="space-y-2 mb-4">
+              {selectedTCs.map((tc, idx) => (
+                <div
+                  key={tc.id}
+                  className="flex items-start gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3"
+                >
+                  <span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] font-bold flex items-center justify-center mt-0.5">
+                    {idx + 1}
+                  </span>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-foreground">
+                      {tc.name}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-0.5 whitespace-pre-wrap">
+                      {tc.terms}
+                    </p>
+                  </div>
+                  {!isReadOnly && (
+                    <button
+                      onClick={() =>
+                        setSelectedTCs((prev) =>
+                          prev.filter((s) => s.id !== tc.id),
+                        )
+                      }
+                      className="flex-shrink-0 p-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/20 text-muted-foreground hover:text-red-500 transition"
+                    >
+                      <X size={13} />
+                    </button>
+                  )}
+                </div>
+              ))}
             </div>
-            <div>
-              <FieldLabel>Remarks</FieldLabel>
-              <textarea
-                value={form.remarks}
-                onChange={(e) => setField("remarks", e.target.value)}
-                readOnly={isReadOnly}
-                rows={3}
-                placeholder="Additional notes…"
-                className={`${inputCls} resize-none ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""}`}
-              />
-            </div>
+          ) : (
+            !isReadOnly && (
+              <div className="flex items-center gap-2 rounded-xl border border-dashed border-border px-4 py-5 mb-4 text-muted-foreground text-xs">
+                <ClipboardList size={14} className="opacity-40" />
+                <span>
+                  No terms selected — click <strong>+ Add T&amp;C</strong> to
+                  add from master
+                </span>
+              </div>
+            )
+          )}
+
+          {/* Remarks */}
+          <div>
+            <FieldLabel>Remarks</FieldLabel>
+            <textarea
+              value={form.remarks}
+              onChange={(e) => setField("remarks", e.target.value)}
+              readOnly={isReadOnly}
+              rows={3}
+              placeholder="Additional notes…"
+              className={`${inputCls} resize-none ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""}`}
+            />
           </div>
         </div>
 
