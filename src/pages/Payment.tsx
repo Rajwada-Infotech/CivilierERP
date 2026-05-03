@@ -1067,6 +1067,7 @@ const Payment: React.FC = () => {
                             status={rec.status}
                             recordId={Number(rec.id)}
                             endpoint="/api/new-payment"
+                            submitOnly
                             onSuccess={() =>
                               queryClient.invalidateQueries({
                                 queryKey: ["payments"],
@@ -1173,6 +1174,7 @@ const Payment: React.FC = () => {
                                 status={rec.status}
                                 recordId={Number(rec.id)}
                                 endpoint="/api/new-payment"
+                                submitOnly
                                 onSuccess={() =>
                                   queryClient.invalidateQueries({
                                     queryKey: ["payments"],
