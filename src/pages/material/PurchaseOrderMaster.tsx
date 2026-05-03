@@ -23,6 +23,7 @@ import {
 } from "@/api/purchaseOrdersApi";
 import { getItems, type DbItem } from "@/api/itemMasterApi";
 import { getTCRecords } from "@/api/tcMasterApi";
+import { getEnterprises } from "@/api/enterpriseApi";
 import {
   Plus,
   Trash2,
@@ -61,6 +62,8 @@ import {
   CircleDollarSign,
   Truck,
   Link2,
+  Printer,
+  Receipt,
 } from "lucide-react";
 
 // ─── PO Chain Status Hook ─────────────────────────────────────────────────────
@@ -80,9 +83,14 @@ function usePOChainStatus(poId: string | null) {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (!poId) { setStatus(null); return; }
+    if (!poId) {
+      setStatus(null);
+      return;
+    }
     setLoading(true);
-    fetchWithAuth(`/api/expense-booking/chain-status?sourceType=PO&sourceId=${poId}`)
+    fetchWithAuth(
+      `/api/expense-booking/chain-status?sourceType=PO&sourceId=${poId}`,
+    )
       .then((r) => r.json())
       .then(setStatus)
       .catch(() => {})
@@ -353,6 +361,11 @@ const PurchaseOrderMaster: React.FC = () => {
     queryFn: getTCRecords,
   });
 
+  const { data: enterprisesRaw = [] } = useQuery({
+    queryKey: ["enterprises"],
+    queryFn: getEnterprises,
+  });
+
   // ── Normalise data ────────────────────────────────────────────────────────
   const suppliers = useMemo(
     () =>
@@ -420,6 +433,154 @@ const PurchaseOrderMaster: React.FC = () => {
         })),
     [tcRaw],
   );
+
+  // ── Enterprise logo ───────────────────────────────────────────────────────
+  const enterpriseLogo = useMemo(() => {
+    const list = ensureArray<any>(enterprisesRaw);
+    const enterprise =
+      list.find((e) => e.entity_type === "Enterprise") ?? list[0];
+    return enterprise?.logo ?? null;
+  }, [enterprisesRaw]);
+
+  // ── Print handler ─────────────────────────────────────────────────────────
+  const handlePrint = () => {
+    const supplier =
+      suppliers.find((s) => s.id === form.supplierId)?.name ?? "—";
+    const company = companies.find((c) => c.id === form.companyId)?.name ?? "—";
+    const project =
+      allProjects.find((p) => p.id === form.projectId)?.name ?? "—";
+
+    const logoHtml = enterpriseLogo
+      ? `<img src="${enterpriseLogo}" alt="Company Logo" style="height:60px;max-width:180px;object-fit:contain;" />`
+      : `<div style="font-size:22px;font-weight:700;color:#4f46e5;">${company}</div>`;
+
+    const itemRows = lineItems
+      .map(
+        (li, i) => `
+      <tr style="border-bottom:1px solid #e5e7eb;">
+        <td style="padding:8px 10px;text-align:center;color:#6b7280;">${i + 1}</td>
+        <td style="padding:8px 10px;font-weight:500;">${li.itemName || "—"}</td>
+        <td style="padding:8px 10px;color:#6b7280;">${li.itemDescription || "—"}</td>
+        <td style="padding:8px 10px;text-align:center;">${li.quantity}</td>
+        <td style="padding:8px 10px;text-align:center;">${li.unit || "—"}</td>
+        <td style="padding:8px 10px;text-align:right;font-family:monospace;">₹${li.rate.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+        <td style="padding:8px 10px;text-align:center;">${li.gstRate > 0 ? li.gstRate + "%" : "—"}</td>
+        <td style="padding:8px 10px;text-align:right;font-family:monospace;font-weight:600;">₹${li.amount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+      </tr>`,
+      )
+      .join("");
+
+    const tcHtml = form.paymentTerms
+      ? `<div style="margin-top:24px;">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#6b7280;margin-bottom:8px;">Terms &amp; Conditions</div>
+          <div style="font-size:12px;color:#374151;white-space:pre-wrap;line-height:1.6;">${form.paymentTerms}</div>
+         </div>`
+      : "";
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Purchase Order — ${form.poNumber || "—"}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; color: #111; background: #fff; padding: 32px; }
+    table { width: 100%; border-collapse: collapse; }
+    th { background: #f3f4f6; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #6b7280; padding: 9px 10px; text-align: left; }
+    .total-row td { padding: 6px 10px; }
+    .grand-total { font-size: 15px; font-weight: 700; color: #4f46e5; border-top: 2px solid #4f46e5; }
+    @media print { body { padding: 16px; } }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:28px;padding-bottom:20px;border-bottom:2px solid #4f46e5;">
+    <div>${logoHtml}</div>
+    <div style="text-align:right;">
+      <div style="font-size:22px;font-weight:800;color:#4f46e5;letter-spacing:-0.5px;">PURCHASE ORDER</div>
+      <div style="font-size:16px;font-weight:700;font-family:monospace;margin-top:4px;">${form.poNumber || "—"}</div>
+      <div style="font-size:12px;color:#6b7280;margin-top:4px;">Date: ${fmtDate(form.poDate)}</div>
+      ${form.expectedDate ? `<div style="font-size:12px;color:#6b7280;">Expected: ${fmtDate(form.expectedDate)}</div>` : ""}
+    </div>
+  </div>
+
+  <!-- Meta -->
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-bottom:24px;">
+    <div>
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Supplier</div>
+      <div style="font-weight:600;">${supplier}</div>
+    </div>
+    <div>
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Company</div>
+      <div style="font-weight:600;">${company}</div>
+    </div>
+    <div>
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Project / Site</div>
+      <div style="font-weight:600;">${project}</div>
+    </div>
+  </div>
+
+  <!-- Items -->
+  <table>
+    <thead>
+      <tr>
+        <th style="width:36px;">#</th>
+        <th>Item</th>
+        <th>Description</th>
+        <th style="text-align:center;">Qty</th>
+        <th style="text-align:center;">UOM</th>
+        <th style="text-align:right;">Rate (₹)</th>
+        <th style="text-align:center;">GST</th>
+        <th style="text-align:right;">Amount (₹)</th>
+      </tr>
+    </thead>
+    <tbody>${itemRows}</tbody>
+  </table>
+
+  <!-- Totals -->
+  <div style="display:flex;justify-content:flex-end;margin-top:16px;">
+    <table style="width:280px;">
+      <tbody>
+        <tr class="total-row">
+          <td style="color:#6b7280;">Subtotal (excl. GST)</td>
+          <td style="text-align:right;font-family:monospace;">₹${subtotal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+        </tr>
+        ${totalCgst > 0 ? `<tr class="total-row"><td style="color:#6b7280;">CGST</td><td style="text-align:right;font-family:monospace;">₹${totalCgst.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td></tr>` : ""}
+        ${totalSgst > 0 ? `<tr class="total-row"><td style="color:#6b7280;">SGST</td><td style="text-align:right;font-family:monospace;">₹${totalSgst.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td></tr>` : ""}
+        ${totalIgst > 0 ? `<tr class="total-row"><td style="color:#6b7280;">IGST</td><td style="text-align:right;font-family:monospace;">₹${totalIgst.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td></tr>` : ""}
+        <tr class="total-row grand-total">
+          <td>Grand Total</td>
+          <td style="text-align:right;font-family:monospace;">₹${grandTotal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  ${tcHtml}
+
+  <!-- Remarks -->
+  ${form.remarks ? `<div style="margin-top:24px;"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#6b7280;margin-bottom:6px;">Remarks</div><div style="font-size:12px;color:#374151;">${form.remarks}</div></div>` : ""}
+
+  <!-- Footer -->
+  <div style="margin-top:40px;padding-top:16px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;font-size:11px;color:#9ca3af;">
+    <span>Generated by CivilierERP</span>
+    <span>Printed on ${new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</span>
+  </div>
+</body>
+</html>`;
+
+    const win = window.open("", "_blank", "width=900,height=700");
+    if (!win) {
+      toast.error("Pop-up blocked — please allow pop-ups for this site.");
+      return;
+    }
+    win.document.write(html);
+    win.document.close();
+    win.onload = () => {
+      win.focus();
+      win.print();
+    };
+  };
 
   // ── Derived list data ─────────────────────────────────────────────────────
   const dbItems: any[] = dbData?.data ?? [];
@@ -489,7 +650,7 @@ const PurchaseOrderMaster: React.FC = () => {
 
   // Chain status — must be here (before any early returns) to satisfy Rules of Hooks
   const { status: poChainStatus, loading: poChainLoading } = usePOChainStatus(
-    editingId ?? null
+    editingId ?? null,
   );
 
   // ── Doc number helpers ────────────────────────────────────────────────────
@@ -1024,13 +1185,22 @@ const PurchaseOrderMaster: React.FC = () => {
           </div>
         )}
         {isReadOnly && (
-          <button
-            onClick={() => setViewMode("edit")}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition shadow-sm"
-          >
-            <PenSquare size={14} />
-            Edit
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handlePrint}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-border text-sm font-semibold text-foreground hover:bg-muted transition"
+            >
+              <Printer size={14} />
+              Print
+            </button>
+            <button
+              onClick={() => setViewMode("edit")}
+              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-semibold hover:bg-primary/90 transition shadow-sm"
+            >
+              <PenSquare size={14} />
+              Edit
+            </button>
+          </div>
         )}
       </div>
 
@@ -1722,7 +1892,10 @@ const PurchaseOrderMaster: React.FC = () => {
             {poChainLoading ? (
               <div className="flex items-center gap-3">
                 {[1, 2, 3].map((i) => (
-                  <div key={i} className="h-16 flex-1 bg-muted animate-pulse rounded-xl" />
+                  <div
+                    key={i}
+                    className="h-16 flex-1 bg-muted animate-pulse rounded-xl"
+                  />
                 ))}
               </div>
             ) : (
@@ -1730,36 +1903,57 @@ const PurchaseOrderMaster: React.FC = () => {
                 {/* Step 1: GRN */}
                 <div className="rounded-xl border border-border bg-muted/20 p-3 flex items-start gap-3">
                   <div className="mt-0.5 w-7 h-7 rounded-full bg-emerald-100 dark:bg-emerald-950/40 flex items-center justify-center shrink-0">
-                    <Truck size={13} className="text-emerald-600 dark:text-emerald-400" />
+                    <Truck
+                      size={13}
+                      className="text-emerald-600 dark:text-emerald-400"
+                    />
                   </div>
                   <div>
-                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">GRN</p>
-                    <p className="text-xs font-semibold text-foreground">Goods Received</p>
-                    <p className="text-[10px] text-muted-foreground mt-0.5">Check GRN list for receipts against this PO</p>
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">
+                      GRN
+                    </p>
+                    <p className="text-xs font-semibold text-foreground">
+                      Goods Received
+                    </p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      Check GRN list for receipts against this PO
+                    </p>
                   </div>
                 </div>
 
                 {/* Step 2: Expense Booking */}
-                <div className={`rounded-xl border p-3 flex items-start gap-3 ${
-                  (poChainStatus?.expenseCount ?? 0) > 0
-                    ? "border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/20"
-                    : "border-border bg-muted/20"
-                }`}>
-                  <div className={`mt-0.5 w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
+                <div
+                  className={`rounded-xl border p-3 flex items-start gap-3 ${
                     (poChainStatus?.expenseCount ?? 0) > 0
-                      ? "bg-emerald-100 dark:bg-emerald-950/40"
-                      : "bg-muted"
-                  }`}>
-                    {(poChainStatus?.expenseCount ?? 0) > 0
-                      ? <CheckCircle2 size={13} className="text-emerald-600 dark:text-emerald-400" />
-                      : <Receipt size={13} className="text-muted-foreground" />}
+                      ? "border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/20"
+                      : "border-border bg-muted/20"
+                  }`}
+                >
+                  <div
+                    className={`mt-0.5 w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
+                      (poChainStatus?.expenseCount ?? 0) > 0
+                        ? "bg-emerald-100 dark:bg-emerald-950/40"
+                        : "bg-muted"
+                    }`}
+                  >
+                    {(poChainStatus?.expenseCount ?? 0) > 0 ? (
+                      <CheckCircle2
+                        size={13}
+                        className="text-emerald-600 dark:text-emerald-400"
+                      />
+                    ) : (
+                      <Receipt size={13} className="text-muted-foreground" />
+                    )}
                   </div>
                   <div className="min-w-0">
-                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Expense Booking</p>
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">
+                      Expense Booking
+                    </p>
                     {(poChainStatus?.expenseCount ?? 0) > 0 ? (
                       <>
                         <p className="text-xs font-semibold text-emerald-700 dark:text-emerald-400">
-                          {poChainStatus!.expenseCount} booking{poChainStatus!.expenseCount > 1 ? "s" : ""}
+                          {poChainStatus!.expenseCount} booking
+                          {poChainStatus!.expenseCount > 1 ? "s" : ""}
                         </p>
                         {poChainStatus?.latestExpenseDocNo && (
                           <p className="text-[10px] font-mono text-muted-foreground mt-0.5 truncate">
@@ -1768,39 +1962,60 @@ const PurchaseOrderMaster: React.FC = () => {
                         )}
                       </>
                     ) : (
-                      <p className="text-xs text-muted-foreground">Not booked yet</p>
+                      <p className="text-xs text-muted-foreground">
+                        Not booked yet
+                      </p>
                     )}
                   </div>
                 </div>
 
                 {/* Step 3: Payment */}
-                <div className={`rounded-xl border p-3 flex items-start gap-3 ${
-                  poChainStatus?.isPaid
-                    ? "border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/20"
-                    : "border-border bg-muted/20"
-                }`}>
-                  <div className={`mt-0.5 w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
+                <div
+                  className={`rounded-xl border p-3 flex items-start gap-3 ${
                     poChainStatus?.isPaid
-                      ? "bg-blue-100 dark:bg-blue-950/40"
-                      : "bg-muted"
-                  }`}>
-                    <CircleDollarSign size={13} className={poChainStatus?.isPaid ? "text-blue-600 dark:text-blue-400" : "text-muted-foreground"} />
+                      ? "border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/20"
+                      : "border-border bg-muted/20"
+                  }`}
+                >
+                  <div
+                    className={`mt-0.5 w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${
+                      poChainStatus?.isPaid
+                        ? "bg-blue-100 dark:bg-blue-950/40"
+                        : "bg-muted"
+                    }`}
+                  >
+                    <CircleDollarSign
+                      size={13}
+                      className={
+                        poChainStatus?.isPaid
+                          ? "text-blue-600 dark:text-blue-400"
+                          : "text-muted-foreground"
+                      }
+                    />
                   </div>
                   <div>
-                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">Payment</p>
+                    <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">
+                      Payment
+                    </p>
                     {poChainStatus?.isPaid ? (
                       <>
                         <p className="text-xs font-semibold text-blue-700 dark:text-blue-400">
-                          {poChainStatus.paymentCount} payment{poChainStatus.paymentCount > 1 ? "s" : ""}
+                          {poChainStatus.paymentCount} payment
+                          {poChainStatus.paymentCount > 1 ? "s" : ""}
                         </p>
                         {poChainStatus.latestPaymentAmount != null && (
                           <p className="text-[10px] font-mono text-muted-foreground mt-0.5">
-                            ₹{poChainStatus.latestPaymentAmount.toLocaleString("en-IN")}
+                            ₹
+                            {poChainStatus.latestPaymentAmount.toLocaleString(
+                              "en-IN",
+                            )}
                           </p>
                         )}
                       </>
                     ) : (
-                      <p className="text-xs text-muted-foreground">Not paid yet</p>
+                      <p className="text-xs text-muted-foreground">
+                        Not paid yet
+                      </p>
                     )}
                   </div>
                 </div>
