@@ -30,13 +30,13 @@ router.get("/options", async (req, res) => {
         SELECT
           eb.Eid                          AS id,
           eb.Eid                          AS value,
-          ISNULL(eb.EDocNo, 'N/A')        AS docNo,
+          ISNULL(eb.EDocNo, CONCAT('Draft #', CAST(eb.Eid AS NVARCHAR))) AS docNo,
           ISNULL(eb.EProjectName, '')     AS projectName,
           ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0)) AS amount,
           ISNULL(eb.ECompanyId, 0)        AS companyId,
           eb.EEmiPayment                  AS emiEnabled,
           CONCAT(
-            ISNULL(eb.EDocNo,'N/A'),
+            ISNULL(eb.EDocNo, CONCAT('Draft #', CAST(eb.Eid AS NVARCHAR))),
             N' — ',
             ISNULL(eb.EProjectName,''),
             N' (₹',
@@ -375,15 +375,45 @@ router.post("/", async (req, res) => {
         ? `${prefix}${padded}/${finYear}`
         : `${prefix}${padded}`;
 
-      await transaction
+      // The preview endpoint may have already reserved this doc number (RecordId IS NULL).
+      // Reuse it if unassigned; bump if already committed to another record.
+      const existingSeq = await transaction
         .request()
-        .input("TypeOfDocId", sql.Int, typeId)
-        .input("DocNo", sql.NVarChar(100), finalDocNo)
-        .input("TableName", sql.NVarChar(100), "ExpenseBooking")
-        .input("IssuedBy", sql.NVarChar(200), req.user?.email || null).query(`
-          INSERT INTO dbo.DocNumberSequence (TypeOfDocId, DocNo, TableName, IssuedBy)
-          VALUES (@TypeOfDocId, @DocNo, @TableName, @IssuedBy)
+        .input("DocNoCheck", sql.NVarChar(100), finalDocNo).query(`
+          SELECT RecordId FROM dbo.DocNumberSequence WHERE DocNo = @DocNoCheck
         `);
+
+      if (existingSeq.recordset.length > 0) {
+        if (existingSeq.recordset[0]?.RecordId) {
+          // Already committed — bump by 1 and insert fresh
+          const bumpPadded = String(nextSeq + 1).padStart(6, "0");
+          finalDocNo = finYear
+            ? `${prefix}${bumpPadded}/${finYear}`
+            : `${prefix}${bumpPadded}`;
+          await transaction
+            .request()
+            .input("TypeOfDocId", sql.Int, typeId)
+            .input("DocNo", sql.NVarChar(100), finalDocNo)
+            .input("TableName", sql.NVarChar(100), "ExpenseBooking")
+            .input("IssuedBy", sql.NVarChar(200), req.user?.email || null)
+            .query(`
+              INSERT INTO dbo.DocNumberSequence (TypeOfDocId, DocNo, TableName, IssuedBy)
+              VALUES (@TypeOfDocId, @DocNo, @TableName, @IssuedBy)
+            `);
+        }
+        // else: reserved by preview (RecordId IS NULL) — reuse as-is
+      } else {
+        // Not yet reserved — insert fresh
+        await transaction
+          .request()
+          .input("TypeOfDocId", sql.Int, typeId)
+          .input("DocNo", sql.NVarChar(100), finalDocNo)
+          .input("TableName", sql.NVarChar(100), "ExpenseBooking")
+          .input("IssuedBy", sql.NVarChar(200), req.user?.email || null).query(`
+            INSERT INTO dbo.DocNumberSequence (TypeOfDocId, DocNo, TableName, IssuedBy)
+            VALUES (@TypeOfDocId, @DocNo, @TableName, @IssuedBy)
+          `);
+      }
     }
 
     const insertResult = await transaction
@@ -629,6 +659,9 @@ router.put("/:id/emi-toggle", async (req, res) => {
 
     const { total, paid, paidAmount, remainingAmount } = stats.recordset[0];
 
+    let lumpSumDocNo = null;
+    let lumpSumId = null;
+
     if (!enabled) {
       if (deleteUnpaid) {
         await pool.request().input("ExpenseBookingId", sql.Int, id).query(`
@@ -637,13 +670,16 @@ router.put("/:id/emi-toggle", async (req, res) => {
           `);
       }
 
-      const existingRes = await pool
-        .request()
-        .input("Eid", sql.Int, id)
-        .query("SELECT EEmiData FROM dbo.ExpenseBooking WHERE Eid = @Eid");
+      const existingRes = await pool.request().input("Eid", sql.Int, id).query(`
+          SELECT EEmiData, EDocNo, EProjectName, EDocumentType, EDocDate,
+                 ECgstRate, ESgstRate, ECompanyId, EDocTypeId, EFinYear,
+                 ECreatedBy, ERemarks, EStatus
+          FROM dbo.ExpenseBooking WHERE Eid = @Eid
+        `);
+      const parentRow = existingRes.recordset[0] || {};
       let emiData = {};
       try {
-        emiData = JSON.parse(existingRes.recordset[0]?.EEmiData || "{}");
+        emiData = JSON.parse(parentRow.EEmiData || "{}");
       } catch {}
       emiData.enabled = false;
       if (deleteUnpaid && Array.isArray(emiData.schedule)) {
@@ -660,6 +696,141 @@ router.put("/:id/emi-toggle", async (req, res) => {
           SET EEmiPayment = @EEmiPayment, EEmiData = @EEmiData
           WHERE Eid = @Eid
         `);
+
+      // If there is a remaining unpaid amount, create a new lump-sum booking
+      // that represents the outstanding balance and link it back to the parent.
+      const remainingAmt = parseFloat(remainingAmount) || 0;
+      if (remainingAmt > 0) {
+        const parentDocNo = parentRow.EDocNo || null;
+        const lumpSumRemark = `Lump-sum balance from EMI booking${parentDocNo ? " " + parentDocNo : ""} (remaining after ${parseInt(paid) || 0} paid installment(s))`;
+
+        const lumpInsert = await pool
+          .request()
+          .input(
+            "EProjectName",
+            sql.NVarChar(150),
+            parentRow.EProjectName || null,
+          )
+          .input(
+            "EDocumentType",
+            sql.NVarChar(50),
+            parentRow.EDocumentType || null,
+          )
+          .input("EDocDate", sql.Date, new Date())
+          .input("EAmount", sql.Decimal(18, 2), remainingAmt)
+          .input("ENetAmount", sql.Decimal(18, 2), remainingAmt)
+          .input("ECgstRate", sql.Decimal(5, 2), 0)
+          .input("ESgstRate", sql.Decimal(5, 2), 0)
+          .input("EEmiPayment", sql.Bit, 0)
+          .input("ERemarks", sql.NVarChar(300), lumpSumRemark)
+          .input("EStatus", sql.NVarChar(50), "Draft")
+          .input("ECompanyId", sql.Int, parentRow.ECompanyId || null)
+          .input("EDocTypeId", sql.Int, parentRow.EDocTypeId || null)
+          .input("EFinYear", sql.NVarChar(20), parentRow.EFinYear || null)
+          .input("ECreatedBy", sql.Int, parentRow.ECreatedBy || null)
+          .input("EParentEmiRef", sql.Int, id)
+          .input("ECreatedAt", sql.DateTime2, new Date())
+          .input("EUpdatedAt", sql.DateTime2, new Date()).query(`
+            INSERT INTO dbo.ExpenseBooking (
+              EProjectName, EDocumentType, EDocDate,
+              EAmount, ENetAmount, ECgstRate, ESgstRate,
+              EEmiPayment, ERemarks, EStatus,
+              ECompanyId, EDocTypeId, EFinYear, ECreatedBy,
+              EParentEmiRef, ECreatedAt, EUpdatedAt
+            ) VALUES (
+              @EProjectName, @EDocumentType, @EDocDate,
+              @EAmount, @ENetAmount, @ECgstRate, @ESgstRate,
+              @EEmiPayment, @ERemarks, @EStatus,
+              @ECompanyId, @EDocTypeId, @EFinYear, @ECreatedBy,
+              @EParentEmiRef, @ECreatedAt, @EUpdatedAt
+            );
+            SELECT SCOPE_IDENTITY() AS NewId;
+          `);
+
+        lumpSumId = lumpInsert.recordset[0]?.NewId || null;
+
+        // Try to auto-generate a doc number for the lump-sum booking using the
+        // same doc type as the parent, if available.
+        if (lumpSumId && parentRow.EDocTypeId) {
+          try {
+            const typeResult = await pool
+              .request()
+              .input("TypeOfDocId", sql.Int, parentRow.EDocTypeId).query(`
+                SELECT Prefix, FullPrefix, StartingDocNo
+                FROM dbo.TypeOfDoc WHERE TypeOfDocId = @TypeOfDocId AND IsActive = 1
+              `);
+            const typeRow = typeResult.recordset[0];
+            if (typeRow) {
+              const rawPrefix = typeRow.FullPrefix ?? typeRow.Prefix ?? "";
+              const prefix = rawPrefix.replace(/\d+$/, "");
+              const startFrom = typeRow.StartingDocNo ?? 1;
+              const finYear = (parentRow.EFinYear || "").toString().trim();
+
+              const maxResult = await pool
+                .request()
+                .input("TypeOfDocId", sql.Int, parentRow.EDocTypeId)
+                .input("Prefix", sql.NVarChar(100), prefix + "%").query(`
+                  SELECT MAX(TRY_CAST(SUBSTRING(DocNo, LEN(@Prefix) + 1, 6) AS INT)) AS MaxSeq
+                  FROM dbo.DocNumberSequence WHERE TypeOfDocId = @TypeOfDocId AND DocNo LIKE @Prefix
+                `);
+              const ebMaxResult = await pool
+                .request()
+                .input("EDocTypeId2", sql.Int, parentRow.EDocTypeId)
+                .input("Prefix2", sql.NVarChar(100), prefix + "%").query(`
+                  SELECT MAX(TRY_CAST(SUBSTRING(EDocNo, LEN(@Prefix2) + 1, 6) AS INT)) AS MaxSeq
+                  FROM dbo.ExpenseBooking WHERE EDocTypeId = @EDocTypeId2 AND EDocNo LIKE @Prefix2
+                `);
+
+              const combined = Math.max(
+                maxResult.recordset[0]?.MaxSeq ?? 0,
+                ebMaxResult.recordset[0]?.MaxSeq ?? 0,
+              );
+              const maxSeq = combined > 0 ? combined : startFrom - 1;
+              const nextSeq = Math.max(maxSeq + 1, startFrom);
+              const padded = String(nextSeq).padStart(6, "0");
+              lumpSumDocNo = finYear
+                ? `${prefix}${padded}/${finYear}`
+                : `${prefix}${padded}`;
+
+              await pool
+                .request()
+                .input("TypeOfDocId", sql.Int, parentRow.EDocTypeId)
+                .input("DocNo", sql.NVarChar(100), lumpSumDocNo)
+                .input("TableName", sql.NVarChar(100), "ExpenseBooking")
+                .input("IssuedBy", sql.NVarChar(200), userEmail).query(`
+                  INSERT INTO dbo.DocNumberSequence (TypeOfDocId, DocNo, TableName, IssuedBy)
+                  VALUES (@TypeOfDocId, @DocNo, @TableName, @IssuedBy)
+                `);
+
+              await pool
+                .request()
+                .input("Eid", sql.Int, lumpSumId)
+                .input("EDocNo", sql.NVarChar(100), lumpSumDocNo)
+                .input("RecordId", sql.Int, lumpSumId).query(`
+                  UPDATE dbo.ExpenseBooking SET EDocNo = @EDocNo WHERE Eid = @Eid;
+                  UPDATE dbo.DocNumberSequence SET RecordId = @RecordId WHERE DocNo = @EDocNo AND TableName = 'ExpenseBooking';
+                `);
+            }
+          } catch (docErr) {
+            console.warn(
+              "Could not auto-assign doc number to lump-sum booking:",
+              docErr.message,
+            );
+          }
+        }
+
+        // Write the lump-sum booking reference back onto the parent so
+        // the UI can surface it as a "remaining balance" link.
+        if (lumpSumId) {
+          await pool
+            .request()
+            .input("Eid", sql.Int, id)
+            .input("ELumpSumRef", sql.Int, lumpSumId)
+            .query(
+              "UPDATE dbo.ExpenseBooking SET ELumpSumRef = @ELumpSumRef WHERE Eid = @Eid",
+            );
+        }
+      }
     } else {
       await pool
         .request()
@@ -681,6 +852,7 @@ router.put("/:id/emi-toggle", async (req, res) => {
         paidAmount: parseFloat(paidAmount) || 0,
         remainingAmount: parseFloat(remainingAmount) || 0,
       },
+      lumpSum: lumpSumId ? { id: lumpSumId, docNo: lumpSumDocNo } : null,
     });
   } catch (err) {
     console.error("EMI toggle error:", err.message);
@@ -782,7 +954,51 @@ router.put("/:id", async (req, res) => {
       return res.status(404).json({ error: "Expense booking not found" });
     }
 
+    // If EMI is being enabled and a schedule is provided, sync EmiInstallments.
+    // Only insert rows that don't already exist (idempotent — safe to call on re-save).
+    if (EEmiPayment && EEmiData) {
+      let schedule = [];
+      try {
+        const parsed =
+          typeof EEmiData === "string" ? JSON.parse(EEmiData) : EEmiData;
+        schedule = parsed?.schedule ?? [];
+      } catch (e) {
+        console.warn("Failed to parse EMI data on update");
+      }
+
+      for (const row of schedule) {
+        try {
+          if (!row.dueDate) continue;
+          // Check if this installment row already exists
+          const exists = await pool
+            .request()
+            .input("ExpenseBookingId", sql.Int, numericId)
+            .input("InstallmentNo", sql.Int, row.installmentNo).query(`
+              SELECT 1 AS found FROM dbo.EmiInstallments
+              WHERE ExpenseBookingId = @ExpenseBookingId AND InstallmentNo = @InstallmentNo
+            `);
+          if (exists.recordset.length > 0) continue; // already exists — skip
+
+          await pool
+            .request()
+            .input("ExpenseBookingId", sql.Int, numericId)
+            .input("InstallmentNo", sql.Int, row.installmentNo)
+            .input("RefNumber", sql.NVarChar(200), row.refNumber || null)
+            .input("DueDate", sql.Date, row.dueDate)
+            .input("Amount", sql.Decimal(18, 2), row.amount || 0)
+            .input("Status", sql.NVarChar(20), row.status || "Pending").query(`
+              INSERT INTO dbo.EmiInstallments
+              (ExpenseBookingId, InstallmentNo, RefNumber, DueDate, Amount, Status)
+              VALUES (@ExpenseBookingId, @InstallmentNo, @RefNumber, @DueDate, @Amount, @Status)
+            `);
+        } catch (rowErr) {
+          console.warn("EMI insert warning on update:", rowErr.message);
+        }
+      }
+    }
+
     await bumpCacheVersion("expense-booking");
+    await bumpCacheVersion("expense-booking-options");
     res.json({ message: "Expense updated successfully" });
   } catch (err) {
     console.error("Update error:", err.message);
