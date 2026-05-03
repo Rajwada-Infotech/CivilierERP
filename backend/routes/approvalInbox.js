@@ -128,7 +128,8 @@ router.get("/", async (req, res) => {
 
     if (queries.length === 0) return res.json([]);
 
-    const fullQuery = queries.join(" UNION ALL ") + " ORDER BY LastModified DESC";
+    const fullQuery =
+      queries.join(" UNION ALL ") + " ORDER BY LastModified DESC";
     const result = await pool.request().query(fullQuery);
 
     res.json(result.recordset);

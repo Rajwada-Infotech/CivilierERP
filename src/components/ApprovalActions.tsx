@@ -51,9 +51,12 @@ async function authFetch(url: string, method: string, body?: object) {
 interface ApprovalActionsProps {
   status: string | null | undefined;
   recordId: number | string;
-  endpoint: string;          // e.g. "/api/purchase-orders"
-  onSuccess?: () => void;
+  endpoint: string; // e.g. "/api/purchase-orders"
+  onSuccess?: (action: "submit" | "approve" | "reject") => void;
   className?: string;
+  /** When true, only the Submit button is shown. Approve/Reject are reserved
+   *  for the Admin Approval Inbox and will not render on this component. */
+  submitOnly?: boolean;
 }
 
 export function ApprovalActions({
@@ -62,6 +65,7 @@ export function ApprovalActions({
   endpoint,
   onSuccess,
   className,
+  submitOnly = false,
 }: ApprovalActionsProps) {
   const [loading, setLoading] = useState<string | null>(null);
   const [rejectOpen, setRejectOpen] = useState(false);
@@ -79,14 +83,14 @@ export function ApprovalActions({
         action === "submit"
           ? "Submitted for approval"
           : action === "approve"
-          ? "Record approved"
-          : "Record rejected"
+            ? "Record approved"
+            : "Record rejected",
       );
       if (action === "reject") {
         setRejectOpen(false);
         setRejectNote("");
       }
-      onSuccess?.();
+      onSuccess?.(action);
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Action failed");
     } finally {
@@ -99,13 +103,15 @@ export function ApprovalActions({
   if (status === "Approved" || status === "Fully Received") return null;
 
   const showSubmit =
-    status === "Draft" || status === "Issued" || status === "Partially Received";
-  const showApproveReject = status === "Pending" && approver;
+    status === "Draft" ||
+    status === "Issued" ||
+    status === "Partially Received";
+  const showApproveReject = !submitOnly && status === "Pending" && approver;
 
   if (!showSubmit && !showApproveReject) return null;
 
   return (
-    <div className={`flex items-center gap-2 ${className ?? ""}`} >
+    <div className={`flex items-center gap-2 ${className ?? ""}`}>
       {/* Submit button — visible to all users on Draft/Issued */}
       {showSubmit && (
         <Button

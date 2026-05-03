@@ -34,12 +34,23 @@ export interface PdfExportOptions {
 
 function getCell(row: Record<string, unknown>, col: ExportColumn): string {
   const raw =
-    typeof col.accessor === "function"
-      ? col.accessor(row)
-      : row[col.accessor];
+    typeof col.accessor === "function" ? col.accessor(row) : row[col.accessor];
   if (raw === null || raw === undefined) return "";
   if (typeof raw === "boolean") return raw ? "Yes" : "No";
   return String(raw);
+}
+
+// jsPDF's built-in Helvetica only covers Latin-1 (ISO 8859-1).
+// Characters outside that range (e.g. ₹ U+20B9) render as garbage glyphs.
+// This helper replaces known symbols with ASCII-safe equivalents for PDF output.
+function sanitizeForPdf(value: string): string {
+  return value
+    .replace(/₹/g, "Rs.") // Indian rupee sign → Rs.
+    .replace(/[^\x00-\xFF]/g, "?"); // any remaining non-Latin1 → ?
+}
+
+function getPdfCell(row: Record<string, unknown>, col: ExportColumn): string {
+  return sanitizeForPdf(getCell(row, col));
 }
 
 function triggerDownload(blob: Blob, filename: string) {
@@ -56,7 +67,7 @@ function triggerDownload(blob: Blob, filename: string) {
 export function exportToCsv(
   rows: Record<string, unknown>[],
   columns: ExportColumn[],
-  filename = "export"
+  filename = "export",
 ): void {
   const escape = (v: string) =>
     v.includes(",") || v.includes('"') || v.includes("\n")
@@ -92,7 +103,7 @@ export async function exportToXlsx(
   rows: Record<string, unknown>[],
   columns: ExportColumn[],
   filename = "export",
-  sheetName = "Sheet1"
+  sheetName = "Sheet1",
 ): Promise<void> {
   // Build rows: header first
   const allRows = [
@@ -176,7 +187,7 @@ export async function exportToXlsx(
 export async function exportToPdf(
   rows: Record<string, unknown>[],
   columns: ExportColumn[],
-  options: PdfExportOptions
+  options: PdfExportOptions,
 ): Promise<void> {
   const {
     title,
@@ -224,7 +235,7 @@ export async function exportToPdf(
   doc.text(
     `Exported on ${dateStr} at ${timeStr} · ${rows.length} record${rows.length !== 1 ? "s" : ""}`,
     36,
-    cursorY
+    cursorY,
   );
   cursorY += 6;
 
@@ -236,7 +247,7 @@ export async function exportToPdf(
 
   // ── Table ─────────────────────────────────────────────────────────────────
   const head = [columns.map((c) => c.header)];
-  const body = rows.map((row) => columns.map((c) => getCell(row, c)));
+  const body = rows.map((row) => columns.map((c) => getPdfCell(row, c)));
 
   // Parse hex to RGB for jsPDF
   const hexToRgb = (hex: string) => {
@@ -273,12 +284,16 @@ export async function exportToPdf(
       const pageCount = (doc as any).internal.getNumberOfPages();
       doc.setFontSize(7);
       doc.setTextColor("#94a3b8");
-      doc.text(`CivilierERP · ${title}`, 36, doc.internal.pageSize.getHeight() - 16);
+      doc.text(
+        `CivilierERP · ${title}`,
+        36,
+        doc.internal.pageSize.getHeight() - 16,
+      );
       doc.text(
         `Page ${data.pageNumber} of ${pageCount}`,
         pageW - 36,
         doc.internal.pageSize.getHeight() - 16,
-        { align: "right" }
+        { align: "right" },
       );
     },
   });
