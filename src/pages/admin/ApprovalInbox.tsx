@@ -161,7 +161,8 @@ const ModuleTab: React.FC<{
 const InboxRow: React.FC<{
   item: InboxItem;
   onActionDone: () => void;
-}> = ({ item, onActionDone }) => {
+  onOptimisticUpdate: (recordId: string, module: string) => void;
+}> = ({ item, onActionDone, onOptimisticUpdate }) => {
   const navigate = useNavigate();
   const cfg = MODULE_CONFIG[item.Module];
   const Icon = cfg?.icon ?? ClipboardCheck;
@@ -239,7 +240,14 @@ const InboxRow: React.FC<{
           status={item.Status}
           recordId={item.RecordId}
           endpoint={cfg?.apiEndpoint ?? `/api/${item.Module}`}
-          onSuccess={onActionDone}
+          onSuccess={(action) => {
+            // Immediately hide this row for approve/reject — the inbox only
+            // shows Pending items so it will be gone after refetch anyway.
+            if (action === "approve" || action === "reject") {
+              onOptimisticUpdate(item.RecordId, item.Module);
+            }
+            onActionDone();
+          }}
         />
         {cfg?.navPath && (
           <button
@@ -271,6 +279,15 @@ const ApprovalInbox: React.FC = () => {
     queryFn: () => fetchInbox(activeModule ?? undefined),
     refetchInterval: 60_000,
   });
+
+  // Optimistically removed keys — keyed "Module-RecordId".
+  // When approve/reject fires we immediately hide the row so the user sees
+  // instant feedback, then the background refetch reconciles the real data.
+  const [removedKeys, setRemovedKeys] = useState<Set<string>>(new Set());
+
+  const handleOptimisticUpdate = (recordId: string, module: string) => {
+    setRemovedKeys((prev) => new Set(prev).add(`${module}-${recordId}`));
+  };
 
   const handleActionDone = () => {
     queryClient.invalidateQueries({ queryKey: ["approval-inbox"] });
@@ -404,13 +421,18 @@ const ApprovalInbox: React.FC = () => {
             </div>
 
             <div>
-              {items.map((item) => (
-                <InboxRow
-                  key={`${item.Module}-${item.RecordId}`}
-                  item={item}
-                  onActionDone={handleActionDone}
-                />
-              ))}
+              {items
+                .filter(
+                  (item) => !removedKeys.has(`${item.Module}-${item.RecordId}`),
+                )
+                .map((item) => (
+                  <InboxRow
+                    key={`${item.Module}-${item.RecordId}`}
+                    item={item}
+                    onActionDone={handleActionDone}
+                    onOptimisticUpdate={handleOptimisticUpdate}
+                  />
+                ))}
             </div>
 
             <div className="px-4 py-2.5 border-t border-border bg-muted/20">
