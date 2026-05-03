@@ -23,6 +23,7 @@ import {
   DocNumberPreview,
   fetchNextDocNumber,
 } from "@/pages/material/ExpenseBooking/DocNumberPreview";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import type {
   GRNFormDataPayload,
   GRNItemLine,
@@ -57,6 +58,33 @@ const parseJsonArray = <T,>(val: unknown): T[] => {
 const inp =
   "w-full px-3 py-2 rounded-lg text-sm font-body bg-muted border border-border transition-all focus:outline-none focus:ring-2 focus:ring-primary text-foreground placeholder:text-muted-foreground/50";
 
+// ─── GRN Chain Badge ──────────────────────────────────────────────────────────
+function GRNChainBadge({ grnId }: { grnId: number }) {
+  const [chain, setChain] = useState<{ expenseCount: number; isPaid: boolean } | null>(null);
+
+  useEffect(() => {
+    if (!grnId) return;
+    fetchWithAuth(`/api/expense-booking/chain-status?sourceType=GRN&sourceId=${grnId}`)
+      .then((r) => r.json())
+      .then(setChain)
+      .catch(() => {});
+  }, [grnId]);
+
+  if (!chain || chain.expenseCount === 0) return null;
+
+  return (
+    <div className="flex items-center gap-1 mt-1 flex-wrap">
+      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-green-100 dark:bg-green-950/40 text-green-700 dark:text-green-400 border border-green-200 dark:border-green-800">
+        ✓ Exp. Booked
+      </span>
+      {chain.isPaid && (
+        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 border border-blue-200 dark:border-blue-800">
+          ✓ Paid
+        </span>
+      )}
+    </div>
+  );
+}
 
 const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
   {
@@ -90,7 +118,15 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
   {
     accessorKey: "Status",
     header: "Status",
-    cell: ({ getValue }) => <StatusBadge status={(getValue() as string) || "Draft"} />,
+    cell: ({ row }) => {
+      const grn = row.original;
+      return (
+        <div>
+          <StatusBadge status={(grn.Status as string) || "Draft"} />
+          <GRNChainBadge grnId={Number(grn.GRNID)} />
+        </div>
+      );
+    },
   },
   {
     id: "actions",
@@ -806,4 +842,3 @@ export default function GRN() {
     </>
   );
 }
-
