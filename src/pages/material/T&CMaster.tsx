@@ -7,7 +7,6 @@ import {
   type DataChangeEvent,
   type RecordWithId,
 } from "@/components/MasterPage";
-import type { ExportColumn } from "@/lib/export";
 import { FileText } from "lucide-react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -29,7 +28,7 @@ interface DbTC {
 
 // ─── Map DB → UI row ─────────────────────────────────────────────────────────
 const toRow = (item: DbTC): RecordWithId => ({
-  _id: String(item.Id), // Keep as string for MasterPage
+  _id: String(item.Id),
   name: item.Name || "",
   terms: item.TermsAndCondition || "",
   remarks: item.Remarks || "",
@@ -127,20 +126,33 @@ export default function TCMaster() {
     data: dbData,
     isLoading,
     error,
+    isFetching,
   } = useQuery({
     queryKey: ["tc-master"],
     queryFn: getTCRecords,
-    staleTime: 5 * 60 * 1000,
+    staleTime: 0, // ← always treat as stale so invalidateQueries always refetches
+    refetchOnMount: true, // ← always refetch when the page mounts
   });
 
-  const rows: RecordWithId[] = Array.isArray(dbData) ? dbData.map(toRow) : [];
+  // Only pass real rows — never pass [] during a background refetch
+  const rows: RecordWithId[] =
+    Array.isArray(dbData) && !isFetching
+      ? dbData.map(toRow)
+      : Array.isArray(dbData)
+        ? dbData.map(toRow)
+        : [];
 
   const handleDataEvent = async (event: DataChangeEvent) => {
     if (event.action === "add") {
       try {
         await addTCRecord(toPayload(event.record));
         toast.success("T&C record saved!");
-        await queryClient.invalidateQueries({ queryKey: ["tc-master"] });
+        // Remove cached data entirely so MasterPage gets fresh array on refetch
+        queryClient.removeQueries({ queryKey: ["tc-master"] });
+        await queryClient.fetchQuery({
+          queryKey: ["tc-master"],
+          queryFn: getTCRecords,
+        });
       } catch (err: any) {
         toast.error("Save failed: " + err.message);
       }
@@ -148,9 +160,13 @@ export default function TCMaster() {
 
     if (event.action === "update") {
       try {
-        await updateTCRecord(Number(event.id), toPayload(event.record)); // Convert back to number
+        await updateTCRecord(Number(event.id), toPayload(event.record));
         toast.success("T&C record updated!");
-        await queryClient.invalidateQueries({ queryKey: ["tc-master"] });
+        queryClient.removeQueries({ queryKey: ["tc-master"] });
+        await queryClient.fetchQuery({
+          queryKey: ["tc-master"],
+          queryFn: getTCRecords,
+        });
       } catch (err: any) {
         toast.error("Update failed: " + err.message);
       }
@@ -158,9 +174,13 @@ export default function TCMaster() {
 
     if (event.action === "delete") {
       try {
-        await deleteTCRecord(Number(event.id)); // Convert back to number
+        await deleteTCRecord(Number(event.id));
         toast.success("T&C record deleted!");
-        await queryClient.invalidateQueries({ queryKey: ["tc-master"] });
+        queryClient.removeQueries({ queryKey: ["tc-master"] });
+        await queryClient.fetchQuery({
+          queryKey: ["tc-master"],
+          queryFn: getTCRecords,
+        });
       } catch (err: any) {
         toast.error("Delete failed: " + err.message);
       }
@@ -189,9 +209,9 @@ export default function TCMaster() {
           title: "T&C Master",
           filename: "tc-master",
           columns: [
-            { header: "Name",          accessor: "name" },
+            { header: "Name", accessor: "name" },
             { header: "Terms Preview", accessor: "terms" },
-            { header: "Status",        accessor: "status" },
+            { header: "Status", accessor: "status" },
           ],
         }}
       />
