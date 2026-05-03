@@ -1,8 +1,8 @@
 -- Migration: 002-create-user-activity-log-table.sql
 -- Full CREATE TABLE for UserActivityLog + all required columns/indexes
--- Run this in SQL Server Management Studio after updating USE [CivilierERP];
+-- Run this in SQL Server Management Studio after updating USE [Civilier];
 
-USE [CivilierERP]; -- Update database name if different
+USE [Civilier]; -- Update database name if different
 
 -- Drop table if exists (backup data first if needed)
 IF EXISTS (SELECT * FROM sys.tables WHERE name = 'UserActivityLog')

@@ -1,18 +1,36 @@
 version: "3.9"
 
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: civilier-redis
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    networks:
+      - civilier-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   backend:
-    build: ./backend
-    ports:
-      - "5000" # For direct access/debug, remove in prod
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: civilier-backend
+    env_file:
+      - backend/.env
     environment:
-      - NODE_ENV=production
+      # Override Redis to use container name (not 127.0.0.1)
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-    env_file:
-      - backend/.env # Your DB creds here
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     networks:
       - civilier-network
     restart: unless-stopped
@@ -30,34 +48,20 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
-
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379" # Local access
-    volumes:
-      - redis_data:/data
-    command: redis-server --appendonly yes
-    networks:
-      - civilier-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 30s
-      timeout: 5s
-      retries: 5
+    # ports:
+    #   - "5000:5000"
 
   nginx:
-    image: nginx:alpine
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: civilier-nginx
     ports:
       - "80:80"
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./dist:/usr/share/nginx/html
     depends_on:
       backend:
-        condition: service_healthy
-      redis:
         condition: service_healthy
     networks:
       - civilier-network
@@ -65,6 +69,7 @@ services:
 
 volumes:
   redis_data:
+    driver: local
 
 networks:
   civilier-network:
