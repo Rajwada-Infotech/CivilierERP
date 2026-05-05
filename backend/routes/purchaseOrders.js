@@ -308,7 +308,7 @@ router.post("/", async (req, res) => {
     // Generate document number if DocTypeId is provided
     let finalDocNo = poNoFromClient || null;
     if (DocTypeId) {
-      finalDocNo = await lockNextDocNumber(transaction, sql, {
+      finalDocNo = await lockNextDocNumber(pool, sql, {
         docTypeId: parseInt(DocTypeId, 10),
         finYear,
         tableName: "PurchaseOrders",
