@@ -13,27 +13,20 @@ import {
   Search,
   Calendar,
   FileText,
+  Eye,
 } from "lucide-react";
 import * as grnApi from "@/api/grnApi";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { StatusBadge } from "@/components/StatusBadge";
-import { ApprovalActions } from "@/components/ApprovalActions";
 import { useFinYear } from "@/contexts/FinYearContext";
-import {
-  DocNumberPreview,
-  fetchNextDocNumber,
-} from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import type {
   GRNFormDataPayload,
   GRNItemLine,
   Supplier,
   PurchaseOrder,
-  Item,
   UOM,
 } from "@/api/grnApi";
-
-const statusOptions = ["Draft", "Partially Received", "Fully Received"] as const;
 
 const createEmptyItem = (): GRNItemLine => ({
   itemId: "",
@@ -48,7 +41,9 @@ const parseJsonArray = <T,>(val: unknown): T[] => {
   if (Array.isArray(val)) return val as T[];
   if (typeof val !== "string" || !val.trim()) return [];
   try {
-    const parsed = JSON.parse(val);
+    let parsed = JSON.parse(val);
+    // Handle double-encoded: stored as JSON string of a JSON string
+    if (typeof parsed === "string") parsed = JSON.parse(parsed);
     return Array.isArray(parsed) ? (parsed as T[]) : [];
   } catch {
     return [];
@@ -60,11 +55,16 @@ const inp =
 
 // ─── GRN Chain Badge ──────────────────────────────────────────────────────────
 function GRNChainBadge({ grnId }: { grnId: number }) {
-  const [chain, setChain] = useState<{ expenseCount: number; isPaid: boolean } | null>(null);
+  const [chain, setChain] = useState<{
+    expenseCount: number;
+    isPaid: boolean;
+  } | null>(null);
 
   useEffect(() => {
     if (!grnId) return;
-    fetchWithAuth(`/api/expense-booking/chain-status?sourceType=GRN&sourceId=${grnId}`)
+    fetchWithAuth(
+      `/api/expense-booking/chain-status?sourceType=GRN&sourceId=${grnId}`,
+    )
       .then((r) => r.json())
       .then(setChain)
       .catch(() => {});
@@ -86,16 +86,19 @@ function GRNChainBadge({ grnId }: { grnId: number }) {
   );
 }
 
+// queryClient is hoisted so column cell closures can reference it
+let queryClient: ReturnType<typeof useQueryClient>;
+let onEdit: (grn: any) => void;
+let onView: (grn: any) => void;
+let deleteMutation: { mutate: (id: string) => void };
+
 const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
   {
     accessorKey: "GRNNo",
     header: "GRN No",
-    cell: ({ getValue }) => <span className="font-medium">{getValue() as string}</span>,
-  },
-  {
-    accessorKey: "DocNo",
-    header: "Doc No",
-    cell: ({ getValue }) => <span className="font-mono text-xs">{(getValue() as string) || "—"}</span>,
+    cell: ({ getValue }) => (
+      <span className="font-medium">{getValue() as string}</span>
+    ),
   },
   {
     accessorKey: "PONumber",
@@ -135,17 +138,26 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
     cell: ({ row }) => {
       const grn = row.original;
       return (
-        <div className="flex items-center justify-end gap-1.5 flex-wrap">
-          <ApprovalActions
-            status={grn.Status || "Draft"}
-            recordId={Number(grn.GRNID)}
-            endpoint="/api/grns"
-            onSuccess={() => queryClient.invalidateQueries({ queryKey: ["grns"] })}
-          />
-          <button onClick={() => onEdit(grn)} className="text-primary hover:bg-primary/10 p-2 rounded transition-colors">
+        <div className="flex items-center justify-end gap-1.5">
+          <button
+            onClick={() => onView(grn)}
+            className="text-muted-foreground hover:bg-muted p-2 rounded transition-colors"
+            title="View GRN"
+          >
+            <Eye size={18} />
+          </button>
+          <button
+            onClick={() => onEdit(grn)}
+            className="text-primary hover:bg-primary/10 p-2 rounded transition-colors"
+            title="Edit GRN"
+          >
             <Edit3 size={18} />
           </button>
-          <button onClick={() => deleteMutation.mutate(String(grn.GRNID))} className="text-destructive hover:bg-destructive/10 p-2 rounded transition-colors">
+          <button
+            onClick={() => deleteMutation.mutate(String(grn.GRNID))}
+            className="text-destructive hover:bg-destructive/10 p-2 rounded transition-colors"
+            title="Delete GRN"
+          >
             <Trash2 size={18} />
           </button>
         </div>
@@ -155,33 +167,20 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
 ];
 
 export default function GRN() {
-  const queryClient = useQueryClient();
+  queryClient = useQueryClient();
   const { finYears } = useFinYear();
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [viewingGrn, setViewingGrn] = useState<any | null>(null);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
+  const [loadingPO, setLoadingPO] = useState(false);
+  const [selectedFinYear, setSelectedFinYear] = useState<string>("");
   const limit = 10;
 
   const activeFinYear =
     finYears.find((fy) => fy.status === "Active")?.year || undefined;
-  const finYearOptions = finYears.filter((fy) => fy.status === "Active");
 
-  const buildEmptyForm = (
-    overrides: Partial<{
-      grnNo: string;
-      grnDate: string;
-      supplierId: string;
-      supplierName: string;
-      poId: string;
-      poNumber: string;
-      remarks: string;
-      status: "Draft" | "Partially Received" | "Fully Received";
-      items: GRNItemLine[];
-      docTypeId: number | null;
-      docNo: string;
-      finYear: string;
-    }> = {},
-  ) => ({
+  const buildEmptyForm = () => ({
     grnNo: "",
     grnDate: new Date().toISOString().slice(0, 10),
     supplierId: "",
@@ -190,25 +189,23 @@ export default function GRN() {
     poNumber: "",
     remarks: "",
     status: "Draft" as const,
-    items: [createEmptyItem()],
+    items: [createEmptyItem()] as GRNItemLine[],
     docTypeId: null as number | null,
     docNo: "",
     finYear: activeFinYear || "",
-    ...overrides,
   });
 
-  const [formData, setFormData] = useState({
-    ...buildEmptyForm(),
-  });
-  const [docRefreshTrigger, setDocRefreshTrigger] = useState(0);
-
+  const [formData, setFormData] = useState(buildEmptyForm());
   const [errors, setErrors] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!formData.finYear && activeFinYear) {
       setFormData((prev) => ({ ...prev, finYear: activeFinYear }));
     }
-  }, [activeFinYear, formData.finYear]);
+    if (!selectedFinYear && activeFinYear) {
+      setSelectedFinYear(activeFinYear);
+    }
+  }, [activeFinYear, formData.finYear, selectedFinYear]);
 
   // ── Queries ──────────────────────────────────────────────────────────────────
   const { data: grnsPage, isLoading: loadingGrns } = useQuery({
@@ -219,19 +216,9 @@ export default function GRN() {
   const totalPages = Math.max(grnsPage?.totalPages ?? 1, 1);
   const totalRecords = grnsPage?.total ?? grns.length;
 
-  const { data: suppliersData = [] } = useQuery({
-    queryKey: ["suppliers"],
-    queryFn: grnApi.getSuppliers,
-  });
-
   const { data: posData = [] } = useQuery({
     queryKey: ["purchaseOrders"],
     queryFn: grnApi.getPurchaseOrders,
-  });
-
-  const { data: itemsData = [] } = useQuery({
-    queryKey: ["itemMaster"],
-    queryFn: grnApi.getItems,
   });
 
   const { data: uomsData = [] } = useQuery({
@@ -239,28 +226,16 @@ export default function GRN() {
     queryFn: grnApi.getUoms,
   });
 
-  // ── Mapped Options ───────────────────────────────────────────────────────────
-  const suppliers = suppliersData.map((s: Supplier) => ({
-    value: String(s.LHeadId),
-    label: s.LHeadName,
-  }));
-
-  const pos = posData.map((po: PurchaseOrder) => ({
-    value: String(po.PurchaseOrderID),
-    label: po.PurchaseOrderNo,
-  }));
-
-  const items = itemsData.map((item: Item) => ({
-    value: String(item.M_Id),
-    label: item.M_Name,
-    group: item.ParentGroupName || "",
-  }));
-
-  const uoms = uomsData
-    .filter((u: UOM) => u.IsActive !== false)
-    .map((uom: UOM) => ({
-      value: uom.UOMCode,
-      label: uom.Symbol ? `${uom.UOMName} (${uom.Symbol})` : uom.UOMName,
+  const pos = posData
+    .filter((po: PurchaseOrder) => {
+      if (!selectedFinYear) return true;
+      // PO number format: CI/PUR/000001/2025-2026 — fin year is the last segment
+      const docNo = po.PurchaseOrderNo || "";
+      return docNo.includes(selectedFinYear);
+    })
+    .map((po: PurchaseOrder) => ({
+      value: String(po.PurchaseOrderID),
+      label: po.PurchaseOrderNo,
     }));
 
   const filteredGrns = grns.filter((grn: any) => {
@@ -276,28 +251,36 @@ export default function GRN() {
   // ── Mutations ────────────────────────────────────────────────────────────────
   const createMutation = useMutation({
     mutationFn: grnApi.addGRN,
-    onSuccess: async () => {
+    onSuccess: async (res) => {
       queryClient.invalidateQueries({ queryKey: ["grns"] });
       setPage(1);
-      await resetForm(true);
-      setDocRefreshTrigger((current) => current + 1);
-      toast.success("GRN created successfully");
+      const generated = res?.grnNo || "";
+      setFormData(buildEmptyForm());
+      setEditingId(null);
+      setErrors({});
+      if (generated) {
+        setFormData((p) => ({ ...p, grnNo: generated }));
+      }
+      toast.success(`GRN ${generated} created successfully`);
     },
     onError: (err: any) => toast.error(err.message || "Failed to create GRN"),
   });
 
   const updateMutation = useMutation({
-    mutationFn: (payload: GRNFormDataPayload) => grnApi.updateGRN(editingId!, payload),
+    mutationFn: (payload: GRNFormDataPayload) =>
+      grnApi.updateGRN(editingId!, payload),
     onSuccess: async () => {
       queryClient.invalidateQueries({ queryKey: ["grns"] });
       setPage(1);
-      await resetForm();
+      setFormData(buildEmptyForm());
+      setEditingId(null);
+      setErrors({});
       toast.success("GRN updated successfully");
     },
     onError: (err: any) => toast.error(err.message || "Failed to update GRN"),
   });
 
-  const deleteMutation = useMutation({
+  deleteMutation = useMutation({
     mutationFn: grnApi.deleteGRN,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["grns"] });
@@ -307,33 +290,70 @@ export default function GRN() {
     onError: (err: any) => toast.error(err.message || "Failed to delete GRN"),
   });
 
-  // ── Helpers ──────────────────────────────────────────────────────────────────
-  const resetForm = async (keepDocType = false) => {
-    const nextDocTypeId = keepDocType ? formData.docTypeId : null;
-    const nextFinYear = formData.finYear || activeFinYear || "";
-    const nextDocNo = nextDocTypeId
-      ? await fetchNextDocNumber(nextDocTypeId, nextFinYear || undefined)
-      : "";
+  // ── PO Selection — fetch full PO with line items ───────────────────────────
+  const handlePOSelect = async (poId: string) => {
+    if (!poId) {
+      setFormData((prev) => ({
+        ...prev,
+        poId: "",
+        poNumber: "",
+        supplierId: "",
+        supplierName: "",
+        items: [createEmptyItem()],
+        grnNo: "",
+        docNo: "",
+        docTypeId: null,
+      }));
+      return;
+    }
 
-    setFormData(
-      buildEmptyForm({
-        docTypeId: nextDocTypeId,
-        docNo: nextDocNo,
-        grnNo: nextDocNo,
-        finYear: nextFinYear,
-      }),
-    );
-    setEditingId(null);
-    setErrors({});
+    setLoadingPO(true);
+    try {
+      const token = localStorage.getItem("token") ?? "";
+      const res = await fetch(`/api/purchase-orders/${poId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (!res.ok) throw new Error("Failed to fetch PO details");
+      const po = await res.json();
+
+      // Map PO line items → GRN item lines
+      const lineItems: GRNItemLine[] = (po.LineItems ?? []).map((li: any) => ({
+        itemId: String(li.ItemId ?? ""),
+        itemName: li.ItemName ?? li.Description ?? "",
+        orderedQty: Number(li.Quantity ?? 0),
+        receivedQty: 0,
+        remainingQty: Number(li.Quantity ?? 0),
+        uom: li.UomName ?? li.UomId ?? "",
+      }));
+
+      setFormData((prev) => ({
+        ...prev,
+        poId,
+        poNumber: po.PurchaseOrderNo ?? "",
+        supplierId: String(po.SupplierID ?? ""),
+        supplierName: po.SupplierName ?? "",
+        items: lineItems.length ? lineItems : [createEmptyItem()],
+        docTypeId: po.DocTypeId ?? null,
+        finYear: prev.finYear || activeFinYear || "",
+        // grnNo will be assigned by backend on save
+        grnNo: "",
+        docNo: "",
+      }));
+    } catch (e: any) {
+      toast.error(e.message || "Failed to load PO details");
+    } finally {
+      setLoadingPO(false);
+    }
   };
 
+  // ── Validation ───────────────────────────────────────────────────────────────
   const validate = () => {
     const newErrors: Record<string, string> = {};
-    if (!formData.grnNo.trim()) newErrors.grnNo = "GRN Number is required";
-    if (!formData.supplierId) newErrors.supplierId = "Supplier is required";
     if (!formData.poId) newErrors.poId = "Purchase Order is required";
-    if (formData.items.some((i) => !i.itemId || !i.uom || i.receivedQty <= 0)) {
-      newErrors.items = "Please complete all item details correctly";
+    if (!formData.supplierId)
+      newErrors.supplierId = "Supplier could not be determined";
+    if (formData.items.every((i) => i.receivedQty <= 0)) {
+      newErrors.items = "Enter received quantity for at least one item";
     }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -346,18 +366,18 @@ export default function GRN() {
     }
 
     const payload: GRNFormDataPayload = {
-      grnNo: formData.grnNo,
+      grnNo: formData.grnNo || "", // empty = backend auto-generates
       grnDate: formData.grnDate,
       supplierId: Number(formData.supplierId),
       poId: Number(formData.poId) || 0,
       grnItems: formData.items,
-      status: formData.status,
+      status: "Draft",
       remarks: formData.remarks,
       supplierName: formData.supplierName,
       poNumber: formData.poNumber,
-      docTypeId: formData.docTypeId,
-      docNo: formData.docNo,
-      finYear: formData.finYear || null,
+      docTypeId: null, // GRN number generated by backend from GRN sequence
+      docNo: "",
+      finYear: selectedFinYear || formData.finYear || null,
     };
 
     if (editingId) {
@@ -367,116 +387,33 @@ export default function GRN() {
     }
   };
 
-  // ── Field & Item Handlers ────────────────────────────────────────────────────
-  const updateField = (field: keyof typeof formData, value: any) => {
-    if (field === "supplierId") {
-      const supplier = suppliersData.find((s: Supplier) => String(s.LHeadId) === value);
-      setFormData((prev) => ({
-        ...prev,
-        supplierId: value,
-        supplierName: supplier?.LHeadName || "",
-      }));
-      return;
-    }
-
-    if (field === "poId") {
-      const po = posData.find((p: PurchaseOrder) => String(p.PurchaseOrderID) === String(value));
-      if (!po) {
-        setFormData((prev) => ({ ...prev, poId: String(value) }));
-        return;
-      }
-
-      // Auto-populate logic (best from dev branch)
-      let autoItemId = "";
-      let autoItemName = po.ItemDescription || "";
-      let autoUom = po.Unit || "";
-
-      const matchedItem = itemsData.find(
-        (it: Item) => it.M_Name.trim().toLowerCase() === po.ItemDescription?.trim().toLowerCase()
-      );
-      if (matchedItem) {
-        autoItemId = String(matchedItem.M_Id);
-        autoItemName = matchedItem.M_Name;
-      }
-
-      const matchedUom = uomsData.find(
-        (u: UOM) =>
-          u.UOMCode.trim().toLowerCase() === po.Unit?.trim().toLowerCase() ||
-          u.UOMName.trim().toLowerCase() === po.Unit?.trim().toLowerCase()
-      );
-      if (matchedUom) autoUom = matchedUom.UOMCode;
-
-      const mappedItems: GRNItemLine[] = po.ItemDescription
-        ? [
-            {
-              itemId: autoItemId,
-              itemName: autoItemName,
-              orderedQty: Number(po.Quantity || 0),
-              receivedQty: 0,
-              remainingQty: Number(po.Quantity || 0),
-              uom: autoUom,
-            },
-          ]
-        : [createEmptyItem()];
-
-      setFormData((prev) => ({
-        ...prev,
-        poId: String(value),
-        poNumber: po.PurchaseOrderNo || "",
-        supplierId: po.SupplierID ? String(po.SupplierID) : prev.supplierId,
-        supplierName: po.SupplierName || prev.supplierName,
-        items: mappedItems,
-      }));
-      return;
-    }
-
-    if (field === "grnNo") {
-      const nextValue = String(value || "").toUpperCase();
-      setFormData((prev) => ({ ...prev, grnNo: nextValue, docNo: nextValue }));
-      return;
-    }
-
-    setFormData((prev) => ({ ...prev, [field]: value }));
-  };
-
-  const addItem = () => {
-    setFormData((prev) => ({ ...prev, items: [...prev.items, createEmptyItem()] }));
-  };
-
-  const removeItem = (index: number) => {
-    setFormData((prev) => ({
-      ...prev,
-      items: prev.items.length > 1 ? prev.items.filter((_, i) => i !== index) : [createEmptyItem()],
-    }));
-  };
-
-  const updateItemField = (index: number, field: keyof GRNItemLine, value: any) => {
+  // ── Item received qty handler ────────────────────────────────────────────────
+  const updateReceivedQty = (index: number, value: number) => {
     setFormData((prev) => {
       const nextItems = [...prev.items];
-      const current = { ...nextItems[index], [field]: value };
-
-      if (field === "itemId") {
-        const matched = itemsData.find((it: Item) => String(it.M_Id) === String(value));
-        current.itemName = matched?.M_Name || current.itemName || "";
-      }
-
-      current.orderedQty = Number(current.orderedQty) || 0;
-      current.receivedQty = Number(current.receivedQty) || 0;
-      current.remainingQty = current.orderedQty - current.receivedQty;
-
+      const current = { ...nextItems[index] };
+      current.receivedQty = value;
+      current.remainingQty = current.orderedQty - value;
       nextItems[index] = current;
       return { ...prev, items: nextItems };
     });
   };
 
-  const onEdit = (grn: any) => {
-    const parsedItems = parseJsonArray<GRNItemLine>(grn.GRNItems).map((item) => ({
-      ...createEmptyItem(),
-      ...item,
-      orderedQty: Number(item.orderedQty || 0),
-      receivedQty: Number(item.receivedQty || 0),
-      remainingQty: Number(item.remainingQty || 0),
-    }));
+  // ── Edit ─────────────────────────────────────────────────────────────────────
+  onView = (grn: any) => {
+    setViewingGrn(grn);
+  };
+
+  onEdit = (grn: any) => {
+    const parsedItems = parseJsonArray<GRNItemLine>(grn.GRNItems).map(
+      (item) => ({
+        ...createEmptyItem(),
+        ...item,
+        orderedQty: Number(item.orderedQty || 0),
+        receivedQty: Number(item.receivedQty || 0),
+        remainingQty: Number(item.remainingQty || 0),
+      }),
+    );
 
     setFormData({
       grnNo: grn.GRNNo || "",
@@ -495,6 +432,12 @@ export default function GRN() {
 
     setEditingId(String(grn.GRNID));
     window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
+  const resetForm = () => {
+    setFormData(buildEmptyForm());
+    setEditingId(null);
+    setErrors({});
   };
 
   if (loadingGrns) {
@@ -524,118 +467,50 @@ export default function GRN() {
           </div>
 
           <div className="p-6 space-y-6">
-            {/* Document Type & Number */}
-            <div>
-              <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                Document Type &amp; Number
-              </label>
-              <div className="mb-3">
+            {/* Header Fields */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+              {/* Fin Year selector */}
+              <div>
                 <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                   Fin Year
                 </label>
                 <select
-                  value={formData.finYear}
-                  onChange={async (e) => {
-                    const nextFinYear = e.target.value;
-                    if (formData.docTypeId) {
-                      const nextDocNo = await fetchNextDocNumber(
-                        formData.docTypeId,
-                        nextFinYear || undefined,
-                      );
-                      setFormData((prev) => ({
-                        ...prev,
-                        finYear: nextFinYear,
-                        docNo: nextDocNo,
-                        grnNo: nextDocNo,
-                      }));
-                      return;
-                    }
-                    setFormData((prev) => ({ ...prev, finYear: nextFinYear }));
+                  value={selectedFinYear}
+                  onChange={(e) => {
+                    setSelectedFinYear(e.target.value);
+                    // Clear PO selection when fin year changes
+                    setFormData((prev) => ({
+                      ...prev,
+                      poId: "",
+                      poNumber: "",
+                      supplierId: "",
+                      supplierName: "",
+                      items: [createEmptyItem()],
+                      grnNo: "",
+                      docNo: "",
+                      finYear: e.target.value,
+                    }));
                   }}
                   className={inp}
                 >
-                  <option value="">Select Fin Year...</option>
-                  {finYearOptions.map((fy) => (
+                  <option value="">All Years</option>
+                  {finYears.map((fy) => (
                     <option key={fy.id} value={fy.year}>
                       {fy.year}
                     </option>
                   ))}
                 </select>
               </div>
-              <DocNumberPreview
-                finYear={formData.finYear || undefined}
-                selectedDocTypeId={formData.docTypeId}
-                preview={formData.docNo}
-                refreshTrigger={docRefreshTrigger}
-                onSelect={(id, preview) =>
-                  setFormData((prev) => ({
-                    ...prev,
-                    docTypeId: id,
-                    docNo: preview,
-                    grnNo: preview,
-                  }))
-                }
-              />
-            </div>
 
-            {/* Header Fields */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-              <div>
-                <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                  GRN Number <span className="text-destructive">*</span>
-                </label>
-                <div className="relative">
-                  <FileText size={15} className="absolute left-3 top-3 text-muted-foreground" />
-                  <input
-                    value={formData.grnNo}
-                    onChange={(e) => updateField("grnNo", e.target.value.toUpperCase())}
-                    className={`${inp} pl-10`}
-                  />
-                </div>
-                {errors.grnNo && <p className="text-destructive text-sm mt-1">{errors.grnNo}</p>}
-              </div>
-
-              <div>
-                <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                  GRN Date
-                </label>
-                <div className="relative">
-                  <Calendar size={15} className="absolute left-3 top-3 text-muted-foreground" />
-                  <input
-                    type="date"
-                    value={formData.grnDate}
-                    onChange={(e) => updateField("grnDate", e.target.value)}
-                    className={`${inp} pl-10`}
-                  />
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                  Supplier <span className="text-destructive">*</span>
-                </label>
-                <select
-                  value={formData.supplierId}
-                  onChange={(e) => updateField("supplierId", e.target.value)}
-                  className={inp}
-                >
-                  <option value="">Select Supplier...</option>
-                  {suppliers.map((s) => (
-                    <option key={s.value} value={s.value}>
-                      {s.label}
-                    </option>
-                  ))}
-                </select>
-                {errors.supplierId && <p className="text-destructive text-sm mt-1">{errors.supplierId}</p>}
-              </div>
-
-              <div>
+              {/* Purchase Order — filtered by fin year */}
+              <div className="lg:col-span-2">
                 <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
                   Purchase Order <span className="text-destructive">*</span>
                 </label>
                 <select
                   value={formData.poId}
-                  onChange={(e) => updateField("poId", e.target.value)}
+                  onChange={(e) => handlePOSelect(e.target.value)}
+                  disabled={!!editingId || loadingPO}
                   className={inp}
                 >
                   <option value="">Select Purchase Order...</option>
@@ -645,25 +520,65 @@ export default function GRN() {
                     </option>
                   ))}
                 </select>
-                {formData.poNumber && <p className="text-xs text-muted-foreground mt-1">PO: {formData.poNumber}</p>}
-                {errors.poId && <p className="text-destructive text-sm mt-1">{errors.poId}</p>}
+                {loadingPO && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Loading PO details…
+                  </p>
+                )}
+                {formData.supplierName && !loadingPO && (
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Supplier:{" "}
+                    <span className="text-foreground font-medium">
+                      {formData.supplierName}
+                    </span>
+                  </p>
+                )}
+                {errors.poId && (
+                  <p className="text-destructive text-sm mt-1">{errors.poId}</p>
+                )}
               </div>
 
+              {/* GRN Date */}
               <div>
                 <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                  Status
+                  GRN Date
                 </label>
-                <select
-                  value={formData.status}
-                  onChange={(e) => updateField("status", e.target.value)}
-                  className={inp}
-                >
-                  {statusOptions.map((st) => (
-                    <option key={st} value={st}>
-                      {st}
-                    </option>
-                  ))}
-                </select>
+                <div className="relative">
+                  <Calendar
+                    size={15}
+                    className="absolute left-3 top-3 text-muted-foreground"
+                  />
+                  <input
+                    type="date"
+                    value={formData.grnDate}
+                    onChange={(e) =>
+                      setFormData((p) => ({ ...p, grnDate: e.target.value }))
+                    }
+                    className={`${inp} pl-10`}
+                  />
+                </div>
+              </div>
+
+              {/* GRN Number — auto-generated preview */}
+              <div>
+                <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  GRN Number
+                </label>
+                <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-muted/40 border border-dashed border-border">
+                  <FileText
+                    size={14}
+                    className="text-muted-foreground shrink-0"
+                  />
+                  {formData.grnNo ? (
+                    <span className="font-mono text-sm text-primary font-semibold tracking-wide">
+                      {formData.grnNo}
+                    </span>
+                  ) : (
+                    <span className="text-sm text-muted-foreground/50 italic">
+                      Auto-generated on save
+                    </span>
+                  )}
+                </div>
               </div>
             </div>
 
@@ -673,87 +588,137 @@ export default function GRN() {
                 <h3 className="font-heading font-semibold text-sm flex items-center gap-2">
                   <Package size={17} /> Received Items
                 </h3>
-                <button
-                  onClick={addItem}
-                  className="flex items-center gap-1.5 text-primary hover:bg-primary/10 px-4 py-2 rounded-lg transition-colors text-sm"
-                >
-                  <Plus size={16} /> Add Item
-                </button>
+                {/* Add Item only when no PO is selected (manual entry fallback) */}
+                {!formData.poId && (
+                  <button
+                    onClick={() =>
+                      setFormData((prev) => ({
+                        ...prev,
+                        items: [...prev.items, createEmptyItem()],
+                      }))
+                    }
+                    className="flex items-center gap-1.5 text-primary hover:bg-primary/10 px-4 py-2 rounded-lg transition-colors text-sm"
+                  >
+                    <Plus size={16} /> Add Item
+                  </button>
+                )}
               </div>
 
-              {errors.items && <p className="text-destructive text-sm mb-3">{errors.items}</p>}
+              {errors.items && (
+                <p className="text-destructive text-sm mb-3">{errors.items}</p>
+              )}
 
               <div className="border border-border rounded-xl overflow-hidden">
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="bg-muted/50">
-                      <th className="px-4 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">Item</th>
-                      <th className="px-4 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">Ordered</th>
-                      <th className="px-4 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">Received</th>
-                      <th className="px-4 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">Remaining</th>
-                      <th className="px-4 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">UOM</th>
-                      <th className="w-12"></th>
+                      <th className="px-4 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                        Item
+                      </th>
+                      <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                        Ordered
+                      </th>
+                      <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                        Received
+                      </th>
+                      <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                        Remaining
+                      </th>
+                      <th className="px-4 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                        UOM
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
-                    {formData.items.map((item, idx) => (
-                      <tr key={idx}>
-                        <td className="p-3">
-                          <select
-                            value={item.itemId}
-                            onChange={(e) => updateItemField(idx, "itemId", e.target.value)}
-                            className={inp}
+                    {formData.items.map((item, idx) => {
+                      const fromPO = !!formData.poId;
+                      return (
+                        <tr key={idx}>
+                          {/* Item name — locked if from PO */}
+                          <td className="p-3">
+                            {fromPO ? (
+                              <span className="text-foreground font-medium">
+                                {item.itemName || "—"}
+                              </span>
+                            ) : (
+                              <input
+                                value={item.itemName}
+                                onChange={(e) => {
+                                  const nextItems = [...formData.items];
+                                  nextItems[idx] = {
+                                    ...nextItems[idx],
+                                    itemName: e.target.value,
+                                  };
+                                  setFormData((p) => ({
+                                    ...p,
+                                    items: nextItems,
+                                  }));
+                                }}
+                                placeholder="Item name"
+                                className={inp}
+                              />
+                            )}
+                          </td>
+                          {/* Ordered qty — locked, comes from PO */}
+                          <td className="p-3 text-right font-medium text-muted-foreground">
+                            {item.orderedQty}
+                          </td>
+                          {/* Received qty — always editable */}
+                          <td className="p-3">
+                            <input
+                              type="number"
+                              min={0}
+                              max={item.orderedQty || undefined}
+                              value={item.receivedQty}
+                              onChange={(e) =>
+                                updateReceivedQty(idx, Number(e.target.value))
+                              }
+                              className={`${inp} text-right`}
+                            />
+                          </td>
+                          {/* Remaining — computed */}
+                          <td
+                            className={`p-3 text-right font-semibold ${item.remainingQty > 0 ? "text-amber-500" : "text-green-500"}`}
                           >
-                            <option value="">Select Item</option>
-                            {items.map((it) => (
-                              <option key={it.value} value={it.value}>
-                                {it.label} {it.group && `(${it.group})`}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                        <td className="p-3">
-                          <input
-                            type="number"
-                            value={item.orderedQty}
-                            onChange={(e) => updateItemField(idx, "orderedQty", Number(e.target.value))}
-                            className={inp}
-                          />
-                        </td>
-                        <td className="p-3">
-                          <input
-                            type="number"
-                            value={item.receivedQty}
-                            onChange={(e) => updateItemField(idx, "receivedQty", Number(e.target.value))}
-                            className={inp}
-                          />
-                        </td>
-                        <td className="p-3 font-medium text-center">{item.remainingQty}</td>
-                        <td className="p-3">
-                          <select
-                            value={item.uom}
-                            onChange={(e) => updateItemField(idx, "uom", e.target.value)}
-                            className={inp}
-                          >
-                            <option value="">Select UOM</option>
-                            {uoms.map((u) => (
-                              <option key={u.value} value={u.value}>
-                                {u.label}
-                              </option>
-                            ))}
-                          </select>
-                        </td>
-                        <td className="p-3">
-                          <button
-                            onClick={() => removeItem(idx)}
-                            disabled={formData.items.length === 1}
-                            className="text-destructive hover:bg-destructive/10 p-2 rounded transition-colors disabled:opacity-50"
-                          >
-                            <Trash2 size={18} />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
+                            {item.remainingQty}
+                          </td>
+                          {/* UOM — locked if from PO */}
+                          <td className="p-3">
+                            {fromPO ? (
+                              <span className="text-foreground">
+                                {item.uom || "—"}
+                              </span>
+                            ) : (
+                              <select
+                                value={item.uom}
+                                onChange={(e) => {
+                                  const nextItems = [...formData.items];
+                                  nextItems[idx] = {
+                                    ...nextItems[idx],
+                                    uom: e.target.value,
+                                  };
+                                  setFormData((p) => ({
+                                    ...p,
+                                    items: nextItems,
+                                  }));
+                                }}
+                                className={inp}
+                              >
+                                <option value="">Select UOM</option>
+                                {uomsData
+                                  .filter((u: UOM) => u.IsActive !== false)
+                                  .map((u: UOM) => (
+                                    <option key={u.UOMCode} value={u.UOMCode}>
+                                      {u.UOMName}{" "}
+                                      {u.Symbol ? `(${u.Symbol})` : ""}
+                                    </option>
+                                  ))}
+                              </select>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -766,7 +731,9 @@ export default function GRN() {
               </label>
               <textarea
                 value={formData.remarks}
-                onChange={(e) => updateField("remarks", e.target.value)}
+                onChange={(e) =>
+                  setFormData((p) => ({ ...p, remarks: e.target.value }))
+                }
                 rows={3}
                 className={`${inp} resize-y`}
                 placeholder="Additional notes, remarks, etc."
@@ -777,10 +744,11 @@ export default function GRN() {
             <div className="flex gap-3 pt-4">
               <button
                 onClick={onSubmit}
-                className="flex-1 bg-primary text-primary-foreground py-3 rounded-lg font-semibold flex items-center justify-center gap-2 hover:bg-primary/90 transition-colors"
+                disabled={createMutation.isPending || updateMutation.isPending}
+                className="flex-1 bg-primary text-primary-foreground py-3 rounded-lg font-semibold flex items-center justify-center gap-2 hover:bg-primary/90 transition-colors disabled:opacity-60"
               >
                 <Save size={18} />
-                {editingId ? "Update GRN" : "Create GRN"}
+                {editingId ? "Update GRN" : "Save GRN"}
               </button>
               <button
                 onClick={resetForm}
@@ -797,7 +765,10 @@ export default function GRN() {
           <div className="flex justify-between items-center px-6 py-4 border-b border-border bg-card/60">
             <h3 className="font-heading font-semibold">GRN History</h3>
             <div className="relative w-80">
-              <Search size={15} className="absolute left-3 top-3 text-muted-foreground" />
+              <Search
+                size={15}
+                className="absolute left-3 top-3 text-muted-foreground"
+              />
               <input
                 type="text"
                 placeholder="Search GRN, PO or Supplier..."
@@ -839,6 +810,151 @@ export default function GRN() {
           </div>
         </div>
       </div>
+
+      {/* View GRN Modal */}
+      {viewingGrn &&
+        (() => {
+          const items = parseJsonArray<GRNItemLine>(viewingGrn.GRNItems);
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+              <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+                {/* Header */}
+                <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+                  <div>
+                    <h2 className="font-heading font-bold text-lg">
+                      {viewingGrn.GRNNo}
+                    </h2>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Goods Receipt Note
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setViewingGrn(null)}
+                    className="p-2 hover:bg-muted rounded-lg transition-colors"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                <div className="p-6 space-y-5">
+                  {/* Meta row */}
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
+                        Purchase Order
+                      </p>
+                      <p className="font-medium">
+                        {viewingGrn.PONumber || "—"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
+                        Supplier
+                      </p>
+                      <p className="font-medium">
+                        {viewingGrn.SupplierName || "—"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
+                        Date
+                      </p>
+                      <p className="font-medium">
+                        {viewingGrn.GRNDate
+                          ? new Date(viewingGrn.GRNDate).toLocaleDateString(
+                              "en-IN",
+                            )
+                          : "—"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
+                        Status
+                      </p>
+                      <StatusBadge status={viewingGrn.Status || "Draft"} />
+                    </div>
+                  </div>
+
+                  {/* Items table */}
+                  <div>
+                    <p className="text-xs uppercase tracking-widest text-muted-foreground mb-2">
+                      Received Items
+                    </p>
+                    <div className="border border-border rounded-xl overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="bg-muted/50">
+                            <th className="px-4 py-2.5 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                              Item
+                            </th>
+                            <th className="px-4 py-2.5 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                              Ordered
+                            </th>
+                            <th className="px-4 py-2.5 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                              Received
+                            </th>
+                            <th className="px-4 py-2.5 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                              Remaining
+                            </th>
+                            <th className="px-4 py-2.5 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                              UOM
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border">
+                          {items.length ? (
+                            items.map((item, i) => (
+                              <tr key={i}>
+                                <td className="px-4 py-3 font-medium">
+                                  {item.itemName || "—"}
+                                </td>
+                                <td className="px-4 py-3 text-right text-muted-foreground">
+                                  {item.orderedQty}
+                                </td>
+                                <td className="px-4 py-3 text-right font-semibold">
+                                  {item.receivedQty}
+                                </td>
+                                <td
+                                  className={`px-4 py-3 text-right font-semibold ${item.remainingQty > 0 ? "text-amber-500" : "text-green-500"}`}
+                                >
+                                  {item.remainingQty}
+                                </td>
+                                <td className="px-4 py-3 text-muted-foreground">
+                                  {item.uom || "—"}
+                                </td>
+                              </tr>
+                            ))
+                          ) : (
+                            <tr>
+                              <td
+                                colSpan={5}
+                                className="px-4 py-4 text-center text-muted-foreground"
+                              >
+                                No items
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Remarks */}
+                  {viewingGrn.Remarks && (
+                    <div>
+                      <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
+                        Remarks
+                      </p>
+                      <p className="text-sm text-foreground bg-muted/40 rounded-lg px-3 py-2">
+                        {viewingGrn.Remarks}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
     </>
   );
 }
