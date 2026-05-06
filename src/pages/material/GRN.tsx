@@ -246,13 +246,17 @@ export default function GRN() {
   // ── Mutations ────────────────────────────────────────────────────────────────
   const createMutation = useMutation({
     mutationFn: grnApi.addGRN,
-    onSuccess: async () => {
+    onSuccess: async (res) => {
       queryClient.invalidateQueries({ queryKey: ["grns"] });
       setPage(1);
+      const generated = res?.grnNo || "";
       setFormData(buildEmptyForm());
       setEditingId(null);
       setErrors({});
-      toast.success("GRN created successfully");
+      if (generated) {
+        setFormData((p) => ({ ...p, grnNo: generated }));
+      }
+      toast.success(`GRN ${generated} created successfully`);
     },
     onError: (err: any) => toast.error(err.message || "Failed to create GRN"),
   });
@@ -546,25 +550,27 @@ export default function GRN() {
                 </div>
               </div>
 
-              {/* GRN No — auto-generated, show as read-only preview when editing */}
-              {editingId && (
-                <div>
-                  <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
-                    GRN Number
-                  </label>
-                  <div className="relative">
-                    <FileText
-                      size={15}
-                      className="absolute left-3 top-3 text-muted-foreground"
-                    />
-                    <input
-                      value={formData.grnNo}
-                      readOnly
-                      className={`${inp} pl-10 opacity-60 cursor-not-allowed`}
-                    />
-                  </div>
+              {/* GRN Number — auto-generated preview */}
+              <div>
+                <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground mb-1.5">
+                  GRN Number
+                </label>
+                <div className="flex items-center gap-2 px-3 py-2.5 rounded-lg bg-muted/40 border border-dashed border-border">
+                  <FileText
+                    size={14}
+                    className="text-muted-foreground shrink-0"
+                  />
+                  {formData.grnNo ? (
+                    <span className="font-mono text-sm text-primary font-semibold tracking-wide">
+                      {formData.grnNo}
+                    </span>
+                  ) : (
+                    <span className="text-sm text-muted-foreground/50 italic">
+                      Auto-generated on save
+                    </span>
+                  )}
                 </div>
-              )}
+              </div>
             </div>
 
             {/* Items Table */}
