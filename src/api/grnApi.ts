@@ -131,10 +131,7 @@ export const addGRN = async (data: GRNFormDataPayload) => {
   const res = await fetch(BASE, {
     method: "POST",
     headers: getAuthHeaders(),
-    body: JSON.stringify({
-      ...data,
-      grnItems: JSON.stringify(data.grnItems),
-    }),
+    body: JSON.stringify({ ...data, grnItems: data.grnItems }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -147,10 +144,7 @@ export const updateGRN = async (id: string, data: GRNFormDataPayload) => {
   const res = await fetch(`${BASE}/${id}`, {
     method: "PUT",
     headers: getAuthHeaders(),
-    body: JSON.stringify({
-      ...data,
-      grnItems: JSON.stringify(data.grnItems),
-    }),
+    body: JSON.stringify({ ...data, grnItems: data.grnItems }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
