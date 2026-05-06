@@ -55,12 +55,9 @@ import {
   Hash,
   User,
   Banknote,
-<<<<<<< HEAD
   Eye,
-=======
   Truck,
   Package,
->>>>>>> 4d2d631e955ffa29a84e150b68cc6311a7b4ae04
 } from "lucide-react";
 import { toast } from "sonner";
 import { ApprovalActions } from "@/components/ApprovalActions";
@@ -1012,7 +1009,9 @@ export default function MaterialExpenseBooking() {
     import("./ExpenseBooking/types").EmiScheduleRow[] | null
   >(null);
   const [loadingEmi, setLoadingEmi] = useState(false);
-  const [previewRecord, setPreviewRecord] = useState<ExpenseRecord | null>(null);
+  const [previewRecord, setPreviewRecord] = useState<ExpenseRecord | null>(
+    null,
+  );
 
   const isEditing = editingId !== null;
 
@@ -1464,7 +1463,12 @@ export default function MaterialExpenseBooking() {
                   )}
                 </div>
                 <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end">
-                  <Button variant="outline" size="sm" className="flex-1 sm:flex-none" onClick={cancelForm}>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex-1 sm:flex-none"
+                    onClick={cancelForm}
+                  >
                     Cancel
                   </Button>
                   <Button
@@ -2121,7 +2125,7 @@ export default function MaterialExpenseBooking() {
                       }
                       rec={rec}
                       onEdit={() => openEdit(rec)}
-                        onPreview={() => setPreviewRecord(rec)}
+                      onPreview={() => setPreviewRecord(rec)}
                       onDelete={() => setDeleteId(rec.id)}
                       onApprovalSuccess={fetchRecords}
                     />
@@ -2351,7 +2355,10 @@ export default function MaterialExpenseBooking() {
       </Dialog>
 
       {/* Preview Dialog */}
-      <Dialog open={!!previewRecord} onOpenChange={() => setPreviewRecord(null)}>
+      <Dialog
+        open={!!previewRecord}
+        onOpenChange={() => setPreviewRecord(null)}
+      >
         <DialogContent className="w-[calc(100vw-2rem)] max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Expense Booking Preview</DialogTitle>
@@ -2363,54 +2370,98 @@ export default function MaterialExpenseBooking() {
             <div className="space-y-4 py-4">
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
                 <div>
-                  <p className="text-xs text-muted-foreground uppercase">Reference</p>
-                  <p className="font-medium">{previewRecord.bookingReference || "—"}</p>
+                  <p className="text-xs text-muted-foreground uppercase">
+                    Reference
+                  </p>
+                  <p className="font-medium">
+                    {previewRecord.bookingReference || "—"}
+                  </p>
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground uppercase">Status</p>
+                  <p className="text-xs text-muted-foreground uppercase">
+                    Status
+                  </p>
                   <div className="mt-1">
                     <StatusBadge status={previewRecord.status} />
                   </div>
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground uppercase">Date</p>
+                  <p className="text-xs text-muted-foreground uppercase">
+                    Date
+                  </p>
                   <p className="font-medium">{previewRecord.bookingDate}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground uppercase">Supplier</p>
+                  <p className="text-xs text-muted-foreground uppercase">
+                    Supplier
+                  </p>
                   <p className="font-medium">{previewRecord.supplier || "—"}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground uppercase">Type</p>
-                  <p className="font-medium">{previewRecord.docTypeName || "—"}</p>
+                  <p className="text-xs text-muted-foreground uppercase">
+                    Type
+                  </p>
+                  <p className="font-medium">
+                    {previewRecord.docTypeName || "—"}
+                  </p>
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground uppercase">Net Amount</p>
+                  <p className="text-xs text-muted-foreground uppercase">
+                    Net Amount
+                  </p>
                   <p className="font-medium text-emerald-600 dark:text-emerald-400">
                     ₹{fmt(previewRecord.netAmount ?? 0)}
                   </p>
                 </div>
               </div>
-              
+
               <div className="border-t border-border pt-4">
-                <p className="text-xs text-muted-foreground uppercase mb-3">Breakdown</p>
+                <p className="text-xs text-muted-foreground uppercase mb-3">
+                  Breakdown
+                </p>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 bg-muted/20 p-4 rounded-lg border border-border">
-                   <div>
-                    <p className="text-[10px] text-muted-foreground uppercase">Basic</p>
-                    <p className="font-mono text-sm font-semibold">₹{fmt(previewRecord.basicAmount)}</p>
+                  <div>
+                    <p className="text-[10px] text-muted-foreground uppercase">
+                      Basic
+                    </p>
+                    <p className="font-mono text-sm font-semibold">
+                      ₹{fmt(previewRecord.basicAmount)}
+                    </p>
                   </div>
                   <div>
-                    <p className="text-[10px] text-muted-foreground uppercase">CGST ({previewRecord.cgstRate}%)</p>
-                    <p className="font-mono text-sm font-semibold">₹{fmt((previewRecord.basicAmount * (previewRecord.cgstRate || 0)) / 100)}</p>
+                    <p className="text-[10px] text-muted-foreground uppercase">
+                      CGST ({previewRecord.cgstRate}%)
+                    </p>
+                    <p className="font-mono text-sm font-semibold">
+                      ₹
+                      {fmt(
+                        (previewRecord.basicAmount *
+                          (previewRecord.cgstRate || 0)) /
+                          100,
+                      )}
+                    </p>
                   </div>
                   <div>
-                    <p className="text-[10px] text-muted-foreground uppercase">SGST ({previewRecord.sgstRate}%)</p>
-                    <p className="font-mono text-sm font-semibold">₹{fmt((previewRecord.basicAmount * (previewRecord.sgstRate || 0)) / 100)}</p>
+                    <p className="text-[10px] text-muted-foreground uppercase">
+                      SGST ({previewRecord.sgstRate}%)
+                    </p>
+                    <p className="font-mono text-sm font-semibold">
+                      ₹
+                      {fmt(
+                        (previewRecord.basicAmount *
+                          (previewRecord.sgstRate || 0)) /
+                          100,
+                      )}
+                    </p>
                   </div>
                   <div>
-                    <p className="text-[10px] text-muted-foreground uppercase">Discount</p>
+                    <p className="text-[10px] text-muted-foreground uppercase">
+                      Discount
+                    </p>
                     <p className="font-mono text-sm font-semibold text-red-500">
-                      {previewRecord.discount?.applicable ? `-₹${fmt(previewRecord.discount.amount)}` : "—"}
+                      {previewRecord.discount?.applicable
+                        ? `-₹${fmt(previewRecord.discount.amount)}`
+                        : "—"}
                     </p>
                   </div>
                 </div>
@@ -2418,8 +2469,12 @@ export default function MaterialExpenseBooking() {
 
               {previewRecord.remarks && (
                 <div className="border-t border-border pt-4">
-                  <p className="text-xs text-muted-foreground uppercase mb-2">Remarks</p>
-                  <p className="text-sm bg-muted/30 p-3 rounded-lg border border-border">{previewRecord.remarks}</p>
+                  <p className="text-xs text-muted-foreground uppercase mb-2">
+                    Remarks
+                  </p>
+                  <p className="text-sm bg-muted/30 p-3 rounded-lg border border-border">
+                    {previewRecord.remarks}
+                  </p>
                 </div>
               )}
             </div>
