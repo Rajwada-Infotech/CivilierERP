@@ -92,7 +92,11 @@ const buildUrl = (base: string, params: Record<string, unknown> = {}) => {
 };
 
 const normalizeArray = <T>(payload: any): T[] =>
-  Array.isArray(payload) ? payload : Array.isArray(payload?.data) ? payload.data : [];
+  Array.isArray(payload)
+    ? payload
+    : Array.isArray(payload?.data)
+      ? payload.data
+      : [];
 
 const normalizePaginated = <T>(payload: any): PaginatedResponse<T> => {
   if (Array.isArray(payload)) {
@@ -127,9 +131,9 @@ export const addGRN = async (data: GRNFormDataPayload) => {
   const res = await fetch(BASE, {
     method: "POST",
     headers: getAuthHeaders(),
-    body: JSON.stringify({ 
-      ...data, 
-      grnItems: JSON.stringify(data.grnItems) 
+    body: JSON.stringify({
+      ...data,
+      grnItems: JSON.stringify(data.grnItems),
     }),
   });
   if (!res.ok) {
@@ -143,9 +147,9 @@ export const updateGRN = async (id: string, data: GRNFormDataPayload) => {
   const res = await fetch(`${BASE}/${id}`, {
     method: "PUT",
     headers: getAuthHeaders(),
-    body: JSON.stringify({ 
-      ...data, 
-      grnItems: JSON.stringify(data.grnItems) 
+    body: JSON.stringify({
+      ...data,
+      grnItems: JSON.stringify(data.grnItems),
     }),
   });
   if (!res.ok) {
@@ -179,7 +183,7 @@ export const getSuppliers = async (): Promise<Supplier[]> => {
 };
 
 export const getPurchaseOrders = async (): Promise<PurchaseOrder[]> => {
-  const res = await fetch(buildUrl("/api/purchase-orders", { limit: 100 }), {
+  const res = await fetch(buildUrl("/api/purchase-orders", { limit: 500 }), {
     headers: getAuthHeaders(),
   });
   if (!res.ok) throw new Error("Failed to fetch Purchase Orders");
@@ -199,7 +203,7 @@ export const getUoms = async (): Promise<UOM[]> => {
   const res = await fetch("/api/uom-master", { headers: getAuthHeaders() });
   if (!res.ok) throw new Error("Failed to fetch UOMs");
   const data = await res.json();
-  return Array.isArray(data) 
-    ? data.filter((u: UOM) => u.IsActive !== false) 
+  return Array.isArray(data)
+    ? data.filter((u: UOM) => u.IsActive !== false)
     : [];
 };

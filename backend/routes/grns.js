@@ -4,17 +4,24 @@ const { bumpCacheVersion } = require("../redis");
 const { transition, guardEdit } = require("../services/approvalService");
 const router = express.Router();
 const { getPool, sql } = require("../db");
-const { lockNextDocNumber, backPatchRecordId } = require("../utils/docNumberLock");
+const {
+  lockNextDocNumber,
+  backPatchRecordId,
+} = require("../utils/docNumberLock");
 
 const requireUserEmail = (req, res) => {
   const email = req.user?.email;
-  if (!email) { res.status(401).json({ error: "User context missing" }); return null; }
+  if (!email) {
+    res.status(401).json({ error: "User context missing" });
+    return null;
+  }
   return email;
 };
 
 function parseGRNItems(grnItems) {
   if (Array.isArray(grnItems)) return grnItems;
-  if (typeof grnItems === "string" && grnItems.trim()) return JSON.parse(grnItems);
+  if (typeof grnItems === "string" && grnItems.trim())
+    return JSON.parse(grnItems);
   return [];
 }
 
@@ -58,10 +65,10 @@ router.get("/", cache("grns", 300), async (req, res) => {
     const total = parseInt(countResult.recordset[0].total);
 
     // Paginated data
-    const result = await pool.request()
-      .input('offset', sql.Int, offset)
-      .input('limit', sql.Int, limit)
-      .query(`
+    const result = await pool
+      .request()
+      .input("offset", sql.Int, offset)
+      .input("limit", sql.Int, limit).query(`
       SELECT
         grn.GRNID,
         grn.GRNNo,
@@ -91,7 +98,7 @@ router.get("/", cache("grns", 300), async (req, res) => {
       page,
       limit,
       total,
-      totalPages: Math.ceil(total / limit)
+      totalPages: Math.ceil(total / limit),
     });
   } catch (err) {
     console.error("GET GRN ERROR:", err);
@@ -104,13 +111,23 @@ router.get("/", cache("grns", 300), async (req, res) => {
 
 // POST - Create GRN + Stock Ledger Entries
 router.post("/", async (req, res) => {
-  const { grnNo, grnDate, supplierId, poId, grnItems, status, remarks, docTypeId, docNo, finYear } =
-    req.body;
+  const {
+    grnNo,
+    grnDate,
+    supplierId,
+    poId,
+    grnItems,
+    status,
+    remarks,
+    docTypeId,
+    docNo,
+    finYear,
+  } = req.body;
 
-  if (!grnDate || !supplierId || (!grnNo && !docTypeId)) {
+  if (!grnDate || !supplierId) {
     return res
       .status(400)
-      .json({ error: "GRNDate, SupplierID, and either GRNNo or DocTypeId are required" });
+      .json({ error: "GRNDate and SupplierID are required" });
   }
 
   const pool = getPool();
@@ -122,12 +139,25 @@ router.post("/", async (req, res) => {
     let finalDocNo = grnNo || docNo || null;
 
     if (docTypeId) {
-      finalDocNo = await lockNextDocNumber(transaction, sql, {
+      // Use TypeOfDoc-based sequence if docTypeId is provided
+      finalDocNo = await lockNextDocNumber(pool, sql, {
         docTypeId: parseInt(docTypeId, 10),
         finYear,
         tableName: "GoodsReceiptNotes",
+        docNoColumn: "GRNNo",
         issuedBy: req.user?.email || req.user?.name || null,
       });
+    } else if (!finalDocNo) {
+      // Auto-generate GRN number from GRN table sequence
+      const seqResult = await pool
+        .request()
+        .query(
+          "SELECT ISNULL(MAX(GRNID), 0) + 1 AS NextId FROM dbo.GoodsReceiptNotes",
+        );
+      const nextId = seqResult.recordset[0].NextId;
+      const padded = String(nextId).padStart(6, "0");
+      const fy = (finYear || "").toString().trim();
+      finalDocNo = fy ? `CI/REC/${padded}/${fy}` : `CI/REC/${padded}`;
     }
 
     // Insert GRN Header
@@ -154,7 +184,7 @@ router.post("/", async (req, res) => {
 
     if (docTypeId && finalDocNo) {
       await backPatchRecordId(
-        transaction,
+        pool,
         sql,
         finalDocNo,
         "GoodsReceiptNotes",
@@ -192,8 +222,17 @@ router.put("/:id", async (req, res) => {
     return res.status(400).json({ error: err.message });
   }
 
-  const { grnNo, grnDate, supplierId, poId, grnItems, status, remarks, docTypeId, docNo } =
-    req.body;
+  const {
+    grnNo,
+    grnDate,
+    supplierId,
+    poId,
+    grnItems,
+    status,
+    remarks,
+    docTypeId,
+    docNo,
+  } = req.body;
   const grnId = parseInt(req.params.id, 10);
 
   const pool = getPool();
@@ -235,7 +274,9 @@ router.put("/:id", async (req, res) => {
     await transaction
       .request()
       .input("RefID", sql.Int, grnId)
-      .query("DELETE FROM StockLedger WHERE RefType = 'GRN' AND RefID = @RefID");
+      .query(
+        "DELETE FROM StockLedger WHERE RefType = 'GRN' AND RefID = @RefID",
+      );
 
     await insertStockLedgerEntries(transaction, grnId, grnItems);
     await transaction.commit();
@@ -265,7 +306,9 @@ router.delete("/:id", async (req, res) => {
     await transaction
       .request()
       .input("RefID", sql.Int, grnId)
-      .query("DELETE FROM StockLedger WHERE RefType = 'GRN' AND RefID = @RefID");
+      .query(
+        "DELETE FROM StockLedger WHERE RefType = 'GRN' AND RefID = @RefID",
+      );
 
     const result = await transaction
       .request()
@@ -299,7 +342,13 @@ router.put("/:id/submit", async (req, res) => {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
 
-    const result = await transition("goods-receipt", id, "Pending", userEmail, req.user?.role);
+    const result = await transition(
+      "goods-receipt",
+      id,
+      "Pending",
+      userEmail,
+      req.user?.role,
+    );
     await bumpCacheVersion("goods-receipt");
     res.json({ message: "GRN submitted for approval", ...result });
   } catch (err) {
@@ -315,7 +364,13 @@ router.put("/:id/approve", async (req, res) => {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
 
-    const result = await transition("goods-receipt", id, "Approved", userEmail, req.user?.role);
+    const result = await transition(
+      "goods-receipt",
+      id,
+      "Approved",
+      userEmail,
+      req.user?.role,
+    );
     await bumpCacheVersion("goods-receipt");
     res.json({ message: "GRN approved", ...result });
   } catch (err) {
@@ -333,7 +388,14 @@ router.put("/:id/reject", async (req, res) => {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
 
-    const result = await transition("goods-receipt", id, "Rejected", userEmail, req.user?.role, note || null);
+    const result = await transition(
+      "goods-receipt",
+      id,
+      "Rejected",
+      userEmail,
+      req.user?.role,
+      note || null,
+    );
     await bumpCacheVersion("goods-receipt");
     res.json({ message: "GRN rejected", ...result });
   } catch (err) {
