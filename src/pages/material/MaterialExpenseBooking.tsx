@@ -55,6 +55,7 @@ import {
   Hash,
   User,
   Banknote,
+  Eye,
   Truck,
   Package,
 } from "lucide-react";
@@ -1008,6 +1009,9 @@ export default function MaterialExpenseBooking() {
     import("./ExpenseBooking/types").EmiScheduleRow[] | null
   >(null);
   const [loadingEmi, setLoadingEmi] = useState(false);
+  const [previewRecord, setPreviewRecord] = useState<ExpenseRecord | null>(
+    null,
+  );
 
   const isEditing = editingId !== null;
 
@@ -1220,6 +1224,7 @@ export default function MaterialExpenseBooking() {
     setSelectedDoc(null);
     setSelectedTod(null);
     setLiveEmiSchedule(null);
+    setPreviewRecord(null);
   };
 
   const openNew = () => {
@@ -1413,8 +1418,8 @@ export default function MaterialExpenseBooking() {
       <Breadcrumbs items={["Dashboard", "Material", "Expense Booking"]} />
       <div className="space-y-5">
         {/* Page Header */}
-        <div className="flex items-center justify-between gap-3">
-          <div>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="w-full sm:w-auto">
             <h1 className="text-xl font-heading font-bold text-foreground">
               Expense Booking
             </h1>
@@ -1425,7 +1430,7 @@ export default function MaterialExpenseBooking() {
           </div>
           {view === "list" && (
             <Button
-              className="gradient-accent shrink-0 gap-1.5"
+              className="gradient-accent shrink-0 gap-1.5 w-full sm:w-auto"
               onClick={openNew}
             >
               <Plus size={14} /> New Booking
@@ -1437,8 +1442,8 @@ export default function MaterialExpenseBooking() {
         {view === "form" && (
           <Card className="border-border shadow-sm">
             <CardHeader className="pb-4 border-b border-border px-5 sm:px-6">
-              <div className="flex items-center justify-between gap-3">
-                <div className="flex items-center gap-3 min-w-0">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex items-center gap-3 min-w-0 w-full sm:w-auto">
                   <button
                     type="button"
                     onClick={cancelForm}
@@ -1457,13 +1462,18 @@ export default function MaterialExpenseBooking() {
                     </span>
                   )}
                 </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <Button variant="outline" size="sm" onClick={cancelForm}>
+                <div className="flex items-center gap-2 shrink-0 w-full sm:w-auto justify-end">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex-1 sm:flex-none"
+                    onClick={cancelForm}
+                  >
                     Cancel
                   </Button>
                   <Button
                     size="sm"
-                    className="gradient-accent"
+                    className="gradient-accent flex-1 sm:flex-none"
                     onClick={handleSave}
                     disabled={saving}
                   >
@@ -2115,6 +2125,7 @@ export default function MaterialExpenseBooking() {
                       }
                       rec={rec}
                       onEdit={() => openEdit(rec)}
+                      onPreview={() => setPreviewRecord(rec)}
                       onDelete={() => setDeleteId(rec.id)}
                       onApprovalSuccess={fetchRecords}
                     />
@@ -2223,6 +2234,15 @@ export default function MaterialExpenseBooking() {
                                       variant="outline"
                                       size="sm"
                                       className="h-7 w-7 p-0"
+                                      onClick={() => setPreviewRecord(rec)}
+                                      title="Preview"
+                                    >
+                                      <Eye size={12} />
+                                    </Button>
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-7 w-7 p-0"
                                       onClick={() => openEdit(rec)}
                                     >
                                       <Edit size={12} />
@@ -2264,8 +2284,8 @@ export default function MaterialExpenseBooking() {
 
                 {/* Pagination */}
                 {totalPages > 1 && (
-                  <div className="flex items-center justify-between mt-2 px-1">
-                    <p className="text-xs text-muted-foreground">
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mt-2 px-1">
+                    <p className="text-xs text-muted-foreground text-center sm:text-left">
                       Page {page} of {totalPages} · {totalRecords} total
                     </p>
                     <div className="flex items-center gap-1">
@@ -2329,6 +2349,139 @@ export default function MaterialExpenseBooking() {
               onClick={() => deleteId && handleDelete(deleteId)}
             >
               Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Preview Dialog */}
+      <Dialog
+        open={!!previewRecord}
+        onOpenChange={() => setPreviewRecord(null)}
+      >
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Expense Booking Preview</DialogTitle>
+            <DialogDescription>
+              Details for booking {previewRecord?.bookingReference}
+            </DialogDescription>
+          </DialogHeader>
+          {previewRecord && (
+            <div className="space-y-4 py-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                <div>
+                  <p className="text-xs text-muted-foreground uppercase">
+                    Reference
+                  </p>
+                  <p className="font-medium">
+                    {previewRecord.bookingReference || "—"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground uppercase">
+                    Status
+                  </p>
+                  <div className="mt-1">
+                    <StatusBadge status={previewRecord.status} />
+                  </div>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground uppercase">
+                    Date
+                  </p>
+                  <p className="font-medium">{previewRecord.bookingDate}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground uppercase">
+                    Supplier
+                  </p>
+                  <p className="font-medium">{previewRecord.supplier || "—"}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground uppercase">
+                    Type
+                  </p>
+                  <p className="font-medium">
+                    {previewRecord.docTypeName || "—"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground uppercase">
+                    Net Amount
+                  </p>
+                  <p className="font-medium text-emerald-600 dark:text-emerald-400">
+                    ₹{fmt(previewRecord.netAmount ?? 0)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="border-t border-border pt-4">
+                <p className="text-xs text-muted-foreground uppercase mb-3">
+                  Breakdown
+                </p>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 bg-muted/20 p-4 rounded-lg border border-border">
+                  <div>
+                    <p className="text-[10px] text-muted-foreground uppercase">
+                      Basic
+                    </p>
+                    <p className="font-mono text-sm font-semibold">
+                      ₹{fmt(previewRecord.basicAmount)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-muted-foreground uppercase">
+                      CGST ({previewRecord.cgstRate}%)
+                    </p>
+                    <p className="font-mono text-sm font-semibold">
+                      ₹
+                      {fmt(
+                        (previewRecord.basicAmount *
+                          (previewRecord.cgstRate || 0)) /
+                          100,
+                      )}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-muted-foreground uppercase">
+                      SGST ({previewRecord.sgstRate}%)
+                    </p>
+                    <p className="font-mono text-sm font-semibold">
+                      ₹
+                      {fmt(
+                        (previewRecord.basicAmount *
+                          (previewRecord.sgstRate || 0)) /
+                          100,
+                      )}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] text-muted-foreground uppercase">
+                      Discount
+                    </p>
+                    <p className="font-mono text-sm font-semibold text-red-500">
+                      {previewRecord.discount?.applicable
+                        ? `-₹${fmt(previewRecord.discount.amount)}`
+                        : "—"}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {previewRecord.remarks && (
+                <div className="border-t border-border pt-4">
+                  <p className="text-xs text-muted-foreground uppercase mb-2">
+                    Remarks
+                  </p>
+                  <p className="text-sm bg-muted/30 p-3 rounded-lg border border-border">
+                    {previewRecord.remarks}
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPreviewRecord(null)}>
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>
