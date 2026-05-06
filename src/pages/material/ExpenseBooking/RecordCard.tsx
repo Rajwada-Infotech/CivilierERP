@@ -1,6 +1,6 @@
 import React from "react";
 import { Button } from "@/components/ui/button";
-import { Edit, Trash2 } from "lucide-react";
+import { Edit, Trash2, Eye } from "lucide-react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { computeBreakdown, fmt } from "./helpers";
@@ -9,11 +9,12 @@ import type { ExpenseRecord } from "./types";
 interface Props {
   rec: ExpenseRecord;
   onEdit: () => void;
+  onPreview: () => void;
   onDelete: () => void;
   onApprovalSuccess: () => void;
 }
 
-export function RecordCard({ rec, onEdit, onDelete, onApprovalSuccess }: Props) {
+export function RecordCard({ rec, onEdit, onPreview, onDelete, onApprovalSuccess }: Props) {
   const rbd = computeBreakdown(rec.basicAmount, rec.cgstRate, rec.sgstRate, rec.discount);
 
   return (
@@ -70,6 +71,9 @@ export function RecordCard({ rec, onEdit, onDelete, onApprovalSuccess }: Props) 
             endpoint="/api/expense-booking"
             onSuccess={onApprovalSuccess}
           />
+          <Button variant="outline" size="sm" className="h-8 w-8 p-0" onClick={onPreview}>
+            <Eye size={13} />
+          </Button>
           <Button variant="outline" size="sm" className="h-8 w-8 p-0" onClick={onEdit}>
             <Edit size={13} />
           </Button>

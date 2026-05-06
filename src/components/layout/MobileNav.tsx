@@ -39,6 +39,7 @@ import {
   ShoppingCart,
   TrendingUp,
   CheckSquare,
+  PackageMinus,
 } from "lucide-react";
 
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -211,6 +212,11 @@ case "material":
                 label: "Purchase Order",
                 path: "/material/purchase-order",
                 icon: FileText,
+              },
+              {
+                label: "Issues",
+                path: "/material/issues",
+                icon: PackageMinus,
               },
             ],
           },
