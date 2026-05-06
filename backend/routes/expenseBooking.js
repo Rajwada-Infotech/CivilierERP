@@ -424,8 +424,16 @@ router.post("/", async (req, res) => {
       .input("EProjectName", sql.NVarChar(150), EProjectName || null)
       .input("EDocumentType", sql.NVarChar(50), EDocumentType || null)
       .input("EDocDate", sql.Date, EDocDate || null)
-      .input("EAmount", sql.Decimal(18, 2), EAmount || null)
-      .input("ENetAmount", sql.Decimal(18, 2), ENetAmount || null)
+      .input(
+        "EAmount",
+        sql.Decimal(18, 2),
+        EAmount != null && EAmount !== "" ? Number(EAmount) : 0,
+      )
+      .input(
+        "ENetAmount",
+        sql.Decimal(18, 2),
+        ENetAmount != null && ENetAmount !== "" ? Number(ENetAmount) : 0,
+      )
       .input("ECgstRate", sql.Decimal(5, 2), ECgstRate ?? 0)
       .input("ESgstRate", sql.Decimal(5, 2), ESgstRate ?? 0)
       .input(
@@ -462,7 +470,8 @@ router.post("/", async (req, res) => {
       )
       .input("EFinYear", sql.NVarChar(20), EFinYear || null)
       .input("ESourceType", sql.NVarChar(20), ESourceType || null)
-      .input("ESourceId", sql.Int, ESourceId ? parseInt(ESourceId, 10) : null).query(`
+      .input("ESourceId", sql.Int, ESourceId ? parseInt(ESourceId, 10) : null)
+      .query(`
         INSERT INTO dbo.ExpenseBooking (
           EName, EProjectName, EDocumentType, EDocDate, EAmount, ENetAmount,
           ECgstRate, ESgstRate, EDiscountData, EDocNo,
@@ -929,8 +938,16 @@ router.put("/:id", async (req, res) => {
       .input("EProjectName", sql.NVarChar(150), EProjectName || null)
       .input("EDocumentType", sql.NVarChar(50), EDocumentType || null)
       .input("EDocDate", sql.Date, EDocDate || null)
-      .input("EAmount", sql.Decimal(18, 2), EAmount || null)
-      .input("ENetAmount", sql.Decimal(18, 2), ENetAmount || null)
+      .input(
+        "EAmount",
+        sql.Decimal(18, 2),
+        EAmount != null && EAmount !== "" ? Number(EAmount) : 0,
+      )
+      .input(
+        "ENetAmount",
+        sql.Decimal(18, 2),
+        ENetAmount != null && ENetAmount !== "" ? Number(ENetAmount) : 0,
+      )
       .input("ECgstRate", sql.Decimal(5, 2), ECgstRate ?? 0)
       .input("ESgstRate", sql.Decimal(5, 2), ESgstRate ?? 0)
       .input(
@@ -964,7 +981,8 @@ router.put("/:id", async (req, res) => {
       )
       .input("EFinYear", sql.NVarChar(20), EFinYear || null)
       .input("ESourceType", sql.NVarChar(20), ESourceType || null)
-      .input("ESourceId", sql.Int, ESourceId ? parseInt(ESourceId, 10) : null).query(`
+      .input("ESourceId", sql.Int, ESourceId ? parseInt(ESourceId, 10) : null)
+      .query(`
         UPDATE dbo.ExpenseBooking SET
           EName=@EName, EProjectName=@EProjectName, EDocumentType=@EDocumentType, EDocDate=@EDocDate,
           EAmount=@EAmount, ENetAmount=@ENetAmount, ECgstRate=@ECgstRate, ESgstRate=@ESgstRate,
@@ -1124,7 +1142,9 @@ router.get("/chain-status", async (req, res) => {
   const srcId = parseInt(sourceId, 10);
 
   if (!sourceType || !srcId || !Number.isFinite(srcId)) {
-    return res.status(400).json({ error: "sourceType and sourceId are required" });
+    return res
+      .status(400)
+      .json({ error: "sourceType and sourceId are required" });
   }
 
   try {
@@ -1174,8 +1194,7 @@ router.get("/chain-status", async (req, res) => {
     let isPaid = false;
 
     if (expenseDocNos.length > 0) {
-      const payResult = await pool
-        .request().query(`
+      const payResult = await pool.request().query(`
           SELECT COUNT(*) AS payCount,
                  SUM(PAmount) AS totalPaid
           FROM dbo.NewPayment
@@ -1192,13 +1211,86 @@ router.get("/chain-status", async (req, res) => {
       expenseCount,
       latestExpenseDocNo: latestExpense?.EDocNo ?? null,
       latestExpenseStatus: latestExpense?.EStatus ?? null,
-      latestExpenseAmount: latestExpense?.ENetAmount ?? latestExpense?.EAmount ?? null,
+      latestExpenseAmount:
+        latestExpense?.ENetAmount ?? latestExpense?.EAmount ?? null,
       paymentCount,
       latestPaymentAmount,
       isPaid,
     });
   } catch (err) {
     console.error("Chain status error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── GET /:id/grns ────────────────────────────────────────────────────────────
+// Returns GRNs linked to an expense booking.
+// Two strategies:
+//   1. If ESourceType = 'GRN', look up the single GRN by ESourceId.
+//   2. Also check GoodsReceiptNotes where any payment references this booking's EDocNo
+//      (belt-and-suspenders for older records that pre-date ESourceType tracking).
+router.get("/:id/grns", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id) || id <= 0)
+    return res.status(400).json({ error: "Invalid id" });
+
+  try {
+    const pool = getPool();
+
+    // Step 1: fetch the expense booking to know its ESourceType / ESourceId / EDocNo
+    const ebResult = await pool
+      .request()
+      .input("Eid", sql.Int, id)
+      .query(
+        "SELECT ESourceType, ESourceId, EDocNo FROM dbo.ExpenseBooking WHERE Eid = @Eid",
+      );
+
+    if (!ebResult.recordset.length)
+      return res.status(404).json({ error: "Expense booking not found" });
+
+    const { ESourceType, ESourceId, EDocNo } = ebResult.recordset[0];
+
+    const grnIds = new Set();
+
+    // Strategy 1: direct GRN source link
+    if (ESourceType === "GRN" && ESourceId) {
+      grnIds.add(parseInt(ESourceId, 10));
+    }
+
+    // Strategy 2: any GRN whose EDocNo matches expense's EDocNo (legacy)
+    if (EDocNo) {
+      const legacyResult = await pool
+        .request()
+        .input("EDocNo", sql.NVarChar(100), EDocNo)
+        .query(`SELECT GRNID FROM dbo.GoodsReceiptNotes WHERE GRNNo = @EDocNo`);
+      for (const row of legacyResult.recordset) {
+        grnIds.add(row.GRNID);
+      }
+    }
+
+    if (grnIds.size === 0) return res.json([]);
+
+    // Fetch full GRN details for all matched IDs
+    const idList = Array.from(grnIds).join(",");
+    const grnResult = await pool.request().query(`
+      SELECT
+        grn.GRNID,
+        grn.GRNNo,
+        grn.GRNDate,
+        grn.Status,
+        grn.Remarks,
+        p.PurchaseOrderNo AS PONumber,
+        s.LHeadName       AS SupplierName
+      FROM dbo.GoodsReceiptNotes grn
+      LEFT JOIN dbo.PurchaseOrders p ON grn.POID = p.PurchaseOrderID
+      LEFT JOIN dbo.AccountHeadMaster s ON grn.SupplierID = s.LHeadId
+      WHERE grn.GRNID IN (${idList})
+      ORDER BY grn.GRNID DESC
+    `);
+
+    res.json(grnResult.recordset);
+  } catch (err) {
+    console.error("Expense GRNs error:", err.message);
     res.status(500).json({ error: err.message });
   }
 });

@@ -55,11 +55,16 @@ import {
   Hash,
   User,
   Banknote,
+<<<<<<< HEAD
   Eye,
+=======
+  Truck,
+  Package,
+>>>>>>> 4d2d631e955ffa29a84e150b68cc6311a7b4ae04
 } from "lucide-react";
 import { toast } from "sonner";
-import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
+import { StatusBadge } from "@/components/StatusBadge";
 import { Field, PriceBreakdownPanel } from "./ExpenseBooking/FormPrimitives";
 import { BillingAccordion } from "./ExpenseBooking/BillingAccordion";
 import { EmiSection } from "./ExpenseBooking/EmiSection";
@@ -94,7 +99,8 @@ const _mastersCache: {
   po: POItem[] | null;
   wo: WOItem[] | null;
   tod: TodItem[] | null;
-} = { po: null, wo: null, tod: null };
+  grn: GRNItem[] | null;
+} = { po: null, wo: null, tod: null, grn: null };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface CompanyOption {
@@ -143,7 +149,16 @@ interface TodItem {
   Description: string;
   EntryType?: string;
 }
-type SourceKind = "PO" | "WO" | "TOD";
+type SourceKind = "PO" | "WO" | "TOD" | "GRN";
+
+interface GRNItemLine {
+  itemName?: string;
+  orderedQty: number;
+  receivedQty: number;
+  remainingQty: number;
+  uom?: string;
+}
+
 interface SelectedDoc {
   kind: SourceKind;
   docNo: string;
@@ -156,6 +171,20 @@ interface SelectedDoc {
   status?: string;
   date?: string;
   gst?: GSTConfig | null;
+  grnItems?: GRNItemLine[];
+}
+
+interface GRNItem {
+  GRNID: number;
+  GRNNo: string;
+  GRNDate: string;
+  SupplierName?: string;
+  PONumber?: string;
+  POID?: number;
+  Status?: string;
+  TotalItems?: number;
+  Remarks?: string;
+  GRNItems?: string | GRNItemLine[];
 }
 
 // ─── Small UI helpers ─────────────────────────────────────────────────────────
@@ -163,6 +192,7 @@ const SECTION_ICONS: Record<string, React.ElementType> = {
   "Document Selection": FileText,
   "Booking Information": CalendarDays,
   "Amount & GST": BadgePercent,
+  "GRN Items Summary": Truck,
   "Billing Terms": Receipt,
   "EMI / Installment Options": CreditCard,
   "Approval Workflow": CheckCircle2,
@@ -331,9 +361,11 @@ interface DocSelectorProps {
   poList: POItem[];
   woList: WOItem[];
   todList: TodItem[];
+  grnList: GRNItem[];
   loadingPO: boolean;
   loadingWO: boolean;
   loadingTOD: boolean;
+  loadingGRN: boolean;
   selected: SelectedDoc | null;
   finYear?: string;
   onSelect: (doc: SelectedDoc) => void;
@@ -345,9 +377,11 @@ function DocSelectorPanel({
   poList,
   woList,
   todList,
+  grnList,
   loadingPO,
   loadingWO,
   loadingTOD,
+  loadingGRN,
   selected,
   finYear,
   onSelect,
@@ -397,11 +431,24 @@ function DocSelectorPanel({
       (t.FullPrefix ?? t.Prefix).toLowerCase().includes(q) ||
       t.Description.toLowerCase().includes(q),
   );
+  const filteredGRN = grnList.filter(
+    (g) =>
+      (g.GRNNo || "").toLowerCase().includes(q) ||
+      (g.SupplierName || "").toLowerCase().includes(q) ||
+      (g.PONumber || "").toLowerCase().includes(q),
+  );
 
   if (selected) {
     const isPO = selected.kind === "PO",
-      isWO = selected.kind === "WO";
-    const Icon = isPO ? ShoppingCart : isWO ? HardHat : FileText;
+      isWO = selected.kind === "WO",
+      isGRN = selected.kind === "GRN";
+    const Icon = isPO
+      ? ShoppingCart
+      : isWO
+        ? HardHat
+        : isGRN
+          ? Truck
+          : FileText;
     const colors = isPO
       ? {
           ring: "border-blue-500/30 bg-blue-500/5",
@@ -418,13 +465,21 @@ function DocSelectorPanel({
             badge:
               "bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/20",
           }
-        : {
-            ring: "border-emerald-500/30 bg-emerald-500/5",
-            icon: "bg-emerald-500/10",
-            text: "text-emerald-500",
-            badge:
-              "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
-          };
+        : isGRN
+          ? {
+              ring: "border-teal-500/30 bg-teal-500/5",
+              icon: "bg-teal-500/10",
+              text: "text-teal-500",
+              badge:
+                "bg-teal-500/10 text-teal-600 dark:text-teal-400 border-teal-500/20",
+            }
+          : {
+              ring: "border-emerald-500/30 bg-emerald-500/5",
+              icon: "bg-emerald-500/10",
+              text: "text-emerald-500",
+              badge:
+                "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
+            };
     return (
       <div className={`rounded-xl border p-4 ${colors.ring}`}>
         <div className="flex items-start gap-3">
@@ -438,7 +493,13 @@ function DocSelectorPanel({
               <span
                 className={`text-xs font-heading font-semibold ${colors.text}`}
               >
-                {isPO ? "Purchase Order" : isWO ? "Work Order" : "Document"}
+                {isPO
+                  ? "Purchase Order"
+                  : isWO
+                    ? "Work Order"
+                    : isGRN
+                      ? "Goods Receipt Note"
+                      : "Document"}
               </span>
               <span
                 className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold border ${colors.badge}`}
@@ -455,17 +516,78 @@ function DocSelectorPanel({
               {selected.vendorLabel && (
                 <InfoPill
                   icon={User}
-                  label={isPO ? "Supplier" : "Contractor"}
+                  label={
+                    isPO
+                      ? "Supplier"
+                      : isWO
+                        ? "Contractor"
+                        : isGRN
+                          ? "Supplier"
+                          : "Vendor"
+                  }
                   value={selected.vendorLabel}
                 />
               )}
-              {selected.amount != null && (
+              {!isGRN && selected.amount != null && (
                 <InfoPill
                   icon={Banknote}
                   label="Order Value"
                   value={`₹${fmt(selected.amount)}`}
                 />
               )}
+              {isGRN &&
+                Array.isArray(selected.grnItems) &&
+                selected.grnItems.length > 0 &&
+                (() => {
+                  const totalReceived = selected.grnItems.reduce(
+                    (s, i) => s + (Number(i.receivedQty) || 0),
+                    0,
+                  );
+                  const totalRemaining = selected.grnItems.reduce(
+                    (s, i) => s + (Number(i.remainingQty) || 0),
+                    0,
+                  );
+                  return (
+                    <>
+                      <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+                        <Package
+                          size={11}
+                          className="text-emerald-600 dark:text-emerald-400 shrink-0"
+                        />
+                        <span className="text-[10px] text-muted-foreground">
+                          Received:
+                        </span>
+                        <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+                          {totalReceived} units
+                        </span>
+                      </div>
+                      {totalRemaining > 0 && (
+                        <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                          <Clock
+                            size={11}
+                            className="text-amber-600 dark:text-amber-400 shrink-0"
+                          />
+                          <span className="text-[10px] text-muted-foreground">
+                            Pending:
+                          </span>
+                          <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+                            {totalRemaining} units
+                          </span>
+                        </div>
+                      )}
+                      <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-muted/40 border border-border/50">
+                        <Truck
+                          size={11}
+                          className="text-muted-foreground shrink-0"
+                        />
+                        <span className="text-[10px] text-muted-foreground">
+                          {selected.grnItems.length}{" "}
+                          {selected.grnItems.length === 1 ? "item" : "items"}
+                        </span>
+                      </div>
+                    </>
+                  );
+                })()}
               {selected.date && (
                 <InfoPill
                   icon={CalendarDays}
@@ -503,6 +625,12 @@ function DocSelectorPanel({
     },
     { id: "WO", label: "Work Orders", icon: HardHat, count: woList.length },
     {
+      id: "GRN",
+      label: "GRN",
+      icon: Truck,
+      count: grnList.length,
+    },
+    {
       id: "TOD",
       label: "Other Expenses",
       icon: FileText,
@@ -510,17 +638,25 @@ function DocSelectorPanel({
     },
   ];
   const loading =
-    tab === "PO" ? loadingPO : tab === "WO" ? loadingWO : loadingTOD;
+    tab === "PO"
+      ? loadingPO
+      : tab === "WO"
+        ? loadingWO
+        : tab === "GRN"
+          ? loadingGRN
+          : loadingTOD;
   const placeholder =
     tab === "PO"
       ? "Search by PO number or supplier…"
       : tab === "WO"
         ? "Search by WO number or contractor…"
-        : "Search document types…";
+        : tab === "GRN"
+          ? "Search by GRN number, supplier, or PO…"
+          : "Search document types…";
 
   return (
     <div className="rounded-xl border border-border overflow-hidden">
-      <div className="flex border-b border-border bg-muted/20">
+      <div className="flex border-b border-border bg-muted/20 overflow-x-auto">
         {tabs.map((t) => (
           <button
             key={t.id}
@@ -528,7 +664,7 @@ function DocSelectorPanel({
               setTab(t.id);
               setSearch("");
             }}
-            className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-heading font-semibold transition-colors border-b-2 -mb-px ${tab === t.id ? "border-primary text-primary bg-background" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+            className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-heading font-semibold transition-colors border-b-2 -mb-px whitespace-nowrap ${tab === t.id ? "border-primary text-primary bg-background" : "border-transparent text-muted-foreground hover:text-foreground"}`}
           >
             <t.icon size={11} />
             {t.label}
@@ -560,6 +696,7 @@ function DocSelectorPanel({
           )}
         </div>
       </div>
+
       <div className="max-h-60 overflow-y-auto bg-background">
         {loading || todFetching ? (
           <div className="flex items-center justify-center py-10 gap-2 text-xs text-muted-foreground">
@@ -640,6 +777,110 @@ function DocSelectorPanel({
               );
             })
           )
+        ) : tab === "GRN" ? (
+          filteredGRN.length === 0 ? (
+            <EmptyState label="No GRNs found" />
+          ) : (
+            filteredGRN.map((g) => {
+              // FIX: parse GRNItems from list data for preview counts only —
+              // the full fetch in applyDoc will always override this with fresh data.
+              const parsedItems: GRNItemLine[] = (() => {
+                try {
+                  if (Array.isArray(g.GRNItems))
+                    return g.GRNItems as GRNItemLine[];
+                  if (typeof g.GRNItems === "string" && g.GRNItems.trim()) {
+                    const parsed = JSON.parse(g.GRNItems);
+                    return Array.isArray(parsed) ? parsed : [];
+                  }
+                } catch {
+                  /* ignore */
+                }
+                return [];
+              })();
+              const totalReceived = parsedItems.reduce(
+                (s, i) => s + (Number(i.receivedQty) || 0),
+                0,
+              );
+              const totalRemaining = parsedItems.reduce(
+                (s, i) => s + (Number(i.remainingQty) || 0),
+                0,
+              );
+              return (
+                <button
+                  key={g.GRNID}
+                  onClick={() =>
+                    onSelect({
+                      kind: "GRN",
+                      docNo: g.GRNNo
+                        ? g.GRNNo.startsWith("GRN-")
+                          ? g.GRNNo
+                          : `GRN-${g.GRNNo}`
+                        : g.GRNNo,
+                      sourceId: g.GRNID,
+                      vendorLabel: g.SupplierName,
+                      status: g.Status,
+                      date: g.GRNDate,
+                      nameLabel: g.Remarks,
+                      grnItems: parsedItems,
+                    })
+                  }
+                  className="w-full flex items-start gap-3 px-4 py-3 hover:bg-muted/30 transition-colors border-b border-border/30 last:border-0 text-left group"
+                >
+                  <div className="w-7 h-7 rounded-lg bg-teal-500/10 flex items-center justify-center shrink-0 mt-0.5">
+                    <Truck size={12} className="text-teal-500" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono text-xs font-bold text-teal-600 dark:text-teal-400">
+                        {g.GRNNo
+                          ? g.GRNNo.startsWith("GRN-")
+                            ? g.GRNNo
+                            : `GRN-${g.GRNNo}`
+                          : "—"}
+                      </span>
+                      {g.Status && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground border border-border/50">
+                          {g.Status}
+                        </span>
+                      )}
+                      {g.PONumber && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                          PO: {g.PONumber}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
+                      {[g.SupplierName, g.GRNDate?.slice(0, 10)]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </p>
+                    {parsedItems.length > 0 && (
+                      <div className="flex items-center gap-3 mt-1.5">
+                        <span className="flex items-center gap-1 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded-md">
+                          <Package size={9} />
+                          {totalReceived} received
+                        </span>
+                        {totalRemaining > 0 && (
+                          <span className="flex items-center gap-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded-md">
+                            <Clock size={9} />
+                            {totalRemaining} pending
+                          </span>
+                        )}
+                        <span className="text-[10px] text-muted-foreground">
+                          {parsedItems.length}{" "}
+                          {parsedItems.length === 1 ? "item" : "items"}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  <ChevronRight
+                    size={12}
+                    className="text-muted-foreground/30 shrink-0 mt-1"
+                  />
+                </button>
+              );
+            })
+          )
         ) : filteredTOD.length === 0 ? (
           <EmptyState label="No other expense types found" />
         ) : (
@@ -677,6 +918,53 @@ function resolveGstRates(
   return { cgst: fallbackCgst, sgst: fallbackSgst };
 }
 
+// ─── GRN Chain Badge (list view) ─────────────────────────────────────────────
+function GRNChainBadge({
+  bookingId,
+}: {
+  bookingId: string | null | undefined;
+}) {
+  const [grns, setGrns] = useState<{ GRNNo: string }[]>([]);
+  useEffect(() => {
+    if (!bookingId) return;
+    fetchWithAuth(`/api/expense-booking/${bookingId}/grns`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => setGrns(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  }, [bookingId]);
+  if (grns.length === 0)
+    return <span className="text-muted-foreground text-xs">—</span>;
+  return (
+    <div className="flex flex-wrap gap-1">
+      {grns.map((g) => (
+        <span
+          key={g.GRNNo}
+          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-teal-100 dark:bg-teal-950/40 text-teal-700 dark:text-teal-400 border border-teal-200 dark:border-teal-800 font-mono"
+        >
+          <Truck size={9} />
+          {g.GRNNo}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+// ─── parseGRNItemsFromRaw ─────────────────────────────────────────────────────
+// Safely parses the GRNItems field from either a raw DB record (string JSON)
+// or an already-parsed array. Used in applyDoc to normalise the API response.
+function parseGRNItemsFromRaw(raw: unknown): GRNItemLine[] {
+  try {
+    if (Array.isArray(raw)) return raw as GRNItemLine[];
+    if (typeof raw === "string" && raw.trim()) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed as GRNItemLine[];
+    }
+  } catch {
+    /* fall through */
+  }
+  return [];
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 const BOOKING_STATUSES: BookingStatus[] = [
   "Draft",
@@ -699,10 +987,13 @@ export default function MaterialExpenseBooking() {
   const [poList, setPoList] = useState<POItem[]>([]);
   const [woList, setWoList] = useState<WOItem[]>([]);
   const [todList, setTodList] = useState<TodItem[]>([]);
+  const [grnList, setGrnList] = useState<GRNItem[]>([]);
   const [loadingPO, setLoadingPO] = useState(false);
   const [loadingWO, setLoadingWO] = useState(false);
   const [loadingTOD, setLoadingTOD] = useState(false);
+  const [loadingGRN, setLoadingGRN] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState<SelectedDoc | null>(null);
+  const [grnItemsLoading, setGrnItemsLoading] = useState(false);
   const [selectedTod, setSelectedTod] = useState<TodItem | null>(null);
   const [records, setRecords] = useState<ExpenseRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -766,6 +1057,7 @@ export default function MaterialExpenseBooking() {
         .catch(() => {})
         .finally(() => setLd(false));
     };
+
     load("po", "/api/purchase-orders?limit=500", setPoList, setLoadingPO);
     load("wo", "/api/work-orders?limit=500", setWoList, setLoadingWO);
     load<TodItem>("tod", "/api/document-type", setTodList, setLoadingTOD, (r) =>
@@ -773,6 +1065,27 @@ export default function MaterialExpenseBooking() {
         (t) => !["PO", "WO"].includes((t as any).ModuleTag ?? ""),
       ),
     );
+
+    // FIX: GRN list is NEVER served from cache because the list endpoint's
+    // GRNItems column is often null/stale (the column is heavy and some DB
+    // configs truncate it in paginated queries). We always fetch fresh so that
+    // the picker row counts are accurate, and applyDoc will always do a
+    // dedicated single-record fetch anyway to guarantee item data.
+    _mastersCache.grn = null;
+    setLoadingGRN(true);
+    apiFetch("/api/grns?limit=500")
+      .then((r) => {
+        const list: GRNItem[] = Array.isArray(r) ? r : (r?.data ?? []);
+        _mastersCache.grn = list;
+        setGrnList(list);
+      })
+      .catch((err: any) => {
+        console.error("GRN list fetch failed:", err?.message);
+        toast.error(
+          "Could not load GRN list: " + (err?.message ?? "Unknown error"),
+        );
+      })
+      .finally(() => setLoadingGRN(false));
   };
 
   useEffect(() => {
@@ -819,12 +1132,64 @@ export default function MaterialExpenseBooking() {
 
   const applyDoc = (doc: SelectedDoc) => {
     setSelectedDoc(doc);
+
+    if (doc.kind === "GRN") {
+      // FIX: immediately clear any stale grnItems so the loading spinner shows
+      // rather than stale/empty data from the list cache.
+      setSelectedDoc({ ...doc, grnItems: [] });
+      setGrnItemsLoading(true);
+
+      // Always fetch the authoritative single-record endpoint. The list endpoint
+      // often returns GRNItems as null or a truncated string — only the /:id
+      // endpoint is guaranteed to return the full GRNItems JSON column.
+      // Also re-read GRNNo from the single record so the booking reference is
+      // always the canonical GRN number, not whatever the list cached.
+      apiFetch(`/api/grns/${doc.sourceId}`)
+        .then((r: any) => {
+          const items = parseGRNItemsFromRaw(r.GRNItems);
+          // Use the authoritative GRNNo from the single-record fetch.
+          // Apply the same GRN- prefix that GRN.tsx uses in its list column.
+          const rawDocNo: string = r.GRNNo || r.DocNo || doc.docNo;
+          const canonicalDocNo = rawDocNo
+            ? rawDocNo.startsWith("GRN-")
+              ? rawDocNo
+              : `GRN-${rawDocNo}`
+            : rawDocNo;
+          setSelectedDoc((prev) =>
+            prev && prev.kind === "GRN" && prev.sourceId === doc.sourceId
+              ? { ...prev, docNo: canonicalDocNo, grnItems: items }
+              : prev,
+          );
+          // Keep bookingReference in sync with the canonical GRN number
+          setForm((prev) => ({
+            ...prev,
+            bookingReference: canonicalDocNo,
+          }));
+          // Let the user know if the GRN genuinely has no item lines.
+          if (items.length === 0) {
+            toast.info("This GRN has no item lines recorded against it.");
+          }
+        })
+        .catch((err: any) => {
+          toast.error(
+            "Could not load GRN items: " +
+              (err?.message ?? "Unknown error") +
+              ". Check that the /api/grns/:id endpoint is deployed.",
+          );
+        })
+        .finally(() => setGrnItemsLoading(false));
+    }
+
     const { cgst, sgst } = resolveGstRates(doc, form.cgstRate, form.sgstRate);
     setForm((prev) => ({
       ...prev,
       bookingReference: doc.docNo,
       bookingName: doc.nameLabel ?? prev.bookingName,
-      basicAmount: doc.amount ?? prev.basicAmount,
+      // GRN has no monetary amount — leave basicAmount for user to fill
+      basicAmount:
+        doc.kind === "GRN"
+          ? prev.basicAmount
+          : (doc.amount ?? prev.basicAmount),
       companyId: doc.companyId ?? prev.companyId,
       projectSite: doc.projectId ? String(doc.projectId) : prev.projectSite,
       supplier: doc.vendorLabel ?? prev.supplier,
@@ -833,7 +1198,9 @@ export default function MaterialExpenseBooking() {
           ? "PO"
           : doc.kind === "WO"
             ? "WO"
-            : doc.docNo.split("/")[0],
+            : doc.kind === "GRN"
+              ? "GRN"
+              : doc.docNo.split("/")[0],
       cgstRate: cgst,
       sgstRate: sgst,
     }));
@@ -842,6 +1209,7 @@ export default function MaterialExpenseBooking() {
   const clearDoc = () => {
     setSelectedDoc(null);
     setSelectedTod(null);
+    setGrnItemsLoading(false);
     setForm((prev) => ({
       ...prev,
       bookingReference: "",
@@ -863,6 +1231,8 @@ export default function MaterialExpenseBooking() {
   const openNew = () => {
     resetForm();
     setForm({ ...blankForm(), financialYear: activeFinYears[0]?.year || "" });
+    // FIX: bust GRN cache so we always get fresh GRNItems on form open
+    _mastersCache.grn = null;
     fetchMasters();
     setView("form");
   };
@@ -900,6 +1270,8 @@ export default function MaterialExpenseBooking() {
     apiFetch(`${API}/${rec.id}/approval-trail`)
       .then(setApprovalTrail)
       .catch(() => setApprovalTrail(undefined));
+    // FIX: bust GRN cache so we always get fresh GRNItems on form open
+    _mastersCache.grn = null;
     fetchMasters();
     setView("form");
   };
@@ -929,8 +1301,6 @@ export default function MaterialExpenseBooking() {
         { duration: 6000 },
       );
     }
-    // emi-toggle already committed everything to the DB — exit edit mode
-    // and refresh without going through handleSave (which guardEdit blocks).
     cancelForm();
     await fetchRecords(page);
   };
@@ -948,6 +1318,13 @@ export default function MaterialExpenseBooking() {
       toast.error("Please select a company.");
       return;
     }
+    if (
+      selectedDoc?.kind !== "GRN" &&
+      (!form.basicAmount || form.basicAmount <= 0)
+    ) {
+      toast.error("Basic amount is required and must be greater than 0.");
+      return;
+    }
     const bd = computeBreakdown(
       form.basicAmount,
       form.cgstRate,
@@ -955,8 +1332,6 @@ export default function MaterialExpenseBooking() {
       form.discount,
     );
 
-    // Guarantee the EMI schedule is always fresh at save time — the useEffect in
-    // EmiSection may not have fired yet if the user saves quickly after configuring EMI.
     let emiForSave = form.emi;
     if (
       !isEditing &&
@@ -1036,6 +1411,7 @@ export default function MaterialExpenseBooking() {
   const vendorLabel =
     selectedDoc?.kind === "WO" ? "Contractor" : "Supplier / Vendor";
   const isPOorWO = selectedDoc?.kind === "PO" || selectedDoc?.kind === "WO";
+  const isGRN = selectedDoc?.kind === "GRN";
   const gstHighlighted = isPOorWO && !!selectedDoc?.gst?.applicable;
 
   return (
@@ -1108,16 +1484,19 @@ export default function MaterialExpenseBooking() {
               <div className="space-y-3">
                 <SectionHeader label="Document Selection" />
                 <p className="text-[11px] text-muted-foreground -mt-1">
-                  Pick a Purchase Order or Work Order to auto-fill details, or
-                  choose a document type from the master for other expenses.
+                  Pick a Purchase Order, Work Order, or GRN to auto-fill booking
+                  details, or choose a document type from Other Expenses for
+                  standalone expense entries.
                 </p>
                 <DocSelectorPanel
                   poList={poList}
                   woList={woList}
                   todList={todList}
+                  grnList={grnList}
                   loadingPO={loadingPO}
                   loadingWO={loadingWO}
                   loadingTOD={loadingTOD}
+                  loadingGRN={loadingGRN}
                   selected={selectedDoc}
                   finYear={form.financialYear || undefined}
                   onSelect={applyDoc}
@@ -1126,39 +1505,60 @@ export default function MaterialExpenseBooking() {
                 />
 
                 {/* ── Source chain banner ───────────────────────────────── */}
-                {selectedDoc && (selectedDoc.kind === "WO" || selectedDoc.kind === "PO") && (
-                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-primary/30 bg-primary/5 text-xs text-primary font-medium">
-                    <span className="shrink-0">←</span>
-                    <span className="font-mono font-semibold">{selectedDoc.docNo}</span>
-                    {selectedDoc.vendorLabel && (
-                      <>
-                        <span className="text-muted-foreground">|</span>
-                        <span className="text-foreground">{selectedDoc.vendorLabel}</span>
-                      </>
-                    )}
-                    {selectedDoc.amount != null && selectedDoc.amount > 0 && (
-                      <>
-                        <span className="text-muted-foreground">|</span>
-                        <span className="text-foreground font-semibold">
-                          ₹{selectedDoc.amount.toLocaleString("en-IN")}
-                        </span>
-                      </>
-                    )}
-                    <span className={`ml-auto shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold ${
-                      selectedDoc.kind === "WO"
-                        ? "bg-orange-100 dark:bg-orange-950/40 text-orange-700 dark:text-orange-400"
-                        : "bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400"
-                    }`}>
-                      {selectedDoc.kind === "WO" ? "Work Order" : "Purchase Order"}
-                    </span>
-                  </div>
-                )}
+                {selectedDoc &&
+                  (selectedDoc.kind === "WO" ||
+                    selectedDoc.kind === "PO" ||
+                    selectedDoc.kind === "GRN") && (
+                    <div
+                      className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium ${
+                        selectedDoc.kind === "GRN"
+                          ? "border-teal-500/30 bg-teal-500/5 text-teal-600 dark:text-teal-400"
+                          : "border-primary/30 bg-primary/5 text-primary"
+                      }`}
+                    >
+                      <span className="shrink-0">←</span>
+                      <span className="font-mono font-semibold">
+                        {selectedDoc.docNo}
+                      </span>
+                      {selectedDoc.vendorLabel && (
+                        <>
+                          <span className="text-muted-foreground">|</span>
+                          <span className="text-foreground">
+                            {selectedDoc.vendorLabel}
+                          </span>
+                        </>
+                      )}
+                      {selectedDoc.amount != null && selectedDoc.amount > 0 && (
+                        <>
+                          <span className="text-muted-foreground">|</span>
+                          <span className="text-foreground font-semibold">
+                            ₹{selectedDoc.amount.toLocaleString("en-IN")}
+                          </span>
+                        </>
+                      )}
+                      <span
+                        className={`ml-auto shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                          selectedDoc.kind === "WO"
+                            ? "bg-orange-100 dark:bg-orange-950/40 text-orange-700 dark:text-orange-400"
+                            : selectedDoc.kind === "GRN"
+                              ? "bg-teal-100 dark:bg-teal-950/40 text-teal-700 dark:text-teal-400"
+                              : "bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400"
+                        }`}
+                      >
+                        {selectedDoc.kind === "WO"
+                          ? "Work Order"
+                          : selectedDoc.kind === "GRN"
+                            ? "GRN"
+                            : "Purchase Order"}
+                      </span>
+                    </div>
+                  )}
                 <Field
                   label="Booking Reference"
                   required
                   hint={
                     selectedDoc
-                      ? `Auto-filled from the selected ${selectedDoc.kind === "PO" ? "Purchase Order" : selectedDoc.kind === "WO" ? "Work Order" : "document"}.`
+                      ? `Auto-filled from the selected ${selectedDoc.kind === "PO" ? "Purchase Order" : selectedDoc.kind === "WO" ? "Work Order" : selectedDoc.kind === "GRN" ? "GRN" : "document"}.`
                       : "Will be populated once you select a document above."
                   }
                 >
@@ -1192,7 +1592,7 @@ export default function MaterialExpenseBooking() {
               {/* 1. Booking Information */}
               <div className="space-y-4">
                 <SectionHeader label="Booking Information" />
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   <Field label="Booking Date" required>
                     <Input
                       type="date"
@@ -1226,23 +1626,6 @@ export default function MaterialExpenseBooking() {
                         {activeFinYears.map((fy) => (
                           <SelectItem key={fy.id} value={fy.year}>
                             {fy.year}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                  <Field label="Status">
-                    <Select
-                      value={form.status}
-                      onValueChange={(v) => set("status", v as BookingStatus)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {BOOKING_STATUSES.map((s) => (
-                          <SelectItem key={s} value={s}>
-                            {s}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -1345,6 +1728,115 @@ export default function MaterialExpenseBooking() {
                 </div>
               </div>
 
+              {/* GRN Items Summary — shown whenever a GRN is selected */}
+              {isGRN && (
+                <div className="space-y-3">
+                  <SectionHeader label="GRN Items Summary" />
+                  {grnItemsLoading ? (
+                    <div className="rounded-xl border border-teal-500/25 bg-teal-500/5 px-4 py-6 flex items-center justify-center gap-2 text-xs text-muted-foreground">
+                      <div className="w-3.5 h-3.5 rounded-full border-2 border-teal-400 border-t-transparent animate-spin shrink-0" />
+                      <span>Loading GRN items…</span>
+                    </div>
+                  ) : !selectedDoc?.grnItems ||
+                    selectedDoc.grnItems.length === 0 ? (
+                    <div className="rounded-xl border border-teal-500/25 bg-teal-500/5 px-4 py-6 flex items-center justify-center gap-2 text-xs text-muted-foreground">
+                      <Truck size={13} className="text-teal-400 shrink-0" />
+                      <span>No items recorded against this GRN.</span>
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-teal-500/25 bg-teal-500/5 overflow-hidden">
+                      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-teal-500/20 bg-teal-500/8">
+                        <Truck size={12} className="text-teal-500 shrink-0" />
+                        <span className="text-xs font-heading font-semibold text-teal-600 dark:text-teal-400">
+                          Items received against this GRN
+                        </span>
+                        <span className="ml-auto text-[10px] text-muted-foreground">
+                          {selectedDoc!.grnItems!.length}{" "}
+                          {selectedDoc!.grnItems!.length === 1
+                            ? "item"
+                            : "items"}
+                        </span>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="bg-muted/20 border-b border-teal-500/15">
+                              <th className="px-4 py-2.5 text-left font-heading uppercase tracking-wider text-muted-foreground text-[10px]">
+                                Item
+                              </th>
+                              <th className="px-4 py-2.5 text-right font-heading uppercase tracking-wider text-muted-foreground text-[10px]">
+                                Ordered
+                              </th>
+                              <th className="px-4 py-2.5 text-right font-heading uppercase tracking-wider text-emerald-600 dark:text-emerald-400 text-[10px]">
+                                Received
+                              </th>
+                              <th className="px-4 py-2.5 text-right font-heading uppercase tracking-wider text-amber-600 dark:text-amber-400 text-[10px]">
+                                Remaining
+                              </th>
+                              <th className="px-4 py-2.5 text-left font-heading uppercase tracking-wider text-muted-foreground text-[10px]">
+                                UOM
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-teal-500/10">
+                            {selectedDoc!.grnItems!.map((item, idx) => (
+                              <tr
+                                key={idx}
+                                className="hover:bg-teal-500/5 transition-colors"
+                              >
+                                <td className="px-4 py-2.5 font-medium text-foreground max-w-[180px] truncate">
+                                  {item.itemName || `Item ${idx + 1}`}
+                                </td>
+                                <td className="px-4 py-2.5 text-right font-mono text-muted-foreground">
+                                  {Number(item.orderedQty) || 0}
+                                </td>
+                                <td className="px-4 py-2.5 text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                                  {Number(item.receivedQty) || 0}
+                                </td>
+                                <td
+                                  className={`px-4 py-2.5 text-right font-mono font-semibold ${Number(item.remainingQty) > 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}
+                                >
+                                  {Number(item.remainingQty) || 0}
+                                </td>
+                                <td className="px-4 py-2.5 text-muted-foreground">
+                                  {item.uom || "—"}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot className="border-t border-teal-500/20 bg-muted/10">
+                            <tr>
+                              <td className="px-4 py-2.5 text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+                                Totals
+                              </td>
+                              <td className="px-4 py-2.5 text-right font-mono text-xs font-semibold text-muted-foreground">
+                                {selectedDoc!.grnItems!.reduce(
+                                  (s, i) => s + (Number(i.orderedQty) || 0),
+                                  0,
+                                )}
+                              </td>
+                              <td className="px-4 py-2.5 text-right font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                                {selectedDoc!.grnItems!.reduce(
+                                  (s, i) => s + (Number(i.receivedQty) || 0),
+                                  0,
+                                )}
+                              </td>
+                              <td className="px-4 py-2.5 text-right font-mono text-xs font-semibold text-amber-600 dark:text-amber-400">
+                                {selectedDoc!.grnItems!.reduce(
+                                  (s, i) => s + (Number(i.remainingQty) || 0),
+                                  0,
+                                )}
+                              </td>
+                              <td />
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* 2. Amount & GST */}
               <div className="space-y-4">
                 <SectionHeader label="Amount & GST" />
@@ -1383,9 +1875,11 @@ export default function MaterialExpenseBooking() {
                     label="Basic Amount (₹)"
                     required
                     hint={
-                      selectedDoc?.amount != null
-                        ? "Auto-filled from linked order value"
-                        : "Will be auto-filled when a PO or WO is selected"
+                      isGRN
+                        ? "Enter the invoice amount being booked against this GRN"
+                        : selectedDoc?.amount != null
+                          ? "Auto-filled from linked order value"
+                          : "Will be auto-filled when a PO or WO is selected"
                     }
                   >
                     <div className="relative">
@@ -1396,12 +1890,14 @@ export default function MaterialExpenseBooking() {
                         type="number"
                         min={0}
                         value={form.basicAmount || ""}
-                        readOnly={!!selectedDoc?.amount}
-                        onChange={(e) =>
-                          !selectedDoc?.amount &&
-                          set("basicAmount", parseFloat(e.target.value) || 0)
-                        }
-                        className={`pl-7 font-mono ${selectedDoc?.amount != null ? "bg-muted/30 cursor-not-allowed" : ""}`}
+                        // GRN: always editable (no pre-set amount from GRN)
+                        // PO/WO: read-only if amount came from the linked order
+                        readOnly={!isGRN && !!selectedDoc?.amount}
+                        onChange={(e) => {
+                          if (!isGRN && selectedDoc?.amount) return;
+                          set("basicAmount", parseFloat(e.target.value) || 0);
+                        }}
+                        className={`pl-7 font-mono ${!isGRN && selectedDoc?.amount != null ? "bg-muted/30 cursor-not-allowed" : ""}`}
                         placeholder="0.00"
                       />
                     </div>
@@ -1470,31 +1966,35 @@ export default function MaterialExpenseBooking() {
                 )}
               </div>
 
-              {/* 3. Billing Terms */}
-              <div className="space-y-3">
-                <SectionHeader label="Billing Terms" />
-                <BillingAccordion
-                  basicAmount={form.basicAmount}
-                  cgstRate={form.cgstRate}
-                  sgstRate={form.sgstRate}
-                  discount={form.discount}
-                  onChange={(d) => set("discount", d)}
-                />
-              </div>
+              {/* 3. Billing Terms — hidden for GRN bookings */}
+              {!isGRN && (
+                <div className="space-y-3">
+                  <SectionHeader label="Billing Terms" />
+                  <BillingAccordion
+                    basicAmount={form.basicAmount}
+                    cgstRate={form.cgstRate}
+                    sgstRate={form.sgstRate}
+                    discount={form.discount}
+                    onChange={(d) => set("discount", d)}
+                  />
+                </div>
+              )}
 
-              {/* 4. EMI Options */}
-              <div className="space-y-3">
-                <SectionHeader label="EMI / Installment Options" />
-                <EmiSection
-                  emi={form.emi}
-                  netAmount={bd.netAmount}
-                  baseDocNo={form.bookingReference}
-                  onChange={(emi) => set("emi", emi)}
-                  liveSchedule={isEditing ? liveEmiSchedule : null}
-                  loadingEmi={loadingEmi}
-                  onDisableEmi={isEditing ? disableEmi : undefined}
-                />
-              </div>
+              {/* 4. EMI Options — hidden for GRN bookings */}
+              {!isGRN && (
+                <div className="space-y-3">
+                  <SectionHeader label="EMI / Installment Options" />
+                  <EmiSection
+                    emi={form.emi}
+                    netAmount={bd.netAmount}
+                    baseDocNo={form.bookingReference}
+                    onChange={(emi) => set("emi", emi)}
+                    liveSchedule={isEditing ? liveEmiSchedule : null}
+                    loadingEmi={loadingEmi}
+                    onDisableEmi={isEditing ? disableEmi : undefined}
+                  />
+                </div>
+              )}
 
               {/* 5. Approval Trail */}
               {isEditing && (
@@ -1644,13 +2144,14 @@ export default function MaterialExpenseBooking() {
                               "CGST",
                               "SGST",
                               "Net Amt",
+                              "GRN",
                               "EMI",
                               "Status",
                               "Actions",
                             ].map((h, i) => (
                               <TableHead
                                 key={h}
-                                className={`text-xs font-heading${[4, 5, 6].includes(i) ? " hidden md:table-cell" : ""}`}
+                                className={`text-xs font-heading${[4, 5, 6].includes(i) ? " hidden md:table-cell" : ""}${i === 8 ? " hidden lg:table-cell" : ""}`}
                               >
                                 {h}
                               </TableHead>
@@ -1698,6 +2199,9 @@ export default function MaterialExpenseBooking() {
                                 <TableCell className="font-mono text-xs font-semibold">
                                   ₹{fmt(rbd.netAmount)}
                                 </TableCell>
+                                <TableCell className="hidden lg:table-cell">
+                                  <GRNChainBadge bookingId={rec.id} />
+                                </TableCell>
                                 <TableCell>
                                   {rec.emi?.enabled ? (
                                     <span className="inline-flex items-center gap-1 text-[10px] font-heading font-semibold bg-violet-500/10 text-violet-500 border border-violet-500/20 px-2 py-0.5 rounded-full">
@@ -1719,6 +2223,7 @@ export default function MaterialExpenseBooking() {
                                       status={rec.status}
                                       recordId={rec.id}
                                       endpoint="/api/expense-booking"
+                                      submitOnly
                                       onSuccess={fetchRecords}
                                     />
                                     <Button
@@ -1754,7 +2259,7 @@ export default function MaterialExpenseBooking() {
                           {filteredRecords.length === 0 && (
                             <TableRow>
                               <TableCell
-                                colSpan={11}
+                                colSpan={12}
                                 className="text-center py-14 text-muted-foreground text-sm"
                               >
                                 <AlertCircle
