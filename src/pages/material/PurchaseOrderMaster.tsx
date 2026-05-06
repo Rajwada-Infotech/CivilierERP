@@ -749,6 +749,7 @@ const PurchaseOrderMaster: React.FC = () => {
     if (!form.poNumber) e.poNumber = true;
     if (!form.poDate) e.poDate = true;
     if (!form.supplierId) e.supplierId = true;
+    if (!form.projectId) e.projectId = true;
     if (lineItems.every((li) => !li.itemName && !li.quantity))
       e.lineItems = true;
     setErrors(e);
@@ -1356,7 +1357,7 @@ const PurchaseOrderMaster: React.FC = () => {
 
             {/* Project */}
             <div>
-              <FieldLabel>Project / Site</FieldLabel>
+              <FieldLabel required>Project / Site</FieldLabel>
               {isReadOnly ? (
                 <div className={`${inputCls} bg-muted/30`}>
                   {allProjects.find((p) => p.id === form.projectId)?.name ||
