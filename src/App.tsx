@@ -202,8 +202,12 @@ const FollowupTasks = lazy(() => import("./pages/followup/FollowupTasks"));
 const FollowupLog = lazy(() => import("./pages/followup/FollowupLog"));
 const AmendmentMenu = lazy(() => import("./pages/material/AmendmentMenu"));
 const Amendments = lazy(() => import("./pages/material/Amendments"));
+const Issues = lazy(() => import("./pages/material/Issues"));
 const RemindersManager = lazy(() => import("./pages/dba/RemindersManager"));
+
+
 const PaymentLogs = lazy(() => import("./pages/dba/PaymentLogs"));
+
 
 // ─── Auth Guard ───────────────────────────────────────────────────────────────
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -584,6 +588,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <AmendmentMenu />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/material/issues"
+        element={
+          <ProtectedRoute>
+            <Issues />
           </ProtectedRoute>
         }
       />
