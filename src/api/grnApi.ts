@@ -43,6 +43,17 @@ export interface UOM {
   IsActive?: boolean;
 }
 
+/**
+ * Represents one line item inside a GRN.
+ *
+ * Fields added in migration 034:
+ *   rate        — unit rate (₹) for this item
+ *   quantity    — billing quantity (may differ from receivedQty when partial
+ *                 billing is allowed)
+ *   totalAmount — derived as rate × quantity; stored for audit / reporting
+ *                 so downstream modules (Expense Booking, etc.) don't need
+ *                 to recompute it.
+ */
 export interface GRNItemLine {
   itemId: string;
   itemName: string;
@@ -50,6 +61,12 @@ export interface GRNItemLine {
   receivedQty: number;
   remainingQty: number;
   uom: string;
+  /** Unit rate in ₹.  Defaults to 0. */
+  rate: number;
+  /** Billing quantity. Separate from receivedQty so partial billing works. */
+  quantity: number;
+  /** Computed: rate × quantity. Stored for audit trail. */
+  totalAmount: number;
 }
 
 export interface GRNFormDataPayload {
