@@ -55,6 +55,8 @@ import {
   Hash,
   User,
   Banknote,
+  Truck,
+  Package,
 } from "lucide-react";
 import { toast } from "sonner";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -93,7 +95,8 @@ const _mastersCache: {
   po: POItem[] | null;
   wo: WOItem[] | null;
   tod: TodItem[] | null;
-} = { po: null, wo: null, tod: null };
+  grn: GRNItem[] | null;
+} = { po: null, wo: null, tod: null, grn: null };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface CompanyOption {
@@ -142,7 +145,16 @@ interface TodItem {
   Description: string;
   EntryType?: string;
 }
-type SourceKind = "PO" | "WO" | "TOD";
+type SourceKind = "PO" | "WO" | "TOD" | "GRN";
+
+interface GRNItemLine {
+  itemName?: string;
+  orderedQty: number;
+  receivedQty: number;
+  remainingQty: number;
+  uom?: string;
+}
+
 interface SelectedDoc {
   kind: SourceKind;
   docNo: string;
@@ -155,6 +167,20 @@ interface SelectedDoc {
   status?: string;
   date?: string;
   gst?: GSTConfig | null;
+  grnItems?: GRNItemLine[];
+}
+
+interface GRNItem {
+  GRNID: number;
+  GRNNo: string;
+  GRNDate: string;
+  SupplierName?: string;
+  PONumber?: string;
+  POID?: number;
+  Status?: string;
+  TotalItems?: number;
+  Remarks?: string;
+  GRNItems?: string | GRNItemLine[];
 }
 
 // ─── Small UI helpers ─────────────────────────────────────────────────────────
@@ -162,6 +188,7 @@ const SECTION_ICONS: Record<string, React.ElementType> = {
   "Document Selection": FileText,
   "Booking Information": CalendarDays,
   "Amount & GST": BadgePercent,
+  "GRN Items Summary": Truck,
   "Billing Terms": Receipt,
   "EMI / Installment Options": CreditCard,
   "Approval Workflow": CheckCircle2,
@@ -330,9 +357,11 @@ interface DocSelectorProps {
   poList: POItem[];
   woList: WOItem[];
   todList: TodItem[];
+  grnList: GRNItem[];
   loadingPO: boolean;
   loadingWO: boolean;
   loadingTOD: boolean;
+  loadingGRN: boolean;
   selected: SelectedDoc | null;
   finYear?: string;
   onSelect: (doc: SelectedDoc) => void;
@@ -344,9 +373,11 @@ function DocSelectorPanel({
   poList,
   woList,
   todList,
+  grnList,
   loadingPO,
   loadingWO,
   loadingTOD,
+  loadingGRN,
   selected,
   finYear,
   onSelect,
@@ -396,11 +427,24 @@ function DocSelectorPanel({
       (t.FullPrefix ?? t.Prefix).toLowerCase().includes(q) ||
       t.Description.toLowerCase().includes(q),
   );
+  const filteredGRN = grnList.filter(
+    (g) =>
+      (g.GRNNo || "").toLowerCase().includes(q) ||
+      (g.SupplierName || "").toLowerCase().includes(q) ||
+      (g.PONumber || "").toLowerCase().includes(q),
+  );
 
   if (selected) {
     const isPO = selected.kind === "PO",
-      isWO = selected.kind === "WO";
-    const Icon = isPO ? ShoppingCart : isWO ? HardHat : FileText;
+      isWO = selected.kind === "WO",
+      isGRN = selected.kind === "GRN";
+    const Icon = isPO
+      ? ShoppingCart
+      : isWO
+        ? HardHat
+        : isGRN
+          ? Truck
+          : FileText;
     const colors = isPO
       ? {
           ring: "border-blue-500/30 bg-blue-500/5",
@@ -417,13 +461,21 @@ function DocSelectorPanel({
             badge:
               "bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/20",
           }
-        : {
-            ring: "border-emerald-500/30 bg-emerald-500/5",
-            icon: "bg-emerald-500/10",
-            text: "text-emerald-500",
-            badge:
-              "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
-          };
+        : isGRN
+          ? {
+              ring: "border-teal-500/30 bg-teal-500/5",
+              icon: "bg-teal-500/10",
+              text: "text-teal-500",
+              badge:
+                "bg-teal-500/10 text-teal-600 dark:text-teal-400 border-teal-500/20",
+            }
+          : {
+              ring: "border-emerald-500/30 bg-emerald-500/5",
+              icon: "bg-emerald-500/10",
+              text: "text-emerald-500",
+              badge:
+                "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20",
+            };
     return (
       <div className={`rounded-xl border p-4 ${colors.ring}`}>
         <div className="flex items-start gap-3">
@@ -437,7 +489,13 @@ function DocSelectorPanel({
               <span
                 className={`text-xs font-heading font-semibold ${colors.text}`}
               >
-                {isPO ? "Purchase Order" : isWO ? "Work Order" : "Document"}
+                {isPO
+                  ? "Purchase Order"
+                  : isWO
+                    ? "Work Order"
+                    : isGRN
+                      ? "Goods Receipt Note"
+                      : "Document"}
               </span>
               <span
                 className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold border ${colors.badge}`}
@@ -454,17 +512,78 @@ function DocSelectorPanel({
               {selected.vendorLabel && (
                 <InfoPill
                   icon={User}
-                  label={isPO ? "Supplier" : "Contractor"}
+                  label={
+                    isPO
+                      ? "Supplier"
+                      : isWO
+                        ? "Contractor"
+                        : isGRN
+                          ? "Supplier"
+                          : "Vendor"
+                  }
                   value={selected.vendorLabel}
                 />
               )}
-              {selected.amount != null && (
+              {!isGRN && selected.amount != null && (
                 <InfoPill
                   icon={Banknote}
                   label="Order Value"
                   value={`₹${fmt(selected.amount)}`}
                 />
               )}
+              {isGRN &&
+                Array.isArray(selected.grnItems) &&
+                selected.grnItems.length > 0 &&
+                (() => {
+                  const totalReceived = selected.grnItems.reduce(
+                    (s, i) => s + (Number(i.receivedQty) || 0),
+                    0,
+                  );
+                  const totalRemaining = selected.grnItems.reduce(
+                    (s, i) => s + (Number(i.remainingQty) || 0),
+                    0,
+                  );
+                  return (
+                    <>
+                      <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+                        <Package
+                          size={11}
+                          className="text-emerald-600 dark:text-emerald-400 shrink-0"
+                        />
+                        <span className="text-[10px] text-muted-foreground">
+                          Received:
+                        </span>
+                        <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+                          {totalReceived} units
+                        </span>
+                      </div>
+                      {totalRemaining > 0 && (
+                        <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                          <Clock
+                            size={11}
+                            className="text-amber-600 dark:text-amber-400 shrink-0"
+                          />
+                          <span className="text-[10px] text-muted-foreground">
+                            Pending:
+                          </span>
+                          <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+                            {totalRemaining} units
+                          </span>
+                        </div>
+                      )}
+                      <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-muted/40 border border-border/50">
+                        <Truck
+                          size={11}
+                          className="text-muted-foreground shrink-0"
+                        />
+                        <span className="text-[10px] text-muted-foreground">
+                          {selected.grnItems.length}{" "}
+                          {selected.grnItems.length === 1 ? "item" : "items"}
+                        </span>
+                      </div>
+                    </>
+                  );
+                })()}
               {selected.date && (
                 <InfoPill
                   icon={CalendarDays}
@@ -502,6 +621,12 @@ function DocSelectorPanel({
     },
     { id: "WO", label: "Work Orders", icon: HardHat, count: woList.length },
     {
+      id: "GRN",
+      label: "GRN",
+      icon: Truck,
+      count: grnList.length,
+    },
+    {
       id: "TOD",
       label: "Other Expenses",
       icon: FileText,
@@ -509,17 +634,25 @@ function DocSelectorPanel({
     },
   ];
   const loading =
-    tab === "PO" ? loadingPO : tab === "WO" ? loadingWO : loadingTOD;
+    tab === "PO"
+      ? loadingPO
+      : tab === "WO"
+        ? loadingWO
+        : tab === "GRN"
+          ? loadingGRN
+          : loadingTOD;
   const placeholder =
     tab === "PO"
       ? "Search by PO number or supplier…"
       : tab === "WO"
         ? "Search by WO number or contractor…"
-        : "Search document types…";
+        : tab === "GRN"
+          ? "Search by GRN number, supplier, or PO…"
+          : "Search document types…";
 
   return (
     <div className="rounded-xl border border-border overflow-hidden">
-      <div className="flex border-b border-border bg-muted/20">
+      <div className="flex border-b border-border bg-muted/20 overflow-x-auto">
         {tabs.map((t) => (
           <button
             key={t.id}
@@ -527,7 +660,7 @@ function DocSelectorPanel({
               setTab(t.id);
               setSearch("");
             }}
-            className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-heading font-semibold transition-colors border-b-2 -mb-px ${tab === t.id ? "border-primary text-primary bg-background" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+            className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-heading font-semibold transition-colors border-b-2 -mb-px whitespace-nowrap ${tab === t.id ? "border-primary text-primary bg-background" : "border-transparent text-muted-foreground hover:text-foreground"}`}
           >
             <t.icon size={11} />
             {t.label}
@@ -559,6 +692,7 @@ function DocSelectorPanel({
           )}
         </div>
       </div>
+
       <div className="max-h-60 overflow-y-auto bg-background">
         {loading || todFetching ? (
           <div className="flex items-center justify-center py-10 gap-2 text-xs text-muted-foreground">
@@ -639,6 +773,100 @@ function DocSelectorPanel({
               );
             })
           )
+        ) : tab === "GRN" ? (
+          filteredGRN.length === 0 ? (
+            <EmptyState label="No GRNs found" />
+          ) : (
+            filteredGRN.map((g) => {
+              const parsedItems: GRNItemLine[] = (() => {
+                try {
+                  if (Array.isArray(g.GRNItems))
+                    return g.GRNItems as GRNItemLine[];
+                  if (typeof g.GRNItems === "string" && g.GRNItems.trim()) {
+                    const parsed = JSON.parse(g.GRNItems);
+                    return Array.isArray(parsed) ? parsed : [];
+                  }
+                } catch {
+                  /* ignore */
+                }
+                return [];
+              })();
+              const totalReceived = parsedItems.reduce(
+                (s, i) => s + (Number(i.receivedQty) || 0),
+                0,
+              );
+              const totalRemaining = parsedItems.reduce(
+                (s, i) => s + (Number(i.remainingQty) || 0),
+                0,
+              );
+              return (
+                <button
+                  key={g.GRNID}
+                  onClick={() =>
+                    onSelect({
+                      kind: "GRN",
+                      docNo: g.GRNNo,
+                      sourceId: g.GRNID,
+                      vendorLabel: g.SupplierName,
+                      status: g.Status,
+                      date: g.GRNDate,
+                      nameLabel: g.Remarks,
+                      grnItems: parsedItems,
+                    })
+                  }
+                  className="w-full flex items-start gap-3 px-4 py-3 hover:bg-muted/30 transition-colors border-b border-border/30 last:border-0 text-left group"
+                >
+                  <div className="w-7 h-7 rounded-lg bg-teal-500/10 flex items-center justify-center shrink-0 mt-0.5">
+                    <Truck size={12} className="text-teal-500" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-mono text-xs font-bold text-teal-600 dark:text-teal-400">
+                        {g.GRNNo}
+                      </span>
+                      {g.Status && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground border border-border/50">
+                          {g.Status}
+                        </span>
+                      )}
+                      {g.PONumber && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                          PO: {g.PONumber}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
+                      {[g.SupplierName, g.GRNDate?.slice(0, 10)]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </p>
+                    {parsedItems.length > 0 && (
+                      <div className="flex items-center gap-3 mt-1.5">
+                        <span className="flex items-center gap-1 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded-md">
+                          <Package size={9} />
+                          {totalReceived} received
+                        </span>
+                        {totalRemaining > 0 && (
+                          <span className="flex items-center gap-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded-md">
+                            <Clock size={9} />
+                            {totalRemaining} pending
+                          </span>
+                        )}
+                        <span className="text-[10px] text-muted-foreground">
+                          {parsedItems.length}{" "}
+                          {parsedItems.length === 1 ? "item" : "items"}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  <ChevronRight
+                    size={12}
+                    className="text-muted-foreground/30 shrink-0 mt-1"
+                  />
+                </button>
+              );
+            })
+          )
         ) : filteredTOD.length === 0 ? (
           <EmptyState label="No other expense types found" />
         ) : (
@@ -676,6 +904,37 @@ function resolveGstRates(
   return { cgst: fallbackCgst, sgst: fallbackSgst };
 }
 
+// ─── GRN Chain Badge (list view) ─────────────────────────────────────────────
+function GRNChainBadge({
+  bookingId,
+}: {
+  bookingId: string | null | undefined;
+}) {
+  const [grns, setGrns] = useState<{ GRNNo: string }[]>([]);
+  useEffect(() => {
+    if (!bookingId) return;
+    fetchWithAuth(`/api/expense-booking/${bookingId}/grns`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => setGrns(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  }, [bookingId]);
+  if (grns.length === 0)
+    return <span className="text-muted-foreground text-xs">—</span>;
+  return (
+    <div className="flex flex-wrap gap-1">
+      {grns.map((g) => (
+        <span
+          key={g.GRNNo}
+          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-teal-100 dark:bg-teal-950/40 text-teal-700 dark:text-teal-400 border border-teal-200 dark:border-teal-800 font-mono"
+        >
+          <Truck size={9} />
+          {g.GRNNo}
+        </span>
+      ))}
+    </div>
+  );
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 const BOOKING_STATUSES: BookingStatus[] = [
   "Draft",
@@ -698,9 +957,11 @@ export default function MaterialExpenseBooking() {
   const [poList, setPoList] = useState<POItem[]>([]);
   const [woList, setWoList] = useState<WOItem[]>([]);
   const [todList, setTodList] = useState<TodItem[]>([]);
+  const [grnList, setGrnList] = useState<GRNItem[]>([]);
   const [loadingPO, setLoadingPO] = useState(false);
   const [loadingWO, setLoadingWO] = useState(false);
   const [loadingTOD, setLoadingTOD] = useState(false);
+  const [loadingGRN, setLoadingGRN] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState<SelectedDoc | null>(null);
   const [selectedTod, setSelectedTod] = useState<TodItem | null>(null);
   const [records, setRecords] = useState<ExpenseRecord[]>([]);
@@ -771,6 +1032,13 @@ export default function MaterialExpenseBooking() {
         (t) => !["PO", "WO"].includes((t as any).ModuleTag ?? ""),
       ),
     );
+    load<GRNItem>(
+      "grn",
+      "/api/grns?limit=500",
+      setGrnList,
+      setLoadingGRN,
+      (r) => (Array.isArray(r) ? r : (r?.data ?? [])),
+    );
   };
 
   useEffect(() => {
@@ -822,7 +1090,11 @@ export default function MaterialExpenseBooking() {
       ...prev,
       bookingReference: doc.docNo,
       bookingName: doc.nameLabel ?? prev.bookingName,
-      basicAmount: doc.amount ?? prev.basicAmount,
+      // GRN has no monetary amount — leave basicAmount for user to fill
+      basicAmount:
+        doc.kind === "GRN"
+          ? prev.basicAmount
+          : (doc.amount ?? prev.basicAmount),
       companyId: doc.companyId ?? prev.companyId,
       projectSite: doc.projectId ? String(doc.projectId) : prev.projectSite,
       supplier: doc.vendorLabel ?? prev.supplier,
@@ -831,7 +1103,9 @@ export default function MaterialExpenseBooking() {
           ? "PO"
           : doc.kind === "WO"
             ? "WO"
-            : doc.docNo.split("/")[0],
+            : doc.kind === "GRN"
+              ? "GRN"
+              : doc.docNo.split("/")[0],
       cgstRate: cgst,
       sgstRate: sgst,
     }));
@@ -1033,6 +1307,7 @@ export default function MaterialExpenseBooking() {
   const vendorLabel =
     selectedDoc?.kind === "WO" ? "Contractor" : "Supplier / Vendor";
   const isPOorWO = selectedDoc?.kind === "PO" || selectedDoc?.kind === "WO";
+  const isGRN = selectedDoc?.kind === "GRN";
   const gstHighlighted = isPOorWO && !!selectedDoc?.gst?.applicable;
 
   return (
@@ -1105,16 +1380,19 @@ export default function MaterialExpenseBooking() {
               <div className="space-y-3">
                 <SectionHeader label="Document Selection" />
                 <p className="text-[11px] text-muted-foreground -mt-1">
-                  Pick a Purchase Order or Work Order to auto-fill details, or
-                  choose a document type from the master for other expenses.
+                  Pick a Purchase Order, Work Order, or GRN to auto-fill booking
+                  details, or choose a document type from Other Expenses for
+                  standalone expense entries.
                 </p>
                 <DocSelectorPanel
                   poList={poList}
                   woList={woList}
                   todList={todList}
+                  grnList={grnList}
                   loadingPO={loadingPO}
                   loadingWO={loadingWO}
                   loadingTOD={loadingTOD}
+                  loadingGRN={loadingGRN}
                   selected={selectedDoc}
                   finYear={form.financialYear || undefined}
                   onSelect={applyDoc}
@@ -1123,39 +1401,60 @@ export default function MaterialExpenseBooking() {
                 />
 
                 {/* ── Source chain banner ───────────────────────────────── */}
-                {selectedDoc && (selectedDoc.kind === "WO" || selectedDoc.kind === "PO") && (
-                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-primary/30 bg-primary/5 text-xs text-primary font-medium">
-                    <span className="shrink-0">←</span>
-                    <span className="font-mono font-semibold">{selectedDoc.docNo}</span>
-                    {selectedDoc.vendorLabel && (
-                      <>
-                        <span className="text-muted-foreground">|</span>
-                        <span className="text-foreground">{selectedDoc.vendorLabel}</span>
-                      </>
-                    )}
-                    {selectedDoc.amount != null && selectedDoc.amount > 0 && (
-                      <>
-                        <span className="text-muted-foreground">|</span>
-                        <span className="text-foreground font-semibold">
-                          ₹{selectedDoc.amount.toLocaleString("en-IN")}
-                        </span>
-                      </>
-                    )}
-                    <span className={`ml-auto shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold ${
-                      selectedDoc.kind === "WO"
-                        ? "bg-orange-100 dark:bg-orange-950/40 text-orange-700 dark:text-orange-400"
-                        : "bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400"
-                    }`}>
-                      {selectedDoc.kind === "WO" ? "Work Order" : "Purchase Order"}
-                    </span>
-                  </div>
-                )}
+                {selectedDoc &&
+                  (selectedDoc.kind === "WO" ||
+                    selectedDoc.kind === "PO" ||
+                    selectedDoc.kind === "GRN") && (
+                    <div
+                      className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium ${
+                        selectedDoc.kind === "GRN"
+                          ? "border-teal-500/30 bg-teal-500/5 text-teal-600 dark:text-teal-400"
+                          : "border-primary/30 bg-primary/5 text-primary"
+                      }`}
+                    >
+                      <span className="shrink-0">←</span>
+                      <span className="font-mono font-semibold">
+                        {selectedDoc.docNo}
+                      </span>
+                      {selectedDoc.vendorLabel && (
+                        <>
+                          <span className="text-muted-foreground">|</span>
+                          <span className="text-foreground">
+                            {selectedDoc.vendorLabel}
+                          </span>
+                        </>
+                      )}
+                      {selectedDoc.amount != null && selectedDoc.amount > 0 && (
+                        <>
+                          <span className="text-muted-foreground">|</span>
+                          <span className="text-foreground font-semibold">
+                            ₹{selectedDoc.amount.toLocaleString("en-IN")}
+                          </span>
+                        </>
+                      )}
+                      <span
+                        className={`ml-auto shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                          selectedDoc.kind === "WO"
+                            ? "bg-orange-100 dark:bg-orange-950/40 text-orange-700 dark:text-orange-400"
+                            : selectedDoc.kind === "GRN"
+                              ? "bg-teal-100 dark:bg-teal-950/40 text-teal-700 dark:text-teal-400"
+                              : "bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400"
+                        }`}
+                      >
+                        {selectedDoc.kind === "WO"
+                          ? "Work Order"
+                          : selectedDoc.kind === "GRN"
+                            ? "GRN"
+                            : "Purchase Order"}
+                      </span>
+                    </div>
+                  )}
                 <Field
                   label="Booking Reference"
                   required
                   hint={
                     selectedDoc
-                      ? `Auto-filled from the selected ${selectedDoc.kind === "PO" ? "Purchase Order" : selectedDoc.kind === "WO" ? "Work Order" : "document"}.`
+                      ? `Auto-filled from the selected ${selectedDoc.kind === "PO" ? "Purchase Order" : selectedDoc.kind === "WO" ? "Work Order" : selectedDoc.kind === "GRN" ? "GRN" : "document"}.`
                       : "Will be populated once you select a document above."
                   }
                 >
@@ -1189,7 +1488,7 @@ export default function MaterialExpenseBooking() {
               {/* 1. Booking Information */}
               <div className="space-y-4">
                 <SectionHeader label="Booking Information" />
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   <Field label="Booking Date" required>
                     <Input
                       type="date"
@@ -1223,23 +1522,6 @@ export default function MaterialExpenseBooking() {
                         {activeFinYears.map((fy) => (
                           <SelectItem key={fy.id} value={fy.year}>
                             {fy.year}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                  <Field label="Status">
-                    <Select
-                      value={form.status}
-                      onValueChange={(v) => set("status", v as BookingStatus)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {BOOKING_STATUSES.map((s) => (
-                          <SelectItem key={s} value={s}>
-                            {s}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -1342,156 +1624,264 @@ export default function MaterialExpenseBooking() {
                 </div>
               </div>
 
-              {/* 2. Amount & GST */}
-              <div className="space-y-4">
-                <SectionHeader label="Amount & GST" />
-                {isPOorWO && (
-                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/20 text-xs">
-                    <BadgePercent size={12} className="text-primary shrink-0" />
-                    {selectedDoc!.gst?.applicable ? (
-                      <span className="text-foreground">
-                        GST auto-filled from linked{" "}
-                        <span className="font-semibold">
-                          {selectedDoc!.kind === "PO"
-                            ? "Purchase Order"
-                            : "Work Order"}
+              {/* GRN Items Summary — shown only when a GRN is selected */}
+              {isGRN &&
+                selectedDoc?.grnItems &&
+                selectedDoc.grnItems.length > 0 && (
+                  <div className="space-y-3">
+                    <SectionHeader label="GRN Items Summary" />
+                    <div className="rounded-xl border border-teal-500/25 bg-teal-500/5 overflow-hidden">
+                      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-teal-500/20 bg-teal-500/8">
+                        <Truck size={12} className="text-teal-500 shrink-0" />
+                        <span className="text-xs font-heading font-semibold text-teal-600 dark:text-teal-400">
+                          Items received against this GRN
                         </span>
-                        {" — "}
-                        {selectedDoc!.gst!.type === "cgst_sgst"
-                          ? `CGST ${selectedDoc!.gst!.rate / 2}% + SGST ${selectedDoc!.gst!.rate / 2}% (total ${selectedDoc!.gst!.rate}%)`
-                          : selectedDoc!.gst!.type === "igst"
-                            ? `IGST ${selectedDoc!.gst!.rate}% (mapped to CGST)`
-                            : "GST not applicable"}
-                        . Editable if needed.
-                      </span>
-                    ) : (
-                      <span className="text-muted-foreground">
-                        Linked{" "}
-                        {selectedDoc!.kind === "PO"
-                          ? "Purchase Order"
-                          : "Work Order"}{" "}
-                        has no GST applied — rates set to 0. Editable if needed.
-                      </span>
-                    )}
-                  </div>
-                )}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <Field
-                    label="Basic Amount (₹)"
-                    required
-                    hint={
-                      selectedDoc?.amount != null
-                        ? "Auto-filled from linked order value"
-                        : "Will be auto-filled when a PO or WO is selected"
-                    }
-                  >
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs font-semibold">
-                        ₹
-                      </span>
-                      <Input
-                        type="number"
-                        min={0}
-                        value={form.basicAmount || ""}
-                        readOnly={!!selectedDoc?.amount}
-                        onChange={(e) =>
-                          !selectedDoc?.amount &&
-                          set("basicAmount", parseFloat(e.target.value) || 0)
-                        }
-                        className={`pl-7 font-mono ${selectedDoc?.amount != null ? "bg-muted/30 cursor-not-allowed" : ""}`}
-                        placeholder="0.00"
-                      />
-                    </div>
-                  </Field>
-                  <Field
-                    label="CGST Rate (%)"
-                    hint={
-                      isPOorWO
-                        ? selectedDoc!.gst?.applicable
-                          ? selectedDoc!.gst!.type === "igst"
-                            ? "IGST mapped here — editable"
-                            : "Auto-filled from linked order — editable"
-                          : "No GST on this order — editable"
-                        : "Enter CGST rate manually"
-                    }
-                  >
-                    <RateInput
-                      value={form.cgstRate}
-                      onChange={(v) => set("cgstRate", v)}
-                      highlighted={gstHighlighted}
-                    />
-                  </Field>
-                  <Field
-                    label={
-                      selectedDoc?.gst?.type === "igst"
-                        ? "SGST Rate (%) — N/A for IGST"
-                        : "SGST Rate (%)"
-                    }
-                    hint={
-                      isPOorWO
-                        ? selectedDoc!.gst?.type === "igst"
-                          ? "IGST order — SGST is 0"
-                          : selectedDoc!.gst?.applicable
-                            ? "Auto-filled from linked order — editable"
-                            : "No GST on this order — editable"
-                        : "Enter SGST rate manually"
-                    }
-                  >
-                    <RateInput
-                      value={form.sgstRate}
-                      onChange={(v) => set("sgstRate", v)}
-                      highlighted={gstHighlighted}
-                    />
-                  </Field>
-                </div>
-                {form.basicAmount > 0 && (
-                  <>
-                    <PriceBreakdownPanel
-                      bd={bd}
-                      cgstRate={form.cgstRate}
-                      sgstRate={form.sgstRate}
-                      hasDiscount={form.discount.applicable}
-                    />
-                    <div className="flex items-center justify-between rounded-xl bg-primary/8 border border-primary/20 px-5 py-4">
-                      <div className="flex items-center gap-2">
-                        <TrendingUp size={15} className="text-primary" />
-                        <span className="text-sm font-heading font-semibold text-foreground">
-                          Net Payable Amount
+                        <span className="ml-auto text-[10px] text-muted-foreground">
+                          {selectedDoc.grnItems.length}{" "}
+                          {selectedDoc.grnItems.length === 1 ? "item" : "items"}
                         </span>
                       </div>
-                      <span className="font-mono text-xl font-bold text-primary">
-                        ₹{fmt(bd.netAmount)}
-                      </span>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="bg-muted/20 border-b border-teal-500/15">
+                              <th className="px-4 py-2.5 text-left font-heading uppercase tracking-wider text-muted-foreground text-[10px]">
+                                Item
+                              </th>
+                              <th className="px-4 py-2.5 text-right font-heading uppercase tracking-wider text-muted-foreground text-[10px]">
+                                Ordered
+                              </th>
+                              <th className="px-4 py-2.5 text-right font-heading uppercase tracking-wider text-emerald-600 dark:text-emerald-400 text-[10px]">
+                                Received
+                              </th>
+                              <th className="px-4 py-2.5 text-right font-heading uppercase tracking-wider text-amber-600 dark:text-amber-400 text-[10px]">
+                                Remaining
+                              </th>
+                              <th className="px-4 py-2.5 text-left font-heading uppercase tracking-wider text-muted-foreground text-[10px]">
+                                UOM
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-teal-500/10">
+                            {selectedDoc.grnItems.map((item, idx) => (
+                              <tr
+                                key={idx}
+                                className="hover:bg-teal-500/5 transition-colors"
+                              >
+                                <td className="px-4 py-2.5 font-medium text-foreground max-w-[180px] truncate">
+                                  {item.itemName || `Item ${idx + 1}`}
+                                </td>
+                                <td className="px-4 py-2.5 text-right font-mono text-muted-foreground">
+                                  {Number(item.orderedQty) || 0}
+                                </td>
+                                <td className="px-4 py-2.5 text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                                  {Number(item.receivedQty) || 0}
+                                </td>
+                                <td
+                                  className={`px-4 py-2.5 text-right font-mono font-semibold ${Number(item.remainingQty) > 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}
+                                >
+                                  {Number(item.remainingQty) || 0}
+                                </td>
+                                <td className="px-4 py-2.5 text-muted-foreground">
+                                  {item.uom || "—"}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot className="border-t border-teal-500/20 bg-muted/10">
+                            <tr>
+                              <td className="px-4 py-2.5 text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+                                Totals
+                              </td>
+                              <td className="px-4 py-2.5 text-right font-mono text-xs font-semibold text-muted-foreground">
+                                {selectedDoc.grnItems.reduce(
+                                  (s, i) => s + (Number(i.orderedQty) || 0),
+                                  0,
+                                )}
+                              </td>
+                              <td className="px-4 py-2.5 text-right font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                                {selectedDoc.grnItems.reduce(
+                                  (s, i) => s + (Number(i.receivedQty) || 0),
+                                  0,
+                                )}
+                              </td>
+                              <td className="px-4 py-2.5 text-right font-mono text-xs font-semibold text-amber-600 dark:text-amber-400">
+                                {selectedDoc.grnItems.reduce(
+                                  (s, i) => s + (Number(i.remainingQty) || 0),
+                                  0,
+                                )}
+                              </td>
+                              <td />
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
                     </div>
-                  </>
+                  </div>
                 )}
-              </div>
 
-              {/* 3. Billing Terms */}
-              <div className="space-y-3">
-                <SectionHeader label="Billing Terms" />
-                <BillingAccordion
-                  basicAmount={form.basicAmount}
-                  cgstRate={form.cgstRate}
-                  sgstRate={form.sgstRate}
-                  discount={form.discount}
-                  onChange={(d) => set("discount", d)}
-                />
-              </div>
+              {/* 2. Amount & GST — hidden when GRN is selected */}
+              {!isGRN && (
+                <>
+                  {/* Amount & GST */}
+                  <div className="space-y-4">
+                    <SectionHeader label="Amount & GST" />
+                    {isPOorWO && (
+                      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/20 text-xs">
+                        <BadgePercent
+                          size={12}
+                          className="text-primary shrink-0"
+                        />
+                        {selectedDoc!.gst?.applicable ? (
+                          <span className="text-foreground">
+                            GST auto-filled from linked{" "}
+                            <span className="font-semibold">
+                              {selectedDoc!.kind === "PO"
+                                ? "Purchase Order"
+                                : "Work Order"}
+                            </span>
+                            {" — "}
+                            {selectedDoc!.gst!.type === "cgst_sgst"
+                              ? `CGST ${selectedDoc!.gst!.rate / 2}% + SGST ${selectedDoc!.gst!.rate / 2}% (total ${selectedDoc!.gst!.rate}%)`
+                              : selectedDoc!.gst!.type === "igst"
+                                ? `IGST ${selectedDoc!.gst!.rate}% (mapped to CGST)`
+                                : "GST not applicable"}
+                            . Editable if needed.
+                          </span>
+                        ) : (
+                          <span className="text-muted-foreground">
+                            Linked{" "}
+                            {selectedDoc!.kind === "PO"
+                              ? "Purchase Order"
+                              : "Work Order"}{" "}
+                            has no GST applied — rates set to 0. Editable if
+                            needed.
+                          </span>
+                        )}
+                      </div>
+                    )}
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <Field
+                        label="Basic Amount (₹)"
+                        required
+                        hint={
+                          selectedDoc?.amount != null
+                            ? "Auto-filled from linked order value"
+                            : "Will be auto-filled when a PO or WO is selected"
+                        }
+                      >
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs font-semibold">
+                            ₹
+                          </span>
+                          <Input
+                            type="number"
+                            min={0}
+                            value={form.basicAmount || ""}
+                            readOnly={!!selectedDoc?.amount}
+                            onChange={(e) =>
+                              !selectedDoc?.amount &&
+                              set(
+                                "basicAmount",
+                                parseFloat(e.target.value) || 0,
+                              )
+                            }
+                            className={`pl-7 font-mono ${selectedDoc?.amount != null ? "bg-muted/30 cursor-not-allowed" : ""}`}
+                            placeholder="0.00"
+                          />
+                        </div>
+                      </Field>
+                      <Field
+                        label="CGST Rate (%)"
+                        hint={
+                          isPOorWO
+                            ? selectedDoc!.gst?.applicable
+                              ? selectedDoc!.gst!.type === "igst"
+                                ? "IGST mapped here — editable"
+                                : "Auto-filled from linked order — editable"
+                              : "No GST on this order — editable"
+                            : "Enter CGST rate manually"
+                        }
+                      >
+                        <RateInput
+                          value={form.cgstRate}
+                          onChange={(v) => set("cgstRate", v)}
+                          highlighted={gstHighlighted}
+                        />
+                      </Field>
+                      <Field
+                        label={
+                          selectedDoc?.gst?.type === "igst"
+                            ? "SGST Rate (%) — N/A for IGST"
+                            : "SGST Rate (%)"
+                        }
+                        hint={
+                          isPOorWO
+                            ? selectedDoc!.gst?.type === "igst"
+                              ? "IGST order — SGST is 0"
+                              : selectedDoc!.gst?.applicable
+                                ? "Auto-filled from linked order — editable"
+                                : "No GST on this order — editable"
+                            : "Enter SGST rate manually"
+                        }
+                      >
+                        <RateInput
+                          value={form.sgstRate}
+                          onChange={(v) => set("sgstRate", v)}
+                          highlighted={gstHighlighted}
+                        />
+                      </Field>
+                    </div>
+                    {form.basicAmount > 0 && (
+                      <>
+                        <PriceBreakdownPanel
+                          bd={bd}
+                          cgstRate={form.cgstRate}
+                          sgstRate={form.sgstRate}
+                          hasDiscount={form.discount.applicable}
+                        />
+                        <div className="flex items-center justify-between rounded-xl bg-primary/8 border border-primary/20 px-5 py-4">
+                          <div className="flex items-center gap-2">
+                            <TrendingUp size={15} className="text-primary" />
+                            <span className="text-sm font-heading font-semibold text-foreground">
+                              Net Payable Amount
+                            </span>
+                          </div>
+                          <span className="font-mono text-xl font-bold text-primary">
+                            ₹{fmt(bd.netAmount)}
+                          </span>
+                        </div>
+                      </>
+                    )}
+                  </div>
 
-              {/* 4. EMI Options */}
-              <div className="space-y-3">
-                <SectionHeader label="EMI / Installment Options" />
-                <EmiSection
-                  emi={form.emi}
-                  netAmount={bd.netAmount}
-                  baseDocNo={form.bookingReference}
-                  onChange={(emi) => set("emi", emi)}
-                  liveSchedule={isEditing ? liveEmiSchedule : null}
-                  loadingEmi={loadingEmi}
-                  onDisableEmi={isEditing ? disableEmi : undefined}
-                />
-              </div>
+                  {/* 3. Billing Terms */}
+                  <div className="space-y-3">
+                    <SectionHeader label="Billing Terms" />
+                    <BillingAccordion
+                      basicAmount={form.basicAmount}
+                      cgstRate={form.cgstRate}
+                      sgstRate={form.sgstRate}
+                      discount={form.discount}
+                      onChange={(d) => set("discount", d)}
+                    />
+                  </div>
+
+                  {/* 4. EMI Options */}
+                  <div className="space-y-3">
+                    <SectionHeader label="EMI / Installment Options" />
+                    <EmiSection
+                      emi={form.emi}
+                      netAmount={bd.netAmount}
+                      baseDocNo={form.bookingReference}
+                      onChange={(emi) => set("emi", emi)}
+                      liveSchedule={isEditing ? liveEmiSchedule : null}
+                      loadingEmi={loadingEmi}
+                      onDisableEmi={isEditing ? disableEmi : undefined}
+                    />
+                  </div>
+                </>
+              )}
 
               {/* 5. Approval Trail */}
               {isEditing && (
@@ -1640,13 +2030,14 @@ export default function MaterialExpenseBooking() {
                               "CGST",
                               "SGST",
                               "Net Amt",
+                              "GRN",
                               "EMI",
                               "Status",
                               "Actions",
                             ].map((h, i) => (
                               <TableHead
                                 key={h}
-                                className={`text-xs font-heading${[4, 5, 6].includes(i) ? " hidden md:table-cell" : ""}`}
+                                className={`text-xs font-heading${[4, 5, 6].includes(i) ? " hidden md:table-cell" : ""}${i === 8 ? " hidden lg:table-cell" : ""}`}
                               >
                                 {h}
                               </TableHead>
@@ -1693,6 +2084,9 @@ export default function MaterialExpenseBooking() {
                                 </TableCell>
                                 <TableCell className="font-mono text-xs font-semibold">
                                   ₹{fmt(rbd.netAmount)}
+                                </TableCell>
+                                <TableCell className="hidden lg:table-cell">
+                                  <GRNChainBadge bookingId={rec.id} />
                                 </TableCell>
                                 <TableCell>
                                   {rec.emi?.enabled ? (
@@ -1741,7 +2135,7 @@ export default function MaterialExpenseBooking() {
                           {filteredRecords.length === 0 && (
                             <TableRow>
                               <TableCell
-                                colSpan={11}
+                                colSpan={12}
                                 className="text-center py-14 text-muted-foreground text-sm"
                               >
                                 <AlertCircle

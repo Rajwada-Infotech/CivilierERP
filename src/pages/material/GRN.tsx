@@ -13,11 +13,11 @@ import {
   Search,
   Calendar,
   FileText,
+  Eye,
 } from "lucide-react";
 import * as grnApi from "@/api/grnApi";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { StatusBadge } from "@/components/StatusBadge";
-import { ApprovalActions } from "@/components/ApprovalActions";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import type {
@@ -41,7 +41,9 @@ const parseJsonArray = <T,>(val: unknown): T[] => {
   if (Array.isArray(val)) return val as T[];
   if (typeof val !== "string" || !val.trim()) return [];
   try {
-    const parsed = JSON.parse(val);
+    let parsed = JSON.parse(val);
+    // Handle double-encoded: stored as JSON string of a JSON string
+    if (typeof parsed === "string") parsed = JSON.parse(parsed);
     return Array.isArray(parsed) ? (parsed as T[]) : [];
   } catch {
     return [];
@@ -87,6 +89,7 @@ function GRNChainBadge({ grnId }: { grnId: number }) {
 // queryClient is hoisted so column cell closures can reference it
 let queryClient: ReturnType<typeof useQueryClient>;
 let onEdit: (grn: any) => void;
+let onView: (grn: any) => void;
 let deleteMutation: { mutate: (id: string) => void };
 
 const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
@@ -135,24 +138,25 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
     cell: ({ row }) => {
       const grn = row.original;
       return (
-        <div className="flex items-center justify-end gap-1.5 flex-wrap">
-          <ApprovalActions
-            status={grn.Status || "Draft"}
-            recordId={Number(grn.GRNID)}
-            endpoint="/api/grns"
-            onSuccess={() =>
-              queryClient.invalidateQueries({ queryKey: ["grns"] })
-            }
-          />
+        <div className="flex items-center justify-end gap-1.5">
+          <button
+            onClick={() => onView(grn)}
+            className="text-muted-foreground hover:bg-muted p-2 rounded transition-colors"
+            title="View GRN"
+          >
+            <Eye size={18} />
+          </button>
           <button
             onClick={() => onEdit(grn)}
             className="text-primary hover:bg-primary/10 p-2 rounded transition-colors"
+            title="Edit GRN"
           >
             <Edit3 size={18} />
           </button>
           <button
             onClick={() => deleteMutation.mutate(String(grn.GRNID))}
             className="text-destructive hover:bg-destructive/10 p-2 rounded transition-colors"
+            title="Delete GRN"
           >
             <Trash2 size={18} />
           </button>
@@ -166,6 +170,7 @@ export default function GRN() {
   queryClient = useQueryClient();
   const { finYears } = useFinYear();
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [viewingGrn, setViewingGrn] = useState<any | null>(null);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [loadingPO, setLoadingPO] = useState(false);
@@ -395,6 +400,10 @@ export default function GRN() {
   };
 
   // ── Edit ─────────────────────────────────────────────────────────────────────
+  onView = (grn: any) => {
+    setViewingGrn(grn);
+  };
+
   onEdit = (grn: any) => {
     const parsedItems = parseJsonArray<GRNItemLine>(grn.GRNItems).map(
       (item) => ({
@@ -801,6 +810,151 @@ export default function GRN() {
           </div>
         </div>
       </div>
+
+      {/* View GRN Modal */}
+      {viewingGrn &&
+        (() => {
+          const items = parseJsonArray<GRNItemLine>(viewingGrn.GRNItems);
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
+              <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+                {/* Header */}
+                <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+                  <div>
+                    <h2 className="font-heading font-bold text-lg">
+                      {viewingGrn.GRNNo}
+                    </h2>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Goods Receipt Note
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setViewingGrn(null)}
+                    className="p-2 hover:bg-muted rounded-lg transition-colors"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+
+                <div className="p-6 space-y-5">
+                  {/* Meta row */}
+                  <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
+                        Purchase Order
+                      </p>
+                      <p className="font-medium">
+                        {viewingGrn.PONumber || "—"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
+                        Supplier
+                      </p>
+                      <p className="font-medium">
+                        {viewingGrn.SupplierName || "—"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
+                        Date
+                      </p>
+                      <p className="font-medium">
+                        {viewingGrn.GRNDate
+                          ? new Date(viewingGrn.GRNDate).toLocaleDateString(
+                              "en-IN",
+                            )
+                          : "—"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
+                        Status
+                      </p>
+                      <StatusBadge status={viewingGrn.Status || "Draft"} />
+                    </div>
+                  </div>
+
+                  {/* Items table */}
+                  <div>
+                    <p className="text-xs uppercase tracking-widest text-muted-foreground mb-2">
+                      Received Items
+                    </p>
+                    <div className="border border-border rounded-xl overflow-hidden">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="bg-muted/50">
+                            <th className="px-4 py-2.5 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                              Item
+                            </th>
+                            <th className="px-4 py-2.5 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                              Ordered
+                            </th>
+                            <th className="px-4 py-2.5 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                              Received
+                            </th>
+                            <th className="px-4 py-2.5 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                              Remaining
+                            </th>
+                            <th className="px-4 py-2.5 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                              UOM
+                            </th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border">
+                          {items.length ? (
+                            items.map((item, i) => (
+                              <tr key={i}>
+                                <td className="px-4 py-3 font-medium">
+                                  {item.itemName || "—"}
+                                </td>
+                                <td className="px-4 py-3 text-right text-muted-foreground">
+                                  {item.orderedQty}
+                                </td>
+                                <td className="px-4 py-3 text-right font-semibold">
+                                  {item.receivedQty}
+                                </td>
+                                <td
+                                  className={`px-4 py-3 text-right font-semibold ${item.remainingQty > 0 ? "text-amber-500" : "text-green-500"}`}
+                                >
+                                  {item.remainingQty}
+                                </td>
+                                <td className="px-4 py-3 text-muted-foreground">
+                                  {item.uom || "—"}
+                                </td>
+                              </tr>
+                            ))
+                          ) : (
+                            <tr>
+                              <td
+                                colSpan={5}
+                                className="px-4 py-4 text-center text-muted-foreground"
+                              >
+                                No items
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  {/* Remarks */}
+                  {viewingGrn.Remarks && (
+                    <div>
+                      <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
+                        Remarks
+                      </p>
+                      <p className="text-sm text-foreground bg-muted/40 rounded-lg px-3 py-2">
+                        {viewingGrn.Remarks}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
     </>
   );
 }
