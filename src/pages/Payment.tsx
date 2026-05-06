@@ -585,6 +585,12 @@ const Payment: React.FC = () => {
           amount: selectedOption.amount ?? null,
           docType: shortDocType,
         }));
+        // Fetch GRNs linked to the parent expense booking
+        if (selectedOption.expenseBookingId) {
+          fetchExpenseGRNs(String(selectedOption.expenseBookingId))
+            .then(setLinkedGRNs)
+            .catch(() => setLinkedGRNs([]));
+        }
         return;
       }
 
@@ -895,53 +901,46 @@ const Payment: React.FC = () => {
                   </div>
                 )}
 
-                {/* GRN linkage panel — shown when expense has linked GRNs */}
-                {form.expenseRef && (
+                {/* GRN linkage panel — only shown when there are linked GRNs */}
+                {form.expenseRef && linkedGRNs.length > 0 && (
                   <div className="mt-3">
-                    {linkedGRNs.length > 0 ? (
-                      <div className="rounded-xl border border-teal-500/25 bg-teal-500/5 px-4 py-3 space-y-2">
-                        <div className="flex items-center gap-2 text-xs font-heading font-semibold text-teal-600 dark:text-teal-400">
-                          <Truck size={12} />
-                          Linked GRNs ({linkedGRNs.length})
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {linkedGRNs.map((g) => (
-                            <div
-                              key={g.GRNID}
-                              className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-teal-500/30 bg-background text-xs"
-                            >
-                              <Truck
-                                size={11}
-                                className="text-teal-500 shrink-0"
-                              />
-                              <span className="font-mono font-semibold text-teal-600 dark:text-teal-400">
-                                {g.GRNNo}
+                    <div className="rounded-xl border border-teal-500/25 bg-teal-500/5 px-4 py-3 space-y-2">
+                      <div className="flex items-center gap-2 text-xs font-heading font-semibold text-teal-600 dark:text-teal-400">
+                        <Truck size={12} />
+                        Linked GRNs ({linkedGRNs.length})
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {linkedGRNs.map((g) => (
+                          <div
+                            key={g.GRNID}
+                            className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-teal-500/30 bg-background text-xs"
+                          >
+                            <Truck
+                              size={11}
+                              className="text-teal-500 shrink-0"
+                            />
+                            <span className="font-mono font-semibold text-teal-600 dark:text-teal-400">
+                              {g.GRNNo}
+                            </span>
+                            {g.PONumber && (
+                              <span className="text-muted-foreground hidden sm:inline">
+                                · PO: {g.PONumber}
                               </span>
-                              {g.PONumber && (
-                                <span className="text-muted-foreground hidden sm:inline">
-                                  · PO: {g.PONumber}
-                                </span>
-                              )}
-                              {g.GRNDate && (
-                                <span className="text-muted-foreground">
-                                  {g.GRNDate.slice(0, 10)}
-                                </span>
-                              )}
-                              {g.Status && (
-                                <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-muted text-muted-foreground border border-border/50">
-                                  {g.Status}
-                                </span>
-                              )}
-                            </div>
-                          ))}
-                        </div>
+                            )}
+                            {g.GRNDate && (
+                              <span className="text-muted-foreground">
+                                {g.GRNDate.slice(0, 10)}
+                              </span>
+                            )}
+                            {g.Status && (
+                              <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-muted text-muted-foreground border border-border/50">
+                                {g.Status}
+                              </span>
+                            )}
+                          </div>
+                        ))}
                       </div>
-                    ) : (
-                      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-muted/30 border border-border/50 text-[11px] text-muted-foreground">
-                        <Package size={12} className="shrink-0 opacity-50" />
-                        No GRNs linked to this expense booking
-                      </div>
-                    )}
+                    </div>
                   </div>
                 )}
               </div>
