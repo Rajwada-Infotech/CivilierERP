@@ -38,6 +38,8 @@ import {
   ChevronLeft,
   ChevronRight,
   TrendingUp,
+  Truck,
+  Package,
 } from "lucide-react";
 import { exportToCsv, exportToPdf } from "@/lib/export";
 import type { ExportColumn } from "@/lib/export";
@@ -147,6 +149,23 @@ const fetchExpenseDetail = async (
   return res.json();
 };
 
+interface GRNRef {
+  GRNID: number;
+  GRNNo: string;
+  GRNDate?: string;
+  SupplierName?: string;
+  PONumber?: string;
+  Status?: string;
+}
+
+const fetchExpenseGRNs = async (expenseId: string): Promise<GRNRef[]> => {
+  if (!expenseId) return [];
+  const res = await fetchWithAuth(`/api/expense-booking/${expenseId}/grns`);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return Array.isArray(data) ? data : [];
+};
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 const PAYMENT_MODES = [
@@ -205,6 +224,42 @@ function ModeBadge({ mode }: { mode: string }) {
       <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
       {mode || "—"}
     </span>
+  );
+}
+
+// ─── GRN badges for payment list ─────────────────────────────────────────────
+function PaymentGRNBadges({
+  expenseId,
+  expenseRef,
+}: {
+  expenseId: string;
+  expenseRef: string;
+}) {
+  const [grns, setGrns] = React.useState<GRNRef[]>([]);
+  React.useEffect(() => {
+    if (!expenseId && !expenseRef) return;
+    // Try by expenseId first; if missing, skip (we can't do a number lookup)
+    if (!expenseId) return;
+    fetchWithAuth(`/api/expense-booking/${expenseId}/grns`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => setGrns(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  }, [expenseId, expenseRef]);
+
+  if (grns.length === 0)
+    return <span className="text-muted-foreground text-xs">—</span>;
+  return (
+    <div className="flex flex-wrap gap-1">
+      {grns.map((g) => (
+        <span
+          key={g.GRNID}
+          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-teal-100 dark:bg-teal-950/40 text-teal-700 dark:text-teal-400 border border-teal-200 dark:border-teal-800 font-mono"
+        >
+          <Truck size={9} />
+          {g.GRNNo}
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -417,6 +472,7 @@ const Payment: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [loadingExpense, setLoadingExpense] = useState(false);
+  const [linkedGRNs, setLinkedGRNs] = useState<GRNRef[]>([]);
 
   // ── Queries ────────────────────────────────────────────────────────────────
 
@@ -529,6 +585,12 @@ const Payment: React.FC = () => {
           amount: selectedOption.amount ?? null,
           docType: shortDocType,
         }));
+        // Fetch GRNs linked to the parent expense booking
+        if (selectedOption.expenseBookingId) {
+          fetchExpenseGRNs(String(selectedOption.expenseBookingId))
+            .then(setLinkedGRNs)
+            .catch(() => setLinkedGRNs([]));
+        }
         return;
       }
 
@@ -545,6 +607,9 @@ const Payment: React.FC = () => {
           amount: detail.ENetAmount ?? detail.EAmount ?? null,
           docType: detail.DocTypeName || detail.EDocumentType || "",
         }));
+        // Fetch linked GRNs for this expense booking
+        const grns = await fetchExpenseGRNs(expenseId);
+        setLinkedGRNs(grns);
       } catch {
         toast.error("Could not load expense booking details.");
       } finally {
@@ -564,6 +629,7 @@ const Payment: React.FC = () => {
       amount: null,
       docType: "",
     }));
+    setLinkedGRNs([]);
   };
 
   // ── Bank selection ─────────────────────────────────────────────────────────
@@ -834,6 +900,49 @@ const Payment: React.FC = () => {
                     </Field>
                   </div>
                 )}
+
+                {/* GRN linkage panel — only shown when there are linked GRNs */}
+                {form.expenseRef && linkedGRNs.length > 0 && (
+                  <div className="mt-3">
+                    <div className="rounded-xl border border-teal-500/25 bg-teal-500/5 px-4 py-3 space-y-2">
+                      <div className="flex items-center gap-2 text-xs font-heading font-semibold text-teal-600 dark:text-teal-400">
+                        <Truck size={12} />
+                        Linked GRNs ({linkedGRNs.length})
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {linkedGRNs.map((g) => (
+                          <div
+                            key={g.GRNID}
+                            className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-teal-500/30 bg-background text-xs"
+                          >
+                            <Truck
+                              size={11}
+                              className="text-teal-500 shrink-0"
+                            />
+                            <span className="font-mono font-semibold text-teal-600 dark:text-teal-400">
+                              {g.GRNNo}
+                            </span>
+                            {g.PONumber && (
+                              <span className="text-muted-foreground hidden sm:inline">
+                                · PO: {g.PONumber}
+                              </span>
+                            )}
+                            {g.GRNDate && (
+                              <span className="text-muted-foreground">
+                                {g.GRNDate.slice(0, 10)}
+                              </span>
+                            )}
+                            {g.Status && (
+                              <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-muted text-muted-foreground border border-border/50">
+                                {g.Status}
+                              </span>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* ── 2. Payment Details ──────────────────────────────────── */}
@@ -1101,6 +1210,7 @@ const Payment: React.FC = () => {
                         {[
                           "Payment Name",
                           "Expense Ref",
+                          "GRN(s)",
                           "Project",
                           "Mode",
                           "Date",
@@ -1111,7 +1221,7 @@ const Payment: React.FC = () => {
                         ].map((h) => (
                           <th
                             key={h}
-                            className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground whitespace-nowrap"
+                            className={`px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground whitespace-nowrap${h === "GRN(s)" ? " hidden lg:table-cell" : ""}`}
                           >
                             {h}
                           </th>
@@ -1151,6 +1261,12 @@ const Payment: React.FC = () => {
                                 —
                               </span>
                             )}
+                          </td>
+                          <td className="px-4 py-3 hidden lg:table-cell">
+                            <PaymentGRNBadges
+                              expenseId={rec.expenseId || ""}
+                              expenseRef={rec.expenseRef}
+                            />
                           </td>
                           <td className="px-4 py-3 text-xs text-muted-foreground max-w-[120px] truncate">
                             {rec.project || "—"}
