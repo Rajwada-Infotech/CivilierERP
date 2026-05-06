@@ -55,12 +55,9 @@ import {
   Hash,
   User,
   Banknote,
-<<<<<<< HEAD
-  Eye,
-=======
   Truck,
   Package,
->>>>>>> 4d2d631e955ffa29a84e150b68cc6311a7b4ae04
+  Eye,
 } from "lucide-react";
 import { toast } from "sonner";
 import { ApprovalActions } from "@/components/ApprovalActions";
@@ -2224,7 +2221,7 @@ export default function MaterialExpenseBooking() {
                                       recordId={rec.id}
                                       endpoint="/api/expense-booking"
                                       submitOnly
-                                      onSuccess={fetchRecords}
+                                      onSuccess={() => fetchRecords(page)}
                                     />
                                     <Button
                                       variant="outline"
@@ -2410,7 +2407,9 @@ export default function MaterialExpenseBooking() {
                   <div>
                     <p className="text-[10px] text-muted-foreground uppercase">Discount</p>
                     <p className="font-mono text-sm font-semibold text-red-500">
-                      {previewRecord.discount?.applicable ? `-₹${fmt(previewRecord.discount.amount)}` : "—"}
+                      {previewRecord.discount?.applicable
+                        ? `-₹${fmt(computeBreakdown(previewRecord.basicAmount, previewRecord.cgstRate, previewRecord.sgstRate, previewRecord.discount).discountAmount)}`
+                        : "—"}
                     </p>
                   </div>
                 </div>
