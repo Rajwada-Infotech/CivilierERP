@@ -59,8 +59,8 @@ import {
   Package,
 } from "lucide-react";
 import { toast } from "sonner";
-import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
+import { StatusBadge } from "@/components/StatusBadge";
 import { Field, PriceBreakdownPanel } from "./ExpenseBooking/FormPrimitives";
 import { BillingAccordion } from "./ExpenseBooking/BillingAccordion";
 import { EmiSection } from "./ExpenseBooking/EmiSection";
@@ -778,6 +778,8 @@ function DocSelectorPanel({
             <EmptyState label="No GRNs found" />
           ) : (
             filteredGRN.map((g) => {
+              // FIX: parse GRNItems from list data for preview counts only —
+              // the full fetch in applyDoc will always override this with fresh data.
               const parsedItems: GRNItemLine[] = (() => {
                 try {
                   if (Array.isArray(g.GRNItems))
@@ -805,7 +807,11 @@ function DocSelectorPanel({
                   onClick={() =>
                     onSelect({
                       kind: "GRN",
-                      docNo: g.GRNNo,
+                      docNo: g.GRNNo
+                        ? g.GRNNo.startsWith("GRN-")
+                          ? g.GRNNo
+                          : `GRN-${g.GRNNo}`
+                        : g.GRNNo,
                       sourceId: g.GRNID,
                       vendorLabel: g.SupplierName,
                       status: g.Status,
@@ -822,7 +828,11 @@ function DocSelectorPanel({
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-mono text-xs font-bold text-teal-600 dark:text-teal-400">
-                        {g.GRNNo}
+                        {g.GRNNo
+                          ? g.GRNNo.startsWith("GRN-")
+                            ? g.GRNNo
+                            : `GRN-${g.GRNNo}`
+                          : "—"}
                       </span>
                       {g.Status && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground border border-border/50">
@@ -935,6 +945,22 @@ function GRNChainBadge({
   );
 }
 
+// ─── parseGRNItemsFromRaw ─────────────────────────────────────────────────────
+// Safely parses the GRNItems field from either a raw DB record (string JSON)
+// or an already-parsed array. Used in applyDoc to normalise the API response.
+function parseGRNItemsFromRaw(raw: unknown): GRNItemLine[] {
+  try {
+    if (Array.isArray(raw)) return raw as GRNItemLine[];
+    if (typeof raw === "string" && raw.trim()) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed as GRNItemLine[];
+    }
+  } catch {
+    /* fall through */
+  }
+  return [];
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 const BOOKING_STATUSES: BookingStatus[] = [
   "Draft",
@@ -963,6 +989,7 @@ export default function MaterialExpenseBooking() {
   const [loadingTOD, setLoadingTOD] = useState(false);
   const [loadingGRN, setLoadingGRN] = useState(false);
   const [selectedDoc, setSelectedDoc] = useState<SelectedDoc | null>(null);
+  const [grnItemsLoading, setGrnItemsLoading] = useState(false);
   const [selectedTod, setSelectedTod] = useState<TodItem | null>(null);
   const [records, setRecords] = useState<ExpenseRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -1025,6 +1052,7 @@ export default function MaterialExpenseBooking() {
         .catch(() => {})
         .finally(() => setLd(false));
     };
+
     load("po", "/api/purchase-orders?limit=500", setPoList, setLoadingPO);
     load("wo", "/api/work-orders?limit=500", setWoList, setLoadingWO);
     load<TodItem>("tod", "/api/document-type", setTodList, setLoadingTOD, (r) =>
@@ -1032,13 +1060,27 @@ export default function MaterialExpenseBooking() {
         (t) => !["PO", "WO"].includes((t as any).ModuleTag ?? ""),
       ),
     );
-    load<GRNItem>(
-      "grn",
-      "/api/grns?limit=500",
-      setGrnList,
-      setLoadingGRN,
-      (r) => (Array.isArray(r) ? r : (r?.data ?? [])),
-    );
+
+    // FIX: GRN list is NEVER served from cache because the list endpoint's
+    // GRNItems column is often null/stale (the column is heavy and some DB
+    // configs truncate it in paginated queries). We always fetch fresh so that
+    // the picker row counts are accurate, and applyDoc will always do a
+    // dedicated single-record fetch anyway to guarantee item data.
+    _mastersCache.grn = null;
+    setLoadingGRN(true);
+    apiFetch("/api/grns?limit=500")
+      .then((r) => {
+        const list: GRNItem[] = Array.isArray(r) ? r : (r?.data ?? []);
+        _mastersCache.grn = list;
+        setGrnList(list);
+      })
+      .catch((err: any) => {
+        console.error("GRN list fetch failed:", err?.message);
+        toast.error(
+          "Could not load GRN list: " + (err?.message ?? "Unknown error"),
+        );
+      })
+      .finally(() => setLoadingGRN(false));
   };
 
   useEffect(() => {
@@ -1085,6 +1127,54 @@ export default function MaterialExpenseBooking() {
 
   const applyDoc = (doc: SelectedDoc) => {
     setSelectedDoc(doc);
+
+    if (doc.kind === "GRN") {
+      // FIX: immediately clear any stale grnItems so the loading spinner shows
+      // rather than stale/empty data from the list cache.
+      setSelectedDoc({ ...doc, grnItems: [] });
+      setGrnItemsLoading(true);
+
+      // Always fetch the authoritative single-record endpoint. The list endpoint
+      // often returns GRNItems as null or a truncated string — only the /:id
+      // endpoint is guaranteed to return the full GRNItems JSON column.
+      // Also re-read GRNNo from the single record so the booking reference is
+      // always the canonical GRN number, not whatever the list cached.
+      apiFetch(`/api/grns/${doc.sourceId}`)
+        .then((r: any) => {
+          const items = parseGRNItemsFromRaw(r.GRNItems);
+          // Use the authoritative GRNNo from the single-record fetch.
+          // Apply the same GRN- prefix that GRN.tsx uses in its list column.
+          const rawDocNo: string = r.GRNNo || r.DocNo || doc.docNo;
+          const canonicalDocNo = rawDocNo
+            ? rawDocNo.startsWith("GRN-")
+              ? rawDocNo
+              : `GRN-${rawDocNo}`
+            : rawDocNo;
+          setSelectedDoc((prev) =>
+            prev && prev.kind === "GRN" && prev.sourceId === doc.sourceId
+              ? { ...prev, docNo: canonicalDocNo, grnItems: items }
+              : prev,
+          );
+          // Keep bookingReference in sync with the canonical GRN number
+          setForm((prev) => ({
+            ...prev,
+            bookingReference: canonicalDocNo,
+          }));
+          // Let the user know if the GRN genuinely has no item lines.
+          if (items.length === 0) {
+            toast.info("This GRN has no item lines recorded against it.");
+          }
+        })
+        .catch((err: any) => {
+          toast.error(
+            "Could not load GRN items: " +
+              (err?.message ?? "Unknown error") +
+              ". Check that the /api/grns/:id endpoint is deployed.",
+          );
+        })
+        .finally(() => setGrnItemsLoading(false));
+    }
+
     const { cgst, sgst } = resolveGstRates(doc, form.cgstRate, form.sgstRate);
     setForm((prev) => ({
       ...prev,
@@ -1114,6 +1204,7 @@ export default function MaterialExpenseBooking() {
   const clearDoc = () => {
     setSelectedDoc(null);
     setSelectedTod(null);
+    setGrnItemsLoading(false);
     setForm((prev) => ({
       ...prev,
       bookingReference: "",
@@ -1134,6 +1225,8 @@ export default function MaterialExpenseBooking() {
   const openNew = () => {
     resetForm();
     setForm({ ...blankForm(), financialYear: activeFinYears[0]?.year || "" });
+    // FIX: bust GRN cache so we always get fresh GRNItems on form open
+    _mastersCache.grn = null;
     fetchMasters();
     setView("form");
   };
@@ -1171,6 +1264,8 @@ export default function MaterialExpenseBooking() {
     apiFetch(`${API}/${rec.id}/approval-trail`)
       .then(setApprovalTrail)
       .catch(() => setApprovalTrail(undefined));
+    // FIX: bust GRN cache so we always get fresh GRNItems on form open
+    _mastersCache.grn = null;
     fetchMasters();
     setView("form");
   };
@@ -1200,8 +1295,6 @@ export default function MaterialExpenseBooking() {
         { duration: 6000 },
       );
     }
-    // emi-toggle already committed everything to the DB — exit edit mode
-    // and refresh without going through handleSave (which guardEdit blocks).
     cancelForm();
     await fetchRecords(page);
   };
@@ -1219,6 +1312,13 @@ export default function MaterialExpenseBooking() {
       toast.error("Please select a company.");
       return;
     }
+    if (
+      selectedDoc?.kind !== "GRN" &&
+      (!form.basicAmount || form.basicAmount <= 0)
+    ) {
+      toast.error("Basic amount is required and must be greater than 0.");
+      return;
+    }
     const bd = computeBreakdown(
       form.basicAmount,
       form.cgstRate,
@@ -1226,8 +1326,6 @@ export default function MaterialExpenseBooking() {
       form.discount,
     );
 
-    // Guarantee the EMI schedule is always fresh at save time — the useEffect in
-    // EmiSection may not have fired yet if the user saves quickly after configuring EMI.
     let emiForSave = form.emi;
     if (
       !isEditing &&
@@ -1624,12 +1722,22 @@ export default function MaterialExpenseBooking() {
                 </div>
               </div>
 
-              {/* GRN Items Summary — shown only when a GRN is selected */}
-              {isGRN &&
-                selectedDoc?.grnItems &&
-                selectedDoc.grnItems.length > 0 && (
-                  <div className="space-y-3">
-                    <SectionHeader label="GRN Items Summary" />
+              {/* GRN Items Summary — shown whenever a GRN is selected */}
+              {isGRN && (
+                <div className="space-y-3">
+                  <SectionHeader label="GRN Items Summary" />
+                  {grnItemsLoading ? (
+                    <div className="rounded-xl border border-teal-500/25 bg-teal-500/5 px-4 py-6 flex items-center justify-center gap-2 text-xs text-muted-foreground">
+                      <div className="w-3.5 h-3.5 rounded-full border-2 border-teal-400 border-t-transparent animate-spin shrink-0" />
+                      <span>Loading GRN items…</span>
+                    </div>
+                  ) : !selectedDoc?.grnItems ||
+                    selectedDoc.grnItems.length === 0 ? (
+                    <div className="rounded-xl border border-teal-500/25 bg-teal-500/5 px-4 py-6 flex items-center justify-center gap-2 text-xs text-muted-foreground">
+                      <Truck size={13} className="text-teal-400 shrink-0" />
+                      <span>No items recorded against this GRN.</span>
+                    </div>
+                  ) : (
                     <div className="rounded-xl border border-teal-500/25 bg-teal-500/5 overflow-hidden">
                       <div className="flex items-center gap-2 px-4 py-2.5 border-b border-teal-500/20 bg-teal-500/8">
                         <Truck size={12} className="text-teal-500 shrink-0" />
@@ -1637,8 +1745,10 @@ export default function MaterialExpenseBooking() {
                           Items received against this GRN
                         </span>
                         <span className="ml-auto text-[10px] text-muted-foreground">
-                          {selectedDoc.grnItems.length}{" "}
-                          {selectedDoc.grnItems.length === 1 ? "item" : "items"}
+                          {selectedDoc!.grnItems!.length}{" "}
+                          {selectedDoc!.grnItems!.length === 1
+                            ? "item"
+                            : "items"}
                         </span>
                       </div>
                       <div className="overflow-x-auto">
@@ -1663,7 +1773,7 @@ export default function MaterialExpenseBooking() {
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-teal-500/10">
-                            {selectedDoc.grnItems.map((item, idx) => (
+                            {selectedDoc!.grnItems!.map((item, idx) => (
                               <tr
                                 key={idx}
                                 className="hover:bg-teal-500/5 transition-colors"
@@ -1694,19 +1804,19 @@ export default function MaterialExpenseBooking() {
                                 Totals
                               </td>
                               <td className="px-4 py-2.5 text-right font-mono text-xs font-semibold text-muted-foreground">
-                                {selectedDoc.grnItems.reduce(
+                                {selectedDoc!.grnItems!.reduce(
                                   (s, i) => s + (Number(i.orderedQty) || 0),
                                   0,
                                 )}
                               </td>
                               <td className="px-4 py-2.5 text-right font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                                {selectedDoc.grnItems.reduce(
+                                {selectedDoc!.grnItems!.reduce(
                                   (s, i) => s + (Number(i.receivedQty) || 0),
                                   0,
                                 )}
                               </td>
                               <td className="px-4 py-2.5 text-right font-mono text-xs font-semibold text-amber-600 dark:text-amber-400">
-                                {selectedDoc.grnItems.reduce(
+                                {selectedDoc!.grnItems!.reduce(
                                   (s, i) => s + (Number(i.remainingQty) || 0),
                                   0,
                                 )}
@@ -1717,170 +1827,167 @@ export default function MaterialExpenseBooking() {
                         </table>
                       </div>
                     </div>
+                  )}
+                </div>
+              )}
+
+              {/* 2. Amount & GST */}
+              <div className="space-y-4">
+                <SectionHeader label="Amount & GST" />
+                {isPOorWO && (
+                  <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/20 text-xs">
+                    <BadgePercent size={12} className="text-primary shrink-0" />
+                    {selectedDoc!.gst?.applicable ? (
+                      <span className="text-foreground">
+                        GST auto-filled from linked{" "}
+                        <span className="font-semibold">
+                          {selectedDoc!.kind === "PO"
+                            ? "Purchase Order"
+                            : "Work Order"}
+                        </span>
+                        {" — "}
+                        {selectedDoc!.gst!.type === "cgst_sgst"
+                          ? `CGST ${selectedDoc!.gst!.rate / 2}% + SGST ${selectedDoc!.gst!.rate / 2}% (total ${selectedDoc!.gst!.rate}%)`
+                          : selectedDoc!.gst!.type === "igst"
+                            ? `IGST ${selectedDoc!.gst!.rate}% (mapped to CGST)`
+                            : "GST not applicable"}
+                        . Editable if needed.
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground">
+                        Linked{" "}
+                        {selectedDoc!.kind === "PO"
+                          ? "Purchase Order"
+                          : "Work Order"}{" "}
+                        has no GST applied — rates set to 0. Editable if needed.
+                      </span>
+                    )}
                   </div>
                 )}
-
-              {/* 2. Amount & GST — hidden when GRN is selected */}
-              {!isGRN && (
-                <>
-                  {/* Amount & GST */}
-                  <div className="space-y-4">
-                    <SectionHeader label="Amount & GST" />
-                    {isPOorWO && (
-                      <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/20 text-xs">
-                        <BadgePercent
-                          size={12}
-                          className="text-primary shrink-0"
-                        />
-                        {selectedDoc!.gst?.applicable ? (
-                          <span className="text-foreground">
-                            GST auto-filled from linked{" "}
-                            <span className="font-semibold">
-                              {selectedDoc!.kind === "PO"
-                                ? "Purchase Order"
-                                : "Work Order"}
-                            </span>
-                            {" — "}
-                            {selectedDoc!.gst!.type === "cgst_sgst"
-                              ? `CGST ${selectedDoc!.gst!.rate / 2}% + SGST ${selectedDoc!.gst!.rate / 2}% (total ${selectedDoc!.gst!.rate}%)`
-                              : selectedDoc!.gst!.type === "igst"
-                                ? `IGST ${selectedDoc!.gst!.rate}% (mapped to CGST)`
-                                : "GST not applicable"}
-                            . Editable if needed.
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground">
-                            Linked{" "}
-                            {selectedDoc!.kind === "PO"
-                              ? "Purchase Order"
-                              : "Work Order"}{" "}
-                            has no GST applied — rates set to 0. Editable if
-                            needed.
-                          </span>
-                        )}
-                      </div>
-                    )}
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                      <Field
-                        label="Basic Amount (₹)"
-                        required
-                        hint={
-                          selectedDoc?.amount != null
-                            ? "Auto-filled from linked order value"
-                            : "Will be auto-filled when a PO or WO is selected"
-                        }
-                      >
-                        <div className="relative">
-                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs font-semibold">
-                            ₹
-                          </span>
-                          <Input
-                            type="number"
-                            min={0}
-                            value={form.basicAmount || ""}
-                            readOnly={!!selectedDoc?.amount}
-                            onChange={(e) =>
-                              !selectedDoc?.amount &&
-                              set(
-                                "basicAmount",
-                                parseFloat(e.target.value) || 0,
-                              )
-                            }
-                            className={`pl-7 font-mono ${selectedDoc?.amount != null ? "bg-muted/30 cursor-not-allowed" : ""}`}
-                            placeholder="0.00"
-                          />
-                        </div>
-                      </Field>
-                      <Field
-                        label="CGST Rate (%)"
-                        hint={
-                          isPOorWO
-                            ? selectedDoc!.gst?.applicable
-                              ? selectedDoc!.gst!.type === "igst"
-                                ? "IGST mapped here — editable"
-                                : "Auto-filled from linked order — editable"
-                              : "No GST on this order — editable"
-                            : "Enter CGST rate manually"
-                        }
-                      >
-                        <RateInput
-                          value={form.cgstRate}
-                          onChange={(v) => set("cgstRate", v)}
-                          highlighted={gstHighlighted}
-                        />
-                      </Field>
-                      <Field
-                        label={
-                          selectedDoc?.gst?.type === "igst"
-                            ? "SGST Rate (%) — N/A for IGST"
-                            : "SGST Rate (%)"
-                        }
-                        hint={
-                          isPOorWO
-                            ? selectedDoc!.gst?.type === "igst"
-                              ? "IGST order — SGST is 0"
-                              : selectedDoc!.gst?.applicable
-                                ? "Auto-filled from linked order — editable"
-                                : "No GST on this order — editable"
-                            : "Enter SGST rate manually"
-                        }
-                      >
-                        <RateInput
-                          value={form.sgstRate}
-                          onChange={(v) => set("sgstRate", v)}
-                          highlighted={gstHighlighted}
-                        />
-                      </Field>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <Field
+                    label="Basic Amount (₹)"
+                    required
+                    hint={
+                      isGRN
+                        ? "Enter the invoice amount being booked against this GRN"
+                        : selectedDoc?.amount != null
+                          ? "Auto-filled from linked order value"
+                          : "Will be auto-filled when a PO or WO is selected"
+                    }
+                  >
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs font-semibold">
+                        ₹
+                      </span>
+                      <Input
+                        type="number"
+                        min={0}
+                        value={form.basicAmount || ""}
+                        // GRN: always editable (no pre-set amount from GRN)
+                        // PO/WO: read-only if amount came from the linked order
+                        readOnly={!isGRN && !!selectedDoc?.amount}
+                        onChange={(e) => {
+                          if (!isGRN && selectedDoc?.amount) return;
+                          set("basicAmount", parseFloat(e.target.value) || 0);
+                        }}
+                        className={`pl-7 font-mono ${!isGRN && selectedDoc?.amount != null ? "bg-muted/30 cursor-not-allowed" : ""}`}
+                        placeholder="0.00"
+                      />
                     </div>
-                    {form.basicAmount > 0 && (
-                      <>
-                        <PriceBreakdownPanel
-                          bd={bd}
-                          cgstRate={form.cgstRate}
-                          sgstRate={form.sgstRate}
-                          hasDiscount={form.discount.applicable}
-                        />
-                        <div className="flex items-center justify-between rounded-xl bg-primary/8 border border-primary/20 px-5 py-4">
-                          <div className="flex items-center gap-2">
-                            <TrendingUp size={15} className="text-primary" />
-                            <span className="text-sm font-heading font-semibold text-foreground">
-                              Net Payable Amount
-                            </span>
-                          </div>
-                          <span className="font-mono text-xl font-bold text-primary">
-                            ₹{fmt(bd.netAmount)}
-                          </span>
-                        </div>
-                      </>
-                    )}
-                  </div>
-
-                  {/* 3. Billing Terms */}
-                  <div className="space-y-3">
-                    <SectionHeader label="Billing Terms" />
-                    <BillingAccordion
-                      basicAmount={form.basicAmount}
+                  </Field>
+                  <Field
+                    label="CGST Rate (%)"
+                    hint={
+                      isPOorWO
+                        ? selectedDoc!.gst?.applicable
+                          ? selectedDoc!.gst!.type === "igst"
+                            ? "IGST mapped here — editable"
+                            : "Auto-filled from linked order — editable"
+                          : "No GST on this order — editable"
+                        : "Enter CGST rate manually"
+                    }
+                  >
+                    <RateInput
+                      value={form.cgstRate}
+                      onChange={(v) => set("cgstRate", v)}
+                      highlighted={gstHighlighted}
+                    />
+                  </Field>
+                  <Field
+                    label={
+                      selectedDoc?.gst?.type === "igst"
+                        ? "SGST Rate (%) — N/A for IGST"
+                        : "SGST Rate (%)"
+                    }
+                    hint={
+                      isPOorWO
+                        ? selectedDoc!.gst?.type === "igst"
+                          ? "IGST order — SGST is 0"
+                          : selectedDoc!.gst?.applicable
+                            ? "Auto-filled from linked order — editable"
+                            : "No GST on this order — editable"
+                        : "Enter SGST rate manually"
+                    }
+                  >
+                    <RateInput
+                      value={form.sgstRate}
+                      onChange={(v) => set("sgstRate", v)}
+                      highlighted={gstHighlighted}
+                    />
+                  </Field>
+                </div>
+                {form.basicAmount > 0 && (
+                  <>
+                    <PriceBreakdownPanel
+                      bd={bd}
                       cgstRate={form.cgstRate}
                       sgstRate={form.sgstRate}
-                      discount={form.discount}
-                      onChange={(d) => set("discount", d)}
+                      hasDiscount={form.discount.applicable}
                     />
-                  </div>
+                    <div className="flex items-center justify-between rounded-xl bg-primary/8 border border-primary/20 px-5 py-4">
+                      <div className="flex items-center gap-2">
+                        <TrendingUp size={15} className="text-primary" />
+                        <span className="text-sm font-heading font-semibold text-foreground">
+                          Net Payable Amount
+                        </span>
+                      </div>
+                      <span className="font-mono text-xl font-bold text-primary">
+                        ₹{fmt(bd.netAmount)}
+                      </span>
+                    </div>
+                  </>
+                )}
+              </div>
 
-                  {/* 4. EMI Options */}
-                  <div className="space-y-3">
-                    <SectionHeader label="EMI / Installment Options" />
-                    <EmiSection
-                      emi={form.emi}
-                      netAmount={bd.netAmount}
-                      baseDocNo={form.bookingReference}
-                      onChange={(emi) => set("emi", emi)}
-                      liveSchedule={isEditing ? liveEmiSchedule : null}
-                      loadingEmi={loadingEmi}
-                      onDisableEmi={isEditing ? disableEmi : undefined}
-                    />
-                  </div>
-                </>
+              {/* 3. Billing Terms — hidden for GRN bookings */}
+              {!isGRN && (
+                <div className="space-y-3">
+                  <SectionHeader label="Billing Terms" />
+                  <BillingAccordion
+                    basicAmount={form.basicAmount}
+                    cgstRate={form.cgstRate}
+                    sgstRate={form.sgstRate}
+                    discount={form.discount}
+                    onChange={(d) => set("discount", d)}
+                  />
+                </div>
+              )}
+
+              {/* 4. EMI Options — hidden for GRN bookings */}
+              {!isGRN && (
+                <div className="space-y-3">
+                  <SectionHeader label="EMI / Installment Options" />
+                  <EmiSection
+                    emi={form.emi}
+                    netAmount={bd.netAmount}
+                    baseDocNo={form.bookingReference}
+                    onChange={(emi) => set("emi", emi)}
+                    liveSchedule={isEditing ? liveEmiSchedule : null}
+                    loadingEmi={loadingEmi}
+                    onDisableEmi={isEditing ? disableEmi : undefined}
+                  />
+                </div>
               )}
 
               {/* 5. Approval Trail */}
@@ -2109,6 +2216,7 @@ export default function MaterialExpenseBooking() {
                                       status={rec.status}
                                       recordId={rec.id}
                                       endpoint="/api/expense-booking"
+                                      submitOnly
                                       onSuccess={fetchRecords}
                                     />
                                     <Button

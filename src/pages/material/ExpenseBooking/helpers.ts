@@ -65,10 +65,6 @@ export function computeBreakdown(
   };
 }
 
-/**
- * Generates EMI schedule rows with reference numbers.
- * refNumber format: {baseDocNo}-EMI-01, -EMI-02, etc.
- */
 export function generateEmiSchedule(
   netAmount: number,
   installmentCount: number,
@@ -76,6 +72,7 @@ export function generateEmiSchedule(
   baseDocNo = "",
 ): EmiScheduleRow[] {
   if (!installmentCount || !startDate || installmentCount <= 0) return [];
+
   const baseAmount = Math.floor((netAmount / installmentCount) * 100) / 100;
   const lastAmount =
     Math.round((netAmount - baseAmount * (installmentCount - 1)) * 100) / 100;
@@ -84,6 +81,7 @@ export function generateEmiSchedule(
     const d = new Date(startDate);
     d.setMonth(d.getMonth() + i);
     const padded = String(i + 1).padStart(2, "0");
+
     return {
       installmentNo: i + 1,
       dueDate: d.toISOString().slice(0, 10),
@@ -157,7 +155,6 @@ export function dbToRecord(row: any): ExpenseRecord {
   return {
     id: String(id),
     bookingName: row.EName ?? "",
-    // Fall back to a human-readable draft label when EDocNo hasn't been assigned yet
     bookingReference: row.EDocNo ?? (id ? `Draft #${id}` : ""),
     docTypeName: row.DocTypeName ?? "",
     bookingDate: row.EDocDate ? row.EDocDate.slice(0, 10) : "",
@@ -165,7 +162,6 @@ export function dbToRecord(row: any): ExpenseRecord {
     financialYear: "",
     companyId: row.ECompanyId ? parseInt(row.ECompanyId, 10) : null,
     poId: null,
-    // EProjectName holds the project/vendor name; empty string means unknown
     supplier: row.EProjectName || "",
     projectSite: row.EProjectName || "",
     materialCategory: row.EDocumentType ?? "",
@@ -193,20 +189,25 @@ export function recordToDb(
     EProjectName: form.supplier || form.projectSite || null,
     EDocumentType: form.materialCategory || null,
     EDocDate: form.bookingDate || null,
-    EAmount: form.basicAmount || null,
-    ENetAmount: netAmount,
-    ECgstRate: form.cgstRate,
-    ESgstRate: form.sgstRate,
+
+    /** FIXED: Prevent NULL being sent to NOT NULL column */
+    EAmount: Number(form.basicAmount) || 0,
+    ENetAmount: Number(netAmount) || 0,
+    ECgstRate: Number(form.cgstRate) || 0,
+    ESgstRate: Number(form.sgstRate) || 0,
+
     EDiscountData: JSON.stringify(form.discount),
     EDocNo: form.bookingReference || null,
     EDocTypeId: docTypeId ?? null,
     EFinYear: form.financialYear || null,
+
     EEmiPayment: form.emi.enabled,
     EEmiData: JSON.stringify(form.emi),
     EInstallmentCount: form.emi.enabled ? form.emi.installmentCount : null,
     EEmiAmount: form.emi.enabled ? form.emi.emiAmount : null,
     EEmiStartDate:
       form.emi.enabled && form.emi.startDate ? form.emi.startDate : null,
+
     EReminder: form.dueDate || null,
     ERemarks: form.remarks || null,
     EStatus: form.status ?? "Draft",
