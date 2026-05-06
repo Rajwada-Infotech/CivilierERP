@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
@@ -22,7 +22,6 @@ import {
   Edit,
   Trash2,
   AlertCircle,
-  CreditCard,
   Download,
   FileText,
   FileSpreadsheet,
@@ -39,7 +38,11 @@ import {
   ChevronRight,
   TrendingUp,
   Truck,
-  Package,
+  Hash,
+  Smartphone,
+  BookOpen,
+  CalendarClock,
+  AlertTriangle,
 } from "lucide-react";
 import { exportToCsv, exportToPdf } from "@/lib/export";
 import type { ExportColumn } from "@/lib/export";
@@ -59,6 +62,19 @@ interface DbPayment {
   PCompany: string | null;
   PExpenseRef: string | null;
   Status?: string;
+  // Cheque
+  PChequeNo?: string | null;
+  PChequeLotId?: number | null;
+  PChequeLotNumber?: string | null;
+  PChequeDate?: string | null;
+  PChequeAccountNumber?: string | null;
+  PChequeIfsc?: string | null;
+  PIsPostDated?: boolean;
+  // Digital
+  PNeftNumber?: string | null;
+  PUpiTransactionId?: string | null;
+  PRtgsReference?: string | null;
+  PImpsReference?: string | null;
 }
 
 interface BankOption {
@@ -70,18 +86,31 @@ interface BankOption {
   accountType?: string | null;
 }
 
+interface ChequeLot {
+  CId: number;
+  ChequeLotNumber: string;
+  AccountNumber: string | null;
+  IFSCCode: string | null;
+  ChequeStartNumber: number | null;
+  ChequeEndNumber: number | null;
+  TotalCheques: number | null;
+  BankId: number | null;
+  BankName: string | null;
+  BankBranch: string | null;
+  BankAccountType: string | null;
+  Remarks: string | null;
+}
+
 interface ExpenseOption {
   id: string;
   value: string;
   label: string;
-  // Present on all options
   type?: "booking" | "emi";
   expenseBookingId?: number;
   docNo?: string;
   projectName?: string;
   amount?: number;
   companyId?: number | null;
-  // EMI-specific
   installmentNo?: number;
   refNumber?: string | null;
   dueDate?: string | null;
@@ -100,6 +129,15 @@ interface ExpenseDetail {
   DocTypeName: string | null;
 }
 
+interface GRNRef {
+  GRNID: number;
+  GRNNo: string;
+  GRNDate?: string;
+  SupplierName?: string;
+  PONumber?: string;
+  Status?: string;
+}
+
 interface PaymentRecord {
   id: string;
   paymentName: string;
@@ -114,68 +152,34 @@ interface PaymentRecord {
   expenseId: string;
   docType: string;
   status: string;
+  // Cheque
+  chequeNo: string;
+  chequeLotId: number | null;
+  chequeLotNumber: string;
+  chequeDate: string;
+  chequeAccountNumber: string;
+  chequeIfsc: string;
+  isPostDated: boolean;
+  // Digital
+  neftNumber: string;
+  upiTransactionId: string;
+  rtgsReference: string;
+  impsReference: string;
 }
 
-// ─── Fetchers ─────────────────────────────────────────────────────────────────
-
-const fetchBankOptions = async (): Promise<BankOption[]> => {
-  const banks = await getBanks();
-  return banks
-    .filter((b) => b.BStatus)
-    .map((b) => ({
-      id: b.BId,
-      label: b.BName
-        ? `${b.BName}${b.BAccountNumber ? ` — ${b.BAccountNumber}` : ""}`
-        : `Bank #${b.BId}`,
-      accountNumber: b.BAccountNumber,
-      ifscCode: b.BIfscCode,
-      branch: b.BBranch,
-      accountType: b.BAccountType,
-    }));
-};
-
-const fetchExpenseOptions = async (): Promise<ExpenseOption[]> => {
-  const res = await fetchWithAuth("/api/expense-booking/options");
-  if (!res.ok) return [];
-  return res.json();
-};
-
-const fetchExpenseDetail = async (
-  id: string,
-): Promise<ExpenseDetail | null> => {
-  if (!id) return null;
-  const res = await fetchWithAuth(`/api/expense-booking/${id}`);
-  if (!res.ok) return null;
-  return res.json();
-};
-
-interface GRNRef {
-  GRNID: number;
-  GRNNo: string;
-  GRNDate?: string;
-  SupplierName?: string;
-  PONumber?: string;
-  Status?: string;
-}
-
-const fetchExpenseGRNs = async (expenseId: string): Promise<GRNRef[]> => {
-  if (!expenseId) return [];
-  const res = await fetchWithAuth(`/api/expense-booking/${expenseId}/grns`);
-  if (!res.ok) return [];
-  const data = await res.json();
-  return Array.isArray(data) ? data : [];
-};
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
 
 const PAYMENT_MODES = [
   "Cash",
   "Cheque",
-  "UPI",
-  "Card",
+  "Post-Dated Cheque",
   "NEFT",
+  "UPI",
   "RTGS",
+  "IMPS",
 ] as const;
+
+type PaymentMode = (typeof PAYMENT_MODES)[number];
 
 const MODE_STYLE: Record<string, { ring: string; text: string; dot: string }> =
   {
@@ -188,6 +192,11 @@ const MODE_STYLE: Record<string, { ring: string; text: string; dot: string }> =
       ring: "ring-blue-500/30 bg-blue-500/10",
       text: "text-blue-600 dark:text-blue-400",
       dot: "bg-blue-500",
+    },
+    "Post-Dated Cheque": {
+      ring: "ring-indigo-500/30 bg-indigo-500/10",
+      text: "text-indigo-600 dark:text-indigo-400",
+      dot: "bg-indigo-500",
     },
     UPI: {
       ring: "ring-violet-500/30 bg-violet-500/10",
@@ -209,58 +218,108 @@ const MODE_STYLE: Record<string, { ring: string; text: string; dot: string }> =
       text: "text-orange-600 dark:text-orange-400",
       dot: "bg-orange-500",
     },
+    IMPS: {
+      ring: "ring-pink-500/30 bg-pink-500/10",
+      text: "text-pink-600 dark:text-pink-400",
+      dot: "bg-pink-500",
+    },
   };
 
-function ModeBadge({ mode }: { mode: string }) {
-  const s = MODE_STYLE[mode] ?? {
-    ring: "ring-border bg-muted",
-    text: "text-muted-foreground",
-    dot: "bg-muted-foreground",
+// ─── Fetchers ─────────────────────────────────────────────────────────────────
+
+const fetchBankOptions = async (): Promise<BankOption[]> => {
+  const banks = await getBanks();
+  return banks
+    .filter((b) => b.BStatus)
+    .map((b) => ({
+      id: b.BId,
+      label: b.BName
+        ? `${b.BName}${b.BAccountNumber ? ` — ${b.BAccountNumber}` : ""}`
+        : `Bank #${b.BId}`,
+      accountNumber: b.BAccountNumber,
+      ifscCode: b.BIfscCode,
+      branch: b.BBranch,
+      accountType: b.BAccountType,
+    }));
+};
+
+const fetchChequeLots = async (
+  bankId?: number | null,
+): Promise<ChequeLot[]> => {
+  const url = bankId
+    ? `/api/new-payment/cheque-lots?bankId=${bankId}`
+    : `/api/new-payment/cheque-lots`;
+  const res = await fetchWithAuth(url);
+  if (!res.ok) return [];
+  return res.json();
+};
+
+const fetchExpenseOptions = async (): Promise<ExpenseOption[]> => {
+  const res = await fetchWithAuth("/api/expense-booking/options");
+  if (!res.ok) return [];
+  return res.json();
+};
+
+const fetchExpenseDetail = async (
+  id: string,
+): Promise<ExpenseDetail | null> => {
+  if (!id) return null;
+  const res = await fetchWithAuth(`/api/expense-booking/${id}`);
+  if (!res.ok) return null;
+  return res.json();
+};
+
+const fetchExpenseGRNs = async (expenseId: string): Promise<GRNRef[]> => {
+  if (!expenseId) return [];
+  const res = await fetchWithAuth(`/api/expense-booking/${expenseId}/grns`);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return Array.isArray(data) ? data : [];
+};
+
+const deductChequeFromLot = async (
+  lotId: number,
+): Promise<{ remainingCheques: number; nextChequeNumber: string }> => {
+  const res = await fetchWithAuth("/api/new-payment/deduct-cheque", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ lotId }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to deduct cheque from lot");
+  }
+  return res.json();
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function blankForm(): Omit<PaymentRecord, "id"> {
+  return {
+    paymentName: "",
+    mode: "",
+    amount: null,
+    date: new Date().toISOString().slice(0, 10),
+    bankId: null,
+    bankName: "",
+    project: "",
+    company: "",
+    expenseRef: "",
+    expenseId: "",
+    docType: "",
+    status: "Draft",
+    chequeNo: "",
+    chequeLotId: null,
+    chequeLotNumber: "",
+    chequeDate: "",
+    chequeAccountNumber: "",
+    chequeIfsc: "",
+    isPostDated: false,
+    neftNumber: "",
+    upiTransactionId: "",
+    rtgsReference: "",
+    impsReference: "",
   };
-  return (
-    <span
-      className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-heading font-semibold ring-1 ${s.ring} ${s.text}`}
-    >
-      <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
-      {mode || "—"}
-    </span>
-  );
-}
-
-// ─── GRN badges for payment list ─────────────────────────────────────────────
-function PaymentGRNBadges({
-  expenseId,
-  expenseRef,
-}: {
-  expenseId: string;
-  expenseRef: string;
-}) {
-  const [grns, setGrns] = React.useState<GRNRef[]>([]);
-  React.useEffect(() => {
-    if (!expenseId && !expenseRef) return;
-    // Try by expenseId first; if missing, skip (we can't do a number lookup)
-    if (!expenseId) return;
-    fetchWithAuth(`/api/expense-booking/${expenseId}/grns`)
-      .then((r) => (r.ok ? r.json() : []))
-      .then((data) => setGrns(Array.isArray(data) ? data : []))
-      .catch(() => {});
-  }, [expenseId, expenseRef]);
-
-  if (grns.length === 0)
-    return <span className="text-muted-foreground text-xs">—</span>;
-  return (
-    <div className="flex flex-wrap gap-1">
-      {grns.map((g) => (
-        <span
-          key={g.GRNID}
-          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-teal-100 dark:bg-teal-950/40 text-teal-700 dark:text-teal-400 border border-teal-200 dark:border-teal-800 font-mono"
-        >
-          <Truck size={9} />
-          {g.GRNNo}
-        </span>
-      ))}
-    </div>
-  );
 }
 
 function dbToRecord(item: DbPayment): PaymentRecord {
@@ -278,24 +337,196 @@ function dbToRecord(item: DbPayment): PaymentRecord {
     expenseId: "",
     docType: item.PDocType || "",
     status: (item as any).Status || "Draft",
+    chequeNo: item.PChequeNo || "",
+    chequeLotId: item.PChequeLotId ?? null,
+    chequeLotNumber: item.PChequeLotNumber || "",
+    chequeDate: item.PChequeDate?.slice(0, 10) || "",
+    chequeAccountNumber: item.PChequeAccountNumber || "",
+    chequeIfsc: item.PChequeIfsc || "",
+    isPostDated: !!item.PIsPostDated,
+    neftNumber: item.PNeftNumber || "",
+    upiTransactionId: item.PUpiTransactionId || "",
+    rtgsReference: item.PRtgsReference || "",
+    impsReference: item.PImpsReference || "",
   };
 }
 
-function blankForm(): Omit<PaymentRecord, "id"> {
-  return {
-    paymentName: "",
-    mode: "",
-    amount: null,
-    date: new Date().toISOString().slice(0, 10),
-    bankId: null,
-    bankName: "",
-    project: "",
-    company: "",
-    expenseRef: "",
-    expenseId: "",
-    docType: "",
-    status: "Draft",
+// ─── Shared UI primitives ─────────────────────────────────────────────────────
+
+function Field({
+  label,
+  required,
+  hint,
+  children,
+}: {
+  label: string;
+  required?: boolean;
+  hint?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
+        {label}
+        {required && <span className="text-destructive">*</span>}
+      </label>
+      {children}
+      {hint && <p className="text-[11px] text-muted-foreground/70">{hint}</p>}
+    </div>
+  );
+}
+
+function SectionHeader({
+  icon: Icon,
+  label,
+  badge,
+}: {
+  icon: React.ElementType;
+  label: string;
+  badge?: React.ReactNode;
+}) {
+  return (
+    <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
+      <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
+        <Icon size={12} className="text-primary" />
+      </div>
+      <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground flex-1">
+        {label}
+      </p>
+      {badge}
+    </div>
+  );
+}
+
+function ReadOnlyField({
+  value,
+  placeholder,
+}: {
+  value: string;
+  placeholder?: string;
+}) {
+  return (
+    <div className="w-full px-3 py-2 rounded-lg text-sm bg-muted/30 border border-border/60 text-muted-foreground cursor-not-allowed truncate min-h-[38px] flex items-center">
+      {value || (
+        <span className="text-muted-foreground/50 italic text-xs">
+          {placeholder ?? "Auto-filled"}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function AutoFillBanner({
+  docNo,
+  onClear,
+}: {
+  docNo: string;
+  onClear: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-lg bg-primary/5 border border-primary/20 px-4 py-2.5">
+      <div className="flex items-center gap-2 min-w-0">
+        <Link2 size={13} className="text-primary shrink-0" />
+        <span className="text-xs text-muted-foreground">Linked to expense</span>
+        <span className="font-mono text-xs font-semibold text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-md truncate">
+          {docNo}
+        </span>
+      </div>
+      <button
+        onClick={onClear}
+        className="shrink-0 p-1 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
+        title="Clear expense link"
+      >
+        <X size={13} />
+      </button>
+    </div>
+  );
+}
+
+function ModeBadge({ mode }: { mode: string }) {
+  const s = MODE_STYLE[mode] ?? {
+    ring: "ring-border bg-muted",
+    text: "text-muted-foreground",
+    dot: "bg-muted-foreground",
   };
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-heading font-semibold ring-1 ${s.ring} ${s.text}`}
+    >
+      <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
+      {mode || "—"}
+    </span>
+  );
+}
+
+function InputField({
+  icon: Icon,
+  value,
+  onChange,
+  placeholder,
+  type = "text",
+  prefix,
+  disabled,
+}: {
+  icon?: React.ElementType;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+  type?: string;
+  prefix?: string;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="relative">
+      {Icon && (
+        <Icon
+          size={13}
+          className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+        />
+      )}
+      {prefix && (
+        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs font-semibold pointer-events-none">
+          {prefix}
+        </span>
+      )}
+      <input
+        type={type}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder={placeholder}
+        disabled={disabled}
+        className={`w-full ${Icon || prefix ? "pl-8" : "pl-3"} pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary placeholder:text-muted-foreground/60 disabled:opacity-60 disabled:cursor-not-allowed font-mono`}
+      />
+    </div>
+  );
+}
+
+// ─── GRN badges for list view ─────────────────────────────────────────────────
+
+function PaymentGRNBadges({ expenseId }: { expenseId: string }) {
+  const [grns, setGrns] = React.useState<GRNRef[]>([]);
+  React.useEffect(() => {
+    if (!expenseId) return;
+    fetchWithAuth(`/api/expense-booking/${expenseId}/grns`)
+      .then((r) => (r.ok ? r.json() : []))
+      .then((data) => setGrns(Array.isArray(data) ? data : []))
+      .catch(() => {});
+  }, [expenseId]);
+  if (!grns.length)
+    return <span className="text-muted-foreground text-xs">—</span>;
+  return (
+    <div className="flex flex-wrap gap-1">
+      {grns.map((g) => (
+        <span
+          key={g.GRNID}
+          className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-teal-100 dark:bg-teal-950/40 text-teal-700 dark:text-teal-400 border border-teal-200 dark:border-teal-800 font-mono"
+        >
+          <Truck size={9} />
+          {g.GRNNo}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 // ─── Export ───────────────────────────────────────────────────────────────────
@@ -309,6 +540,7 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Date", accessor: "date" },
   { header: "Amount", accessor: (r) => formatINR(Number(r.amount || 0)) },
   { header: "Bank", accessor: "bankName" },
+  { header: "Cheque No", accessor: "chequeNo" },
   { header: "Status", accessor: "status" },
 ];
 
@@ -364,98 +596,301 @@ function ExportButton({ data }: { data: PaymentRecord[] }) {
   );
 }
 
-// ─── Form field wrapper ───────────────────────────────────────────────────────
+// ─── Mode-specific info banner ─────────────────────────────────────────────────
 
-function Field({
-  label,
-  required,
-  hint,
-  children,
-}: {
-  label: string;
-  required?: boolean;
-  hint?: string;
-  children: React.ReactNode;
-}) {
+function ModeInfoBanner({ mode }: { mode: string }) {
+  const msgs: Record<
+    string,
+    { icon: React.ElementType; color: string; text: string }
+  > = {
+    Cash: {
+      icon: Banknote,
+      color: "emerald",
+      text: "Enter the raw cash amount to be paid.",
+    },
+    Cheque: {
+      icon: BookOpen,
+      color: "blue",
+      text: "Select a bank and lot to auto-populate cheque details. One cheque will be deducted from the lot inventory.",
+    },
+    "Post-Dated Cheque": {
+      icon: CalendarClock,
+      color: "indigo",
+      text: "Same as cheque — enter a future cheque date. The record is stored as a scheduled payment.",
+    },
+    NEFT: {
+      icon: Hash,
+      color: "cyan",
+      text: "Post-transaction: enter the NEFT UTR number for reconciliation. Record will go for approval after save.",
+    },
+    UPI: {
+      icon: Smartphone,
+      color: "violet",
+      text: "Post-transaction: enter the UPI Transaction ID. Record will go for approval after save.",
+    },
+    RTGS: {
+      icon: Hash,
+      color: "orange",
+      text: "Post-transaction: enter the RTGS UTR reference. Record will go for approval after save.",
+    },
+    IMPS: {
+      icon: Hash,
+      color: "pink",
+      text: "Post-transaction: enter the IMPS reference number. Record will go for approval after save.",
+    },
+  };
+  const m = msgs[mode];
+  if (!m) return null;
+  const Icon = m.icon;
   return (
-    <div className="space-y-1.5">
-      <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider flex items-center gap-1">
-        {label}
-        {required && <span className="text-destructive">*</span>}
-      </label>
-      {children}
-      {hint && <p className="text-[11px] text-muted-foreground/70">{hint}</p>}
+    <div
+      className={`flex items-start gap-2.5 rounded-lg bg-${m.color}-500/5 border border-${m.color}-500/20 px-4 py-3`}
+    >
+      <Icon size={14} className={`text-${m.color}-500 shrink-0 mt-0.5`} />
+      <p className="text-xs text-muted-foreground">{m.text}</p>
     </div>
   );
 }
 
-// ─── Section header ───────────────────────────────────────────────────────────
+// ─── Cheque Panel ─────────────────────────────────────────────────────────────
 
-function SectionHeader({
-  icon: Icon,
-  label,
-}: {
-  icon: React.ElementType;
-  label: string;
-}) {
+interface ChequePanelProps {
+  bankId: number | null;
+  form: Omit<PaymentRecord, "id">;
+  set: <K extends keyof Omit<PaymentRecord, "id">>(
+    field: K,
+    value: Omit<PaymentRecord, "id">[K],
+  ) => void;
+  isPostDated: boolean;
+}
+
+function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps) {
+  const [lots, setLots] = useState<ChequeLot[]>([]);
+  const [loadingLots, setLoadingLots] = useState(false);
+  const [deducting, setDeducting] = useState(false);
+  const [lotDetail, setLotDetail] = useState<ChequeLot | null>(null);
+
+  // Fetch lots whenever bankId changes
+  useEffect(() => {
+    setLoadingLots(true);
+    fetchChequeLots(bankId)
+      .then(setLots)
+      .catch(() => setLots([]))
+      .finally(() => setLoadingLots(false));
+  }, [bankId]);
+
+  const handleLotSelect = async (lotIdStr: string) => {
+    if (!lotIdStr) {
+      setLotDetail(null);
+      set("chequeLotId", null);
+      set("chequeLotNumber", "");
+      set("chequeNo", "");
+      set("chequeAccountNumber", "");
+      set("chequeIfsc", "");
+      return;
+    }
+    const lot = lots.find((l) => String(l.CId) === lotIdStr);
+    if (!lot) return;
+
+    setLotDetail(lot);
+    set("chequeLotId", lot.CId);
+    set("chequeLotNumber", lot.ChequeLotNumber);
+    set("chequeAccountNumber", lot.AccountNumber || "");
+    set("chequeIfsc", lot.IFSCCode || "");
+    // Cheque number will be assigned on deduct
+    set("chequeNo", "");
+
+    // Deduct one cheque from the lot
+    setDeducting(true);
+    try {
+      const result = await deductChequeFromLot(lot.CId);
+      set("chequeNo", result.nextChequeNumber);
+      toast.success(
+        `Cheque #${result.nextChequeNumber} assigned. ${result.remainingCheques} remaining in lot.`,
+      );
+    } catch (err: any) {
+      toast.error(err.message);
+    } finally {
+      setDeducting(false);
+    }
+  };
+
   return (
-    <div className="flex items-center gap-2.5 pb-2 border-b border-border/60">
-      <div className="flex items-center justify-center w-6 h-6 rounded-md bg-primary/10 shrink-0">
-        <Icon size={12} className="text-primary" />
+    <div className="space-y-4">
+      <Field label="Lot Number" required hint="Active lots for selected bank">
+        <div className="relative">
+          <BookOpen
+            size={13}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+          />
+          <select
+            value={form.chequeLotId ? String(form.chequeLotId) : ""}
+            onChange={(e) => handleLotSelect(e.target.value)}
+            disabled={loadingLots || deducting}
+            className="w-full appearance-none pl-8 pr-9 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-60"
+          >
+            <option value="">— Select lot number —</option>
+            {lots.map((l) => (
+              <option key={l.CId} value={String(l.CId)}>
+                {l.ChequeLotNumber}
+                {l.TotalCheques != null ? ` (${l.TotalCheques} remaining)` : ""}
+              </option>
+            ))}
+          </select>
+          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground">
+            {loadingLots || deducting ? (
+              <div className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+            ) : (
+              <ChevronDown size={14} />
+            )}
+          </div>
+        </div>
+        {!bankId && (
+          <p className="text-[11px] text-amber-600 flex items-center gap-1 mt-1">
+            <AlertTriangle size={10} /> Select a bank first to filter lots.
+          </p>
+        )}
+      </Field>
+
+      {lotDetail && (
+        <div className="rounded-xl bg-blue-500/5 border border-blue-500/20 px-4 py-3 grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <div>
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-heading">
+              Cheque Range
+            </p>
+            <p className="font-mono text-xs font-semibold text-foreground mt-0.5">
+              {lotDetail.ChequeStartNumber} – {lotDetail.ChequeEndNumber}
+            </p>
+          </div>
+          <div>
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-heading">
+              Account No.
+            </p>
+            <p className="font-mono text-xs text-foreground mt-0.5">
+              {lotDetail.AccountNumber || "—"}
+            </p>
+          </div>
+          <div>
+            <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-heading">
+              IFSC
+            </p>
+            <p className="font-mono text-xs text-foreground mt-0.5">
+              {lotDetail.IFSCCode || "—"}
+            </p>
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Field label="Cheque Number" required>
+          <InputField
+            icon={Hash}
+            value={form.chequeNo}
+            onChange={(v) => set("chequeNo", v)}
+            placeholder="Auto-assigned from lot"
+            disabled={deducting}
+          />
+        </Field>
+        <Field
+          label={isPostDated ? "Post-Dated Cheque Date" : "Cheque Date"}
+          required={isPostDated}
+          hint={isPostDated ? "Must be a future date" : undefined}
+        >
+          <div className="relative">
+            <CalendarDays
+              size={13}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+            />
+            <input
+              type="date"
+              value={form.chequeDate}
+              min={
+                isPostDated ? new Date().toISOString().slice(0, 10) : undefined
+              }
+              onChange={(e) => set("chequeDate", e.target.value)}
+              className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+          </div>
+        </Field>
       </div>
-      <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
-        {label}
-      </p>
-    </div>
-  );
-}
 
-// ─── Auto-fill banner ─────────────────────────────────────────────────────────
-
-function AutoFillBanner({
-  docNo,
-  onClear,
-}: {
-  docNo: string;
-  onClear: () => void;
-}) {
-  return (
-    <div className="flex items-center justify-between gap-3 rounded-lg bg-primary/5 border border-primary/20 px-4 py-2.5">
-      <div className="flex items-center gap-2 min-w-0">
-        <Link2 size={13} className="text-primary shrink-0" />
-        <span className="text-xs text-muted-foreground">Linked to expense</span>
-        <span className="font-mono text-xs font-semibold text-primary bg-primary/10 border border-primary/20 px-2 py-0.5 rounded-md truncate">
-          {docNo}
-        </span>
-      </div>
-      <button
-        onClick={onClear}
-        className="shrink-0 p-1 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors"
-        title="Clear expense link"
-      >
-        <X size={13} />
-      </button>
-    </div>
-  );
-}
-
-// ─── Read-only display field ──────────────────────────────────────────────────
-
-function ReadOnlyField({
-  value,
-  placeholder,
-}: {
-  value: string;
-  placeholder?: string;
-}) {
-  return (
-    <div className="w-full px-3 py-2 rounded-lg text-sm bg-muted/30 border border-border/60 text-muted-foreground cursor-not-allowed truncate min-h-[38px] flex items-center">
-      {value || (
-        <span className="text-muted-foreground/50 italic text-xs">
-          {placeholder ?? "Auto-filled from expense booking"}
-        </span>
+      {isPostDated && form.chequeDate && (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-indigo-500/5 border border-indigo-500/20 text-xs text-indigo-600 dark:text-indigo-400">
+          <CalendarClock size={13} />
+          Scheduled for{" "}
+          {new Date(form.chequeDate).toLocaleDateString("en-IN", {
+            day: "numeric",
+            month: "short",
+            year: "numeric",
+          })}
+        </div>
       )}
     </div>
+  );
+}
+
+// ─── Digital Reference Panel ──────────────────────────────────────────────────
+
+function DigitalRefPanel({
+  mode,
+  form,
+  set,
+}: {
+  mode: string;
+  form: Omit<PaymentRecord, "id">;
+  set: <K extends keyof Omit<PaymentRecord, "id">>(
+    field: K,
+    value: Omit<PaymentRecord, "id">[K],
+  ) => void;
+}) {
+  const configs: Record<
+    string,
+    {
+      field: keyof Omit<PaymentRecord, "id">;
+      label: string;
+      placeholder: string;
+      hint: string;
+    }
+  > = {
+    NEFT: {
+      field: "neftNumber",
+      label: "NEFT UTR Number",
+      placeholder: "e.g. HDFC0000012345",
+      hint: "22-character UTR number from your bank statement.",
+    },
+    UPI: {
+      field: "upiTransactionId",
+      label: "UPI Transaction ID",
+      placeholder: "e.g. 4059876543210",
+      hint: "12-digit transaction ID from the UPI app.",
+    },
+    RTGS: {
+      field: "rtgsReference",
+      label: "RTGS UTR Reference",
+      placeholder: "e.g. RTGS2024050600001",
+      hint: "UTR number provided by the bank for RTGS transfer.",
+    },
+    IMPS: {
+      field: "impsReference",
+      label: "IMPS Reference Number",
+      placeholder: "e.g. 412210987654",
+      hint: "12-digit reference from IMPS transfer confirmation.",
+    },
+  };
+  const cfg = configs[mode];
+  if (!cfg) return null;
+
+  const value = (form[cfg.field] as string) || "";
+
+  return (
+    <Field label={cfg.label} required hint={cfg.hint}>
+      <InputField
+        icon={Hash}
+        value={value}
+        onChange={(v) => set(cfg.field, v)}
+        placeholder={cfg.placeholder}
+      />
+    </Field>
   );
 }
 
@@ -499,7 +934,9 @@ const Payment: React.FC = () => {
   // ── Stats ──────────────────────────────────────────────────────────────────
 
   const totalAmount = dbItems.reduce((s, p) => s + (p.PAmount || 0), 0);
-  const chequeCount = dbItems.filter((p) => p.PMode === "Cheque").length;
+  const chequeCount = dbItems.filter(
+    (p) => p.PMode === "Cheque" || p.PMode === "Post-Dated Cheque",
+  ).length;
   const cashCount = dbItems.filter((p) => p.PMode === "Cash").length;
 
   // ── Form helpers ───────────────────────────────────────────────────────────
@@ -512,17 +949,18 @@ const Payment: React.FC = () => {
   const openNew = () => {
     setEditingId(null);
     setForm(blankForm());
+    setLinkedGRNs([]);
     setView("form");
   };
 
   const openEdit = (rec: PaymentRecord) => {
     setEditingId(rec.id);
     const { id, ...rest } = rec;
-    // Resolve expenseId from the stored expenseRef doc number so the banner stays linked
     const matchedOption = rest.expenseRef
       ? expenseOptions.find((o) => o.label.startsWith(rest.expenseRef))
       : undefined;
     setForm({ ...rest, expenseId: matchedOption?.id ?? "" });
+    setLinkedGRNs([]);
     setView("form");
   };
 
@@ -530,6 +968,37 @@ const Payment: React.FC = () => {
     setView("list");
     setEditingId(null);
     setForm(blankForm());
+    setLinkedGRNs([]);
+  };
+
+  // ── Mode change — clear irrelevant fields ──────────────────────────────────
+
+  const handleModeChange = (newMode: string) => {
+    setForm((prev) => ({
+      ...prev,
+      mode: newMode,
+      isPostDated: newMode === "Post-Dated Cheque",
+      // Clear cheque fields when switching away from cheque modes
+      ...(newMode !== "Cheque" && newMode !== "Post-Dated Cheque"
+        ? {
+            chequeNo: "",
+            chequeLotId: null,
+            chequeLotNumber: "",
+            chequeDate: "",
+            chequeAccountNumber: "",
+            chequeIfsc: "",
+          }
+        : {}),
+      // Clear digital fields when switching away from digital modes
+      ...(!["NEFT", "UPI", "RTGS", "IMPS"].includes(newMode)
+        ? {
+            neftNumber: "",
+            upiTransactionId: "",
+            rtgsReference: "",
+            impsReference: "",
+          }
+        : {}),
+    }));
   };
 
   // ── Expense booking selection → auto-fill ──────────────────────────────────
@@ -549,14 +1018,8 @@ const Payment: React.FC = () => {
         return;
       }
 
-      // EMI installment options have id like "emi-{bookingId}-{no}".
-      // The detail endpoint only accepts numeric booking IDs, so for EMI options
-      // we auto-fill directly from the option data without any API call.
       const selectedOption = expenseOptions.find((o) => o.id === expenseId);
       if (selectedOption?.type === "emi") {
-        // Build the installment-specific ref: either the stored refNumber, or
-        // derive it from parentDocNo + installment number (matching backend SQL logic:
-        // CONCAT(parentDocNo, '-EMI-', RIGHT('00' + CAST(installmentNo AS VARCHAR), 2)))
         const padded = String(selectedOption.installmentNo ?? 1).padStart(
           2,
           "0",
@@ -569,13 +1032,6 @@ const Payment: React.FC = () => {
             : selectedOption.docNo
               ? `${selectedOption.docNo}-${emiSuffix}`
               : emiSuffix);
-        // Derive a short doc type from the ref: "CI/WO/000001/2025-2026-EMI-01" → "WO/EMI-01"
-        const emiTag = `EMI-${padded}`;
-        const woTag =
-          (ref.match(/\/(WO|PO|OTH)\//)?.[1] ?? ref.match(/\/(WO|PO|OTH)\//))
-            ? ""
-            : "EXP";
-        const shortDocType = woTag ? `${woTag}/${emiTag}` : emiTag;
         setForm((prev) => ({
           ...prev,
           expenseId,
@@ -583,9 +1039,8 @@ const Payment: React.FC = () => {
           project: selectedOption.projectName || "",
           company: String(selectedOption.companyId ?? ""),
           amount: selectedOption.amount ?? null,
-          docType: shortDocType,
+          docType: `EMI-${padded}`,
         }));
-        // Fetch GRNs linked to the parent expense booking
         if (selectedOption.expenseBookingId) {
           fetchExpenseGRNs(String(selectedOption.expenseBookingId))
             .then(setLinkedGRNs)
@@ -607,7 +1062,6 @@ const Payment: React.FC = () => {
           amount: detail.ENetAmount ?? detail.EAmount ?? null,
           docType: detail.DocTypeName || detail.EDocumentType || "",
         }));
-        // Fetch linked GRNs for this expense booking
         const grns = await fetchExpenseGRNs(expenseId);
         setLinkedGRNs(grns);
       } catch {
@@ -642,29 +1096,83 @@ const Payment: React.FC = () => {
     }
     const bank = banks.find((b) => String(b.id) === bankIdStr);
     set("bankId", bank?.id ?? null);
-    // Store just the base name (before the " — accountNumber" suffix)
     set("bankName", bank?.label?.split(" — ")[0] ?? "");
+    // Reset cheque lot when bank changes
+    set("chequeLotId", null);
+    set("chequeLotNumber", "");
+    set("chequeNo", "");
+  };
+
+  // ── Validation ─────────────────────────────────────────────────────────────
+
+  const validate = (): boolean => {
+    if (!form.paymentName.trim()) {
+      toast.error("Payment name is required.");
+      return false;
+    }
+    if (!form.mode) {
+      toast.error("Please select a payment mode.");
+      return false;
+    }
+    if (!form.date) {
+      toast.error("Payment date is required.");
+      return false;
+    }
+
+    const isChequeMode =
+      form.mode === "Cheque" || form.mode === "Post-Dated Cheque";
+    const isDigitalMode = ["NEFT", "UPI", "RTGS", "IMPS"].includes(form.mode);
+
+    if (isChequeMode) {
+      if (!form.bankId) {
+        toast.error("Please select a bank account.");
+        return false;
+      }
+      if (!form.chequeLotId) {
+        toast.error("Please select a cheque lot.");
+        return false;
+      }
+      if (!form.chequeNo) {
+        toast.error("Cheque number is required.");
+        return false;
+      }
+      if (form.mode === "Post-Dated Cheque" && !form.chequeDate) {
+        toast.error("Post-dated cheque requires a future date.");
+        return false;
+      }
+    }
+
+    if (form.mode === "Cash" && !form.amount) {
+      toast.error("Amount is required for Cash payment.");
+      return false;
+    }
+
+    if (isDigitalMode) {
+      if (form.mode === "NEFT" && !form.neftNumber.trim()) {
+        toast.error("NEFT UTR number is required.");
+        return false;
+      }
+      if (form.mode === "UPI" && !form.upiTransactionId.trim()) {
+        toast.error("UPI Transaction ID is required.");
+        return false;
+      }
+      if (form.mode === "RTGS" && !form.rtgsReference.trim()) {
+        toast.error("RTGS reference is required.");
+        return false;
+      }
+      if (form.mode === "IMPS" && !form.impsReference.trim()) {
+        toast.error("IMPS reference is required.");
+        return false;
+      }
+    }
+
+    return true;
   };
 
   // ── Save ───────────────────────────────────────────────────────────────────
 
   const handleSave = async () => {
-    if (!form.paymentName.trim()) {
-      toast.error("Payment name is required.");
-      return;
-    }
-    if (!form.mode) {
-      toast.error("Please select a payment mode.");
-      return;
-    }
-    if (!form.bankId) {
-      toast.error("Please select a bank account.");
-      return;
-    }
-    if (!form.date) {
-      toast.error("Payment date is required.");
-      return;
-    }
+    if (!validate()) return;
 
     const payload = {
       PPaymentName: form.paymentName || null,
@@ -677,6 +1185,19 @@ const Payment: React.FC = () => {
       PProject: form.project || null,
       PCompany: form.company || null,
       PExpenseRef: form.expenseRef || null,
+      // Cheque
+      PChequeNo: form.chequeNo || null,
+      PChequeLotId: form.chequeLotId ?? null,
+      PChequeLotNumber: form.chequeLotNumber || null,
+      PChequeDate: form.chequeDate || null,
+      PChequeAccountNumber: form.chequeAccountNumber || null,
+      PChequeIfsc: form.chequeIfsc || null,
+      PIsPostDated: form.isPostDated,
+      // Digital
+      PNeftNumber: form.neftNumber || null,
+      PUpiTransactionId: form.upiTransactionId || null,
+      PRtgsReference: form.rtgsReference || null,
+      PImpsReference: form.impsReference || null,
     };
 
     try {
@@ -710,13 +1231,20 @@ const Payment: React.FC = () => {
     }
   };
 
+  // ── Derived ────────────────────────────────────────────────────────────────
+
+  const isChequeMode =
+    form.mode === "Cheque" || form.mode === "Post-Dated Cheque";
+  const isDigitalMode = ["NEFT", "UPI", "RTGS", "IMPS"].includes(form.mode);
+  const isCashMode = form.mode === "Cash";
+
   // ─────────────────────────────────────────────────────────────────────────────
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance", "Payments"]} />
       <div className="space-y-5">
-        {/* ── Page header ──────────────────────────────────────────────────── */}
+        {/* ── Page header ── */}
         <div className="flex items-center justify-between gap-3">
           <div>
             <h1 className="text-xl font-heading font-bold text-foreground">
@@ -739,7 +1267,7 @@ const Payment: React.FC = () => {
           </div>
         </div>
 
-        {/* ── Summary stats (list only) ─────────────────────────────────────── */}
+        {/* ── Summary stats ── */}
         {view === "list" && !isLoading && dbItems.length > 0 && (
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {[
@@ -820,10 +1348,9 @@ const Payment: React.FC = () => {
             </div>
 
             <div className="px-5 sm:px-6 py-6 space-y-7">
-              {/* ── 1. Link Expense Booking ─────────────────────────────── */}
+              {/* ── 1. Link Expense Booking ── */}
               <div className="space-y-3">
                 <SectionHeader icon={Link2} label="Expense Booking" />
-
                 {form.expenseRef ? (
                   <AutoFillBanner
                     docNo={form.expenseRef}
@@ -859,7 +1386,6 @@ const Payment: React.FC = () => {
                   </Field>
                 )}
 
-                {/* Auto-filled read-only fields */}
                 {form.expenseRef && (
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-1">
                     <Field label="Project / Site">
@@ -870,7 +1396,7 @@ const Payment: React.FC = () => {
                         />
                         <ReadOnlyField
                           value={form.project}
-                          placeholder="Fetched from expense booking"
+                          placeholder="From expense booking"
                         />
                       </div>
                     </Field>
@@ -882,7 +1408,7 @@ const Payment: React.FC = () => {
                         />
                         <ReadOnlyField
                           value={form.company}
-                          placeholder="Fetched from expense booking"
+                          placeholder="From expense booking"
                         />
                       </div>
                     </Field>
@@ -894,20 +1420,18 @@ const Payment: React.FC = () => {
                         />
                         <ReadOnlyField
                           value={form.docType}
-                          placeholder="Fetched from expense booking"
+                          placeholder="From expense booking"
                         />
                       </div>
                     </Field>
                   </div>
                 )}
 
-                {/* GRN linkage panel — only shown when there are linked GRNs */}
                 {form.expenseRef && linkedGRNs.length > 0 && (
                   <div className="mt-3">
                     <div className="rounded-xl border border-teal-500/25 bg-teal-500/5 px-4 py-3 space-y-2">
                       <div className="flex items-center gap-2 text-xs font-heading font-semibold text-teal-600 dark:text-teal-400">
-                        <Truck size={12} />
-                        Linked GRNs ({linkedGRNs.length})
+                        <Truck size={12} /> Linked GRNs ({linkedGRNs.length})
                       </div>
                       <div className="flex flex-wrap gap-2">
                         {linkedGRNs.map((g) => (
@@ -932,11 +1456,6 @@ const Payment: React.FC = () => {
                                 {g.GRNDate.slice(0, 10)}
                               </span>
                             )}
-                            {g.Status && (
-                              <span className="px-1.5 py-0.5 rounded-full text-[10px] bg-muted text-muted-foreground border border-border/50">
-                                {g.Status}
-                              </span>
-                            )}
                           </div>
                         ))}
                       </div>
@@ -945,10 +1464,9 @@ const Payment: React.FC = () => {
                 )}
               </div>
 
-              {/* ── 2. Payment Details ──────────────────────────────────── */}
+              {/* ── 2. Payment Details ── */}
               <div className="space-y-3">
                 <SectionHeader icon={Receipt} label="Payment Details" />
-
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <Field label="Payment Name" required>
                     <input
@@ -975,14 +1493,13 @@ const Payment: React.FC = () => {
                   </Field>
                 </div>
 
-                {/* Amount — auto-filled if expense linked, else manual */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <Field
                     label="Amount (₹)"
-                    required
+                    required={isCashMode}
                     hint={
                       form.expenseRef
-                        ? "Net amount fetched from expense booking — editable if needed."
+                        ? "Net amount from expense booking — editable if needed."
                         : undefined
                     }
                   >
@@ -1003,8 +1520,6 @@ const Payment: React.FC = () => {
                       />
                     </div>
                   </Field>
-
-                  {/* Net amount highlight if set */}
                   {(form.amount ?? 0) > 0 && (
                     <div className="flex items-center gap-3 rounded-xl bg-primary/5 border border-primary/20 px-4 py-2 self-end mb-0.5">
                       <TrendingUp size={14} className="text-primary shrink-0" />
@@ -1021,19 +1536,23 @@ const Payment: React.FC = () => {
                 </div>
               </div>
 
-              {/* ── 3. Payment Mode ─────────────────────────────────────── */}
+              {/* ── 3. Payment Mode ── */}
               <div className="space-y-3">
                 <SectionHeader icon={Wallet} label="Payment Mode" />
                 <Field label="Mode" required>
                   <div className="flex flex-wrap gap-2">
                     {PAYMENT_MODES.map((m) => {
-                      const s = MODE_STYLE[m];
+                      const s = MODE_STYLE[m] ?? {
+                        ring: "ring-border bg-muted",
+                        text: "text-muted-foreground",
+                        dot: "bg-muted-foreground",
+                      };
                       const active = form.mode === m;
                       return (
                         <button
                           key={m}
                           type="button"
-                          onClick={() => set("mode", m)}
+                          onClick={() => handleModeChange(m)}
                           className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-heading font-semibold border transition-all ring-1 ${
                             active
                               ? `${s.ring} ${s.text} border-transparent shadow-sm`
@@ -1051,14 +1570,23 @@ const Payment: React.FC = () => {
                     })}
                   </div>
                 </Field>
+
+                {form.mode && <ModeInfoBanner mode={form.mode} />}
               </div>
 
-              {/* ── 4. Bank ─────────────────────────────────────────────── */}
+              {/* ── 4. Bank Account ── */}
               <div className="space-y-3">
                 <SectionHeader icon={Landmark} label="Bank Account" />
                 <Field
                   label="Bank"
-                  hint="Required for Cheque / NEFT / RTGS payments."
+                  required={isChequeMode || isDigitalMode}
+                  hint={
+                    isChequeMode
+                      ? "Required — used to filter cheque lots."
+                      : isDigitalMode
+                        ? "Bank account from which the transfer was made."
+                        : "Optional for cash payments."
+                  }
                 >
                   <div className="relative">
                     <Landmark
@@ -1101,7 +1629,54 @@ const Payment: React.FC = () => {
                 </Field>
               </div>
 
-              {/* ── Save footer ──────────────────────────────────────────── */}
+              {/* ── 5. Mode-specific section ── */}
+
+              {/* Cash — nothing extra, amount above is sufficient */}
+              {isCashMode && (
+                <div className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 px-4 py-3 flex items-center gap-2.5">
+                  <Banknote size={14} className="text-emerald-500 shrink-0" />
+                  <p className="text-xs text-muted-foreground">
+                    Cash payment — enter the amount above and save.
+                  </p>
+                </div>
+              )}
+
+              {/* Cheque / Post-Dated Cheque */}
+              {isChequeMode && (
+                <div className="space-y-3">
+                  <SectionHeader
+                    icon={BookOpen}
+                    label={
+                      form.mode === "Post-Dated Cheque"
+                        ? "Post-Dated Cheque Details"
+                        : "Cheque Details"
+                    }
+                    badge={
+                      form.mode === "Post-Dated Cheque" ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading font-semibold bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 ring-1 ring-indigo-500/20">
+                          <CalendarClock size={9} /> Scheduled
+                        </span>
+                      ) : null
+                    }
+                  />
+                  <ChequePanel
+                    bankId={form.bankId}
+                    form={form}
+                    set={set}
+                    isPostDated={form.mode === "Post-Dated Cheque"}
+                  />
+                </div>
+              )}
+
+              {/* NEFT / UPI / RTGS / IMPS */}
+              {isDigitalMode && (
+                <div className="space-y-3">
+                  <SectionHeader icon={Hash} label={`${form.mode} Reference`} />
+                  <DigitalRefPanel mode={form.mode} form={form} set={set} />
+                </div>
+              )}
+
+              {/* ── Save footer ── */}
               <div className="flex justify-end gap-2 pt-2 border-t border-border">
                 <button
                   onClick={cancelForm}
@@ -1139,7 +1714,7 @@ const Payment: React.FC = () => {
 
             {!isLoading && (
               <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-                {/* ── Mobile cards ── */}
+                {/* Mobile cards */}
                 <div className="sm:hidden divide-y divide-border">
                   {records.length === 0 && (
                     <div className="text-center py-14 text-muted-foreground text-sm">
@@ -1161,6 +1736,11 @@ const Payment: React.FC = () => {
                       {rec.expenseRef && (
                         <span className="inline-block font-mono text-[11px] bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-md">
                           {rec.expenseRef}
+                        </span>
+                      )}
+                      {rec.chequeNo && (
+                        <span className="inline-block font-mono text-[11px] bg-blue-500/10 text-blue-600 border border-blue-500/20 px-2 py-0.5 rounded-md">
+                          Chq #{rec.chequeNo}
                         </span>
                       )}
                       <div className="flex items-center justify-between text-xs text-muted-foreground">
@@ -1202,7 +1782,7 @@ const Payment: React.FC = () => {
                   ))}
                 </div>
 
-                {/* ── Desktop table ── */}
+                {/* Desktop table */}
                 <div className="hidden sm:block overflow-auto">
                   <table className="w-full text-sm">
                     <thead>
@@ -1211,8 +1791,8 @@ const Payment: React.FC = () => {
                           "Payment Name",
                           "Expense Ref",
                           "GRN(s)",
-                          "Project",
                           "Mode",
+                          "Cheque / Ref",
                           "Date",
                           "Amount",
                           "Bank",
@@ -1232,7 +1812,7 @@ const Payment: React.FC = () => {
                       {records.length === 0 && (
                         <tr>
                           <td
-                            colSpan={9}
+                            colSpan={10}
                             className="text-center py-14 text-muted-foreground text-sm"
                           >
                             <AlertCircle
@@ -1263,16 +1843,44 @@ const Payment: React.FC = () => {
                             )}
                           </td>
                           <td className="px-4 py-3 hidden lg:table-cell">
-                            <PaymentGRNBadges
-                              expenseId={rec.expenseId || ""}
-                              expenseRef={rec.expenseRef}
-                            />
-                          </td>
-                          <td className="px-4 py-3 text-xs text-muted-foreground max-w-[120px] truncate">
-                            {rec.project || "—"}
+                            <PaymentGRNBadges expenseId={rec.expenseId || ""} />
                           </td>
                           <td className="px-4 py-3">
                             <ModeBadge mode={rec.mode} />
+                          </td>
+                          <td className="px-4 py-3">
+                            {rec.chequeNo ? (
+                              <div className="space-y-0.5">
+                                <span className="font-mono text-xs bg-blue-500/10 text-blue-600 border border-blue-500/20 px-2 py-0.5 rounded-md">
+                                  # {rec.chequeNo}
+                                </span>
+                                {rec.isPostDated && rec.chequeDate && (
+                                  <p className="text-[10px] text-indigo-500 font-mono">
+                                    {rec.chequeDate}
+                                  </p>
+                                )}
+                              </div>
+                            ) : rec.neftNumber ? (
+                              <span className="font-mono text-xs text-muted-foreground">
+                                {rec.neftNumber}
+                              </span>
+                            ) : rec.upiTransactionId ? (
+                              <span className="font-mono text-xs text-muted-foreground">
+                                {rec.upiTransactionId}
+                              </span>
+                            ) : rec.rtgsReference ? (
+                              <span className="font-mono text-xs text-muted-foreground">
+                                {rec.rtgsReference}
+                              </span>
+                            ) : rec.impsReference ? (
+                              <span className="font-mono text-xs text-muted-foreground">
+                                {rec.impsReference}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground text-xs">
+                                —
+                              </span>
+                            )}
                           </td>
                           <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
                             {rec.date || "—"}
@@ -1365,7 +1973,7 @@ const Payment: React.FC = () => {
         )}
       </div>
 
-      {/* ── Delete confirm dialog ────────────────────────────────────────── */}
+      {/* Delete confirm */}
       {deleteId && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
           <div className="w-full max-w-sm rounded-xl bg-card border border-border shadow-xl p-6 space-y-4">
@@ -1378,8 +1986,8 @@ const Payment: React.FC = () => {
                   Delete Payment
                 </h3>
                 <p className="text-sm text-muted-foreground mt-1">
-                  Are you sure you want to delete this payment? This action
-                  cannot be undone.
+                  Are you sure you want to delete this payment? This cannot be
+                  undone.
                 </p>
               </div>
             </div>
