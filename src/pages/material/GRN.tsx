@@ -96,9 +96,14 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
   {
     accessorKey: "GRNNo",
     header: "GRN No",
-    cell: ({ getValue }) => (
-      <span className="font-medium">{getValue() as string}</span>
-    ),
+    cell: ({ getValue }) => {
+      const v = getValue() as string;
+      return (
+        <span className="font-medium">
+          {v ? (v.startsWith("GRN-") ? v : `GRN-${v}`) : "—"}
+        </span>
+      );
+    },
   },
   {
     accessorKey: "PONumber",
@@ -822,7 +827,11 @@ export default function GRN() {
                 <div className="flex items-center justify-between px-6 py-4 border-b border-border">
                   <div>
                     <h2 className="font-heading font-bold text-lg">
-                      {viewingGrn.GRNNo}
+                      {viewingGrn.GRNNo
+                        ? viewingGrn.GRNNo.startsWith("GRN-")
+                          ? viewingGrn.GRNNo
+                          : `GRN-${viewingGrn.GRNNo}`
+                        : "—"}
                     </h2>
                     <p className="text-xs text-muted-foreground mt-0.5">
                       Goods Receipt Note
