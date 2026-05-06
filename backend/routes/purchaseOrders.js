@@ -120,13 +120,14 @@ const syncLineItems = async (
       .input("TaxPct", sqlRef.Decimal(5, 2), parseFloat(it.tax) || 0)
       .input("LineAmt", sqlRef.Decimal(18, 2), amount)
       .input("Sort", sqlRef.Int, i)
+      .input("ReceivedQty", sqlRef.Decimal(18, 4), 0)
       .input("Now", sqlRef.DateTime2, new Date()).query(`
         INSERT INTO dbo.PurchaseOrderItems
           (PurchaseOrderID, ItemId, ItemName, ItemCode, Description,
-           Quantity, UomId, UomName, Rate, TaxPct, LineAmount, SortOrder, CreatedAt)
+           Quantity, ReceivedQty, UomId, UomName, Rate, TaxPct, LineAmount, SortOrder, CreatedAt)
         VALUES
           (@POID, @ItemId, @ItemName, @ItemCode, @Desc,
-           @Qty, @UomId, @UomName, @Rate, @TaxPct, @LineAmt, @Sort, @Now)
+           @Qty, @ReceivedQty, @UomId, @UomName, @Rate, @TaxPct, @LineAmt, @Sort, @Now)
       `);
   }
 };
@@ -308,7 +309,7 @@ router.post("/", async (req, res) => {
     // Generate document number if DocTypeId is provided
     let finalDocNo = poNoFromClient || null;
     if (DocTypeId) {
-      finalDocNo = await lockNextDocNumber(transaction, sql, {
+      finalDocNo = await lockNextDocNumber(pool, sql, {
         docTypeId: parseInt(DocTypeId, 10),
         finYear,
         tableName: "PurchaseOrders",
@@ -316,11 +317,23 @@ router.post("/", async (req, res) => {
       });
     }
 
+    if (!finalDocNo) {
+      await transaction.rollback();
+      return res.status(400).json({
+        error:
+          "PurchaseOrderNo is required. Select a document type or enter a PO number manually.",
+      });
+    }
+
     const result = await transaction
       .request()
-      .input("PurchaseOrderNo", sql.NVarChar(100), finalDocNo || null)
+      .input("PurchaseOrderNo", sql.NVarChar(100), finalDocNo)
       .input("PODate", sql.Date, PODate || null)
-      .input("ExpectedDeliveryDate", sql.Date, ExpectedDeliveryDate || null)
+      .input(
+        "ExpectedDeliveryDate",
+        sql.Date,
+        ExpectedDeliveryDate || PODate || null,
+      )
       .input(
         "SupplierID",
         sql.Int,
@@ -330,16 +343,16 @@ router.post("/", async (req, res) => {
       .input("ProjectId", sql.Int, ProjectId ? parseInt(ProjectId, 10) : null)
       .input("ItemDescription", sql.NVarChar(sql.MAX), ItemDescription || null)
       .input("Quantity", sql.Decimal(18, 2), parseFloat(Quantity) || 0)
-      .input("Unit", sql.NVarChar(50), Unit || null)
+      .input("Unit", sql.NVarChar(50), Unit || "NOS")
       .input("Rate", sql.Decimal(18, 2), parseFloat(Rate) || 0)
       .input("SubtotalAmount", sql.Decimal(18, 2), subtotal)
       .input("TotalAmount", sql.Decimal(18, 2), parseFloat(TotalAmount) || 0)
       .input("HsnCode", sql.NVarChar(20), hsnCode)
       .input("GstType", sql.NVarChar(20), gstType)
       .input("GstRate", sql.Decimal(5, 2), gstRate)
-      .input("PaymentTerms", sql.NVarChar(255), PaymentTerms || null)
+      .input("PaymentTerms", sql.NVarChar(sql.MAX), PaymentTerms || null)
       .input("Status", sql.NVarChar(50), Status || "Draft")
-      .input("Remarks", sql.NVarChar(500), Remarks || null)
+      .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
       .input("DocTypeId", sql.Int, DocTypeId ? parseInt(DocTypeId, 10) : null)
       .input("DocNo", sql.NVarChar(100), finalDocNo || null)
       .input("CreatedBy", sql.NVarChar(100), userEmail)
@@ -372,13 +385,7 @@ router.post("/", async (req, res) => {
     await syncLineItems(transaction, sql, newId, poItemsArray, uomMap);
 
     if (DocTypeId && finalDocNo) {
-      await backPatchRecordId(
-        transaction,
-        sql,
-        finalDocNo,
-        "PurchaseOrders",
-        newId,
-      );
+      await backPatchRecordId(pool, sql, finalDocNo, "PurchaseOrders", newId);
     }
 
     await transaction.commit();
@@ -454,7 +461,11 @@ router.put("/:id", async (req, res) => {
       .input("PurchaseOrderID", sql.Int, id)
       .input("PurchaseOrderNo", sql.NVarChar(100), PurchaseOrderNo || null)
       .input("PODate", sql.Date, PODate || null)
-      .input("ExpectedDeliveryDate", sql.Date, ExpectedDeliveryDate || null)
+      .input(
+        "ExpectedDeliveryDate",
+        sql.Date,
+        ExpectedDeliveryDate || PODate || null,
+      )
       .input(
         "SupplierID",
         sql.Int,
@@ -464,16 +475,16 @@ router.put("/:id", async (req, res) => {
       .input("ProjectId", sql.Int, ProjectId ? parseInt(ProjectId, 10) : null)
       .input("ItemDescription", sql.NVarChar(sql.MAX), ItemDescription || null)
       .input("Quantity", sql.Decimal(18, 2), parseFloat(Quantity) || 0)
-      .input("Unit", sql.NVarChar(50), Unit || null)
+      .input("Unit", sql.NVarChar(50), Unit || "NOS")
       .input("Rate", sql.Decimal(18, 2), parseFloat(Rate) || 0)
       .input("SubtotalAmount", sql.Decimal(18, 2), subtotal)
       .input("TotalAmount", sql.Decimal(18, 2), parseFloat(TotalAmount) || 0)
       .input("HsnCode", sql.NVarChar(20), hsnCode)
       .input("GstType", sql.NVarChar(20), gstType)
       .input("GstRate", sql.Decimal(5, 2), gstRate)
-      .input("PaymentTerms", sql.NVarChar(255), PaymentTerms || null)
+      .input("PaymentTerms", sql.NVarChar(sql.MAX), PaymentTerms || null)
       .input("Status", sql.NVarChar(50), Status || "Draft")
-      .input("Remarks", sql.NVarChar(500), Remarks || null)
+      .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
       .input("DocTypeId", sql.Int, DocTypeId ? parseInt(DocTypeId, 10) : null)
       .input("DocNo", sql.NVarChar(100), DocNo || null)
       .input("UpdatedBy", sql.NVarChar(100), userEmail)

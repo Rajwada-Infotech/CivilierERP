@@ -14,8 +14,8 @@ const MODULE_MAP = {
   },
   "purchase-orders": {
     table: "dbo.PurchaseOrders",
-    pk: "POId",
-    status: "POStatus",
+    pk: "PurchaseOrderID",
+    status: "Status",
   },
   "work-order": { table: "dbo.WorkOrder", pk: "WOId", status: "WOStatus" },
   grn: { table: "dbo.GRN", pk: "GRNId", status: "GRNStatus" },
