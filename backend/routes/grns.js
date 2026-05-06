@@ -25,6 +25,20 @@ function parseGRNItems(grnItems) {
   return [];
 }
 
+// Normalise the GRNItems field on a raw DB row so the client always
+// receives a parsed array, never a raw JSON string. This prevents the
+// frontend from needing to double-parse and avoids issues with truncated
+// strings returned by some MSSQL NVARCHAR(MAX) driver configurations.
+function normaliseGRNRow(row) {
+  if (!row) return row;
+  try {
+    row.GRNItems = parseGRNItems(row.GRNItems);
+  } catch {
+    row.GRNItems = [];
+  }
+  return row;
+}
+
 async function insertStockLedgerEntries(transaction, grnId, grnItems) {
   const items = parseGRNItems(grnItems);
 
@@ -46,16 +60,17 @@ async function insertStockLedgerEntries(transaction, grnId, grnItems) {
 }
 
 // GET all GRNs
+// NOTE: GRNItems is intentionally NOT normalised here — the list endpoint
+// returns raw strings (or null) which is fine for picker row counts.
+// The frontend always re-fetches GET /:id for authoritative item data.
 router.get("/", cache("grns", 300), async (req, res) => {
   try {
     const pool = getPool();
 
-    // Sanitized pagination params
     const page = Math.max(parseInt(req.query.page) || 1, 1);
-    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 500);
     const offset = (page - 1) * limit;
 
-    // Total count (matching exact JOINs)
     const countResult = await pool.request().query(`
       SELECT COUNT(*) AS total
       FROM GoodsReceiptNotes grn
@@ -64,7 +79,6 @@ router.get("/", cache("grns", 300), async (req, res) => {
     `);
     const total = parseInt(countResult.recordset[0].total);
 
-    // Paginated data
     const result = await pool
       .request()
       .input("offset", sql.Int, offset)
@@ -109,6 +123,56 @@ router.get("/", cache("grns", 300), async (req, res) => {
   }
 });
 
+// GET single GRN by ID
+// This is the authoritative endpoint used by the expense booking form to load
+// GRN items. GRNItems is normalised to a parsed array before returning so the
+// frontend never has to deal with raw JSON strings or truncation.
+router.get("/:id", async (req, res) => {
+  const grnId = parseInt(req.params.id, 10);
+  if (isNaN(grnId)) return res.status(400).json({ error: "Invalid GRN ID" });
+
+  try {
+    const pool = await getPool();
+    const result = await pool.request().input("GRNID", sql.Int, grnId).query(`
+        SELECT
+          grn.GRNID,
+          grn.GRNNo,
+          grn.GRNDate,
+          grn.SupplierID,
+          grn.POID,
+          grn.GRNItems,
+          grn.Status,
+          grn.Remarks,
+          grn.CreatedDate,
+          grn.DocTypeId,
+          grn.DocNo,
+          s.LHeadName AS SupplierName,
+          p.PurchaseOrderNo AS PONumber,
+          td.Prefix AS DocTypePrefix,
+          td.Description AS DocTypeDescription
+        FROM GoodsReceiptNotes grn
+        LEFT JOIN dbo.AccountHeadMaster s ON grn.SupplierID = s.LHeadId
+        LEFT JOIN PurchaseOrders p ON grn.POID = p.PurchaseOrderID
+        LEFT JOIN dbo.TypeOfDoc td ON td.TypeOfDocId = grn.DocTypeId
+        WHERE grn.GRNID = @GRNID
+      `);
+
+    if (result.recordset.length === 0)
+      return res.status(404).json({ error: "GRN not found" });
+
+    // FIX: normalise GRNItems to a parsed array so the client always receives
+    // an array, not a raw JSON string. This prevents double-parsing issues on
+    // the frontend and handles cases where the NVARCHAR(MAX) column is returned
+    // as a truncated string by some mssql driver versions.
+    res.json(normaliseGRNRow(result.recordset[0]));
+  } catch (err) {
+    console.error("GET GRN by ID ERROR:", err);
+    res
+      .status(500)
+      .json({ error: "Failed to fetch GRN", message: err.message });
+  }
+});
+
 // POST - Create GRN + Stock Ledger Entries
 router.post("/", async (req, res) => {
   const {
@@ -139,7 +203,6 @@ router.post("/", async (req, res) => {
     let finalDocNo = grnNo || docNo || null;
 
     if (docTypeId) {
-      // Use TypeOfDoc-based sequence if docTypeId is provided
       finalDocNo = await lockNextDocNumber(pool, sql, {
         docTypeId: parseInt(docTypeId, 10),
         finYear,
@@ -148,7 +211,6 @@ router.post("/", async (req, res) => {
         issuedBy: req.user?.email || req.user?.name || null,
       });
     } else if (!finalDocNo) {
-      // Auto-generate GRN number from GRN table sequence
       const seqResult = await pool
         .request()
         .query(
@@ -160,7 +222,6 @@ router.post("/", async (req, res) => {
       finalDocNo = fy ? `CI/REC/${padded}/${fy}` : `CI/REC/${padded}`;
     }
 
-    // Insert GRN Header
     const grnResult = await transaction
       .request()
       .input("GRNNo", sql.NVarChar(50), finalDocNo)
@@ -335,7 +396,7 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
-// ── PUT /:id/submit — Partially Received → Pending ────────────────────────────
+// ── PUT /:id/submit — Draft/Partially Received → Pending ──────────────────────
 router.put("/:id/submit", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   try {

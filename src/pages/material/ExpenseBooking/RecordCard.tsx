@@ -14,8 +14,18 @@ interface Props {
   onApprovalSuccess: () => void;
 }
 
-export function RecordCard({ rec, onEdit, onPreview, onDelete, onApprovalSuccess }: Props) {
-  const rbd = computeBreakdown(rec.basicAmount, rec.cgstRate, rec.sgstRate, rec.discount);
+export function RecordCard({
+  rec,
+  onEdit,
+  onDelete,
+  onApprovalSuccess,
+}: Props) {
+  const rbd = computeBreakdown(
+    rec.basicAmount,
+    rec.cgstRate,
+    rec.sgstRate,
+    rec.discount,
+  );
 
   return (
     <div className="rounded-xl border border-border bg-card p-4 space-y-3">
@@ -27,14 +37,22 @@ export function RecordCard({ rec, onEdit, onPreview, onDelete, onApprovalSuccess
           <p className="font-mono text-xs font-semibold text-primary">
             {rec.bookingReference || "—"}
           </p>
-          <p className="text-xs text-muted-foreground mt-0.5 truncate">{rec.supplier}</p>
+          <p className="text-xs text-muted-foreground mt-0.5 truncate">
+            {rec.supplier}
+          </p>
         </div>
         <StatusBadge status={rec.status} />
       </div>
 
       <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
-        <div><span className="text-muted-foreground">Date: </span>{rec.bookingDate}</div>
-        <div><span className="text-muted-foreground">Due: </span>{rec.dueDate || "-"}</div>
+        <div>
+          <span className="text-muted-foreground">Date: </span>
+          {rec.bookingDate}
+        </div>
+        <div>
+          <span className="text-muted-foreground">Due: </span>
+          {rec.dueDate || "-"}
+        </div>
         <div>
           <span className="text-muted-foreground">PO: </span>
           <span className="font-mono">{rec.poId || "-"}</span>
@@ -50,7 +68,9 @@ export function RecordCard({ rec, onEdit, onPreview, onDelete, onApprovalSuccess
         <div>
           <span className="text-muted-foreground">EMI: </span>
           {rec.emi.enabled ? (
-            <span className="text-primary font-medium">{rec.emi.installmentCount}x</span>
+            <span className="text-primary font-medium">
+              {rec.emi.installmentCount}x
+            </span>
           ) : (
             <span className="text-muted-foreground">-</span>
           )}
@@ -64,20 +84,28 @@ export function RecordCard({ rec, onEdit, onPreview, onDelete, onApprovalSuccess
             Rs.{fmt(rbd.netAmount)}
           </p>
         </div>
-        <div className="flex flex-wrap gap-1.5 items-center justify-end">
+        <div className="flex gap-1.5 items-center">
           <ApprovalActions
             status={rec.status}
             recordId={rec.id}
             endpoint="/api/expense-booking"
+            submitOnly
             onSuccess={onApprovalSuccess}
           />
-          <Button variant="outline" size="sm" className="h-8 w-8 p-0" onClick={onPreview}>
-            <Eye size={13} />
-          </Button>
-          <Button variant="outline" size="sm" className="h-8 w-8 p-0" onClick={onEdit}>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 w-8 p-0"
+            onClick={onEdit}
+          >
             <Edit size={13} />
           </Button>
-          <Button variant="destructive" size="sm" className="h-8 w-8 p-0" onClick={onDelete}>
+          <Button
+            variant="destructive"
+            size="sm"
+            className="h-8 w-8 p-0"
+            onClick={onDelete}
+          >
             <Trash2 size={13} />
           </Button>
         </div>
