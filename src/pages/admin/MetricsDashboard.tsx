@@ -52,7 +52,8 @@ import {
 } from "lucide-react";
 import { fetchMetrics, getDemoMetrics } from "@/api/metricsApi";
 import { cn } from "@/lib/utils";
-import { useToast } from "@/hooks/use-toast";
+import { toast } from "sonner";
+import { API_BASE_URL } from "@/lib/apiBase";
 
 interface SystemMetrics {
   rpm: number;
@@ -74,13 +75,14 @@ const chartConfig = {
 } as const;
 
 const MetricsDashboard = () => {
-  const [baseURL, setBaseURL] = useState("http://localhost:5000");
+  const [baseURL, setBaseURL] = useState(
+    API_BASE_URL.replace(/\/api$/, "") || "http://localhost:5000",
+  );
   const [token, setToken] = useState("");
   const [metrics, setMetrics] = useState<SystemMetrics | null>(null);
   const [loading, setLoading] = useState(false);
   const [live, setLive] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const { toast } = useToast();
 
   const fetchData = useCallback(
     async (demo = false) => {
@@ -94,17 +96,14 @@ const MetricsDashboard = () => {
           data = await fetchMetrics(baseURL, token);
         }
         setMetrics(data);
-        toast({
-          title: "Connected!",
+        toast.success("Connected!", {
           description: `${data.rpm} RPM • ${data.activeUsers} active users • Cache: ${(data.cacheHitRate * 100).toFixed(0)}%`,
         });
       } catch (err) {
         const message =
           err instanceof Error ? err.message : "Connection failed";
         setError(message);
-        toast({
-          variant: "destructive",
-          title: "Connection Error",
+        toast.error("Connection Error", {
           description: message,
         });
       } finally {

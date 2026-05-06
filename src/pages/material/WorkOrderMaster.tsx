@@ -61,6 +61,7 @@ import {
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { getTCRecords } from "@/api/tcMasterApi";
 import { useQuery } from "@tanstack/react-query";
 import { getHsn } from "@/api/hsnApi";
 import {
@@ -84,9 +85,14 @@ function useWOChainStatus(woId: number | null) {
   const [loading, setLoading] = React.useState(false);
 
   React.useEffect(() => {
-    if (!woId) { setStatus(null); return; }
+    if (!woId) {
+      setStatus(null);
+      return;
+    }
     setLoading(true);
-    fetchWithAuth(`/api/expense-booking/chain-status?sourceType=WO&sourceId=${woId}`)
+    fetchWithAuth(
+      `/api/expense-booking/chain-status?sourceType=WO&sourceId=${woId}`,
+    )
       .then((r) => r.json())
       .then(setStatus)
       .catch(() => {})
@@ -106,6 +112,8 @@ interface MaterialItem {
   uomId: number | null;
   unit: string;
   price: number;
+  /** GST rate % auto-filled from HSN when item is selected */
+  gstRate: number;
 }
 
 interface Activity {
@@ -127,8 +135,6 @@ interface ActivityGroup {
   expanded: boolean;
 }
 
-type WOGSTType = "none" | "cgst_sgst" | "igst";
-
 interface WorkOrderForm {
   companyId: string;
   projectId: string;
@@ -137,7 +143,7 @@ interface WorkOrderForm {
   contractorId: string;
   remarks: string;
   termsAndConditions: string;
-  hsnCode: string;
+  gstApplicable: boolean;
   gstType: WOGSTType;
   gstRate: number;
 }
@@ -147,10 +153,14 @@ interface DropdownOption {
   name: string;
 }
 
-interface ItemOption {
-  id: string;
+interface TCRecord {
+  id: number;
   name: string;
+  terms: string;
 }
+
+// ItemOption now includes gstRate from HSN Master
+type ItemOption = WOItemOption;
 
 interface ActivityOption {
   id: number;
@@ -255,9 +265,9 @@ const EMPTY_FORM = (): WorkOrderForm => ({
   contractorId: "",
   remarks: "",
   termsAndConditions: "",
-  hsnCode: "",
+  gstApplicable: false,
   gstType: "cgst_sgst",
-  gstRate: 0,
+  gstRate: 18,
 });
 
 const EMPTY_MATERIAL = (): MaterialItem => ({
@@ -268,6 +278,7 @@ const EMPTY_MATERIAL = (): MaterialItem => ({
   uomId: null,
   unit: "",
   price: 0,
+  gstRate: 0,
 });
 
 const EMPTY_ACTIVITY = (): Activity => ({
@@ -379,9 +390,19 @@ const MaterialBreakdownModal: React.FC<{
 
   const handleItemChange = (idx: number, selectedId: string) => {
     const found = itemOptions.find((it) => it.id === selectedId);
+    // Resolve M_UOM code (stored as UOMCode) to actual UOMMaster id+name
+    const resolvedUom = found?.uomName
+      ? uomOptions.find((u) => (u as any).uomCode === found.uomName)
+      : null;
     updateMaterial(idx, {
       itemId: found ? found.id : "",
       itemName: found ? found.name : "",
+      gstRate: found ? (found.gstRate ?? 0) : 0,
+      ...(resolvedUom != null
+        ? { uomId: resolvedUom.id, unit: resolvedUom.name }
+        : found?.uomName
+          ? { uomId: null, unit: found.uomName }
+          : {}),
     });
   };
 
@@ -600,13 +621,22 @@ const MaterialBreakdownModal: React.FC<{
                             </div>
                           </div>
                         </div>
+                        {mat.gstRate > 0 && (
+                          <div className="mt-1 text-[11px] text-violet-600 dark:text-violet-400 font-medium">
+                            GST {mat.gstRate}% (from HSN) ={" "}
+                            {fmt((lineTotal * mat.gstRate) / 100)}
+                          </div>
+                        )}
                         {lineTotal > 0 && (
                           <div className="flex items-center justify-between pt-1 border-t border-border/50">
                             <span className="text-xs text-muted-foreground">
                               {mat.quantity} {mat.unit} × ₹{mat.price}
                             </span>
                             <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">
-                              {fmt(lineTotal)}
+                              {fmt(
+                                lineTotal +
+                                  (lineTotal * (mat.gstRate || 0)) / 100,
+                              )}
                             </span>
                           </div>
                         )}
@@ -1458,11 +1488,13 @@ const WorkOrderDetailPanel: React.FC<{
         </div>
         <div className="p-4 sm:p-5 flex flex-wrap gap-3">
           {/* Step 1: Expense Booking */}
-          <div className={`flex-1 min-w-[140px] rounded-lg border px-3 py-2.5 ${
-            (chainStatus?.expenseCount ?? 0) > 0
-              ? "border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-950/30"
-              : "border-border bg-muted/30"
-          }`}>
+          <div
+            className={`flex-1 min-w-[140px] rounded-lg border px-3 py-2.5 ${
+              (chainStatus?.expenseCount ?? 0) > 0
+                ? "border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-950/30"
+                : "border-border bg-muted/30"
+            }`}
+          >
             <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">
               Expense Booking
             </p>
@@ -1483,11 +1515,13 @@ const WorkOrderDetailPanel: React.FC<{
           </div>
 
           {/* Step 2: Payment */}
-          <div className={`flex-1 min-w-[140px] rounded-lg border px-3 py-2.5 ${
-            chainStatus?.isPaid
-              ? "border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-950/30"
-              : "border-border bg-muted/30"
-          }`}>
+          <div
+            className={`flex-1 min-w-[140px] rounded-lg border px-3 py-2.5 ${
+              chainStatus?.isPaid
+                ? "border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-950/30"
+                : "border-border bg-muted/30"
+            }`}
+          >
             <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">
               Payment
             </p>
@@ -2311,6 +2345,9 @@ const WorkOrderEditPanel: React.FC<{
   const [loadingDropdowns, setLoadingDropdowns] = useState(true);
   const [dropdownError, setDropdownError] = useState<string | null>(null);
   const [loadingItems, setLoadingItems] = useState(true);
+  const [tcRecords, setTcRecords] = useState<TCRecord[]>([]);
+  const [selectedTCs, setSelectedTCs] = useState<TCRecord[]>([]);
+  const [tcDropdownOpen, setTcDropdownOpen] = useState(false);
 
   // Load dropdowns + existing work order data
   useEffect(() => {
@@ -2319,19 +2356,40 @@ const WorkOrderEditPanel: React.FC<{
       setLoadingDropdowns(true);
       setDropdownError(null);
       try {
-        const [comp, proj, cont, grps, acts, uomsRaw, detail, items] =
+        const [comp, proj, cont, grps, acts, uomsRaw, detail, items, tcRaw] =
           await Promise.all([
             fetchCompanies(),
             fetchProjects(),
             fetchContractors(),
             fetchActivityGroups(),
             fetchActivities(),
-            fetchWithAuth("/api/work-orders/meta/uoms").then((r) =>
-              r.ok ? r.json() : [],
+            fetchWithAuth("/api/uom-master").then((r) =>
+              r.ok
+                ? r
+                    .json()
+                    .then((rows: any[]) =>
+                      rows
+                        .filter((u) => u.IsActive !== false)
+                        .map((u) => ({
+                          id: u.Id,
+                          name: u.UOMName,
+                          uomCode: u.UOMCode,
+                        })),
+                    )
+                : [],
             ),
             getWorkOrder(workOrderId),
             fetchItems(),
+            getTCRecords().catch(() => []),
           ]);
+        const parsedTCs: TCRecord[] = (Array.isArray(tcRaw) ? tcRaw : [])
+          .filter((t: any) => t.isActive !== false)
+          .map((t: any) => ({
+            id: Number(t.Id),
+            name: String(t.Name ?? ""),
+            terms: String(t.TermsAndCondition ?? ""),
+          }));
+        setTcRecords(parsedTCs);
         setCompanies(ensureArray<DropdownOption>(comp));
         setProjects(ensureArray<DropdownOption>(proj));
         setContractors(ensureArray<DropdownOption>(cont));
@@ -2452,28 +2510,38 @@ const WorkOrderEditPanel: React.FC<{
   const {
     grandLabourTotal,
     grandMaterialsTotal,
+    grandMaterialsGST,
     grandSubtotal,
     gstAmount,
     grandTotal,
   } = useMemo(() => {
     let labour = 0;
     let materials = 0;
+    let materialsGST = 0;
     for (const g of groups) {
       for (const a of g.activities) {
         labour += a.ratePerUnit * a.area;
         materials += a.materials.reduce((s, m) => s + m.quantity * m.price, 0);
+        materialsGST += a.materials.reduce(
+          (s, m) => s + (m.quantity * m.price * (m.gstRate || 0)) / 100,
+          0,
+        );
       }
     }
     const subtotal = labour + materials;
-    const gst = form.gstRate > 0 ? (subtotal * form.gstRate) / 100 : 0;
+    const gst =
+      form.gstApplicable && form.gstRate > 0
+        ? (subtotal * form.gstRate) / 100
+        : 0;
     return {
       grandLabourTotal: labour,
       grandMaterialsTotal: materials,
+      grandMaterialsGST: materialsGST,
       grandSubtotal: subtotal,
       gstAmount: gst,
       grandTotal: subtotal + gst,
     };
-  }, [groups, form.gstRate]);
+  }, [groups, form.gstApplicable, form.gstRate]);
 
   const setField = (key: keyof WorkOrderForm, value: string) => {
     setFormState((p) => ({ ...p, [key]: value }));
@@ -2529,6 +2597,7 @@ const WorkOrderEditPanel: React.FC<{
               UOMId: m.uomId ?? null,
               Quantity: m.quantity || null,
               Rate: m.price || null,
+              GSTRate: m.gstRate ?? 0,
               Remarks: null,
               UpdatedBy: userId,
             })),
@@ -2543,11 +2612,13 @@ const WorkOrderEditPanel: React.FC<{
           ContractorId: parseInt(form.contractorId),
           TotalAmount: grandTotal,
           Remarks: form.remarks || null,
-          TermsAndConditions: form.termsAndConditions || null,
+          TermsAndConditions:
+            selectedTCs.length > 0
+              ? selectedTCs.map((tc) => `${tc.name}: ${tc.terms}`).join("\n\n")
+              : form.termsAndConditions || null,
           UpdatedBy: userId,
           GST: {
-            applicable: form.gstRate > 0,
-            hsnCode: form.hsnCode || null,
+            applicable: form.gstApplicable,
             type: form.gstType,
             rate: form.gstRate,
           },
@@ -2815,83 +2886,64 @@ const WorkOrderEditPanel: React.FC<{
                 </h3>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div>
-                    <FieldLabel>HSN Code</FieldLabel>
+                    <FieldLabel>GST Applicable</FieldLabel>
                     <select
-                      value={form.hsnCode}
-                      onChange={(e) => {
-                        const code = e.target.value;
-                        const hsn = hsnRecords.find((h) => h.code === code);
-                        const rate = hsn
-                          ? hsn.igstRate || hsn.cgstRate + hsn.sgstRate
-                          : 0;
+                      value={form.gstApplicable ? "Yes" : "No"}
+                      onChange={(e) =>
                         setFormState((p) => ({
                           ...p,
-                          hsnCode: code,
-                          gstRate: rate,
-                        }));
-                      }}
+                          gstApplicable: e.target.value === "Yes",
+                        }))
+                      }
                       className={inputCls}
                     >
-                      <option value="">— Select HSN Code —</option>
-                      {hsnRecords
-                        .filter((h) => h.status)
-                        .map((h) => (
-                          <option key={h.code} value={h.code}>
-                            {h.code} — {h.shortDesc}
-                          </option>
-                        ))}
+                      <option value="No">No</option>
+                      <option value="Yes">Yes</option>
                     </select>
-                    {form.hsnCode &&
-                      hsnRecords.find((h) => h.code === form.hsnCode) && (
-                        <p className="text-[11px] text-muted-foreground mt-1 truncate">
-                          {
-                            hsnRecords.find((h) => h.code === form.hsnCode)!
-                              .description
+                  </div>
+                  {form.gstApplicable && (
+                    <>
+                      <div>
+                        <FieldLabel>GST Type</FieldLabel>
+                        <select
+                          value={form.gstType}
+                          onChange={(e) =>
+                            setFormState((p) => ({
+                              ...p,
+                              gstType: e.target.value as WOGSTType,
+                            }))
                           }
-                        </p>
-                      )}
-                  </div>
-                  <div>
-                    <FieldLabel>GST Type</FieldLabel>
-                    <select
-                      value={form.gstType}
-                      onChange={(e) =>
-                        setFormState((p) => ({
-                          ...p,
-                          gstType: e.target.value as WOGSTType,
-                        }))
-                      }
-                      className={inputCls}
-                    >
-                      <option value="cgst_sgst">CGST + SGST</option>
-                      <option value="igst">IGST</option>
-                    </select>
-                  </div>
-                  <div>
-                    <FieldLabel>GST Rate (%)</FieldLabel>
-                    <input
-                      type="number"
-                      min={0}
-                      max={100}
-                      step={0.01}
-                      value={form.gstRate}
-                      readOnly={!!form.hsnCode}
-                      onChange={(e) =>
-                        !form.hsnCode &&
-                        setFormState((p) => ({
-                          ...p,
-                          gstRate: parseFloat(e.target.value) || 0,
-                        }))
-                      }
-                      className={`${inputCls} ${form.hsnCode ? "bg-muted/50 text-muted-foreground cursor-not-allowed" : ""}`}
-                    />
-                    {form.gstRate > 0 && form.gstType === "cgst_sgst" && (
-                      <p className="text-[11px] text-muted-foreground mt-1">
-                        CGST {(form.gstRate / 2).toFixed(2)}% + SGST{" "}
-                        {(form.gstRate / 2).toFixed(2)}%
-                      </p>
-                    )}
-                  </div>
+                          className={inputCls}
+                        >
+                          <option value="cgst_sgst">CGST + SGST</option>
+                          <option value="igst">IGST</option>
+                        </select>
+                      </div>
+                      <div>
+                        <FieldLabel>GST Rate (%)</FieldLabel>
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          step={0.01}
+                          value={form.gstRate}
+                          onChange={(e) =>
+                            setFormState((p) => ({
+                              ...p,
+                              gstRate: parseFloat(e.target.value) || 0,
+                            }))
+                          }
+                          className={inputCls}
+                        />
+                        {form.gstApplicable && form.gstType === "cgst_sgst" && (
+                          <p className="text-[11px] text-muted-foreground mt-1">
+                            CGST {(form.gstRate / 2).toFixed(2)}% + SGST{" "}
+                            {(form.gstRate / 2).toFixed(2)}%
+                          </p>
+                        )}
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             </div>
@@ -2906,13 +2958,126 @@ const WorkOrderEditPanel: React.FC<{
             </div>
             <div className="col-span-1 sm:col-span-2 lg:col-span-3">
               <FieldLabel>Terms &amp; Conditions</FieldLabel>
-              <textarea
-                value={form.termsAndConditions}
-                onChange={(e) => setField("termsAndConditions", e.target.value)}
-                placeholder="Enter contractor terms and conditions…"
-                rows={4}
-                className={`${inputCls} resize-none`}
-              />
+              {/* T&C Picker from TCMaster */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setTcDropdownOpen((o) => !o)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/20 transition mb-2"
+                >
+                  <Plus size={13} />
+                  Add T&amp;C
+                </button>
+                {tcDropdownOpen && (
+                  <>
+                    <div
+                      className="fixed inset-0 z-10"
+                      onClick={() => setTcDropdownOpen(false)}
+                    />
+                    <div className="absolute left-0 top-full mt-1 z-20 w-80 rounded-xl border border-border bg-card shadow-lg overflow-hidden">
+                      <div className="px-3 py-2 border-b border-border">
+                        <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                          Select Terms &amp; Conditions
+                        </p>
+                      </div>
+                      <div className="max-h-56 overflow-y-auto divide-y divide-border">
+                        {tcRecords.length === 0 ? (
+                          <p className="px-4 py-6 text-xs text-center text-muted-foreground">
+                            No T&amp;C records found
+                          </p>
+                        ) : (
+                          tcRecords.map((tc) => {
+                            const isSelected = selectedTCs.some(
+                              (s) => s.id === tc.id,
+                            );
+                            return (
+                              <button
+                                key={tc.id}
+                                type="button"
+                                onClick={() =>
+                                  setSelectedTCs((prev) =>
+                                    isSelected
+                                      ? prev.filter((s) => s.id !== tc.id)
+                                      : [...prev, tc],
+                                  )
+                                }
+                                className={`w-full text-left px-4 py-2.5 flex items-start gap-2.5 hover:bg-muted/40 transition ${isSelected ? "bg-primary/5" : ""}`}
+                              >
+                                <span
+                                  className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition ${isSelected ? "bg-primary border-primary" : "border-border"}`}
+                                >
+                                  {isSelected && (
+                                    <Check
+                                      size={10}
+                                      className="text-primary-foreground"
+                                    />
+                                  )}
+                                </span>
+                                <span className="flex-1 min-w-0">
+                                  <span className="block text-sm font-medium text-foreground truncate">
+                                    {tc.name}
+                                  </span>
+                                  <span className="block text-[11px] text-muted-foreground truncate mt-0.5">
+                                    {tc.terms}
+                                  </span>
+                                </span>
+                              </button>
+                            );
+                          })
+                        )}
+                      </div>
+                      <div className="px-3 py-2 border-t border-border">
+                        <button
+                          type="button"
+                          onClick={() => setTcDropdownOpen(false)}
+                          className="w-full text-xs text-center text-muted-foreground hover:text-foreground transition py-1"
+                        >
+                          Done
+                        </button>
+                      </div>
+                    </div>
+                  </>
+                )}
+              </div>
+              {/* Selected T&C list */}
+              {selectedTCs.length > 0 ? (
+                <div className="space-y-2">
+                  {selectedTCs.map((tc, idx) => (
+                    <div
+                      key={tc.id}
+                      className="flex items-start gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3"
+                    >
+                      <span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] font-bold flex items-center justify-center mt-0.5">
+                        {idx + 1}
+                      </span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-semibold text-foreground">
+                          {tc.name}
+                        </p>
+                        <p className="text-xs text-muted-foreground mt-0.5 whitespace-pre-wrap">
+                          {tc.terms}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setSelectedTCs((prev) =>
+                            prev.filter((s) => s.id !== tc.id),
+                          )
+                        }
+                        className="flex-shrink-0 p-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/20 text-muted-foreground hover:text-red-500 transition"
+                      >
+                        <X size={13} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground italic">
+                  No terms selected. Click &quot;Add T&amp;C&quot; to pick from
+                  master.
+                </p>
+              )}
             </div>
           </div>
         </div>
@@ -2959,7 +3124,7 @@ const WorkOrderEditPanel: React.FC<{
           ))}
         </div>
         <div className="border-t border-border bg-muted/10">
-          <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-border/50">
+          <div className="grid grid-cols-1 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-border/50">
             <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3">
               <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                 <Package size={11} className="text-amber-500" />
@@ -2978,6 +3143,15 @@ const WorkOrderEditPanel: React.FC<{
                 {fmt(grandLabourTotal)}
               </span>
             </div>
+            <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3">
+              <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                <Receipt size={11} className="text-primary" />
+                GST (from HSN)
+              </span>
+              <span className="text-base font-bold text-violet-600 dark:text-violet-400">
+                {fmt(grandMaterialsGST)}
+              </span>
+            </div>
             <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3 bg-muted/20">
               <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                 <Receipt size={11} className="text-primary" />
@@ -2988,7 +3162,7 @@ const WorkOrderEditPanel: React.FC<{
               </span>
             </div>
           </div>
-          {form.gstRate > 0 && gstAmount > 0 && (
+          {form.gstApplicable && gstAmount > 0 && (
             <div className="border-t border-border/50 px-4 sm:px-6 py-2 flex flex-wrap gap-4 text-xs text-muted-foreground">
               <span>
                 Subtotal:{" "}
@@ -3144,22 +3318,47 @@ const WorkOrderMaster: React.FC = () => {
   const [loadingDropdowns, setLoadingDropdowns] = useState(true);
   const [loadingItems, setLoadingItems] = useState(true);
   const [dropdownError, setDropdownError] = useState<string | null>(null);
+  const [tcRecords, setTcRecords] = useState<TCRecord[]>([]);
+  const [selectedTCs, setSelectedTCs] = useState<TCRecord[]>([]);
+  const [tcDropdownOpen, setTcDropdownOpen] = useState(false);
 
   useEffect(() => {
     const loadDropdowns = async () => {
       setLoadingDropdowns(true);
       setDropdownError(null);
       try {
-        const [comp, proj, cont, grps, acts, uomsRaw] = await Promise.all([
-          fetchCompanies(),
-          fetchProjects(),
-          fetchContractors(),
-          fetchActivityGroups(),
-          fetchActivities(),
-          fetchWithAuth("/api/work-orders/meta/uoms").then((r) =>
-            r.ok ? r.json() : [],
-          ),
-        ]);
+        const [comp, proj, cont, grps, acts, uomsRaw, tcRaw] =
+          await Promise.all([
+            fetchCompanies(),
+            fetchProjects(),
+            fetchContractors(),
+            fetchActivityGroups(),
+            fetchActivities(),
+            fetchWithAuth("/api/uom-master").then((r) =>
+              r.ok
+                ? r
+                    .json()
+                    .then((rows: any[]) =>
+                      rows
+                        .filter((u) => u.IsActive !== false)
+                        .map((u) => ({
+                          id: u.Id,
+                          name: u.UOMName,
+                          uomCode: u.UOMCode,
+                        })),
+                    )
+                : [],
+            ),
+            getTCRecords().catch(() => []),
+          ]);
+        const parsedTCs: TCRecord[] = (Array.isArray(tcRaw) ? tcRaw : [])
+          .filter((t: any) => t.isActive !== false)
+          .map((t: any) => ({
+            id: Number(t.Id),
+            name: String(t.Name ?? ""),
+            terms: String(t.TermsAndCondition ?? ""),
+          }));
+        setTcRecords(parsedTCs);
         setCompanies(ensureArray<DropdownOption>(comp));
         setProjects(ensureArray<DropdownOption>(proj));
         setContractors(ensureArray<DropdownOption>(cont));
@@ -3212,28 +3411,38 @@ const WorkOrderMaster: React.FC = () => {
   const {
     grandLabourTotal,
     grandMaterialsTotal,
+    grandMaterialsGST,
     grandSubtotal,
     gstAmount,
     grandTotal,
   } = useMemo(() => {
     let labour = 0;
     let materials = 0;
+    let materialsGST = 0;
     for (const g of groups) {
       for (const a of g.activities) {
         labour += a.ratePerUnit * a.area;
         materials += a.materials.reduce((s, m) => s + m.quantity * m.price, 0);
+        materialsGST += a.materials.reduce(
+          (s, m) => s + (m.quantity * m.price * (m.gstRate || 0)) / 100,
+          0,
+        );
       }
     }
     const subtotal = labour + materials;
-    const gst = form.gstRate > 0 ? (subtotal * form.gstRate) / 100 : 0;
+    const gst =
+      form.gstApplicable && form.gstRate > 0
+        ? (subtotal * form.gstRate) / 100
+        : 0;
     return {
       grandLabourTotal: labour,
       grandMaterialsTotal: materials,
+      grandMaterialsGST: materialsGST,
       grandSubtotal: subtotal,
       gstAmount: gst,
       grandTotal: subtotal + gst,
     };
-  }, [groups, form.gstRate]);
+  }, [groups, form.gstApplicable, form.gstRate]);
 
   const setField = (key: keyof WorkOrderForm, value: string) => {
     setForm((p) => ({ ...p, [key]: value }));
@@ -3290,13 +3499,16 @@ const WorkOrderMaster: React.FC = () => {
         ContractorId: parseInt(form.contractorId),
         TotalAmount: grandTotal,
         Remarks: form.remarks || null,
-        TermsAndConditions: form.termsAndConditions || null,
+        TermsAndConditions:
+          selectedTCs.length > 0
+            ? selectedTCs.map((tc) => `${tc.name}: ${tc.terms}`).join("\n\n")
+            : form.termsAndConditions || null,
         DocTypeId: woDocTypeId,
         DocNo: form.docNumber || woDocNo || null,
         finYear: selectedFinYear || null,
         CreatedBy: userId,
         GST: {
-          applicable: form.gstRate > 0,
+          applicable: form.gstApplicable,
           type: form.gstType,
           rate: form.gstRate,
         },
@@ -3328,6 +3540,7 @@ const WorkOrderMaster: React.FC = () => {
                 UOMId: m.uomId ?? null,
                 Quantity: m.quantity || null,
                 Rate: m.price || null,
+                GSTRate: m.gstRate ?? 0,
                 Remarks: null,
                 CreatedBy: userId,
               })),
@@ -3343,13 +3556,15 @@ const WorkOrderMaster: React.FC = () => {
           ContractorId: parseInt(form.contractorId),
           TotalAmount: grandTotal,
           Remarks: form.remarks || null,
-          TermsAndConditions: form.termsAndConditions || null,
+          TermsAndConditions:
+            selectedTCs.length > 0
+              ? selectedTCs.map((tc) => `${tc.name}: ${tc.terms}`).join("\n\n")
+              : form.termsAndConditions || null,
           DocTypeId: woDocTypeId,
           DocNo: confirmedDocNumber || null,
           UpdatedBy: userId,
           GST: {
-            applicable: form.gstRate > 0,
-            hsnCode: form.hsnCode || null,
+            applicable: form.gstApplicable,
             type: form.gstType,
             rate: form.gstRate,
           },
@@ -3768,83 +3983,65 @@ const WorkOrderMaster: React.FC = () => {
                     </h3>
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                       <div>
-                        <FieldLabel>HSN Code</FieldLabel>
+                        <FieldLabel>GST Applicable</FieldLabel>
                         <select
-                          value={form.hsnCode}
-                          onChange={(e) => {
-                            const code = e.target.value;
-                            const hsn = hsnRecords.find((h) => h.code === code);
-                            const rate = hsn
-                              ? hsn.igstRate || hsn.cgstRate + hsn.sgstRate
-                              : 0;
+                          value={form.gstApplicable ? "Yes" : "No"}
+                          onChange={(e) =>
                             setForm((p) => ({
                               ...p,
-                              hsnCode: code,
-                              gstRate: rate,
-                            }));
-                          }}
+                              gstApplicable: e.target.value === "Yes",
+                            }))
+                          }
                           className={inputCls}
                         >
-                          <option value="">— Select HSN Code —</option>
-                          {hsnRecords
-                            .filter((h) => h.status)
-                            .map((h) => (
-                              <option key={h.code} value={h.code}>
-                                {h.code} — {h.shortDesc}
-                              </option>
-                            ))}
+                          <option value="No">No</option>
+                          <option value="Yes">Yes</option>
                         </select>
-                        {form.hsnCode &&
-                          hsnRecords.find((h) => h.code === form.hsnCode) && (
-                            <p className="text-[11px] text-muted-foreground mt-1 truncate">
-                              {
-                                hsnRecords.find((h) => h.code === form.hsnCode)!
-                                  .description
+                      </div>
+                      {form.gstApplicable && (
+                        <>
+                          <div>
+                            <FieldLabel>GST Type</FieldLabel>
+                            <select
+                              value={form.gstType}
+                              onChange={(e) =>
+                                setForm((p) => ({
+                                  ...p,
+                                  gstType: e.target.value as WOGSTType,
+                                }))
                               }
-                            </p>
-                          )}
-                      </div>
-                      <div>
-                        <FieldLabel>GST Type</FieldLabel>
-                        <select
-                          value={form.gstType}
-                          onChange={(e) =>
-                            setForm((p) => ({
-                              ...p,
-                              gstType: e.target.value as WOGSTType,
-                            }))
-                          }
-                          className={inputCls}
-                        >
-                          <option value="cgst_sgst">CGST + SGST</option>
-                          <option value="igst">IGST</option>
-                        </select>
-                      </div>
-                      <div>
-                        <FieldLabel>GST Rate (%)</FieldLabel>
-                        <input
-                          type="number"
-                          min={0}
-                          max={100}
-                          step={0.01}
-                          value={form.gstRate}
-                          readOnly={!!form.hsnCode}
-                          onChange={(e) =>
-                            !form.hsnCode &&
-                            setForm((p) => ({
-                              ...p,
-                              gstRate: parseFloat(e.target.value) || 0,
-                            }))
-                          }
-                          className={`${inputCls} ${form.hsnCode ? "bg-muted/50 text-muted-foreground cursor-not-allowed" : ""}`}
-                        />
-                        {form.gstRate > 0 && form.gstType === "cgst_sgst" && (
-                          <p className="text-[11px] text-muted-foreground mt-1">
-                            CGST {(form.gstRate / 2).toFixed(2)}% + SGST{" "}
-                            {(form.gstRate / 2).toFixed(2)}%
-                          </p>
-                        )}
-                      </div>
+                              className={inputCls}
+                            >
+                              <option value="cgst_sgst">CGST + SGST</option>
+                              <option value="igst">IGST</option>
+                            </select>
+                          </div>
+                          <div>
+                            <FieldLabel>GST Rate (%)</FieldLabel>
+                            <input
+                              type="number"
+                              min={0}
+                              max={100}
+                              step={0.01}
+                              value={form.gstRate}
+                              onChange={(e) =>
+                                setForm((p) => ({
+                                  ...p,
+                                  gstRate: parseFloat(e.target.value) || 0,
+                                }))
+                              }
+                              className={inputCls}
+                            />
+                            {form.gstApplicable &&
+                              form.gstType === "cgst_sgst" && (
+                                <p className="text-[11px] text-muted-foreground mt-1">
+                                  CGST {(form.gstRate / 2).toFixed(2)}% + SGST{" "}
+                                  {(form.gstRate / 2).toFixed(2)}%
+                                </p>
+                              )}
+                          </div>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -3859,15 +4056,126 @@ const WorkOrderMaster: React.FC = () => {
                 </div>
                 <div className="col-span-1 sm:col-span-2 lg:col-span-3">
                   <FieldLabel>Terms &amp; Conditions</FieldLabel>
-                  <textarea
-                    value={form.termsAndConditions}
-                    onChange={(e) =>
-                      setField("termsAndConditions", e.target.value)
-                    }
-                    placeholder="Enter contractor terms and conditions…"
-                    rows={4}
-                    className={`${inputCls} resize-none`}
-                  />
+                  {/* T&C Picker from TCMaster */}
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => setTcDropdownOpen((o) => !o)}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-semibold hover:bg-primary/20 transition mb-2"
+                    >
+                      <Plus size={13} />
+                      Add T&amp;C
+                    </button>
+                    {tcDropdownOpen && (
+                      <>
+                        <div
+                          className="fixed inset-0 z-10"
+                          onClick={() => setTcDropdownOpen(false)}
+                        />
+                        <div className="absolute left-0 top-full mt-1 z-20 w-80 rounded-xl border border-border bg-card shadow-lg overflow-hidden">
+                          <div className="px-3 py-2 border-b border-border">
+                            <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                              Select Terms &amp; Conditions
+                            </p>
+                          </div>
+                          <div className="max-h-56 overflow-y-auto divide-y divide-border">
+                            {tcRecords.length === 0 ? (
+                              <p className="px-4 py-6 text-xs text-center text-muted-foreground">
+                                No T&amp;C records found
+                              </p>
+                            ) : (
+                              tcRecords.map((tc) => {
+                                const isSelected = selectedTCs.some(
+                                  (s) => s.id === tc.id,
+                                );
+                                return (
+                                  <button
+                                    key={tc.id}
+                                    type="button"
+                                    onClick={() =>
+                                      setSelectedTCs((prev) =>
+                                        isSelected
+                                          ? prev.filter((s) => s.id !== tc.id)
+                                          : [...prev, tc],
+                                      )
+                                    }
+                                    className={`w-full text-left px-4 py-2.5 flex items-start gap-2.5 hover:bg-muted/40 transition ${isSelected ? "bg-primary/5" : ""}`}
+                                  >
+                                    <span
+                                      className={`mt-0.5 flex-shrink-0 w-4 h-4 rounded border flex items-center justify-center transition ${isSelected ? "bg-primary border-primary" : "border-border"}`}
+                                    >
+                                      {isSelected && (
+                                        <Check
+                                          size={10}
+                                          className="text-primary-foreground"
+                                        />
+                                      )}
+                                    </span>
+                                    <span className="flex-1 min-w-0">
+                                      <span className="block text-sm font-medium text-foreground truncate">
+                                        {tc.name}
+                                      </span>
+                                      <span className="block text-[11px] text-muted-foreground truncate mt-0.5">
+                                        {tc.terms}
+                                      </span>
+                                    </span>
+                                  </button>
+                                );
+                              })
+                            )}
+                          </div>
+                          <div className="px-3 py-2 border-t border-border">
+                            <button
+                              type="button"
+                              onClick={() => setTcDropdownOpen(false)}
+                              className="w-full text-xs text-center text-muted-foreground hover:text-foreground transition py-1"
+                            >
+                              Done
+                            </button>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                  {/* Selected T&C list */}
+                  {selectedTCs.length > 0 ? (
+                    <div className="space-y-2">
+                      {selectedTCs.map((tc, idx) => (
+                        <div
+                          key={tc.id}
+                          className="flex items-start gap-3 rounded-xl border border-border bg-muted/20 px-4 py-3"
+                        >
+                          <span className="flex-shrink-0 w-5 h-5 rounded-full bg-primary/10 text-primary text-[10px] font-bold flex items-center justify-center mt-0.5">
+                            {idx + 1}
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-foreground">
+                              {tc.name}
+                            </p>
+                            <p className="text-xs text-muted-foreground mt-0.5 whitespace-pre-wrap">
+                              {tc.terms}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setSelectedTCs((prev) =>
+                                prev.filter((s) => s.id !== tc.id),
+                              )
+                            }
+                            className="flex-shrink-0 p-1 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/20 text-muted-foreground hover:text-red-500 transition"
+                          >
+                            <X size={13} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-xs text-muted-foreground italic">
+                      No terms selected. Click &quot;Add T&amp;C&quot; to pick
+                      from master.
+                    </p>
+                  )}
                 </div>
               </div>
             </div>
@@ -3914,7 +4222,7 @@ const WorkOrderMaster: React.FC = () => {
               ))}
             </div>
             <div className="border-t border-border bg-muted/10">
-              <div className="grid grid-cols-1 sm:grid-cols-3 divide-y sm:divide-y-0 sm:divide-x divide-border/50">
+              <div className="grid grid-cols-1 sm:grid-cols-4 divide-y sm:divide-y-0 sm:divide-x divide-border/50">
                 <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3">
                   <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                     <Package size={11} className="text-amber-500" />
@@ -3933,6 +4241,15 @@ const WorkOrderMaster: React.FC = () => {
                     {fmt(grandLabourTotal)}
                   </span>
                 </div>
+                <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3">
+                  <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                    <Receipt size={11} className="text-primary" />
+                    GST (from HSN)
+                  </span>
+                  <span className="text-base font-bold text-violet-600 dark:text-violet-400">
+                    {fmt(grandMaterialsGST)}
+                  </span>
+                </div>
                 <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3 bg-muted/20">
                   <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                     <Receipt size={11} className="text-primary" />
@@ -3943,7 +4260,7 @@ const WorkOrderMaster: React.FC = () => {
                   </span>
                 </div>
               </div>
-              {form.gstRate > 0 && gstAmount > 0 && (
+              {form.gstApplicable && gstAmount > 0 && (
                 <div className="border-t border-border/50 px-4 sm:px-6 py-2 flex flex-wrap gap-4 text-xs text-muted-foreground">
                   <span>
                     Subtotal:{" "}

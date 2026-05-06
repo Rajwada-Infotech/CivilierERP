@@ -434,15 +434,15 @@ const PurchaseOrderMaster: React.FC = () => {
     [tcRaw],
   );
 
-  // ── Enterprise logo ───────────────────────────────────────────────────────
+  // ── Enterprise logo (stored as base64 data URL in DB) ─────────────────────
   const enterpriseLogo = useMemo(() => {
     const list = ensureArray<any>(enterprisesRaw);
     const enterprise =
       list.find((e) => e.entity_type === "Enterprise") ?? list[0];
-    return enterprise?.logo ?? null;
+    return (enterprise?.logo as string | null) ?? null;
   }, [enterprisesRaw]);
 
-  // ── Print handler ─────────────────────────────────────────────────────────
+  // ── Print handler — uses Blob URL so base64 logo renders correctly ─────────
   const handlePrint = () => {
     const supplier =
       suppliers.find((s) => s.id === form.supplierId)?.name ?? "—";
@@ -450,30 +450,44 @@ const PurchaseOrderMaster: React.FC = () => {
     const project =
       allProjects.find((p) => p.id === form.projectId)?.name ?? "—";
 
+    // Logo: if it's a base64 data URL embed it directly — Blob URL approach
+    // keeps it same-origin so the popup's img src resolves.
     const logoHtml = enterpriseLogo
-      ? `<img src="${enterpriseLogo}" alt="Company Logo" style="height:60px;max-width:180px;object-fit:contain;" />`
-      : `<div style="font-size:22px;font-weight:700;color:#4f46e5;">${company}</div>`;
+      ? `<img src="${enterpriseLogo}" alt="Logo" style="height:64px;max-width:200px;object-fit:contain;" />`
+      : `<span style="font-size:20px;font-weight:800;color:#4f46e5;">${company}</span>`;
 
     const itemRows = lineItems
       .map(
         (li, i) => `
       <tr style="border-bottom:1px solid #e5e7eb;">
-        <td style="padding:8px 10px;text-align:center;color:#6b7280;">${i + 1}</td>
+        <td style="padding:8px 10px;text-align:center;color:#6b7280;font-size:12px;">${i + 1}</td>
         <td style="padding:8px 10px;font-weight:500;">${li.itemName || "—"}</td>
-        <td style="padding:8px 10px;color:#6b7280;">${li.itemDescription || "—"}</td>
+        <td style="padding:8px 10px;color:#6b7280;font-size:12px;">${li.itemDescription || "—"}</td>
         <td style="padding:8px 10px;text-align:center;">${li.quantity}</td>
-        <td style="padding:8px 10px;text-align:center;">${li.unit || "—"}</td>
+        <td style="padding:8px 10px;text-align:center;color:#6b7280;">${li.unit || "—"}</td>
         <td style="padding:8px 10px;text-align:right;font-family:monospace;">₹${li.rate.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
         <td style="padding:8px 10px;text-align:center;">${li.gstRate > 0 ? li.gstRate + "%" : "—"}</td>
-        <td style="padding:8px 10px;text-align:right;font-family:monospace;font-weight:600;">₹${li.amount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+        <td style="padding:8px 10px;text-align:right;font-family:monospace;font-weight:700;">₹${li.amount.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
       </tr>`,
       )
       .join("");
 
+    const taxRows = [
+      totalCgst > 0
+        ? `<tr><td style="color:#6b7280;padding:5px 8px;">CGST</td><td style="text-align:right;padding:5px 8px;font-family:monospace;">₹${totalCgst.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td></tr>`
+        : "",
+      totalSgst > 0
+        ? `<tr><td style="color:#6b7280;padding:5px 8px;">SGST</td><td style="text-align:right;padding:5px 8px;font-family:monospace;">₹${totalSgst.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td></tr>`
+        : "",
+      totalIgst > 0
+        ? `<tr><td style="color:#6b7280;padding:5px 8px;">IGST</td><td style="text-align:right;padding:5px 8px;font-family:monospace;">₹${totalIgst.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td></tr>`
+        : "",
+    ].join("");
+
     const tcHtml = form.paymentTerms
-      ? `<div style="margin-top:24px;">
-          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#6b7280;margin-bottom:8px;">Terms &amp; Conditions</div>
-          <div style="font-size:12px;color:#374151;white-space:pre-wrap;line-height:1.6;">${form.paymentTerms}</div>
+      ? `<div style="margin-top:24px;padding:16px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
+           <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.1em;color:#9ca3af;margin-bottom:8px;">Terms &amp; Conditions</div>
+           <div style="font-size:12px;color:#374151;white-space:pre-wrap;line-height:1.7;">${form.paymentTerms}</div>
          </div>`
       : "";
 
@@ -481,56 +495,58 @@ const PurchaseOrderMaster: React.FC = () => {
 <html>
 <head>
   <meta charset="utf-8" />
-  <title>Purchase Order — ${form.poNumber || "—"}</title>
+  <title>PO — ${form.poNumber || "—"}</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; color: #111; background: #fff; padding: 32px; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; color: #111827; background: #fff; padding: 36px; }
     table { width: 100%; border-collapse: collapse; }
-    th { background: #f3f4f6; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: #6b7280; padding: 9px 10px; text-align: left; }
-    .total-row td { padding: 6px 10px; }
-    .grand-total { font-size: 15px; font-weight: 700; color: #4f46e5; border-top: 2px solid #4f46e5; }
-    @media print { body { padding: 16px; } }
+    thead th { background: #f3f4f6; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: #6b7280; padding: 9px 10px; }
+    @media print {
+      body { padding: 16px; }
+      button { display: none !important; }
+    }
   </style>
 </head>
 <body>
   <!-- Header -->
-  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:28px;padding-bottom:20px;border-bottom:2px solid #4f46e5;">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:20px;border-bottom:2px solid #4f46e5;margin-bottom:28px;">
     <div>${logoHtml}</div>
     <div style="text-align:right;">
-      <div style="font-size:22px;font-weight:800;color:#4f46e5;letter-spacing:-0.5px;">PURCHASE ORDER</div>
-      <div style="font-size:16px;font-weight:700;font-family:monospace;margin-top:4px;">${form.poNumber || "—"}</div>
-      <div style="font-size:12px;color:#6b7280;margin-top:4px;">Date: ${fmtDate(form.poDate)}</div>
-      ${form.expectedDate ? `<div style="font-size:12px;color:#6b7280;">Expected: ${fmtDate(form.expectedDate)}</div>` : ""}
+      <div style="font-size:24px;font-weight:800;color:#4f46e5;letter-spacing:-0.5px;">PURCHASE ORDER</div>
+      <div style="font-size:15px;font-weight:700;font-family:monospace;color:#111827;margin-top:4px;">${form.poNumber || "—"}</div>
+      <div style="font-size:12px;color:#6b7280;margin-top:6px;">Date: <strong>${fmtDate(form.poDate)}</strong></div>
+      ${form.expectedDate ? `<div style="font-size:12px;color:#6b7280;margin-top:2px;">Expected: <strong>${fmtDate(form.expectedDate)}</strong></div>` : ""}
     </div>
   </div>
 
-  <!-- Meta -->
+  <!-- Party details -->
   <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:20px;margin-bottom:24px;">
-    <div>
-      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Supplier</div>
-      <div style="font-weight:600;">${supplier}</div>
-    </div>
-    <div>
-      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Company</div>
-      <div style="font-weight:600;">${company}</div>
-    </div>
-    <div>
-      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">Project / Site</div>
-      <div style="font-weight:600;">${project}</div>
-    </div>
+    ${[
+      ["Supplier", supplier],
+      ["Company", company],
+      ["Project / Site", project],
+    ]
+      .map(
+        ([label, val]) => `
+      <div style="padding:12px 14px;background:#f9fafb;border-radius:8px;border:1px solid #e5e7eb;">
+        <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:4px;">${label}</div>
+        <div style="font-weight:600;font-size:13px;">${val}</div>
+      </div>`,
+      )
+      .join("")}
   </div>
 
-  <!-- Items -->
+  <!-- Items table -->
   <table>
     <thead>
       <tr>
-        <th style="width:36px;">#</th>
-        <th>Item</th>
-        <th>Description</th>
+        <th style="width:32px;text-align:center;">#</th>
+        <th style="text-align:left;">Item</th>
+        <th style="text-align:left;">Description</th>
         <th style="text-align:center;">Qty</th>
         <th style="text-align:center;">UOM</th>
         <th style="text-align:right;">Rate (₹)</th>
-        <th style="text-align:center;">GST</th>
+        <th style="text-align:center;">GST %</th>
         <th style="text-align:right;">Amount (₹)</th>
       </tr>
     </thead>
@@ -539,18 +555,13 @@ const PurchaseOrderMaster: React.FC = () => {
 
   <!-- Totals -->
   <div style="display:flex;justify-content:flex-end;margin-top:16px;">
-    <table style="width:280px;">
+    <table style="width:260px;border-collapse:collapse;">
       <tbody>
-        <tr class="total-row">
-          <td style="color:#6b7280;">Subtotal (excl. GST)</td>
-          <td style="text-align:right;font-family:monospace;">₹${subtotal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
-        </tr>
-        ${totalCgst > 0 ? `<tr class="total-row"><td style="color:#6b7280;">CGST</td><td style="text-align:right;font-family:monospace;">₹${totalCgst.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td></tr>` : ""}
-        ${totalSgst > 0 ? `<tr class="total-row"><td style="color:#6b7280;">SGST</td><td style="text-align:right;font-family:monospace;">₹${totalSgst.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td></tr>` : ""}
-        ${totalIgst > 0 ? `<tr class="total-row"><td style="color:#6b7280;">IGST</td><td style="text-align:right;font-family:monospace;">₹${totalIgst.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td></tr>` : ""}
-        <tr class="total-row grand-total">
-          <td>Grand Total</td>
-          <td style="text-align:right;font-family:monospace;">₹${grandTotal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
+        <tr><td style="color:#6b7280;padding:5px 8px;">Subtotal (excl. GST)</td><td style="text-align:right;padding:5px 8px;font-family:monospace;">₹${subtotal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td></tr>
+        ${taxRows}
+        <tr style="border-top:2px solid #4f46e5;">
+          <td style="padding:8px;font-weight:800;font-size:14px;">Grand Total</td>
+          <td style="text-align:right;padding:8px;font-family:monospace;font-weight:800;font-size:15px;color:#4f46e5;">₹${grandTotal.toLocaleString("en-IN", { minimumFractionDigits: 2 })}</td>
         </tr>
       </tbody>
     </table>
@@ -558,24 +569,27 @@ const PurchaseOrderMaster: React.FC = () => {
 
   ${tcHtml}
 
-  <!-- Remarks -->
-  ${form.remarks ? `<div style="margin-top:24px;"><div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#6b7280;margin-bottom:6px;">Remarks</div><div style="font-size:12px;color:#374151;">${form.remarks}</div></div>` : ""}
+  ${form.remarks ? `<div style="margin-top:20px;"><div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.08em;color:#9ca3af;margin-bottom:6px;">Remarks</div><div style="font-size:12px;color:#374151;">${form.remarks}</div></div>` : ""}
 
   <!-- Footer -->
-  <div style="margin-top:40px;padding-top:16px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;font-size:11px;color:#9ca3af;">
+  <div style="margin-top:40px;padding-top:14px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;font-size:11px;color:#9ca3af;">
     <span>Generated by CivilierERP</span>
-    <span>Printed on ${new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</span>
+    <span>Printed: ${new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</span>
   </div>
 </body>
 </html>`;
 
-    const win = window.open("", "_blank", "width=900,height=700");
+    // Use Blob URL — avoids document.write CSP issues with base64 images
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const blobUrl = URL.createObjectURL(blob);
+    const win = window.open(blobUrl, "_blank", "width=960,height=720");
     if (!win) {
+      URL.revokeObjectURL(blobUrl);
       toast.error("Pop-up blocked — please allow pop-ups for this site.");
       return;
     }
-    win.document.write(html);
-    win.document.close();
+    // Revoke after enough time for the window to load and print
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
     win.onload = () => {
       win.focus();
       win.print();
@@ -735,6 +749,7 @@ const PurchaseOrderMaster: React.FC = () => {
     if (!form.poNumber) e.poNumber = true;
     if (!form.poDate) e.poDate = true;
     if (!form.supplierId) e.supplierId = true;
+    if (!form.projectId) e.projectId = true;
     if (lineItems.every((li) => !li.itemName && !li.quantity))
       e.lineItems = true;
     setErrors(e);
@@ -759,8 +774,9 @@ const PurchaseOrderMaster: React.FC = () => {
       Rate: validItems[0]?.rate || 0,
       TotalAmount: grandTotal,
       POItems: validItems.map((li) => ({
-        itemDescription:
-          li.itemName + (li.itemDescription ? ` — ${li.itemDescription}` : ""),
+        itemId: li.itemId || null,
+        itemDescription: li.itemName,
+        description: li.itemDescription || null,
         unit: li.unit,
         quantity: li.quantity,
         rate: li.rate,
@@ -1341,7 +1357,7 @@ const PurchaseOrderMaster: React.FC = () => {
 
             {/* Project */}
             <div>
-              <FieldLabel>Project / Site</FieldLabel>
+              <FieldLabel required>Project / Site</FieldLabel>
               {isReadOnly ? (
                 <div className={`${inputCls} bg-muted/30`}>
                   {allProjects.find((p) => p.id === form.projectId)?.name ||
@@ -1606,88 +1622,6 @@ const PurchaseOrderMaster: React.FC = () => {
 
           {/* Totals footer */}
           <div className="border-t border-border bg-muted/10 px-5 py-5 space-y-4">
-            {/* Tax rate breakdown — shown only when at least one item has GST */}
-            {totalTax > 0 && (
-              <div>
-                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-widest mb-2">
-                  Tax Rates{" "}
-                  <span className="text-primary font-medium normal-case tracking-normal">
-                    (auto-filled from Item Master)
-                  </span>
-                </p>
-                <div className="grid grid-cols-3 gap-3">
-                  {/* CGST */}
-                  <div>
-                    <p className="text-[11px] text-muted-foreground mb-1">
-                      CGST (%)
-                    </p>
-                    <div className="flex items-center rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm font-mono text-foreground">
-                      <span className="flex-1">
-                        {totalCgst > 0
-                          ? (lineItems.find((li) => li.cgstRate > 0)
-                              ?.cgstRate ?? 0)
-                          : 0}
-                      </span>
-                      <span className="text-muted-foreground text-xs ml-1">
-                        %
-                      </span>
-                    </div>
-                    {totalCgst > 0 && (
-                      <p className="text-[11px] text-muted-foreground mt-1 font-mono">
-                        {fmt(totalCgst)}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* SGST */}
-                  <div>
-                    <p className="text-[11px] text-muted-foreground mb-1">
-                      SGST (%)
-                    </p>
-                    <div className="flex items-center rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm font-mono text-foreground">
-                      <span className="flex-1">
-                        {totalSgst > 0
-                          ? (lineItems.find((li) => li.sgstRate > 0)
-                              ?.sgstRate ?? 0)
-                          : 0}
-                      </span>
-                      <span className="text-muted-foreground text-xs ml-1">
-                        %
-                      </span>
-                    </div>
-                    {totalSgst > 0 && (
-                      <p className="text-[11px] text-muted-foreground mt-1 font-mono">
-                        {fmt(totalSgst)}
-                      </p>
-                    )}
-                  </div>
-
-                  {/* IGST */}
-                  <div>
-                    <p className="text-[11px] text-muted-foreground mb-1">
-                      IGST (%)
-                    </p>
-                    <div className="flex items-center rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm font-mono text-foreground">
-                      <span className="flex-1">
-                        {totalIgst > 0
-                          ? (lineItems.find((li) => li.igstRate > 0)
-                              ?.igstRate ?? 0)
-                          : 0}
-                      </span>
-                      <span className="text-muted-foreground text-xs ml-1">
-                        %
-                      </span>
-                    </div>
-                    {totalIgst > 0 && (
-                      <p className="text-[11px] text-muted-foreground mt-1 font-mono">
-                        {fmt(totalIgst)}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            )}
-
             {/* Amount summary */}
             <div className="flex justify-end">
               <div className="w-full max-w-xs space-y-2">
