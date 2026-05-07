@@ -401,9 +401,9 @@ router.post("/", async (req, res) => {
     ETCId,
     ETCName,
     ETCText,
+    EPaymentType,
+    EPartialAmount,
   } = req.body;
-
-  const pool = getPool();
   const transaction = pool.transaction();
 
   let finalDocNo = EDocNo || null;
@@ -575,7 +575,13 @@ router.post("/", async (req, res) => {
       .input("EBillingTermName", sql.NVarChar(200), EBillingTermName || null)
       .input("ETCId", sql.Int, ETCId ? parseInt(ETCId, 10) : null)
       .input("ETCName", sql.NVarChar(200), ETCName || null)
-      .input("ETCText", sql.NVarChar(sql.MAX), ETCText || null).query(`
+      .input("ETCText", sql.NVarChar(sql.MAX), ETCText || null)
+      .input("EPaymentType", sql.NVarChar(20), EPaymentType || "full")
+      .input(
+        "EPartialAmount",
+        sql.Decimal(18, 2),
+        EPartialAmount != null ? Number(EPartialAmount) : null,
+      ).query(`
         INSERT INTO dbo.ExpenseBooking (
           EName, EProjectName, EDocumentType, EDocDate, EAmount, ENetAmount,
           ECgstRate, ESgstRate, EDiscountData, EDocNo,
@@ -584,7 +590,8 @@ router.post("/", async (req, res) => {
           ECreatedAt, EUpdatedAt, ECreatedBy, EApprovedBy,
           ECompanyId, EDocTypeId, EFinYear,
           ESourceType, ESourceId,
-          EBillingTermId, EBillingTermName, ETCId, ETCName, ETCText
+          EBillingTermId, EBillingTermName, ETCId, ETCName, ETCText,
+          EPaymentType, EPartialAmount
         ) VALUES (
           @EName, @EProjectName, @EDocumentType, @EDocDate, @EAmount, @ENetAmount,
           @ECgstRate, @ESgstRate, @EDiscountData, @EDocNo,
@@ -593,7 +600,8 @@ router.post("/", async (req, res) => {
           @ECreatedAt, @EUpdatedAt, @ECreatedBy, @EApprovedBy,
           @ECompanyId, @EDocTypeId, @EFinYear,
           @ESourceType, @ESourceId,
-          @EBillingTermId, @EBillingTermName, @ETCId, @ETCName, @ETCText
+          @EBillingTermId, @EBillingTermName, @ETCId, @ETCName, @ETCText,
+          @EPaymentType, @EPartialAmount
         );
         SELECT SCOPE_IDENTITY() AS NewId;
       `);
@@ -1038,6 +1046,8 @@ router.put("/:id", async (req, res) => {
     ETCId,
     ETCName,
     ETCText,
+    EPaymentType,
+    EPartialAmount,
   } = req.body;
 
   try {
@@ -1101,7 +1111,13 @@ router.put("/:id", async (req, res) => {
       .input("EBillingTermName", sql.NVarChar(200), EBillingTermName || null)
       .input("ETCId", sql.Int, ETCId ? parseInt(ETCId, 10) : null)
       .input("ETCName", sql.NVarChar(200), ETCName || null)
-      .input("ETCText", sql.NVarChar(sql.MAX), ETCText || null).query(`
+      .input("ETCText", sql.NVarChar(sql.MAX), ETCText || null)
+      .input("EPaymentType", sql.NVarChar(20), EPaymentType || "full")
+      .input(
+        "EPartialAmount",
+        sql.Decimal(18, 2),
+        EPartialAmount != null ? Number(EPartialAmount) : null,
+      ).query(`
         UPDATE dbo.ExpenseBooking SET
           EName=@EName, EProjectName=@EProjectName, EDocumentType=@EDocumentType, EDocDate=@EDocDate,
           EAmount=@EAmount, ENetAmount=@ENetAmount, ECgstRate=@ECgstRate, ESgstRate=@ESgstRate,
@@ -1112,7 +1128,8 @@ router.put("/:id", async (req, res) => {
           EDocTypeId=@EDocTypeId, EFinYear=@EFinYear,
           ESourceType=@ESourceType, ESourceId=@ESourceId,
           EBillingTermId=@EBillingTermId, EBillingTermName=@EBillingTermName,
-          ETCId=@ETCId, ETCName=@ETCName, ETCText=@ETCText
+          ETCId=@ETCId, ETCName=@ETCName, ETCText=@ETCText,
+          EPaymentType=@EPaymentType, EPartialAmount=@EPartialAmount
         WHERE Eid = @Eid
       `);
 

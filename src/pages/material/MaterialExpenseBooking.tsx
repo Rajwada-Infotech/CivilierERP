@@ -1422,6 +1422,19 @@ export default function MaterialExpenseBooking() {
       toast.error("Payment type is required for EMI bookings.");
       return;
     }
+    if (form.paymentType === "partial") {
+      const partial = form.partialAmount || 0;
+      if (partial <= 0) {
+        toast.error("Enter the amount being paid now for partial payment.");
+        return;
+      }
+      if (partial >= bd.netAmount) {
+        toast.error(
+          "Partial amount must be less than net payable. Use Full payment instead.",
+        );
+        return;
+      }
+    }
     if (
       selectedDoc?.kind !== "GRN" &&
       (!form.basicAmount || form.basicAmount <= 0)
@@ -1487,9 +1500,57 @@ export default function MaterialExpenseBooking() {
           },
           30000,
         );
-        toast.success(
-          `Expense booking created — Ref: ${result?.docNo || form.bookingReference}`,
-        );
+
+        const mainDocNo = result?.docNo || form.bookingReference;
+
+        // ── Partial payment: create balance booking ─────────────────
+        if (form.paymentType === "partial" && !isEditing) {
+          const balanceAmount = bd.netAmount - (form.partialAmount || 0);
+          const balanceRef = `${mainDocNo}-BAL-01`;
+          const balanceBody = {
+            ...recordToDb(
+              {
+                ...form,
+                bookingReference: balanceRef,
+                basicAmount: balanceAmount,
+                partialAmount: 0,
+                paymentType: "full",
+                discount: { ...form.discount, applicable: false, value: 0 },
+                billingTerms: [],
+                emi: { ...form.emi, enabled: false, schedule: [] },
+                remarks:
+                  `Balance due from partial payment on ${mainDocNo}. ${form.remarks}`.trim(),
+                status: "Draft",
+              },
+              balanceAmount,
+              selectedDoc?.kind === "TOD"
+                ? (selectedDoc.sourceId ?? null)
+                : null,
+            ),
+            ESourceType: selectedDoc?.kind ?? null,
+            ESourceId: selectedDoc?.sourceId ?? null,
+          };
+          try {
+            const balResult = await apiFetch(
+              API,
+              { method: "POST", body: JSON.stringify(balanceBody) },
+              30000,
+            );
+            const balRef = balResult?.docNo || balanceRef;
+            toast.success(
+              `Booking created — Ref: ${mainDocNo}. Balance booking created — Ref: ${balRef}`,
+              { duration: 8000 },
+            );
+          } catch {
+            toast.success(`Booking created — Ref: ${mainDocNo}`);
+            toast.warning(
+              "Balance booking could not be created automatically. Please create it manually.",
+              { duration: 6000 },
+            );
+          }
+        } else {
+          toast.success(`Expense booking created — Ref: ${mainDocNo}`);
+        }
       }
       cancelForm();
       await fetchRecords(page);
@@ -2161,9 +2222,10 @@ export default function MaterialExpenseBooking() {
                     <Field label="Payment Type" required>
                       <Select
                         value={form.paymentType || "full"}
-                        onValueChange={(value) =>
-                          set("paymentType", value as "full" | "partial")
-                        }
+                        onValueChange={(value) => {
+                          set("paymentType", value as "full" | "partial");
+                          if (value === "full") set("partialAmount", 0);
+                        }}
                       >
                         <SelectTrigger>
                           <SelectValue placeholder="Select payment type…" />
@@ -2171,12 +2233,127 @@ export default function MaterialExpenseBooking() {
                         <SelectContent>
                           <SelectItem value="full">Full payment</SelectItem>
                           <SelectItem value="partial">
-                            Partial payment (EMI)
+                            Partial payment
                           </SelectItem>
                         </SelectContent>
                       </Select>
                     </Field>
+
+                    {form.paymentType === "partial" && (
+                      <Field
+                        label="Amount Paid Now (₹)"
+                        required
+                        hint="Balance will be auto-created as a linked booking"
+                      >
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs font-semibold">
+                            ₹
+                          </span>
+                          <Input
+                            type="number"
+                            min={0}
+                            max={bd.netAmount}
+                            value={form.partialAmount || ""}
+                            onChange={(e) =>
+                              set(
+                                "partialAmount",
+                                parseFloat(e.target.value) || 0,
+                              )
+                            }
+                            className="pl-7"
+                            placeholder="0.00"
+                          />
+                        </div>
+                      </Field>
+                    )}
                   </div>
+
+                  {/* Partial payment breakdown card */}
+                  {form.paymentType === "partial" && bd.netAmount > 0 && (
+                    <div className="rounded-xl border border-border overflow-hidden">
+                      <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/40 border-b border-border">
+                        <Banknote size={13} className="text-primary" />
+                        <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
+                          Partial Payment Summary
+                        </p>
+                      </div>
+                      <div className="divide-y divide-border/50">
+                        <div className="flex items-center justify-between px-4 py-3">
+                          <div>
+                            <p className="text-xs text-foreground">
+                              Net Payable
+                            </p>
+                            <p className="text-[10px] text-muted-foreground">
+                              Total amount due
+                            </p>
+                          </div>
+                          <span className="text-xs font-mono font-semibold text-foreground">
+                            ₹{fmt(bd.netAmount)}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between px-4 py-3">
+                          <div>
+                            <p className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold">
+                              Paying Now
+                            </p>
+                            <p className="text-[10px] text-muted-foreground">
+                              This booking — Ref:{" "}
+                              <span className="font-mono text-primary">
+                                {form.bookingReference || "—"}
+                              </span>
+                            </p>
+                          </div>
+                          <span className="text-xs font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                            ₹{fmt(form.partialAmount || 0)}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between px-4 py-3 bg-amber-50/40 dark:bg-amber-900/10">
+                          <div>
+                            <p className="text-xs text-amber-600 dark:text-amber-400 font-semibold">
+                              Balance Due
+                            </p>
+                            <p className="text-[10px] text-muted-foreground">
+                              New linked booking — Ref:{" "}
+                              <span className="font-mono text-primary">
+                                {form.bookingReference
+                                  ? `${form.bookingReference}-BAL-01`
+                                  : "—"}
+                              </span>
+                            </p>
+                          </div>
+                          <span
+                            className={`text-xs font-mono font-semibold ${
+                              (form.partialAmount || 0) > bd.netAmount
+                                ? "text-destructive"
+                                : "text-amber-600 dark:text-amber-400"
+                            }`}
+                          >
+                            ₹
+                            {fmt(
+                              Math.max(
+                                0,
+                                bd.netAmount - (form.partialAmount || 0),
+                              ),
+                            )}
+                          </span>
+                        </div>
+                      </div>
+                      {(form.partialAmount || 0) > bd.netAmount && (
+                        <div className="flex items-center gap-2 px-4 py-2.5 bg-destructive/5 border-t border-destructive/20 text-destructive text-xs">
+                          <AlertCircle size={12} />
+                          Amount paid exceeds net payable
+                        </div>
+                      )}
+                      {(form.partialAmount || 0) === bd.netAmount && (
+                        <div className="flex items-center gap-2 px-4 py-2.5 bg-amber-50/40 dark:bg-amber-900/10 border-t border-amber-200 dark:border-amber-800 text-amber-600 dark:text-amber-400 text-xs">
+                          <AlertCircle size={12} />
+                          Partial amount equals full amount — use Full payment
+                          instead
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <EmiSection
                     emi={form.emi}
                     netAmount={bd.netAmount}
