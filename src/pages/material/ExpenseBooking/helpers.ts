@@ -116,6 +116,11 @@ export function blankForm(): Omit<ExpenseRecord, "id"> {
     netAmount: null,
     status: "Draft",
     remarks: "",
+    billingTermId: null,
+    billingTermName: "",
+    tcId: null,
+    tcName: "",
+    tcText: "",
   };
 }
 
@@ -185,6 +190,11 @@ export function dbToRecord(row: any): ExpenseRecord {
       : parseFloat(row.EAmount) || 0,
     status: (row.EStatus ?? row.Status ?? "Draft") as any,
     remarks: row.ERemarks ?? "",
+    billingTermId: row.EBillingTermId ? parseInt(row.EBillingTermId, 10) : null,
+    billingTermName: row.EBillingTermName ?? "",
+    tcId: row.ETCId ? parseInt(row.ETCId, 10) : null,
+    tcName: row.ETCName ?? "",
+    tcText: row.ETCText ?? "",
   };
 }
 
@@ -225,5 +235,10 @@ export function recordToDb(
     ERemarks: form.remarks || null,
     EStatus: form.status ?? "Draft",
     ECompanyId: form.companyId ?? null,
+    EBillingTermId: form.billingTermId ?? null,
+    EBillingTermName: form.billingTermName || null,
+    ETCId: form.tcId ?? null,
+    ETCName: form.tcName || null,
+    ETCText: form.tcText || null,
   };
 }
