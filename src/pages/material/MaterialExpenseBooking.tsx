@@ -1345,10 +1345,10 @@ export default function MaterialExpenseBooking() {
       form.basicAmount,
       form.cgstRate,
       form.sgstRate,
-      form.discount,
+      form.billingTerms && form.billingTerms.length > 0
+        ? form.billingTerms
+        : form.discount,
     );
-
-    let emiForSave = form.emi;
     if (
       !isEditing &&
       form.emi.enabled &&
@@ -1403,7 +1403,9 @@ export default function MaterialExpenseBooking() {
     form.basicAmount,
     form.cgstRate,
     form.sgstRate,
-    form.discount,
+    form.billingTerms && form.billingTerms.length > 0
+      ? form.billingTerms
+      : form.discount,
   );
   const filteredRecords =
     statusFilter && statusFilter !== "All"
@@ -2024,7 +2026,9 @@ export default function MaterialExpenseBooking() {
                   cgstRate={form.cgstRate}
                   sgstRate={form.sgstRate}
                   discount={form.discount}
+                  billingTerms={form.billingTerms}
                   onChange={(d) => set("discount", d)}
+                  onChangeBillingTerms={(terms) => set("billingTerms", terms)}
                 />
               </div>
 
@@ -2255,7 +2259,9 @@ export default function MaterialExpenseBooking() {
                               rec.basicAmount,
                               rec.cgstRate,
                               rec.sgstRate,
-                              rec.discount,
+                              rec.billingTerms && rec.billingTerms.length > 0
+                                ? rec.billingTerms
+                                : rec.discount,
                             );
                             return (
                               <TableRow

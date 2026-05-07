@@ -38,15 +38,25 @@ export function computeBreakdown(
   basicAmount: number,
   cgstRate: number,
   sgstRate: number,
-  discount: DiscountConfig,
+  discount: DiscountConfig | DiscountConfig[],
 ): PriceBreakdown {
-  const discountAmount = discount.applicable
-    ? discount.type === "percentage"
-      ? (basicAmount * discount.value) / 100
-      : discount.value
-    : 0;
+  // Normalise: support both legacy single config and new array
+  const terms = Array.isArray(discount) ? discount : [discount];
+  const activeTerms = terms.filter((d) => d.applicable);
 
-  const taxableAmount = Math.max(0, basicAmount - discountAmount);
+  // Apply discounts sequentially on the running taxable base
+  let runningBase = basicAmount;
+  let totalDiscountAmount = 0;
+
+  for (const d of activeTerms) {
+    const discAmt =
+      d.type === "percentage" ? (runningBase * d.value) / 100 : d.value;
+    const clamped = Math.min(discAmt, runningBase);
+    totalDiscountAmount += clamped;
+    runningBase -= clamped;
+  }
+
+  const taxableAmount = Math.max(0, runningBase);
   const cgstAmount = (taxableAmount * cgstRate) / 100;
   const sgstAmount = (taxableAmount * sgstRate) / 100;
   const grossAmount = taxableAmount + cgstAmount + sgstAmount;
@@ -55,7 +65,7 @@ export function computeBreakdown(
 
   return {
     basicAmount,
-    discountAmount,
+    discountAmount: totalDiscountAmount,
     taxableAmount,
     cgstAmount,
     sgstAmount,
@@ -116,6 +126,7 @@ export function blankForm(): Omit<ExpenseRecord, "id"> {
     remarks: "",
     billingTermId: null,
     billingTermName: "",
+    billingTerms: [],
     tcId: null,
     tcName: "",
     tcText: "",
@@ -147,9 +158,26 @@ export function dbToRecord(row: any): ExpenseRecord {
   }
 
   let discount: DiscountConfig = defaultDiscount();
+  let billingTerms: DiscountConfig[] = [];
   try {
-    if (row.EDiscountData)
+    if (row.EBillingTermsData) {
+      const parsed = JSON.parse(row.EBillingTermsData);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        billingTerms = parsed.map((t: any, i: number) => ({
+          ...defaultDiscount(),
+          ...t,
+          _key: `loaded-${i}`,
+        }));
+        // Legacy compat: derive single discount from first applicable term
+        const first = billingTerms.find((t) => t.applicable);
+        if (first) discount = first;
+      }
+    } else if (row.EDiscountData) {
       discount = { ...defaultDiscount(), ...JSON.parse(row.EDiscountData) };
+      if (discount.applicable) {
+        billingTerms = [{ ...discount, _key: "loaded-0" }];
+      }
+    }
   } catch {
     /* ignore */
   }
@@ -183,6 +211,7 @@ export function dbToRecord(row: any): ExpenseRecord {
     remarks: row.ERemarks ?? "",
     billingTermId: row.EBillingTermId ? parseInt(row.EBillingTermId, 10) : null,
     billingTermName: row.EBillingTermName ?? "",
+    billingTerms,
     tcId: row.ETCId ? parseInt(row.ETCId, 10) : null,
     tcName: row.ETCName ?? "",
     tcText: row.ETCText ?? "",
@@ -207,6 +236,7 @@ export function recordToDb(
     ESgstRate: Number(form.sgstRate) || 0,
 
     EDiscountData: JSON.stringify(form.discount),
+    EBillingTermsData: JSON.stringify(form.billingTerms ?? []),
     EDocNo: form.bookingReference || null,
     EDocTypeId: docTypeId ?? null,
     EFinYear: form.financialYear || null,
