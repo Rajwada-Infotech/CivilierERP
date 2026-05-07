@@ -94,6 +94,7 @@ interface ChequeLot {
   ChequeStartNumber: number | null;
   ChequeEndNumber: number | null;
   TotalCheques: number | null;
+  RemainingCheques: number | null;
   BankId: number | null;
   BankName: string | null;
   BankBranch: string | null;
@@ -127,6 +128,10 @@ interface ExpenseDetail {
   ENetAmount: number | null;
   EDocumentType: string | null;
   DocTypeName: string | null;
+  // GST breakdown
+  ECgstRate?: number | null;
+  ESgstRate?: number | null;
+  EIgstRate?: number | null;
 }
 
 interface GRNRef {
@@ -165,6 +170,11 @@ interface PaymentRecord {
   upiTransactionId: string;
   rtgsReference: string;
   impsReference: string;
+  // GST breakdown from linked expense
+  baseAmount: number | null;
+  cgstRate: number | null;
+  sgstRate: number | null;
+  igstRate: number | null;
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -277,13 +287,22 @@ const fetchExpenseGRNs = async (expenseId: string): Promise<GRNRef[]> => {
   return Array.isArray(data) ? data : [];
 };
 
+const fetchChequeNumbers = async (
+  lotId: number,
+): Promise<{ number: string; used: boolean }[]> => {
+  const res = await fetchWithAuth(`/api/new-payment/cheque-numbers/${lotId}`);
+  if (!res.ok) return [];
+  return res.json();
+};
+
 const deductChequeFromLot = async (
   lotId: number,
+  chequeNo: string,
 ): Promise<{ remainingCheques: number; nextChequeNumber: string }> => {
   const res = await fetchWithAuth("/api/new-payment/deduct-cheque", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ lotId }),
+    body: JSON.stringify({ lotId, chequeNo }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -319,6 +338,10 @@ function blankForm(): Omit<PaymentRecord, "id"> {
     upiTransactionId: "",
     rtgsReference: "",
     impsReference: "",
+    baseAmount: null,
+    cgstRate: null,
+    sgstRate: null,
+    igstRate: null,
   };
 }
 
@@ -348,6 +371,10 @@ function dbToRecord(item: DbPayment): PaymentRecord {
     upiTransactionId: item.PUpiTransactionId || "",
     rtgsReference: item.PRtgsReference || "",
     impsReference: item.PImpsReference || "",
+    baseAmount: null,
+    cgstRate: null,
+    sgstRate: null,
+    igstRate: null,
   };
 }
 
@@ -667,163 +694,211 @@ interface ChequePanelProps {
 function ChequePanel({ bankId, form, set, isPostDated }: ChequePanelProps) {
   const [lots, setLots] = useState<ChequeLot[]>([]);
   const [loadingLots, setLoadingLots] = useState(false);
-  const [deducting, setDeducting] = useState(false);
-  const [lotDetail, setLotDetail] = useState<ChequeLot | null>(null);
+  const [chequeNumbers, setChequeNumbers] = useState<
+    { number: string; used: boolean }[]
+  >([]);
+  const [loadingCheques, setLoadingCheques] = useState(false);
+  const [validating, setValidating] = useState(false);
 
-  // Fetch lots whenever bankId changes
+  // Fetch lots whenever bankId changes; auto-select the first active lot
   useEffect(() => {
     setLoadingLots(true);
     fetchChequeLots(bankId)
-      .then(setLots)
+      .then((fetched) => {
+        setLots(fetched);
+        // Auto-select first lot if none already selected
+        if (fetched.length > 0 && !form.chequeLotId) {
+          const first = fetched[0];
+          set("chequeLotId", first.CId);
+          set("chequeLotNumber", first.ChequeLotNumber);
+          set("chequeAccountNumber", first.AccountNumber || "");
+          set("chequeIfsc", first.IFSCCode || "");
+          set("chequeNo", "");
+        }
+      })
       .catch(() => setLots([]))
       .finally(() => setLoadingLots(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bankId]);
 
-  const handleLotSelect = async (lotIdStr: string) => {
-    if (!lotIdStr) {
-      setLotDetail(null);
-      set("chequeLotId", null);
-      set("chequeLotNumber", "");
-      set("chequeNo", "");
-      set("chequeAccountNumber", "");
-      set("chequeIfsc", "");
+  // Fetch available cheque numbers whenever lot changes
+  useEffect(() => {
+    if (!form.chequeLotId) {
+      setChequeNumbers([]);
       return;
     }
-    const lot = lots.find((l) => String(l.CId) === lotIdStr);
-    if (!lot) return;
+    setLoadingCheques(true);
+    fetchChequeNumbers(form.chequeLotId)
+      .then(setChequeNumbers)
+      .catch(() => setChequeNumbers([]))
+      .finally(() => setLoadingCheques(false));
+  }, [form.chequeLotId]);
 
-    setLotDetail(lot);
-    set("chequeLotId", lot.CId);
-    set("chequeLotNumber", lot.ChequeLotNumber);
-    set("chequeAccountNumber", lot.AccountNumber || "");
-    set("chequeIfsc", lot.IFSCCode || "");
-    // Cheque number will be assigned on deduct
-    set("chequeNo", "");
+  const activeLot = lots.find((l) => l.CId === form.chequeLotId) ?? null;
+  const availableCheques = chequeNumbers.filter((c) => !c.used);
 
-    // Deduct one cheque from the lot
-    setDeducting(true);
+  const handleChequeSelect = async (chequeNo: string) => {
+    set("chequeNo", chequeNo);
+    if (!chequeNo || !form.chequeLotId) return;
+    setValidating(true);
     try {
-      const result = await deductChequeFromLot(lot.CId);
-      set("chequeNo", result.nextChequeNumber);
-      toast.success(
-        `Cheque #${result.nextChequeNumber} assigned. ${result.remainingCheques} remaining in lot.`,
-      );
+      await deductChequeFromLot(form.chequeLotId, chequeNo);
+      // validation passed — chequeNo is set, no further action needed
     } catch (err: any) {
       toast.error(err.message);
+      set("chequeNo", "");
     } finally {
-      setDeducting(false);
+      setValidating(false);
     }
   };
 
   return (
     <div className="space-y-4">
-      <Field label="Lot Number" required hint="Active lots for selected bank">
-        <div className="relative">
-          <BookOpen
-            size={13}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-          />
-          <select
-            value={form.chequeLotId ? String(form.chequeLotId) : ""}
-            onChange={(e) => handleLotSelect(e.target.value)}
-            disabled={loadingLots || deducting}
-            className="w-full appearance-none pl-8 pr-9 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-60"
-          >
-            <option value="">— Select lot number —</option>
-            {lots.map((l) => (
-              <option key={l.CId} value={String(l.CId)}>
-                {l.ChequeLotNumber}
-                {l.TotalCheques != null ? ` (${l.TotalCheques} remaining)` : ""}
-              </option>
-            ))}
-          </select>
-          <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground">
-            {loadingLots || deducting ? (
-              <div className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-            ) : (
-              <ChevronDown size={14} />
-            )}
-          </div>
+      {/* Lot info — static display, not a dropdown */}
+      {!bankId ? null : loadingLots ? (
+        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+          <div className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+          Loading cheque lots…
         </div>
-        {!bankId && (
-          <p className="text-[11px] text-amber-600 flex items-center gap-1 mt-1">
-            <AlertTriangle size={10} /> Select a bank first to filter lots.
-          </p>
-        )}
-      </Field>
+      ) : lots.length === 0 ? (
+        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-600">
+          <AlertTriangle size={12} />
+          No active cheque lots found for this bank.
+        </div>
+      ) : (
+        <>
+          {/* Lot number shown as a static info chip */}
+          <div className="space-y-1.5">
+            <label className="text-xs font-heading font-medium text-muted-foreground uppercase tracking-wider">
+              Lot Number
+            </label>
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-muted/40 border border-border/60">
+              <BookOpen size={13} className="text-primary shrink-0" />
+              <span className="font-mono text-sm font-semibold text-foreground">
+                {activeLot?.ChequeLotNumber ?? "—"}
+              </span>
+              {activeLot?.RemainingCheques != null && (
+                <span className="ml-auto text-[11px] text-muted-foreground bg-primary/10 text-primary px-2 py-0.5 rounded-full font-heading">
+                  {activeLot.RemainingCheques} remaining
+                </span>
+              )}
+            </div>
+          </div>
 
-      {lotDetail && (
-        <div className="rounded-xl bg-blue-500/5 border border-blue-500/20 px-4 py-3 grid grid-cols-2 sm:grid-cols-3 gap-3">
-          <div>
-            <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-heading">
-              Cheque Range
-            </p>
-            <p className="font-mono text-xs font-semibold text-foreground mt-0.5">
-              {lotDetail.ChequeStartNumber} – {lotDetail.ChequeEndNumber}
-            </p>
-          </div>
-          <div>
-            <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-heading">
-              Account No.
-            </p>
-            <p className="font-mono text-xs text-foreground mt-0.5">
-              {lotDetail.AccountNumber || "—"}
-            </p>
-          </div>
-          <div>
-            <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-heading">
-              IFSC
-            </p>
-            <p className="font-mono text-xs text-foreground mt-0.5">
-              {lotDetail.IFSCCode || "—"}
-            </p>
-          </div>
-        </div>
+          {/* Lot detail panel */}
+          {activeLot && (
+            <div className="rounded-xl bg-blue-500/5 border border-blue-500/20 px-4 py-3 grid grid-cols-2 sm:grid-cols-3 gap-3">
+              <div>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-heading">
+                  Cheque Range
+                </p>
+                <p className="font-mono text-xs font-semibold text-foreground mt-0.5">
+                  {activeLot.ChequeStartNumber} – {activeLot.ChequeEndNumber}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-heading">
+                  Account No.
+                </p>
+                <p className="font-mono text-xs text-foreground mt-0.5">
+                  {activeLot.AccountNumber || "—"}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-heading">
+                  IFSC
+                </p>
+                <p className="font-mono text-xs text-foreground mt-0.5">
+                  {activeLot.IFSCCode || "—"}
+                </p>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <Field label="Cheque Number" required>
-          <InputField
-            icon={Hash}
-            value={form.chequeNo}
-            onChange={(v) => set("chequeNo", v)}
-            placeholder="Auto-assigned from lot"
-            disabled={deducting}
-          />
-        </Field>
-        <Field
-          label={isPostDated ? "Post-Dated Cheque Date" : "Cheque Date"}
-          required={isPostDated}
-          hint={isPostDated ? "Must be a future date" : undefined}
-        >
-          <div className="relative">
-            <CalendarDays
-              size={13}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-            />
-            <input
-              type="date"
-              value={form.chequeDate}
-              min={
-                isPostDated ? new Date().toISOString().slice(0, 10) : undefined
-              }
-              onChange={(e) => set("chequeDate", e.target.value)}
-              className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-            />
-          </div>
-        </Field>
-      </div>
+      {/* Cheque number dropdown — only show after bank+lot loaded */}
+      {bankId && form.chequeLotId && (
+        <>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Field
+              label="Cheque Number"
+              required
+              hint="Select an available cheque from this lot"
+            >
+              <div className="relative">
+                <Hash
+                  size={13}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                />
+                <select
+                  value={form.chequeNo}
+                  onChange={(e) => handleChequeSelect(e.target.value)}
+                  disabled={loadingCheques || validating || !form.chequeLotId}
+                  className="w-full appearance-none pl-8 pr-9 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-60 font-mono"
+                >
+                  <option value="">— Select cheque number —</option>
+                  {availableCheques.map((c) => (
+                    <option key={c.number} value={c.number}>
+                      # {c.number}
+                    </option>
+                  ))}
+                </select>
+                <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground">
+                  {loadingCheques || validating ? (
+                    <div className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                  ) : (
+                    <ChevronDown size={14} />
+                  )}
+                </div>
+              </div>
+              {availableCheques.length === 0 &&
+                form.chequeLotId &&
+                !loadingCheques && (
+                  <p className="text-[11px] text-amber-600 flex items-center gap-1 mt-1">
+                    <AlertTriangle size={10} /> No available cheques left in
+                    this lot.
+                  </p>
+                )}
+            </Field>
 
-      {isPostDated && form.chequeDate && (
-        <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-indigo-500/5 border border-indigo-500/20 text-xs text-indigo-600 dark:text-indigo-400">
-          <CalendarClock size={13} />
-          Scheduled for{" "}
-          {new Date(form.chequeDate).toLocaleDateString("en-IN", {
-            day: "numeric",
-            month: "short",
-            year: "numeric",
-          })}
-        </div>
+            <Field
+              label={isPostDated ? "Post-Dated Cheque Date" : "Cheque Date"}
+              required={isPostDated}
+              hint={isPostDated ? "Must be a future date" : undefined}
+            >
+              <div className="relative">
+                <CalendarDays
+                  size={13}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                />
+                <input
+                  type="date"
+                  value={form.chequeDate}
+                  min={
+                    isPostDated
+                      ? new Date().toISOString().slice(0, 10)
+                      : undefined
+                  }
+                  onChange={(e) => set("chequeDate", e.target.value)}
+                  className="w-full pl-8 pr-3 py-2 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </div>
+            </Field>
+          </div>
+
+          {isPostDated && form.chequeDate && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-indigo-500/5 border border-indigo-500/20 text-xs text-indigo-600 dark:text-indigo-400">
+              <CalendarClock size={13} />
+              Scheduled for{" "}
+              {new Date(form.chequeDate).toLocaleDateString("en-IN", {
+                day: "numeric",
+                month: "short",
+                year: "numeric",
+              })}
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -1061,6 +1136,10 @@ const Payment: React.FC = () => {
           company: String(detail.ECompanyId ?? ""),
           amount: detail.ENetAmount ?? detail.EAmount ?? null,
           docType: detail.DocTypeName || detail.EDocumentType || "",
+          baseAmount: detail.EAmount ?? null,
+          cgstRate: detail.ECgstRate ?? null,
+          sgstRate: detail.ESgstRate ?? null,
+          igstRate: detail.EIgstRate ?? null,
         }));
         const grns = await fetchExpenseGRNs(expenseId);
         setLinkedGRNs(grns);
@@ -1082,6 +1161,10 @@ const Payment: React.FC = () => {
       company: "",
       amount: null,
       docType: "",
+      baseAmount: null,
+      cgstRate: null,
+      sgstRate: null,
+      igstRate: null,
     }));
     setLinkedGRNs([]);
   };
@@ -1129,11 +1212,11 @@ const Payment: React.FC = () => {
         return false;
       }
       if (!form.chequeLotId) {
-        toast.error("Please select a cheque lot.");
+        toast.error("No active cheque lot found for the selected bank.");
         return false;
       }
       if (!form.chequeNo) {
-        toast.error("Cheque number is required.");
+        toast.error("Please select a cheque number from the lot.");
         return false;
       }
       if (form.mode === "Post-Dated Cheque" && !form.chequeDate) {
@@ -1520,19 +1603,80 @@ const Payment: React.FC = () => {
                       />
                     </div>
                   </Field>
-                  {(form.amount ?? 0) > 0 && (
-                    <div className="flex items-center gap-3 rounded-xl bg-primary/5 border border-primary/20 px-4 py-2 self-end mb-0.5">
-                      <TrendingUp size={14} className="text-primary shrink-0" />
-                      <div>
-                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-heading">
-                          Net Payable
-                        </p>
-                        <p className="font-mono text-base font-bold text-primary">
-                          {formatINR(form.amount ?? 0)}
-                        </p>
-                      </div>
-                    </div>
-                  )}
+                  {(form.amount ?? 0) > 0 &&
+                    (() => {
+                      const base = form.baseAmount ?? form.amount ?? 0;
+                      const cgst = form.cgstRate
+                        ? (base * form.cgstRate) / 100
+                        : 0;
+                      const sgst = form.sgstRate
+                        ? (base * form.sgstRate) / 100
+                        : 0;
+                      const igst = form.igstRate
+                        ? (base * form.igstRate) / 100
+                        : 0;
+                      const gstTotal = cgst + sgst + igst;
+                      const hasGst = gstTotal > 0;
+
+                      return (
+                        <div className="rounded-xl bg-primary/5 border border-primary/20 px-4 py-3 space-y-2">
+                          <div className="flex items-center gap-2">
+                            <TrendingUp
+                              size={13}
+                              className="text-primary shrink-0"
+                            />
+                            <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-heading">
+                              Payment Breakdown
+                            </p>
+                          </div>
+                          <div className="space-y-1.5">
+                            {hasGst && (
+                              <>
+                                <div className="flex justify-between text-xs text-muted-foreground">
+                                  <span>Base Amount</span>
+                                  <span className="font-mono">
+                                    {formatINR(base)}
+                                  </span>
+                                </div>
+                                {cgst > 0 && (
+                                  <div className="flex justify-between text-xs text-muted-foreground">
+                                    <span>CGST ({form.cgstRate}%)</span>
+                                    <span className="font-mono">
+                                      {formatINR(cgst)}
+                                    </span>
+                                  </div>
+                                )}
+                                {sgst > 0 && (
+                                  <div className="flex justify-between text-xs text-muted-foreground">
+                                    <span>SGST ({form.sgstRate}%)</span>
+                                    <span className="font-mono">
+                                      {formatINR(sgst)}
+                                    </span>
+                                  </div>
+                                )}
+                                {igst > 0 && (
+                                  <div className="flex justify-between text-xs text-muted-foreground">
+                                    <span>IGST ({form.igstRate}%)</span>
+                                    <span className="font-mono">
+                                      {formatINR(igst)}
+                                    </span>
+                                  </div>
+                                )}
+                                <div className="border-t border-border/60 pt-1.5" />
+                              </>
+                            )}
+                            <div className="flex justify-between items-center">
+                              <span className="text-xs font-heading font-semibold text-foreground">
+                                Net Payable
+                              </span>
+                              <span className="font-mono text-base font-bold text-primary">
+                                {formatINR(form.amount ?? 0)}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
                 </div>
               </div>
 
