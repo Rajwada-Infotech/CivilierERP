@@ -174,9 +174,9 @@ const BillingTermsMaster: React.FC = () => {
           fields={fields}
           columns={columns}
           columnRenderers={columnRenderers}
-          initialData={billingTerms}
+          initialData={billingTerms as unknown as Record<string, unknown>[]}
           onDataEvent={handleDataEvent}
-        exportConfig={{
+          exportConfig={{
           title: "Billing Terms Master",
           filename: "billing-terms-master",
           columns: [

@@ -26,7 +26,7 @@ export const ReminderBell = () => {
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("all");
   const { reminders, loading, badgeCount, refresh, isLocked } = useReminders({
-    pollingInterval: 4000,
+    pollingInterval: 0,
   });
   const panelRef = useRef<HTMLDivElement>(null);
 
