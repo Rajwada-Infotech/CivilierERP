@@ -64,23 +64,21 @@ async function lockNextDocNumber(
   const getGlobalMax = async () => {
     const dnsResult = await pool
       .request()
-      .input("TypeOfDocId", sql.Int, docTypeId)
-      .input("Prefix", sql.NVarChar(100), prefix + "%").query(`
+      .input("Prefix", sql.NVarChar(100), prefix)
+      .input("PrefixLike", sql.NVarChar(100), prefix + "%").query(`
         SELECT MAX(TRY_CAST(SUBSTRING(DocNo, LEN(@Prefix) + 1, 6) AS INT)) AS MaxSeq
         FROM   dbo.DocNumberSequence
-        WHERE  TypeOfDocId = @TypeOfDocId
-          AND  DocNo LIKE @Prefix
+        WHERE  DocNo LIKE @PrefixLike
       `);
 
     // Also check the committed rows in the actual target table
     const committedResult = await pool
       .request()
-      .input("DocTypeId2", sql.Int, docTypeId)
-      .input("Prefix2", sql.NVarChar(100), prefix + "%").query(`
+      .input("Prefix2", sql.NVarChar(100), prefix)
+      .input("PrefixLike2", sql.NVarChar(100), prefix + "%").query(`
         SELECT MAX(TRY_CAST(SUBSTRING(${col}, LEN(@Prefix2) + 1, 6) AS INT)) AS MaxSeq
         FROM   dbo.${tableName}
-        WHERE  DocTypeId = @DocTypeId2
-          AND  ${col} LIKE @Prefix2
+        WHERE  ${col} LIKE @PrefixLike2
       `);
 
     const fromDNS = dnsResult.recordset[0]?.MaxSeq ?? 0;
@@ -112,15 +110,32 @@ async function lockNextDocNumber(
     await tryInsert(finalDocNo);
   } catch (_seqErr) {
     // Unique-constraint collision: another request grabbed this exact number.
-    // Re-read the global max and bump by 1 more.
-    const retryMax = await getGlobalMax();
-    const retrySeq = Math.max(retryMax + 1, nextSeq + 1);
-    const retryBase = `${prefix}${String(retrySeq).padStart(6, "0")}`;
-    finalDocNo = fy ? `${retryBase}/${fy}` : retryBase;
-    await tryInsert(finalDocNo);
+    // DocNo is globally unique, so the collision may belong to another
+    // TypeOfDocId that uses the same prefix. Re-read by prefix only and bump.
+    // Re-read the global max and bump until we can reserve a free number.
+    // (Avoids returning a duplicate DocNo to the caller.)
+    let attempts = 0;
+    while (attempts < 5) {
+      attempts += 1;
+      const retryMax = await getGlobalMax();
+      const retrySeq = Math.max(retryMax + 1, nextSeq + 1);
+      const retryBase = `${prefix}${String(retrySeq).padStart(6, "0")}`;
+      finalDocNo = fy ? `${retryBase}/${fy}` : retryBase;
+
+      try {
+        await tryInsert(finalDocNo);
+        return finalDocNo;
+      } catch (err2) {
+        // continue loop to reserve next number
+      }
+    }
+
+    // If still failing, rethrow so caller can handle as 500.
+    throw _seqErr;
   }
 
   return finalDocNo;
+
 }
 
 /**

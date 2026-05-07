@@ -1,11 +1,11 @@
 // ─────────────────────────────────────────────────────────────────────────────
 // Purchase Orders API
 // ─────────────────────────────────────────────────────────────────────────────
-
+ 
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-
+ 
 // ── Types ─────────────────────────────────────────────────────────────────────
-
+ 
 export interface POLineItem {
   itemId?: string;
   itemName?: string;
@@ -16,7 +16,7 @@ export interface POLineItem {
   tax: number;    // percentage, e.g. 18
   amount: number; // computed: qty * rate * (1 + tax/100)
 }
-
+ 
 // Billing terms / discount configuration
 export interface DiscountConfig {
   applicable: boolean;
@@ -26,16 +26,16 @@ export interface DiscountConfig {
   masterTermId: string | null;
   masterTermName: string | null;
 }
-
+ 
 // GST configuration
 export type GSTType = "none" | "cgst_sgst" | "igst";
-
+ 
 export interface GSTConfig {
   applicable: boolean;
   type: GSTType;          // "none" | "cgst_sgst" | "igst"
   rate: number;           // total GST %, e.g. 18 → CGST 9% + SGST 9%, or IGST 18%
 }
-
+ 
 export interface PurchaseOrder {
   PurchaseOrderID: number;
   PurchaseOrderNo: string;
@@ -72,7 +72,7 @@ export interface PurchaseOrder {
   // GST configuration
   GST?: GSTConfig;
 }
-
+ 
 export interface POListResponse {
   data: PurchaseOrder[];
   page: number;
@@ -80,7 +80,7 @@ export interface POListResponse {
   total: number;
   totalPages: number;
 }
-
+ 
 export interface CreatePOPayload {
   PurchaseOrderNo?: string;
   PODate?: string;
@@ -107,9 +107,9 @@ export interface CreatePOPayload {
   // GST configuration
   GST?: GSTConfig | null;
 }
-
+ 
 // ── Helpers ───────────────────────────────────────────────────────────────────
-
+ 
 /**
  * Compute grand total from line items and keep legacy single-item fields
  * in sync so GRN and other downstream modules that read those columns still work.
@@ -132,7 +132,7 @@ function enrichPayload(payload: CreatePOPayload): CreatePOPayload {
   // GST is now captured per line item via the `tax` field (from HSN)
   // The header-level GST object is kept for reference only; line tax drives the total.
   const grandTotal = Math.round(taxableAmount + totalTax * taxMultiplier);
-
+ 
   return {
     ...payload,
     TotalAmount: grandTotal || payload.TotalAmount,
@@ -145,13 +145,31 @@ function enrichPayload(payload: CreatePOPayload): CreatePOPayload {
     }),
   };
 }
-
+ 
+/**
+ * Shared response handler — throws with the server's error message on non-2xx
+ * so callers always get a meaningful error string in their catch block.
+ */
+async function handleResponse<T = any>(res: Response): Promise<T> {
+  if (!res.ok) {
+    let message = `HTTP ${res.status}`;
+    try {
+      const body = await res.json();
+      message = body.error ?? body.message ?? message;
+    } catch {
+      // ignore JSON parse failure — keep the status code message
+    }
+    throw new Error(message);
+  }
+  return res.json() as Promise<T>;
+}
+ 
 // ── API Functions ─────────────────────────────────────────────────────────────
-
+ 
 export const getPurchaseOrders = (query: { page?: number; limit?: number } = {}) => {
   const { page = 1, limit = 10 } = query;
   return fetchWithAuth(`/purchase-orders?page=${page}&limit=${limit}`)
-    .then((r) => r.json())
+    .then((r) => handleResponse<POListResponse>(r))
     .then((r: any): POListResponse => ({
       data: Array.isArray(r.data) ? r.data : Array.isArray(r) ? r : [],
       page: Number(r.page ?? 1),
@@ -160,60 +178,60 @@ export const getPurchaseOrders = (query: { page?: number; limit?: number } = {})
       totalPages: Number(r.totalPages ?? 1),
     }));
 };
-
+ 
 export const getPurchaseOrderById = (id: number | string): Promise<PurchaseOrder> =>
-  fetchWithAuth(`/purchase-orders/${id}`).then((r) => r.json());
-
+  fetchWithAuth(`/purchase-orders/${id}`).then((r) => handleResponse<PurchaseOrder>(r));
+ 
 export const addPurchaseOrder = (payload: CreatePOPayload) =>
   fetchWithAuth("/purchase-orders", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(enrichPayload(payload)),
-  }).then((r) => r.json());
-
+  }).then((r) => handleResponse(r));
+ 
 export const updatePurchaseOrder = (id: number | string, payload: CreatePOPayload) =>
   fetchWithAuth(`/purchase-orders/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(enrichPayload(payload)),
-  }).then((r) => r.json());
-
+  }).then((r) => handleResponse(r));
+ 
 export const deletePurchaseOrder = (id: number | string) =>
-  fetchWithAuth(`/purchase-orders/${id}`, { method: "DELETE" }).then((r) => r.json());
-
+  fetchWithAuth(`/purchase-orders/${id}`, { method: "DELETE" }).then((r) => handleResponse(r));
+ 
 export const submitPurchaseOrder = (id: number | string) =>
-  fetchWithAuth(`/purchase-orders/${id}/submit`, { method: "PUT" }).then((r) => r.json());
-
+  fetchWithAuth(`/purchase-orders/${id}/submit`, { method: "PUT" }).then((r) => handleResponse(r));
+ 
 export const approvePurchaseOrder = (id: number | string) =>
-  fetchWithAuth(`/purchase-orders/${id}/approve`, { method: "PUT" }).then((r) => r.json());
-
+  fetchWithAuth(`/purchase-orders/${id}/approve`, { method: "PUT" }).then((r) => handleResponse(r));
+ 
 export const rejectPurchaseOrder = (id: number | string, note?: string) =>
   fetchWithAuth(`/purchase-orders/${id}/reject`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ note }),
-  }).then((r) => r.json());
-
+  }).then((r) => handleResponse(r));
+ 
 // ─── Suppliers ────────────────────────────────────────────────────────────────
 // Returns [{ LHeadId, LHeadName, ... }]
 export const getSuppliers = () =>
-  fetchWithAuth("/api/account-head?type=S").then((r) => r.json());
-
+  fetchWithAuth("/api/account-head?type=S").then((r) => handleResponse(r));
+ 
 // ─── Companies ────────────────────────────────────────────────────────────────
 // Returns [{ id, label, ... }] from enterprises/options?business_type=C
 export const getCompanies = () =>
-  fetchWithAuth("/api/enterprises/options?business_type=C").then((r) => r.json());
-
+  fetchWithAuth("/api/enterprises/options?business_type=C").then((r) => handleResponse(r));
+ 
 // ─── Projects ────────────────────────────────────────────────────────────────
 // Returns [{ id, label, ... }] from enterprises/options?business_type=P
 export const getProjects = () =>
-  fetchWithAuth("/api/enterprises/options?business_type=P").then((r) => r.json());
-
+  fetchWithAuth("/api/enterprises/options?business_type=P").then((r) => handleResponse(r));
+ 
 // ─── UOM ─────────────────────────────────────────────────────────────────────
 // Returns [{ Id, UOMName, UOMCode, Symbol, IsActive, ... }]
 export const getUOMs = () =>
-  fetchWithAuth("/api/uom-master").then((r) => r.json());
-
+  fetchWithAuth("/api/uom-master").then((r) => handleResponse(r));
+ 
 // ─── Items with HSN GST rates ─────────────────────────────────────────────────
 // Returns items with their resolved GST rate from HSN Master
 // Used by PO to auto-fill GST rate when an item is selected
@@ -223,11 +241,11 @@ export interface POItemOption {
   gstRate: number;
   hsnCode: string | null;
 }
-
+ 
 export const getItemsWithGST = (): Promise<POItemOption[]> =>
   fetchWithAuth("/api/work-orders/meta/items")
-    .then((r) => r.json())
-    .then((data: any[]) =>
+    .then((r) => handleResponse<any[]>(r))
+    .then((data) =>
       (Array.isArray(data) ? data : []).map((i) => ({
         id: String(i.id),
         name: String(i.name),
