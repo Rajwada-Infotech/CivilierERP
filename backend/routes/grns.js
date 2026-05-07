@@ -76,6 +76,76 @@ async function insertStockLedgerEntries(transaction, grnId, grnItems) {
 // returns raw strings (or null) which is fine for picker row counts.
 // The frontend always re-fetches GET /:id for authoritative item data.
 router.get("/", cache("grns", 300), async (req, res) => {
+
+});
+
+// GET suppliers list for GRN filtering.
+// Must be declared before /filtered and /:id.
+router.get("/suppliers", async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT LHeadId AS id, LHeadName AS label
+      FROM dbo.AccountHeadMaster
+      WHERE IsActive = 1
+      ORDER BY LHeadName
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /filtered ─────────────────────────────────────────────────────────────
+// Filter GRNs by supplierId, projectId, companyId.
+// We join via PurchaseOrders for company/project filters because GRN itself
+// does not carry those columns directly.
+// Also includes GRNs where POID is NULL by only applying PO-based filters
+// when the corresponding parameter is provided.
+router.get("/filtered", async (req, res) => {
+  const supplierId = parseInt(req.query.supplierId, 10) || null;
+  const projectId = parseInt(req.query.projectId, 10) || null;
+  const companyId = parseInt(req.query.companyId, 10) || null;
+  try {
+    const pool = getPool();
+    const request = pool.request();
+    let whereClause = "WHERE 1=1";
+    if (supplierId) {
+      request.input("SupplierID", sql.Int, supplierId);
+      whereClause += " AND grn.SupplierID = @SupplierID";
+    }
+    if (projectId) {
+      request.input("ProjectId", sql.Int, projectId);
+      whereClause += " AND (p.ProjectId = @ProjectId OR grn.POID IS NULL)";
+    }
+    if (companyId) {
+      request.input("CompanyId", sql.Int, companyId);
+      whereClause += " AND (p.CompanyId = @CompanyId OR grn.POID IS NULL)";
+    }
+    const result = await request.query(`
+      SELECT grn.GRNID, grn.GRNNo, grn.GRNDate, grn.SupplierID, grn.POID,
+             grn.Status, grn.Remarks, grn.DocNo,
+             s.LHeadName AS SupplierName,
+             p.PurchaseOrderNo AS PONumber,
+             p.ProjectId, p.CompanyId
+      FROM GoodsReceiptNotes grn
+      LEFT JOIN dbo.AccountHeadMaster s ON grn.SupplierID = s.LHeadId
+      LEFT JOIN PurchaseOrders p ON grn.POID = p.PurchaseOrderID
+      ${whereClause}
+      ORDER BY grn.GRNID DESC
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("GET filtered GRNs ERROR:", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET all GRNs
+// NOTE: GRNItems is intentionally NOT normalised here — the list endpoint
+// returns raw strings (or null) which is fine for picker row counts.
+// The frontend always re-fetches GET /:id for authoritative item data.
+router.get("/", cache("grns", 300), async (req, res) => {
   try {
     const pool = getPool();
 
