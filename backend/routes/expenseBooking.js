@@ -16,6 +16,90 @@ const requireUserEmail = (req, res) => {
   return email;
 };
 
+async function handleChainStatus(req, res) {
+  const { sourceType, sourceId } = req.query;
+  const srcId = parseInt(sourceId, 10);
+
+  if (!sourceType || !srcId || !Number.isFinite(srcId)) {
+    return res
+      .status(400)
+      .json({ error: "sourceType and sourceId are required" });
+  }
+
+  try {
+    const pool = getPool();
+
+    const expResult = await pool
+      .request()
+      .input("ESourceType", sql.NVarChar(20), String(sourceType))
+      .input("ESourceId", sql.Int, srcId).query(`
+        SELECT
+          eb.Eid,
+          eb.EDocNo,
+          eb.EStatus,
+          eb.ENetAmount,
+          eb.EAmount
+        FROM dbo.ExpenseBooking eb
+        WHERE eb.ESourceType = @ESourceType AND eb.ESourceId = @ESourceId
+        ORDER BY eb.Eid DESC
+      `);
+
+    const expenses = expResult.recordset;
+    const expenseCount = expenses.length;
+    const latestExpense = expenses[0] ?? null;
+
+    if (expenseCount === 0) {
+      return res.json({
+        expenseCount: 0,
+        latestExpenseDocNo: null,
+        latestExpenseStatus: null,
+        latestExpenseAmount: null,
+        paymentCount: 0,
+        latestPaymentAmount: null,
+        isPaid: false,
+      });
+    }
+
+    const expenseDocNos = expenses
+      .map((e) => e.EDocNo)
+      .filter(Boolean)
+      .map((d) => `'${d.replace(/'/g, "''")}'`)
+      .join(",");
+
+    let paymentCount = 0;
+    let latestPaymentAmount = null;
+    let isPaid = false;
+
+    if (expenseDocNos.length > 0) {
+      const payResult = await pool.request().query(`
+          SELECT COUNT(*) AS payCount,
+                 SUM(PAmount) AS totalPaid
+          FROM dbo.NewPayment
+          WHERE PExpenseRef IN (${expenseDocNos})
+        `);
+      paymentCount = parseInt(payResult.recordset[0]?.payCount) || 0;
+      latestPaymentAmount = payResult.recordset[0]?.totalPaid
+        ? parseFloat(payResult.recordset[0].totalPaid)
+        : null;
+      isPaid = paymentCount > 0;
+    }
+
+    res.json({
+      expenseCount,
+      latestExpenseDocNo: latestExpense?.EDocNo ?? null,
+      latestExpenseStatus: latestExpense?.EStatus ?? null,
+      latestExpenseAmount:
+        latestExpense?.ENetAmount ?? latestExpense?.EAmount ?? null,
+      paymentCount,
+      latestPaymentAmount,
+      isPaid,
+    });
+  } catch (err) {
+    console.error("Chain status error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+}
+
 // ─── GET /options ─────────────────────────────────────────────────────────────
 router.get("/options", async (req, res) => {
   try {
@@ -176,6 +260,8 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
 });
 
 // ─── GET /:id ─────────────────────────────────────────────────────────────────
+router.get("/chain-status", handleChainStatus);
+
 router.get("/:id", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0)
@@ -1172,92 +1258,6 @@ router.put("/:id/reject", async (req, res) => {
 // ─── GET /chain-status ────────────────────────────────────────────────────────
 // Used by PO / WO / GRN detail panels to show "Expense Booked ✓ / Paid ✓" badges.
 // Query params: sourceType (PO | WO | GRN), sourceId (numeric DB id)
-router.get("/chain-status", async (req, res) => {
-  const { sourceType, sourceId } = req.query;
-  const srcId = parseInt(sourceId, 10);
-
-  if (!sourceType || !srcId || !Number.isFinite(srcId)) {
-    return res
-      .status(400)
-      .json({ error: "sourceType and sourceId are required" });
-  }
-
-  try {
-    const pool = getPool();
-
-    // All expense bookings linked to this source
-    const expResult = await pool
-      .request()
-      .input("ESourceType", sql.NVarChar(20), String(sourceType))
-      .input("ESourceId", sql.Int, srcId).query(`
-        SELECT
-          eb.Eid,
-          eb.EDocNo,
-          eb.EStatus,
-          eb.ENetAmount,
-          eb.EAmount
-        FROM dbo.ExpenseBooking eb
-        WHERE eb.ESourceType = @ESourceType AND eb.ESourceId = @ESourceId
-        ORDER BY eb.Eid DESC
-      `);
-
-    const expenses = expResult.recordset;
-    const expenseCount = expenses.length;
-    const latestExpense = expenses[0] ?? null;
-
-    if (expenseCount === 0) {
-      return res.json({
-        expenseCount: 0,
-        latestExpenseDocNo: null,
-        latestExpenseStatus: null,
-        latestExpenseAmount: null,
-        paymentCount: 0,
-        latestPaymentAmount: null,
-        isPaid: false,
-      });
-    }
-
-    // All payments linked to any of these expense bookings
-    const expenseDocNos = expenses
-      .map((e) => e.EDocNo)
-      .filter(Boolean)
-      .map((d) => `'${d.replace(/'/g, "''")}'`)
-      .join(",");
-
-    let paymentCount = 0;
-    let latestPaymentAmount = null;
-    let isPaid = false;
-
-    if (expenseDocNos.length > 0) {
-      const payResult = await pool.request().query(`
-          SELECT COUNT(*) AS payCount,
-                 SUM(PAmount) AS totalPaid
-          FROM dbo.NewPayment
-          WHERE PExpenseRef IN (${expenseDocNos})
-        `);
-      paymentCount = parseInt(payResult.recordset[0]?.payCount) || 0;
-      latestPaymentAmount = payResult.recordset[0]?.totalPaid
-        ? parseFloat(payResult.recordset[0].totalPaid)
-        : null;
-      isPaid = paymentCount > 0;
-    }
-
-    res.json({
-      expenseCount,
-      latestExpenseDocNo: latestExpense?.EDocNo ?? null,
-      latestExpenseStatus: latestExpense?.EStatus ?? null,
-      latestExpenseAmount:
-        latestExpense?.ENetAmount ?? latestExpense?.EAmount ?? null,
-      paymentCount,
-      latestPaymentAmount,
-      isPaid,
-    });
-  } catch (err) {
-    console.error("Chain status error:", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
-
 // ─── GET /:id/grns ────────────────────────────────────────────────────────────
 // Returns GRNs linked to an expense booking.
 // Two strategies:
