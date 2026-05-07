@@ -1538,6 +1538,8 @@ export default function MaterialExpenseBooking() {
         ? form.billingTerms
         : form.discount,
     );
+
+    let emiForSave = { ...form.emi };
     if (
       !isEditing &&
       form.emi.enabled &&
