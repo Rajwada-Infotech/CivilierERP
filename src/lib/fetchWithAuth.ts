@@ -1,4 +1,5 @@
 import { apiUrl } from "./apiBase";
+import { toast } from "sonner";
 
 export async function fetchWithAuth(
   url: string,
@@ -36,14 +37,25 @@ export async function fetchWithAuth(
   if (response.status === 401) {
     console.error("Unauthorized", url);
 
-    const hasToken =
-      typeof window !== "undefined" && !!localStorage.getItem("token");
+    // Always force re-auth on 401.
+    // This avoids “silent broken UI” when callers don't catch the thrown error.
+    if (typeof window !== "undefined") {
+      // Anti-spam: avoid repeating the toast multiple times during the same re-auth flow.
+      const flagKey = "__reauth_toast_until";
+      const now = Date.now();
+      const until = Number(sessionStorage.getItem(flagKey) || 0);
+      const shouldToast = now >= until;
 
-    if (!hasToken && typeof window !== "undefined") {
+      if (shouldToast) {
+        sessionStorage.setItem(flagKey, String(now + 5000));
+        toast.error("Session expired. Please login again.");
+      }
+
       localStorage.removeItem("token");
       localStorage.removeItem("user");
-      window.history.pushState(null, "", "/login");
-      window.dispatchEvent(new PopStateEvent("popstate"));
+
+      // Prefer a hard navigation so React Router + guards re-run reliably.
+      window.location.href = "/login";
     }
 
     throw new Error("Unauthorized. Please login again.");
@@ -56,3 +68,4 @@ export async function fetchWithAuth(
 
   return response;
 }
+
