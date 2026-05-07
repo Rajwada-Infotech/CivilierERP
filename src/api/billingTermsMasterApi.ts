@@ -1,8 +1,7 @@
 import api from "./axios";
 
 export interface BillingTermRow {
-
-  BillingTermID: number;       // exact DB column name
+  BillingTermID: number;
   Name: string | null;
   Description: string | null;
   CalculationType: string | null;
@@ -19,8 +18,7 @@ export interface BillingTermPayload {
 }
 
 export const getBillingTerms = async (): Promise<BillingTermRow[]> => {
-  const { data } = await api.get("/api/billing-terms");
-
+  const { data } = await api.get("/billing-terms");
   return data;
 };
 
