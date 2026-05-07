@@ -252,7 +252,7 @@ function SingleTermRow({
             </div>
           ) : (
             <>
-              <Field label="Discount Type">
+              <Field label="Type">
                 <div className="grid grid-cols-2 gap-2">
                   {(["percentage", "fixed"] as const).map((t) => (
                     <button
@@ -393,7 +393,11 @@ export function BillingAccordion({
     runningBases.push(rb);
     if (t.applicable) {
       const d = t.type === "percentage" ? (rb * t.value) / 100 : t.value;
-      rb = Math.max(0, rb - d);
+      if (t.deductionType === "Addition") {
+        rb += d;
+      } else {
+        rb = Math.max(0, rb - d);
+      }
     }
   }
 

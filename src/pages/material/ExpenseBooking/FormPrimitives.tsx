@@ -240,23 +240,29 @@ export function PriceBreakdownPanel({
 
       {/* Post-GST Billing Terms */}
       {hasPostGst &&
-        postGstTerms.map((term, i) => {
-          const base = bd.basicAmount;
-          const amt =
-            term.type === "percentage" ? (base * term.value) / 100 : term.value;
-          const isAddition = term.termType === "Addition";
-          return (
-            <BreakdownRow
-              key={term._key ?? `post-${i}`}
-              label={term.masterTermName ?? `Term ${i + 1}`}
-              sublabel={`${isAddition ? "Addition" : "Deduction"} · After GST${
-                term.type === "percentage" ? ` · ${term.value}%` : ""
-              }`}
-              value={(isAddition ? "+ ₹" : "− ₹") + fmt(amt)}
-              variant={isAddition ? "addition" : "debit"}
-            />
-          );
-        })}
+        (() => {
+          let pgBase = bd.taxableAmount + bd.cgstAmount + bd.sgstAmount;
+          return postGstTerms.map((term, i) => {
+            const amt =
+              term.type === "percentage"
+                ? (pgBase * term.value) / 100
+                : term.value;
+            const isAddition = term.termType === "Addition";
+            if (isAddition) pgBase += amt;
+            else pgBase = Math.max(0, pgBase - amt);
+            return (
+              <BreakdownRow
+                key={term._key ?? `post-${i}`}
+                label={term.masterTermName ?? `Term ${i + 1}`}
+                sublabel={`${isAddition ? "Addition" : "Deduction"} · After GST${
+                  term.type === "percentage" ? ` · ${term.value}%` : ""
+                }`}
+                value={(isAddition ? "+ ₹" : "− ₹") + fmt(amt)}
+                variant={isAddition ? "addition" : "debit"}
+              />
+            );
+          });
+        })()}
 
       {/* Round off */}
       {Math.abs(bd.roundOff) > 0 && (

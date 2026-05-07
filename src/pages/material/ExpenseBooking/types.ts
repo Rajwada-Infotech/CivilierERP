@@ -140,4 +140,8 @@ export interface PriceBreakdown {
   grossAmount: number;
   roundOff: number;
   netAmount: number;
+  /** Resolved pre-GST terms with termType normalised to "Addition" | "Deduction" */
+  preGstTerms?: (DiscountConfig & { termType: "Addition" | "Deduction" })[];
+  /** Resolved post-GST terms with termType normalised */
+  postGstTerms?: (DiscountConfig & { termType: "Addition" | "Deduction" })[];
 }
