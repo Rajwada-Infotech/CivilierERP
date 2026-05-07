@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { parseJsonArray } from "@/utils/parseJsonArray";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { Button } from "@/components/ui/button";
@@ -67,6 +68,7 @@ import { BillingAccordion } from "./ExpenseBooking/BillingAccordion";
 import { EmiSection } from "./ExpenseBooking/EmiSection";
 import { ApprovalTrailPanel } from "./ExpenseBooking/ApprovalTrailPanel";
 import { RecordCard } from "./ExpenseBooking/RecordCard";
+import { ExpenseBookingPreviewModal } from "./ExpenseBookingPreviewModal";
 import {
   blankForm,
   computeBreakdown,
@@ -978,10 +980,9 @@ function resolveGstRates(
   fallbackSgst: number,
 ) {
   if ((doc.kind === "PO" || doc.kind === "WO") && doc.gst?.applicable) {
-    const { type, rate } = doc.gst;
-    if (type === "cgst_sgst") return { cgst: rate / 2, sgst: rate / 2 };
-    if (type === "igst") return { cgst: rate, sgst: 0 };
-    return { cgst: 0, sgst: 0 };
+    const { rate } = doc.gst;
+    // Always split total GST equally as CGST + SGST (regardless of igst/cgst_sgst type)
+    return { cgst: rate / 2, sgst: rate / 2 };
   }
   if (doc.kind === "PO" || doc.kind === "WO") return { cgst: 0, sgst: 0 };
   return { cgst: fallbackCgst, sgst: fallbackSgst };
@@ -1015,19 +1016,6 @@ function GRNChainBadge({
       ))}
     </div>
   );
-}
-
-function parseGRNItemsFromRaw(raw: unknown): GRNItemLine[] {
-  try {
-    if (Array.isArray(raw)) return raw as GRNItemLine[];
-    if (typeof raw === "string" && raw.trim()) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed as GRNItemLine[];
-    }
-  } catch {
-    /* fall through */
-  }
-  return [];
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
@@ -1231,7 +1219,7 @@ export default function MaterialExpenseBooking() {
       setGrnItemsLoading(true);
       apiFetch(`/api/grns/${doc.sourceId}`)
         .then((r: any) => {
-          const items = parseGRNItemsFromRaw(r.GRNItems);
+          const items = parseJsonArray<GRNItemLine>(r.GRNItems);
           const rawDocNo: string = r.GRNNo || r.DocNo || doc.docNo;
           const canonicalDocNo = rawDocNo
             ? rawDocNo.startsWith("GRN-")
@@ -1422,19 +1410,6 @@ export default function MaterialExpenseBooking() {
       toast.error("Payment type is required for EMI bookings.");
       return;
     }
-    if (form.paymentType === "partial") {
-      const partial = form.partialAmount || 0;
-      if (partial <= 0) {
-        toast.error("Enter the amount being paid now for partial payment.");
-        return;
-      }
-      if (partial >= bd.netAmount) {
-        toast.error(
-          "Partial amount must be less than net payable. Use Full payment instead.",
-        );
-        return;
-      }
-    }
     if (
       selectedDoc?.kind !== "GRN" &&
       (!form.basicAmount || form.basicAmount <= 0)
@@ -1500,57 +1475,9 @@ export default function MaterialExpenseBooking() {
           },
           30000,
         );
-
-        const mainDocNo = result?.docNo || form.bookingReference;
-
-        // ── Partial payment: create balance booking ─────────────────
-        if (form.paymentType === "partial" && !isEditing) {
-          const balanceAmount = bd.netAmount - (form.partialAmount || 0);
-          const balanceRef = `${mainDocNo}-BAL-01`;
-          const balanceBody = {
-            ...recordToDb(
-              {
-                ...form,
-                bookingReference: balanceRef,
-                basicAmount: balanceAmount,
-                partialAmount: 0,
-                paymentType: "full",
-                discount: { ...form.discount, applicable: false, value: 0 },
-                billingTerms: [],
-                emi: { ...form.emi, enabled: false, schedule: [] },
-                remarks:
-                  `Balance due from partial payment on ${mainDocNo}. ${form.remarks}`.trim(),
-                status: "Draft",
-              },
-              balanceAmount,
-              selectedDoc?.kind === "TOD"
-                ? (selectedDoc.sourceId ?? null)
-                : null,
-            ),
-            ESourceType: selectedDoc?.kind ?? null,
-            ESourceId: selectedDoc?.sourceId ?? null,
-          };
-          try {
-            const balResult = await apiFetch(
-              API,
-              { method: "POST", body: JSON.stringify(balanceBody) },
-              30000,
-            );
-            const balRef = balResult?.docNo || balanceRef;
-            toast.success(
-              `Booking created — Ref: ${mainDocNo}. Balance booking created — Ref: ${balRef}`,
-              { duration: 8000 },
-            );
-          } catch {
-            toast.success(`Booking created — Ref: ${mainDocNo}`);
-            toast.warning(
-              "Balance booking could not be created automatically. Please create it manually.",
-              { duration: 6000 },
-            );
-          }
-        } else {
-          toast.success(`Expense booking created — Ref: ${mainDocNo}`);
-        }
+        toast.success(
+          `Expense booking created — Ref: ${result?.docNo || form.bookingReference}`,
+        );
       }
       cancelForm();
       await fetchRecords(page);
@@ -1660,46 +1587,7 @@ export default function MaterialExpenseBooking() {
               {/* ── 0. Booking Information ─────────────────────────────── */}
               <div className="space-y-4">
                 <SectionHeader label="Booking Information" />
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  <Field label="Booking Date" required>
-                    <Input
-                      type="date"
-                      value={form.bookingDate}
-                      onChange={(e) => set("bookingDate", e.target.value)}
-                    />
-                  </Field>
-                  <Field label="Due Date">
-                    <Input
-                      type="date"
-                      value={form.dueDate}
-                      onChange={(e) => set("dueDate", e.target.value)}
-                    />
-                  </Field>
-                  <Field
-                    label="Financial Year"
-                    hint={
-                      selectedTod
-                        ? "Changing year updates the booking reference number"
-                        : undefined
-                    }
-                  >
-                    <Select
-                      value={form.financialYear}
-                      onValueChange={(v) => set("financialYear", v)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select year…" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {activeFinYears.map((fy) => (
-                          <SelectItem key={fy.id} value={fy.year}>
-                            {fy.year}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                </div>
+                {/* Company / Supplier / Project — shown first */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <Field label="Company" required>
                     <Select
@@ -1723,11 +1611,13 @@ export default function MaterialExpenseBooking() {
                             No companies found
                           </SelectItem>
                         )}
-                        {companyOptions.map((c) => (
-                          <SelectItem key={c.id} value={String(c.id)}>
-                            {c.label}
-                          </SelectItem>
-                        ))}
+                        {companyOptions
+                          .filter((c) => c.id != null && String(c.id) !== "")
+                          .map((c) => (
+                            <SelectItem key={c.id} value={String(c.id)}>
+                              {c.label}
+                            </SelectItem>
+                          ))}
                       </SelectContent>
                     </Select>
                   </Field>
@@ -1802,11 +1692,56 @@ export default function MaterialExpenseBooking() {
                             No projects found
                           </SelectItem>
                         )}
-                        {projectOptions.map((p) => (
-                          <SelectItem key={p.id} value={String(p.id)}>
-                            {p.label}
-                          </SelectItem>
-                        ))}
+                        {projectOptions
+                          .filter((p) => p.id != null && String(p.id) !== "")
+                          .map((p) => (
+                            <SelectItem key={p.id} value={String(p.id)}>
+                              {p.label}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </div>
+                {/* Dates / Financial Year — below company/project */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <Field label="Booking Date" required>
+                    <Input
+                      type="date"
+                      value={form.bookingDate}
+                      onChange={(e) => set("bookingDate", e.target.value)}
+                    />
+                  </Field>
+                  <Field label="Due Date">
+                    <Input
+                      type="date"
+                      value={form.dueDate}
+                      onChange={(e) => set("dueDate", e.target.value)}
+                    />
+                  </Field>
+                  <Field
+                    label="Financial Year"
+                    hint={
+                      selectedTod
+                        ? "Changing year updates the booking reference number"
+                        : undefined
+                    }
+                  >
+                    <Select
+                      value={form.financialYear}
+                      onValueChange={(v) => set("financialYear", v)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select year…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {activeFinYears
+                          .filter((fy) => fy.year && fy.year !== "")
+                          .map((fy) => (
+                            <SelectItem key={fy.id} value={fy.year}>
+                              {fy.year}
+                            </SelectItem>
+                          ))}
                       </SelectContent>
                     </Select>
                   </Field>
@@ -1947,12 +1882,12 @@ export default function MaterialExpenseBooking() {
                             : "Work Order"}
                         </span>
                         {" — "}
-                        {selectedDoc!.gst!.type === "cgst_sgst"
-                          ? `CGST ${selectedDoc!.gst!.rate / 2}% + SGST ${selectedDoc!.gst!.rate / 2}% (total ${selectedDoc!.gst!.rate}%)`
-                          : selectedDoc!.gst!.type === "igst"
-                            ? `IGST ${selectedDoc!.gst!.rate}% (mapped to CGST)`
-                            : "GST not applicable"}
-                        . Editable if needed.
+                        Total{" "}
+                        <span className="font-mono font-semibold">
+                          {selectedDoc!.gst!.rate}%
+                        </span>{" "}
+                        split as CGST {selectedDoc!.gst!.rate / 2}% + SGST{" "}
+                        {selectedDoc!.gst!.rate / 2}%. Editable if needed.
                       </span>
                     ) : (
                       <span className="text-muted-foreground">
@@ -1960,12 +1895,12 @@ export default function MaterialExpenseBooking() {
                         {selectedDoc!.kind === "PO"
                           ? "Purchase Order"
                           : "Work Order"}{" "}
-                        has no GST applied — rates set to 0. Editable if needed.
+                        has no GST applied — rate set to 0. Editable if needed.
                       </span>
                     )}
                   </div>
                 )}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <Field
                     label="Basic Amount (₹)"
                     required
@@ -1996,46 +1931,46 @@ export default function MaterialExpenseBooking() {
                     </div>
                   </Field>
                   <Field
-                    label="CGST Rate (%)"
+                    label="GST Total (%)"
                     hint={
                       isPOorWO
                         ? selectedDoc!.gst?.applicable
-                          ? selectedDoc!.gst!.type === "igst"
-                            ? "IGST mapped here — editable"
-                            : "Auto-filled from linked order — editable"
+                          ? `Auto-filled from linked ${selectedDoc!.kind === "PO" ? "Purchase Order" : "Work Order"} — split equally as CGST + SGST`
                           : "No GST on this order — editable"
-                        : "Enter CGST rate manually"
+                        : "Enter total GST % — split equally as CGST + SGST"
                     }
                   >
                     <RateInput
-                      value={form.cgstRate}
-                      onChange={(v) => set("cgstRate", v)}
-                      highlighted={gstHighlighted}
-                    />
-                  </Field>
-                  <Field
-                    label={
-                      selectedDoc?.gst?.type === "igst"
-                        ? "SGST Rate (%) — N/A for IGST"
-                        : "SGST Rate (%)"
-                    }
-                    hint={
-                      isPOorWO
-                        ? selectedDoc!.gst?.type === "igst"
-                          ? "IGST order — SGST is 0"
-                          : selectedDoc!.gst?.applicable
-                            ? "Auto-filled from linked order — editable"
-                            : "No GST on this order — editable"
-                        : "Enter SGST rate manually"
-                    }
-                  >
-                    <RateInput
-                      value={form.sgstRate}
-                      onChange={(v) => set("sgstRate", v)}
+                      value={form.cgstRate + form.sgstRate}
+                      onChange={(v) => {
+                        const half = v / 2;
+                        set("cgstRate", half);
+                        set("sgstRate", half);
+                      }}
                       highlighted={gstHighlighted}
                     />
                   </Field>
                 </div>
+                {/* CGST / SGST split preview */}
+                {(form.cgstRate > 0 || form.sgstRate > 0) && (
+                  <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-muted/30 border border-border/50 text-xs text-muted-foreground">
+                    <BadgePercent size={11} className="text-primary shrink-0" />
+                    <span>
+                      Split:{" "}
+                      <span className="font-mono font-semibold text-foreground">
+                        CGST {form.cgstRate}%
+                      </span>{" "}
+                      +{" "}
+                      <span className="font-mono font-semibold text-foreground">
+                        SGST {form.sgstRate}%
+                      </span>{" "}
+                      = Total{" "}
+                      <span className="font-mono font-semibold text-primary">
+                        {form.cgstRate + form.sgstRate}%
+                      </span>
+                    </span>
+                  </div>
+                )}
                 {form.basicAmount > 0 && (
                   <>
                     <PriceBreakdownPanel
@@ -2222,10 +2157,9 @@ export default function MaterialExpenseBooking() {
                     <Field label="Payment Type" required>
                       <Select
                         value={form.paymentType || "full"}
-                        onValueChange={(value) => {
-                          set("paymentType", value as "full" | "partial");
-                          if (value === "full") set("partialAmount", 0);
-                        }}
+                        onValueChange={(value) =>
+                          set("paymentType", value as "full" | "partial")
+                        }
                       >
                         <SelectTrigger>
                           <SelectValue placeholder="Select payment type…" />
@@ -2233,127 +2167,12 @@ export default function MaterialExpenseBooking() {
                         <SelectContent>
                           <SelectItem value="full">Full payment</SelectItem>
                           <SelectItem value="partial">
-                            Partial payment
+                            Partial payment (EMI)
                           </SelectItem>
                         </SelectContent>
                       </Select>
                     </Field>
-
-                    {form.paymentType === "partial" && (
-                      <Field
-                        label="Amount Paid Now (₹)"
-                        required
-                        hint="Balance will be auto-created as a linked booking"
-                      >
-                        <div className="relative">
-                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs font-semibold">
-                            ₹
-                          </span>
-                          <Input
-                            type="number"
-                            min={0}
-                            max={bd.netAmount}
-                            value={form.partialAmount || ""}
-                            onChange={(e) =>
-                              set(
-                                "partialAmount",
-                                parseFloat(e.target.value) || 0,
-                              )
-                            }
-                            className="pl-7"
-                            placeholder="0.00"
-                          />
-                        </div>
-                      </Field>
-                    )}
                   </div>
-
-                  {/* Partial payment breakdown card */}
-                  {form.paymentType === "partial" && bd.netAmount > 0 && (
-                    <div className="rounded-xl border border-border overflow-hidden">
-                      <div className="flex items-center gap-2 px-4 py-2.5 bg-muted/40 border-b border-border">
-                        <Banknote size={13} className="text-primary" />
-                        <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
-                          Partial Payment Summary
-                        </p>
-                      </div>
-                      <div className="divide-y divide-border/50">
-                        <div className="flex items-center justify-between px-4 py-3">
-                          <div>
-                            <p className="text-xs text-foreground">
-                              Net Payable
-                            </p>
-                            <p className="text-[10px] text-muted-foreground">
-                              Total amount due
-                            </p>
-                          </div>
-                          <span className="text-xs font-mono font-semibold text-foreground">
-                            ₹{fmt(bd.netAmount)}
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between px-4 py-3">
-                          <div>
-                            <p className="text-xs text-emerald-600 dark:text-emerald-400 font-semibold">
-                              Paying Now
-                            </p>
-                            <p className="text-[10px] text-muted-foreground">
-                              This booking — Ref:{" "}
-                              <span className="font-mono text-primary">
-                                {form.bookingReference || "—"}
-                              </span>
-                            </p>
-                          </div>
-                          <span className="text-xs font-mono font-semibold text-emerald-600 dark:text-emerald-400">
-                            ₹{fmt(form.partialAmount || 0)}
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between px-4 py-3 bg-amber-50/40 dark:bg-amber-900/10">
-                          <div>
-                            <p className="text-xs text-amber-600 dark:text-amber-400 font-semibold">
-                              Balance Due
-                            </p>
-                            <p className="text-[10px] text-muted-foreground">
-                              New linked booking — Ref:{" "}
-                              <span className="font-mono text-primary">
-                                {form.bookingReference
-                                  ? `${form.bookingReference}-BAL-01`
-                                  : "—"}
-                              </span>
-                            </p>
-                          </div>
-                          <span
-                            className={`text-xs font-mono font-semibold ${
-                              (form.partialAmount || 0) > bd.netAmount
-                                ? "text-destructive"
-                                : "text-amber-600 dark:text-amber-400"
-                            }`}
-                          >
-                            ₹
-                            {fmt(
-                              Math.max(
-                                0,
-                                bd.netAmount - (form.partialAmount || 0),
-                              ),
-                            )}
-                          </span>
-                        </div>
-                      </div>
-                      {(form.partialAmount || 0) > bd.netAmount && (
-                        <div className="flex items-center gap-2 px-4 py-2.5 bg-destructive/5 border-t border-destructive/20 text-destructive text-xs">
-                          <AlertCircle size={12} />
-                          Amount paid exceeds net payable
-                        </div>
-                      )}
-                      {(form.partialAmount || 0) === bd.netAmount && (
-                        <div className="flex items-center gap-2 px-4 py-2.5 bg-amber-50/40 dark:bg-amber-900/10 border-t border-amber-200 dark:border-amber-800 text-amber-600 dark:text-amber-400 text-xs">
-                          <AlertCircle size={12} />
-                          Partial amount equals full amount — use Full payment
-                          instead
-                        </div>
-                      )}
-                    </div>
-                  )}
-
                   <EmiSection
                     emi={form.emi}
                     netAmount={bd.netAmount}

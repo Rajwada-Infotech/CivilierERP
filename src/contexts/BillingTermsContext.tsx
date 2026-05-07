@@ -29,10 +29,9 @@ export interface BillingTerm {
   paymentDueDays: number;
   description: string;
   status: boolean;
-  /** "Before GST" | "After GST" */
   calculationType?: string;
-  /** "Addition" | "Deduction" — from master */
-  deductionType?: "Addition" | "Deduction";
+  /** "Addition" adds to the base amount; "Deduction" subtracts from it */
+  deductionType: "Addition" | "Deduction";
 }
 
 interface BillingTermsContextType {
@@ -49,13 +48,13 @@ function mapDbRow(row: any): BillingTerm {
     _id: String(row.BillingTermID),
     name: row.Name ?? "",
     description: row.Description ?? "",
-    billType: "Tax Invoice",
-    discountType: "none",
+    billType: (row.CalculationType as BillType) ?? "Tax Invoice",
+    discountType: "percentage",
     discountValue: 0,
     paymentDueDays: 0,
     status: row.IsActive === 1 || row.IsActive === true,
     calculationType: row.CalculationType ?? undefined,
-    deductionType: row.DeductionType === "Deduction" ? "Deduction" : "Addition",
+    deductionType: row.DeductionType === "Addition" ? "Addition" : "Deduction",
   };
 }
 
@@ -63,11 +62,16 @@ function mapDbRow(row: any): BillingTerm {
 
 const BillingTermsContext = createContext<BillingTermsContextType | null>(null);
 
+const _fallback: BillingTermsContextType = {
+  billingTerms: [],
+  setBillingTerms: () => {},
+  activeBillingTerms: [],
+  loading: false,
+};
+
 export const useBillingTerms = (): BillingTermsContextType => {
   const ctx = useContext(BillingTermsContext);
-  if (!ctx)
-    throw new Error("useBillingTerms must be used inside BillingTermsProvider");
-  return ctx;
+  return ctx ?? _fallback;
 };
 
 export const BillingTermsProvider: React.FC<{ children: React.ReactNode }> = ({
