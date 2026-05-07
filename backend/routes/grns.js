@@ -158,6 +158,7 @@ router.get("/:id", async (req, res) => {
           grn.CreatedDate,
           grn.DocTypeId,
           grn.DocNo,
+          grn.TotalAmount,
           s.LHeadName AS SupplierName,
           p.PurchaseOrderNo AS PONumber,
           td.Prefix AS DocTypePrefix,
