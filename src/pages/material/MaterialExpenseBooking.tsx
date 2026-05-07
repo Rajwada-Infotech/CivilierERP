@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { parseJsonArray } from "@/utils/parseJsonArray";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { Button } from "@/components/ui/button";
@@ -67,6 +68,7 @@ import { BillingAccordion } from "./ExpenseBooking/BillingAccordion";
 import { EmiSection } from "./ExpenseBooking/EmiSection";
 import { ApprovalTrailPanel } from "./ExpenseBooking/ApprovalTrailPanel";
 import { RecordCard } from "./ExpenseBooking/RecordCard";
+import { ExpenseBookingPreviewModal } from "./ExpenseBookingPreviewModal";
 import {
   blankForm,
   computeBreakdown,
@@ -1016,19 +1018,6 @@ function GRNChainBadge({
   );
 }
 
-function parseGRNItemsFromRaw(raw: unknown): GRNItemLine[] {
-  try {
-    if (Array.isArray(raw)) return raw as GRNItemLine[];
-    if (typeof raw === "string" && raw.trim()) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed as GRNItemLine[];
-    }
-  } catch {
-    /* fall through */
-  }
-  return [];
-}
-
 // ─── Main Component ───────────────────────────────────────────────────────────
 const BOOKING_STATUSES: BookingStatus[] = [
   "Draft",
@@ -1230,7 +1219,7 @@ export default function MaterialExpenseBooking() {
       setGrnItemsLoading(true);
       apiFetch(`/api/grns/${doc.sourceId}`)
         .then((r: any) => {
-          const items = parseGRNItemsFromRaw(r.GRNItems);
+          const items = parseJsonArray<GRNItemLine>(r.GRNItems);
           const rawDocNo: string = r.GRNNo || r.DocNo || doc.docNo;
           const canonicalDocNo = rawDocNo
             ? rawDocNo.startsWith("GRN-")
