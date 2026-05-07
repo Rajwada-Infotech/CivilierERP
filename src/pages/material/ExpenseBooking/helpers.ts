@@ -40,38 +40,76 @@ export function computeBreakdown(
   sgstRate: number,
   discount: DiscountConfig | DiscountConfig[],
 ): PriceBreakdown {
-  // Normalise: support both legacy single config and new array
   const terms = Array.isArray(discount) ? discount : [discount];
   const activeTerms = terms.filter((d) => d.applicable);
 
-  // Apply discounts sequentially on the running taxable base
-  let runningBase = basicAmount;
-  let totalDiscountAmount = 0;
+  // Split into pre-GST and post-GST terms
+  const preGstTerms = activeTerms.filter(
+    (d) => !d.appliedOn || d.appliedOn === "pre-gst",
+  );
+  const postGstTerms = activeTerms.filter((d) => d.appliedOn === "post-gst");
 
-  for (const d of activeTerms) {
-    const discAmt =
+  // Apply pre-GST terms sequentially
+  let runningBase = basicAmount;
+  let preGstDeductionTotal = 0;
+  let preGstAdditionTotal = 0;
+
+  for (const d of preGstTerms) {
+    const amt =
       d.type === "percentage" ? (runningBase * d.value) / 100 : d.value;
-    const clamped = Math.min(discAmt, runningBase);
-    totalDiscountAmount += clamped;
-    runningBase -= clamped;
+    const isDeduction = d.termType !== "Addition"; // default = Deduction (legacy)
+    if (isDeduction) {
+      const clamped = Math.min(amt, runningBase);
+      preGstDeductionTotal += clamped;
+      runningBase -= clamped;
+    } else {
+      preGstAdditionTotal += amt;
+      runningBase += amt;
+    }
   }
 
   const taxableAmount = Math.max(0, runningBase);
   const cgstAmount = (taxableAmount * cgstRate) / 100;
   const sgstAmount = (taxableAmount * sgstRate) / 100;
-  const grossAmount = taxableAmount + cgstAmount + sgstAmount;
+  let grossAmount = taxableAmount + cgstAmount + sgstAmount;
+
+  // Apply post-GST terms sequentially
+  let postGstDeductionTotal = 0;
+  let postGstAdditionTotal = 0;
+
+  for (const d of postGstTerms) {
+    const base = basicAmount; // post-GST terms apply on original basic
+    const amt = d.type === "percentage" ? (base * d.value) / 100 : d.value;
+    if (d.termType !== "Addition") {
+      postGstDeductionTotal += amt;
+      grossAmount -= amt;
+    } else {
+      postGstAdditionTotal += amt;
+      grossAmount += amt;
+    }
+  }
+
+  grossAmount = Math.max(0, grossAmount);
   const rounded = Math.round(grossAmount);
   const roundOff = rounded - grossAmount;
 
   return {
     basicAmount,
-    discountAmount: totalDiscountAmount,
+    // legacy field: total deduction for backward compat
+    discountAmount: preGstDeductionTotal + postGstDeductionTotal,
     taxableAmount,
     cgstAmount,
     sgstAmount,
     grossAmount,
     roundOff,
     netAmount: rounded,
+    // extended breakdown fields
+    preGstDeductionTotal,
+    preGstAdditionTotal,
+    postGstDeductionTotal,
+    postGstAdditionTotal,
+    preGstTerms,
+    postGstTerms,
   };
 }
 
@@ -123,6 +161,7 @@ export function blankForm(): Omit<ExpenseRecord, "id"> {
     emi: defaultEmi(),
     /** Default payment type for new bookings. */
     paymentType: "full",
+    partialAmount: 0,
     netAmount: null,
     status: "Draft",
     remarks: "",
@@ -208,6 +247,8 @@ export function dbToRecord(row: any): ExpenseRecord {
     sgstRate: row.ESgstRate ? parseFloat(row.ESgstRate) : 0,
     discount,
     emi,
+    paymentType: (row.EPaymentType as "full" | "partial") ?? "full",
+    partialAmount: row.EPartialAmount ? parseFloat(row.EPartialAmount) : 0,
     netAmount: row.ENetAmount
       ? parseFloat(row.ENetAmount)
       : parseFloat(row.EAmount) || 0,
@@ -257,5 +298,8 @@ export function recordToDb(
     ETCId: form.tcId ?? null,
     ETCName: form.tcName || null,
     ETCText: form.tcText || null,
+    EPaymentType: form.paymentType ?? "full",
+    EPartialAmount:
+      form.paymentType === "partial" ? Number(form.partialAmount) || 0 : null,
   };
 }

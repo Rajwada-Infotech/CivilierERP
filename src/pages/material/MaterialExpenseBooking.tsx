@@ -399,25 +399,6 @@ interface DocSelectorProps {
   companyOptions: CompanyOption[];
   projectOptions: ProjectOption[];
   suppliers: { id: number; label: string }[];
-  grnFilter: {
-    companyId: number | null;
-    projectId: number | null;
-    supplierId: number | null;
-  };
-  setGrnFilter: React.Dispatch<
-    React.SetStateAction<{
-      companyId: number | null;
-      projectId: number | null;
-      supplierId: number | null;
-    }>
-  >;
-  filteredGrnList: GRNItem[];
-  loadingFilteredGrn: boolean;
-  fetchFilteredGrns: (filter: {
-    companyId: number | null;
-    projectId: number | null;
-    supplierId: number | null;
-  }) => void;
 
   selected: SelectedDoc | null;
   finYear?: string;
@@ -441,11 +422,6 @@ function DocSelectorPanel({
   companyOptions,
   projectOptions,
   suppliers,
-  grnFilter,
-  setGrnFilter,
-  filteredGrnList,
-  loadingFilteredGrn,
-  fetchFilteredGrns,
   selected,
   finYear,
   filterCompanyId,
@@ -519,7 +495,7 @@ function DocSelectorPanel({
       (t.FullPrefix ?? t.Prefix).toLowerCase().includes(q) ||
       t.Description.toLowerCase().includes(q),
   );
-  const filteredGRN = filteredGrnList.filter(
+  const filteredGRN = grnList.filter(
     (g) =>
       inFinYear(g.GRNNo) &&
       ((g.GRNNo || "").toLowerCase().includes(q) ||
@@ -747,7 +723,7 @@ function DocSelectorPanel({
           <button
             key={t.id}
             onClick={() => {
-              setTab(t.id);
+              setTab(t.id as SourceKind);
               setSearch("");
             }}
             className={`flex items-center gap-1.5 px-4 py-2.5 text-xs font-heading font-semibold transition-colors border-b-2 -mb-px whitespace-nowrap ${tab === t.id ? "border-primary text-primary bg-background" : "border-transparent text-muted-foreground hover:text-foreground"}`}
@@ -865,108 +841,7 @@ function DocSelectorPanel({
           )
         ) : tab === "GRN" ? (
           <>
-            <div className="p-3 border-b border-border/40">
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-xs font-heading font-semibold text-muted-foreground">
-                  Filter GRNs
-                </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 text-xs gap-1"
-                  onClick={() => fetchFilteredGrns(grnFilter)}
-                >
-                  <Search size={11} /> Refresh
-                </Button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                <Field label="Company">
-                  <Select
-                    value={
-                      grnFilter.companyId ? String(grnFilter.companyId) : "__all__"
-                    }
-                    onValueChange={(v) =>
-                      setGrnFilter((prev) => ({
-                        ...prev,
-                        companyId: v && v !== "__all__" ? parseInt(v, 10) : null,
-                      }))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="All companies" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__all__">All companies</SelectItem>
-                      {companyOptions
-                        .filter((c) => c.id != null && String(c.id) !== "")
-                        .map((c) => (
-                          <SelectItem key={c.id} value={String(c.id)}>
-                            {c.label}
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
-                </Field>
-                <Field label="Project">
-                  <Select
-                    value={
-                      grnFilter.projectId ? String(grnFilter.projectId) : "__all__"
-                    }
-                    onValueChange={(v) =>
-                      setGrnFilter((prev) => ({
-                        ...prev,
-                        projectId: v && v !== "__all__" ? parseInt(v, 10) : null,
-                      }))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="All projects" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__all__">All projects</SelectItem>
-                      {projectOptions
-                        .filter((p) => p.id != null && String(p.id) !== "")
-                        .map((p) => (
-                          <SelectItem key={p.id} value={String(p.id)}>
-                            {p.label}
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
-                </Field>
-                <Field label="Supplier">
-                  <Select
-                    value={
-                      grnFilter.supplierId ? String(grnFilter.supplierId) : "__all__"
-                    }
-                    onValueChange={(v) =>
-                      setGrnFilter((prev) => ({
-                        ...prev,
-                        supplierId: v && v !== "__all__" ? parseInt(v, 10) : null,
-                      }))
-                    }
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="All suppliers" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__all__">All suppliers</SelectItem>
-                      {suppliers
-                        .filter((s) => s.id != null && String(s.id) !== "")
-                        .map((supplier) => (
-                          <SelectItem
-                            key={supplier.id}
-                            value={String(supplier.id)}
-                          >
-                            {supplier.label}
-                          </SelectItem>
-                        ))}
-                    </SelectContent>
-                  </Select>
-                </Field>
-              </div>
-            </div>
-            {loadingFilteredGrn ? (
+            {loadingGRN ? (
               <div className="flex items-center justify-center py-10 gap-2 text-xs text-muted-foreground">
                 <Loader2 size={14} className="animate-spin" />
                 Loading GRNs…
@@ -1103,10 +978,9 @@ function resolveGstRates(
   fallbackSgst: number,
 ) {
   if ((doc.kind === "PO" || doc.kind === "WO") && doc.gst?.applicable) {
-    const { type, rate } = doc.gst;
-    if (type === "cgst_sgst") return { cgst: rate / 2, sgst: rate / 2 };
-    if (type === "igst") return { cgst: rate, sgst: 0 };
-    return { cgst: 0, sgst: 0 };
+    const { rate } = doc.gst;
+    // Always split total GST equally as CGST + SGST (regardless of igst/cgst_sgst type)
+    return { cgst: rate / 2, sgst: rate / 2 };
   }
   if (doc.kind === "PO" || doc.kind === "WO") return { cgst: 0, sgst: 0 };
   return { cgst: fallbackCgst, sgst: fallbackSgst };
@@ -1206,16 +1080,12 @@ export default function MaterialExpenseBooking() {
   const [previewRecord, setPreviewRecord] = useState<ExpenseRecord | null>(
     null,
   );
-  const [filteredGrnList, setFilteredGrnList] = useState<GRNItem[]>([]);
-  const [loadingFilteredGrn, setLoadingFilteredGrn] = useState(false);
-  const [grnFilter, setGrnFilter] = useState<{
-    companyId: number | null;
-    projectId: number | null;
-    supplierId: number | null;
-  }>({ companyId: null, projectId: null, supplierId: null });
   const [suppliers, setSuppliers] = useState<{ id: number; label: string }[]>(
     [],
   );
+  const [supplierHeads, setSupplierHeads] = useState<
+    { id: number; label: string }[]
+  >([]);
   const [billingTerms, setBillingTerms] = useState<BillingTermOption[]>([]);
   const [tcOptions, setTcOptions] = useState<TCOption[]>([]);
 
@@ -1235,30 +1105,6 @@ export default function MaterialExpenseBooking() {
       setLoading(false);
     }
   }, []);
-
-  const fetchFilteredGrns = useCallback(
-    (filter: {
-      companyId: number | null;
-      projectId: number | null;
-      supplierId: number | null;
-    }) => {
-      setLoadingFilteredGrn(true);
-      const params = new URLSearchParams();
-      if (filter.companyId) params.set("companyId", String(filter.companyId));
-      if (filter.projectId) params.set("projectId", String(filter.projectId));
-      if (filter.supplierId)
-        params.set("supplierId", String(filter.supplierId));
-      params.set("limit", "500");
-      apiFetch(`/api/grns?${params.toString()}`)
-        .then((r) => {
-          const list: GRNItem[] = Array.isArray(r) ? r : (r?.data ?? []);
-          setFilteredGrnList(list);
-        })
-        .catch(() => toast.error("Could not load filtered GRNs"))
-        .finally(() => setLoadingFilteredGrn(false));
-    },
-    [],
-  );
 
   const fetchMasters = () => {
     const load = <T,>(
@@ -1350,6 +1196,15 @@ export default function MaterialExpenseBooking() {
     apiFetch("/api/enterprises/options?business_type=S")
       .then((list: { id: number; label: string }[]) => setSuppliers(list ?? []))
       .catch(() => {});
+    apiFetch("/api/account-head?type=S")
+      .then((list: any[]) => {
+        const heads = (Array.isArray(list) ? list : []).map((h) => ({
+          id: h.LHeadId,
+          label: h.LHeadName,
+        }));
+        setSupplierHeads(heads);
+      })
+      .catch(() => {});
     apiFetch("/api/billing-terms")
       .then((list: BillingTermOption[]) =>
         setBillingTerms(
@@ -1435,10 +1290,7 @@ export default function MaterialExpenseBooking() {
       sgstRate: sgst,
     }));
     if (doc.kind === "GRN") {
-      setGrnFilter((prev) => ({
-        ...prev,
-        companyId: doc.companyId ?? prev.companyId,
-      }));
+      // GRN selected — no filter state to update
     }
   };
 
@@ -1746,6 +1598,123 @@ export default function MaterialExpenseBooking() {
               {/* ── 0. Booking Information ─────────────────────────────── */}
               <div className="space-y-4">
                 <SectionHeader label="Booking Information" />
+                {/* Company / Supplier / Project — shown first */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Field label="Company" required>
+                    <Select
+                      value={form.companyId ? String(form.companyId) : ""}
+                      onValueChange={(v) =>
+                        set("companyId", v ? parseInt(v, 10) : null)
+                      }
+                    >
+                      <SelectTrigger>
+                        <div className="flex items-center gap-2">
+                          <Building2
+                            size={13}
+                            className="text-muted-foreground shrink-0"
+                          />
+                          <SelectValue placeholder="Select company…" />
+                        </div>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {companyOptions.length === 0 && (
+                          <SelectItem value="__none__" disabled>
+                            No companies found
+                          </SelectItem>
+                        )}
+                        {companyOptions
+                          .filter((c) => c.id != null && String(c.id) !== "")
+                          .map((c) => (
+                            <SelectItem key={c.id} value={String(c.id)}>
+                              {c.label}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  <Field
+                    label={vendorLabel}
+                    hint={
+                      selectedDoc?.vendorLabel
+                        ? `Auto-filled from ${selectedDoc.kind === "PO" ? "Purchase Order (supplier)" : selectedDoc.kind === "GRN" ? "GRN (supplier)" : "Work Order (contractor)"}`
+                        : "Select supplier or auto-filled when a PO/WO is selected"
+                    }
+                  >
+                    {selectedDoc?.vendorLabel ? (
+                      <div className="relative">
+                        <User
+                          size={13}
+                          className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                        />
+                        <Input
+                          value={form.supplier}
+                          readOnly
+                          placeholder="Auto-filled from linked order"
+                          className="pl-8 bg-muted/30 cursor-not-allowed"
+                        />
+                      </div>
+                    ) : (
+                      <Select
+                        value={form.supplier || "__none__"}
+                        onValueChange={(v) =>
+                          set("supplier", v === "__none__" ? "" : v)
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select supplier…" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="__none__">— None —</SelectItem>
+                          {supplierHeads.map((s) => (
+                            <SelectItem key={s.id} value={s.label}>
+                              {s.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                  </Field>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Field
+                    label="Project / Site"
+                    hint={
+                      selectedDoc?.projectId
+                        ? "Pre-filled from linked order"
+                        : undefined
+                    }
+                  >
+                    <Select
+                      value={form.projectSite || ""}
+                      onValueChange={(v) => set("projectSite", v || "")}
+                    >
+                      <SelectTrigger>
+                        <div className="flex items-center gap-2">
+                          <FolderKanban
+                            size={13}
+                            className="text-muted-foreground shrink-0"
+                          />
+                          <SelectValue placeholder="Select project…" />
+                        </div>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {projectOptions.length === 0 && (
+                          <SelectItem value="__none__" disabled>
+                            No projects found
+                          </SelectItem>
+                        )}
+                        {projectOptions
+                          .filter((p) => p.id != null && String(p.id) !== "")
+                          .map((p) => (
+                            <SelectItem key={p.id} value={String(p.id)}>
+                              {p.label}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </div>
+                {/* Dates / Financial Year — below company/project */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                   <Field label="Booking Date" required>
                     <Input
@@ -1788,104 +1757,6 @@ export default function MaterialExpenseBooking() {
                     </Select>
                   </Field>
                 </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <Field label="Company" required>
-                    <Select
-                      value={form.companyId ? String(form.companyId) : ""}
-                      onValueChange={(v) =>
-                        set("companyId", v ? parseInt(v, 10) : null)
-                      }
-                    >
-                      <SelectTrigger>
-                        <div className="flex items-center gap-2">
-                          <Building2
-                            size={13}
-                            className="text-muted-foreground shrink-0"
-                          />
-                          <SelectValue placeholder="Select company…" />
-                        </div>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {companyOptions.length === 0 && (
-                          <SelectItem value="__none__" disabled>
-                            No companies found
-                          </SelectItem>
-                        )}
-                        {companyOptions
-                          .filter((c) => c.id != null && String(c.id) !== "")
-                          .map((c) => (
-                            <SelectItem key={c.id} value={String(c.id)}>
-                              {c.label}
-                            </SelectItem>
-                          ))}
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                  <Field
-                    label={vendorLabel}
-                    hint={
-                      selectedDoc?.vendorLabel
-                        ? `Auto-filled from ${selectedDoc.kind === "PO" ? "Purchase Order (supplier)" : "Work Order (contractor)"}`
-                        : "Auto-filled when a PO or WO is selected above"
-                    }
-                  >
-                    <div className="relative">
-                      <User
-                        size={13}
-                        className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                      />
-                      <Input
-                        value={form.supplier}
-                        readOnly={!!selectedDoc?.vendorLabel}
-                        onChange={(e) =>
-                          !selectedDoc?.vendorLabel &&
-                          set("supplier", e.target.value)
-                        }
-                        placeholder="Auto-filled from linked order"
-                        className={`pl-8 ${selectedDoc?.vendorLabel ? "bg-muted/30 cursor-not-allowed" : ""}`}
-                      />
-                    </div>
-                  </Field>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  <Field
-                    label="Project / Site"
-                    hint={
-                      selectedDoc?.projectId
-                        ? "Pre-filled from linked order"
-                        : undefined
-                    }
-                  >
-                    <Select
-                      value={form.projectSite || ""}
-                      onValueChange={(v) => set("projectSite", v || "")}
-                    >
-                      <SelectTrigger>
-                        <div className="flex items-center gap-2">
-                          <FolderKanban
-                            size={13}
-                            className="text-muted-foreground shrink-0"
-                          />
-                          <SelectValue placeholder="Select project…" />
-                        </div>
-                      </SelectTrigger>
-                      <SelectContent>
-                        {projectOptions.length === 0 && (
-                          <SelectItem value="__none__" disabled>
-                            No projects found
-                          </SelectItem>
-                        )}
-                        {projectOptions
-                          .filter((p) => p.id != null && String(p.id) !== "")
-                          .map((p) => (
-                            <SelectItem key={p.id} value={String(p.id)}>
-                              {p.label}
-                            </SelectItem>
-                          ))}
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                </div>
               </div>
 
               {/* ── 1. Document Selection (gated on booking info) ──────── */}
@@ -1910,11 +1781,6 @@ export default function MaterialExpenseBooking() {
                       companyOptions={companyOptions}
                       projectOptions={projectOptions}
                       suppliers={suppliers}
-                      grnFilter={grnFilter}
-                      setGrnFilter={setGrnFilter}
-                      filteredGrnList={filteredGrnList}
-                      loadingFilteredGrn={loadingFilteredGrn}
-                      fetchFilteredGrns={fetchFilteredGrns}
                       selected={selectedDoc}
                       finYear={form.financialYear || undefined}
                       filterCompanyId={form.companyId ?? null}
@@ -2027,12 +1893,12 @@ export default function MaterialExpenseBooking() {
                             : "Work Order"}
                         </span>
                         {" — "}
-                        {selectedDoc!.gst!.type === "cgst_sgst"
-                          ? `CGST ${selectedDoc!.gst!.rate / 2}% + SGST ${selectedDoc!.gst!.rate / 2}% (total ${selectedDoc!.gst!.rate}%)`
-                          : selectedDoc!.gst!.type === "igst"
-                            ? `IGST ${selectedDoc!.gst!.rate}% (mapped to CGST)`
-                            : "GST not applicable"}
-                        . Editable if needed.
+                        Total{" "}
+                        <span className="font-mono font-semibold">
+                          {selectedDoc!.gst!.rate}%
+                        </span>{" "}
+                        split as CGST {selectedDoc!.gst!.rate / 2}% + SGST{" "}
+                        {selectedDoc!.gst!.rate / 2}%. Editable if needed.
                       </span>
                     ) : (
                       <span className="text-muted-foreground">
@@ -2040,12 +1906,12 @@ export default function MaterialExpenseBooking() {
                         {selectedDoc!.kind === "PO"
                           ? "Purchase Order"
                           : "Work Order"}{" "}
-                        has no GST applied — rates set to 0. Editable if needed.
+                        has no GST applied — rate set to 0. Editable if needed.
                       </span>
                     )}
                   </div>
                 )}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <Field
                     label="Basic Amount (₹)"
                     required
@@ -2076,46 +1942,46 @@ export default function MaterialExpenseBooking() {
                     </div>
                   </Field>
                   <Field
-                    label="CGST Rate (%)"
+                    label="GST Total (%)"
                     hint={
                       isPOorWO
                         ? selectedDoc!.gst?.applicable
-                          ? selectedDoc!.gst!.type === "igst"
-                            ? "IGST mapped here — editable"
-                            : "Auto-filled from linked order — editable"
+                          ? `Auto-filled from linked ${selectedDoc!.kind === "PO" ? "Purchase Order" : "Work Order"} — split equally as CGST + SGST`
                           : "No GST on this order — editable"
-                        : "Enter CGST rate manually"
+                        : "Enter total GST % — split equally as CGST + SGST"
                     }
                   >
                     <RateInput
-                      value={form.cgstRate}
-                      onChange={(v) => set("cgstRate", v)}
-                      highlighted={gstHighlighted}
-                    />
-                  </Field>
-                  <Field
-                    label={
-                      selectedDoc?.gst?.type === "igst"
-                        ? "SGST Rate (%) — N/A for IGST"
-                        : "SGST Rate (%)"
-                    }
-                    hint={
-                      isPOorWO
-                        ? selectedDoc!.gst?.type === "igst"
-                          ? "IGST order — SGST is 0"
-                          : selectedDoc!.gst?.applicable
-                            ? "Auto-filled from linked order — editable"
-                            : "No GST on this order — editable"
-                        : "Enter SGST rate manually"
-                    }
-                  >
-                    <RateInput
-                      value={form.sgstRate}
-                      onChange={(v) => set("sgstRate", v)}
+                      value={form.cgstRate + form.sgstRate}
+                      onChange={(v) => {
+                        const half = v / 2;
+                        set("cgstRate", half);
+                        set("sgstRate", half);
+                      }}
                       highlighted={gstHighlighted}
                     />
                   </Field>
                 </div>
+                {/* CGST / SGST split preview */}
+                {(form.cgstRate > 0 || form.sgstRate > 0) && (
+                  <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-muted/30 border border-border/50 text-xs text-muted-foreground">
+                    <BadgePercent size={11} className="text-primary shrink-0" />
+                    <span>
+                      Split:{" "}
+                      <span className="font-mono font-semibold text-foreground">
+                        CGST {form.cgstRate}%
+                      </span>{" "}
+                      +{" "}
+                      <span className="font-mono font-semibold text-foreground">
+                        SGST {form.sgstRate}%
+                      </span>{" "}
+                      = Total{" "}
+                      <span className="font-mono font-semibold text-primary">
+                        {form.cgstRate + form.sgstRate}%
+                      </span>
+                    </span>
+                  </div>
+                )}
                 {form.basicAmount > 0 && (
                   <>
                     <PriceBreakdownPanel
@@ -2364,13 +2230,11 @@ export default function MaterialExpenseBooking() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="__none__">None</SelectItem>
-                        {tcOptions
-                          .filter((t) => t.Id != null && String(t.Id) !== "")
-                          .map((t) => (
-                            <SelectItem key={t.Id} value={String(t.Id)}>
-                              {t.Name}
-                            </SelectItem>
-                          ))}
+                        {tcOptions.map((t) => (
+                          <SelectItem key={t.Id} value={String(t.Id)}>
+                            {t.Name}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </Field>
@@ -3193,28 +3057,7 @@ export default function MaterialExpenseBooking() {
                           Terms
                         </p>
                         <div className="bg-muted/20 border border-border rounded-xl px-4 py-3 text-sm text-foreground">
-                          {Array.isArray(previewRecord.billingTerms) &&
-                          previewRecord.billingTerms.length > 0 ? (
-                            <div className="space-y-1.5">
-                              {previewRecord.billingTerms.map((t: any, idx: number) => (
-                                <div
-                                  key={t?.BillingTermID ?? t?.id ?? idx}
-                                  className="flex flex-col gap-0.5"
-                                >
-                                  <span className="font-semibold">
-                                    {t?.Name ?? t?.name ?? "—"}
-                                  </span>
-                                  {t?.Description ? (
-                                    <span className="text-muted-foreground text-xs">
-                                      {t.Description}
-                                    </span>
-                                  ) : null}
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <span className="text-muted-foreground">—</span>
-                          )}
+                          {previewRecord.billingTerms}
                         </div>
                       </div>
                     )}

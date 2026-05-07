@@ -40,7 +40,7 @@ function makeKey() {
 }
 
 function newTerm(): DiscountConfig {
-  return { ...defaultDiscount(), applicable: true, _key: makeKey() };
+  return { ...defaultDiscount(), applicable: false, _key: makeKey() };
 }
 
 // ─── MasterTermPicker ─────────────────────────────────────────────────────────
@@ -148,13 +148,18 @@ function SingleTermRow({
   onPickMaster: () => void;
 }) {
   const [expanded, setExpanded] = useState(true);
+  const isAddition = term.termType === "Addition";
+  const isPreGst = !term.appliedOn || term.appliedOn === "pre-gst";
 
-  const discountAmount = term.applicable
+  const termAmount = term.applicable
     ? term.type === "percentage"
       ? (runningBase * term.value) / 100
       : term.value
     : 0;
-  const afterThisTerm = Math.max(0, runningBase - discountAmount);
+
+  const termLabel = term.masterTermName ?? `Term ${index + 1}`;
+  const typeLabel = isAddition ? "Addition" : "Deduction";
+  const appliedOnLabel = isPreGst ? "Before GST" : "After GST";
 
   return (
     <div className="rounded-xl border border-border overflow-hidden">
@@ -165,12 +170,33 @@ function SingleTermRow({
             {index + 1}
           </span>
           <div className="min-w-0">
-            <p className="text-xs font-heading font-semibold text-foreground truncate">
-              {term.masterTermName ?? `Term ${index + 1}`}
-            </p>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <p className="text-xs font-heading font-semibold text-foreground truncate">
+                {termLabel}
+              </p>
+              {/* Only show badges once a master term is picked */}
+              {term.masterTermName && (
+                <>
+                  <span
+                    className={
+                      "inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-heading font-semibold border " +
+                      (isAddition
+                        ? "bg-green-500/10 text-green-500 border-green-500/20"
+                        : "bg-destructive/10 text-destructive border-destructive/20")
+                    }
+                  >
+                    {isAddition ? "+" : "−"} {typeLabel}
+                  </span>
+                  <span className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-heading bg-muted text-muted-foreground border border-border">
+                    {appliedOnLabel}
+                  </span>
+                </>
+              )}
+            </div>
             {term.applicable && basicAmount > 0 && (
-              <p className="text-[10px] text-muted-foreground">
-                −₹{fmt(discountAmount)} → base ₹{fmt(afterThisTerm)}
+              <p className="text-[10px] text-muted-foreground mt-0.5">
+                {isAddition ? "+" : "−"}₹{fmt(termAmount)}{" "}
+                {isPreGst ? "on taxable base" : "after GST"}
               </p>
             )}
           </div>
@@ -232,38 +258,34 @@ function SingleTermRow({
             <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-4 flex flex-col items-center gap-1.5 text-center">
               <Tag size={15} className="text-muted-foreground/40" />
               <p className="text-[11px] text-muted-foreground">
-                Toggle on to configure this discount term
+                Toggle on to configure this billing term
               </p>
             </div>
           ) : (
             <>
-              <Field label="Discount Type">
-                <div className="grid grid-cols-2 gap-2">
-                  {(["percentage", "fixed"] as const).map((t) => (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => onUpdate({ ...term, type: t })}
-                      className={
-                        "rounded-lg border px-3 py-1.5 text-xs font-heading font-semibold transition-all " +
-                        (term.type === t
-                          ? "border-primary bg-primary/[0.07] text-primary ring-1 ring-primary/20"
-                          : "border-border bg-background text-muted-foreground hover:border-primary/30")
-                      }
-                    >
-                      {t === "percentage"
-                        ? "Percentage (%)"
-                        : "Fixed Amount (₹)"}
-                    </button>
-                  ))}
+              {/* If no master term is picked yet, show prompt */}
+              {!term.masterTermName && (
+                <div className="rounded-lg border border-dashed border-primary/30 bg-primary/[0.03] px-4 py-3 flex flex-col items-center gap-1.5 text-center">
+                  <BookOpen size={14} className="text-primary/40" />
+                  <p className="text-[11px] text-muted-foreground">
+                    Pick a term from master to auto-fill type &amp; apply-on
+                  </p>
+                  <button
+                    type="button"
+                    onClick={onPickMaster}
+                    className="text-[11px] text-primary hover:underline font-medium"
+                  >
+                    Select from master →
+                  </button>
                 </div>
-              </Field>
+              )}
 
+              {/* Value input — label reflects whether it's addition or deduction */}
               <Field
                 label={
                   term.type === "percentage"
-                    ? "Discount %"
-                    : "Discount Amount (₹)"
+                    ? `${typeLabel} % (${appliedOnLabel})`
+                    : `${typeLabel} Amount ₹ (${appliedOnLabel})`
                 }
               >
                 <div className="relative">
@@ -343,16 +365,17 @@ export function BillingAccordion({
   const [pickerForIndex, setPickerForIndex] = useState<number | null>(null);
 
   const applyMasterTerm = (masterTerm: MasterBillingTerm, idx: number) => {
-    const hasDiscount =
-      masterTerm.discountType !== "none" && masterTerm.discountValue > 0;
     const updated: DiscountConfig = {
       ...terms[idx],
-      applicable: hasDiscount,
+      applicable: true,
+      // Percentage vs Fixed: infer from master calculationType or default to percentage
       type: masterTerm.discountType === "flat" ? "fixed" : "percentage",
-      value: hasDiscount ? masterTerm.discountValue : 0,
-      appliedOn: "pre-gst",
+      value: 0, // user sets the value; master only sets type/direction
+      appliedOn:
+        masterTerm.calculationType === "After GST" ? "post-gst" : "pre-gst",
       masterTermId: masterTerm._id,
       masterTermName: masterTerm.name,
+      termType: masterTerm.deductionType ?? "Deduction",
     };
     setTerms(terms.map((t, i) => (i === idx ? updated : t)));
     toast.success(`Billing term "${masterTerm.name}" applied!`);
@@ -370,14 +393,18 @@ export function BillingAccordion({
   const hasBase = basicAmount > 0;
   const activeCount = terms.filter((t) => t.applicable).length;
 
-  // Running base amounts for per-row display
+  // Running base amounts for per-row display (pre-GST terms only)
   const runningBases: number[] = [];
   let rb = basicAmount;
   for (const t of terms) {
     runningBases.push(rb);
-    if (t.applicable) {
-      const d = t.type === "percentage" ? (rb * t.value) / 100 : t.value;
-      rb = Math.max(0, rb - d);
+    if (t.applicable && (!t.appliedOn || t.appliedOn === "pre-gst")) {
+      const amt = t.type === "percentage" ? (rb * t.value) / 100 : t.value;
+      if (t.termType === "Addition") {
+        rb += amt;
+      } else {
+        rb = Math.max(0, rb - amt);
+      }
     }
   }
 
