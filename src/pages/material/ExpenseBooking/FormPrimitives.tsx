@@ -1,7 +1,7 @@
 import React from "react";
 import { Label } from "@/components/ui/label";
 import { fmt } from "./helpers";
-import type { PriceBreakdown } from "./types";
+import type { PriceBreakdown, DiscountConfig } from "./types";
 
 // ─── FormSection ──────────────────────────────────────────────────────────────
 
@@ -81,7 +81,13 @@ export function ReadonlyField({
 
 // ─── BreakdownRow ─────────────────────────────────────────────────────────────
 
-type BRVariant = "neutral" | "debit" | "tax" | "subtotal" | "total";
+type BRVariant =
+  | "neutral"
+  | "debit"
+  | "addition"
+  | "tax"
+  | "subtotal"
+  | "total";
 
 export function BreakdownRow({
   label,
@@ -97,6 +103,7 @@ export function BreakdownRow({
   const rowStyles: Record<BRVariant, string> = {
     neutral: "bg-card",
     debit: "bg-card",
+    addition: "bg-card",
     tax: "bg-muted/30",
     subtotal: "bg-muted/50",
     total: "bg-muted/60",
@@ -105,6 +112,7 @@ export function BreakdownRow({
   const labelStyles: Record<BRVariant, string> = {
     neutral: "text-foreground text-xs",
     debit: "text-foreground text-xs",
+    addition: "text-foreground text-xs",
     tax: "text-foreground text-xs",
     subtotal: "text-foreground text-xs font-semibold font-heading",
     total: "text-foreground text-xs font-semibold font-heading",
@@ -113,6 +121,7 @@ export function BreakdownRow({
   const valueStyles: Record<BRVariant, string> = {
     neutral: "text-foreground text-xs font-mono",
     debit: "text-destructive text-xs font-mono",
+    addition: "text-green-500 text-xs font-mono",
     tax: "text-primary text-xs font-mono",
     subtotal: "text-foreground text-xs font-mono font-semibold",
     total: "text-foreground text-sm font-mono font-bold",
@@ -146,40 +155,68 @@ export function PriceBreakdownPanel({
   sgstRate: number;
   hasDiscount: boolean;
 }) {
+  const preGstTerms = bd.preGstTerms ?? [];
+  const postGstTerms = bd.postGstTerms ?? [];
+
+  const hasPreGst = preGstTerms.length > 0;
+  const hasPostGst = postGstTerms.length > 0;
+  const hasAnyTerms = hasDiscount && (hasPreGst || hasPostGst);
+
+  // Calculate running base for per-term amount display
+  let runningBase = bd.basicAmount;
+  const preGstRows: { term: any; amt: number }[] = [];
+  for (const t of preGstTerms) {
+    const amt =
+      t.type === "percentage" ? (runningBase * t.value) / 100 : t.value;
+    preGstRows.push({ term: t, amt });
+    if (t.termType === "Addition") runningBase += amt;
+    else runningBase = Math.max(0, runningBase - amt);
+  }
+
   return (
     <div className="rounded-xl border border-border overflow-hidden divide-y divide-border/50">
+      {/* Basic Amount */}
       <BreakdownRow
         label="Basic Amount"
-        sublabel="Pre-tax value from linked order"
+        sublabel="Pre-tax value"
         value={"₹" + fmt(bd.basicAmount)}
         variant="neutral"
       />
 
-      {hasDiscount && (
-        <BreakdownRow
-          label="Discount"
-          sublabel="Applied before GST"
-          value={"− ₹" + fmt(bd.discountAmount)}
-          variant="debit"
-        />
-      )}
+      {/* Pre-GST Billing Terms */}
+      {hasPreGst &&
+        preGstRows.map(({ term, amt }, i) => {
+          const isAddition = term.termType === "Addition";
+          return (
+            <BreakdownRow
+              key={term._key ?? i}
+              label={term.masterTermName ?? `Term ${i + 1}`}
+              sublabel={`${isAddition ? "Addition" : "Deduction"} · Before GST${
+                term.type === "percentage" ? ` · ${term.value}%` : ""
+              }`}
+              value={(isAddition ? "+ ₹" : "− ₹") + fmt(amt)}
+              variant={isAddition ? "addition" : "debit"}
+            />
+          );
+        })}
 
-      {hasDiscount && (
+      {/* Taxable Amount (shown when there are pre-GST terms) */}
+      {hasPreGst && (
         <BreakdownRow
           label="Taxable Amount"
-          sublabel="After discount"
+          sublabel="After pre-GST adjustments"
           value={"₹" + fmt(bd.taxableAmount)}
           variant="subtotal"
         />
       )}
 
+      {/* GST rows */}
       <BreakdownRow
         label={`CGST @ ${cgstRate}%`}
         sublabel="Central GST"
         value={"₹" + fmt(bd.cgstAmount)}
         variant="tax"
       />
-
       <BreakdownRow
         label={`SGST @ ${sgstRate}%`}
         sublabel="State GST"
@@ -187,13 +224,41 @@ export function PriceBreakdownPanel({
         variant="tax"
       />
 
+      {/* Gross (before post-GST terms) */}
       <BreakdownRow
         label="Gross Amount"
-        sublabel={hasDiscount ? "Taxable + CGST + SGST" : "Basic + CGST + SGST"}
-        value={"₹" + fmt(bd.grossAmount)}
+        sublabel={
+          hasAnyTerms
+            ? hasPreGst
+              ? "Taxable + CGST + SGST"
+              : "Basic + CGST + SGST"
+            : "Basic + CGST + SGST"
+        }
+        value={"₹" + fmt(bd.taxableAmount + bd.cgstAmount + bd.sgstAmount)}
         variant="subtotal"
       />
 
+      {/* Post-GST Billing Terms */}
+      {hasPostGst &&
+        postGstTerms.map((term, i) => {
+          const base = bd.basicAmount;
+          const amt =
+            term.type === "percentage" ? (base * term.value) / 100 : term.value;
+          const isAddition = term.termType === "Addition";
+          return (
+            <BreakdownRow
+              key={term._key ?? `post-${i}`}
+              label={term.masterTermName ?? `Term ${i + 1}`}
+              sublabel={`${isAddition ? "Addition" : "Deduction"} · After GST${
+                term.type === "percentage" ? ` · ${term.value}%` : ""
+              }`}
+              value={(isAddition ? "+ ₹" : "− ₹") + fmt(amt)}
+              variant={isAddition ? "addition" : "debit"}
+            />
+          );
+        })}
+
+      {/* Round off */}
       {Math.abs(bd.roundOff) > 0 && (
         <BreakdownRow
           label="Round Off"
@@ -203,6 +268,7 @@ export function PriceBreakdownPanel({
         />
       )}
 
+      {/* Net Payable */}
       <BreakdownRow
         label="Net Payable"
         sublabel="Final amount due"
