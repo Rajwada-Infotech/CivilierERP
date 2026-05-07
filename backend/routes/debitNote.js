@@ -26,10 +26,14 @@ router.get("/", async (req, res) => {
         dn.created_by,
         dn.created_at,
         dn.updated_at,
+
         u.name AS created_by_name,
-        u.role AS created_by_role
+        u.email AS created_by_email
+
+
       FROM dbo.DebitNote dn
       LEFT JOIN dbo.users u ON u.id = dn.created_by
+
       ORDER BY dn.id DESC
     `);
 
