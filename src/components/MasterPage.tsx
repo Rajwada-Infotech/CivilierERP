@@ -32,6 +32,7 @@ export interface FieldDef {
     onChange: (v: unknown) => void;
     error: boolean;
     field: FieldDef;
+    formData: Record<string, unknown>;
   }) => React.ReactNode;
 }
 
@@ -376,6 +377,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                       onChange: (v) => updateCustomField(field.name, v),
                       error: !!errors[field.name],
                       field,
+                      formData: form,
                     })
                   ) : field.type === "text" || field.type === "number" ? (
                     <div className="relative">
