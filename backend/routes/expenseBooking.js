@@ -310,6 +310,11 @@ router.post("/", async (req, res) => {
     EFinYear,
     ESourceType,
     ESourceId,
+    EBillingTermId,
+    EBillingTermName,
+    ETCId,
+    ETCName,
+    ETCText,
   } = req.body;
 
   const pool = getPool();
@@ -418,6 +423,11 @@ router.post("/", async (req, res) => {
       }
     }
 
+    // Prepend ExB/ prefix to every expense booking doc number
+    if (finalDocNo && !finalDocNo.startsWith("ExB/")) {
+      finalDocNo = `ExB/${finalDocNo}`;
+    }
+
     const insertResult = await transaction
       .request()
       .input("EName", sql.NVarChar(200), EName || null)
@@ -471,7 +481,15 @@ router.post("/", async (req, res) => {
       .input("EFinYear", sql.NVarChar(20), EFinYear || null)
       .input("ESourceType", sql.NVarChar(20), ESourceType || null)
       .input("ESourceId", sql.Int, ESourceId ? parseInt(ESourceId, 10) : null)
-      .query(`
+      .input(
+        "EBillingTermId",
+        sql.Int,
+        EBillingTermId ? parseInt(EBillingTermId, 10) : null,
+      )
+      .input("EBillingTermName", sql.NVarChar(200), EBillingTermName || null)
+      .input("ETCId", sql.Int, ETCId ? parseInt(ETCId, 10) : null)
+      .input("ETCName", sql.NVarChar(200), ETCName || null)
+      .input("ETCText", sql.NVarChar(sql.MAX), ETCText || null).query(`
         INSERT INTO dbo.ExpenseBooking (
           EName, EProjectName, EDocumentType, EDocDate, EAmount, ENetAmount,
           ECgstRate, ESgstRate, EDiscountData, EDocNo,
@@ -479,7 +497,8 @@ router.post("/", async (req, res) => {
           EReminder, ERemarks, EStatus,
           ECreatedAt, EUpdatedAt, ECreatedBy, EApprovedBy,
           ECompanyId, EDocTypeId, EFinYear,
-          ESourceType, ESourceId
+          ESourceType, ESourceId,
+          EBillingTermId, EBillingTermName, ETCId, ETCName, ETCText
         ) VALUES (
           @EName, @EProjectName, @EDocumentType, @EDocDate, @EAmount, @ENetAmount,
           @ECgstRate, @ESgstRate, @EDiscountData, @EDocNo,
@@ -487,7 +506,8 @@ router.post("/", async (req, res) => {
           @EReminder, @ERemarks, @EStatus,
           @ECreatedAt, @EUpdatedAt, @ECreatedBy, @EApprovedBy,
           @ECompanyId, @EDocTypeId, @EFinYear,
-          @ESourceType, @ESourceId
+          @ESourceType, @ESourceId,
+          @EBillingTermId, @EBillingTermName, @ETCId, @ETCName, @ETCText
         );
         SELECT SCOPE_IDENTITY() AS NewId;
       `);
@@ -927,6 +947,11 @@ router.put("/:id", async (req, res) => {
     EFinYear,
     ESourceType,
     ESourceId,
+    EBillingTermId,
+    EBillingTermName,
+    ETCId,
+    ETCName,
+    ETCText,
   } = req.body;
 
   try {
@@ -982,7 +1007,15 @@ router.put("/:id", async (req, res) => {
       .input("EFinYear", sql.NVarChar(20), EFinYear || null)
       .input("ESourceType", sql.NVarChar(20), ESourceType || null)
       .input("ESourceId", sql.Int, ESourceId ? parseInt(ESourceId, 10) : null)
-      .query(`
+      .input(
+        "EBillingTermId",
+        sql.Int,
+        EBillingTermId ? parseInt(EBillingTermId, 10) : null,
+      )
+      .input("EBillingTermName", sql.NVarChar(200), EBillingTermName || null)
+      .input("ETCId", sql.Int, ETCId ? parseInt(ETCId, 10) : null)
+      .input("ETCName", sql.NVarChar(200), ETCName || null)
+      .input("ETCText", sql.NVarChar(sql.MAX), ETCText || null).query(`
         UPDATE dbo.ExpenseBooking SET
           EName=@EName, EProjectName=@EProjectName, EDocumentType=@EDocumentType, EDocDate=@EDocDate,
           EAmount=@EAmount, ENetAmount=@ENetAmount, ECgstRate=@ECgstRate, ESgstRate=@ESgstRate,
@@ -991,7 +1024,9 @@ router.put("/:id", async (req, res) => {
           EEmiStartDate=@EEmiStartDate, EReminder=@EReminder, ERemarks=@ERemarks,
           EStatus=@EStatus, EUpdatedAt=@EUpdatedAt, ECompanyId=@ECompanyId,
           EDocTypeId=@EDocTypeId, EFinYear=@EFinYear,
-          ESourceType=@ESourceType, ESourceId=@ESourceId
+          ESourceType=@ESourceType, ESourceId=@ESourceId,
+          EBillingTermId=@EBillingTermId, EBillingTermName=@EBillingTermName,
+          ETCId=@ETCId, ETCName=@ETCName, ETCText=@ETCText
         WHERE Eid = @Eid
       `);
 
