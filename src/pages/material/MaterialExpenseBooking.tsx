@@ -187,6 +187,14 @@ interface GRNItem {
   GRNItems?: string | GRNItemLine[];
 }
 
+interface BillingTermOption {
+  BillingTermID: number;
+  Name: string;
+  Description?: string;
+  Type?: string;
+  GST?: string;
+  IsActive?: boolean;
+}
 interface TCOption {
   Id: number;
   Name: string;
@@ -373,6 +381,31 @@ interface DocSelectorProps {
   loadingWO: boolean;
   loadingTOD: boolean;
   loadingGRN: boolean;
+
+  // GRN filtering (suppliers-based picker)
+  companyOptions: CompanyOption[];
+  projectOptions: ProjectOption[];
+  suppliers: { id: number; label: string }[];
+  grnFilter: {
+    companyId: number | null;
+    projectId: number | null;
+    supplierId: number | null;
+  };
+  setGrnFilter: React.Dispatch<
+    React.SetStateAction<{
+      companyId: number | null;
+      projectId: number | null;
+      supplierId: number | null;
+    }>
+  >;
+  filteredGrnList: GRNItem[];
+  loadingFilteredGrn: boolean;
+  fetchFilteredGrns: (filter: {
+    companyId: number | null;
+    projectId: number | null;
+    supplierId: number | null;
+  }) => void;
+
   selected: SelectedDoc | null;
   finYear?: string;
   filterCompanyId?: number | null;
@@ -383,6 +416,9 @@ interface DocSelectorProps {
   onTodSelected?: (tod: TodItem | null) => void;
 }
 
+
+
+
 function DocSelectorPanel({
   poList,
   woList,
@@ -392,6 +428,14 @@ function DocSelectorPanel({
   loadingWO,
   loadingTOD,
   loadingGRN,
+  companyOptions,
+  projectOptions,
+  suppliers,
+  grnFilter,
+  setGrnFilter,
+  filteredGrnList,
+  loadingFilteredGrn,
+  fetchFilteredGrns,
   selected,
   finYear,
   filterCompanyId,
@@ -465,7 +509,7 @@ function DocSelectorPanel({
       (t.FullPrefix ?? t.Prefix).toLowerCase().includes(q) ||
       t.Description.toLowerCase().includes(q),
   );
-  const filteredGRN = grnList.filter(
+  const filteredGRN = filteredGrnList.filter(
     (g) =>
       inFinYear(g.GRNNo) &&
       ((g.GRNNo || "").toLowerCase().includes(q) ||
@@ -517,119 +561,121 @@ function DocSelectorPanel({
             };
     return (
       <div className={`rounded-xl border p-4 ${colors.ring}`}>
-        <div className="flex items-start gap-3">
-          <div
-            className={`w-9 h-9 rounded-lg ${colors.icon} flex items-center justify-center shrink-0`}
-          >
-            <Icon size={15} className={colors.text} />
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <span
-                className={`text-xs font-heading font-semibold ${colors.text}`}
-              >
-                {isPO
-                  ? "Purchase Order"
-                  : isWO
-                    ? "Work Order"
-                    : isGRN
-                      ? "Goods Receipt Note"
-                      : "Document"}
-              </span>
-              <span
-                className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold border ${colors.badge}`}
-              >
-                {selected.docNo}
-              </span>
-              {selected.status && (
-                <span className="px-2 py-0.5 rounded-full text-[10px] border border-border bg-muted/50 text-muted-foreground">
-                  {selected.status}
-                </span>
-              )}
+        <div className="flex flex-col sm:flex-row sm:items-start gap-3 justify-between">
+          <div className="flex items-start gap-3 min-w-0">
+            <div
+              className={`w-9 h-9 rounded-lg ${colors.icon} flex items-center justify-center shrink-0`}
+            >
+              <Icon size={15} className={colors.text} />
             </div>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {selected.vendorLabel && (
-                <InfoPill
-                  icon={User}
-                  label={
-                    isPO
-                      ? "Supplier"
-                      : isWO
-                        ? "Contractor"
-                        : isGRN
-                          ? "Supplier"
-                          : "Vendor"
-                  }
-                  value={selected.vendorLabel}
-                />
-              )}
-              {!isGRN && selected.amount != null && (
-                <InfoPill
-                  icon={Banknote}
-                  label="Order Value"
-                  value={`₹${fmt(selected.amount)}`}
-                />
-              )}
-              {isGRN &&
-                Array.isArray(selected.grnItems) &&
-                selected.grnItems.length > 0 &&
-                (() => {
-                  const totalReceived = selected.grnItems.reduce(
-                    (s, i) => s + (Number(i.receivedQty) || 0),
-                    0,
-                  );
-                  const totalRemaining = selected.grnItems.reduce(
-                    (s, i) => s + (Number(i.remainingQty) || 0),
-                    0,
-                  );
-                  return (
-                    <>
-                      <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
-                        <Package
-                          size={11}
-                          className="text-emerald-600 dark:text-emerald-400 shrink-0"
-                        />
-                        <span className="text-[10px] text-muted-foreground">
-                          Received:
-                        </span>
-                        <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
-                          {totalReceived} units
-                        </span>
-                      </div>
-                      {totalRemaining > 0 && (
-                        <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
-                          <Clock
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span
+                  className={`text-xs font-heading font-semibold ${colors.text}`}
+                >
+                  {isPO
+                    ? "Purchase Order"
+                    : isWO
+                      ? "Work Order"
+                      : isGRN
+                        ? "Goods Receipt Note"
+                        : "Document"}
+                </span>
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-mono font-bold border ${colors.badge}`}
+                >
+                  {selected.docNo}
+                </span>
+                {selected.status && (
+                  <span className="px-2 py-0.5 rounded-full text-[10px] border border-border bg-muted/50 text-muted-foreground">
+                    {selected.status}
+                  </span>
+                )}
+              </div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {selected.vendorLabel && (
+                  <InfoPill
+                    icon={User}
+                    label={
+                      isPO
+                        ? "Supplier"
+                        : isWO
+                          ? "Contractor"
+                          : isGRN
+                            ? "Supplier"
+                            : "Vendor"
+                    }
+                    value={selected.vendorLabel}
+                  />
+                )}
+                {!isGRN && selected.amount != null && (
+                  <InfoPill
+                    icon={Banknote}
+                    label="Order Value"
+                    value={`₹${fmt(selected.amount)}`}
+                  />
+                )}
+                {isGRN &&
+                  Array.isArray(selected.grnItems) &&
+                  selected.grnItems.length > 0 &&
+                  (() => {
+                    const totalReceived = selected.grnItems.reduce(
+                      (s, i) => s + (Number(i.receivedQty) || 0),
+                      0,
+                    );
+                    const totalRemaining = selected.grnItems.reduce(
+                      (s, i) => s + (Number(i.remainingQty) || 0),
+                      0,
+                    );
+                    return (
+                      <>
+                        <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20">
+                          <Package
                             size={11}
-                            className="text-amber-600 dark:text-amber-400 shrink-0"
+                            className="text-emerald-600 dark:text-emerald-400 shrink-0"
                           />
                           <span className="text-[10px] text-muted-foreground">
-                            Pending:
+                            Received:
                           </span>
-                          <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400">
-                            {totalRemaining} units
+                          <span className="text-[10px] font-semibold text-emerald-600 dark:text-emerald-400">
+                            {totalReceived} units
                           </span>
                         </div>
-                      )}
-                      <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-muted/40 border border-border/50">
-                        <Truck
-                          size={11}
-                          className="text-muted-foreground shrink-0"
-                        />
-                        <span className="text-[10px] text-muted-foreground">
-                          {selected.grnItems.length}{" "}
-                          {selected.grnItems.length === 1 ? "item" : "items"}
-                        </span>
-                      </div>
-                    </>
-                  );
-                })()}
-              {selected.date && (
-                <InfoPill
-                  icon={CalendarDays}
-                  label="Date"
-                  value={selected.date.slice(0, 10)}
-                />
-              )}
+                        {totalRemaining > 0 && (
+                          <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20">
+                            <Clock
+                              size={11}
+                              className="text-amber-600 dark:text-amber-400 shrink-0"
+                            />
+                            <span className="text-[10px] text-muted-foreground">
+                              Pending:
+                            </span>
+                            <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400">
+                              {totalRemaining} units
+                            </span>
+                          </div>
+                        )}
+                        <div className="flex items-center gap-1.5 px-3 py-2 rounded-lg bg-muted/40 border border-border/50">
+                          <Truck
+                            size={11}
+                            className="text-muted-foreground shrink-0"
+                          />
+                          <span className="text-[10px] text-muted-foreground">
+                            {selected.grnItems.length}{" "}
+                            {selected.grnItems.length === 1 ? "item" : "items"}
+                          </span>
+                        </div>
+                      </>
+                    );
+                  })()}
+                {selected.date && (
+                  <InfoPill
+                    icon={CalendarDays}
+                    label="Date"
+                    value={selected.date.slice(0, 10)}
+                  />
+                )}
+              </div>
             </div>
           </div>
           <button
@@ -637,7 +683,7 @@ function DocSelectorPanel({
               onTodSelected?.(null);
               onClear();
             }}
-            className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-destructive transition-colors shrink-0 px-2 py-1 rounded-md hover:bg-destructive/5 border border-transparent hover:border-destructive/20 mt-0.5"
+            className="flex items-center justify-center gap-1 text-[10px] font-medium text-muted-foreground hover:text-destructive transition-colors shrink-0 px-2 py-1.5 sm:py-1 rounded-md hover:bg-destructive/5 border border-transparent hover:border-destructive/20 w-full sm:w-auto mt-2 sm:mt-0"
           >
             <X size={10} /> Change
           </button>
@@ -808,107 +854,194 @@ function DocSelectorPanel({
             })
           )
         ) : tab === "GRN" ? (
-          filteredGRN.length === 0 ? (
-            <EmptyState label="No GRNs found" />
-          ) : (
-            filteredGRN.map((g) => {
-              const parsedItems: GRNItemLine[] = (() => {
-                try {
-                  if (Array.isArray(g.GRNItems))
-                    return g.GRNItems as GRNItemLine[];
-                  if (typeof g.GRNItems === "string" && g.GRNItems.trim()) {
-                    const parsed = JSON.parse(g.GRNItems);
-                    return Array.isArray(parsed) ? parsed : [];
+          <>
+            <div className="p-3 border-b border-border/40">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-heading font-semibold text-muted-foreground">Filter GRNs</span>
+              <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onClick={() => fetchFilteredGrns(grnFilter)}>
+                <Search size={11} /> Refresh
+              </Button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <Field label="Company">
+                  <Select
+                    value={grnFilter.companyId ? String(grnFilter.companyId) : ""}
+                    onValueChange={(v) =>
+                      setGrnFilter((prev) => ({
+                        ...prev,
+                        companyId: v ? parseInt(v, 10) : null,
+                      }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="All companies" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">All companies</SelectItem>
+                      {companyOptions.map((c) => (
+                        <SelectItem key={c.id} value={String(c.id)}>
+                          {c.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field label="Project">
+                  <Select
+                    value={grnFilter.projectId ? String(grnFilter.projectId) : ""}
+                    onValueChange={(v) =>
+                      setGrnFilter((prev) => ({
+                        ...prev,
+                        projectId: v ? parseInt(v, 10) : null,
+                      }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="All projects" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">All projects</SelectItem>
+                      {projectOptions.map((p) => (
+                        <SelectItem key={p.id} value={String(p.id)}>
+                          {p.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field label="Supplier">
+                  <Select
+                    value={grnFilter.supplierId ? String(grnFilter.supplierId) : ""}
+                    onValueChange={(v) =>
+                      setGrnFilter((prev) => ({
+                        ...prev,
+                        supplierId: v ? parseInt(v, 10) : null,
+                      }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="All suppliers" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">All suppliers</SelectItem>
+                      {suppliers.map((supplier) => (
+                        <SelectItem key={supplier.id} value={String(supplier.id)}>
+                          {supplier.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              </div>
+            </div>
+            {loadingFilteredGrn ? (
+              <div className="flex items-center justify-center py-10 gap-2 text-xs text-muted-foreground">
+                <Loader2 size={14} className="animate-spin" />
+                Loading GRNs…
+              </div>
+            ) : filteredGRN.length === 0 ? (
+              <EmptyState label="No GRNs found" />
+            ) : (
+              filteredGRN.map((g) => {
+                // FIX: parse GRNItems from list data for preview counts only —
+                // the full fetch in applyDoc will always override this with fresh data.
+                const parsedItems: GRNItemLine[] = (() => {
+                  try {
+                    if (Array.isArray(g.GRNItems)) return g.GRNItems as GRNItemLine[];
+                    if (typeof g.GRNItems === "string" && g.GRNItems.trim()) {
+                      const parsed = JSON.parse(g.GRNItems);
+                      return Array.isArray(parsed) ? parsed : [];
+                    }
+                  } catch {
+                    /* ignore */
                   }
-                } catch {
-                  /* ignore */
-                }
-                return [];
-              })();
-              const totalReceived = parsedItems.reduce(
-                (s, i) => s + (Number(i.receivedQty) || 0),
-                0,
-              );
-              const totalRemaining = parsedItems.reduce(
-                (s, i) => s + (Number(i.remainingQty) || 0),
-                0,
-              );
-              return (
-                <button
-                  key={g.GRNID}
-                  onClick={() =>
-                    onSelect({
-                      kind: "GRN",
-                      docNo: g.GRNNo
-                        ? g.GRNNo.startsWith("GRN-")
-                          ? g.GRNNo
-                          : `GRN-${g.GRNNo}`
-                        : g.GRNNo,
-                      sourceId: g.GRNID,
-                      vendorLabel: g.SupplierName,
-                      status: g.Status,
-                      date: g.GRNDate,
-                      nameLabel: g.Remarks,
-                      grnItems: parsedItems,
-                    })
-                  }
-                  className="w-full flex items-start gap-3 px-4 py-3 hover:bg-muted/30 transition-colors border-b border-border/30 last:border-0 text-left group"
-                >
-                  <div className="w-7 h-7 rounded-lg bg-teal-500/10 flex items-center justify-center shrink-0 mt-0.5">
-                    <Truck size={12} className="text-teal-500" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-mono text-xs font-bold text-teal-600 dark:text-teal-400">
-                        {g.GRNNo
+                  return [];
+                })();
+                const totalReceived = parsedItems.reduce(
+                  (s, i) => s + (Number(i.receivedQty) || 0),
+                  0,
+                );
+                const totalRemaining = parsedItems.reduce(
+                  (s, i) => s + (Number(i.remainingQty) || 0),
+                  0,
+                );
+                return (
+                  <button
+                    key={g.GRNID}
+                    onClick={() =>
+                      onSelect({
+                        kind: "GRN",
+                        docNo: g.GRNNo
                           ? g.GRNNo.startsWith("GRN-")
                             ? g.GRNNo
                             : `GRN-${g.GRNNo}`
-                          : "—"}
-                      </span>
-                      {g.Status && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground border border-border/50">
-                          {g.Status}
-                        </span>
-                      )}
-                      {g.PONumber && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
-                          PO: {g.PONumber}
-                        </span>
-                      )}
+                          : g.GRNNo,
+                        sourceId: g.GRNID,
+                        vendorLabel: g.SupplierName,
+                        status: g.Status,
+                        date: g.GRNDate,
+                        nameLabel: g.Remarks,
+                        grnItems: parsedItems,
+                      })
+                    }
+                    className="w-full flex items-start gap-3 px-4 py-3 hover:bg-muted/30 transition-colors border-b border-border/30 last:border-0 text-left group"
+                  >
+                    <div className="w-7 h-7 rounded-lg bg-teal-500/10 flex items-center justify-center shrink-0 mt-0.5">
+                      <Truck size={12} className="text-teal-500" />
                     </div>
-                    <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
-                      {[g.SupplierName, g.GRNDate?.slice(0, 10)]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </p>
-                    {parsedItems.length > 0 && (
-                      <div className="flex items-center gap-3 mt-1.5">
-                        <span className="flex items-center gap-1 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded-md">
-                          <Package size={9} />
-                          {totalReceived} received
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono text-xs font-bold text-teal-600 dark:text-teal-400">
+                          {g.GRNNo
+                            ? g.GRNNo.startsWith("GRN-")
+                              ? g.GRNNo
+                              : `GRN-${g.GRNNo}`
+                            : "—"}
                         </span>
-                        {totalRemaining > 0 && (
-                          <span className="flex items-center gap-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded-md">
-                            <Clock size={9} />
-                            {totalRemaining} pending
+                        {g.Status && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground border border-border/50">
+                            {g.Status}
                           </span>
                         )}
-                        <span className="text-[10px] text-muted-foreground">
-                          {parsedItems.length}{" "}
-                          {parsedItems.length === 1 ? "item" : "items"}
-                        </span>
+                        {g.PONumber && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                            PO: {g.PONumber}
+                          </span>
+                        )}
                       </div>
-                    )}
-                  </div>
-                  <ChevronRight
-                    size={12}
-                    className="text-muted-foreground/30 shrink-0 mt-1"
-                  />
-                </button>
-              );
-            })
-          )
+                      <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
+                        {[g.SupplierName, g.GRNDate?.slice(0, 10)]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </p>
+                      {parsedItems.length > 0 && (
+                        <div className="flex items-center gap-3 mt-1.5">
+                          <span className="flex items-center gap-1 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded-md">
+                            <Package size={9} />
+                            {totalReceived} received
+                          </span>
+                          {totalRemaining > 0 && (
+                            <span className="flex items-center gap-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded-md">
+                              <Clock size={9} />
+                              {totalRemaining} pending
+                            </span>
+                          )}
+                          <span className="text-[10px] text-muted-foreground">
+                            {parsedItems.length}{" "}
+                            {parsedItems.length === 1 ? "item" : "items"}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <ChevronRight
+                      size={12}
+                      className="text-muted-foreground/30 shrink-0 mt-1"
+                    />
+                  </button>
+                );
+              })
+            )}
+          </>
         ) : filteredTOD.length === 0 ? (
           <EmptyState label="No other expense types found" />
         ) : (
@@ -1039,6 +1172,15 @@ export default function MaterialExpenseBooking() {
   const [previewRecord, setPreviewRecord] = useState<ExpenseRecord | null>(
     null,
   );
+  const [filteredGrnList, setFilteredGrnList] = useState<GRNItem[]>([]);
+  const [loadingFilteredGrn, setLoadingFilteredGrn] = useState(false);
+  const [grnFilter, setGrnFilter] = useState<{
+    companyId: number | null;
+    projectId: number | null;
+    supplierId: number | null;
+  }>({ companyId: null, projectId: null, supplierId: null });
+  const [suppliers, setSuppliers] = useState<{ id: number; label: string }[]>([]);
+  const [billingTerms, setBillingTerms] = useState<BillingTermOption[]>([]);
   const [tcOptions, setTcOptions] = useState<TCOption[]>([]);
 
   const isEditing = editingId !== null;
@@ -1056,6 +1198,22 @@ export default function MaterialExpenseBooking() {
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  const fetchFilteredGrns = useCallback((filter: { companyId: number | null; projectId: number | null; supplierId: number | null }) => {
+    setLoadingFilteredGrn(true);
+    const params = new URLSearchParams();
+    if (filter.companyId) params.set("companyId", String(filter.companyId));
+    if (filter.projectId) params.set("projectId", String(filter.projectId));
+    if (filter.supplierId) params.set("supplierId", String(filter.supplierId));
+    params.set("limit", "500");
+    apiFetch(`/api/grns?${params.toString()}`)
+      .then((r) => {
+        const list: GRNItem[] = Array.isArray(r) ? r : (r?.data ?? []);
+        setFilteredGrnList(list);
+      })
+      .catch(() => toast.error("Could not load filtered GRNs"))
+      .finally(() => setLoadingFilteredGrn(false));
   }, []);
 
   const fetchMasters = () => {
@@ -1145,6 +1303,16 @@ export default function MaterialExpenseBooking() {
     apiFetch("/api/enterprises/options?business_type=P")
       .then((list: ProjectOption[]) => setProjectOptions(list ?? []))
       .catch(() => {});
+    apiFetch("/api/enterprises/options?business_type=S")
+      .then((list: { id: number; label: string }[]) => setSuppliers(list ?? []))
+      .catch(() => {});
+    apiFetch("/api/billing-terms")
+      .then((list: BillingTermOption[]) =>
+        setBillingTerms(
+          (Array.isArray(list) ? list : []).filter((t) => t.IsActive !== false),
+        ),
+      )
+      .catch(() => {});
     apiFetch("/api/tc-master")
       .then((list: TCOption[]) => setTcOptions(Array.isArray(list) ? list : []))
       .catch(() => {});
@@ -1222,6 +1390,12 @@ export default function MaterialExpenseBooking() {
       cgstRate: cgst,
       sgstRate: sgst,
     }));
+    if (doc.kind === "GRN") {
+      setGrnFilter((prev) => ({
+        ...prev,
+        companyId: doc.companyId ?? prev.companyId,
+      }));
+    }
   };
 
   const clearDoc = () => {
@@ -1292,6 +1466,17 @@ export default function MaterialExpenseBooking() {
     setView("form");
   };
 
+  const handleDelete = async (id: string) => {
+    try {
+      await apiFetch(`${API}/${id}`, { method: "DELETE" });
+      toast.success("Expense booking deleted.");
+      setDeleteId(null);
+      await fetchRecords(page);
+    } catch (err: any) {
+      toast.error("Delete failed: " + err.message);
+    }
+  };
+
   const cancelForm = () => {
     setView("list");
     resetForm();
@@ -1332,6 +1517,10 @@ export default function MaterialExpenseBooking() {
     }
     if (!form.companyId) {
       toast.error("Please select a company.");
+      return;
+    }
+    if (form.emi.enabled && !form.paymentType) {
+      toast.error("Payment type is required for EMI bookings.");
       return;
     }
     if (
@@ -1651,6 +1840,14 @@ export default function MaterialExpenseBooking() {
                       loadingWO={loadingWO}
                       loadingTOD={loadingTOD}
                       loadingGRN={loadingGRN}
+                      companyOptions={companyOptions}
+                      projectOptions={projectOptions}
+                      suppliers={suppliers}
+                      grnFilter={grnFilter}
+                      setGrnFilter={setGrnFilter}
+                      filteredGrnList={filteredGrnList}
+                      loadingFilteredGrn={loadingFilteredGrn}
+                      fetchFilteredGrns={fetchFilteredGrns}
                       selected={selectedDoc}
                       finYear={form.financialYear || undefined}
                       filterCompanyId={form.companyId ?? null}
@@ -2032,6 +2229,24 @@ export default function MaterialExpenseBooking() {
               {!isGRN && (
                 <div className="space-y-3">
                   <SectionHeader label="EMI / Installment Options" />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <Field label="Payment Type" required>
+                      <Select
+                        value={form.paymentType || "full"}
+                        onValueChange={(value) =>
+                          set("paymentType", value as "full" | "partial")
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select payment type…" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="full">Full payment</SelectItem>
+                          <SelectItem value="partial">Partial payment (EMI)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                  </div>
                   <EmiSection
                     emi={form.emi}
                     netAmount={bd.netAmount}
@@ -2111,12 +2326,12 @@ export default function MaterialExpenseBooking() {
               </div>
 
               {/* Save row */}
-              <div className="flex justify-end gap-2 pt-2 border-t border-border">
-                <Button variant="outline" onClick={cancelForm}>
+              <div className="flex flex-col-reverse sm:flex-row justify-end gap-2 pt-4 border-t border-border">
+                <Button variant="outline" className="w-full sm:w-auto" onClick={cancelForm}>
                   Cancel
                 </Button>
                 <Button
-                  className="gradient-accent gap-1.5"
+                  className="gradient-accent gap-1.5 w-full sm:w-auto"
                   onClick={handleSave}
                   disabled={saving}
                 >
@@ -2222,7 +2437,7 @@ export default function MaterialExpenseBooking() {
                 {/* Desktop table */}
                 <Card className="hidden sm:block border-border shadow-sm">
                   <CardContent className="p-0">
-                    <div className="rounded-md overflow-auto">
+                    <div className="rounded-md overflow-x-auto">
                       <Table>
                         <TableHeader>
                           <TableRow className="bg-muted/30">
@@ -2315,7 +2530,7 @@ export default function MaterialExpenseBooking() {
                                       recordId={rec.id}
                                       endpoint="/api/expense-booking"
                                       submitOnly
-                                      onSuccess={fetchRecords}
+                                      onSuccess={() => fetchRecords(page)}
                                     />
                                     <Button
                                       variant="outline"
@@ -2375,7 +2590,7 @@ export default function MaterialExpenseBooking() {
                     <p className="text-xs text-muted-foreground text-center sm:text-left">
                       Page {page} of {totalPages} · {totalRecords} total
                     </p>
-                    <div className="flex items-center gap-1">
+                    <div className="flex flex-wrap items-center justify-center gap-1 mt-2 sm:mt-0">
                       <button
                         onClick={() => fetchRecords(Math.max(1, page - 1))}
                         disabled={page === 1}
@@ -2453,122 +2668,322 @@ export default function MaterialExpenseBooking() {
               Details for booking {previewRecord?.bookingReference}
             </DialogDescription>
           </DialogHeader>
-          {previewRecord && (
-            <div className="space-y-4 py-4">
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                <div>
-                  <p className="text-xs text-muted-foreground uppercase">
-                    Reference
-                  </p>
-                  <p className="font-medium">
-                    {previewRecord.bookingReference || "—"}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground uppercase">
-                    Status
-                  </p>
-                  <div className="mt-1">
-                    <StatusBadge status={previewRecord.status} />
-                  </div>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground uppercase">
-                    Date
-                  </p>
-                  <p className="font-medium">{previewRecord.bookingDate}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground uppercase">
-                    Supplier
-                  </p>
-                  <p className="font-medium">{previewRecord.supplier || "—"}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground uppercase">
-                    Type
-                  </p>
-                  <p className="font-medium">
-                    {previewRecord.docTypeName || "—"}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground uppercase">
-                    Net Amount
-                  </p>
-                  <p className="font-medium text-emerald-600 dark:text-emerald-400">
-                    ₹{fmt(previewRecord.netAmount ?? 0)}
-                  </p>
-                </div>
-              </div>
-              <div className="border-t border-border pt-4">
-                <p className="text-xs text-muted-foreground uppercase mb-3">
-                  Breakdown
-                </p>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 bg-muted/20 p-4 rounded-lg border border-border">
+          {previewRecord && (() => {
+            const hasEmi = !!(previewRecord.emi?.enabled && previewRecord.emi?.installmentCount);
+            return (
+              <>
+                <div className="px-4 sm:px-6 py-4 sm:py-5 space-y-5">
+
+                  {/* ── Section 1: Booking Info ── */}
                   <div>
-                    <p className="text-[10px] text-muted-foreground uppercase">
-                      Basic
+                    <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
+                      <CalendarDays size={10} className="text-primary" /> Booking Information
                     </p>
-                    <p className="font-mono text-sm font-semibold">
-                      ₹{fmt(previewRecord.basicAmount)}
-                    </p>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-4">
+                      <div className="space-y-0.5">
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Booking Date</p>
+                        <p className="text-sm font-medium">{previewRecord.bookingDate || "—"}</p>
+                      </div>
+                      <div className="space-y-0.5">
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Due Date</p>
+                        <p className="text-sm font-medium">{previewRecord.dueDate || "—"}</p>
+                      </div>
+                      <div className="space-y-0.5">
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Document Type</p>
+                        <p className="text-sm font-medium truncate">{previewRecord.docTypeName || previewRecord.materialCategory || "—"}</p>
+                      </div>
+                      <div className="space-y-0.5">
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Source Document</p>
+                        <p className="text-sm font-mono font-semibold text-foreground">{previewRecord.sourceDocNo || previewRecord.purchaseOrderId ? `PO-${previewRecord.purchaseOrderId}` : previewRecord.workOrderId ? `WO-${previewRecord.workOrderId}` : "—"}</p>
+                      </div>
+                      <div className="space-y-0.5">
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Company</p>
+                        <p className="text-sm font-medium truncate">{previewRecord.companyName || (previewRecord.companyId ? `Company #${previewRecord.companyId}` : "—")}</p>
+                      </div>
+                      <div className="space-y-0.5">
+                        <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Project</p>
+                        <p className="text-sm font-medium truncate">{previewRecord.projectName || (previewRecord.projectId ? `Project #${previewRecord.projectId}` : "—")}</p>
+                      </div>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-[10px] text-muted-foreground uppercase">
-                      CGST ({previewRecord.cgstRate}%)
+
+                  {/* ── Section 2: Vendor / Supplier ── */}
+                  <div className="border-t border-border/60 pt-4">
+                    <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
+                      <Truck size={10} className="text-primary" /> Vendor / Supplier
                     </p>
-                    <p className="font-mono text-sm font-semibold">
-                      ₹
-                      {fmt(
-                        (previewRecord.basicAmount *
-                          (previewRecord.cgstRate || 0)) /
-                          100,
+                    <div className="flex flex-col sm:flex-row gap-3">
+                      <div className="flex-1 flex items-center gap-3 bg-muted/30 border border-border rounded-xl px-4 py-3">
+                        <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                          <User size={14} className="text-primary" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Supplier / Contractor</p>
+                          <p className="text-sm font-semibold truncate">{previewRecord.supplier || "—"}</p>
+                        </div>
+                      </div>
+                      {previewRecord.materialCategory && (
+                        <div className="flex-1 flex items-center gap-3 bg-muted/30 border border-border rounded-xl px-4 py-3">
+                          <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center shrink-0">
+                            <Package size={14} className="text-blue-500" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Material Category</p>
+                            <p className="text-sm font-semibold truncate">{previewRecord.materialCategory}</p>
+                          </div>
+                        </div>
                       )}
-                    </p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-[10px] text-muted-foreground uppercase">
-                      SGST ({previewRecord.sgstRate}%)
-                    </p>
-                    <p className="font-mono text-sm font-semibold">
-                      ₹
-                      {fmt(
-                        (previewRecord.basicAmount *
-                          (previewRecord.sgstRate || 0)) /
-                          100,
+
+                  {/* Compute breakdown for preview */}
+                  {(() => {
+                    const rbd = computeBreakdown(
+                      previewRecord.basicAmount,
+                      previewRecord.cgstRate,
+                      previewRecord.sgstRate,
+                      previewRecord.discount,
+                    );
+                    const hasIgst = (previewRecord.igstRate || 0) > 0;
+                    const hasDiscount = previewRecord.discount && (previewRecord.discount.value || 0) > 0;
+                    const cgstAmt = (rbd as any).cgstAmt ?? (previewRecord.basicAmount * (previewRecord.cgstRate || 0)) / 100;
+                    const sgstAmt = (rbd as any).sgstAmt ?? (previewRecord.basicAmount * (previewRecord.sgstRate || 0)) / 100;
+                    const igstAmt = (rbd as any).igstAmt ?? (previewRecord.basicAmount * (previewRecord.igstRate || 0)) / 100;
+
+                    return (
+                      <>
+                        {/* ── Section 3: Amount Breakdown ── */}
+                        <div className="border-t border-border/60 pt-4">
+                          <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
+                            <Banknote size={10} className="text-primary" /> Amount Breakdown
+                          </p>
+                          <div className="rounded-xl border border-border overflow-hidden">
+                            {/* Breakdown rows */}
+                            <div className="divide-y divide-border/60">
+                              <div className="flex items-center justify-between px-4 py-2.5 bg-muted/10">
+                                <p className="text-xs text-muted-foreground">Basic Amount</p>
+                                <p className="font-mono text-sm font-semibold">₹{fmt(previewRecord.basicAmount)}</p>
+                              </div>
+                              {!hasIgst && (previewRecord.cgstRate || 0) > 0 && (
+                                <div className="flex items-center justify-between px-4 py-2.5">
+                                  <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                                    <BadgePercent size={10} className="text-amber-500" />
+                                    CGST <span className="font-mono text-[10px] bg-amber-500/10 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded">{previewRecord.cgstRate}%</span>
+                                  </p>
+                                  <p className="font-mono text-sm text-foreground/80">+ ₹{fmt(cgstAmt)}</p>
+                                </div>
+                              )}
+                              {!hasIgst && (previewRecord.sgstRate || 0) > 0 && (
+                                <div className="flex items-center justify-between px-4 py-2.5">
+                                  <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                                    <BadgePercent size={10} className="text-amber-500" />
+                                    SGST <span className="font-mono text-[10px] bg-amber-500/10 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded">{previewRecord.sgstRate}%</span>
+                                  </p>
+                                  <p className="font-mono text-sm text-foreground/80">+ ₹{fmt(sgstAmt)}</p>
+                                </div>
+                              )}
+                              {hasIgst && (
+                                <div className="flex items-center justify-between px-4 py-2.5">
+                                  <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                                    <BadgePercent size={10} className="text-amber-500" />
+                                    IGST <span className="font-mono text-[10px] bg-amber-500/10 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded">{previewRecord.igstRate}%</span>
+                                  </p>
+                                  <p className="font-mono text-sm text-foreground/80">+ ₹{fmt(igstAmt)}</p>
+                                </div>
+                              )}
+                              {!hasIgst && (previewRecord.cgstRate || 0) === 0 && (previewRecord.sgstRate || 0) === 0 && (
+                                <div className="flex items-center justify-between px-4 py-2.5">
+                                  <p className="text-xs text-muted-foreground">GST</p>
+                                  <p className="text-xs text-muted-foreground">Not applicable</p>
+                                </div>
+                              )}
+                              {hasDiscount && (
+                                <div className="flex items-center justify-between px-4 py-2.5 bg-red-500/5">
+                                  <p className="text-xs text-red-600 dark:text-red-400 flex items-center gap-1.5">
+                                    <TrendingUp size={10} />
+                                    Discount
+                                    {previewRecord.discount?.type === "percentage" && previewRecord.discount?.value
+                                      ? <span className="font-mono text-[10px] bg-red-500/10 px-1.5 py-0.5 rounded">{previewRecord.discount.value}%</span>
+                                      : null}
+                                  </p>
+                                  <p className="font-mono text-sm text-red-500 dark:text-red-400">− ₹{fmt((rbd as any).discountAmount)}</p>
+                                </div>
+                              )}
+                            </div>
+                            {/* Total row */}
+                            <div className="flex items-center justify-between px-4 py-3 bg-primary/10 border-t border-primary/20">
+                              <p className="text-xs font-heading font-bold text-primary uppercase tracking-wider">Net Payable</p>
+                              <p className="font-mono text-base font-bold text-primary">₹{fmt(previewRecord.netAmount ?? rbd.netAmount)}</p>
+                            </div>
+                          </div>
+
+                          {/* GST type pill */}
+                          {(previewRecord.cgstRate || previewRecord.sgstRate || previewRecord.igstRate) ? (
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-700 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full">
+                                <BadgePercent size={9} />
+                                {hasIgst ? `IGST @ ${previewRecord.igstRate}%` : `CGST ${previewRecord.cgstRate}% + SGST ${previewRecord.sgstRate}%`}
+                              </span>
+                              <span className="inline-flex items-center gap-1 text-[10px] font-medium text-foreground/60 bg-muted/40 border border-border px-2 py-0.5 rounded-full">
+                                Total Tax: ₹{fmt(cgstAmt + sgstAmt + igstAmt)}
+                              </span>
+                            </div>
+                          ) : null}
+                        </div>
+                      </>
+                    );
+                  })()}
+
+                  {/* ── Section 4: EMI Details ── */}
+                  {hasEmi && (
+                    <div className="border-t border-border/60 pt-4">
+                      <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
+                        <CreditCard size={10} className="text-primary" /> EMI / Installment Plan
+                      </p>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                        <div className="bg-violet-500/5 border border-violet-500/20 rounded-xl p-3 text-center">
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Installments</p>
+                          <p className="font-mono text-lg font-bold text-violet-600 dark:text-violet-400">{previewRecord.emi!.installmentCount}</p>
+                          <p className="text-[10px] text-muted-foreground">total</p>
+                        </div>
+                        <div className="bg-violet-500/5 border border-violet-500/20 rounded-xl p-3 text-center">
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Per EMI</p>
+                          <p className="font-mono text-base font-bold text-violet-600 dark:text-violet-400">₹{fmt(previewRecord.emi!.emiAmount ?? 0)}</p>
+                          <p className="text-[10px] text-muted-foreground">amount</p>
+                        </div>
+                        <div className="bg-muted/30 border border-border rounded-xl p-3 text-center">
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Start Date</p>
+                          <p className="text-sm font-semibold">{previewRecord.emi!.startDate || "—"}</p>
+                          <p className="text-[10px] text-muted-foreground">first emi</p>
+                        </div>
+                        <div className="bg-muted/30 border border-border rounded-xl p-3 text-center">
+                          <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">Frequency</p>
+                          <p className="text-sm font-semibold capitalize">{previewRecord.emi!.frequency || "Monthly"}</p>
+                          <p className="text-[10px] text-muted-foreground">cycle</p>
+                        </div>
+                      </div>
+                      {previewRecord.emi!.installmentCount && previewRecord.emi!.emiAmount && (
+                        <div className="mt-2 flex items-center gap-2 text-[10px] text-muted-foreground bg-muted/20 border border-border/50 rounded-lg px-3 py-2">
+                          <Hash size={10} className="shrink-0" />
+                          Total via EMI: <span className="font-mono font-semibold text-foreground">₹{fmt(previewRecord.emi!.emiAmount * previewRecord.emi!.installmentCount)}</span>
+                          <span className="mx-1">·</span>
+                          Remaining: <span className="font-mono font-semibold text-foreground">₹{fmt(Math.max(0, (previewRecord.netAmount ?? 0) - previewRecord.emi!.emiAmount * previewRecord.emi!.installmentCount))}</span>
+                        </div>
                       )}
+                    </div>
+                  )}
+
+                  {/* ── Section 5: GRN Items ── */}
+                  {previewRecord.grnItems && Array.isArray(previewRecord.grnItems) && previewRecord.grnItems.length > 0 && (
+                    <div className="border-t border-border/60 pt-4">
+                      <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
+                        <Truck size={10} className="text-primary" /> GRN Items Summary
+                        <span className="ml-auto font-mono text-[10px] bg-muted px-1.5 py-0.5 rounded-full border border-border">{previewRecord.grnItems.length} items</span>
+                      </p>
+                      <div className="rounded-xl border border-border overflow-hidden">
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="bg-muted/40 border-b border-border">
+                                <th className="text-left px-3 py-2 text-[10px] font-heading uppercase tracking-wider text-muted-foreground">Item</th>
+                                <th className="text-right px-3 py-2 text-[10px] font-heading uppercase tracking-wider text-muted-foreground">Ordered</th>
+                                <th className="text-right px-3 py-2 text-[10px] font-heading uppercase tracking-wider text-muted-foreground">Received</th>
+                                <th className="text-right px-3 py-2 text-[10px] font-heading uppercase tracking-wider text-muted-foreground hidden sm:table-cell">Remaining</th>
+                                <th className="text-left px-3 py-2 text-[10px] font-heading uppercase tracking-wider text-muted-foreground hidden sm:table-cell">UOM</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-border/50">
+                              {(previewRecord.grnItems as GRNItemLine[]).map((item, idx) => (
+                                <tr key={idx} className="hover:bg-muted/20">
+                                  <td className="px-3 py-2.5 font-medium max-w-[140px] truncate">{item.itemName || `Item ${idx + 1}`}</td>
+                                  <td className="px-3 py-2.5 text-right font-mono text-muted-foreground">{item.orderedQty}</td>
+                                  <td className="px-3 py-2.5 text-right font-mono text-emerald-600 dark:text-emerald-400 font-semibold">{item.receivedQty}</td>
+                                  <td className="px-3 py-2.5 text-right font-mono hidden sm:table-cell">
+                                    <span className={item.remainingQty > 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}>
+                                      {item.remainingQty}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-2.5 text-muted-foreground hidden sm:table-cell">{item.uom || "—"}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── Section 6: Billing Terms ── */}
+                  {previewRecord.billingTerms && (
+                    <div className="border-t border-border/60 pt-4">
+                      <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
+                        <Receipt size={10} className="text-primary" /> Billing Terms
+                      </p>
+                      <div className="bg-muted/20 border border-border rounded-xl px-4 py-3 text-sm text-foreground">
+                        {previewRecord.billingTerms}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── Section 7: Remarks ── */}
+                  {previewRecord.remarks && (
+                    <div className="border-t border-border/60 pt-4">
+                      <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
+                        <StickyNote size={10} className="text-primary" /> Remarks
+                      </p>
+                      <div className="bg-muted/20 border border-border rounded-xl px-4 py-3 text-sm text-foreground leading-relaxed">
+                        {previewRecord.remarks}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── Section 8: Approval Status ── */}
+                  <div className="border-t border-border/60 pt-4">
+                    <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
+                      <CheckCircle2 size={10} className="text-primary" /> Approval Status
                     </p>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <div className="flex items-center gap-2 bg-muted/30 border border-border rounded-xl px-4 py-2.5">
+                        <StatusBadge status={previewRecord.status} />
+                        <span className="text-xs text-muted-foreground">Current Status</span>
+                      </div>
+                      {previewRecord.status === "Approved" && (
+                        <div className="flex items-center gap-1.5 text-[10px] text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-2 rounded-xl">
+                          <CheckCircle2 size={11} /> Approved & Processed
+                        </div>
+                      )}
+                      {previewRecord.status === "Pending" && (
+                        <div className="flex items-center gap-1.5 text-[10px] text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 px-3 py-2 rounded-xl">
+                          <Clock size={11} /> Awaiting Approval
+                        </div>
+                      )}
+                      {previewRecord.status === "Rejected" && (
+                        <div className="flex items-center gap-1.5 text-[10px] text-red-600 dark:text-red-400 bg-red-500/10 border border-red-500/20 px-3 py-2 rounded-xl">
+                          <AlertCircle size={11} /> Rejected — Review Required
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-[10px] text-muted-foreground uppercase">
-                      Discount
-                    </p>
-                    <p className="font-mono text-sm font-semibold text-red-500">
-                      {previewRecord.discount?.applicable
-                        ? `-₹${fmt(previewRecord.discount.amount)}`
-                        : "—"}
-                    </p>
+
+                </div>
+
+                {/* Footer */}
+                <div className="border-t border-border px-4 sm:px-6 py-3 flex flex-col-reverse sm:flex-row items-center justify-between gap-2 bg-muted/10">
+                  <p className="text-[10px] text-muted-foreground">
+                    ID: <span className="font-mono">{previewRecord.id || "—"}</span>
+                  </p>
+                  <div className="flex gap-2 w-full sm:w-auto">
+                    <Button variant="outline" className="flex-1 sm:flex-none h-8 text-xs" onClick={() => { setPreviewRecord(null); openEdit(previewRecord); }}>
+                      <Edit size={11} className="mr-1.5" /> Edit
+                    </Button>
+                    <Button variant="outline" className="flex-1 sm:flex-none h-8 text-xs" onClick={() => setPreviewRecord(null)}>
+                      Close
+                    </Button>
                   </div>
                 </div>
-              </div>
-              {previewRecord.remarks && (
-                <div className="border-t border-border pt-4">
-                  <p className="text-xs text-muted-foreground uppercase mb-2">
-                    Remarks
-                  </p>
-                  <p className="text-sm bg-muted/30 p-3 rounded-lg border border-border">
-                    {previewRecord.remarks}
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setPreviewRecord(null)}>
-              Close
-            </Button>
-          </DialogFooter>
+              </>
+            );
+          })()}
         </DialogContent>
       </Dialog>
     </>
