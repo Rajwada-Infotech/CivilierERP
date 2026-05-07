@@ -300,6 +300,18 @@ describe("Expense Booking Routes (/api/expense-booking)", function () {
     expect([200, 401]).toContain(res.status);
   });
 
+  it("GET /chain-status is matched before /:id", async function () {
+    dbReturns([]);
+    var res = await request(await getApp())
+      .get("/api/expense-booking/chain-status?sourceType=GRN&sourceId=17")
+      .set(authHeader(token));
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({
+      expenseCount: 0,
+      isPaid: false,
+    });
+  });
+
   it("POST / with empty body returns 400, 201, or 500", async function () {
     // TODO: add Zod validation; tighten to expect(400) once done
     var res = await request(await getApp())
@@ -318,5 +330,28 @@ describe("Expense Booking Routes (/api/expense-booking)", function () {
     dbReturns([{ Eid: 1 }]);
     var res = await request(await getApp()).delete("/api/expense-booking/1");
     expect([401, 200, 500]).toContain(res.status);
+  });
+});
+
+// â”€â”€â”€ Material Issue Routes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+describe("Material Issue Routes (/api/material-issues)", function () {
+  var token;
+  beforeAll(function () { token = makeToken(); });
+  beforeEach(function () { resetPool(); dbReturns([{ total: 0 }]); });
+
+  it("GET / handles an empty search without using enterprise label columns", async function () {
+    var res = await request(await getApp())
+      .get("/api/material-issues?page=1&limit=10&search=")
+      .set(authHeader(token));
+
+    expect(res.status).toBe(200);
+
+    var queries = mockPool.request.mock.results.flatMap(function (result) {
+      var req = result.value;
+      return req && req.query ? req.query.mock.calls.map(function (call) { return call[0]; }) : [];
+    });
+    expect(queries.join("\n")).toContain("c.name as CompanyName");
+    expect(queries.join("\n")).not.toContain("c.label");
   });
 });
