@@ -18,11 +18,11 @@ import {
   Percent,
   ToggleLeft,
   ToggleRight,
-  Link2,
   AlertCircle,
   BookOpen,
-  Clock,
-  BadgePercent,
+  Plus,
+  Trash2,
+  Layers,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -33,18 +33,17 @@ import { Field, PriceBreakdownPanel } from "./FormPrimitives";
 import { computeBreakdown, defaultDiscount, fmt } from "./helpers";
 import type { DiscountConfig } from "./types";
 
-// ─── MasterTermPicker ─────────────────────────────────────────────────────────
+// ─── helpers ──────────────────────────────────────────────────────────────────
 
-const BILL_TYPE_COLORS: Record<string, string> = {
-  "Tax Invoice": "bg-blue-100 text-blue-700 border-blue-200",
-  "Proforma Invoice": "bg-violet-100 text-violet-700 border-violet-200",
-  "Credit Note": "bg-emerald-100 text-emerald-700 border-emerald-200",
-  "Debit Note": "bg-orange-100 text-orange-700 border-orange-200",
-  "Bill of Supply": "bg-amber-100 text-amber-700 border-amber-200",
-  "Receipt Voucher": "bg-cyan-100 text-cyan-700 border-cyan-200",
-  "Delivery Challan": "bg-pink-100 text-pink-700 border-pink-200",
-  "Self Invoice": "bg-slate-100 text-slate-700 border-slate-200",
-};
+function makeKey() {
+  return `bt-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function newTerm(): DiscountConfig {
+  return { ...defaultDiscount(), applicable: true, _key: makeKey() };
+}
+
+// ─── MasterTermPicker ─────────────────────────────────────────────────────────
 
 function MasterTermPicker({
   open,
@@ -127,14 +126,186 @@ function MasterTermPicker({
   );
 }
 
+// ─── SingleTermRow ─────────────────────────────────────────────────────────────
+
+function SingleTermRow({
+  term,
+  index,
+  total,
+  basicAmount,
+  runningBase,
+  onUpdate,
+  onRemove,
+  onPickMaster,
+}: {
+  term: DiscountConfig;
+  index: number;
+  total: number;
+  basicAmount: number;
+  runningBase: number;
+  onUpdate: (updated: DiscountConfig) => void;
+  onRemove: () => void;
+  onPickMaster: () => void;
+}) {
+  const [expanded, setExpanded] = useState(true);
+
+  const discountAmount = term.applicable
+    ? term.type === "percentage"
+      ? (runningBase * term.value) / 100
+      : term.value
+    : 0;
+  const afterThisTerm = Math.max(0, runningBase - discountAmount);
+
+  return (
+    <div className="rounded-xl border border-border overflow-hidden">
+      {/* Row header */}
+      <div className="flex items-center justify-between gap-2 px-3 py-2.5 bg-muted/30">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="flex items-center justify-center w-5 h-5 rounded-full bg-primary/10 text-[10px] font-heading font-semibold text-primary shrink-0">
+            {index + 1}
+          </span>
+          <div className="min-w-0">
+            <p className="text-xs font-heading font-semibold text-foreground truncate">
+              {term.masterTermName ?? `Term ${index + 1}`}
+            </p>
+            {term.applicable && basicAmount > 0 && (
+              <p className="text-[10px] text-muted-foreground">
+                −₹{fmt(discountAmount)} → base ₹{fmt(afterThisTerm)}
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            type="button"
+            onClick={onPickMaster}
+            className="flex items-center gap-1 text-[11px] text-primary hover:underline"
+          >
+            <BookOpen size={11} />
+            {term.masterTermName ? "Change" : "From Master"}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onUpdate({ ...term, applicable: !term.applicable })}
+            className="flex items-center gap-1 text-[11px] font-medium transition-colors"
+          >
+            {term.applicable ? (
+              <>
+                <ToggleRight size={15} className="text-primary" />
+                <span className="text-primary hidden sm:inline">On</span>
+              </>
+            ) : (
+              <>
+                <ToggleLeft size={15} className="text-muted-foreground" />
+                <span className="text-muted-foreground hidden sm:inline">
+                  Off
+                </span>
+              </>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setExpanded((v) => !v)}
+            className="text-muted-foreground hover:text-foreground transition-colors"
+          >
+            {expanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+          </button>
+
+          {total > 1 && (
+            <button
+              type="button"
+              onClick={onRemove}
+              className="text-destructive/60 hover:text-destructive transition-colors"
+            >
+              <Trash2 size={13} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {expanded && (
+        <div className="border-t border-border bg-card p-3 space-y-3">
+          {!term.applicable ? (
+            <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-4 flex flex-col items-center gap-1.5 text-center">
+              <Tag size={15} className="text-muted-foreground/40" />
+              <p className="text-[11px] text-muted-foreground">
+                Toggle on to configure this discount term
+              </p>
+            </div>
+          ) : (
+            <>
+              <Field label="Discount Type">
+                <div className="grid grid-cols-2 gap-2">
+                  {(["percentage", "fixed"] as const).map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => onUpdate({ ...term, type: t })}
+                      className={
+                        "rounded-lg border px-3 py-1.5 text-xs font-heading font-semibold transition-all " +
+                        (term.type === t
+                          ? "border-primary bg-primary/[0.07] text-primary ring-1 ring-primary/20"
+                          : "border-border bg-background text-muted-foreground hover:border-primary/30")
+                      }
+                    >
+                      {t === "percentage"
+                        ? "Percentage (%)"
+                        : "Fixed Amount (₹)"}
+                    </button>
+                  ))}
+                </div>
+              </Field>
+
+              <Field
+                label={
+                  term.type === "percentage"
+                    ? "Discount %"
+                    : "Discount Amount (₹)"
+                }
+              >
+                <div className="relative">
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs">
+                    {term.type === "percentage" ? <Percent size={11} /> : "₹"}
+                  </span>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={term.type === "percentage" ? 100 : undefined}
+                    value={term.value || ""}
+                    onChange={(e) =>
+                      onUpdate({
+                        ...term,
+                        value: parseFloat(e.target.value) || 0,
+                      })
+                    }
+                    className="pl-8 h-8 text-sm"
+                    placeholder="0"
+                  />
+                </div>
+              </Field>
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── BillingAccordion ─────────────────────────────────────────────────────────
 
 interface Props {
   basicAmount: number;
   cgstRate: number;
   sgstRate: number;
+  /** Legacy single-term (kept for backward compat) */
   discount: DiscountConfig;
+  /** Multi-term list — the primary prop going forward */
+  billingTerms?: DiscountConfig[];
   onChange: (d: DiscountConfig) => void;
+  onChangeBillingTerms?: (terms: DiscountConfig[]) => void;
 }
 
 export function BillingAccordion({
@@ -142,70 +313,109 @@ export function BillingAccordion({
   cgstRate,
   sgstRate,
   discount,
+  billingTerms,
   onChange,
+  onChangeBillingTerms,
 }: Props) {
   const { activeBillingTerms = [] } = useBillingTerms();
-  const [open, setOpen] = useState(discount.applicable);
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const [open, setOpen] = useState(true);
 
-  const bd = computeBreakdown(basicAmount, cgstRate, sgstRate, discount);
-  const hasBase = basicAmount > 0;
+  const isMulti = onChangeBillingTerms !== undefined;
 
-  const toggle = (applicable: boolean) => {
-    onChange({ ...discount, applicable });
-    if (applicable) setOpen(true);
+  const terms: DiscountConfig[] =
+    isMulti && billingTerms && billingTerms.length > 0
+      ? billingTerms
+      : isMulti
+        ? [{ ...discount, _key: discount._key ?? makeKey() }]
+        : [discount];
+
+  const setTerms = (next: DiscountConfig[]) => {
+    if (isMulti && onChangeBillingTerms) {
+      onChangeBillingTerms(next);
+      const first =
+        next.find((t) => t.applicable) ?? next[0] ?? defaultDiscount();
+      onChange(first);
+    } else {
+      onChange(next[0] ?? defaultDiscount());
+    }
   };
 
-  const applyMasterTerm = (term: MasterBillingTerm) => {
-    const hasDiscount = term.discountType !== "none" && term.discountValue > 0;
-    const mapped: DiscountConfig = {
+  const [pickerForIndex, setPickerForIndex] = useState<number | null>(null);
+
+  const applyMasterTerm = (masterTerm: MasterBillingTerm, idx: number) => {
+    const hasDiscount =
+      masterTerm.discountType !== "none" && masterTerm.discountValue > 0;
+    const updated: DiscountConfig = {
+      ...terms[idx],
       applicable: hasDiscount,
-      type: term.discountType === "flat" ? "fixed" : "percentage",
-      value: hasDiscount ? term.discountValue : 0,
+      type: masterTerm.discountType === "flat" ? "fixed" : "percentage",
+      value: hasDiscount ? masterTerm.discountValue : 0,
       appliedOn: "pre-gst",
-      masterTermId: term._id,
-      masterTermName: term.name,
+      masterTermId: masterTerm._id,
+      masterTermName: masterTerm.name,
     };
-    onChange(mapped);
-    if (hasDiscount) setOpen(true);
-    toast.success(`Billing term "${term.name}" applied!`);
-    setPickerOpen(false);
+    setTerms(terms.map((t, i) => (i === idx ? updated : t)));
+    toast.success(`Billing term "${masterTerm.name}" applied!`);
   };
 
-  const clearMasterTerm = () => {
-    onChange(defaultDiscount());
-    toast.info("Master billing term cleared.");
+  const addTerm = () => setTerms([...terms, newTerm()]);
+  const removeTerm = (idx: number) => {
+    const next = terms.filter((_, i) => i !== idx);
+    setTerms(next.length > 0 ? next : [newTerm()]);
   };
+  const updateTerm = (idx: number, updated: DiscountConfig) =>
+    setTerms(terms.map((t, i) => (i === idx ? updated : t)));
+
+  const bd = computeBreakdown(basicAmount, cgstRate, sgstRate, terms);
+  const hasBase = basicAmount > 0;
+  const activeCount = terms.filter((t) => t.applicable).length;
+
+  // Running base amounts for per-row display
+  const runningBases: number[] = [];
+  let rb = basicAmount;
+  for (const t of terms) {
+    runningBases.push(rb);
+    if (t.applicable) {
+      const d = t.type === "percentage" ? (rb * t.value) / 100 : t.value;
+      rb = Math.max(0, rb - d);
+    }
+  }
 
   return (
     <>
       <MasterTermPicker
-        open={pickerOpen}
-        onClose={() => setPickerOpen(false)}
+        open={pickerForIndex !== null}
+        onClose={() => setPickerForIndex(null)}
         terms={activeBillingTerms}
-        onSelect={applyMasterTerm}
+        onSelect={(masterTerm) => {
+          if (pickerForIndex !== null)
+            applyMasterTerm(masterTerm, pickerForIndex);
+          setPickerForIndex(null);
+        }}
       />
 
       <div className="rounded-xl border border-border overflow-hidden">
-        {/* Header */}
+        {/* ── Section Header ── */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-4 py-3.5 bg-muted/40">
           <div className="flex items-center gap-2.5 min-w-0">
             <div className="flex items-center justify-center w-7 h-7 rounded-lg bg-primary/10 shrink-0">
               <Receipt size={14} className="text-primary" />
             </div>
             <div className="min-w-0">
-              <p className="text-sm font-heading font-semibold text-foreground">
+              <p className="text-sm font-heading font-semibold text-foreground flex items-center gap-1.5">
                 Billing Terms
+                {isMulti && terms.length > 1 && (
+                  <span className="inline-flex items-center gap-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-heading px-1.5 py-0.5 border border-primary/20">
+                    <Layers size={9} />
+                    {terms.length}
+                  </span>
+                )}
               </p>
               <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
-                {discount.masterTermName ? (
+                {activeCount > 0 && hasBase ? (
                   <span className="text-primary font-medium">
-                    From master: {discount.masterTermName}
-                  </span>
-                ) : discount.applicable ? (
-                  <span className="text-primary font-medium">
-                    Discount applied · Net Rs.{" "}
-                    {hasBase ? fmt(bd.netAmount) : "-"}
+                    {activeCount} term{activeCount > 1 ? "s" : ""} applied · Net
+                    ₹{fmt(bd.netAmount)}
                   </span>
                 ) : (
                   "No discount / master term applied"
@@ -215,45 +425,18 @@ export function BillingAccordion({
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              onClick={() => setPickerOpen(true)}
-              className="h-7 gap-1.5 text-xs border-primary/30 text-primary hover:bg-primary/[0.06]"
-            >
-              <BookOpen size={12} />
-              {discount.masterTermName ? "Change Term" : "Pick from Master"}
-            </Button>
-
-            {discount.masterTermName && (
-              <button
+            {isMulti && (
+              <Button
                 type="button"
-                onClick={clearMasterTerm}
-                className="flex items-center gap-1 text-[11px] text-destructive hover:underline"
+                variant="outline"
+                size="sm"
+                onClick={addTerm}
+                className="h-7 gap-1.5 text-xs border-primary/30 text-primary hover:bg-primary/[0.06]"
               >
-                <X size={10} /> Clear
-              </button>
+                <Plus size={11} />
+                Add Term
+              </Button>
             )}
-
-            <button
-              type="button"
-              onClick={() => toggle(!discount.applicable)}
-              className="flex items-center gap-1.5 text-xs font-medium transition-colors"
-            >
-              {discount.applicable ? (
-                <>
-                  <ToggleRight size={18} className="text-primary" />
-                  <span className="text-primary">Discount On</span>
-                </>
-              ) : (
-                <>
-                  <ToggleLeft size={18} className="text-muted-foreground" />
-                  <span className="text-muted-foreground">Discount Off</span>
-                </>
-              )}
-            </button>
-
             <button
               type="button"
               onClick={() => setOpen((v) => !v)}
@@ -264,80 +447,111 @@ export function BillingAccordion({
           </div>
         </div>
 
-        {/* Body */}
+        {/* ── Body ── */}
         {open && (
           <div className="border-t border-border bg-card">
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-0 divide-y lg:divide-y-0 lg:divide-x divide-border">
-              {/* Left: Discount Config */}
-              <div className="p-4 space-y-4">
+              {/* Left: Term list */}
+              <div className="p-4 space-y-3">
                 <p className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
-                  Discount Configuration
+                  {isMulti ? "Discount Terms" : "Discount Configuration"}
                 </p>
 
-                {!discount.applicable && (
-                  <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-5 flex flex-col items-center gap-2 text-center">
-                    <Tag size={18} className="text-muted-foreground/40" />
-                    <p className="text-xs text-muted-foreground">
-                      Toggle discount on or pick a term from master
-                    </p>
-                  </div>
-                )}
+                {isMulti ? (
+                  <div className="space-y-2">
+                    {terms.map((term, idx) => (
+                      <SingleTermRow
+                        key={term._key ?? idx}
+                        term={term}
+                        index={idx}
+                        total={terms.length}
+                        basicAmount={basicAmount}
+                        runningBase={runningBases[idx] ?? basicAmount}
+                        onUpdate={(updated) => updateTerm(idx, updated)}
+                        onRemove={() => removeTerm(idx)}
+                        onPickMaster={() => setPickerForIndex(idx)}
+                      />
+                    ))}
 
-                {discount.applicable && (
-                  <div className="space-y-4">
-                    <Field label="Discount Type">
-                      <div className="grid grid-cols-2 gap-2">
-                        {(["percentage", "fixed"] as const).map((t) => (
-                          <button
-                            key={t}
-                            type="button"
-                            onClick={() => onChange({ ...discount, type: t })}
-                            className={
-                              "rounded-lg border px-3 py-2 text-xs font-heading font-semibold transition-all " +
-                              (discount.type === t
-                                ? "border-primary bg-primary/[0.07] text-primary ring-1 ring-primary/20"
-                                : "border-border bg-background text-muted-foreground hover:border-primary/30")
-                            }
-                          >
-                            {t === "percentage"
-                              ? "Percentage (%)"
-                              : "Fixed Amount (Rs.)"}
-                          </button>
-                        ))}
-                      </div>
-                    </Field>
-
-                    <Field
-                      label={
-                        discount.type === "percentage"
-                          ? "Discount %"
-                          : "Discount Amount (Rs.)"
-                      }
+                    <button
+                      type="button"
+                      onClick={addTerm}
+                      className="w-full rounded-xl border border-dashed border-border hover:border-primary/40 hover:bg-primary/[0.03] transition-all px-4 py-3 flex items-center justify-center gap-2 text-xs text-muted-foreground hover:text-primary"
                     >
-                      <div className="relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs">
-                          {discount.type === "percentage" ? (
-                            <Percent size={12} />
-                          ) : (
-                            "Rs."
-                          )}
-                        </span>
-                        <Input
-                          type="number"
-                          min={0}
-                          max={discount.type === "percentage" ? 100 : undefined}
-                          value={discount.value || ""}
-                          onChange={(e) =>
-                            onChange({
-                              ...discount,
-                              value: parseFloat(e.target.value) || 0,
-                            })
-                          }
-                          className="pl-8"
-                          placeholder="0"
-                        />
+                      <Plus size={13} />
+                      Add another billing term
+                    </button>
+                  </div>
+                ) : (
+                  /* Legacy single-term UI */
+                  <div className="space-y-4">
+                    {!discount.applicable ? (
+                      <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-5 flex flex-col items-center gap-2 text-center">
+                        <Tag size={18} className="text-muted-foreground/40" />
+                        <p className="text-xs text-muted-foreground">
+                          Toggle discount on or pick a term from master
+                        </p>
                       </div>
-                    </Field>
+                    ) : (
+                      <>
+                        <Field label="Discount Type">
+                          <div className="grid grid-cols-2 gap-2">
+                            {(["percentage", "fixed"] as const).map((t) => (
+                              <button
+                                key={t}
+                                type="button"
+                                onClick={() =>
+                                  onChange({ ...discount, type: t })
+                                }
+                                className={
+                                  "rounded-lg border px-3 py-2 text-xs font-heading font-semibold transition-all " +
+                                  (discount.type === t
+                                    ? "border-primary bg-primary/[0.07] text-primary ring-1 ring-primary/20"
+                                    : "border-border bg-background text-muted-foreground hover:border-primary/30")
+                                }
+                              >
+                                {t === "percentage"
+                                  ? "Percentage (%)"
+                                  : "Fixed Amount (₹)"}
+                              </button>
+                            ))}
+                          </div>
+                        </Field>
+                        <Field
+                          label={
+                            discount.type === "percentage"
+                              ? "Discount %"
+                              : "Discount Amount (₹)"
+                          }
+                        >
+                          <div className="relative">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs">
+                              {discount.type === "percentage" ? (
+                                <Percent size={12} />
+                              ) : (
+                                "₹"
+                              )}
+                            </span>
+                            <Input
+                              type="number"
+                              min={0}
+                              max={
+                                discount.type === "percentage" ? 100 : undefined
+                              }
+                              value={discount.value || ""}
+                              onChange={(e) =>
+                                onChange({
+                                  ...discount,
+                                  value: parseFloat(e.target.value) || 0,
+                                })
+                              }
+                              className="pl-8"
+                              placeholder="0"
+                            />
+                          </div>
+                        </Field>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
@@ -363,7 +577,7 @@ export function BillingAccordion({
                     bd={bd}
                     cgstRate={cgstRate}
                     sgstRate={sgstRate}
-                    hasDiscount={discount.applicable}
+                    hasDiscount={activeCount > 0}
                   />
                 )}
               </div>
