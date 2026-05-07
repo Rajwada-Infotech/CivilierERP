@@ -210,7 +210,7 @@ const SECTION_ICONS: Record<string, React.ElementType> = {
   "Billing Terms": Receipt,
   "EMI / Installment Options": CreditCard,
   "Approval Workflow": CheckCircle2,
-  "Billing Terms & Conditions": Receipt,
+  "Terms & Conditions": FileText,
   Remarks: StickyNote,
 };
 
@@ -2214,18 +2214,16 @@ export default function MaterialExpenseBooking() {
               )}
 
               {/* ── 3. Billing Terms ───────────────────────────────────── */}
-              {!isGRN && (
-                <div className="space-y-3">
-                  <SectionHeader label="Billing Terms" />
-                  <BillingAccordion
-                    basicAmount={form.basicAmount}
-                    cgstRate={form.cgstRate}
-                    sgstRate={form.sgstRate}
-                    discount={form.discount}
-                    onChange={(d) => set("discount", d)}
-                  />
-                </div>
-              )}
+              <div className="space-y-3">
+                <SectionHeader label="Billing Terms" />
+                <BillingAccordion
+                  basicAmount={form.basicAmount}
+                  cgstRate={form.cgstRate}
+                  sgstRate={form.sgstRate}
+                  discount={form.discount}
+                  onChange={(d) => set("discount", d)}
+                />
+              </div>
 
               {/* ── 4. EMI Options ─────────────────────────────────────── */}
               {!isGRN && (
@@ -2273,58 +2271,13 @@ export default function MaterialExpenseBooking() {
               )}
 
               {/* ── 6. Remarks ─────────────────────────────────────────── */}
-              {/* ── Billing Terms & T&C ───────────────────────────────── */}
-              <div className="space-y-4">
-                <SectionHeader label="Billing Terms & Conditions" />
+              {/* ── Terms & Conditions ────────────────────────────────── */}
+              <div className="space-y-3">
+                <SectionHeader label="Terms & Conditions" />
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <Field
-                    label="Billing Terms"
-                    hint="Select applicable payment / billing terms"
-                  >
-                    <Select
-                      value={
-                        form.billingTermId ? String(form.billingTermId) : ""
-                      }
-                      onValueChange={(v) => {
-                        const term = billingTerms.find(
-                          (t) => String(t.BillingTermID) === v,
-                        );
-                        set("billingTermId", term ? term.BillingTermID : null);
-                        set("billingTermName", term?.Name ?? "");
-                      }}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select billing term…" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="__none__">None</SelectItem>
-                        {billingTerms.map((t) => (
-                          <SelectItem
-                            key={t.BillingTermID}
-                            value={String(t.BillingTermID)}
-                          >
-                            {t.Name}
-                            {t.Type ? ` (${t.Type})` : ""}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {form.billingTermId &&
-                      (() => {
-                        const term = billingTerms.find(
-                          (t) => t.BillingTermID === form.billingTermId,
-                        );
-                        return term?.Description ? (
-                          <p className="text-[10px] text-muted-foreground mt-1 px-1">
-                            {term.Description}
-                          </p>
-                        ) : null;
-                      })()}
-                  </Field>
-
-                  <Field
-                    label="Terms & Conditions"
-                    hint="Select T&C template to attach"
+                    label="T&C Template"
+                    hint="Select a Terms & Conditions template to attach"
                   >
                     <Select
                       value={form.tcId ? String(form.tcId) : ""}
@@ -2349,11 +2302,10 @@ export default function MaterialExpenseBooking() {
                     </Select>
                   </Field>
                 </div>
-
                 {form.tcText && (
                   <div className="rounded-xl border border-border bg-muted/20 p-4">
                     <p className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground mb-2">
-                      T&C Preview
+                      T&amp;C Preview
                     </p>
                     <p className="text-xs text-foreground whitespace-pre-wrap leading-relaxed">
                       {form.tcText}
