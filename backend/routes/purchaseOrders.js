@@ -306,8 +306,10 @@ router.post("/", async (req, res) => {
     transaction = pool.transaction();
     await transaction.begin();
 
-    // Generate document number if DocTypeId is provided
-    let finalDocNo = poNoFromClient || null;
+    // Generate document number server-side when a document type is selected.
+    // Client-provided values are previews only and are intentionally ignored
+    // for numbered PO documents.
+    let finalDocNo = null;
     if (DocTypeId) {
       finalDocNo = await lockNextDocNumber(pool, sql, {
         docTypeId: parseInt(DocTypeId, 10),
@@ -315,6 +317,8 @@ router.post("/", async (req, res) => {
         tableName: "PurchaseOrders",
         issuedBy: req.user?.email,
       });
+    } else {
+      finalDocNo = poNoFromClient || null;
     }
 
     if (!finalDocNo) {
