@@ -72,13 +72,6 @@ async function insertStockLedgerEntries(transaction, grnId, grnItems) {
 }
 
 // GET all GRNs
-// NOTE: GRNItems is intentionally NOT normalised here — the list endpoint
-// returns raw strings (or null) which is fine for picker row counts.
-// The frontend always re-fetches GET /:id for authoritative item data.
-router.get("/", cache("grns", 300), async (req, res) => {
-
-});
-
 // GET suppliers list for GRN filtering.
 // Must be declared before /filtered and /:id.
 router.get("/suppliers", async (req, res) => {
@@ -171,7 +164,6 @@ router.get("/", cache("grns", 300), async (req, res) => {
         grn.GRNDate,
         grn.SupplierID,
         grn.POID,
-        grn.GRNItems,
         grn.Status,
         grn.Remarks,
         grn.CreatedDate,
