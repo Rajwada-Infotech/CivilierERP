@@ -230,7 +230,9 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           eb.EDocNo, eb.EEmiPayment, eb.EInstallmentCount, eb.EEmiAmount,
           eb.EEmiStartDate, eb.EReminder, eb.ERemarks, eb.EStatus,
           eb.ECreatedAt, eb.EUpdatedAt, eb.ECompanyId, eb.EDocTypeId,
-          eb.EFinYear, eb.ECreatedBy,
+          eb.EFinYear, eb.ECreatedBy, eb.ESourceType, eb.ESourceId,
+          eb.EName, eb.EBillingTermsData, eb.EDiscountData, eb.EEmiData,
+          eb.ETCId, eb.ETCName, eb.ETCText,
           CASE
             WHEN t.Prefix IS NOT NULL AND t.Description IS NOT NULL THEN t.Prefix + N' — ' + t.Description
             WHEN t.Prefix IS NOT NULL THEN t.Prefix
@@ -401,9 +403,9 @@ router.post("/", async (req, res) => {
     ETCId,
     ETCName,
     ETCText,
-    EPaymentType,
-    EPartialAmount,
   } = req.body;
+
+  const pool = getPool();
   const transaction = pool.transaction();
 
   let finalDocNo = EDocNo || null;
@@ -575,13 +577,7 @@ router.post("/", async (req, res) => {
       .input("EBillingTermName", sql.NVarChar(200), EBillingTermName || null)
       .input("ETCId", sql.Int, ETCId ? parseInt(ETCId, 10) : null)
       .input("ETCName", sql.NVarChar(200), ETCName || null)
-      .input("ETCText", sql.NVarChar(sql.MAX), ETCText || null)
-      .input("EPaymentType", sql.NVarChar(20), EPaymentType || "full")
-      .input(
-        "EPartialAmount",
-        sql.Decimal(18, 2),
-        EPartialAmount != null ? Number(EPartialAmount) : null,
-      ).query(`
+      .input("ETCText", sql.NVarChar(sql.MAX), ETCText || null).query(`
         INSERT INTO dbo.ExpenseBooking (
           EName, EProjectName, EDocumentType, EDocDate, EAmount, ENetAmount,
           ECgstRate, ESgstRate, EDiscountData, EDocNo,
@@ -590,8 +586,7 @@ router.post("/", async (req, res) => {
           ECreatedAt, EUpdatedAt, ECreatedBy, EApprovedBy,
           ECompanyId, EDocTypeId, EFinYear,
           ESourceType, ESourceId,
-          EBillingTermId, EBillingTermName, ETCId, ETCName, ETCText,
-          EPaymentType, EPartialAmount
+          EBillingTermId, EBillingTermName, ETCId, ETCName, ETCText
         ) VALUES (
           @EName, @EProjectName, @EDocumentType, @EDocDate, @EAmount, @ENetAmount,
           @ECgstRate, @ESgstRate, @EDiscountData, @EDocNo,
@@ -600,8 +595,7 @@ router.post("/", async (req, res) => {
           @ECreatedAt, @EUpdatedAt, @ECreatedBy, @EApprovedBy,
           @ECompanyId, @EDocTypeId, @EFinYear,
           @ESourceType, @ESourceId,
-          @EBillingTermId, @EBillingTermName, @ETCId, @ETCName, @ETCText,
-          @EPaymentType, @EPartialAmount
+          @EBillingTermId, @EBillingTermName, @ETCId, @ETCName, @ETCText
         );
         SELECT SCOPE_IDENTITY() AS NewId;
       `);
@@ -1046,8 +1040,6 @@ router.put("/:id", async (req, res) => {
     ETCId,
     ETCName,
     ETCText,
-    EPaymentType,
-    EPartialAmount,
   } = req.body;
 
   try {
@@ -1111,13 +1103,7 @@ router.put("/:id", async (req, res) => {
       .input("EBillingTermName", sql.NVarChar(200), EBillingTermName || null)
       .input("ETCId", sql.Int, ETCId ? parseInt(ETCId, 10) : null)
       .input("ETCName", sql.NVarChar(200), ETCName || null)
-      .input("ETCText", sql.NVarChar(sql.MAX), ETCText || null)
-      .input("EPaymentType", sql.NVarChar(20), EPaymentType || "full")
-      .input(
-        "EPartialAmount",
-        sql.Decimal(18, 2),
-        EPartialAmount != null ? Number(EPartialAmount) : null,
-      ).query(`
+      .input("ETCText", sql.NVarChar(sql.MAX), ETCText || null).query(`
         UPDATE dbo.ExpenseBooking SET
           EName=@EName, EProjectName=@EProjectName, EDocumentType=@EDocumentType, EDocDate=@EDocDate,
           EAmount=@EAmount, ENetAmount=@ENetAmount, ECgstRate=@ECgstRate, ESgstRate=@ESgstRate,
@@ -1128,8 +1114,7 @@ router.put("/:id", async (req, res) => {
           EDocTypeId=@EDocTypeId, EFinYear=@EFinYear,
           ESourceType=@ESourceType, ESourceId=@ESourceId,
           EBillingTermId=@EBillingTermId, EBillingTermName=@EBillingTermName,
-          ETCId=@ETCId, ETCName=@ETCName, ETCText=@ETCText,
-          EPaymentType=@EPaymentType, EPartialAmount=@EPartialAmount
+          ETCId=@ETCId, ETCName=@ETCName, ETCText=@ETCText
         WHERE Eid = @Eid
       `);
 
