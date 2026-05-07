@@ -25,6 +25,18 @@ function parseGRNItems(grnItems) {
   return [];
 }
 
+/** Sum rate × quantity for every line item, falling back to stored totalAmount. */
+function computeGRNTotal(grnItems) {
+  const items = parseGRNItems(grnItems);
+  return items.reduce((sum, item) => {
+    const lineTotal =
+      Number(item.totalAmount) > 0
+        ? Number(item.totalAmount)
+        : Number(item.rate || 0) * Number(item.quantity || 0);
+    return sum + lineTotal;
+  }, 0);
+}
+
 // Normalise the GRNItems field on a raw DB row so the client always
 // receives a parsed array, never a raw JSON string. This prevents the
 // frontend from needing to double-parse and avoids issues with truncated
@@ -233,12 +245,13 @@ router.post("/", async (req, res) => {
       .input("Remarks", sql.NVarChar(sql.MAX), remarks || null)
       .input("DocTypeId", sql.Int, docTypeId ? parseInt(docTypeId, 10) : null)
       .input("DocNo", sql.NVarChar(100), finalDocNo)
+      .input("TotalAmount", sql.Decimal(18, 2), computeGRNTotal(grnItems))
       .input("CreatedDate", sql.DateTime2, new Date()).query(`
         INSERT INTO GoodsReceiptNotes
-          (GRNNo, GRNDate, SupplierID, POID, GRNItems, Status, Remarks, DocTypeId, DocNo, CreatedDate)
+          (GRNNo, GRNDate, SupplierID, POID, GRNItems, Status, Remarks, DocTypeId, DocNo, TotalAmount, CreatedDate)
         OUTPUT INSERTED.GRNID
         VALUES
-          (@GRNNo, @GRNDate, @SupplierID, @POID, @GRNItems, @Status, @Remarks, @DocTypeId, @DocNo, @CreatedDate)
+          (@GRNNo, @GRNDate, @SupplierID, @POID, @GRNItems, @Status, @Remarks, @DocTypeId, @DocNo, @TotalAmount, @CreatedDate)
       `);
 
     const grnId = grnResult.recordset[0].GRNID;
@@ -313,6 +326,7 @@ router.put("/:id", async (req, res) => {
       .input("Remarks", sql.NVarChar(sql.MAX), remarks || null)
       .input("DocTypeId", sql.Int, docTypeId ? parseInt(docTypeId, 10) : null)
       .input("DocNo", sql.NVarChar(100), docNo || null)
+      .input("TotalAmount", sql.Decimal(18, 2), computeGRNTotal(grnItems))
       .input("UpdatedDate", sql.DateTime2, new Date()).query(`
         UPDATE GoodsReceiptNotes
         SET GRNNo = @GRNNo,
@@ -323,7 +337,8 @@ router.put("/:id", async (req, res) => {
             Status = @Status,
             Remarks = @Remarks,
             DocTypeId = @DocTypeId,
-            DocNo = @DocNo
+            DocNo = @DocNo,
+            TotalAmount = @TotalAmount
         WHERE GRNID = @GRNID
       `);
 

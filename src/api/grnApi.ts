@@ -12,6 +12,18 @@ export interface Supplier {
   LHeadType?: string;
 }
 
+// PO line item — mirrors POLineItem in purchaseOrdersApi.ts
+export interface POLineItem {
+  itemId?: string;
+  itemName?: string;
+  itemDescription: string;
+  unit: string;
+  quantity: number;
+  rate: number;
+  tax: number;
+  amount: number;
+}
+
 // Final combined PurchaseOrder interface (most complete version)
 export interface PurchaseOrder {
   PurchaseOrderID: number;
@@ -24,6 +36,12 @@ export interface PurchaseOrder {
   Unit?: string;
   Rate?: number;
   TotalAmount?: number;
+  // Multi-item field — JSON blob stored on PO row
+  POItems?: POLineItem[];
+  // Normalised child table rows (returned by GET /:id only)
+  // Fields: ItemId, ItemName, Quantity, UomName, Rate (PascalCase from SQL)
+  LineItems?: any[];
+  DocTypeId?: number;
   Status?: string;
 }
 
@@ -43,6 +61,17 @@ export interface UOM {
   IsActive?: boolean;
 }
 
+/**
+ * Represents one line item inside a GRN.
+ *
+ * Fields added in migration 034:
+ *   rate        — unit rate (₹) for this item
+ *   quantity    — billing quantity (may differ from receivedQty when partial
+ *                 billing is allowed)
+ *   totalAmount — derived as rate × quantity; stored for audit / reporting
+ *                 so downstream modules (Expense Booking, etc.) don't need
+ *                 to recompute it.
+ */
 export interface GRNItemLine {
   itemId: string;
   itemName: string;
@@ -50,6 +79,12 @@ export interface GRNItemLine {
   receivedQty: number;
   remainingQty: number;
   uom: string;
+  /** Unit rate in ₹.  Defaults to 0. */
+  rate: number;
+  /** Billing quantity. Separate from receivedQty so partial billing works. */
+  quantity: number;
+  /** Computed: rate × quantity. Stored for audit trail. */
+  totalAmount: number;
 }
 
 export interface GRNFormDataPayload {
@@ -182,6 +217,16 @@ export const getPurchaseOrders = async (): Promise<PurchaseOrder[]> => {
   });
   if (!res.ok) throw new Error("Failed to fetch Purchase Orders");
   return normalizeArray<PurchaseOrder>(await res.json());
+};
+
+export const getPurchaseOrderById = async (
+  id: number | string,
+): Promise<PurchaseOrder> => {
+  const res = await fetch(`/api/purchase-orders/${id}`, {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) throw new Error("Failed to fetch PO details");
+  return res.json();
 };
 
 export const getItems = async (): Promise<Item[]> => {
