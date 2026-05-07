@@ -34,6 +34,8 @@ export interface DiscountConfig {
   appliedOn: "pre-gst" | "post-gst";
   masterTermId: string | null;
   masterTermName: string | null;
+  /** Unique local key for list rendering (not persisted) */
+  _key?: string;
 }
 
 export interface EmiScheduleRow {
@@ -92,6 +94,8 @@ export interface ExpenseRecord {
   remarks: string;
   billingTermId: number | null;
   billingTermName: string;
+  /** Multi-term support: list of all applied billing terms */
+  billingTerms: DiscountConfig[];
   tcId: number | null;
   tcName: string;
   tcText: string;
