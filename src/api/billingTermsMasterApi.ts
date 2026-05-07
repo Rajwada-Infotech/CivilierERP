@@ -1,6 +1,7 @@
-import api from "./axios"; // adjust to your axios instance path
+import api from "./axios";
 
 export interface BillingTermRow {
+
   BillingTermID: number;       // exact DB column name
   Name: string | null;
   Description: string | null;
@@ -16,7 +17,8 @@ export interface BillingTermPayload {
 }
 
 export const getBillingTerms = async (): Promise<BillingTermRow[]> => {
-  const { data } = await api.get("/billing-terms");
+  const { data } = await api.get("/api/billing-terms");
+
   return data;
 };
 
