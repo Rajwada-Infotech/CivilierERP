@@ -1,18 +1,20 @@
-import api from "./axios"; // adjust to your axios instance path
+import api from "./axios";
 
 export interface BillingTermRow {
-  BillingTermID: number;       // exact DB column name
+  BillingTermID: number;
   Name: string | null;
   Description: string | null;
   CalculationType: string | null;
+  DeductionType: string | null;
   IsActive: boolean | number;
 }
 
 export interface BillingTermPayload {
-  Name: string;
-  Description: string;
+  Name: unknown;
+  Description: unknown;
   CalculationType: string;
-  IsActive: boolean;
+  DeductionType: string | null;
+  IsActive: unknown;
 }
 
 export const getBillingTerms = async (): Promise<BillingTermRow[]> => {
@@ -20,13 +22,15 @@ export const getBillingTerms = async (): Promise<BillingTermRow[]> => {
   return data;
 };
 
-export const addBillingTerm = async (payload: BillingTermPayload): Promise<void> => {
+export const addBillingTerm = async (
+  payload: BillingTermPayload,
+): Promise<void> => {
   await api.post("/billing-terms", payload);
 };
 
 export const updateBillingTerm = async (
   id: number,
-  payload: BillingTermPayload
+  payload: BillingTermPayload,
 ): Promise<void> => {
   await api.put(`/billing-terms/${id}`, payload);
 };

@@ -29,7 +29,10 @@ export interface BillingTerm {
   paymentDueDays: number;
   description: string;
   status: boolean;
+  /** "Before GST" | "After GST" */
   calculationType?: string;
+  /** "Addition" | "Deduction" — from master */
+  deductionType?: "Addition" | "Deduction";
 }
 
 interface BillingTermsContextType {
@@ -46,12 +49,13 @@ function mapDbRow(row: any): BillingTerm {
     _id: String(row.BillingTermID),
     name: row.Name ?? "",
     description: row.Description ?? "",
-    billType: (row.CalculationType as BillType) ?? "Tax Invoice",
+    billType: "Tax Invoice",
     discountType: "none",
     discountValue: 0,
     paymentDueDays: 0,
     status: row.IsActive === 1 || row.IsActive === true,
     calculationType: row.CalculationType ?? undefined,
+    deductionType: row.DeductionType === "Deduction" ? "Deduction" : "Addition",
   };
 }
 
