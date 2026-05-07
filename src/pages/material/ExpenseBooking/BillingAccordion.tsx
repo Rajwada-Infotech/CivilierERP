@@ -10,9 +10,19 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import {
-  Receipt, X, ChevronDown, ChevronUp, Tag, Percent,
-  ToggleLeft, ToggleRight, Link2, AlertCircle, BookOpen,
-  Clock, BadgePercent,
+  Receipt,
+  X,
+  ChevronDown,
+  ChevronUp,
+  Tag,
+  Percent,
+  ToggleLeft,
+  ToggleRight,
+  Link2,
+  AlertCircle,
+  BookOpen,
+  Clock,
+  BadgePercent,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -74,7 +84,10 @@ function MasterTermPicker({
             <button
               key={term._id}
               type="button"
-              onClick={() => { onSelect(term); onClose(); }}
+              onClick={() => {
+                onSelect(term);
+                onClose();
+              }}
               className="w-full text-left rounded-xl border border-border bg-background hover:border-primary/40 hover:bg-primary/[0.03] transition-all px-4 py-3 group"
             >
               <div className="flex items-start justify-between gap-3">
@@ -83,39 +96,31 @@ function MasterTermPicker({
                     <p className="text-sm font-heading font-semibold text-foreground group-hover:text-primary transition-colors">
                       {term.name}
                     </p>
-                    <span
-                      className={
-                        "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-heading " +
-                        (BILL_TYPE_COLORS[term.billType] ?? "bg-muted text-muted-foreground border-border")
-                      }
-                    >
-                      {term.billType}
-                    </span>
+                    {term.calculationType && (
+                      <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-heading bg-muted text-muted-foreground border-border">
+                        {term.calculationType}
+                      </span>
+                    )}
                   </div>
-                  <p className="text-[11px] text-muted-foreground mt-1 truncate">{term.description}</p>
-                  <div className="flex items-center gap-3 mt-1.5 text-[11px] text-muted-foreground flex-wrap">
-                    <span className="flex items-center gap-1">
-                      <BadgePercent size={10} />
-                      {term.discountType === "none"
-                        ? "No discount"
-                        : term.discountType === "percentage"
-                          ? `${term.discountValue}% discount`
-                          : `Rs.${fmt(term.discountValue)} flat off`}
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <Clock size={10} />
-                      {term.paymentDueDays === 0 ? "Immediate" : `Net-${term.paymentDueDays}`}
-                    </span>
-                  </div>
+                  {term.description && (
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      {term.description}
+                    </p>
+                  )}
                 </div>
-                <ChevronDown size={14} className="text-muted-foreground group-hover:text-primary rotate-[-90deg] shrink-0 mt-1 transition-colors" />
+                <ChevronDown
+                  size={14}
+                  className="text-muted-foreground group-hover:text-primary rotate-[-90deg] shrink-0 mt-1 transition-colors"
+                />
               </div>
             </button>
           ))}
         </div>
 
         <DialogFooter className="pt-3 border-t border-border">
-          <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
+          <Button variant="outline" size="sm" onClick={onClose}>
+            Cancel
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -132,7 +137,13 @@ interface Props {
   onChange: (d: DiscountConfig) => void;
 }
 
-export function BillingAccordion({ basicAmount, cgstRate, sgstRate, discount, onChange }: Props) {
+export function BillingAccordion({
+  basicAmount,
+  cgstRate,
+  sgstRate,
+  discount,
+  onChange,
+}: Props) {
   const { activeBillingTerms = [] } = useBillingTerms();
   const [open, setOpen] = useState(discount.applicable);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -146,16 +157,17 @@ export function BillingAccordion({ basicAmount, cgstRate, sgstRate, discount, on
   };
 
   const applyMasterTerm = (term: MasterBillingTerm) => {
+    const hasDiscount = term.discountType !== "none" && term.discountValue > 0;
     const mapped: DiscountConfig = {
-      applicable: term.discountType !== "none",
+      applicable: hasDiscount,
       type: term.discountType === "flat" ? "fixed" : "percentage",
-      value: term.discountValue,
+      value: hasDiscount ? term.discountValue : 0,
       appliedOn: "pre-gst",
       masterTermId: term._id,
       masterTermName: term.name,
     };
     onChange(mapped);
-    if (mapped.applicable) setOpen(true);
+    if (hasDiscount) setOpen(true);
     toast.success(`Billing term "${term.name}" applied!`);
     setPickerOpen(false);
   };
@@ -182,13 +194,18 @@ export function BillingAccordion({ basicAmount, cgstRate, sgstRate, discount, on
               <Receipt size={14} className="text-primary" />
             </div>
             <div className="min-w-0">
-              <p className="text-sm font-heading font-semibold text-foreground">Billing Terms</p>
+              <p className="text-sm font-heading font-semibold text-foreground">
+                Billing Terms
+              </p>
               <p className="text-[11px] text-muted-foreground mt-0.5 truncate">
                 {discount.masterTermName ? (
-                  <span className="text-primary font-medium">From master: {discount.masterTermName}</span>
+                  <span className="text-primary font-medium">
+                    From master: {discount.masterTermName}
+                  </span>
                 ) : discount.applicable ? (
                   <span className="text-primary font-medium">
-                    Discount applied · Net Rs. {hasBase ? fmt(bd.netAmount) : "-"}
+                    Discount applied · Net Rs.{" "}
+                    {hasBase ? fmt(bd.netAmount) : "-"}
                   </span>
                 ) : (
                   "No discount / master term applied"
@@ -210,7 +227,11 @@ export function BillingAccordion({ basicAmount, cgstRate, sgstRate, discount, on
             </Button>
 
             {discount.masterTermName && (
-              <button type="button" onClick={clearMasterTerm} className="flex items-center gap-1 text-[11px] text-destructive hover:underline">
+              <button
+                type="button"
+                onClick={clearMasterTerm}
+                className="flex items-center gap-1 text-[11px] text-destructive hover:underline"
+              >
                 <X size={10} /> Clear
               </button>
             )}
@@ -221,13 +242,23 @@ export function BillingAccordion({ basicAmount, cgstRate, sgstRate, discount, on
               className="flex items-center gap-1.5 text-xs font-medium transition-colors"
             >
               {discount.applicable ? (
-                <><ToggleRight size={18} className="text-primary" /><span className="text-primary">Discount On</span></>
+                <>
+                  <ToggleRight size={18} className="text-primary" />
+                  <span className="text-primary">Discount On</span>
+                </>
               ) : (
-                <><ToggleLeft size={18} className="text-muted-foreground" /><span className="text-muted-foreground">Discount Off</span></>
+                <>
+                  <ToggleLeft size={18} className="text-muted-foreground" />
+                  <span className="text-muted-foreground">Discount Off</span>
+                </>
               )}
             </button>
 
-            <button type="button" onClick={() => setOpen((v) => !v)} className="text-muted-foreground hover:text-foreground transition-colors">
+            <button
+              type="button"
+              onClick={() => setOpen((v) => !v)}
+              className="text-muted-foreground hover:text-foreground transition-colors"
+            >
               {open ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
             </button>
           </div>
@@ -268,23 +299,40 @@ export function BillingAccordion({ basicAmount, cgstRate, sgstRate, discount, on
                                 : "border-border bg-background text-muted-foreground hover:border-primary/30")
                             }
                           >
-                            {t === "percentage" ? "Percentage (%)" : "Fixed Amount (Rs.)"}
+                            {t === "percentage"
+                              ? "Percentage (%)"
+                              : "Fixed Amount (Rs.)"}
                           </button>
                         ))}
                       </div>
                     </Field>
 
-                    <Field label={discount.type === "percentage" ? "Discount %" : "Discount Amount (Rs.)"}>
+                    <Field
+                      label={
+                        discount.type === "percentage"
+                          ? "Discount %"
+                          : "Discount Amount (Rs.)"
+                      }
+                    >
                       <div className="relative">
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground text-xs">
-                          {discount.type === "percentage" ? <Percent size={12} /> : "Rs."}
+                          {discount.type === "percentage" ? (
+                            <Percent size={12} />
+                          ) : (
+                            "Rs."
+                          )}
                         </span>
                         <Input
                           type="number"
                           min={0}
                           max={discount.type === "percentage" ? 100 : undefined}
                           value={discount.value || ""}
-                          onChange={(e) => onChange({ ...discount, value: parseFloat(e.target.value) || 0 })}
+                          onChange={(e) =>
+                            onChange({
+                              ...discount,
+                              value: parseFloat(e.target.value) || 0,
+                            })
+                          }
                           className="pl-8"
                           placeholder="0"
                         />
@@ -302,8 +350,13 @@ export function BillingAccordion({ basicAmount, cgstRate, sgstRate, discount, on
 
                 {!hasBase ? (
                   <div className="flex flex-col items-center justify-center gap-2 text-center py-8 rounded-lg border border-dashed border-border bg-muted/20">
-                    <AlertCircle size={16} className="text-muted-foreground/40" />
-                    <p className="text-xs text-muted-foreground">Basic amount not yet set</p>
+                    <AlertCircle
+                      size={16}
+                      className="text-muted-foreground/40"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Basic amount not yet set
+                    </p>
                   </div>
                 ) : (
                   <PriceBreakdownPanel

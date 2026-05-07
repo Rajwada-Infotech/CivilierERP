@@ -1,19 +1,24 @@
-const express = require("express")
+const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
-const router = express.Router()
-const { getPool, sql } = require("../db")
+const router = express.Router();
+const { getPool, sql } = require("../db");
 
 router.get("/", cache("billing-terms", 300), async (req, res) => {
   try {
-    const pool = getPool()
-    const result = await pool.request().query("SELECT * FROM dbo.Billing_Terms_Master")
-    res.json(result.recordset)
-  } catch (err) { res.status(500).json({ error: err.message }) }
-})
+    const pool = getPool();
+    const result = await pool
+      .request()
+      .query("SELECT * FROM dbo.Billing_Terms_Master");
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 router.post("/", async (req, res) => {
   const { Name, Description, CalculationType, IsActive } = req.body;
+
   try {
     const pool = getPool();
     await pool
@@ -40,6 +45,7 @@ router.post("/", async (req, res) => {
 
 router.put("/:id", async (req, res) => {
   const { Name, Description, CalculationType, IsActive } = req.body;
+
   try {
     const pool = getPool();
     await pool
@@ -52,11 +58,15 @@ router.put("/:id", async (req, res) => {
       .input("UpdatedBy", sql.Int, req.user?.id || 1)
       .input("UpdatedAt", sql.DateTime2, new Date())
       .query(`
-        UPDATE dbo.Billing_Terms_Master SET
-          Name=@Name, Description=@Description,
-          CalculationType=@CalculationType, IsActive=@IsActive,
-          UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt
-        WHERE BillingTermID=@BillingTermID
+        UPDATE dbo.Billing_Terms_Master 
+        SET 
+          Name = @Name,
+          Description = @Description,
+          CalculationType = @CalculationType,
+          IsActive = @IsActive,
+          UpdatedBy = @UpdatedBy,
+          UpdatedAt = @UpdatedAt
+        WHERE BillingTermID = @BillingTermID
       `);
 
     await bumpCacheVersion("billing-terms");
@@ -68,14 +78,19 @@ router.put("/:id", async (req, res) => {
 
 router.delete("/:id", async (req, res) => {
   try {
-    const pool = getPool()
-    await pool.request()
+    const pool = getPool();
+    await pool
+      .request()
       .input("BillingTermID", sql.Int, req.params.id)
-      .query("DELETE FROM dbo.Billing_Terms_Master WHERE BillingTermID=@BillingTermID")
+      .query(
+        "DELETE FROM dbo.Billing_Terms_Master WHERE BillingTermID = @BillingTermID"
+      );
+
     await bumpCacheVersion("billing-terms");
+    res.json({ message: "Billing term deleted" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
-    res.json({ message: "Billing term deleted" })
-  } catch (err) { res.status(500).json({ error: err.message }) }
-})
-
-module.exports = router
+module.exports = router;
