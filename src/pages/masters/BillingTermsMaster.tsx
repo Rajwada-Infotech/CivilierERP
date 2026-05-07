@@ -19,16 +19,13 @@ import {
   updateBillingTerm,
   deleteBillingTerm,
   type BillingTermRow,
-} from "@/api/billingTermsMasterApi";             // ✅ correct filename
+} from "@/api/billingTermsMasterApi";
 
 // ─── Map DB row → context shape ───────────────────────────────────────────────
 const mapRow = (row: BillingTermRow): BillingTerm => ({
   _id: String(row.BillingTermID),
   name: row.Name ?? "",
   description: row.Description ?? "",
-  // NOTE: the master UI/context currently only stores status + generic fields
-  // defined in BillingTermsContext. CalculationType/billType/discount config
-  // are not represented in the context type, so we store defaults here.
   billType: "Tax Invoice",
   discountType: "none",
   discountValue: 0,
@@ -36,13 +33,45 @@ const mapRow = (row: BillingTermRow): BillingTerm => ({
   status: Boolean(row.IsActive),
 });
 
+// ─── Segmented toggler: Addition | Deduction ──────────────────────────────────
+function DeductionToggler({
+  value,
+  onChange,
+}: {
+  value: unknown;
+  onChange: (v: unknown) => void;
+}) {
+  const current = (value as string) || "Addition";
+  return (
+    <div className="flex items-center gap-1 p-1 rounded-lg bg-muted border border-border w-fit">
+      {(["Addition", "Deduction"] as const).map((opt) => {
+        const active = current === opt;
+        return (
+          <button
+            key={opt}
+            type="button"
+            onClick={() => onChange(opt)}
+            className={`px-4 py-1.5 rounded-md text-xs font-heading font-semibold transition-all ${
+              active
+                ? opt === "Addition"
+                  ? "bg-green-500 text-white shadow-sm"
+                  : "bg-destructive text-white shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {opt === "Addition" ? "+ Addition" : "− Deduction"}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 const BillingTermsMaster: React.FC = () => {
   const { billingTerms, setBillingTerms } = useBillingTerms();
   const [loading, setLoading] = useState(true);
 
-  // ── Fetch on mount ──────────────────────────────────────────────────────────
   useEffect(() => {
     getBillingTerms()
       .then((rows) => setBillingTerms(rows.map(mapRow)))
@@ -50,13 +79,11 @@ const BillingTermsMaster: React.FC = () => {
       .finally(() => setLoading(false));
   }, []);
 
-  // ── Refetch helper ──────────────────────────────────────────────────────────
   const refetch = async () => {
     const fresh = await getBillingTerms();
     setBillingTerms(fresh.map(mapRow));
   };
 
-  // ── Fields ──────────────────────────────────────────────────────────────────
   const fields: FieldDef[] = [
     {
       name: "Name",
@@ -69,7 +96,16 @@ const BillingTermsMaster: React.FC = () => {
       label: "Calculation Type",
       type: "select",
       required: true,
-      options: ["Fixed", "Percentage", "Custom"],
+      options: ["Before GST", "After GST"],
+    },
+    {
+      name: "DeductionType",
+      label: "Type",
+      type: "custom",
+      defaultValue: "Addition",
+      render: ({ value, onChange }) => {
+        return <DeductionToggler value={value} onChange={onChange} />;
+      },
     },
     {
       name: "Description",
@@ -85,12 +121,10 @@ const BillingTermsMaster: React.FC = () => {
     },
   ];
 
-  // ── Columns ─────────────────────────────────────────────────────────────────
   const columns: ColumnDef[] = [
     { key: "name", label: "Term Name" },
     { key: "status", label: "Status" },
   ];
-
 
   const columnRenderers = {
     IsActive: (value: unknown) => (
@@ -111,31 +145,32 @@ const BillingTermsMaster: React.FC = () => {
     ),
   };
 
-  // ── Events ──────────────────────────────────────────────────────────────────
   const handleDataEvent = async (event: DataChangeEvent) => {
     try {
       if (event.action === "add") {
         const record = event.record as Record<string, unknown>;
+        const calcType = String(record.CalculationType ?? "");
         await addBillingTerm({
           Name: record.Name,
           Description: record.Description,
-          CalculationType: record.CalculationType,
+          CalculationType: calcType,
+          DeductionType: String(record.DeductionType ?? "Addition"),
           IsActive: record.IsActive,
         });
         toast.success("Billing term added!");
         await refetch();
-
       } else if (event.action === "update") {
         const record = event.record as Record<string, unknown>;
+        const calcType = String(record["CalculationType"] ?? "");
         await updateBillingTerm(Number(event.id), {
           Name: String(record["Name"] ?? ""),
           Description: String(record["Description"] ?? ""),
-          CalculationType: String(record["CalculationType"] ?? ""),
+          CalculationType: calcType,
+          DeductionType: String(record["DeductionType"] ?? "Addition"),
           IsActive: Boolean(record["IsActive"]),
         });
         toast.success("Billing term updated!");
         await refetch();
-
       } else if (event.action === "delete") {
         await deleteBillingTerm(Number(event.id));
         toast.success("Billing term deleted!");
@@ -146,7 +181,6 @@ const BillingTermsMaster: React.FC = () => {
     }
   };
 
-  // ── Render ──────────────────────────────────────────────────────────────────
   return (
     <>
       <Breadcrumbs items={["Masters", "Billing Terms"]} />
@@ -177,14 +211,18 @@ const BillingTermsMaster: React.FC = () => {
           initialData={billingTerms as unknown as Record<string, unknown>[]}
           onDataEvent={handleDataEvent}
           exportConfig={{
-          title: "Billing Terms Master",
-          filename: "billing-terms-master",
-          columns: [
-            { header: "Term Name",        accessor: "Name" },
-            { header: "Calculation Type", accessor: "CalculationType" },
-            { header: "Status",           accessor: (r) => r.IsActive ? "Active" : "Inactive" },
-          ],
-        }}
+            title: "Billing Terms Master",
+            filename: "billing-terms-master",
+            columns: [
+              { header: "Term Name", accessor: "Name" },
+              { header: "Calculation Type", accessor: "CalculationType" },
+              { header: "Type", accessor: "DeductionType" },
+              {
+                header: "Status",
+                accessor: (r) => (r.IsActive ? "Active" : "Inactive"),
+              },
+            ],
+          }}
         />
       )}
     </>

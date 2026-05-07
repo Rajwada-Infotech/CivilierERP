@@ -34,6 +34,9 @@ export interface DiscountConfig {
   masterTermId: string | null;
   masterTermName: string | null;
 
+  /** "Addition" adds to net; "Deduction" subtracts (discount) */
+  termType?: "Addition" | "Deduction";
+
   /** Unique local key for React list rendering (not persisted) */
   _key?: string;
 
@@ -95,6 +98,8 @@ export interface ExpenseRecord {
   emi: EmiConfig;
   /** Payment mode derived from EMI flag. */
   paymentType?: "full" | "partial";
+  /** Amount paid now when paymentType is partial */
+  partialAmount?: number;
   netAmount: number | null;
   status: BookingStatus;
   remarks: string;
@@ -134,4 +139,11 @@ export interface PriceBreakdown {
   grossAmount: number;
   roundOff: number;
   netAmount: number;
+  // Extended fields for billing terms breakdown
+  preGstDeductionTotal?: number;
+  preGstAdditionTotal?: number;
+  postGstDeductionTotal?: number;
+  postGstAdditionTotal?: number;
+  preGstTerms?: DiscountConfig[];
+  postGstTerms?: DiscountConfig[];
 }
