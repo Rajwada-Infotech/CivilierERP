@@ -154,6 +154,9 @@ interface GRNItemLine {
   receivedQty: number;
   remainingQty: number;
   uom?: string;
+  rate?: number;
+  quantity?: number;
+  totalAmount?: number;
 }
 
 interface SelectedDoc {
@@ -184,6 +187,19 @@ interface GRNItem {
   GRNItems?: string | GRNItemLine[];
 }
 
+interface BillingTermOption {
+  BillingTermID: number;
+  Name: string;
+  Description?: string;
+  Type?: string;
+  GST?: string;
+}
+interface TCOption {
+  Id: number;
+  Name: string;
+  TermsAndCondition?: string;
+}
+
 // ─── Small UI helpers ─────────────────────────────────────────────────────────
 const SECTION_ICONS: Record<string, React.ElementType> = {
   "Document Selection": FileText,
@@ -193,6 +209,7 @@ const SECTION_ICONS: Record<string, React.ElementType> = {
   "Billing Terms": Receipt,
   "EMI / Installment Options": CreditCard,
   "Approval Workflow": CheckCircle2,
+  "Billing Terms & Conditions": Receipt,
   Remarks: StickyNote,
 };
 
@@ -365,6 +382,9 @@ interface DocSelectorProps {
   loadingGRN: boolean;
   selected: SelectedDoc | null;
   finYear?: string;
+  filterCompanyId?: number | null;
+  filterProjectId?: number | null;
+  filterFinYear?: string | null;
   onSelect: (doc: SelectedDoc) => void;
   onClear: () => void;
   onTodSelected?: (tod: TodItem | null) => void;
@@ -381,6 +401,9 @@ function DocSelectorPanel({
   loadingGRN,
   selected,
   finYear,
+  filterCompanyId,
+  filterProjectId,
+  filterFinYear,
   onSelect,
   onClear,
   onTodSelected,
@@ -413,16 +436,37 @@ function DocSelectorPanel({
   };
 
   const q = search.toLowerCase();
-  const filteredPO = poList.filter(
-    (p) =>
+
+  // Match fin year by looking for the year string embedded in the doc number.
+  // e.g. filterFinYear = "2026-2027", docNo = "CI/PUR/000001/2026-2027" → match
+  // Falls back to true when no filter is set or doc has no number.
+  const inFinYear = (docNo?: string) => {
+    if (!filterFinYear || !docNo) return true;
+    return docNo.includes(filterFinYear);
+  };
+
+  const filteredPO = poList.filter((p) => {
+    if (filterCompanyId && p.CompanyId && p.CompanyId !== filterCompanyId)
+      return false;
+    if (filterProjectId && p.ProjectId && p.ProjectId !== filterProjectId)
+      return false;
+    if (!inFinYear(p.DocNo || p.PurchaseOrderNo)) return false;
+    return (
       (p.DocNo || p.PurchaseOrderNo).toLowerCase().includes(q) ||
-      (p.SupplierName || "").toLowerCase().includes(q),
-  );
-  const filteredWO = woList.filter(
-    (w) =>
+      (p.SupplierName || "").toLowerCase().includes(q)
+    );
+  });
+  const filteredWO = woList.filter((w) => {
+    if (filterCompanyId && w.CompanyId && w.CompanyId !== filterCompanyId)
+      return false;
+    if (filterProjectId && w.ProjectId && w.ProjectId !== filterProjectId)
+      return false;
+    if (!inFinYear(w.DocNo || w.DocumentNumber)) return false;
+    return (
       (w.DocNo || w.DocumentNumber).toLowerCase().includes(q) ||
-      (w.ContractorName || "").toLowerCase().includes(q),
-  );
+      (w.ContractorName || "").toLowerCase().includes(q)
+    );
+  });
   const filteredTOD = todList.filter(
     (t) =>
       (t.FullPrefix ?? t.Prefix).toLowerCase().includes(q) ||
@@ -430,9 +474,10 @@ function DocSelectorPanel({
   );
   const filteredGRN = grnList.filter(
     (g) =>
-      (g.GRNNo || "").toLowerCase().includes(q) ||
-      (g.SupplierName || "").toLowerCase().includes(q) ||
-      (g.PONumber || "").toLowerCase().includes(q),
+      inFinYear(g.GRNNo) &&
+      ((g.GRNNo || "").toLowerCase().includes(q) ||
+        (g.SupplierName || "").toLowerCase().includes(q) ||
+        (g.PONumber || "").toLowerCase().includes(q)),
   );
 
   if (selected) {
@@ -618,15 +663,10 @@ function DocSelectorPanel({
       id: "PO",
       label: "Purchase Orders",
       icon: ShoppingCart,
-      count: poList.length,
+      count: filteredPO.length,
     },
-    { id: "WO", label: "Work Orders", icon: HardHat, count: woList.length },
-    {
-      id: "GRN",
-      label: "GRN",
-      icon: Truck,
-      count: grnList.length,
-    },
+    { id: "WO", label: "Work Orders", icon: HardHat, count: filteredWO.length },
+    { id: "GRN", label: "GRN", icon: Truck, count: filteredGRN.length },
     {
       id: "TOD",
       label: "Other Expenses",
@@ -779,8 +819,6 @@ function DocSelectorPanel({
             <EmptyState label="No GRNs found" />
           ) : (
             filteredGRN.map((g) => {
-              // FIX: parse GRNItems from list data for preview counts only —
-              // the full fetch in applyDoc will always override this with fresh data.
               const parsedItems: GRNItemLine[] = (() => {
                 try {
                   if (Array.isArray(g.GRNItems))
@@ -915,7 +953,6 @@ function resolveGstRates(
   return { cgst: fallbackCgst, sgst: fallbackSgst };
 }
 
-// ─── GRN Chain Badge (list view) ─────────────────────────────────────────────
 function GRNChainBadge({
   bookingId,
 }: {
@@ -946,9 +983,6 @@ function GRNChainBadge({
   );
 }
 
-// ─── parseGRNItemsFromRaw ─────────────────────────────────────────────────────
-// Safely parses the GRNItems field from either a raw DB record (string JSON)
-// or an already-parsed array. Used in applyDoc to normalise the API response.
 function parseGRNItemsFromRaw(raw: unknown): GRNItemLine[] {
   try {
     if (Array.isArray(raw)) return raw as GRNItemLine[];
@@ -1012,6 +1046,8 @@ export default function MaterialExpenseBooking() {
   const [previewRecord, setPreviewRecord] = useState<ExpenseRecord | null>(
     null,
   );
+  const [billingTerms, setBillingTerms] = useState<BillingTermOption[]>([]);
+  const [tcOptions, setTcOptions] = useState<TCOption[]>([]);
 
   const isEditing = editingId !== null;
 
@@ -1065,11 +1101,6 @@ export default function MaterialExpenseBooking() {
       ),
     );
 
-    // FIX: GRN list is NEVER served from cache because the list endpoint's
-    // GRNItems column is often null/stale (the column is heavy and some DB
-    // configs truncate it in paginated queries). We always fetch fresh so that
-    // the picker row counts are accurate, and applyDoc will always do a
-    // dedicated single-record fetch anyway to guarantee item data.
     _mastersCache.grn = null;
     setLoadingGRN(true);
     apiFetch("/api/grns?limit=500")
@@ -1122,6 +1153,16 @@ export default function MaterialExpenseBooking() {
     apiFetch("/api/enterprises/options?business_type=P")
       .then((list: ProjectOption[]) => setProjectOptions(list ?? []))
       .catch(() => {});
+    apiFetch("/api/billing-terms")
+      .then((list: BillingTermOption[]) =>
+        setBillingTerms(
+          (Array.isArray(list) ? list : []).filter((t) => t.IsActive !== false),
+        ),
+      )
+      .catch(() => {});
+    apiFetch("/api/tc-master")
+      .then((list: TCOption[]) => setTcOptions(Array.isArray(list) ? list : []))
+      .catch(() => {});
   }, [fetchRecords]);
 
   const set = <K extends keyof Omit<ExpenseRecord, "id">>(
@@ -1133,41 +1174,35 @@ export default function MaterialExpenseBooking() {
     setSelectedDoc(doc);
 
     if (doc.kind === "GRN") {
-      // FIX: immediately clear any stale grnItems so the loading spinner shows
-      // rather than stale/empty data from the list cache.
       setSelectedDoc({ ...doc, grnItems: [] });
       setGrnItemsLoading(true);
-
-      // Always fetch the authoritative single-record endpoint. The list endpoint
-      // often returns GRNItems as null or a truncated string — only the /:id
-      // endpoint is guaranteed to return the full GRNItems JSON column.
-      // Also re-read GRNNo from the single record so the booking reference is
-      // always the canonical GRN number, not whatever the list cached.
       apiFetch(`/api/grns/${doc.sourceId}`)
         .then((r: any) => {
           const items = parseGRNItemsFromRaw(r.GRNItems);
-          // Use the authoritative GRNNo from the single-record fetch.
-          // Apply the same GRN- prefix that GRN.tsx uses in its list column.
           const rawDocNo: string = r.GRNNo || r.DocNo || doc.docNo;
           const canonicalDocNo = rawDocNo
             ? rawDocNo.startsWith("GRN-")
               ? rawDocNo
               : `GRN-${rawDocNo}`
             : rawDocNo;
+          const grnTotal = parseFloat(r.TotalAmount) || 0;
           setSelectedDoc((prev) =>
             prev && prev.kind === "GRN" && prev.sourceId === doc.sourceId
-              ? { ...prev, docNo: canonicalDocNo, grnItems: items }
+              ? {
+                  ...prev,
+                  docNo: canonicalDocNo,
+                  grnItems: items,
+                  amount: grnTotal,
+                }
               : prev,
           );
-          // Keep bookingReference in sync with the canonical GRN number
           setForm((prev) => ({
             ...prev,
             bookingReference: canonicalDocNo,
+            basicAmount: grnTotal > 0 ? grnTotal : prev.basicAmount,
           }));
-          // Let the user know if the GRN genuinely has no item lines.
-          if (items.length === 0) {
+          if (items.length === 0)
             toast.info("This GRN has no item lines recorded against it.");
-          }
         })
         .catch((err: any) => {
           toast.error(
@@ -1184,7 +1219,6 @@ export default function MaterialExpenseBooking() {
       ...prev,
       bookingReference: doc.docNo,
       bookingName: doc.nameLabel ?? prev.bookingName,
-      // GRN has no monetary amount — leave basicAmount for user to fill
       basicAmount:
         doc.kind === "GRN"
           ? prev.basicAmount
@@ -1230,7 +1264,6 @@ export default function MaterialExpenseBooking() {
   const openNew = () => {
     resetForm();
     setForm({ ...blankForm(), financialYear: activeFinYears[0]?.year || "" });
-    // FIX: bust GRN cache so we always get fresh GRNItems on form open
     _mastersCache.grn = null;
     fetchMasters();
     setView("form");
@@ -1269,7 +1302,6 @@ export default function MaterialExpenseBooking() {
     apiFetch(`${API}/${rec.id}/approval-trail`)
       .then(setApprovalTrail)
       .catch(() => setApprovalTrail(undefined));
-    // FIX: bust GRN cache so we always get fresh GRNItems on form open
     _mastersCache.grn = null;
     fetchMasters();
     setView("form");
@@ -1382,17 +1414,6 @@ export default function MaterialExpenseBooking() {
     }
   };
 
-  const handleDelete = async (id: string) => {
-    try {
-      await apiFetch(`${API}/${id}`, { method: "DELETE" });
-      setDeleteId(null);
-      toast.success("Booking deleted.");
-      await fetchRecords(page);
-    } catch (err: any) {
-      toast.error("Delete failed: " + err.message);
-    }
-  };
-
   const bd = computeBreakdown(
     form.basicAmount,
     form.cgstRate,
@@ -1412,6 +1433,9 @@ export default function MaterialExpenseBooking() {
   const isPOorWO = selectedDoc?.kind === "PO" || selectedDoc?.kind === "WO";
   const isGRN = selectedDoc?.kind === "GRN";
   const gstHighlighted = isPOorWO && !!selectedDoc?.gst?.applicable;
+
+  // Gate: reveal Document Selection only after booking info is started
+  const showDocSection = !!(form.bookingDate || form.companyId);
 
   return (
     <>
@@ -1484,116 +1508,7 @@ export default function MaterialExpenseBooking() {
             </CardHeader>
 
             <CardContent className="pt-6 space-y-7 px-5 sm:px-6">
-              {/* 0. Document Selection */}
-              <div className="space-y-3">
-                <SectionHeader label="Document Selection" />
-                <p className="text-[11px] text-muted-foreground -mt-1">
-                  Pick a Purchase Order, Work Order, or GRN to auto-fill booking
-                  details, or choose a document type from Other Expenses for
-                  standalone expense entries.
-                </p>
-                <DocSelectorPanel
-                  poList={poList}
-                  woList={woList}
-                  todList={todList}
-                  grnList={grnList}
-                  loadingPO={loadingPO}
-                  loadingWO={loadingWO}
-                  loadingTOD={loadingTOD}
-                  loadingGRN={loadingGRN}
-                  selected={selectedDoc}
-                  finYear={form.financialYear || undefined}
-                  onSelect={applyDoc}
-                  onClear={clearDoc}
-                  onTodSelected={setSelectedTod}
-                />
-
-                {/* ── Source chain banner ───────────────────────────────── */}
-                {selectedDoc &&
-                  (selectedDoc.kind === "WO" ||
-                    selectedDoc.kind === "PO" ||
-                    selectedDoc.kind === "GRN") && (
-                    <div
-                      className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium ${
-                        selectedDoc.kind === "GRN"
-                          ? "border-teal-500/30 bg-teal-500/5 text-teal-600 dark:text-teal-400"
-                          : "border-primary/30 bg-primary/5 text-primary"
-                      }`}
-                    >
-                      <span className="shrink-0">←</span>
-                      <span className="font-mono font-semibold">
-                        {selectedDoc.docNo}
-                      </span>
-                      {selectedDoc.vendorLabel && (
-                        <>
-                          <span className="text-muted-foreground">|</span>
-                          <span className="text-foreground">
-                            {selectedDoc.vendorLabel}
-                          </span>
-                        </>
-                      )}
-                      {selectedDoc.amount != null && selectedDoc.amount > 0 && (
-                        <>
-                          <span className="text-muted-foreground">|</span>
-                          <span className="text-foreground font-semibold">
-                            ₹{selectedDoc.amount.toLocaleString("en-IN")}
-                          </span>
-                        </>
-                      )}
-                      <span
-                        className={`ml-auto shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold ${
-                          selectedDoc.kind === "WO"
-                            ? "bg-orange-100 dark:bg-orange-950/40 text-orange-700 dark:text-orange-400"
-                            : selectedDoc.kind === "GRN"
-                              ? "bg-teal-100 dark:bg-teal-950/40 text-teal-700 dark:text-teal-400"
-                              : "bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400"
-                        }`}
-                      >
-                        {selectedDoc.kind === "WO"
-                          ? "Work Order"
-                          : selectedDoc.kind === "GRN"
-                            ? "GRN"
-                            : "Purchase Order"}
-                      </span>
-                    </div>
-                  )}
-                <Field
-                  label="Booking Reference"
-                  required
-                  hint={
-                    selectedDoc
-                      ? `Auto-filled from the selected ${selectedDoc.kind === "PO" ? "Purchase Order" : selectedDoc.kind === "WO" ? "Work Order" : selectedDoc.kind === "GRN" ? "GRN" : "document"}.`
-                      : "Will be populated once you select a document above."
-                  }
-                >
-                  <Input
-                    value={form.bookingReference}
-                    readOnly
-                    placeholder="Auto-filled from selected document"
-                    className="font-mono bg-muted/30 cursor-not-allowed"
-                  />
-                </Field>
-              </div>
-
-              {/* Booking Name */}
-              <div className="space-y-2">
-                <Field
-                  label="Booking Name"
-                  hint={
-                    selectedDoc?.nameLabel
-                      ? "Auto-filled from selected document — editable"
-                      : undefined
-                  }
-                >
-                  <Input
-                    value={form.bookingName}
-                    onChange={(e) => set("bookingName", e.target.value)}
-                    placeholder="e.g. Cement supply for Block A, Q1 contractor payment…"
-                  />
-                </Field>
-              </div>
-
-              {/* 1. Booking Information */}
+              {/* ── 0. Booking Information ─────────────────────────────── */}
               <div className="space-y-4">
                 <SectionHeader label="Booking Information" />
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -1732,116 +1647,123 @@ export default function MaterialExpenseBooking() {
                 </div>
               </div>
 
-              {/* GRN Items Summary — shown whenever a GRN is selected */}
-              {isGRN && (
-                <div className="space-y-3">
-                  <SectionHeader label="GRN Items Summary" />
-                  {grnItemsLoading ? (
-                    <div className="rounded-xl border border-teal-500/25 bg-teal-500/5 px-4 py-6 flex items-center justify-center gap-2 text-xs text-muted-foreground">
-                      <div className="w-3.5 h-3.5 rounded-full border-2 border-teal-400 border-t-transparent animate-spin shrink-0" />
-                      <span>Loading GRN items…</span>
-                    </div>
-                  ) : !selectedDoc?.grnItems ||
-                    selectedDoc.grnItems.length === 0 ? (
-                    <div className="rounded-xl border border-teal-500/25 bg-teal-500/5 px-4 py-6 flex items-center justify-center gap-2 text-xs text-muted-foreground">
-                      <Truck size={13} className="text-teal-400 shrink-0" />
-                      <span>No items recorded against this GRN.</span>
-                    </div>
-                  ) : (
-                    <div className="rounded-xl border border-teal-500/25 bg-teal-500/5 overflow-hidden">
-                      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-teal-500/20 bg-teal-500/8">
-                        <Truck size={12} className="text-teal-500 shrink-0" />
-                        <span className="text-xs font-heading font-semibold text-teal-600 dark:text-teal-400">
-                          Items received against this GRN
-                        </span>
-                        <span className="ml-auto text-[10px] text-muted-foreground">
-                          {selectedDoc!.grnItems!.length}{" "}
-                          {selectedDoc!.grnItems!.length === 1
-                            ? "item"
-                            : "items"}
-                        </span>
-                      </div>
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-xs">
-                          <thead>
-                            <tr className="bg-muted/20 border-b border-teal-500/15">
-                              <th className="px-4 py-2.5 text-left font-heading uppercase tracking-wider text-muted-foreground text-[10px]">
-                                Item
-                              </th>
-                              <th className="px-4 py-2.5 text-right font-heading uppercase tracking-wider text-muted-foreground text-[10px]">
-                                Ordered
-                              </th>
-                              <th className="px-4 py-2.5 text-right font-heading uppercase tracking-wider text-emerald-600 dark:text-emerald-400 text-[10px]">
-                                Received
-                              </th>
-                              <th className="px-4 py-2.5 text-right font-heading uppercase tracking-wider text-amber-600 dark:text-amber-400 text-[10px]">
-                                Remaining
-                              </th>
-                              <th className="px-4 py-2.5 text-left font-heading uppercase tracking-wider text-muted-foreground text-[10px]">
-                                UOM
-                              </th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-teal-500/10">
-                            {selectedDoc!.grnItems!.map((item, idx) => (
-                              <tr
-                                key={idx}
-                                className="hover:bg-teal-500/5 transition-colors"
-                              >
-                                <td className="px-4 py-2.5 font-medium text-foreground max-w-[180px] truncate">
-                                  {item.itemName || `Item ${idx + 1}`}
-                                </td>
-                                <td className="px-4 py-2.5 text-right font-mono text-muted-foreground">
-                                  {Number(item.orderedQty) || 0}
-                                </td>
-                                <td className="px-4 py-2.5 text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400">
-                                  {Number(item.receivedQty) || 0}
-                                </td>
-                                <td
-                                  className={`px-4 py-2.5 text-right font-mono font-semibold ${Number(item.remainingQty) > 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}
-                                >
-                                  {Number(item.remainingQty) || 0}
-                                </td>
-                                <td className="px-4 py-2.5 text-muted-foreground">
-                                  {item.uom || "—"}
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                          <tfoot className="border-t border-teal-500/20 bg-muted/10">
-                            <tr>
-                              <td className="px-4 py-2.5 text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
-                                Totals
-                              </td>
-                              <td className="px-4 py-2.5 text-right font-mono text-xs font-semibold text-muted-foreground">
-                                {selectedDoc!.grnItems!.reduce(
-                                  (s, i) => s + (Number(i.orderedQty) || 0),
-                                  0,
-                                )}
-                              </td>
-                              <td className="px-4 py-2.5 text-right font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                                {selectedDoc!.grnItems!.reduce(
-                                  (s, i) => s + (Number(i.receivedQty) || 0),
-                                  0,
-                                )}
-                              </td>
-                              <td className="px-4 py-2.5 text-right font-mono text-xs font-semibold text-amber-600 dark:text-amber-400">
-                                {selectedDoc!.grnItems!.reduce(
-                                  (s, i) => s + (Number(i.remainingQty) || 0),
-                                  0,
-                                )}
-                              </td>
-                              <td />
-                            </tr>
-                          </tfoot>
-                        </table>
-                      </div>
-                    </div>
-                  )}
+              {/* ── 1. Document Selection (gated on booking info) ──────── */}
+              {showDocSection ? (
+                <>
+                  <div className="space-y-3">
+                    <SectionHeader label="Document Selection" />
+                    <p className="text-[11px] text-muted-foreground -mt-1">
+                      Pick a Purchase Order, Work Order, or GRN to auto-fill
+                      booking details, or choose a document type from Other
+                      Expenses for standalone expense entries.
+                    </p>
+                    <DocSelectorPanel
+                      poList={poList}
+                      woList={woList}
+                      todList={todList}
+                      grnList={grnList}
+                      loadingPO={loadingPO}
+                      loadingWO={loadingWO}
+                      loadingTOD={loadingTOD}
+                      loadingGRN={loadingGRN}
+                      selected={selectedDoc}
+                      finYear={form.financialYear || undefined}
+                      filterCompanyId={form.companyId ?? null}
+                      filterProjectId={
+                        form.projectSite ? parseInt(form.projectSite) : null
+                      }
+                      filterFinYear={form.financialYear || null}
+                      onSelect={applyDoc}
+                      onClear={clearDoc}
+                      onTodSelected={setSelectedTod}
+                    />
+
+                    {/* Source chain banner */}
+                    {selectedDoc &&
+                      (selectedDoc.kind === "WO" ||
+                        selectedDoc.kind === "PO" ||
+                        selectedDoc.kind === "GRN") && (
+                        <div
+                          className={`flex items-center gap-2 px-3 py-2 rounded-lg border text-xs font-medium ${selectedDoc.kind === "GRN" ? "border-teal-500/30 bg-teal-500/5 text-teal-600 dark:text-teal-400" : "border-primary/30 bg-primary/5 text-primary"}`}
+                        >
+                          <span className="shrink-0">←</span>
+                          <span className="font-mono font-semibold">
+                            {selectedDoc.docNo}
+                          </span>
+                          {selectedDoc.vendorLabel && (
+                            <>
+                              <span className="text-muted-foreground">|</span>
+                              <span className="text-foreground">
+                                {selectedDoc.vendorLabel}
+                              </span>
+                            </>
+                          )}
+                          {selectedDoc.amount != null &&
+                            selectedDoc.amount > 0 && (
+                              <>
+                                <span className="text-muted-foreground">|</span>
+                                <span className="text-foreground font-semibold">
+                                  ₹{selectedDoc.amount.toLocaleString("en-IN")}
+                                </span>
+                              </>
+                            )}
+                          <span
+                            className={`ml-auto shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold ${selectedDoc.kind === "WO" ? "bg-orange-100 dark:bg-orange-950/40 text-orange-700 dark:text-orange-400" : selectedDoc.kind === "GRN" ? "bg-teal-100 dark:bg-teal-950/40 text-teal-700 dark:text-teal-400" : "bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400"}`}
+                          >
+                            {selectedDoc.kind === "WO"
+                              ? "Work Order"
+                              : selectedDoc.kind === "GRN"
+                                ? "GRN"
+                                : "Purchase Order"}
+                          </span>
+                        </div>
+                      )}
+
+                    <Field
+                      label="Booking Reference"
+                      required
+                      hint={
+                        selectedDoc
+                          ? `Auto-filled from the selected ${selectedDoc.kind === "PO" ? "Purchase Order" : selectedDoc.kind === "WO" ? "Work Order" : selectedDoc.kind === "GRN" ? "GRN" : "document"}.`
+                          : "Will be populated once you select a document above."
+                      }
+                    >
+                      <Input
+                        value={form.bookingReference}
+                        readOnly
+                        placeholder="Auto-filled from selected document"
+                        className="font-mono bg-muted/30 cursor-not-allowed"
+                      />
+                    </Field>
+                  </div>
+
+                  {/* Booking Name — separate block, inside the fragment */}
+                  <div className="space-y-2">
+                    <Field
+                      label="Booking Name"
+                      hint={
+                        selectedDoc?.nameLabel
+                          ? "Auto-filled from selected document — editable"
+                          : undefined
+                      }
+                    >
+                      <Input
+                        value={form.bookingName}
+                        onChange={(e) => set("bookingName", e.target.value)}
+                        placeholder="e.g. Cement supply for Block A, Q1 contractor payment…"
+                      />
+                    </Field>
+                  </div>
+                </>
+              ) : (
+                <div className="flex items-center gap-2 px-4 py-3 rounded-xl border border-dashed border-border/60 text-xs text-muted-foreground">
+                  <FileText size={13} className="shrink-0 opacity-40" />
+                  Fill in the booking information above to see matching
+                  documents.
                 </div>
               )}
 
-              {/* 2. Amount & GST */}
+              {/* ── 2. Amount & GST ────────────────────────────────────── */}
               <div className="space-y-4">
                 <SectionHeader label="Amount & GST" />
                 {isPOorWO && (
@@ -1894,8 +1816,6 @@ export default function MaterialExpenseBooking() {
                         type="number"
                         min={0}
                         value={form.basicAmount || ""}
-                        // GRN: always editable (no pre-set amount from GRN)
-                        // PO/WO: read-only if amount came from the linked order
                         readOnly={!isGRN && !!selectedDoc?.amount}
                         onChange={(e) => {
                           if (!isGRN && selectedDoc?.amount) return;
@@ -1970,7 +1890,148 @@ export default function MaterialExpenseBooking() {
                 )}
               </div>
 
-              {/* 3. Billing Terms — hidden for GRN bookings */}
+              {/* ── GRN Items Summary ──────────────────────────────────── */}
+              {isGRN && (
+                <div className="space-y-3">
+                  <SectionHeader label="GRN Items Summary" />
+                  {grnItemsLoading ? (
+                    <div className="rounded-xl border border-teal-500/25 bg-teal-500/5 px-4 py-6 flex items-center justify-center gap-2 text-xs text-muted-foreground">
+                      <div className="w-3.5 h-3.5 rounded-full border-2 border-teal-400 border-t-transparent animate-spin shrink-0" />
+                      <span>Loading GRN items…</span>
+                    </div>
+                  ) : !selectedDoc?.grnItems ||
+                    selectedDoc.grnItems.length === 0 ? (
+                    <div className="rounded-xl border border-teal-500/25 bg-teal-500/5 px-4 py-6 flex items-center justify-center gap-2 text-xs text-muted-foreground">
+                      <Truck size={13} className="text-teal-400 shrink-0" />
+                      <span>No items recorded against this GRN.</span>
+                    </div>
+                  ) : (
+                    <div className="rounded-xl border border-teal-500/25 bg-teal-500/5 overflow-hidden">
+                      <div className="flex items-center gap-2 px-4 py-2.5 border-b border-teal-500/20 bg-teal-500/8">
+                        <Truck size={12} className="text-teal-500 shrink-0" />
+                        <span className="text-xs font-heading font-semibold text-teal-600 dark:text-teal-400">
+                          Items received against this GRN
+                        </span>
+                        <span className="ml-auto text-[10px] text-muted-foreground">
+                          {selectedDoc!.grnItems!.length}{" "}
+                          {selectedDoc!.grnItems!.length === 1
+                            ? "item"
+                            : "items"}
+                        </span>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="bg-muted/20 border-b border-teal-500/15">
+                              <th className="px-4 py-2.5 text-left font-heading uppercase tracking-wider text-muted-foreground text-[10px]">
+                                Item
+                              </th>
+                              <th className="px-4 py-2.5 text-right font-heading uppercase tracking-wider text-muted-foreground text-[10px]">
+                                Ordered
+                              </th>
+                              <th className="px-4 py-2.5 text-right font-heading uppercase tracking-wider text-emerald-600 dark:text-emerald-400 text-[10px]">
+                                Received
+                              </th>
+                              <th className="px-4 py-2.5 text-right font-heading uppercase tracking-wider text-amber-600 dark:text-amber-400 text-[10px]">
+                                Remaining
+                              </th>
+                              <th className="px-4 py-2.5 text-left font-heading uppercase tracking-wider text-muted-foreground text-[10px]">
+                                UOM
+                              </th>
+                              <th className="px-4 py-2.5 text-right font-heading uppercase tracking-wider text-muted-foreground text-[10px]">
+                                Amount (₹)
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-teal-500/10">
+                            {selectedDoc!.grnItems!.map((item, idx) => (
+                              <tr
+                                key={idx}
+                                className="hover:bg-teal-500/5 transition-colors"
+                              >
+                                <td className="px-4 py-2.5 font-medium text-foreground max-w-[180px] truncate">
+                                  {item.itemName || `Item ${idx + 1}`}
+                                </td>
+                                <td className="px-4 py-2.5 text-right font-mono text-muted-foreground">
+                                  {Number(item.orderedQty) || 0}
+                                </td>
+                                <td className="px-4 py-2.5 text-right font-mono font-semibold text-emerald-600 dark:text-emerald-400">
+                                  {Number(item.receivedQty) || 0}
+                                </td>
+                                <td
+                                  className={`px-4 py-2.5 text-right font-mono font-semibold ${Number(item.remainingQty) > 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}
+                                >
+                                  {Number(item.remainingQty) || 0}
+                                </td>
+                                <td className="px-4 py-2.5 text-muted-foreground">
+                                  {item.uom || "—"}
+                                </td>
+                                <td className="px-4 py-2.5 text-right font-mono text-xs font-semibold text-foreground">
+                                  {(() => {
+                                    const amt =
+                                      Number(item.totalAmount) > 0
+                                        ? Number(item.totalAmount)
+                                        : Number(item.rate || 0) *
+                                          Number(
+                                            item.quantity ||
+                                              item.receivedQty ||
+                                              0,
+                                          );
+                                    return amt > 0 ? `₹${fmt(amt)}` : "—";
+                                  })()}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                          <tfoot className="border-t border-teal-500/20 bg-muted/10">
+                            <tr>
+                              <td className="px-4 py-2.5 text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+                                Totals
+                              </td>
+                              <td className="px-4 py-2.5 text-right font-mono text-xs font-semibold text-muted-foreground">
+                                {selectedDoc!.grnItems!.reduce(
+                                  (s, i) => s + (Number(i.orderedQty) || 0),
+                                  0,
+                                )}
+                              </td>
+                              <td className="px-4 py-2.5 text-right font-mono text-xs font-semibold text-emerald-600 dark:text-emerald-400">
+                                {selectedDoc!.grnItems!.reduce(
+                                  (s, i) => s + (Number(i.receivedQty) || 0),
+                                  0,
+                                )}
+                              </td>
+                              <td className="px-4 py-2.5 text-right font-mono text-xs font-semibold text-amber-600 dark:text-amber-400">
+                                {selectedDoc!.grnItems!.reduce(
+                                  (s, i) => s + (Number(i.remainingQty) || 0),
+                                  0,
+                                )}
+                              </td>
+                              <td />
+                              <td className="px-4 py-2.5 text-right font-mono text-xs font-bold text-foreground">
+                                ₹
+                                {fmt(
+                                  selectedDoc!.grnItems!.reduce((s, i) => {
+                                    const amt =
+                                      Number(i.totalAmount) > 0
+                                        ? Number(i.totalAmount)
+                                        : Number(i.rate || 0) *
+                                          Number(
+                                            i.quantity || i.receivedQty || 0,
+                                          );
+                                    return s + amt;
+                                  }, 0),
+                                )}
+                              </td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* ── 3. Billing Terms ───────────────────────────────────── */}
               {!isGRN && (
                 <div className="space-y-3">
                   <SectionHeader label="Billing Terms" />
@@ -1984,7 +2045,7 @@ export default function MaterialExpenseBooking() {
                 </div>
               )}
 
-              {/* 4. EMI Options — hidden for GRN bookings */}
+              {/* ── 4. EMI Options ─────────────────────────────────────── */}
               {!isGRN && (
                 <div className="space-y-3">
                   <SectionHeader label="EMI / Installment Options" />
@@ -2000,7 +2061,7 @@ export default function MaterialExpenseBooking() {
                 </div>
               )}
 
-              {/* 5. Approval Trail */}
+              {/* ── 5. Approval Trail ──────────────────────────────────── */}
               {isEditing && (
                 <div className="space-y-3">
                   <SectionHeader label="Approval Workflow" />
@@ -2011,7 +2072,96 @@ export default function MaterialExpenseBooking() {
                 </div>
               )}
 
-              {/* 6. Remarks */}
+              {/* ── 6. Remarks ─────────────────────────────────────────── */}
+              {/* ── Billing Terms & T&C ───────────────────────────────── */}
+              <div className="space-y-4">
+                <SectionHeader label="Billing Terms & Conditions" />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Field
+                    label="Billing Terms"
+                    hint="Select applicable payment / billing terms"
+                  >
+                    <Select
+                      value={
+                        form.billingTermId ? String(form.billingTermId) : ""
+                      }
+                      onValueChange={(v) => {
+                        const term = billingTerms.find(
+                          (t) => String(t.BillingTermID) === v,
+                        );
+                        set("billingTermId", term ? term.BillingTermID : null);
+                        set("billingTermName", term?.Name ?? "");
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select billing term…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">None</SelectItem>
+                        {billingTerms.map((t) => (
+                          <SelectItem
+                            key={t.BillingTermID}
+                            value={String(t.BillingTermID)}
+                          >
+                            {t.Name}
+                            {t.Type ? ` (${t.Type})` : ""}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {form.billingTermId &&
+                      (() => {
+                        const term = billingTerms.find(
+                          (t) => t.BillingTermID === form.billingTermId,
+                        );
+                        return term?.Description ? (
+                          <p className="text-[10px] text-muted-foreground mt-1 px-1">
+                            {term.Description}
+                          </p>
+                        ) : null;
+                      })()}
+                  </Field>
+
+                  <Field
+                    label="Terms & Conditions"
+                    hint="Select T&C template to attach"
+                  >
+                    <Select
+                      value={form.tcId ? String(form.tcId) : ""}
+                      onValueChange={(v) => {
+                        const tc = tcOptions.find((t) => String(t.Id) === v);
+                        set("tcId", tc ? tc.Id : null);
+                        set("tcName", tc?.Name ?? "");
+                        set("tcText", tc?.TermsAndCondition ?? "");
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select T&C template…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">None</SelectItem>
+                        {tcOptions.map((t) => (
+                          <SelectItem key={t.Id} value={String(t.Id)}>
+                            {t.Name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </div>
+
+                {form.tcText && (
+                  <div className="rounded-xl border border-border bg-muted/20 p-4">
+                    <p className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground mb-2">
+                      T&C Preview
+                    </p>
+                    <p className="text-xs text-foreground whitespace-pre-wrap leading-relaxed">
+                      {form.tcText}
+                    </p>
+                  </div>
+                )}
+              </div>
+
               <div className="space-y-3">
                 <SectionHeader label="Remarks" />
                 <textarea
@@ -2414,7 +2564,6 @@ export default function MaterialExpenseBooking() {
                   </p>
                 </div>
               </div>
-
               <div className="border-t border-border pt-4">
                 <p className="text-xs text-muted-foreground uppercase mb-3">
                   Breakdown
@@ -2466,7 +2615,6 @@ export default function MaterialExpenseBooking() {
                   </div>
                 </div>
               </div>
-
               {previewRecord.remarks && (
                 <div className="border-t border-border pt-4">
                   <p className="text-xs text-muted-foreground uppercase mb-2">
