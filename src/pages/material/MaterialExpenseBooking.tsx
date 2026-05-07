@@ -883,12 +883,12 @@ function DocSelectorPanel({
                 <Field label="Company">
                   <Select
                     value={
-                      grnFilter.companyId ? String(grnFilter.companyId) : ""
+                      grnFilter.companyId ? String(grnFilter.companyId) : "__all__"
                     }
                     onValueChange={(v) =>
                       setGrnFilter((prev) => ({
                         ...prev,
-                        companyId: v ? parseInt(v, 10) : null,
+                        companyId: v && v !== "__all__" ? parseInt(v, 10) : null,
                       }))
                     }
                   >
@@ -896,24 +896,26 @@ function DocSelectorPanel({
                       <SelectValue placeholder="All companies" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">All companies</SelectItem>
-                      {companyOptions.map((c) => (
-                        <SelectItem key={c.id} value={String(c.id)}>
-                          {c.label}
-                        </SelectItem>
-                      ))}
+                      <SelectItem value="__all__">All companies</SelectItem>
+                      {companyOptions
+                        .filter((c) => c.id != null && String(c.id) !== "")
+                        .map((c) => (
+                          <SelectItem key={c.id} value={String(c.id)}>
+                            {c.label}
+                          </SelectItem>
+                        ))}
                     </SelectContent>
                   </Select>
                 </Field>
                 <Field label="Project">
                   <Select
                     value={
-                      grnFilter.projectId ? String(grnFilter.projectId) : ""
+                      grnFilter.projectId ? String(grnFilter.projectId) : "__all__"
                     }
                     onValueChange={(v) =>
                       setGrnFilter((prev) => ({
                         ...prev,
-                        projectId: v ? parseInt(v, 10) : null,
+                        projectId: v && v !== "__all__" ? parseInt(v, 10) : null,
                       }))
                     }
                   >
@@ -921,24 +923,26 @@ function DocSelectorPanel({
                       <SelectValue placeholder="All projects" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">All projects</SelectItem>
-                      {projectOptions.map((p) => (
-                        <SelectItem key={p.id} value={String(p.id)}>
-                          {p.label}
-                        </SelectItem>
-                      ))}
+                      <SelectItem value="__all__">All projects</SelectItem>
+                      {projectOptions
+                        .filter((p) => p.id != null && String(p.id) !== "")
+                        .map((p) => (
+                          <SelectItem key={p.id} value={String(p.id)}>
+                            {p.label}
+                          </SelectItem>
+                        ))}
                     </SelectContent>
                   </Select>
                 </Field>
                 <Field label="Supplier">
                   <Select
                     value={
-                      grnFilter.supplierId ? String(grnFilter.supplierId) : ""
+                      grnFilter.supplierId ? String(grnFilter.supplierId) : "__all__"
                     }
                     onValueChange={(v) =>
                       setGrnFilter((prev) => ({
                         ...prev,
-                        supplierId: v ? parseInt(v, 10) : null,
+                        supplierId: v && v !== "__all__" ? parseInt(v, 10) : null,
                       }))
                     }
                   >
@@ -946,15 +950,17 @@ function DocSelectorPanel({
                       <SelectValue placeholder="All suppliers" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="">All suppliers</SelectItem>
-                      {suppliers.map((supplier) => (
-                        <SelectItem
-                          key={supplier.id}
-                          value={String(supplier.id)}
-                        >
-                          {supplier.label}
-                        </SelectItem>
-                      ))}
+                      <SelectItem value="__all__">All suppliers</SelectItem>
+                      {suppliers
+                        .filter((s) => s.id != null && String(s.id) !== "")
+                        .map((supplier) => (
+                          <SelectItem
+                            key={supplier.id}
+                            value={String(supplier.id)}
+                          >
+                            {supplier.label}
+                          </SelectItem>
+                        ))}
                     </SelectContent>
                   </Select>
                 </Field>
@@ -1771,11 +1777,13 @@ export default function MaterialExpenseBooking() {
                         <SelectValue placeholder="Select year…" />
                       </SelectTrigger>
                       <SelectContent>
-                        {activeFinYears.map((fy) => (
-                          <SelectItem key={fy.id} value={fy.year}>
-                            {fy.year}
-                          </SelectItem>
-                        ))}
+                        {activeFinYears
+                          .filter((fy) => fy.year && fy.year !== "")
+                          .map((fy) => (
+                            <SelectItem key={fy.id} value={fy.year}>
+                              {fy.year}
+                            </SelectItem>
+                          ))}
                       </SelectContent>
                     </Select>
                   </Field>
@@ -1803,11 +1811,13 @@ export default function MaterialExpenseBooking() {
                             No companies found
                           </SelectItem>
                         )}
-                        {companyOptions.map((c) => (
-                          <SelectItem key={c.id} value={String(c.id)}>
-                            {c.label}
-                          </SelectItem>
-                        ))}
+                        {companyOptions
+                          .filter((c) => c.id != null && String(c.id) !== "")
+                          .map((c) => (
+                            <SelectItem key={c.id} value={String(c.id)}>
+                              {c.label}
+                            </SelectItem>
+                          ))}
                       </SelectContent>
                     </Select>
                   </Field>
@@ -1865,11 +1875,13 @@ export default function MaterialExpenseBooking() {
                             No projects found
                           </SelectItem>
                         )}
-                        {projectOptions.map((p) => (
-                          <SelectItem key={p.id} value={String(p.id)}>
-                            {p.label}
-                          </SelectItem>
-                        ))}
+                        {projectOptions
+                          .filter((p) => p.id != null && String(p.id) !== "")
+                          .map((p) => (
+                            <SelectItem key={p.id} value={String(p.id)}>
+                              {p.label}
+                            </SelectItem>
+                          ))}
                       </SelectContent>
                     </Select>
                   </Field>
@@ -2352,11 +2364,13 @@ export default function MaterialExpenseBooking() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="__none__">None</SelectItem>
-                        {tcOptions.map((t) => (
-                          <SelectItem key={t.Id} value={String(t.Id)}>
-                            {t.Name}
-                          </SelectItem>
-                        ))}
+                        {tcOptions
+                          .filter((t) => t.Id != null && String(t.Id) !== "")
+                          .map((t) => (
+                            <SelectItem key={t.Id} value={String(t.Id)}>
+                              {t.Name}
+                            </SelectItem>
+                          ))}
                       </SelectContent>
                     </Select>
                   </Field>
