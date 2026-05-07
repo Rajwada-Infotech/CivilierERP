@@ -44,34 +44,69 @@ export function computeBreakdown(
   const terms = Array.isArray(discount) ? discount : [discount];
   const activeTerms = terms.filter((d) => d.applicable);
 
-  // Apply discounts sequentially on the running taxable base
-  let runningBase = basicAmount;
-  let totalDiscountAmount = 0;
+  // Separate pre-GST and post-GST terms
+  const preGstActive = activeTerms.filter((d) => d.appliedOn !== "post-gst");
+  const postGstActive = activeTerms.filter((d) => d.appliedOn === "post-gst");
 
-  for (const d of activeTerms) {
-    const discAmt =
+  // Build annotated term lists (normalise deductionType → termType)
+  const toAnnotated = (d: DiscountConfig) => ({
+    ...d,
+    termType: (d.deductionType ?? "Deduction") as "Addition" | "Deduction",
+  });
+
+  const preGstTerms = preGstActive.map(toAnnotated);
+  const postGstTerms = postGstActive.map(toAnnotated);
+
+  // Apply pre-GST terms sequentially
+  let runningBase = basicAmount;
+  let netDiscountDelta = 0; // positive = net deduction, negative = net addition
+
+  for (const d of preGstTerms) {
+    const amt =
       d.type === "percentage" ? (runningBase * d.value) / 100 : d.value;
-    const clamped = Math.min(discAmt, runningBase);
-    totalDiscountAmount += clamped;
-    runningBase -= clamped;
+    if (d.termType === "Addition") {
+      runningBase += amt;
+      netDiscountDelta -= amt;
+    } else {
+      const clamped = Math.min(amt, runningBase);
+      runningBase = Math.max(0, runningBase - clamped);
+      netDiscountDelta += clamped;
+    }
   }
 
   const taxableAmount = Math.max(0, runningBase);
   const cgstAmount = (taxableAmount * cgstRate) / 100;
   const sgstAmount = (taxableAmount * sgstRate) / 100;
-  const grossAmount = taxableAmount + cgstAmount + sgstAmount;
+  let grossAmount = taxableAmount + cgstAmount + sgstAmount;
+
+  // Apply post-GST terms sequentially
+  for (const d of postGstTerms) {
+    const amt =
+      d.type === "percentage" ? (grossAmount * d.value) / 100 : d.value;
+    if (d.termType === "Addition") {
+      grossAmount += amt;
+      netDiscountDelta -= amt;
+    } else {
+      const clamped = Math.min(amt, grossAmount);
+      grossAmount = Math.max(0, grossAmount - clamped);
+      netDiscountDelta += clamped;
+    }
+  }
+
   const rounded = Math.round(grossAmount);
   const roundOff = rounded - grossAmount;
 
   return {
     basicAmount,
-    discountAmount: totalDiscountAmount,
+    discountAmount: netDiscountDelta,
     taxableAmount,
     cgstAmount,
     sgstAmount,
     grossAmount,
     roundOff,
     netAmount: rounded,
+    preGstTerms,
+    postGstTerms,
   };
 }
 
