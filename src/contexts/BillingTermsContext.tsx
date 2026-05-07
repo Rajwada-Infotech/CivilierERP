@@ -30,6 +30,8 @@ export interface BillingTerm {
   description: string;
   status: boolean;
   calculationType?: string;
+  /** "Addition" adds to the base amount; "Deduction" subtracts from it */
+  deductionType: "Addition" | "Deduction";
 }
 
 interface BillingTermsContextType {
@@ -47,11 +49,12 @@ function mapDbRow(row: any): BillingTerm {
     name: row.Name ?? "",
     description: row.Description ?? "",
     billType: (row.CalculationType as BillType) ?? "Tax Invoice",
-    discountType: "none",
+    discountType: "percentage",
     discountValue: 0,
     paymentDueDays: 0,
     status: row.IsActive === 1 || row.IsActive === true,
     calculationType: row.CalculationType ?? undefined,
+    deductionType: row.DeductionType === "Addition" ? "Addition" : "Deduction",
   };
 }
 
