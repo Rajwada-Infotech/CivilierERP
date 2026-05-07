@@ -735,19 +735,6 @@ router.post("/:id/activities/:activityId/materials", async (req, res) => {
       `);
     const docNo = docNoRow.recordset[0]?.DocNo || null;
 
-<<<<<<< HEAD
-    const result = await pool.request()
-      .input("WorkOrderActivityId", sql.Int,              req.params.activityId)
-      .input("ItemId",              sql.UniqueIdentifier, ItemId.trim())
-      .input("UOMId",               sql.Int,              UOMId    || null)
-      .input("Quantity",            sql.Decimal(18,2),    Quantity || null)
-      .input("Rate",                sql.Decimal(18,2),    Rate     || null)
-      .input("Remarks",             sql.NVarChar(400),    Remarks  || null)
-      .input("DocNo",               sql.NVarChar(100),    docNo)
-      .input("CreatedBy",           sql.NVarChar(100),    req.user?.name || null)
-      .input("CreatedAt",           sql.DateTime2,        new Date())
-      .query(`
-=======
     const result = await pool
       .request()
       .input("WorkOrderActivityId", sql.Int, req.params.activityId)
@@ -759,7 +746,6 @@ router.post("/:id/activities/:activityId/materials", async (req, res) => {
       .input("DocNo", sql.NVarChar(100), docNo)
       .input("CreatedBy", sql.NVarChar(100), req.user?.name || null)
       .input("CreatedAt", sql.DateTime2, new Date()).query(`
->>>>>>> eba391bbd58ab223bf3baf8134f4eabb9d9bfe91
         INSERT INTO dbo.WorkOrderActivityMaterials
           (WorkOrderActivityId, ItemId, UOMId, Quantity, Rate, Remarks, DocNo, CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
@@ -776,22 +762,6 @@ router.post("/:id/activities/:activityId/materials", async (req, res) => {
   }
 });
 
-<<<<<<< HEAD
-router.put("/:id/activities/:activityId/materials/:materialId", async (req, res) => {
-  const { ItemId, UOMId, Quantity, Rate, Remarks } = req.body;
-  try {
-    const pool = getPool();
-    await pool.request()
-      .input("Id",        sql.Int,              req.params.materialId)
-      .input("ItemId",    sql.UniqueIdentifier, ItemId || null)
-      .input("UOMId",     sql.Int,              UOMId    || null)
-      .input("Quantity",  sql.Decimal(18,2),    Quantity || null)
-      .input("Rate",      sql.Decimal(18,2),    Rate     || null)
-      .input("Remarks",   sql.NVarChar(400),    Remarks  || null)
-      .input("UpdatedBy", sql.NVarChar(100),    req.user?.name || null)
-      .input("UpdatedAt", sql.DateTime2,        new Date())
-      .query(`
-=======
 router.put(
   "/:id/activities/:activityId/materials/:materialId",
   async (req, res) => {
@@ -808,7 +778,6 @@ router.put(
         .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
         .input("UpdatedBy", sql.NVarChar(100), req.user?.name || null)
         .input("UpdatedAt", sql.DateTime2, new Date()).query(`
->>>>>>> eba391bbd58ab223bf3baf8134f4eabb9d9bfe91
         UPDATE dbo.WorkOrderActivityMaterials SET
           ItemId=@ItemId, UOMId=@UOMId, Quantity=@Quantity,
           Rate=@Rate, Remarks=@Remarks,
@@ -879,24 +848,6 @@ router.post("/:id/save-full", async (req, res) => {
       null;
 
     // 1. Update header
-<<<<<<< HEAD
-    await pool.request()
-      .input("Id",                 sql.Int,               headerId)
-      .input("CompanyId",          sql.Int,               header.CompanyId          || null)
-      .input("ProjectId",          sql.Int,               header.ProjectId          || null)
-      .input("DocumentNumber",     sql.NVarChar(100),     stableDocNo)
-      .input("DocumentDate",       sql.Date,              header.DocumentDate       || null)
-      .input("ContractorId",       sql.Int,               header.ContractorId       || null)
-      .input("TotalAmount",        sql.Decimal(18,2),     header.TotalAmount        || 0)
-      .input("Remarks",            sql.NVarChar(500),     header.Remarks            || null)
-      .input("TermsAndConditions", sql.NVarChar(sql.MAX), header.TermsAndConditions || null)
-      .input("DocTypeId",          sql.Int,               header.DocTypeId ? parseInt(header.DocTypeId, 10) : null)
-      .input("DocNo",              sql.NVarChar(100),     stableDocNo)
-      .input("UpdatedBy",          sql.NVarChar(100),     req.user?.name           || null)
-      .input("UpdatedAt",          sql.DateTime,          new Date())
-      .input("GST",                sql.NVarChar(sql.MAX), header.GST ? (typeof header.GST === "string" ? header.GST : JSON.stringify(header.GST)) : null)
-      .query(`
-=======
     await pool
       .request()
       .input("Id", sql.Int, headerId)
@@ -929,7 +880,6 @@ router.post("/:id/save-full", async (req, res) => {
             : JSON.stringify(header.GST)
           : null,
       ).query(`
->>>>>>> eba391bbd58ab223bf3baf8134f4eabb9d9bfe91
         UPDATE dbo.WorkOrderHeader SET
           CompanyId=@CompanyId, ProjectId=@ProjectId,
           DocumentNumber=@DocumentNumber, DocumentDate=@DocumentDate,
@@ -1017,15 +967,6 @@ router.post("/:id/save-full", async (req, res) => {
           materialDbId = null;
 
         if (!materialDbId) {
-<<<<<<< HEAD
-          const r = await pool.request()
-            .input("WorkOrderActivityId", sql.Int,              activityDbId)
-            .input("ItemId",              sql.UniqueIdentifier, String(mat.ItemId).trim())
-            .input("UOMId",               sql.Int,              mat.UOMId    || null)
-            .input("Quantity",            sql.Decimal(18,2),    mat.Quantity || null)
-            .input("Rate",                sql.Decimal(18,2),    mat.Rate     || null)
-            .input("Remarks",             sql.NVarChar(400),    mat.Remarks  || null)
-=======
           const r = await pool
             .request()
             .input("WorkOrderActivityId", sql.Int, activityDbId)
@@ -1039,7 +980,6 @@ router.post("/:id/save-full", async (req, res) => {
               sql.Decimal(5, 2),
               mat.GSTRate != null ? Number(mat.GSTRate) : 0,
             )
->>>>>>> eba391bbd58ab223bf3baf8134f4eabb9d9bfe91
             // ↓ DocNo FK — required by FK_WorkOrderActivityMaterials_DocNo
             .input("DocNo", sql.NVarChar(100), docNo)
             .input("CreatedBy", sql.NVarChar(100), req.user?.name || null)
@@ -1052,18 +992,6 @@ router.post("/:id/save-full", async (req, res) => {
             `);
           materialDbId = r.recordset[0].Id;
         } else {
-<<<<<<< HEAD
-          await pool.request()
-            .input("Id",        sql.Int,              materialDbId)
-            .input("ItemId",    sql.UniqueIdentifier, String(mat.ItemId).trim())
-            .input("UOMId",     sql.Int,              mat.UOMId    || null)
-            .input("Quantity",  sql.Decimal(18,2),    mat.Quantity || null)
-            .input("Rate",      sql.Decimal(18,2),    mat.Rate     || null)
-            .input("Remarks",   sql.NVarChar(400),    mat.Remarks  || null)
-            .input("UpdatedBy", sql.NVarChar(100),    req.user?.name || null)
-            .input("UpdatedAt", sql.DateTime2,        new Date())
-            .query(`
-=======
           await pool
             .request()
             .input("Id", sql.Int, materialDbId)
@@ -1079,7 +1007,6 @@ router.post("/:id/save-full", async (req, res) => {
             )
             .input("UpdatedBy", sql.NVarChar(100), req.user?.name || null)
             .input("UpdatedAt", sql.DateTime2, new Date()).query(`
->>>>>>> eba391bbd58ab223bf3baf8134f4eabb9d9bfe91
               UPDATE dbo.WorkOrderActivityMaterials SET
                 ItemId=@ItemId, UOMId=@UOMId, Quantity=@Quantity,
                 Rate=@Rate, Remarks=@Remarks, GSTRate=@GSTRate,

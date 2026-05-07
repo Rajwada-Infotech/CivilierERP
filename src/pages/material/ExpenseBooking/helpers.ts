@@ -111,11 +111,14 @@ export function blankForm(): Omit<ExpenseRecord, "id"> {
     sgstRate: 0,
     discount: defaultDiscount(),
     emi: defaultEmi(),
+    /** Default payment type for new bookings. */
+    paymentType: "full",
     netAmount: null,
     status: "Draft",
     remarks: "",
   };
 }
+
 
 export function dbToRecord(row: any): ExpenseRecord {
   let emi: EmiConfig = defaultEmi();
@@ -141,7 +144,13 @@ export function dbToRecord(row: any): ExpenseRecord {
     /* ignore */
   }
 
+  // paymentType is derived from EEmiPayment but currently not persisted in record.
+  // Keeping this local variable for forward compatibility.
+  // const paymentType = row.EEmiPayment ? "partial" : "full";
+
   let discount: DiscountConfig = defaultDiscount();
+
+
   try {
     if (row.EDiscountData)
       discount = { ...defaultDiscount(), ...JSON.parse(row.EDiscountData) };
@@ -185,8 +194,12 @@ export function recordToDb(
   docTypeId?: number | null,
 ) {
   return {
+
+
     EName: form.bookingName || null,
+
     EProjectName: form.supplier || form.projectSite || null,
+
     EDocumentType: form.materialCategory || null,
     EDocDate: form.bookingDate || null,
 

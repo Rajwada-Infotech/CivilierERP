@@ -63,7 +63,7 @@ const BillingTermsMaster: React.FC = () => {
       label: "Calculation Type",
       type: "select",
       required: true,
-      options: ["Before GST", "After GST"],
+      options: ["Fixed", "Percentage", "Custom"],
     },
     {
       name: "Description",

@@ -89,6 +89,8 @@ export interface ExpenseRecord {
   sgstRate: number;
   discount: DiscountConfig;
   emi: EmiConfig;
+  /** Payment mode derived from EMI flag. */
+  paymentType?: "full" | "partial";
   netAmount: number | null;
   status: BookingStatus;
   remarks: string;
@@ -109,6 +111,7 @@ export interface ExpenseRecord {
     [key: string]: any;
   }[];
 }
+
 
 export interface PriceBreakdown {
   basicAmount: number;
