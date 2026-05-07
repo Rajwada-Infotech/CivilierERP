@@ -193,6 +193,7 @@ interface BillingTermOption {
   Description?: string;
   Type?: string;
   GST?: string;
+  IsActive?: boolean;
 }
 interface TCOption {
   Id: number;
@@ -853,56 +854,15 @@ function DocSelectorPanel({
             })
           )
         ) : tab === "GRN" ? (
-          filteredGRN.length === 0 ? (
-            <EmptyState label="No GRNs found" />
-          ) : (
-            filteredGRN.map((g) => {
-              const parsedItems: GRNItemLine[] = (() => {
-                try {
-                  if (Array.isArray(g.GRNItems))
-                    return g.GRNItems as GRNItemLine[];
-                  if (typeof g.GRNItems === "string" && g.GRNItems.trim()) {
-                    const parsed = JSON.parse(g.GRNItems);
-                    return Array.isArray(parsed) ? parsed : [];
-                  }
-                } catch {
-                  /* ignore */
-                }
-                return [];
-              })();
-              const totalReceived = parsedItems.reduce(
-                (s, i) => s + (Number(i.receivedQty) || 0),
-                0,
-              );
-              const totalRemaining = parsedItems.reduce(
-                (s, i) => s + (Number(i.remainingQty) || 0),
-                0,
-              );
-              return (
-                <button
-                  key={g.GRNID}
-                  onClick={() =>
-                    onSelect({
-                      kind: "GRN",
-                      docNo: g.GRNNo
-                        ? g.GRNNo.startsWith("GRN-")
-                          ? g.GRNNo
-                          : `GRN-${g.GRNNo}`
-                        : g.GRNNo,
-                      sourceId: g.GRNID,
-                      vendorLabel: g.SupplierName,
-                      status: g.Status,
-                      date: g.GRNDate,
-                      nameLabel: g.Remarks,
-                      grnItems: parsedItems,
-                    })
-                  }
-                  className="w-full flex items-start gap-3 px-4 py-3 hover:bg-muted/30 transition-colors border-b border-border/30 last:border-0 text-left group"
-                >
-                  Refresh
-                </Button>
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <>
+            <div className="p-3 border-b border-border/40">
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-heading font-semibold text-muted-foreground">Filter GRNs</span>
+              <Button variant="ghost" size="sm" className="h-7 text-xs gap-1" onClick={() => fetchFilteredGrns(grnFilter)}>
+                <Search size={11} /> Refresh
+              </Button>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <Field label="Company">
                   <Select
                     value={grnFilter.companyId ? String(grnFilter.companyId) : ""}
@@ -1212,6 +1172,14 @@ export default function MaterialExpenseBooking() {
   const [previewRecord, setPreviewRecord] = useState<ExpenseRecord | null>(
     null,
   );
+  const [filteredGrnList, setFilteredGrnList] = useState<GRNItem[]>([]);
+  const [loadingFilteredGrn, setLoadingFilteredGrn] = useState(false);
+  const [grnFilter, setGrnFilter] = useState<{
+    companyId: number | null;
+    projectId: number | null;
+    supplierId: number | null;
+  }>({ companyId: null, projectId: null, supplierId: null });
+  const [suppliers, setSuppliers] = useState<{ id: number; label: string }[]>([]);
   const [billingTerms, setBillingTerms] = useState<BillingTermOption[]>([]);
   const [tcOptions, setTcOptions] = useState<TCOption[]>([]);
 
@@ -1230,6 +1198,22 @@ export default function MaterialExpenseBooking() {
     } finally {
       setLoading(false);
     }
+  }, []);
+
+  const fetchFilteredGrns = useCallback((filter: { companyId: number | null; projectId: number | null; supplierId: number | null }) => {
+    setLoadingFilteredGrn(true);
+    const params = new URLSearchParams();
+    if (filter.companyId) params.set("companyId", String(filter.companyId));
+    if (filter.projectId) params.set("projectId", String(filter.projectId));
+    if (filter.supplierId) params.set("supplierId", String(filter.supplierId));
+    params.set("limit", "500");
+    apiFetch(`/api/grns?${params.toString()}`)
+      .then((r) => {
+        const list: GRNItem[] = Array.isArray(r) ? r : (r?.data ?? []);
+        setFilteredGrnList(list);
+      })
+      .catch(() => toast.error("Could not load filtered GRNs"))
+      .finally(() => setLoadingFilteredGrn(false));
   }, []);
 
   const fetchMasters = () => {
@@ -1318,6 +1302,9 @@ export default function MaterialExpenseBooking() {
       .catch(() => {});
     apiFetch("/api/enterprises/options?business_type=P")
       .then((list: ProjectOption[]) => setProjectOptions(list ?? []))
+      .catch(() => {});
+    apiFetch("/api/enterprises/options?business_type=S")
+      .then((list: { id: number; label: string }[]) => setSuppliers(list ?? []))
       .catch(() => {});
     apiFetch("/api/billing-terms")
       .then((list: BillingTermOption[]) =>
@@ -1477,6 +1464,17 @@ export default function MaterialExpenseBooking() {
     _mastersCache.grn = null;
     fetchMasters();
     setView("form");
+  };
+
+  const handleDelete = async (id: string) => {
+    try {
+      await apiFetch(`${API}/${id}`, { method: "DELETE" });
+      toast.success("Expense booking deleted.");
+      setDeleteId(null);
+      await fetchRecords(page);
+    } catch (err: any) {
+      toast.error("Delete failed: " + err.message);
+    }
   };
 
   const cancelForm = () => {
@@ -1842,6 +1840,14 @@ export default function MaterialExpenseBooking() {
                       loadingWO={loadingWO}
                       loadingTOD={loadingTOD}
                       loadingGRN={loadingGRN}
+                      companyOptions={companyOptions}
+                      projectOptions={projectOptions}
+                      suppliers={suppliers}
+                      grnFilter={grnFilter}
+                      setGrnFilter={setGrnFilter}
+                      filteredGrnList={filteredGrnList}
+                      loadingFilteredGrn={loadingFilteredGrn}
+                      fetchFilteredGrns={fetchFilteredGrns}
                       selected={selectedDoc}
                       finYear={form.financialYear || undefined}
                       filterCompanyId={form.companyId ?? null}
@@ -2710,115 +2716,10 @@ export default function MaterialExpenseBooking() {
               Details for booking {previewRecord?.bookingReference}
             </DialogDescription>
           </DialogHeader>
-          {previewRecord && (
-            <div className="space-y-4 py-4">
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                <div>
-                  <p className="text-xs text-muted-foreground uppercase">
-                    Reference
-                  </p>
-                  <p className="font-medium">
-                    {previewRecord.bookingReference || "—"}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground uppercase">
-                    Status
-                  </p>
-                  <div className="mt-1">
-                    <StatusBadge status={previewRecord.status} />
-                  </div>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground uppercase">
-                    Date
-                  </p>
-                  <p className="font-medium">{previewRecord.bookingDate}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground uppercase">
-                    Supplier
-                  </p>
-                  <p className="font-medium">{previewRecord.supplier || "—"}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground uppercase">
-                    Type
-                  </p>
-                  <p className="font-medium">
-                    {previewRecord.docTypeName || "—"}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground uppercase">
-                    Net Amount
-                  </p>
-                  <p className="font-medium text-emerald-600 dark:text-emerald-400">
-                    ₹{fmt(previewRecord.netAmount ?? 0)}
-                  </p>
-                </div>
-              </div>
-              <div className="border-t border-border pt-4">
-                <p className="text-xs text-muted-foreground uppercase mb-3">
-                  Breakdown
-                </p>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 bg-muted/20 p-4 rounded-lg border border-border">
-                  <div>
-                    <p className="text-[10px] text-muted-foreground uppercase">
-                      Basic
-                    </p>
-                    <p className="font-mono text-sm font-semibold">
-                      ₹{fmt(previewRecord.basicAmount)}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-[10px] text-muted-foreground uppercase">
-                      CGST ({previewRecord.cgstRate}%)
-                    </p>
-                    <p className="font-mono text-sm font-semibold">
-                      ₹
-                      {fmt(
-                        (previewRecord.basicAmount *
-                          (previewRecord.cgstRate || 0)) /
-                          100,
-                      )}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-[10px] text-muted-foreground uppercase">
-                      SGST ({previewRecord.sgstRate}%)
-                    </p>
-                    <p className="font-mono text-sm font-semibold">
-                      ₹
-                      {fmt(
-                        (previewRecord.basicAmount *
-                          (previewRecord.sgstRate || 0)) /
-                          100,
-                      )}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-[10px] text-muted-foreground uppercase">
-                      Discount
-                    </p>
-                    <p className="font-mono text-sm font-semibold text-red-500">
-                      {previewRecord.discount?.applicable
-                        ? `-₹${fmt(previewRecord.discount.amount)}`
-                        : "—"}
-                    </p>
-                  </div>
-                </div>
-              </div>
-              {previewRecord.remarks && (
-                <div className="border-t border-border pt-4">
-                  <p className="text-xs text-muted-foreground uppercase mb-2">
-                    Remarks
-                  </p>
-                  <p className="text-sm bg-muted/30 p-3 rounded-lg border border-border">
-                    {previewRecord.remarks}
-                  </p>
-                </div>
-
+          {previewRecord && (() => {
+            const hasEmi = !!(previewRecord.emi?.enabled && previewRecord.emi?.installmentCount);
+            return (
+              <>
                 <div className="px-4 sm:px-6 py-4 sm:py-5 space-y-5">
 
                   {/* ── Section 1: Booking Info ── */}
@@ -2893,9 +2794,9 @@ export default function MaterialExpenseBooking() {
                     );
                     const hasIgst = (previewRecord.igstRate || 0) > 0;
                     const hasDiscount = previewRecord.discount && (previewRecord.discount.value || 0) > 0;
-                    const cgstAmt = rbd.cgstAmt;
-                    const sgstAmt = rbd.sgstAmt;
-                    const igstAmt = rbd.igstAmt;
+                    const cgstAmt = (rbd as any).cgstAmt ?? (previewRecord.basicAmount * (previewRecord.cgstRate || 0)) / 100;
+                    const sgstAmt = (rbd as any).sgstAmt ?? (previewRecord.basicAmount * (previewRecord.sgstRate || 0)) / 100;
+                    const igstAmt = (rbd as any).igstAmt ?? (previewRecord.basicAmount * (previewRecord.igstRate || 0)) / 100;
 
                     return (
                       <>
@@ -2953,7 +2854,7 @@ export default function MaterialExpenseBooking() {
                                       ? <span className="font-mono text-[10px] bg-red-500/10 px-1.5 py-0.5 rounded">{previewRecord.discount.value}%</span>
                                       : null}
                                   </p>
-                                  <p className="font-mono text-sm text-red-500 dark:text-red-400">− ₹{fmt(rbd.discountAmount)}</p>
+                                  <p className="font-mono text-sm text-red-500 dark:text-red-400">− ₹{fmt((rbd as any).discountAmount)}</p>
                                 </div>
                               )}
                             </div>
@@ -3014,7 +2915,7 @@ export default function MaterialExpenseBooking() {
                           <Hash size={10} className="shrink-0" />
                           Total via EMI: <span className="font-mono font-semibold text-foreground">₹{fmt(previewRecord.emi!.emiAmount * previewRecord.emi!.installmentCount)}</span>
                           <span className="mx-1">·</span>
-                          Remaining: <span className="font-mono font-semibold text-foreground">₹{fmt(Math.max(0, (previewRecord.netAmount ?? rbd.netAmount) - previewRecord.emi!.emiAmount * previewRecord.emi!.installmentCount))}</span>
+                          Remaining: <span className="font-mono font-semibold text-foreground">₹{fmt(Math.max(0, (previewRecord.netAmount ?? 0) - previewRecord.emi!.emiAmount * previewRecord.emi!.installmentCount))}</span>
                         </div>
                       )}
                     </div>
