@@ -1,5 +1,4 @@
 // ─── Expense Booking — Shared Types ──────────────────────────────────────────
-
 export type BookingStatus =
   | "Draft"
   | "Pending"
@@ -34,6 +33,11 @@ export interface DiscountConfig {
   appliedOn: "pre-gst" | "post-gst";
   masterTermId: string | null;
   masterTermName: string | null;
+
+  /** Unique local key for React list rendering (not persisted) */
+  _key?: string;
+
+  /** Optional calculated amount (used in UI for fixed discounts) */
   amount?: number;
 }
 
@@ -96,10 +100,14 @@ export interface ExpenseRecord {
   remarks: string;
   billingTermId: number | null;
   billingTermName: string;
+  /** Multi-term support: list of all applied billing terms */
+  billingTerms: DiscountConfig[];
   tcId: number | null;
   tcName: string;
   tcText: string;
   approvalTrail?: ApprovalTrail;
+
+  // Optional fields for display / frontend use
   companyName?: string;
   projectName?: string;
   projectId?: number | string;
@@ -107,7 +115,7 @@ export interface ExpenseRecord {
   workOrderId?: number | string;
   sourceDocNo?: string;
   igstRate?: number;
-  billingTerms?: string | string[];
+
   grnItems?: {
     itemName?: string;
     qty?: number;
@@ -116,7 +124,6 @@ export interface ExpenseRecord {
     [key: string]: any;
   }[];
 }
-
 
 export interface PriceBreakdown {
   basicAmount: number;
