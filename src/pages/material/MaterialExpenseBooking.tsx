@@ -363,12 +363,40 @@ interface DocSelectorProps {
   loadingWO: boolean;
   loadingTOD: boolean;
   loadingGRN: boolean;
+
+  // GRN filtering (suppliers-based picker)
+  companyOptions: CompanyOption[];
+  projectOptions: ProjectOption[];
+  suppliers: { id: number; label: string }[];
+  grnFilter: {
+    companyId: number | null;
+    projectId: number | null;
+    supplierId: number | null;
+  };
+  setGrnFilter: React.Dispatch<
+    React.SetStateAction<{
+      companyId: number | null;
+      projectId: number | null;
+      supplierId: number | null;
+    }>
+  >;
+  filteredGrnList: GRNItem[];
+  loadingFilteredGrn: boolean;
+  fetchFilteredGrns: (filter: {
+    companyId: number | null;
+    projectId: number | null;
+    supplierId: number | null;
+  }) => void;
+
   selected: SelectedDoc | null;
   finYear?: string;
   onSelect: (doc: SelectedDoc) => void;
   onClear: () => void;
   onTodSelected?: (tod: TodItem | null) => void;
 }
+
+
+
 
 function DocSelectorPanel({
   poList,
@@ -379,6 +407,14 @@ function DocSelectorPanel({
   loadingWO,
   loadingTOD,
   loadingGRN,
+  companyOptions,
+  projectOptions,
+  suppliers,
+  grnFilter,
+  setGrnFilter,
+  filteredGrnList,
+  loadingFilteredGrn,
+  fetchFilteredGrns,
   selected,
   finYear,
   onSelect,
@@ -413,6 +449,11 @@ function DocSelectorPanel({
   };
 
   const q = search.toLowerCase();
+
+  useEffect(() => {
+    fetchFilteredGrns(grnFilter);
+  }, [fetchFilteredGrns, grnFilter]);
+
   const filteredPO = poList.filter(
     (p) =>
       (p.DocNo || p.PurchaseOrderNo).toLowerCase().includes(q) ||
@@ -428,7 +469,7 @@ function DocSelectorPanel({
       (t.FullPrefix ?? t.Prefix).toLowerCase().includes(q) ||
       t.Description.toLowerCase().includes(q),
   );
-  const filteredGRN = grnList.filter(
+  const filteredGRN = filteredGrnList.filter(
     (g) =>
       (g.GRNNo || "").toLowerCase().includes(q) ||
       (g.SupplierName || "").toLowerCase().includes(q) ||
@@ -777,109 +818,205 @@ function DocSelectorPanel({
             })
           )
         ) : tab === "GRN" ? (
-          filteredGRN.length === 0 ? (
-            <EmptyState label="No GRNs found" />
-          ) : (
-            filteredGRN.map((g) => {
-              // FIX: parse GRNItems from list data for preview counts only —
-              // the full fetch in applyDoc will always override this with fresh data.
-              const parsedItems: GRNItemLine[] = (() => {
-                try {
-                  if (Array.isArray(g.GRNItems))
-                    return g.GRNItems as GRNItemLine[];
-                  if (typeof g.GRNItems === "string" && g.GRNItems.trim()) {
-                    const parsed = JSON.parse(g.GRNItems);
-                    return Array.isArray(parsed) ? parsed : [];
-                  }
-                } catch {
-                  /* ignore */
-                }
-                return [];
-              })();
-              const totalReceived = parsedItems.reduce(
-                (s, i) => s + (Number(i.receivedQty) || 0),
-                0,
-              );
-              const totalRemaining = parsedItems.reduce(
-                (s, i) => s + (Number(i.remainingQty) || 0),
-                0,
-              );
-              return (
-                <button
-                  key={g.GRNID}
-                  onClick={() =>
-                    onSelect({
-                      kind: "GRN",
-                      docNo: g.GRNNo
-                        ? g.GRNNo.startsWith("GRN-")
-                          ? g.GRNNo
-                          : `GRN-${g.GRNNo}`
-                        : g.GRNNo,
-                      sourceId: g.GRNID,
-                      vendorLabel: g.SupplierName,
-                      status: g.Status,
-                      date: g.GRNDate,
-                      nameLabel: g.Remarks,
-                      grnItems: parsedItems,
-                    })
-                  }
-                  className="w-full flex items-start gap-3 px-4 py-3 hover:bg-muted/30 transition-colors border-b border-border/30 last:border-0 text-left group"
+          <>
+            <div className="p-3 border-b border-border/40 bg-background space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-[10px] uppercase tracking-wider font-heading text-muted-foreground">
+                    Step 1 — Company
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Filter GRNs by company, project, and supplier before selecting.
+                  </p>
+                </div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => fetchFilteredGrns(grnFilter)}
                 >
-                  <div className="w-7 h-7 rounded-lg bg-teal-500/10 flex items-center justify-center shrink-0 mt-0.5">
-                    <Truck size={12} className="text-teal-500" />
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="font-mono text-xs font-bold text-teal-600 dark:text-teal-400">
-                        {g.GRNNo
+                  Refresh
+                </Button>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <Field label="Company">
+                  <Select
+                    value={grnFilter.companyId ? String(grnFilter.companyId) : ""}
+                    onValueChange={(v) =>
+                      setGrnFilter((prev) => ({
+                        ...prev,
+                        companyId: v ? parseInt(v, 10) : null,
+                      }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="All companies" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">All companies</SelectItem>
+                      {companyOptions.map((c) => (
+                        <SelectItem key={c.id} value={String(c.id)}>
+                          {c.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field label="Project">
+                  <Select
+                    value={grnFilter.projectId ? String(grnFilter.projectId) : ""}
+                    onValueChange={(v) =>
+                      setGrnFilter((prev) => ({
+                        ...prev,
+                        projectId: v ? parseInt(v, 10) : null,
+                      }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="All projects" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">All projects</SelectItem>
+                      {projectOptions.map((p) => (
+                        <SelectItem key={p.id} value={String(p.id)}>
+                          {p.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field label="Supplier">
+                  <Select
+                    value={grnFilter.supplierId ? String(grnFilter.supplierId) : ""}
+                    onValueChange={(v) =>
+                      setGrnFilter((prev) => ({
+                        ...prev,
+                        supplierId: v ? parseInt(v, 10) : null,
+                      }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="All suppliers" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="">All suppliers</SelectItem>
+                      {suppliers.map((supplier) => (
+                        <SelectItem key={supplier.id} value={String(supplier.id)}>
+                          {supplier.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              </div>
+            </div>
+            {loadingFilteredGrn ? (
+              <div className="flex items-center justify-center py-10 gap-2 text-xs text-muted-foreground">
+                <Loader2 size={14} className="animate-spin" />
+                Loading GRNs…
+              </div>
+            ) : filteredGRN.length === 0 ? (
+              <EmptyState label="No GRNs found" />
+            ) : (
+              filteredGRN.map((g) => {
+                // FIX: parse GRNItems from list data for preview counts only —
+                // the full fetch in applyDoc will always override this with fresh data.
+                const parsedItems: GRNItemLine[] = (() => {
+                  try {
+                    if (Array.isArray(g.GRNItems)) return g.GRNItems as GRNItemLine[];
+                    if (typeof g.GRNItems === "string" && g.GRNItems.trim()) {
+                      const parsed = JSON.parse(g.GRNItems);
+                      return Array.isArray(parsed) ? parsed : [];
+                    }
+                  } catch {
+                    /* ignore */
+                  }
+                  return [];
+                })();
+                const totalReceived = parsedItems.reduce(
+                  (s, i) => s + (Number(i.receivedQty) || 0),
+                  0,
+                );
+                const totalRemaining = parsedItems.reduce(
+                  (s, i) => s + (Number(i.remainingQty) || 0),
+                  0,
+                );
+                return (
+                  <button
+                    key={g.GRNID}
+                    onClick={() =>
+                      onSelect({
+                        kind: "GRN",
+                        docNo: g.GRNNo
                           ? g.GRNNo.startsWith("GRN-")
                             ? g.GRNNo
                             : `GRN-${g.GRNNo}`
-                          : "—"}
-                      </span>
-                      {g.Status && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground border border-border/50">
-                          {g.Status}
-                        </span>
-                      )}
-                      {g.PONumber && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
-                          PO: {g.PONumber}
-                        </span>
-                      )}
+                          : g.GRNNo,
+                        sourceId: g.GRNID,
+                        vendorLabel: g.SupplierName,
+                        status: g.Status,
+                        date: g.GRNDate,
+                        nameLabel: g.Remarks,
+                        grnItems: parsedItems,
+                      })
+                    }
+                    className="w-full flex items-start gap-3 px-4 py-3 hover:bg-muted/30 transition-colors border-b border-border/30 last:border-0 text-left group"
+                  >
+                    <div className="w-7 h-7 rounded-lg bg-teal-500/10 flex items-center justify-center shrink-0 mt-0.5">
+                      <Truck size={12} className="text-teal-500" />
                     </div>
-                    <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
-                      {[g.SupplierName, g.GRNDate?.slice(0, 10)]
-                        .filter(Boolean)
-                        .join(" · ")}
-                    </p>
-                    {parsedItems.length > 0 && (
-                      <div className="flex items-center gap-3 mt-1.5">
-                        <span className="flex items-center gap-1 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded-md">
-                          <Package size={9} />
-                          {totalReceived} received
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono text-xs font-bold text-teal-600 dark:text-teal-400">
+                          {g.GRNNo
+                            ? g.GRNNo.startsWith("GRN-")
+                              ? g.GRNNo
+                              : `GRN-${g.GRNNo}`
+                            : "—"}
                         </span>
-                        {totalRemaining > 0 && (
-                          <span className="flex items-center gap-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded-md">
-                            <Clock size={9} />
-                            {totalRemaining} pending
+                        {g.Status && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-muted text-muted-foreground border border-border/50">
+                            {g.Status}
                           </span>
                         )}
-                        <span className="text-[10px] text-muted-foreground">
-                          {parsedItems.length}{" "}
-                          {parsedItems.length === 1 ? "item" : "items"}
-                        </span>
+                        {g.PONumber && (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+                            PO: {g.PONumber}
+                          </span>
+                        )}
                       </div>
-                    )}
-                  </div>
-                  <ChevronRight
-                    size={12}
-                    className="text-muted-foreground/30 shrink-0 mt-1"
-                  />
-                </button>
-              );
-            })
-          )
+                      <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
+                        {[g.SupplierName, g.GRNDate?.slice(0, 10)]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </p>
+                      {parsedItems.length > 0 && (
+                        <div className="flex items-center gap-3 mt-1.5">
+                          <span className="flex items-center gap-1 text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded-md">
+                            <Package size={9} />
+                            {totalReceived} received
+                          </span>
+                          {totalRemaining > 0 && (
+                            <span className="flex items-center gap-1 text-[10px] font-semibold text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 px-1.5 py-0.5 rounded-md">
+                              <Clock size={9} />
+                              {totalRemaining} pending
+                            </span>
+                          )}
+                          <span className="text-[10px] text-muted-foreground">
+                            {parsedItems.length}{" "}
+                            {parsedItems.length === 1 ? "item" : "items"}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <ChevronRight
+                      size={12}
+                      className="text-muted-foreground/30 shrink-0 mt-1"
+                    />
+                  </button>
+                );
+              })
+            )}
+          </>
         ) : filteredTOD.length === 0 ? (
           <EmptyState label="No other expense types found" />
         ) : (
@@ -1012,6 +1149,16 @@ export default function MaterialExpenseBooking() {
   >(null);
   const [loadingEmi, setLoadingEmi] = useState(false);
   const [previewRecord, setPreviewRecord] = useState<ExpenseRecord | null>(null);
+  const [suppliers, setSuppliers] = useState<{ id: number; label: string }[]>([]);
+  const [grnFilter, setGrnFilter] = useState<{
+    companyId: number | null;
+    projectId: number | null;
+    supplierId: number | null;
+  }>({ companyId: null, projectId: null, supplierId: null });
+  const [filteredGrnList, setFilteredGrnList] = useState<GRNItem[]>([]);
+  const [loadingFilteredGrn, setLoadingFilteredGrn] = useState(false);
+  const [editedGrnItems, setEditedGrnItems] = useState<GRNItemLine[]>([]);
+  const [editingGrnItems, setEditingGrnItems] = useState(false);
 
   const isEditing = editingId !== null;
 
@@ -1122,6 +1269,11 @@ export default function MaterialExpenseBooking() {
     apiFetch("/api/enterprises/options?business_type=P")
       .then((list: ProjectOption[]) => setProjectOptions(list ?? []))
       .catch(() => {});
+    apiFetch("/api/grns/suppliers")
+      .then((list: { id: number; label: string }[]) =>
+        setSuppliers(list ?? []),
+      )
+      .catch(() => {});
   }, [fetchRecords]);
 
   const set = <K extends keyof Omit<ExpenseRecord, "id">>(
@@ -1141,7 +1293,7 @@ export default function MaterialExpenseBooking() {
       // Always fetch the authoritative single-record endpoint. The list endpoint
       // often returns GRNItems as null or a truncated string — only the /:id
       // endpoint is guaranteed to return the full GRNItems JSON column.
-      // Also re-read GRNNo from the single record so the booking reference is
+      // Also re-read GRNNo from the single-record fetch so the booking reference is
       // always the canonical GRN number, not whatever the list cached.
       apiFetch(`/api/grns/${doc.sourceId}`)
         .then((r: any) => {
@@ -1203,6 +1355,12 @@ export default function MaterialExpenseBooking() {
       cgstRate: cgst,
       sgstRate: sgst,
     }));
+    if (doc.kind === "GRN") {
+      setGrnFilter((prev) => ({
+        ...prev,
+        companyId: doc.companyId ?? prev.companyId,
+      }));
+    }
   };
 
   const clearDoc = () => {
@@ -1317,6 +1475,10 @@ export default function MaterialExpenseBooking() {
       toast.error("Please select a company.");
       return;
     }
+    if (form.emi.enabled && !form.paymentType) {
+      toast.error("Payment type is required for EMI bookings.");
+      return;
+    }
     if (
       selectedDoc?.kind !== "GRN" &&
       (!form.basicAmount || form.basicAmount <= 0)
@@ -1380,6 +1542,44 @@ export default function MaterialExpenseBooking() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const fetchFilteredGrns = useCallback(
+    async (filter: {
+      companyId: number | null;
+      projectId: number | null;
+      supplierId: number | null;
+    }) => {
+      setLoadingFilteredGrn(true);
+      try {
+        const params = new URLSearchParams();
+        if (filter.companyId) params.set("companyId", String(filter.companyId));
+        if (filter.projectId) params.set("projectId", String(filter.projectId));
+        if (filter.supplierId) params.set("supplierId", String(filter.supplierId));
+        const list = await apiFetch(
+          `/api/grns/filtered${params.toString() ? `?${params.toString()}` : ""}`,
+        );
+        setFilteredGrnList(Array.isArray(list) ? list : []);
+      } catch (err: any) {
+        console.error("Filtered GRN fetch failed:", err);
+        toast.error("Could not load filtered GRNs.");
+        setFilteredGrnList([]);
+      } finally {
+        setLoadingFilteredGrn(false);
+      }
+    },
+    [],
+  );
+
+  const saveGrnEdits = () => {
+    if (!selectedDoc || selectedDoc.kind !== "GRN") return;
+    setSelectedDoc((prev) =>
+      prev && prev.kind === "GRN"
+        ? { ...prev, grnItems: editedGrnItems }
+        : prev,
+    );
+    setEditingGrnItems(false);
+    toast.success("GRN item quantities saved.");
   };
 
   const handleDelete = async (id: string) => {
@@ -1487,7 +1687,7 @@ export default function MaterialExpenseBooking() {
                   details, or choose a document type from Other Expenses for
                   standalone expense entries.
                 </p>
-                <DocSelectorPanel
+<DocSelectorPanel
                   poList={poList}
                   woList={woList}
                   todList={todList}
@@ -1501,6 +1701,14 @@ export default function MaterialExpenseBooking() {
                   onSelect={applyDoc}
                   onClear={clearDoc}
                   onTodSelected={setSelectedTod}
+                  companyOptions={companyOptions}
+                  projectOptions={projectOptions}
+                  suppliers={suppliers}
+                  grnFilter={grnFilter}
+                  setGrnFilter={setGrnFilter}
+                  filteredGrnList={filteredGrnList}
+                  loadingFilteredGrn={loadingFilteredGrn}
+                  fetchFilteredGrns={fetchFilteredGrns}
                 />
 
                 {/* ── Source chain banner ───────────────────────────────── */}
@@ -1755,6 +1963,17 @@ export default function MaterialExpenseBooking() {
                             ? "item"
                             : "items"}
                         </span>
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          className="h-6 text-xs ml-2 text-teal-600 hover:bg-teal-500/20"
+                          onClick={() => {
+                            setEditedGrnItems(selectedDoc!.grnItems! || []);
+                            setEditingGrnItems(true);
+                          }}
+                        >
+                          <Edit size={12} className="mr-1"/> Edit
+                        </Button>
                       </div>
                       <div className="overflow-x-auto">
                         <table className="w-full text-xs">
@@ -1831,6 +2050,33 @@ export default function MaterialExpenseBooking() {
                           </tfoot>
                         </table>
                       </div>
+                      {editingGrnItems && (
+                        <div className="p-4 border-t border-teal-500/20 bg-background space-y-3">
+                          <h4 className="text-xs font-semibold text-teal-700">Edit Received Quantities</h4>
+                          <div className="space-y-2">
+                            {editedGrnItems.map((item, idx) => (
+                              <div key={idx} className="flex items-center gap-3">
+                                <span className="flex-1 text-xs truncate">{item.itemName}</span>
+                                <Input 
+                                  type="number" 
+                                  className="w-24 h-8 text-xs" 
+                                  value={item.receivedQty} 
+                                  onChange={(e) => {
+                                    const val = Number(e.target.value) || 0;
+                                    const next = [...editedGrnItems];
+                                    next[idx] = { ...next[idx], receivedQty: val };
+                                    setEditedGrnItems(next);
+                                  }}
+                                />
+                              </div>
+                            ))}
+                          </div>
+                          <div className="flex items-center justify-end gap-2 pt-2">
+                            <Button variant="outline" size="sm" onClick={() => setEditingGrnItems(false)}>Cancel</Button>
+                            <Button size="sm" className="bg-teal-600 hover:bg-teal-700 text-white" onClick={saveGrnEdits}>Save Changes</Button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -1983,6 +2229,24 @@ export default function MaterialExpenseBooking() {
               {!isGRN && (
                 <div className="space-y-3">
                   <SectionHeader label="EMI / Installment Options" />
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <Field label="Payment Type" required>
+                      <Select
+                        value={form.paymentType || "full"}
+                        onValueChange={(value) =>
+                          set("paymentType", value as "full" | "partial")
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select payment type…" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="full">Full payment</SelectItem>
+                          <SelectItem value="partial">Partial payment (EMI)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </Field>
+                  </div>
                   <EmiSection
                     emi={form.emi}
                     netAmount={bd.netAmount}
