@@ -18,7 +18,6 @@ router.get("/", cache("billing-terms", 300), async (req, res) => {
 
 router.post("/", async (req, res) => {
   const { Name, Description, CalculationType, IsActive } = req.body;
-
   try {
     const pool = getPool();
     await pool
@@ -35,7 +34,6 @@ router.post("/", async (req, res) => {
         VALUES
           (@Name, @Description, @CalculationType, @IsActive, @CreatedBy, @CreatedAt)
       `);
-
     await bumpCacheVersion("billing-terms");
     res.json({ message: "Billing term added" });
   } catch (err) {
@@ -45,7 +43,6 @@ router.post("/", async (req, res) => {
 
 router.put("/:id", async (req, res) => {
   const { Name, Description, CalculationType, IsActive } = req.body;
-
   try {
     const pool = getPool();
     await pool
@@ -68,7 +65,6 @@ router.put("/:id", async (req, res) => {
           UpdatedAt = @UpdatedAt
         WHERE BillingTermID = @BillingTermID
       `);
-
     await bumpCacheVersion("billing-terms");
     res.json({ message: "Billing term updated" });
   } catch (err) {
@@ -85,7 +81,6 @@ router.delete("/:id", async (req, res) => {
       .query(
         "DELETE FROM dbo.Billing_Terms_Master WHERE BillingTermID = @BillingTermID"
       );
-
     await bumpCacheVersion("billing-terms");
     res.json({ message: "Billing term deleted" });
   } catch (err) {
