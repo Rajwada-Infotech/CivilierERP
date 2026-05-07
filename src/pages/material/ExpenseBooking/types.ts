@@ -94,6 +94,11 @@ export interface ExpenseRecord {
   netAmount: number | null;
   status: BookingStatus;
   remarks: string;
+  billingTermId: number | null;
+  billingTermName: string;
+  tcId: number | null;
+  tcName: string;
+  tcText: string;
   approvalTrail?: ApprovalTrail;
   companyName?: string;
   projectName?: string;
