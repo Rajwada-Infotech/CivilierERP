@@ -50,7 +50,10 @@ router.get("/", async (req, res) => {
           COUNT(*) AS TotalCount,
           COUNT(CASE WHEN YEAR(GRNDate)  = YEAR(GETDATE())
                       AND MONTH(GRNDate) = MONTH(GETDATE()) THEN 1 END) AS ThisMonthCount,
-          COUNT(CASE WHEN CAST(GRNDate AS DATE) = CAST(GETDATE() AS DATE) THEN 1 END) AS TodayCount
+          COUNT(CASE WHEN CAST(GRNDate AS DATE) = CAST(GETDATE() AS DATE) THEN 1 END) AS TodayCount,
+          ISNULL(SUM(TotalAmount), 0) AS TotalValue,
+          ISNULL(SUM(CASE WHEN ISNULL(Status,'') NOT IN ('Closed','Rejected')
+                          THEN TotalAmount ELSE 0 END), 0) AS OpenValue
         FROM dbo.GoodsReceiptNotes
       `),
 
@@ -212,7 +215,7 @@ router.get("/", async (req, res) => {
         thisMonth: gr.ThisMonthCount ?? 0,
         today: gr.TodayCount ?? 0,
         totalValue: parseFloat(gr.TotalValue ?? 0),
-        thisMonthValue: parseFloat(gr.ThisMonthValue ?? 0),
+        openValue: parseFloat(gr.OpenValue ?? 0),
       },
       purchaseOrders: {
         total: po.TotalCount ?? 0,

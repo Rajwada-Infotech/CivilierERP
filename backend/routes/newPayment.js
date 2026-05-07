@@ -14,11 +14,10 @@ const requireUserEmail = (req, res) => {
   return email;
 };
 
-// GET all payments
+// ── GET all payments ──────────────────────────────────────────────────────────
 router.get("/", cache("new-payment", 300), async (req, res) => {
   try {
     const pool = getPool();
-
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
     const offset = (page - 1) * limit;
@@ -50,7 +49,111 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
   }
 });
 
-// POST - Create payment
+// ── GET /cheque-lots — fetch active lots, optionally filtered by bankId ────────
+router.get("/cheque-lots", async (req, res) => {
+  try {
+    const pool = getPool();
+    const bankId = req.query.bankId ? parseInt(req.query.bankId) : null;
+
+    const request = pool.request();
+    let whereClause = "WHERE cm.Status = 1 AND cm.TotalCheques > 0";
+    if (bankId) {
+      request.input("BankId", sql.Int, bankId);
+      whereClause += " AND cm.BankId = @BankId";
+    }
+
+    const result = await request.query(`
+      SELECT
+        cm.CId,
+        cm.ChequeLotNumber,
+        cm.AccountNumber,
+        cm.IFSCCode,
+        cm.ChequeStartNumber,
+        cm.ChequeEndNumber,
+        cm.TotalCheques,
+        cm.BankId,
+        bm.BName        AS BankName,
+        bm.BBranch      AS BankBranch,
+        bm.BAccountType AS BankAccountType,
+        cm.Remarks
+      FROM dbo.ChequeMaster cm
+      LEFT JOIN dbo.BankMaster bm ON cm.BankId = bm.BId
+      ${whereClause}
+      ORDER BY cm.ChequeLotNumber
+    `);
+
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("CHEQUE LOTS GET ERROR:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /deduct-cheque — atomically assign next cheque number and decrement ──
+router.post("/deduct-cheque", async (req, res) => {
+  const { lotId } = req.body;
+  if (!lotId) return res.status(400).json({ error: "lotId is required" });
+
+  try {
+    const pool = getPool();
+
+    // Fetch the lot inside a transaction to avoid race conditions
+    const transaction = pool.transaction();
+    await transaction.begin();
+
+    try {
+      const lotRes = await transaction.request().input("CId", sql.Int, lotId)
+        .query(`
+          SELECT CId, ChequeStartNumber, ChequeEndNumber, TotalCheques
+          FROM dbo.ChequeMaster WITH (UPDLOCK, ROWLOCK)
+          WHERE CId = @CId AND Status = 1
+        `);
+
+      if (!lotRes.recordset.length) {
+        await transaction.rollback();
+        return res
+          .status(404)
+          .json({ error: "Cheque lot not found or inactive" });
+      }
+
+      const lot = lotRes.recordset[0];
+      if (!lot.TotalCheques || lot.TotalCheques <= 0) {
+        await transaction.rollback();
+        return res
+          .status(400)
+          .json({ error: "No cheques remaining in this lot" });
+      }
+
+      // Next cheque number = EndNumber - (TotalCheques - 1)
+      // i.e. we assign from start upward; track how many are left to compute the current one.
+      const usedCount =
+        lot.ChequeEndNumber - lot.ChequeStartNumber + 1 - lot.TotalCheques;
+      const nextChequeNumber = lot.ChequeStartNumber + usedCount;
+
+      // Decrement TotalCheques by 1
+      await transaction.request().input("CId", sql.Int, lotId).query(`
+          UPDATE dbo.ChequeMaster
+          SET TotalCheques = TotalCheques - 1
+          WHERE CId = @CId
+        `);
+
+      await transaction.commit();
+
+      res.json({
+        nextChequeNumber: String(nextChequeNumber),
+        remainingCheques: lot.TotalCheques - 1,
+      });
+    } catch (innerErr) {
+      await transaction.rollback();
+      throw innerErr;
+    }
+  } catch (err) {
+    console.error("DEDUCT CHEQUE ERROR:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST — Create payment ─────────────────────────────────────────────────────
 router.post("/", async (req, res) => {
   const {
     PPaymentName,
@@ -63,6 +166,19 @@ router.post("/", async (req, res) => {
     PProject,
     PCompany,
     PExpenseRef,
+    // Cheque
+    PChequeNo,
+    PChequeLotId,
+    PChequeLotNumber,
+    PChequeDate,
+    PChequeAccountNumber,
+    PChequeIfsc,
+    PIsPostDated,
+    // Digital
+    PNeftNumber,
+    PUpiTransactionId,
+    PRtgsReference,
+    PImpsReference,
   } = req.body;
 
   try {
@@ -70,6 +186,12 @@ router.post("/", async (req, res) => {
     if (!userEmail) return;
 
     const pool = getPool();
+
+    // Determine Status: digital modes start as Pending (submitted for approval),
+    // all others start as Draft.
+    const digitalModes = ["NEFT", "UPI", "RTGS", "IMPS"];
+    const initialStatus = digitalModes.includes(PMode) ? "Pending" : "Draft";
+
     await pool
       .request()
       .input("PPaymentName", sql.VarChar, PPaymentName || "")
@@ -82,19 +204,45 @@ router.post("/", async (req, res) => {
       .input("PProject", sql.VarChar, PProject || "")
       .input("PCompany", sql.VarChar, PCompany || "")
       .input("PExpenseRef", sql.NVarChar(100), PExpenseRef || null)
+      // Cheque fields
+      .input("PChequeNo", sql.NVarChar(50), PChequeNo || null)
+      .input("PChequeLotId", sql.Int, PChequeLotId || null)
+      .input("PChequeLotNumber", sql.NVarChar(100), PChequeLotNumber || null)
+      .input("PChequeDate", sql.Date, PChequeDate || null)
+      .input(
+        "PChequeAccountNumber",
+        sql.NVarChar(50),
+        PChequeAccountNumber || null,
+      )
+      .input("PChequeIfsc", sql.NVarChar(20), PChequeIfsc || null)
+      .input("PIsPostDated", sql.Bit, PIsPostDated ? 1 : 0)
+      // Digital reference fields
+      .input("PNeftNumber", sql.NVarChar(50), PNeftNumber || null)
+      .input("PUpiTransactionId", sql.NVarChar(100), PUpiTransactionId || null)
+      .input("PRtgsReference", sql.NVarChar(100), PRtgsReference || null)
+      .input("PImpsReference", sql.NVarChar(100), PImpsReference || null)
+      // Audit
       .input("PCreatedAt", sql.DateTime, new Date())
       .input("PCreatedBy", sql.NVarChar(100), userEmail)
-      .input("PApprovedBy", sql.NVarChar(100), null).query(`
+      .input("PApprovedBy", sql.NVarChar(100), null)
+      .input("Status", sql.NVarChar(20), initialStatus).query(`
         INSERT INTO dbo.NewPayment (
           PPaymentName, PMode, PAmount, PDocType, PDate,
           PBankID, PBankName, PProject, PCompany, PExpenseRef,
-          PCreatedAt, PCreatedBy, PApprovedBy
+          PChequeNo, PChequeLotId, PChequeLotNumber, PChequeDate,
+          PChequeAccountNumber, PChequeIfsc, PIsPostDated,
+          PNeftNumber, PUpiTransactionId, PRtgsReference, PImpsReference,
+          PCreatedAt, PCreatedBy, PApprovedBy, Status
         ) VALUES (
           @PPaymentName, @PMode, @PAmount, @PDocType, @PDate,
           @PBankID, @PBankName, @PProject, @PCompany, @PExpenseRef,
-          @PCreatedAt, @PCreatedBy, @PApprovedBy
+          @PChequeNo, @PChequeLotId, @PChequeLotNumber, @PChequeDate,
+          @PChequeAccountNumber, @PChequeIfsc, @PIsPostDated,
+          @PNeftNumber, @PUpiTransactionId, @PRtgsReference, @PImpsReference,
+          @PCreatedAt, @PCreatedBy, @PApprovedBy, @Status
         )
       `);
+
     await bumpCacheVersion("new-payment");
     res.json({ message: "Payment added successfully" });
   } catch (err) {
@@ -103,7 +251,7 @@ router.post("/", async (req, res) => {
   }
 });
 
-// PUT - Update payment
+// ── PUT /:id — Update payment ─────────────────────────────────────────────────
 router.put("/:id", async (req, res) => {
   const { id } = req.params;
   const {
@@ -117,6 +265,19 @@ router.put("/:id", async (req, res) => {
     PProject,
     PCompany,
     PExpenseRef,
+    // Cheque
+    PChequeNo,
+    PChequeLotId,
+    PChequeLotNumber,
+    PChequeDate,
+    PChequeAccountNumber,
+    PChequeIfsc,
+    PIsPostDated,
+    // Digital
+    PNeftNumber,
+    PUpiTransactionId,
+    PRtgsReference,
+    PImpsReference,
   } = req.body;
 
   try {
@@ -137,15 +298,49 @@ router.put("/:id", async (req, res) => {
       .input("PProject", sql.VarChar, PProject || "")
       .input("PCompany", sql.VarChar, PCompany || "")
       .input("PExpenseRef", sql.NVarChar(100), PExpenseRef || null)
+      // Cheque
+      .input("PChequeNo", sql.NVarChar(50), PChequeNo || null)
+      .input("PChequeLotId", sql.Int, PChequeLotId || null)
+      .input("PChequeLotNumber", sql.NVarChar(100), PChequeLotNumber || null)
+      .input("PChequeDate", sql.Date, PChequeDate || null)
+      .input(
+        "PChequeAccountNumber",
+        sql.NVarChar(50),
+        PChequeAccountNumber || null,
+      )
+      .input("PChequeIfsc", sql.NVarChar(20), PChequeIfsc || null)
+      .input("PIsPostDated", sql.Bit, PIsPostDated ? 1 : 0)
+      // Digital
+      .input("PNeftNumber", sql.NVarChar(50), PNeftNumber || null)
+      .input("PUpiTransactionId", sql.NVarChar(100), PUpiTransactionId || null)
+      .input("PRtgsReference", sql.NVarChar(100), PRtgsReference || null)
+      .input("PImpsReference", sql.NVarChar(100), PImpsReference || null)
       .input("PUpdatedBy", sql.NVarChar(100), userEmail).query(`
         UPDATE dbo.NewPayment SET
-          PPaymentName=@PPaymentName, PMode=@PMode,
-          PAmount=@PAmount, PDocType=@PDocType, PDate=@PDate,
-          PBankID=@PBankID, PBankName=@PBankName,
-          PProject=@PProject, PCompany=@PCompany,
-          PExpenseRef=@PExpenseRef
-        WHERE PPaymentID=@PPaymentID
+          PPaymentName         = @PPaymentName,
+          PMode                = @PMode,
+          PAmount              = @PAmount,
+          PDocType             = @PDocType,
+          PDate                = @PDate,
+          PBankID              = @PBankID,
+          PBankName            = @PBankName,
+          PProject             = @PProject,
+          PCompany             = @PCompany,
+          PExpenseRef          = @PExpenseRef,
+          PChequeNo            = @PChequeNo,
+          PChequeLotId         = @PChequeLotId,
+          PChequeLotNumber     = @PChequeLotNumber,
+          PChequeDate          = @PChequeDate,
+          PChequeAccountNumber = @PChequeAccountNumber,
+          PChequeIfsc          = @PChequeIfsc,
+          PIsPostDated         = @PIsPostDated,
+          PNeftNumber          = @PNeftNumber,
+          PUpiTransactionId    = @PUpiTransactionId,
+          PRtgsReference       = @PRtgsReference,
+          PImpsReference       = @PImpsReference
+        WHERE PPaymentID = @PPaymentID
       `);
+
     await bumpCacheVersion("new-payment");
     res.json({ message: "Payment updated successfully" });
   } catch (err) {
@@ -154,7 +349,7 @@ router.put("/:id", async (req, res) => {
   }
 });
 
-// DELETE - Remove payment
+// ── DELETE /:id ───────────────────────────────────────────────────────────────
 router.delete("/:id", async (req, res) => {
   const { id } = req.params;
   try {
@@ -201,7 +396,6 @@ router.put("/:id/approve", async (req, res) => {
     if (!userEmail) return;
 
     const pool = getPool();
-
     const result = await transition(
       "payments",
       id,
@@ -210,8 +404,7 @@ router.put("/:id/approve", async (req, res) => {
       req.user?.role,
     );
 
-    // If this payment is linked to an EMI installment ref (e.g. CI/WO/000001/2025-2026-EMI-01),
-    // mark that installment as Paid in dbo.EmiInstallments so the EMI schedule reflects it.
+    // Sync EMI installment if this payment is for an EMI ref
     try {
       const payRec = await pool
         .request()
@@ -230,7 +423,6 @@ router.put("/:id/approve", async (req, res) => {
             SET Status = 'Paid', PaidBy = @PaidBy, PaidAt = @PaidAt
             WHERE RefNumber = @RefNumber AND Status != 'Paid'
           `);
-        // Also sync EEmiData JSON on the parent ExpenseBooking
         const parentRes = await pool
           .request()
           .input("RefNumber", sql.NVarChar(200), expenseRef).query(`
@@ -270,7 +462,6 @@ router.put("/:id/approve", async (req, res) => {
         }
       }
     } catch (emiErr) {
-      // Non-critical — don't fail the approval if EMI sync fails
       console.warn("EMI sync on approve failed:", emiErr.message);
     }
 
