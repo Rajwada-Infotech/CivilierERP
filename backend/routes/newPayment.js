@@ -56,7 +56,7 @@ router.get("/cheque-lots", async (req, res) => {
     const bankId = req.query.bankId ? parseInt(req.query.bankId) : null;
 
     const request = pool.request();
-    let whereClause = "WHERE cm.Status = 1 AND cm.TotalCheques > 0";
+    let whereClause = "WHERE cm.Status = 1 AND cm.TotalCheques > 0"; // TotalCheques is computed (ChequeEndNumber - ChequeStartNumber + 1), read-only OK
     if (bankId) {
       request.input("BankId", sql.Int, bankId);
       whereClause += " AND cm.BankId = @BankId";
@@ -75,7 +75,12 @@ router.get("/cheque-lots", async (req, res) => {
         bm.BName        AS BankName,
         bm.BBranch      AS BankBranch,
         bm.BAccountType AS BankAccountType,
-        cm.Remarks
+        cm.Remarks,
+        -- Compute actually remaining based on NewPayment usage
+        cm.TotalCheques - ISNULL((
+          SELECT COUNT(*) FROM dbo.NewPayment np
+          WHERE np.PChequeLotId = cm.CId AND np.PChequeNo IS NOT NULL
+        ), 0) AS RemainingCheques
       FROM dbo.ChequeMaster cm
       LEFT JOIN dbo.BankMaster bm ON cm.BankId = bm.BId
       ${whereClause}
@@ -89,64 +94,109 @@ router.get("/cheque-lots", async (req, res) => {
   }
 });
 
-// ── POST /deduct-cheque — atomically assign next cheque number and decrement ──
-router.post("/deduct-cheque", async (req, res) => {
-  const { lotId } = req.body;
+// ── GET /cheque-numbers/:lotId — list all cheque numbers in a lot with used status ──
+router.get("/cheque-numbers/:lotId", async (req, res) => {
+  const lotId = parseInt(req.params.lotId);
   if (!lotId) return res.status(400).json({ error: "lotId is required" });
 
   try {
     const pool = getPool();
 
-    // Fetch the lot inside a transaction to avoid race conditions
-    const transaction = pool.transaction();
-    await transaction.begin();
+    // Fetch lot range
+    const lotRes = await pool.request().input("CId", sql.Int, lotId).query(`
+      SELECT ChequeStartNumber, ChequeEndNumber
+      FROM dbo.ChequeMaster
+      WHERE CId = @CId AND Status = 1
+    `);
 
-    try {
-      const lotRes = await transaction.request().input("CId", sql.Int, lotId)
-        .query(`
-          SELECT CId, ChequeStartNumber, ChequeEndNumber, TotalCheques
-          FROM dbo.ChequeMaster WITH (UPDLOCK, ROWLOCK)
-          WHERE CId = @CId AND Status = 1
-        `);
-
-      if (!lotRes.recordset.length) {
-        await transaction.rollback();
-        return res
-          .status(404)
-          .json({ error: "Cheque lot not found or inactive" });
-      }
-
-      const lot = lotRes.recordset[0];
-      if (!lot.TotalCheques || lot.TotalCheques <= 0) {
-        await transaction.rollback();
-        return res
-          .status(400)
-          .json({ error: "No cheques remaining in this lot" });
-      }
-
-      // Next cheque number = EndNumber - (TotalCheques - 1)
-      // i.e. we assign from start upward; track how many are left to compute the current one.
-      const usedCount =
-        lot.ChequeEndNumber - lot.ChequeStartNumber + 1 - lot.TotalCheques;
-      const nextChequeNumber = lot.ChequeStartNumber + usedCount;
-
-      // Decrement TotalCheques by 1
-      await transaction.request().input("CId", sql.Int, lotId).query(`
-          UPDATE dbo.ChequeMaster
-          SET TotalCheques = TotalCheques - 1
-          WHERE CId = @CId
-        `);
-
-      await transaction.commit();
-
-      res.json({
-        nextChequeNumber: String(nextChequeNumber),
-        remainingCheques: lot.TotalCheques - 1,
-      });
-    } catch (innerErr) {
-      await transaction.rollback();
-      throw innerErr;
+    if (!lotRes.recordset.length) {
+      return res
+        .status(404)
+        .json({ error: "Cheque lot not found or inactive" });
     }
+
+    const { ChequeStartNumber, ChequeEndNumber } = lotRes.recordset[0];
+
+    // Fetch all cheque numbers already used from this lot in NewPayment
+    const usedRes = await pool.request().input("PChequeLotId", sql.Int, lotId)
+      .query(`
+      SELECT PChequeNo FROM dbo.NewPayment
+      WHERE PChequeLotId = @PChequeLotId AND PChequeNo IS NOT NULL
+    `);
+    const usedSet = new Set(usedRes.recordset.map((r) => String(r.PChequeNo)));
+
+    // Build list of all cheque numbers in range
+    const cheques = [];
+    for (let n = ChequeStartNumber; n <= ChequeEndNumber; n++) {
+      cheques.push({ number: String(n), used: usedSet.has(String(n)) });
+    }
+
+    res.json(cheques);
+  } catch (err) {
+    console.error("CHEQUE NUMBERS GET ERROR:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /deduct-cheque — validate cheque number selection (no longer auto-assigns) ──
+// TotalCheques is a COMPUTED column on ChequeMaster — cannot be updated directly.
+// Usage is tracked via NewPayment.PChequeNo records instead.
+router.post("/deduct-cheque", async (req, res) => {
+  const { lotId, chequeNo } = req.body;
+  if (!lotId) return res.status(400).json({ error: "lotId is required" });
+  if (!chequeNo) return res.status(400).json({ error: "chequeNo is required" });
+
+  try {
+    const pool = getPool();
+
+    // Verify lot exists and is active
+    const lotRes = await pool.request().input("CId", sql.Int, lotId).query(`
+      SELECT CId, ChequeStartNumber, ChequeEndNumber
+      FROM dbo.ChequeMaster
+      WHERE CId = @CId AND Status = 1
+    `);
+
+    if (!lotRes.recordset.length) {
+      return res
+        .status(404)
+        .json({ error: "Cheque lot not found or inactive" });
+    }
+
+    const lot = lotRes.recordset[0];
+    const num = parseInt(chequeNo);
+    if (num < lot.ChequeStartNumber || num > lot.ChequeEndNumber) {
+      return res.status(400).json({ error: "Cheque number out of lot range" });
+    }
+
+    // Check if already used
+    const dupRes = await pool
+      .request()
+      .input("PChequeLotId", sql.Int, lotId)
+      .input("PChequeNo", sql.NVarChar(50), String(chequeNo)).query(`
+        SELECT COUNT(*) AS cnt FROM dbo.NewPayment
+        WHERE PChequeLotId = @PChequeLotId AND PChequeNo = @PChequeNo
+      `);
+
+    if (dupRes.recordset[0].cnt > 0) {
+      return res
+        .status(409)
+        .json({ error: "Cheque number already used in another payment" });
+    }
+
+    // Count remaining available cheques
+    const usedRes = await pool.request().input("PChequeLotId", sql.Int, lotId)
+      .query(`
+      SELECT COUNT(*) AS usedCount FROM dbo.NewPayment
+      WHERE PChequeLotId = @PChequeLotId AND PChequeNo IS NOT NULL
+    `);
+    const totalCheques = lot.ChequeEndNumber - lot.ChequeStartNumber + 1;
+    const usedCount = usedRes.recordset[0].usedCount;
+    const remainingCheques = totalCheques - usedCount - 1; // -1 for this one being taken
+
+    res.json({
+      nextChequeNumber: String(chequeNo),
+      remainingCheques: Math.max(0, remainingCheques),
+    });
   } catch (err) {
     console.error("DEDUCT CHEQUE ERROR:", err.message);
     res.status(500).json({ error: err.message });
