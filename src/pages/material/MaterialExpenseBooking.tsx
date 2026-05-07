@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useFinYear } from "@/contexts/FinYearContext";
@@ -83,8 +83,21 @@ import type {
 
 const API = "/api/expense-booking";
 
-async function apiFetch(url: string, opts?: RequestInit) {
-  const res = await fetchWithAuth(url, opts);
+async function apiFetch(url: string, opts?: RequestInit, timeoutMs = 25000) {
+  let timeoutId: ReturnType<typeof setTimeout> | null = null;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(
+      () => reject(new Error("Request timed out. Please try again.")),
+      timeoutMs,
+    );
+  });
+
+  const res = await Promise.race([fetchWithAuth(url, opts), timeout]).finally(
+    () => {
+      if (timeoutId) clearTimeout(timeoutId);
+    },
+  );
+
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error ?? `HTTP ${res.status}`);
@@ -1176,6 +1189,7 @@ export default function MaterialExpenseBooking() {
   const [form, setForm] = useState<Omit<ExpenseRecord, "id">>(blankForm());
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const saveInFlight = useRef(false);
   const [statusFilter, setStatusFilter] = useState<string>("All");
   const [approvalTrail, setApprovalTrail] =
     useState<ExpenseRecord["approvalTrail"]>(undefined);
@@ -1531,6 +1545,8 @@ export default function MaterialExpenseBooking() {
   };
 
   const handleSave = async () => {
+    if (saveInFlight.current) return;
+
     if (!form.bookingReference.trim()) {
       toast.error("Please select a document (PO, WO, or Doc Type) first.");
       return;
@@ -1588,19 +1604,30 @@ export default function MaterialExpenseBooking() {
       ESourceType: selectedDoc?.kind ?? null,
       ESourceId: selectedDoc?.sourceId ?? null,
     };
+    saveInFlight.current = true;
+    setSaving(true);
+
     try {
-      setSaving(true);
       if (isEditing) {
-        await apiFetch(`${API}/${editingId}`, {
-          method: "PUT",
-          body: JSON.stringify(body),
-        });
+        if (!editingId) throw new Error("Missing booking id for update.");
+        await apiFetch(
+          `${API}/${editingId}`,
+          {
+            method: "PUT",
+            body: JSON.stringify(body),
+          },
+          30000,
+        );
         toast.success("Expense booking updated.");
       } else {
-        const result = await apiFetch(API, {
-          method: "POST",
-          body: JSON.stringify(body),
-        });
+        const result = await apiFetch(
+          API,
+          {
+            method: "POST",
+            body: JSON.stringify(body),
+          },
+          30000,
+        );
         toast.success(
           `Expense booking created — Ref: ${result?.docNo || form.bookingReference}`,
         );
