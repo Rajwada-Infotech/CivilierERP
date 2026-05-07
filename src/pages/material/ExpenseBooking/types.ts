@@ -117,6 +117,10 @@ export interface ExpenseRecord {
   workOrderId?: number | string;
   sourceDocNo?: string;
   igstRate?: number;
+  /** Source document type: PO | WO | GRN | TOD — saved to DB and restored on edit */
+  eSourceType?: "PO" | "WO" | "GRN" | "TOD" | null;
+  /** Source document DB id — saved to DB and restored on edit */
+  eSourceId?: number | null;
 
   grnItems?: {
     itemName?: string;
