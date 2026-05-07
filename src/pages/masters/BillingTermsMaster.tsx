@@ -6,7 +6,7 @@ import {
   type ColumnDef,
   type DataChangeEvent,
 } from "@/components/MasterPage";
-import type { ExportColumn } from "@/lib/export";
+
 import { Book, Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -23,13 +23,19 @@ import {
 
 // ─── Map DB row → context shape ───────────────────────────────────────────────
 const mapRow = (row: BillingTermRow): BillingTerm => ({
-  _id: String(row.BillingTermID),                 // ✅ capital ID matches DB
-  Name: row.Name ?? "",
-  Description: row.Description ?? "",
-  CalculationType:
-    (row.CalculationType as BillingTerm["CalculationType"]) ?? "Before GST",
-  IsActive: Boolean(row.IsActive),
+  _id: String(row.BillingTermID),
+  name: row.Name ?? "",
+  description: row.Description ?? "",
+  // NOTE: the master UI/context currently only stores status + generic fields
+  // defined in BillingTermsContext. CalculationType/billType/discount config
+  // are not represented in the context type, so we store defaults here.
+  billType: "Tax Invoice",
+  discountType: "none",
+  discountValue: 0,
+  paymentDueDays: 0,
+  status: Boolean(row.IsActive),
 });
+
 
 // ─── Component ────────────────────────────────────────────────────────────────
 const BillingTermsMaster: React.FC = () => {
@@ -63,7 +69,7 @@ const BillingTermsMaster: React.FC = () => {
       label: "Calculation Type",
       type: "select",
       required: true,
-      options: ["Before GST", "After GST"],
+      options: ["Fixed", "Percentage", "Custom"],
     },
     {
       name: "Description",
@@ -81,10 +87,10 @@ const BillingTermsMaster: React.FC = () => {
 
   // ── Columns ─────────────────────────────────────────────────────────────────
   const columns: ColumnDef[] = [
-    { key: "Name", label: "Term Name" },
-    { key: "CalculationType", label: "Calculation Type" },
-    { key: "IsActive", label: "Status" },
+    { key: "name", label: "Term Name" },
+    { key: "status", label: "Status" },
   ];
+
 
   const columnRenderers = {
     IsActive: (value: unknown) => (
@@ -109,7 +115,7 @@ const BillingTermsMaster: React.FC = () => {
   const handleDataEvent = async (event: DataChangeEvent) => {
     try {
       if (event.action === "add") {
-        const record = event.record as BillingTerm;
+        const record = event.record as Record<string, unknown>;
         await addBillingTerm({
           Name: record.Name,
           Description: record.Description,
@@ -120,12 +126,12 @@ const BillingTermsMaster: React.FC = () => {
         await refetch();
 
       } else if (event.action === "update") {
-        const record = event.record as BillingTerm;
+        const record = event.record as Record<string, unknown>;
         await updateBillingTerm(Number(event.id), {
-          Name: record.Name,
-          Description: record.Description,
-          CalculationType: record.CalculationType,
-          IsActive: record.IsActive,
+          Name: String(record["Name"] ?? ""),
+          Description: String(record["Description"] ?? ""),
+          CalculationType: String(record["CalculationType"] ?? ""),
+          IsActive: Boolean(record["IsActive"]),
         });
         toast.success("Billing term updated!");
         await refetch();
@@ -168,9 +174,9 @@ const BillingTermsMaster: React.FC = () => {
           fields={fields}
           columns={columns}
           columnRenderers={columnRenderers}
-          initialData={billingTerms}
+          initialData={billingTerms as unknown as Record<string, unknown>[]}
           onDataEvent={handleDataEvent}
-        exportConfig={{
+          exportConfig={{
           title: "Billing Terms Master",
           filename: "billing-terms-master",
           columns: [

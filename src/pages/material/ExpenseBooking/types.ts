@@ -1,5 +1,4 @@
 // ─── Expense Booking — Shared Types ──────────────────────────────────────────
-
 export type BookingStatus =
   | "Draft"
   | "Pending"
@@ -34,6 +33,12 @@ export interface DiscountConfig {
   appliedOn: "pre-gst" | "post-gst";
   masterTermId: string | null;
   masterTermName: string | null;
+
+  /** Unique local key for React list rendering (not persisted) */
+  _key?: string;
+
+  /** Optional calculated amount (used in UI for fixed discounts) */
+  amount?: number;
 }
 
 export interface EmiScheduleRow {
@@ -51,6 +56,7 @@ export interface EmiConfig {
   emiAmount: number;
   startDate: string;
   schedule: EmiScheduleRow[];
+  frequency?: string;
 }
 
 export interface ApprovalStep {
@@ -87,15 +93,36 @@ export interface ExpenseRecord {
   sgstRate: number;
   discount: DiscountConfig;
   emi: EmiConfig;
+  /** Payment mode derived from EMI flag. */
+  paymentType?: "full" | "partial";
   netAmount: number | null;
   status: BookingStatus;
   remarks: string;
   billingTermId: number | null;
   billingTermName: string;
+  /** Multi-term support: list of all applied billing terms */
+  billingTerms: DiscountConfig[];
   tcId: number | null;
   tcName: string;
   tcText: string;
   approvalTrail?: ApprovalTrail;
+
+  // Optional fields for display / frontend use
+  companyName?: string;
+  projectName?: string;
+  projectId?: number | string;
+  purchaseOrderId?: number | string;
+  workOrderId?: number | string;
+  sourceDocNo?: string;
+  igstRate?: number;
+
+  grnItems?: {
+    itemName?: string;
+    qty?: number;
+    rate?: number;
+    amount?: number;
+    [key: string]: any;
+  }[];
 }
 
 export interface PriceBreakdown {

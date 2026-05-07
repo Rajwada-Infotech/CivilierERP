@@ -117,26 +117,27 @@ router.get("/:id/next-number", authMiddleware, async (req, res) => {
     // The fin year is only a cosmetic suffix — the counter never resets per year.
     // This matches exactly what lockNextDocNumber does when it issues numbers.
 
-    // Max already locked in DocNumberSequence (all fin years, same prefix)
+    // Max already locked in DocNumberSequence (all fin years, same prefix).
+    // DocNo has a global unique constraint, so do not filter by TypeOfDocId here.
     const maxDNSResult = await pool
       .request()
-      .input("TypeOfDocId", sql.Int, id)
-      .input("Prefix", sql.NVarChar(100), truePrefix + "%").query(`
+      .input("Prefix", sql.NVarChar(100), truePrefix)
+      .input("PrefixLike", sql.NVarChar(100), truePrefix + "%").query(`
         SELECT MAX(
           TRY_CAST(
             SUBSTRING(DocNo, LEN(@Prefix) + 1, 6) AS INT
           )
         ) AS MaxSeq
         FROM dbo.DocNumberSequence
-        WHERE TypeOfDocId = @TypeOfDocId
-          AND DocNo LIKE @Prefix
+        WHERE DocNo LIKE @PrefixLike
       `);
 
     // Max already committed in ExpenseBooking (all fin years, same prefix)
     const maxEBResult = await pool
       .request()
       .input("EDocTypeId", sql.Int, id)
-      .input("Prefix2", sql.NVarChar(100), truePrefix + "%").query(`
+      .input("Prefix2", sql.NVarChar(100), truePrefix)
+      .input("PrefixLike2", sql.NVarChar(100), truePrefix + "%").query(`
         SELECT MAX(
           TRY_CAST(
             SUBSTRING(EDocNo, LEN(@Prefix2) + 1, 6) AS INT
@@ -144,7 +145,7 @@ router.get("/:id/next-number", authMiddleware, async (req, res) => {
         ) AS MaxSeq
         FROM dbo.ExpenseBooking
         WHERE EDocTypeId = @EDocTypeId
-          AND EDocNo LIKE @Prefix2
+          AND EDocNo LIKE @PrefixLike2
       `);
 
     const seqFromDNS = maxDNSResult.recordset[0]?.MaxSeq ?? null;

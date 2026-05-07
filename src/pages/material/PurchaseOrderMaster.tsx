@@ -746,7 +746,9 @@ const PurchaseOrderMaster: React.FC = () => {
 
   const validate = () => {
     const e: Record<string, boolean> = {};
-    if (!form.poNumber) e.poNumber = true;
+    const hasBackendNumbering =
+      viewMode === "create" && !!(form.docTypeId ?? poDocTypeId);
+    if (!form.poNumber && !hasBackendNumbering) e.poNumber = true;
     if (!form.poDate) e.poDate = true;
     if (!form.supplierId) e.supplierId = true;
     if (!form.projectId) e.projectId = true;
@@ -761,8 +763,10 @@ const PurchaseOrderMaster: React.FC = () => {
     const company = companies.find((c) => c.id === form.companyId);
     const project = allProjects.find((p) => p.id === form.projectId);
     const validItems = lineItems.filter((li) => li.itemName || li.quantity > 0);
+    const docTypeId = form.docTypeId ?? poDocTypeId;
+    const backendNumbered = viewMode === "create" && !!docTypeId;
     return {
-      PurchaseOrderNo: form.poNumber || null,
+      PurchaseOrderNo: backendNumbered ? null : form.poNumber || null,
       PODate: form.poDate || null,
       ExpectedDeliveryDate: form.expectedDate || null,
       SupplierID: supplier ? Number(supplier.id) : null,
@@ -789,8 +793,8 @@ const PurchaseOrderMaster: React.FC = () => {
           : form.paymentTerms || null,
       Status: "Draft",
       Remarks: form.remarks || null,
-      DocTypeId: form.docTypeId ?? poDocTypeId,
-      DocNo: form.poNumber || form.docNo || poDocNo || null,
+      DocTypeId: docTypeId,
+      DocNo: backendNumbered ? null : form.poNumber || form.docNo || poDocNo || null,
       finYear: selectedFinYear || null,
     };
   };
@@ -804,8 +808,16 @@ const PurchaseOrderMaster: React.FC = () => {
     setSaving(true);
     try {
       if (viewMode === "create") {
-        await addPurchaseOrder(toPayload());
+        const created = await addPurchaseOrder(toPayload());
         await queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
+        if (created?.PurchaseOrderNo) {
+          setForm((p) => ({
+            ...p,
+            poNumber: created.PurchaseOrderNo,
+            docNo: created.PurchaseOrderNo,
+          }));
+          setPoDocNo(created.PurchaseOrderNo);
+        }
         toast.success("Purchase Order created successfully!");
         const savedDocTypeId = form.docTypeId ?? poDocTypeId;
         await refreshPoDocNumber(savedDocTypeId);
@@ -1279,8 +1291,16 @@ const PurchaseOrderMaster: React.FC = () => {
                 onChange={(e) =>
                   setField("poNumber", e.target.value.toUpperCase())
                 }
-                readOnly={isReadOnly}
-                className={`${inputCls} font-mono ${errors.poNumber ? "border-red-400" : ""} ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""}`}
+                readOnly={
+                  isReadOnly ||
+                  (viewMode === "create" && !!(form.docTypeId ?? poDocTypeId))
+                }
+                className={`${inputCls} font-mono ${errors.poNumber ? "border-red-400" : ""} ${
+                  isReadOnly ||
+                  (viewMode === "create" && !!(form.docTypeId ?? poDocTypeId))
+                    ? "bg-muted/30 cursor-not-allowed"
+                    : ""
+                }`}
                 placeholder="Auto-generated"
               />
             </div>
