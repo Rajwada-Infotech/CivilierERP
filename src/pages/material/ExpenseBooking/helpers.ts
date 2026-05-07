@@ -49,18 +49,11 @@ export function computeBreakdown(
   let totalDiscountAmount = 0;
 
   for (const d of activeTerms) {
-    const amt =
+    const discAmt =
       d.type === "percentage" ? (runningBase * d.value) / 100 : d.value;
-    if (d.deductionType === "Addition") {
-      // Addition: increases the taxable base (e.g. extra charges)
-      totalDiscountAmount -= amt; // net discount decreases (cost goes up)
-      runningBase += amt;
-    } else {
-      // Deduction (default): decreases the taxable base
-      const clamped = Math.min(amt, runningBase);
-      totalDiscountAmount += clamped;
-      runningBase -= clamped;
-    }
+    const clamped = Math.min(discAmt, runningBase);
+    totalDiscountAmount += clamped;
+    runningBase -= clamped;
   }
 
   const taxableAmount = Math.max(0, runningBase);
@@ -124,7 +117,7 @@ export function blankForm(): Omit<ExpenseRecord, "id"> {
     materialCategory: "",
     invoiceReference: "",
     basicAmount: 0,
-    cgstRate: 18,
+    cgstRate: 0,
     sgstRate: 0,
     discount: defaultDiscount(),
     emi: defaultEmi(),
@@ -211,7 +204,7 @@ export function dbToRecord(row: any): ExpenseRecord {
     materialCategory: row.EDocumentType ?? "",
     invoiceReference: row.EDocNo ?? "",
     basicAmount: parseFloat(row.EAmount) || 0,
-    cgstRate: row.ECgstRate ? parseFloat(row.ECgstRate) : 18,
+    cgstRate: row.ECgstRate ? parseFloat(row.ECgstRate) : 0,
     sgstRate: row.ESgstRate ? parseFloat(row.ESgstRate) : 0,
     discount,
     emi,
