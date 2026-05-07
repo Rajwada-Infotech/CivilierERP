@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -25,6 +25,7 @@ import type {
   GRNItemLine,
   Supplier,
   PurchaseOrder,
+  POLineItem,
   UOM,
 } from "@/api/grnApi";
 
@@ -35,6 +36,9 @@ const createEmptyItem = (): GRNItemLine => ({
   receivedQty: 0,
   remainingQty: 0,
   uom: "",
+  rate: 0,
+  quantity: 0,
+  totalAmount: 0,
 });
 
 const parseJsonArray = <T,>(val: unknown): T[] => {
@@ -63,7 +67,7 @@ function GRNChainBadge({ grnId }: { grnId: number }) {
   useEffect(() => {
     if (!grnId) return;
     fetchWithAuth(
-      `/api/expense-booking/chain-status?sourceType=GRN&sourceId=${grnId}`,
+      `/expense-booking/chain-status?sourceType=GRN&sourceId=${grnId}`,
     )
       .then((r) => r.json())
       .then(setChain)
@@ -226,6 +230,34 @@ export default function GRN() {
     queryFn: grnApi.getPurchaseOrders,
   });
 
+  // Fetch ALL grns (up to 500) so we can compute per-PO received quantities
+  // and show remaining items in the PO dropdown.
+  const { data: allGrnsPage } = useQuery({
+    queryKey: ["grns-all"],
+    queryFn: () => grnApi.getGRNs({ page: 1, limit: 500 }),
+  });
+  const allGrns = allGrnsPage?.data ?? [];
+
+  // Build a map: poId → { itemId → totalReceivedQty } across all existing GRNs
+  // (excluding the GRN currently being edited, so its own qty isn't double-counted)
+  const poReceivedMap = useMemo(() => {
+    const map = new Map<string, Map<string, number>>();
+    for (const grn of allGrns) {
+      if (!grn.POID) continue;
+      // Skip the GRN being edited — its items will be re-saved
+      if (editingId && String(grn.GRNID) === editingId) continue;
+      const poKey = String(grn.POID);
+      if (!map.has(poKey)) map.set(poKey, new Map());
+      const itemMap = map.get(poKey)!;
+      const items = parseJsonArray<GRNItemLine>(grn.GRNItems);
+      for (const item of items) {
+        const prev = itemMap.get(item.itemId) ?? 0;
+        itemMap.set(item.itemId, prev + Number(item.receivedQty || 0));
+      }
+    }
+    return map;
+  }, [allGrns, editingId]);
+
   const { data: uomsData = [] } = useQuery({
     queryKey: ["uomMaster"],
     queryFn: grnApi.getUoms,
@@ -234,14 +266,51 @@ export default function GRN() {
   const pos = posData
     .filter((po: PurchaseOrder) => {
       if (!selectedFinYear) return true;
-      // PO number format: CI/PUR/000001/2025-2026 — fin year is the last segment
       const docNo = po.PurchaseOrderNo || "";
       return docNo.includes(selectedFinYear);
     })
-    .map((po: PurchaseOrder) => ({
-      value: String(po.PurchaseOrderID),
-      label: po.PurchaseOrderNo,
-    }));
+    .map((po: PurchaseOrder) => {
+      const poKey = String(po.PurchaseOrderID);
+      const itemMap = poReceivedMap.get(poKey);
+
+      // Compute total ordered and total received across all items for this PO
+      let totalOrdered = 0;
+      let totalReceived = 0;
+
+      // Try POItems first, then legacy single-item fields
+      const lines: Array<{ itemId?: string; quantity: number }> =
+        Array.isArray(po.POItems) && po.POItems.length > 0
+          ? po.POItems.map((li) => ({
+              itemId: li.itemId,
+              quantity: Number(li.quantity ?? 0),
+            }))
+          : po.Quantity
+            ? [{ quantity: Number(po.Quantity) }]
+            : [];
+
+      for (const li of lines) {
+        totalOrdered += li.quantity;
+        totalReceived += itemMap?.get(li.itemId ?? "") ?? 0;
+      }
+
+      const totalRemaining = Math.max(0, totalOrdered - totalReceived);
+      const hasGRN = totalReceived > 0;
+      const isFullyReceived = totalOrdered > 0 && totalRemaining === 0;
+
+      let label = po.PurchaseOrderNo;
+      if (hasGRN && !isFullyReceived) {
+        label = `${po.PurchaseOrderNo} — ${totalRemaining} remaining`;
+      } else if (isFullyReceived) {
+        label = `${po.PurchaseOrderNo} ✓ Fully Received`;
+      }
+
+      return {
+        value: poKey,
+        label,
+        isFullyReceived,
+        totalRemaining,
+      };
+    });
 
   const filteredGrns = grns.filter((grn: any) => {
     if (!search) return true;
@@ -314,22 +383,82 @@ export default function GRN() {
 
     setLoadingPO(true);
     try {
-      const token = localStorage.getItem("token") ?? "";
-      const res = await fetch(`/api/purchase-orders/${poId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error("Failed to fetch PO details");
-      const po = await res.json();
+      const po = await grnApi.getPurchaseOrderById(poId);
 
-      // Map PO line items → GRN item lines
-      const lineItems: GRNItemLine[] = (po.LineItems ?? []).map((li: any) => ({
-        itemId: String(li.ItemId ?? ""),
-        itemName: li.ItemName ?? li.Description ?? "",
-        orderedQty: Number(li.Quantity ?? 0),
-        receivedQty: 0,
-        remainingQty: Number(li.Quantity ?? 0),
-        uom: li.UomName ?? li.UomId ?? "",
-      }));
+      // Prefer normalised LineItems rows (PurchaseOrderItems table) which have
+      // correct field names: ItemId, ItemName, Quantity, UomName, Rate.
+      // Fall back to POItems JSON blob, then to legacy single-item fields.
+      let lineItems: GRNItemLine[] = [];
+
+      if (po.LineItems && po.LineItems.length > 0) {
+        // Normalised child table — most reliable source
+        lineItems = po.LineItems.map((li: any) => {
+          const rate = Number(li.Rate ?? li.rate ?? 0);
+          const orderedQty = Number(li.Quantity ?? li.quantity ?? 0);
+          const itemId = String(li.ItemId ?? li.itemId ?? "");
+          const alreadyReceived = poReceivedMap.get(poId)?.get(itemId) ?? 0;
+          const remainingQty = Math.max(0, orderedQty - alreadyReceived);
+          return {
+            itemId,
+            itemName:
+              li.ItemName ??
+              li.itemName ??
+              li.ItemDescription ??
+              li.itemDescription ??
+              "",
+            orderedQty,
+            receivedQty: 0,
+            remainingQty,
+            uom: li.UomName ?? li.uom ?? li.unit ?? "",
+            rate,
+            quantity: 0,
+            totalAmount: 0,
+          };
+        });
+      } else if (Array.isArray(po.POItems) && po.POItems.length > 0) {
+        // POItems JSON blob fallback
+        lineItems = po.POItems.map((li: any) => {
+          const rate = Number(li.rate ?? li.Rate ?? 0);
+          const orderedQty = Number(li.quantity ?? li.Quantity ?? 0);
+          const itemId = String(li.itemId ?? li.ItemId ?? "");
+          const alreadyReceived = poReceivedMap.get(poId)?.get(itemId) ?? 0;
+          const remainingQty = Math.max(0, orderedQty - alreadyReceived);
+          return {
+            itemId,
+            itemName:
+              li.itemName ?? li.itemDescription ?? li.ItemDescription ?? "",
+            orderedQty,
+            receivedQty: 0,
+            remainingQty,
+            uom: li.unit ?? li.UomName ?? "",
+            rate,
+            quantity: 0,
+            totalAmount: 0,
+          };
+        });
+      } else if (po.ItemDescription || po.Quantity) {
+        // Legacy single-item PO fallback
+        const rate = Number(po.Rate ?? 0);
+        const orderedQty = Number(po.Quantity ?? 0);
+        const alreadyReceived = poReceivedMap.get(poId)?.get("") ?? 0;
+        const remainingQty = Math.max(0, orderedQty - alreadyReceived);
+        lineItems = [
+          {
+            itemId: "",
+            itemName: po.ItemDescription ?? "",
+            orderedQty,
+            receivedQty: 0,
+            remainingQty,
+            uom: po.Unit ?? "",
+            rate,
+            quantity: 0,
+            totalAmount: 0,
+          },
+        ];
+      }
+
+      // Only show items that still have remaining qty to receive
+      const pendingItems = lineItems.filter((li) => li.remainingQty > 0);
 
       setFormData((prev) => ({
         ...prev,
@@ -337,10 +466,13 @@ export default function GRN() {
         poNumber: po.PurchaseOrderNo ?? "",
         supplierId: String(po.SupplierID ?? ""),
         supplierName: po.SupplierName ?? "",
-        items: lineItems.length ? lineItems : [createEmptyItem()],
+        items: pendingItems.length
+          ? pendingItems
+          : lineItems.length
+            ? lineItems
+            : [createEmptyItem()],
         docTypeId: po.DocTypeId ?? null,
         finYear: prev.finYear || activeFinYear || "",
-        // grnNo will be assigned by backend on save
         grnNo: "",
         docNo: "",
       }));
@@ -359,6 +491,22 @@ export default function GRN() {
       newErrors.supplierId = "Supplier could not be determined";
     if (formData.items.every((i) => i.receivedQty <= 0)) {
       newErrors.items = "Enter received quantity for at least one item";
+    }
+    const missingRate = formData.items.some(
+      (i) => i.receivedQty > 0 && (!i.rate || i.rate <= 0),
+    );
+    if (missingRate) {
+      newErrors.items =
+        newErrors.items ||
+        "Enter a rate (₹) for each item with a received quantity";
+    }
+    const missingQty = formData.items.some(
+      (i) => i.receivedQty > 0 && (!i.quantity || i.quantity <= 0),
+    );
+    if (missingQty) {
+      newErrors.items =
+        newErrors.items ||
+        "Enter a billing quantity for each item with a received quantity";
     }
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -392,33 +540,104 @@ export default function GRN() {
     }
   };
 
-  // ── Item received qty handler ────────────────────────────────────────────────
-  const updateReceivedQty = (index: number, value: number) => {
+  // ── Item field update handlers ───────────────────────────────────────────────
+  const updateItemField = (
+    index: number,
+    field: "receivedQty" | "rate" | "quantity",
+    value: number,
+  ) => {
     setFormData((prev) => {
       const nextItems = [...prev.items];
-      const current = { ...nextItems[index] };
-      current.receivedQty = value;
-      current.remainingQty = current.orderedQty - value;
+      const current = { ...nextItems[index], [field]: value };
+      // Keep receivedQty and quantity in sync when user edits receivedQty
+      if (field === "receivedQty") {
+        current.remainingQty = current.orderedQty - value;
+        // Only auto-sync quantity if user hasn't manually set it yet
+        if (nextItems[index].quantity === nextItems[index].receivedQty) {
+          current.quantity = value;
+        }
+      }
+      current.totalAmount =
+        Number(current.rate || 0) * Number(current.quantity || 0);
       nextItems[index] = current;
       return { ...prev, items: nextItems };
     });
   };
+
+  // Legacy alias kept so existing call-sites compile without change
+  const updateReceivedQty = (index: number, value: number) =>
+    updateItemField(index, "receivedQty", value);
 
   // ── Edit ─────────────────────────────────────────────────────────────────────
   onView = (grn: any) => {
     setViewingGrn(grn);
   };
 
-  onEdit = (grn: any) => {
-    const parsedItems = parseJsonArray<GRNItemLine>(grn.GRNItems).map(
+  onEdit = async (grn: any) => {
+    // Parse saved GRN items
+    const savedItems = parseJsonArray<GRNItemLine>(grn.GRNItems).map(
       (item) => ({
         ...createEmptyItem(),
         ...item,
         orderedQty: Number(item.orderedQty || 0),
         receivedQty: Number(item.receivedQty || 0),
         remainingQty: Number(item.remainingQty || 0),
+        rate: Number(item.rate || 0),
+        quantity: Number(item.quantity || 0),
+        totalAmount: Number(item.totalAmount || 0),
       }),
     );
+
+    // If the GRN is linked to a PO, fetch the PO to backfill rate/orderedQty
+    // for any items that were saved before migration 034 (rate = 0).
+    let mergedItems = savedItems;
+    if (grn.POID) {
+      try {
+        const po = await grnApi.getPurchaseOrderById(String(grn.POID));
+        // Build a lookup: itemId → PO line  (prefer LineItems, fall back to POItems)
+        const poLineMap = new Map<
+          string,
+          { rate: number; orderedQty: number; uom: string }
+        >();
+
+        const rawLines: any[] =
+          po.LineItems && po.LineItems.length > 0
+            ? po.LineItems.map((li: any) => ({
+                itemId: String(li.ItemId ?? li.itemId ?? ""),
+                rate: Number(li.Rate ?? li.rate ?? 0),
+                orderedQty: Number(li.Quantity ?? li.quantity ?? 0),
+                uom: li.UomName ?? li.uom ?? li.unit ?? "",
+              }))
+            : (Array.isArray(po.POItems) ? po.POItems : []).map((li: any) => ({
+                itemId: String(li.itemId ?? li.ItemId ?? ""),
+                rate: Number(li.rate ?? li.Rate ?? 0),
+                orderedQty: Number(li.quantity ?? li.Quantity ?? 0),
+                uom: li.unit ?? li.UomName ?? "",
+              }));
+
+        rawLines.forEach((l) => {
+          if (l.itemId) poLineMap.set(l.itemId, l);
+        });
+
+        mergedItems = savedItems.map((item) => {
+          const poLine = poLineMap.get(item.itemId);
+          return {
+            ...item,
+            // Backfill rate from PO if GRN item has none (pre-migration data)
+            rate: item.rate > 0 ? item.rate : (poLine?.rate ?? 0),
+            // Backfill orderedQty from PO if missing
+            orderedQty:
+              item.orderedQty > 0 ? item.orderedQty : (poLine?.orderedQty ?? 0),
+            // Recompute totalAmount using whichever qty field is more relevant
+            totalAmount:
+              (item.rate > 0 ? item.rate : (poLine?.rate ?? 0)) *
+              (item.quantity > 0 ? item.quantity : item.receivedQty),
+          };
+        });
+      } catch {
+        // If PO fetch fails, continue with saved items as-is
+      }
+    }
 
     setFormData({
       grnNo: grn.GRNNo || "",
@@ -429,7 +648,7 @@ export default function GRN() {
       poNumber: grn.PONumber || "",
       remarks: grn.Remarks || "",
       status: (grn.Status as any) || "Draft",
-      items: parsedItems.length ? parsedItems : [createEmptyItem()],
+      items: mergedItems.length ? mergedItems : [createEmptyItem()],
       docTypeId: grn.DocTypeId ?? null,
       docNo: grn.DocNo || "",
       finYear: grn.FinYear || activeFinYear || "",
@@ -520,7 +739,14 @@ export default function GRN() {
                 >
                   <option value="">Select Purchase Order...</option>
                   {pos.map((po) => (
-                    <option key={po.value} value={po.value}>
+                    <option
+                      key={po.value}
+                      value={po.value}
+                      disabled={po.isFullyReceived}
+                      style={
+                        po.isFullyReceived ? { color: "#6b7280" } : undefined
+                      }
+                    >
                       {po.label}
                     </option>
                   ))}
@@ -632,6 +858,16 @@ export default function GRN() {
                       <th className="px-4 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">
                         UOM
                       </th>
+                      <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                        Rate (₹) <span className="text-destructive">*</span>
+                      </th>
+                      <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                        Qty (Billing){" "}
+                        <span className="text-destructive">*</span>
+                      </th>
+                      <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                        Total (₹)
+                      </th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-border">
@@ -721,10 +957,74 @@ export default function GRN() {
                               </select>
                             )}
                           </td>
+                          {/* Rate */}
+                          <td className="p-3">
+                            <input
+                              type="number"
+                              min={0}
+                              step="0.01"
+                              value={item.rate}
+                              onChange={(e) =>
+                                updateItemField(
+                                  idx,
+                                  "rate",
+                                  Number(e.target.value),
+                                )
+                              }
+                              className={`${inp} text-right`}
+                              placeholder="0.00"
+                            />
+                          </td>
+                          {/* Billing Quantity */}
+                          <td className="p-3">
+                            <input
+                              type="number"
+                              min={0}
+                              step="0.01"
+                              value={item.quantity}
+                              onChange={(e) =>
+                                updateItemField(
+                                  idx,
+                                  "quantity",
+                                  Number(e.target.value),
+                                )
+                              }
+                              className={`${inp} text-right`}
+                              placeholder="0"
+                            />
+                          </td>
+                          {/* Total Amount — computed, read-only */}
+                          <td className="p-3 text-right font-semibold text-primary">
+                            {item.totalAmount > 0
+                              ? `₹${item.totalAmount.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                              : "—"}
+                          </td>
                         </tr>
                       );
                     })}
                   </tbody>
+                  {/* Grand total footer */}
+                  {formData.items.some((i) => i.totalAmount > 0) && (
+                    <tfoot>
+                      <tr className="bg-muted/40 border-t-2 border-border">
+                        <td
+                          colSpan={7}
+                          className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground"
+                        >
+                          Grand Total
+                        </td>
+                        <td className="px-4 py-3 text-right font-bold text-primary">
+                          ₹
+                          {formData.items
+                            .reduce((sum, i) => sum + (i.totalAmount || 0), 0)
+                            .toLocaleString("en-IN", {
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            })}
+                        </td>
+                      </tr>
+                    </tfoot>
+                  )}
                 </table>
               </div>
             </div>
@@ -908,6 +1208,15 @@ export default function GRN() {
                             <th className="px-4 py-2.5 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">
                               UOM
                             </th>
+                            <th className="px-4 py-2.5 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                              Rate (₹)
+                            </th>
+                            <th className="px-4 py-2.5 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                              Qty
+                            </th>
+                            <th className="px-4 py-2.5 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
+                              Total (₹)
+                            </th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-border">
@@ -931,12 +1240,25 @@ export default function GRN() {
                                 <td className="px-4 py-3 text-muted-foreground">
                                   {item.uom || "—"}
                                 </td>
+                                <td className="px-4 py-3 text-right text-muted-foreground">
+                                  {item.rate
+                                    ? `₹${Number(item.rate).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                    : "—"}
+                                </td>
+                                <td className="px-4 py-3 text-right text-muted-foreground">
+                                  {item.quantity ?? "—"}
+                                </td>
+                                <td className="px-4 py-3 text-right font-semibold text-primary">
+                                  {item.totalAmount
+                                    ? `₹${Number(item.totalAmount).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+                                    : "—"}
+                                </td>
                               </tr>
                             ))
                           ) : (
                             <tr>
                               <td
-                                colSpan={5}
+                                colSpan={8}
                                 className="px-4 py-4 text-center text-muted-foreground"
                               >
                                 No items
@@ -944,6 +1266,31 @@ export default function GRN() {
                             </tr>
                           )}
                         </tbody>
+                        {items.some((i) => i.totalAmount > 0) && (
+                          <tfoot>
+                            <tr className="bg-muted/40 border-t-2 border-border">
+                              <td
+                                colSpan={7}
+                                className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground"
+                              >
+                                Grand Total
+                              </td>
+                              <td className="px-4 py-3 text-right font-bold text-primary">
+                                ₹
+                                {items
+                                  .reduce(
+                                    (sum, i) =>
+                                      sum + (Number(i.totalAmount) || 0),
+                                    0,
+                                  )
+                                  .toLocaleString("en-IN", {
+                                    minimumFractionDigits: 2,
+                                    maximumFractionDigits: 2,
+                                  })}
+                              </td>
+                            </tr>
+                          </tfoot>
+                        )}
                       </table>
                     </div>
                   </div>
