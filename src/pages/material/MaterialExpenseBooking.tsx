@@ -3193,7 +3193,28 @@ export default function MaterialExpenseBooking() {
                           Terms
                         </p>
                         <div className="bg-muted/20 border border-border rounded-xl px-4 py-3 text-sm text-foreground">
-                          {previewRecord.billingTerms}
+                          {Array.isArray(previewRecord.billingTerms) &&
+                          previewRecord.billingTerms.length > 0 ? (
+                            <div className="space-y-1.5">
+                              {previewRecord.billingTerms.map((t: any, idx: number) => (
+                                <div
+                                  key={t?.BillingTermID ?? t?.id ?? idx}
+                                  className="flex flex-col gap-0.5"
+                                >
+                                  <span className="font-semibold">
+                                    {t?.Name ?? t?.name ?? "—"}
+                                  </span>
+                                  {t?.Description ? (
+                                    <span className="text-muted-foreground text-xs">
+                                      {t.Description}
+                                    </span>
+                                  ) : null}
+                                </div>
+                              ))}
+                            </div>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
                         </div>
                       </div>
                     )}
