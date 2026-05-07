@@ -191,8 +191,8 @@ interface BillingTermOption {
   BillingTermID: number;
   Name: string;
   Description?: string;
-  Type?: string;
-  GST?: string;
+  IsActive?: boolean | number;
+  CalculationType?: string;
 }
 interface TCOption {
   Id: number;
@@ -1156,7 +1156,9 @@ export default function MaterialExpenseBooking() {
     apiFetch("/api/billing-terms")
       .then((list: BillingTermOption[]) =>
         setBillingTerms(
-          (Array.isArray(list) ? list : []).filter((t) => t.IsActive !== false),
+          (Array.isArray(list) ? list : []).filter(
+            (t) => t.IsActive !== 0 && t.IsActive !== false,
+          ),
         ),
       )
       .catch(() => {});
@@ -2104,7 +2106,7 @@ export default function MaterialExpenseBooking() {
                             value={String(t.BillingTermID)}
                           >
                             {t.Name}
-                            {t.Type ? ` (${t.Type})` : ""}
+                            {t.CalculationType ? ` — ${t.CalculationType}` : ""}
                           </SelectItem>
                         ))}
                       </SelectContent>
