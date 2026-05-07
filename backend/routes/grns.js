@@ -269,7 +269,7 @@ router.post("/", async (req, res) => {
       .json({ error: "GRNDate and SupplierID are required" });
   }
 
-  const pool = getPool();
+  const pool = await getPool();
   const transaction = pool.transaction();
 
   try {
@@ -372,7 +372,7 @@ router.put("/:id", async (req, res) => {
   } = req.body;
   const grnId = parseInt(req.params.id, 10);
 
-  const pool = getPool();
+  const pool = await getPool();
   const transaction = pool.transaction();
   try {
     await transaction.begin();
@@ -436,7 +436,7 @@ router.put("/:id", async (req, res) => {
 // DELETE
 router.delete("/:id", async (req, res) => {
   const grnId = parseInt(req.params.id, 10);
-  const pool = getPool();
+  const pool = await getPool();
   const transaction = pool.transaction();
 
   try {
