@@ -1,12 +1,13 @@
 const express = require("express");
 const router = express.Router();
-const sql = require("mssql");
 const authenticateToken = require("../middleware/auth");
+const { getPool, sql } = require("../db");
 
 // Get item options
 router.get("/item-options", authenticateToken, async (req, res) => {
   try {
-    const result = await sql.query(`
+    const pool = getPool();
+    const result = await pool.request().query(`
       SELECT
         M_Id,
         M_Name,
@@ -30,50 +31,55 @@ router.get("/", authenticateToken, async (req, res) => {
     const search = req.query.search || "";
     const offset = (page - 1) * limit;
 
-    const request = new sql.Request();
+    const pool = getPool();
 
     let whereClause = "";
+    const bindFilters = (request) => {
+      if (search) {
+        request.input("search", sql.NVarChar(255), `%${search}%`);
+      }
+      return request;
+    };
+
     if (search) {
       whereClause = `
         WHERE mi.IssueNo LIKE @search
-        OR c.label LIKE @search
-        OR p.label LIKE @search
+        OR c.name LIKE @search
+        OR p.name LIKE @search
         OR i.M_Name LIKE @search
       `;
-      request.input("search", sql.VarChar, `%${search}%`);
     }
-
-    request.input("offset", sql.Int, offset);
-    request.input("limit", sql.Int, limit);
 
     const countQuery = `
       SELECT COUNT(*) as total
-      FROM MaterialIssues mi
-      LEFT JOIN Enterprise c ON mi.CompanyId = c.id
-      LEFT JOIN Enterprise p ON mi.ProjectId = p.id
-      LEFT JOIN Item_Master_Group i ON mi.ItemId = i.M_Id
+      FROM dbo.MaterialIssues mi
+      LEFT JOIN dbo.enterprise c ON mi.CompanyId = c.id
+      LEFT JOIN dbo.enterprise p ON mi.ProjectId = p.id
+      LEFT JOIN dbo.Item_Master_Group i ON mi.ItemId = i.M_Id
       ${whereClause}
     `;
 
     const query = `
       SELECT
         mi.*,
-        c.label as CompanyName,
-        p.label as ProjectName,
+        c.name as CompanyName,
+        p.name as ProjectName,
         i.M_Name as ItemName
-      FROM MaterialIssues mi
-      LEFT JOIN Enterprise c ON mi.CompanyId = c.id
-      LEFT JOIN Enterprise p ON mi.ProjectId = p.id
-      LEFT JOIN Item_Master_Group i ON mi.ItemId = i.M_Id
+      FROM dbo.MaterialIssues mi
+      LEFT JOIN dbo.enterprise c ON mi.CompanyId = c.id
+      LEFT JOIN dbo.enterprise p ON mi.ProjectId = p.id
+      LEFT JOIN dbo.Item_Master_Group i ON mi.ItemId = i.M_Id
       ${whereClause}
       ORDER BY mi.CreatedAt DESC
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
     `;
 
-    const countResult = await request.query(countQuery);
+    const countResult = await bindFilters(pool.request()).query(countQuery);
     const total = countResult.recordset[0].total;
 
-    const result = await request.query(query);
+    const result = await bindFilters(
+      pool.request().input("offset", sql.Int, offset).input("limit", sql.Int, limit),
+    ).query(query);
 
     res.json({
       data: result.recordset,
@@ -91,15 +97,16 @@ router.get("/", authenticateToken, async (req, res) => {
 // Get issue by id
 router.get("/:id", authenticateToken, async (req, res) => {
   try {
-    const request = new sql.Request();
-    request.input("id", sql.Int, parseInt(req.params.id));
+    const pool = getPool();
+    const request = pool.request();
+    request.input("id", sql.Int, parseInt(req.params.id, 10));
 
     const result = await request.query(`
-      SELECT mi.*, c.label as CompanyName, p.label as ProjectName, i.M_Name as ItemName
-      FROM MaterialIssues mi
-      LEFT JOIN Enterprise c ON mi.CompanyId = c.id
-      LEFT JOIN Enterprise p ON mi.ProjectId = p.id
-      LEFT JOIN Item_Master_Group i ON mi.ItemId = i.M_Id
+      SELECT mi.*, c.name as CompanyName, p.name as ProjectName, i.M_Name as ItemName
+      FROM dbo.MaterialIssues mi
+      LEFT JOIN dbo.enterprise c ON mi.CompanyId = c.id
+      LEFT JOIN dbo.enterprise p ON mi.ProjectId = p.id
+      LEFT JOIN dbo.Item_Master_Group i ON mi.ItemId = i.M_Id
       WHERE mi.IssueId = @id
     `);
 
@@ -129,20 +136,21 @@ router.post("/", authenticateToken, async (req, res) => {
     // Generate simple IssueNo (e.g. MI-YYYYMMDD-XXXX)
     const issueNo = `MI-${new Date().toISOString().slice(0, 10).replace(/-/g, "")}-${Math.floor(Math.random() * 10000)}`;
 
-    const request = new sql.Request();
-    request.input("IssueNo", sql.VarChar, issueNo);
+    const pool = getPool();
+    const request = pool.request();
+    request.input("IssueNo", sql.NVarChar(50), issueNo);
     request.input("CompanyId", sql.Int, CompanyId);
     request.input("ProjectId", sql.Int, ProjectId);
     request.input("Date", sql.Date, Date);
-    request.input("ItemId", sql.VarChar, ItemId);
-    request.input("UOMId", sql.VarChar, UOMId);
+    request.input("ItemId", sql.NVarChar(100), ItemId);
+    request.input("UOMId", sql.NVarChar(50), UOMId);
     request.input("Quantity", sql.Decimal(18, 2), Quantity);
     request.input("Remarks", sql.NVarChar, Remarks || null);
     request.input("Reason", sql.NVarChar, Reason);
     request.input("CreatedBy", sql.Int, userId);
 
     const result = await request.query(`
-      INSERT INTO MaterialIssues (IssueNo, CompanyId, ProjectId, Date, ItemId, UOMId, Quantity, Remarks, Reason, CreatedBy)
+      INSERT INTO dbo.MaterialIssues (IssueNo, CompanyId, ProjectId, Date, ItemId, UOMId, Quantity, Remarks, Reason, CreatedBy)
       OUTPUT INSERTED.*
       VALUES (@IssueNo, @CompanyId, @ProjectId, @Date, @ItemId, @UOMId, @Quantity, @Remarks, @Reason, @CreatedBy)
     `);
@@ -157,7 +165,7 @@ router.post("/", authenticateToken, async (req, res) => {
 // Update issue
 router.put("/:id", authenticateToken, async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(req.params.id, 10);
     const {
       CompanyId,
       ProjectId,
@@ -169,19 +177,20 @@ router.put("/:id", authenticateToken, async (req, res) => {
       Reason,
     } = req.body;
 
-    const request = new sql.Request();
+    const pool = getPool();
+    const request = pool.request();
     request.input("Id", sql.Int, id);
     request.input("CompanyId", sql.Int, CompanyId);
     request.input("ProjectId", sql.Int, ProjectId);
     request.input("Date", sql.Date, Date);
-    request.input("ItemId", sql.VarChar, ItemId);
-    request.input("UOMId", sql.VarChar, UOMId);
+    request.input("ItemId", sql.NVarChar(100), ItemId);
+    request.input("UOMId", sql.NVarChar(50), UOMId);
     request.input("Quantity", sql.Decimal(18, 2), Quantity);
     request.input("Remarks", sql.NVarChar, Remarks || null);
     request.input("Reason", sql.NVarChar, Reason);
 
     await request.query(`
-      UPDATE MaterialIssues
+      UPDATE dbo.MaterialIssues
       SET CompanyId=@CompanyId, ProjectId=@ProjectId, Date=@Date, ItemId=@ItemId, UOMId=@UOMId, Quantity=@Quantity, Remarks=@Remarks, Reason=@Reason, UpdatedAt=GETDATE()
       WHERE IssueId=@Id
     `);
@@ -196,9 +205,10 @@ router.put("/:id", authenticateToken, async (req, res) => {
 // Delete issue
 router.delete("/:id", authenticateToken, async (req, res) => {
   try {
-    const request = new sql.Request();
-    request.input("id", sql.Int, parseInt(req.params.id));
-    await request.query(`DELETE FROM MaterialIssues WHERE IssueId = @id`);
+    const pool = getPool();
+    const request = pool.request();
+    request.input("id", sql.Int, parseInt(req.params.id, 10));
+    await request.query(`DELETE FROM dbo.MaterialIssues WHERE IssueId = @id`);
     res.json({ message: "Issue deleted successfully" });
   } catch (error) {
     res.status(500).json({ error: "Failed to delete material issue" });
