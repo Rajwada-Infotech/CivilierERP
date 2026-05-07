@@ -219,6 +219,9 @@ export function dbToRecord(row: any): ExpenseRecord {
     tcId: row.ETCId ? parseInt(row.ETCId, 10) : null,
     tcName: row.ETCName ?? "",
     tcText: row.ETCText ?? "",
+    eSourceType:
+      (row.ESourceType as "PO" | "WO" | "GRN" | "TOD" | null) ?? null,
+    eSourceId: row.ESourceId ? parseInt(row.ESourceId, 10) : null,
   };
 }
 
