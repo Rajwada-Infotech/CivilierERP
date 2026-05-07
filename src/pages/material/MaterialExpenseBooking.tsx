@@ -68,7 +68,7 @@ import { BillingAccordion } from "./ExpenseBooking/BillingAccordion";
 import { EmiSection } from "./ExpenseBooking/EmiSection";
 import { ApprovalTrailPanel } from "./ExpenseBooking/ApprovalTrailPanel";
 import { RecordCard } from "./ExpenseBooking/RecordCard";
-import { ExpenseBookingPreviewModal } from "@/components/material/ExpenseBookingPreviewModal";
+import { ExpenseBookingPreviewModal } from "./ExpenseBookingPreviewModal";
 import {
   blankForm,
   computeBreakdown,
