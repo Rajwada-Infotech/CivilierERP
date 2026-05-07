@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { parseJsonArray } from "@/utils/parseJsonArray";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { Button } from "@/components/ui/button";
@@ -68,7 +67,6 @@ import { BillingAccordion } from "./ExpenseBooking/BillingAccordion";
 import { EmiSection } from "./ExpenseBooking/EmiSection";
 import { ApprovalTrailPanel } from "./ExpenseBooking/ApprovalTrailPanel";
 import { RecordCard } from "./ExpenseBooking/RecordCard";
-import { ExpenseBookingPreviewModal } from "./ExpenseBookingPreviewModal";
 import {
   blankForm,
   computeBreakdown,
@@ -407,6 +405,10 @@ interface DocSelectorProps {
   filterCompanyId?: number | null;
   filterProjectId?: number | null;
   filterFinYear?: string | null;
+  /** IDs already booked — excludes them from picker (except the one being edited) */
+  bookedPOIds?: Set<number>;
+  bookedWOIds?: Set<number>;
+  bookedGRNIds?: Set<number>;
   onSelect: (doc: SelectedDoc) => void;
   onClear: () => void;
   onTodSelected?: (tod: TodItem | null) => void;
@@ -429,6 +431,9 @@ function DocSelectorPanel({
   filterCompanyId,
   filterProjectId,
   filterFinYear,
+  bookedPOIds,
+  bookedWOIds,
+  bookedGRNIds,
   onSelect,
   onClear,
   onTodSelected,
@@ -471,6 +476,7 @@ function DocSelectorPanel({
   };
 
   const filteredPO = poList.filter((p) => {
+    if (bookedPOIds?.has(p.PurchaseOrderID)) return false;
     if (filterCompanyId && p.CompanyId && p.CompanyId !== filterCompanyId)
       return false;
     if (filterProjectId && p.ProjectId && p.ProjectId !== filterProjectId)
@@ -482,6 +488,7 @@ function DocSelectorPanel({
     );
   });
   const filteredWO = woList.filter((w) => {
+    if (bookedWOIds?.has(w.Id)) return false;
     if (filterCompanyId && w.CompanyId && w.CompanyId !== filterCompanyId)
       return false;
     if (filterProjectId && w.ProjectId && w.ProjectId !== filterProjectId)
@@ -499,6 +506,7 @@ function DocSelectorPanel({
   );
   const filteredGRN = grnList.filter(
     (g) =>
+      !bookedGRNIds?.has(g.GRNID) &&
       inFinYear(g.GRNNo) &&
       ((g.GRNNo || "").toLowerCase().includes(q) ||
         (g.SupplierName || "").toLowerCase().includes(q) ||
@@ -980,9 +988,10 @@ function resolveGstRates(
   fallbackSgst: number,
 ) {
   if ((doc.kind === "PO" || doc.kind === "WO") && doc.gst?.applicable) {
-    const { rate } = doc.gst;
-    // Always split total GST equally as CGST + SGST (regardless of igst/cgst_sgst type)
-    return { cgst: rate / 2, sgst: rate / 2 };
+    const { type, rate } = doc.gst;
+    if (type === "cgst_sgst") return { cgst: rate / 2, sgst: rate / 2 };
+    if (type === "igst") return { cgst: rate, sgst: 0 };
+    return { cgst: 0, sgst: 0 };
   }
   if (doc.kind === "PO" || doc.kind === "WO") return { cgst: 0, sgst: 0 };
   return { cgst: fallbackCgst, sgst: fallbackSgst };
@@ -1016,6 +1025,19 @@ function GRNChainBadge({
       ))}
     </div>
   );
+}
+
+function parseGRNItemsFromRaw(raw: unknown): GRNItemLine[] {
+  try {
+    if (Array.isArray(raw)) return raw as GRNItemLine[];
+    if (typeof raw === "string" && raw.trim()) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed as GRNItemLine[];
+    }
+  } catch {
+    /* fall through */
+  }
+  return [];
 }
 
 // ─── Main Component ───────────────────────────────────────────────────────────
@@ -1219,7 +1241,7 @@ export default function MaterialExpenseBooking() {
       setGrnItemsLoading(true);
       apiFetch(`/api/grns/${doc.sourceId}`)
         .then((r: any) => {
-          const items = parseJsonArray<GRNItemLine>(r.GRNItems);
+          const items = parseGRNItemsFromRaw(r.GRNItems);
           const rawDocNo: string = r.GRNNo || r.DocNo || doc.docNo;
           const canonicalDocNo = rawDocNo
             ? rawDocNo.startsWith("GRN-")
@@ -1322,8 +1344,109 @@ export default function MaterialExpenseBooking() {
     const { id, ...rest } = rec;
     setForm(rest);
     setApprovalTrail(undefined);
-    setSelectedDoc(null);
     setLiveEmiSchedule(null);
+
+    // ── Rebuild selectedDoc so the doc selector shows the linked document ──
+    if (rec.eSourceType && rec.eSourceId) {
+      const kind = rec.eSourceType;
+      const sourceId = rec.eSourceId;
+      const docNo = rec.bookingReference;
+
+      if (kind === "GRN") {
+        const stub: SelectedDoc = {
+          kind: "GRN",
+          docNo,
+          sourceId,
+          grnItems: [],
+        };
+        setSelectedDoc(stub);
+        setGrnItemsLoading(true);
+        apiFetch(`/api/grns/${sourceId}`)
+          .then((r: any) => {
+            const items = parseGRNItemsFromRaw(r.GRNItems);
+            const rawDocNo: string = r.GRNNo || r.DocNo || docNo;
+            const canonical = rawDocNo.startsWith("GRN-")
+              ? rawDocNo
+              : `GRN-${rawDocNo}`;
+            setSelectedDoc({
+              kind: "GRN",
+              docNo: canonical,
+              sourceId,
+              vendorLabel: r.SupplierName,
+              status: r.Status,
+              date: r.GRNDate?.slice(0, 10),
+              grnItems: items,
+              amount: parseFloat(r.TotalAmount) || 0,
+            });
+          })
+          .catch(() => {})
+          .finally(() => setGrnItemsLoading(false));
+      } else if (kind === "PO") {
+        // PO: find from already-loaded list or fetch lazily after fetchMasters
+        const tryBuildPO = (list: POItem[]) => {
+          const po = list.find((p) => p.PurchaseOrderID === sourceId);
+          if (po) {
+            setSelectedDoc({
+              kind: "PO",
+              docNo: po.DocNo || po.PurchaseOrderNo,
+              sourceId,
+              vendorLabel: po.SupplierName,
+              companyId: po.CompanyId,
+              projectId: po.ProjectId,
+              amount: po.TotalAmount,
+              status: po.Status,
+              date: po.PODate,
+              gst: po.GST ?? null,
+            });
+          }
+        };
+        if (_mastersCache.po) {
+          tryBuildPO(_mastersCache.po);
+        } else {
+          apiFetch("/api/purchase-orders?limit=500")
+            .then((r: any) => {
+              const list: POItem[] = Array.isArray(r) ? r : (r.data ?? []);
+              _mastersCache.po = list;
+              tryBuildPO(list);
+            })
+            .catch(() => {});
+        }
+      } else if (kind === "WO") {
+        const tryBuildWO = (list: WOItem[]) => {
+          const wo = list.find((w) => w.Id === sourceId);
+          if (wo) {
+            setSelectedDoc({
+              kind: "WO",
+              docNo: wo.DocNo || wo.DocumentNumber,
+              sourceId,
+              vendorLabel: wo.ContractorName,
+              companyId: wo.CompanyId,
+              projectId: wo.ProjectId,
+              amount: wo.TotalAmount,
+              status: wo.Status,
+              date: wo.DocumentDate,
+              gst: wo.GST ?? null,
+            });
+          }
+        };
+        if (_mastersCache.wo) {
+          tryBuildWO(_mastersCache.wo);
+        } else {
+          apiFetch("/api/work-orders?limit=500")
+            .then((r: any) => {
+              const list: WOItem[] = Array.isArray(r) ? r : (r.data ?? []);
+              _mastersCache.wo = list;
+              tryBuildWO(list);
+            })
+            .catch(() => {});
+        }
+      } else if (kind === "TOD") {
+        setSelectedDoc({ kind: "TOD", docNo, sourceId });
+      }
+    } else {
+      setSelectedDoc(null);
+    }
+
     if (rec.emi?.enabled) {
       setLoadingEmi(true);
       apiFetch(`${API}/${rec.id}/emi-schedule`)
@@ -1510,6 +1633,17 @@ export default function MaterialExpenseBooking() {
   const isGRN = selectedDoc?.kind === "GRN";
   const gstHighlighted = isPOorWO && !!selectedDoc?.gst?.applicable;
 
+  // Compute sets of already-booked source IDs (excluding the record being edited)
+  const bookedPOIds = new Set<number>();
+  const bookedWOIds = new Set<number>();
+  const bookedGRNIds = new Set<number>();
+  for (const r of records) {
+    if (r.id === editingId) continue; // allow re-selecting own doc when editing
+    if (r.eSourceType === "PO" && r.eSourceId) bookedPOIds.add(r.eSourceId);
+    if (r.eSourceType === "WO" && r.eSourceId) bookedWOIds.add(r.eSourceId);
+    if (r.eSourceType === "GRN" && r.eSourceId) bookedGRNIds.add(r.eSourceId);
+  }
+
   // Gate: reveal Document Selection only after booking info is started
   const showDocSection = !!(form.bookingDate || form.companyId);
 
@@ -1587,7 +1721,46 @@ export default function MaterialExpenseBooking() {
               {/* ── 0. Booking Information ─────────────────────────────── */}
               <div className="space-y-4">
                 <SectionHeader label="Booking Information" />
-                {/* Company / Supplier / Project — shown first */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <Field label="Booking Date" required>
+                    <Input
+                      type="date"
+                      value={form.bookingDate}
+                      onChange={(e) => set("bookingDate", e.target.value)}
+                    />
+                  </Field>
+                  <Field label="Due Date">
+                    <Input
+                      type="date"
+                      value={form.dueDate}
+                      onChange={(e) => set("dueDate", e.target.value)}
+                    />
+                  </Field>
+                  <Field
+                    label="Financial Year"
+                    hint={
+                      selectedTod
+                        ? "Changing year updates the booking reference number"
+                        : undefined
+                    }
+                  >
+                    <Select
+                      value={form.financialYear}
+                      onValueChange={(v) => set("financialYear", v)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select year…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {activeFinYears.map((fy) => (
+                          <SelectItem key={fy.id} value={fy.year}>
+                            {fy.year}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <Field label="Company" required>
                     <Select
@@ -1611,13 +1784,11 @@ export default function MaterialExpenseBooking() {
                             No companies found
                           </SelectItem>
                         )}
-                        {companyOptions
-                          .filter((c) => c.id != null && String(c.id) !== "")
-                          .map((c) => (
-                            <SelectItem key={c.id} value={String(c.id)}>
-                              {c.label}
-                            </SelectItem>
-                          ))}
+                        {companyOptions.map((c) => (
+                          <SelectItem key={c.id} value={String(c.id)}>
+                            {c.label}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </Field>
@@ -1692,56 +1863,11 @@ export default function MaterialExpenseBooking() {
                             No projects found
                           </SelectItem>
                         )}
-                        {projectOptions
-                          .filter((p) => p.id != null && String(p.id) !== "")
-                          .map((p) => (
-                            <SelectItem key={p.id} value={String(p.id)}>
-                              {p.label}
-                            </SelectItem>
-                          ))}
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                </div>
-                {/* Dates / Financial Year — below company/project */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  <Field label="Booking Date" required>
-                    <Input
-                      type="date"
-                      value={form.bookingDate}
-                      onChange={(e) => set("bookingDate", e.target.value)}
-                    />
-                  </Field>
-                  <Field label="Due Date">
-                    <Input
-                      type="date"
-                      value={form.dueDate}
-                      onChange={(e) => set("dueDate", e.target.value)}
-                    />
-                  </Field>
-                  <Field
-                    label="Financial Year"
-                    hint={
-                      selectedTod
-                        ? "Changing year updates the booking reference number"
-                        : undefined
-                    }
-                  >
-                    <Select
-                      value={form.financialYear}
-                      onValueChange={(v) => set("financialYear", v)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select year…" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {activeFinYears
-                          .filter((fy) => fy.year && fy.year !== "")
-                          .map((fy) => (
-                            <SelectItem key={fy.id} value={fy.year}>
-                              {fy.year}
-                            </SelectItem>
-                          ))}
+                        {projectOptions.map((p) => (
+                          <SelectItem key={p.id} value={String(p.id)}>
+                            {p.label}
+                          </SelectItem>
+                        ))}
                       </SelectContent>
                     </Select>
                   </Field>
@@ -1777,6 +1903,9 @@ export default function MaterialExpenseBooking() {
                         form.projectSite ? parseInt(form.projectSite) : null
                       }
                       filterFinYear={form.financialYear || null}
+                      bookedPOIds={bookedPOIds}
+                      bookedWOIds={bookedWOIds}
+                      bookedGRNIds={bookedGRNIds}
                       onSelect={applyDoc}
                       onClear={clearDoc}
                       onTodSelected={setSelectedTod}
@@ -1882,12 +2011,12 @@ export default function MaterialExpenseBooking() {
                             : "Work Order"}
                         </span>
                         {" — "}
-                        Total{" "}
-                        <span className="font-mono font-semibold">
-                          {selectedDoc!.gst!.rate}%
-                        </span>{" "}
-                        split as CGST {selectedDoc!.gst!.rate / 2}% + SGST{" "}
-                        {selectedDoc!.gst!.rate / 2}%. Editable if needed.
+                        {selectedDoc!.gst!.type === "cgst_sgst"
+                          ? `CGST ${selectedDoc!.gst!.rate / 2}% + SGST ${selectedDoc!.gst!.rate / 2}% (total ${selectedDoc!.gst!.rate}%)`
+                          : selectedDoc!.gst!.type === "igst"
+                            ? `IGST ${selectedDoc!.gst!.rate}% (mapped to CGST)`
+                            : "GST not applicable"}
+                        . Editable if needed.
                       </span>
                     ) : (
                       <span className="text-muted-foreground">
@@ -1895,12 +2024,12 @@ export default function MaterialExpenseBooking() {
                         {selectedDoc!.kind === "PO"
                           ? "Purchase Order"
                           : "Work Order"}{" "}
-                        has no GST applied — rate set to 0. Editable if needed.
+                        has no GST applied — rates set to 0. Editable if needed.
                       </span>
                     )}
                   </div>
                 )}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <Field
                     label="Basic Amount (₹)"
                     required
@@ -1931,46 +2060,46 @@ export default function MaterialExpenseBooking() {
                     </div>
                   </Field>
                   <Field
-                    label="GST Total (%)"
+                    label="CGST Rate (%)"
                     hint={
                       isPOorWO
                         ? selectedDoc!.gst?.applicable
-                          ? `Auto-filled from linked ${selectedDoc!.kind === "PO" ? "Purchase Order" : "Work Order"} — split equally as CGST + SGST`
+                          ? selectedDoc!.gst!.type === "igst"
+                            ? "IGST mapped here — editable"
+                            : "Auto-filled from linked order — editable"
                           : "No GST on this order — editable"
-                        : "Enter total GST % — split equally as CGST + SGST"
+                        : "Enter CGST rate manually"
                     }
                   >
                     <RateInput
-                      value={form.cgstRate + form.sgstRate}
-                      onChange={(v) => {
-                        const half = v / 2;
-                        set("cgstRate", half);
-                        set("sgstRate", half);
-                      }}
+                      value={form.cgstRate}
+                      onChange={(v) => set("cgstRate", v)}
+                      highlighted={gstHighlighted}
+                    />
+                  </Field>
+                  <Field
+                    label={
+                      selectedDoc?.gst?.type === "igst"
+                        ? "SGST Rate (%) — N/A for IGST"
+                        : "SGST Rate (%)"
+                    }
+                    hint={
+                      isPOorWO
+                        ? selectedDoc!.gst?.type === "igst"
+                          ? "IGST order — SGST is 0"
+                          : selectedDoc!.gst?.applicable
+                            ? "Auto-filled from linked order — editable"
+                            : "No GST on this order — editable"
+                        : "Enter SGST rate manually"
+                    }
+                  >
+                    <RateInput
+                      value={form.sgstRate}
+                      onChange={(v) => set("sgstRate", v)}
                       highlighted={gstHighlighted}
                     />
                   </Field>
                 </div>
-                {/* CGST / SGST split preview */}
-                {(form.cgstRate > 0 || form.sgstRate > 0) && (
-                  <div className="flex items-center gap-3 px-3 py-2 rounded-lg bg-muted/30 border border-border/50 text-xs text-muted-foreground">
-                    <BadgePercent size={11} className="text-primary shrink-0" />
-                    <span>
-                      Split:{" "}
-                      <span className="font-mono font-semibold text-foreground">
-                        CGST {form.cgstRate}%
-                      </span>{" "}
-                      +{" "}
-                      <span className="font-mono font-semibold text-foreground">
-                        SGST {form.sgstRate}%
-                      </span>{" "}
-                      = Total{" "}
-                      <span className="font-mono font-semibold text-primary">
-                        {form.cgstRate + form.sgstRate}%
-                      </span>
-                    </span>
-                  </div>
-                )}
                 {form.basicAmount > 0 && (
                   <>
                     <PriceBreakdownPanel
