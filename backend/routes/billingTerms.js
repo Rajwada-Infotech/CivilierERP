@@ -22,17 +22,19 @@ router.post("/", async (req, res) => {
     const pool = getPool();
     await pool
       .request()
-      .input("Name", sql.NVarChar, Name || null)
+      .input("Name", sql.NVarChar(200), Name || null)
       .input("Description", sql.NVarChar(sql.MAX), Description || null)
       .input("CalculationType", sql.NVarChar(20), CalculationType || null)
       .input("IsActive", sql.Bit, IsActive ? 1 : 0)
-      .input("CreatedBy", sql.Int, 1)
-      .input("CreatedAt", sql.DateTime2, new Date()).query(`
-        INSERT INTO dbo.Billing_Terms_Master (Name, Description, CalculationType, IsActive, CreatedBy, CreatedAt)
-        VALUES (@Name, @Description, @CalculationType, @IsActive, @CreatedBy, @CreatedAt)
+      .input("CreatedBy", sql.Int, req.user?.id || 1)
+      .input("CreatedAt", sql.DateTime2, new Date())
+      .query(`
+        INSERT INTO dbo.Billing_Terms_Master
+          (Name, Description, CalculationType, IsActive, CreatedBy, CreatedAt)
+        VALUES
+          (@Name, @Description, @CalculationType, @IsActive, @CreatedBy, @CreatedAt)
       `);
     await bumpCacheVersion("billing-terms");
-
     res.json({ message: "Billing term added" });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -46,19 +48,24 @@ router.put("/:id", async (req, res) => {
     await pool
       .request()
       .input("BillingTermID", sql.Int, req.params.id)
-      .input("Name", sql.NVarChar, Name || null)
+      .input("Name", sql.NVarChar(200), Name || null)
       .input("Description", sql.NVarChar(sql.MAX), Description || null)
       .input("CalculationType", sql.NVarChar(20), CalculationType || null)
       .input("IsActive", sql.Bit, IsActive ? 1 : 0)
-      .input("UpdatedBy", sql.Int, 1)
-      .input("UpdatedAt", sql.DateTime2, new Date()).query(`
-        UPDATE dbo.Billing_Terms_Master SET
-          Name=@Name, Description=@Description, CalculationType=@CalculationType,
-          IsActive=@IsActive, UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt
-        WHERE BillingTermID=@BillingTermID
+      .input("UpdatedBy", sql.Int, req.user?.id || 1)
+      .input("UpdatedAt", sql.DateTime2, new Date())
+      .query(`
+        UPDATE dbo.Billing_Terms_Master 
+        SET 
+          Name = @Name,
+          Description = @Description,
+          CalculationType = @CalculationType,
+          IsActive = @IsActive,
+          UpdatedBy = @UpdatedBy,
+          UpdatedAt = @UpdatedAt
+        WHERE BillingTermID = @BillingTermID
       `);
     await bumpCacheVersion("billing-terms");
-
     res.json({ message: "Billing term updated" });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -72,10 +79,9 @@ router.delete("/:id", async (req, res) => {
       .request()
       .input("BillingTermID", sql.Int, req.params.id)
       .query(
-        "DELETE FROM dbo.Billing_Terms_Master WHERE BillingTermID=@BillingTermID",
+        "DELETE FROM dbo.Billing_Terms_Master WHERE BillingTermID = @BillingTermID"
       );
     await bumpCacheVersion("billing-terms");
-
     res.json({ message: "Billing term deleted" });
   } catch (err) {
     res.status(500).json({ error: err.message });

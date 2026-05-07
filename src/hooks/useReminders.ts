@@ -164,7 +164,7 @@ export async function fetchAllReminders(): Promise<ReminderItem[]> {
 }
 
 export function useReminders(options: { pollingInterval?: number } = {}) {
-  const { pollingInterval = 30000 } = options;
+  const { pollingInterval = 0 } = options;
   const [reminders, setReminders] = useState<ReminderItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
@@ -215,8 +215,20 @@ export function useReminders(options: { pollingInterval?: number } = {}) {
   );
 
   useEffect(() => {
+    let cancelled = false;
+
     refresh();
+
+    if (pollingInterval <= 0) {
+      return () => {
+        cancelled = true;
+        if (backoffTimer.current) clearTimeout(backoffTimer.current);
+      };
+    }
+
     const schedule = () => {
+      if (cancelled) return;
+
       const delay =
         failCount.current > 3
           ? Math.min(
@@ -224,12 +236,21 @@ export function useReminders(options: { pollingInterval?: number } = {}) {
               5 * 60 * 1000,
             )
           : pollingInterval;
+
       backoffTimer.current = setTimeout(() => {
-        refresh(false).finally(schedule);
+        // Do NOT use .finally(schedule) because that can schedule twice
+        // when the component unmounts/re-mounts or when refresh exits early.
+        // Instead, schedule only after refresh() settles.
+        void refresh(false).then(() => {
+          if (!cancelled) schedule();
+        });
       }, delay);
     };
+
     schedule();
+
     return () => {
+      cancelled = true;
       if (backoffTimer.current) clearTimeout(backoffTimer.current);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
