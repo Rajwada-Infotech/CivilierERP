@@ -100,6 +100,10 @@ export interface GRNFormDataPayload {
   docTypeId?: number | null;
   docNo?: string;
   finYear?: string | null;
+  /** DocNo of the parent PO or WO (used to resolve correct GRN prefix). */
+  parentDocNo?: string | null;
+  /** Root ExB DocNo — present when this GRN is under an Expense Booking. */
+  rootExBDocNo?: string | null;
 }
 
 export interface PaginatedResponse<T> {
