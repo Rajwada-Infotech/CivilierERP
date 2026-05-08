@@ -9,6 +9,7 @@ const {
   backPatchRecordId,
   resolveDocTypeId,
   resolveGRNPrefix,
+  previewNextDocNumber,
 } = require("../utils/docNumberLock");
 
 const requireUserEmail = (req, res) => {
@@ -105,6 +106,21 @@ router.get("/suppliers", async (req, res) => {
 // does not carry those columns directly.
 // Also includes GRNs where POID is NULL by only applying PO-based filters
 // when the corresponding parameter is provided.
+// GET /next-number - preview the next GRN DocNo without locking it.
+router.get("/next-number", async (req, res) => {
+  try {
+    const pool = getPool();
+    const parentDocNo = req.query.parentDocNo || null;
+    const prefix = resolveGRNPrefix(parentDocNo);
+    const docTypeId = await resolveDocTypeId(pool, sql, prefix);
+    const preview = await previewNextDocNumber(pool, sql, docTypeId);
+    res.json(preview);
+  } catch (err) {
+    console.error("GRN next-number error:", err.message);
+    res.status(500).json({ error: "Failed to preview next GRN number" });
+  }
+});
+
 router.get("/filtered", async (req, res) => {
   const supplierId = parseInt(req.query.supplierId, 10) || null;
   const projectId = parseInt(req.query.projectId, 10) || null;
@@ -151,7 +167,8 @@ router.get("/filtered", async (req, res) => {
 // The frontend always re-fetches GET /:id for authoritative item data.
 router.get("/", cache("grns", 300), async (req, res) => {
   try {
-    const pool = getPool();
+    const pool = await getPool();
+
 
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 500);
@@ -271,7 +288,7 @@ router.post("/", async (req, res) => {
     grnItems,
     status,
     remarks,
-    docTypeId,
+    docTypeId: clientDocTypeId,
     docNo,
     finYear,
     parentDocNo = null, // DocNo of the parent PO or WO
@@ -290,8 +307,9 @@ router.post("/", async (req, res) => {
   try {
     await transaction.begin();
 
-    let finalDocNo = grnNo || docNo || null;
-    let resolvedDocTypeId = docTypeId ? parseInt(docTypeId, 10) : null;
+    let resolvedDocTypeId = clientDocTypeId
+      ? parseInt(clientDocTypeId, 10)
+      : null;
 
     // ── Auto-resolve GRN prefix from parent chain ────────────────────────────
     // If no explicit docTypeId was passed but we have a parentDocNo, derive the
@@ -300,32 +318,20 @@ router.post("/", async (req, res) => {
     //   parent starts with ExB-WO-  →  ExB-WO-GRN
     //   parent starts with ExB-     →  ExB-GRN
     //   otherwise                   →  GRN
-    if (!resolvedDocTypeId && parentDocNo) {
+    if (!resolvedDocTypeId) {
       const grnPrefix = resolveGRNPrefix(parentDocNo);
       resolvedDocTypeId = await resolveDocTypeId(pool, sql, grnPrefix);
     }
 
-    if (resolvedDocTypeId) {
-      finalDocNo = await lockNextDocNumber(pool, sql, {
-        docTypeId: resolvedDocTypeId,
-        finYear,
-        tableName: "GoodsReceiptNotes",
-        docNoColumn: "GRNNo",
-        issuedBy: req.user?.email || req.user?.name || null,
-        parentDocNo,
-        rootExBDocNo,
-      });
-    } else if (!finalDocNo) {
-      const seqResult = await pool
-        .request()
-        .query(
-          "SELECT ISNULL(MAX(GRNID), 0) + 1 AS NextId FROM dbo.GoodsReceiptNotes",
-        );
-      const nextId = seqResult.recordset[0].NextId;
-      const padded = String(nextId).padStart(6, "0");
-      const fy = (finYear || "").toString().trim();
-      finalDocNo = fy ? `CI/REC/${padded}/${fy}` : `CI/REC/${padded}`;
-    }
+    const finalDocNo = await lockNextDocNumber(pool, sql, {
+      docTypeId: resolvedDocTypeId,
+      finYear,
+      tableName: "GoodsReceiptNotes",
+      docNoColumn: "DocNo",
+      issuedBy: req.user?.email || req.user?.name || null,
+      parentDocNo,
+      rootExBDocNo,
+    });
 
     // Parse year + serial for storage
     const parts = (finalDocNo || "").split("-");
@@ -364,15 +370,13 @@ router.post("/", async (req, res) => {
 
     const grnId = grnResult.recordset[0].GRNID;
 
-    if (resolvedDocTypeId && finalDocNo) {
-      await backPatchRecordId(
-        pool,
-        sql,
-        finalDocNo,
-        "GoodsReceiptNotes",
-        grnId,
-      );
-    }
+    await backPatchRecordId(
+      pool,
+      sql,
+      finalDocNo,
+      "GoodsReceiptNotes",
+      grnId,
+    );
 
     await insertStockLedgerEntries(transaction, grnId, grnItems);
 
@@ -384,6 +388,7 @@ router.post("/", async (req, res) => {
       message: "GRN created successfully",
       grnId,
       grnNo: finalDocNo,
+      docNo: finalDocNo,
     });
   } catch (err) {
     await transaction.rollback().catch(() => {});
@@ -533,7 +538,7 @@ router.put("/:id/submit", async (req, res) => {
       userEmail,
       req.user?.role,
     );
-    await bumpCacheVersion("goods-receipt");
+    await bumpCacheVersion("grns");
     res.json({ message: "GRN submitted for approval", ...result });
   } catch (err) {
     console.error("GRN submit error:", err.message);
@@ -555,7 +560,7 @@ router.put("/:id/approve", async (req, res) => {
       userEmail,
       req.user?.role,
     );
-    await bumpCacheVersion("goods-receipt");
+    await bumpCacheVersion("grns");
     res.json({ message: "GRN approved", ...result });
   } catch (err) {
     console.error("GRN approve error:", err.message);
@@ -580,7 +585,7 @@ router.put("/:id/reject", async (req, res) => {
       req.user?.role,
       note || null,
     );
-    await bumpCacheVersion("goods-receipt");
+    await bumpCacheVersion("grns");
     res.json({ message: "GRN rejected", ...result });
   } catch (err) {
     console.error("GRN reject error:", err.message);
