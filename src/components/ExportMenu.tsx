@@ -48,6 +48,10 @@ export interface ExportMenuProps {
   subtitle?: string;
   /** Disable the button (e.g. while data is loading) */
   disabled?: boolean;
+  /** Company name from enterprise master — shown in PDF header */
+  companyName?: string;
+  /** Base64 or URL logo from enterprise master — shown in PDF header */
+  logoBase64?: string;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -59,6 +63,8 @@ export function ExportMenu({
   filename,
   subtitle,
   disabled = false,
+  companyName,
+  logoBase64,
 }: ExportMenuProps) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState<"pdf" | "xlsx" | "csv" | null>(null);
@@ -102,7 +108,13 @@ export function ExportMenu({
       icon: FileText,
       color: "text-rose-500",
       action: () =>
-        exportToPdf(data, columns, { title, filename: base, subtitle }),
+        exportToPdf(data, columns, {
+          title,
+          filename: base,
+          subtitle,
+          companyName,
+          logoBase64,
+        }),
     },
     {
       key: "xlsx" as const,

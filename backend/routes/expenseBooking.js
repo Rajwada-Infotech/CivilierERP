@@ -118,6 +118,7 @@ router.get("/options", async (req, res) => {
           ISNULL(eb.EProjectName, '')     AS projectName,
           ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0)) AS amount,
           ISNULL(eb.ECompanyId, 0)        AS companyId,
+          ISNULL(e.name, '')              AS companyName,
           eb.EEmiPayment                  AS emiEnabled,
           CONCAT(
             ISNULL(eb.EDocNo, CONCAT('Draft #', CAST(eb.Eid AS NVARCHAR))),
@@ -128,6 +129,7 @@ router.get("/options", async (req, res) => {
             ')'
           ) AS label
         FROM dbo.ExpenseBooking eb
+        LEFT JOIN dbo.enterprise e ON e.id = eb.ECompanyId
         WHERE
           (eb.EEmiPayment = 0 OR eb.EEmiPayment IS NULL)
           AND NOT EXISTS (
@@ -152,6 +154,7 @@ router.get("/options", async (req, res) => {
           ei.Status                    AS status,
           eb.EProjectName              AS projectName,
           eb.ECompanyId                AS companyId,
+          ISNULL(e2.name, '')           AS companyName,
           eb.EDocNo                    AS parentDocNo,
           CONCAT(
             ISNULL(ei.RefNumber, CONCAT('EMI-', RIGHT('00' + CAST(ei.InstallmentNo AS VARCHAR), 2))),
@@ -164,6 +167,7 @@ router.get("/options", async (req, res) => {
           ) AS label
         FROM dbo.EmiInstallments ei
         INNER JOIN dbo.ExpenseBooking eb ON eb.Eid = ei.ExpenseBookingId
+        LEFT JOIN dbo.enterprise e2 ON e2.id = eb.ECompanyId
         WHERE
           eb.EEmiPayment = 1
           AND ei.Status = 'Pending'
@@ -185,6 +189,7 @@ router.get("/options", async (req, res) => {
       projectName: r.projectName,
       amount: parseFloat(r.amount) || 0,
       companyId: r.companyId || null,
+      companyName: r.companyName || "",
     }));
 
     const emiOptions = emiResult.recordset.map((r) => ({
@@ -200,6 +205,7 @@ router.get("/options", async (req, res) => {
       projectName: r.projectName,
       amount: parseFloat(r.amount) || 0,
       companyId: r.companyId || null,
+      companyName: r.companyName || "",
       status: r.status,
       parentDocNo: r.parentDocNo,
     }));
@@ -277,9 +283,11 @@ router.get("/:id", async (req, res) => {
                  WHEN t.Prefix IS NOT NULL AND t.Description IS NOT NULL THEN t.Prefix + ' — ' + t.Description
                  WHEN t.Prefix IS NOT NULL THEN t.Prefix
             ELSE NULL
-          END AS DocTypeName
+          END AS DocTypeName,
+          e.name AS ECompanyName
         FROM dbo.ExpenseBooking eb
         LEFT JOIN dbo.TypeOfDoc t ON eb.EDocTypeId = t.TypeOfDocId
+        LEFT JOIN dbo.enterprise e ON e.id = eb.ECompanyId
         WHERE eb.Eid = @Eid
       `);
     if (!result.recordset.length)
@@ -1317,10 +1325,12 @@ router.get("/:id/grns", async (req, res) => {
         grn.Status,
         grn.Remarks,
         p.PurchaseOrderNo AS PONumber,
-        s.LHeadName       AS SupplierName
+        s.LHeadName       AS SupplierName,
+        pr.name           AS ProjectName
       FROM dbo.GoodsReceiptNotes grn
       LEFT JOIN dbo.PurchaseOrders p ON grn.POID = p.PurchaseOrderID
       LEFT JOIN dbo.AccountHeadMaster s ON grn.SupplierID = s.LHeadId
+      LEFT JOIN dbo.enterprise pr ON pr.id = p.ProjectId
       WHERE grn.GRNID IN (${idList})
       ORDER BY grn.GRNID DESC
     `);

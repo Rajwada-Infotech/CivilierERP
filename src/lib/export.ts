@@ -28,6 +28,10 @@ export interface PdfExportOptions {
   subtitle?: string;
   /** Hex colour for header row background — defaults to brand blue */
   headerColor?: string;
+  /** Company name from enterprise master — shown in PDF header */
+  companyName?: string;
+  /** Base64 or URL logo from enterprise master — shown top-left of PDF */
+  logoBase64?: string;
 }
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
@@ -41,11 +45,13 @@ function getCell(row: Record<string, unknown>, col: ExportColumn): string {
 }
 
 // jsPDF's built-in Helvetica only covers Latin-1 (ISO 8859-1).
-// Characters outside that range (e.g. ₹ U+20B9) render as garbage glyphs.
-// This helper replaces known symbols with ASCII-safe equivalents for PDF output.
+// Characters outside that range (e.g. ₹ U+20B9, box-drawing chars U+2500)
+// render as garbage glyphs. This helper replaces known symbols with
+// ASCII-safe equivalents for PDF output.
 function sanitizeForPdf(value: string): string {
   return value
     .replace(/₹/g, "Rs.") // Indian rupee sign → Rs.
+    .replace(/[─━─\u2500-\u257F]/g, "-") // box-drawing chars → hyphen
     .replace(/[^\x00-\xFF]/g, "?"); // any remaining non-Latin1 → ?
 }
 
@@ -194,6 +200,8 @@ export async function exportToPdf(
     filename = "export",
     subtitle,
     headerColor = "#1e40af",
+    companyName,
+    logoBase64,
   } = options;
 
   const { default: jsPDF } = await import("jspdf");
@@ -214,19 +222,41 @@ export async function exportToPdf(
 
   // ── Header ────────────────────────────────────────────────────────────────
   const pageW = doc.internal.pageSize.getWidth();
+  let logoEndX = 36;
+
+  // Draw logo if provided
+  if (logoBase64) {
+    try {
+      doc.addImage(logoBase64, "JPEG", 36, 20, 40, 40);
+      logoEndX = 84;
+    } catch {
+      // ignore logo errors — still render text
+      logoEndX = 36;
+    }
+  }
+
+  const textX = logoEndX + (logoBase64 ? 8 : 0);
+
+  // Company name above title
+  if (companyName) {
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor("#1e40af");
+    doc.text(sanitizeForPdf(companyName), textX, 30);
+  }
 
   doc.setFontSize(16);
   doc.setTextColor("#0f172a");
   doc.setFont("helvetica", "bold");
-  doc.text(title, 36, 40);
+  doc.text(sanitizeForPdf(title), textX, companyName ? 46 : 40);
 
-  let cursorY = 52;
+  let cursorY = companyName ? 58 : 52;
 
   if (subtitle) {
     doc.setFontSize(8);
     doc.setFont("helvetica", "normal");
     doc.setTextColor("#64748b");
-    doc.text(subtitle, 36, cursorY);
+    doc.text(sanitizeForPdf(subtitle), textX, cursorY);
     cursorY += 12;
   }
 
@@ -234,7 +264,7 @@ export async function exportToPdf(
   doc.setTextColor("#94a3b8");
   doc.text(
     `Exported on ${dateStr} at ${timeStr} · ${rows.length} record${rows.length !== 1 ? "s" : ""}`,
-    36,
+    textX,
     cursorY,
   );
   cursorY += 6;
