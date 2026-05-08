@@ -11,9 +11,15 @@ async function parseError(res: Response, fallback: string) {
   }
 }
 
-export const getPayments = async (page = 1, limit = 20) => {
-  const res = await fetchWithAuth(`${BASE_URL}?page=${page}&limit=${limit}`);
-  if (!res.ok) throw new Error(await parseError(res, `GET failed: ${res.status}`));
+export const getPayments = async (page = 1, limit = 20, supplier = "") => {
+  const params = new URLSearchParams({
+    page: String(page),
+    limit: String(limit),
+  });
+  if (supplier) params.set("supplier", supplier);
+  const res = await fetchWithAuth(`${BASE_URL}?${params.toString()}`);
+  if (!res.ok)
+    throw new Error(await parseError(res, `GET failed: ${res.status}`));
   return res.json();
 };
 
@@ -27,7 +33,10 @@ export const addPayment = async (data: Record<string, unknown>) => {
   return res.json();
 };
 
-export const updatePayment = async (id: string, data: Record<string, unknown>) => {
+export const updatePayment = async (
+  id: string,
+  data: Record<string, unknown>,
+) => {
   const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -42,4 +51,3 @@ export const deletePayment = async (id: string) => {
   if (!res.ok) throw new Error(await parseError(res, "DELETE failed"));
   return res.json();
 };
-
