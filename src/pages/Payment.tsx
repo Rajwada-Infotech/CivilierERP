@@ -43,6 +43,7 @@ import {
   BookOpen,
   CalendarClock,
   AlertTriangle,
+  Search,
 } from "lucide-react";
 import { exportToCsv, exportToPdf } from "@/lib/export";
 import type { ExportColumn } from "@/lib/export";
@@ -529,6 +530,217 @@ function InputField({
 }
 
 // ─── GRN badges for list view ─────────────────────────────────────────────────
+
+// ─── ExpenseBookingPicker ─────────────────────────────────────────────────────
+
+function ExpenseBookingPicker({
+  options,
+  value,
+  onChange,
+  loading,
+}: {
+  options: ExpenseOption[];
+  value: string;
+  onChange: (id: string) => void;
+  loading?: boolean;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const [search, setSearch] = React.useState("");
+  const [typeFilter, setTypeFilter] = React.useState<"all" | "booking" | "emi">(
+    "all",
+  );
+  const ref = React.useRef<HTMLDivElement>(null);
+
+  // Close on outside click
+  React.useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node))
+        setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  const selected = options.find((o) => o.id === value);
+
+  const filtered = options.filter((o) => {
+    if (typeFilter !== "all" && o.type !== typeFilter) return false;
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (
+      o.label.toLowerCase().includes(q) ||
+      (o.projectName ?? "").toLowerCase().includes(q)
+    );
+  });
+
+  const bookingCount = options.filter((o) => o.type === "booking").length;
+  const emiCount = options.filter((o) => o.type === "emi").length;
+
+  return (
+    <div className="space-y-1.5">
+      <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground">
+        Select Expense Booking
+      </label>
+      <p className="text-[11px] text-muted-foreground -mt-1">
+        Selecting a booking auto-fills project, company, amount &amp; doc type.
+      </p>
+      <div className="relative" ref={ref}>
+        {/* Trigger */}
+        <button
+          type="button"
+          disabled={loading}
+          onClick={() => setOpen((v) => !v)}
+          className="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-60 disabled:cursor-wait hover:border-primary/40 transition-colors"
+        >
+          {loading ? (
+            <span className="flex items-center gap-2 text-muted-foreground">
+              <div className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+              Loading bookings…
+            </span>
+          ) : selected ? (
+            <span className="flex items-center gap-2 min-w-0">
+              <span
+                className={`shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-heading font-semibold ${selected.type === "emi" ? "bg-violet-500/10 text-violet-600 border border-violet-500/20" : "bg-primary/10 text-primary border border-primary/20"}`}
+              >
+                {selected.type === "emi" ? "EMI" : "EXB"}
+              </span>
+              <span className="font-mono text-xs text-primary font-semibold truncate">
+                {selected.label}
+              </span>
+            </span>
+          ) : (
+            <span className="text-muted-foreground">
+              — Choose expense booking —
+            </span>
+          )}
+          <ChevronDown
+            size={14}
+            className={`shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
+          />
+        </button>
+
+        {/* Dropdown panel */}
+        {open && (
+          <div className="absolute z-50 mt-1 w-full bg-card border border-border rounded-xl shadow-xl overflow-hidden">
+            {/* Search + filter bar */}
+            <div className="p-2.5 border-b border-border space-y-2">
+              <div className="relative">
+                <Search
+                  size={13}
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+                />
+                <input
+                  autoFocus
+                  type="text"
+                  placeholder="Search by ref, project…"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="w-full pl-8 pr-3 py-1.5 text-sm bg-muted border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </div>
+              {/* Type filter pills */}
+              <div className="flex gap-1.5">
+                {(["all", "booking", "emi"] as const).map((t) => {
+                  const count =
+                    t === "all"
+                      ? options.length
+                      : t === "booking"
+                        ? bookingCount
+                        : emiCount;
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => setTypeFilter(t)}
+                      className={`flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-heading font-semibold transition-all border ${
+                        typeFilter === t
+                          ? t === "emi"
+                            ? "bg-violet-500/15 text-violet-600 border-violet-500/30"
+                            : "bg-primary/10 text-primary border-primary/30"
+                          : "bg-muted text-muted-foreground border-border hover:border-primary/20"
+                      }`}
+                    >
+                      {t === "all"
+                        ? "All"
+                        : t === "booking"
+                          ? "Bookings"
+                          : "EMI"}
+                      <span className="opacity-70">{count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Options list */}
+            <div className="max-h-64 overflow-y-auto divide-y divide-border/50">
+              {filtered.length === 0 && (
+                <div className="px-4 py-6 text-center text-xs text-muted-foreground">
+                  No matches found
+                </div>
+              )}
+              {filtered.map((o) => (
+                <button
+                  key={o.id}
+                  type="button"
+                  onClick={() => {
+                    onChange(o.id);
+                    setOpen(false);
+                    setSearch("");
+                  }}
+                  className={`w-full flex items-start gap-3 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors ${o.id === value ? "bg-primary/5" : ""}`}
+                >
+                  <span
+                    className={`shrink-0 mt-0.5 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-heading font-semibold ${o.type === "emi" ? "bg-violet-500/10 text-violet-600 border border-violet-500/20" : "bg-primary/10 text-primary border border-primary/20"}`}
+                  >
+                    {o.type === "emi" ? "EMI" : "EXB"}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-mono text-xs font-semibold text-foreground truncate">
+                      {o.label}
+                    </p>
+                    {o.projectName && (
+                      <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
+                        {o.projectName}
+                      </p>
+                    )}
+                    {o.type === "emi" && o.installmentNo && (
+                      <p className="text-[10px] text-violet-500 mt-0.5">
+                        Installment #{o.installmentNo}
+                      </p>
+                    )}
+                  </div>
+                  {o.amount != null && (
+                    <span className="shrink-0 text-[11px] font-mono font-semibold text-foreground/70 mt-0.5">
+                      ₹{o.amount.toLocaleString("en-IN")}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {/* Footer clear */}
+            {value && (
+              <div className="border-t border-border p-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onChange("");
+                    setOpen(false);
+                    setSearch("");
+                  }}
+                  className="w-full text-xs text-muted-foreground hover:text-destructive transition-colors py-1"
+                >
+                  Clear selection
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 
 function PaymentGRNBadges({ expenseId }: { expenseId: string }) {
   const [grns, setGrns] = React.useState<GRNRef[]>([]);
@@ -1440,33 +1652,12 @@ const Payment: React.FC = () => {
                     onClear={clearExpenseLink}
                   />
                 ) : (
-                  <Field
-                    label="Select Expense Booking"
-                    hint="Selecting a booking auto-fills project, company, amount & doc type."
-                  >
-                    <div className="relative">
-                      <select
-                        value={form.expenseId}
-                        onChange={(e) => handleExpenseSelect(e.target.value)}
-                        disabled={loadingExpense}
-                        className="w-full appearance-none px-3 py-2 pr-9 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-60 disabled:cursor-wait"
-                      >
-                        <option value="">— Choose expense booking —</option>
-                        {expenseOptions.map((e) => (
-                          <option key={e.id} value={e.id}>
-                            {e.label}
-                          </option>
-                        ))}
-                      </select>
-                      <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground">
-                        {loadingExpense ? (
-                          <div className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                        ) : (
-                          <ChevronDown size={14} />
-                        )}
-                      </div>
-                    </div>
-                  </Field>
+                  <ExpenseBookingPicker
+                    options={expenseOptions}
+                    value={form.expenseId}
+                    onChange={handleExpenseSelect}
+                    loading={loadingExpense}
+                  />
                 )}
 
                 {form.expenseRef && (
@@ -1926,37 +2117,42 @@ const Payment: React.FC = () => {
                   ))}
                 </div>
 
-                {/* Desktop table */}
-                <div className="hidden sm:block overflow-auto">
+                {/* Desktop table — compact, no horizontal scroll */}
+                <div className="hidden sm:block">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="bg-muted/30 border-b border-border">
-                        {[
-                          "Payment Name",
-                          "Expense Ref",
-                          "GRN(s)",
-                          "Mode",
-                          "Cheque / Ref",
-                          "Date",
-                          "Amount",
-                          "Bank",
-                          "Status",
-                          "Actions",
-                        ].map((h) => (
-                          <th
-                            key={h}
-                            className={`px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground whitespace-nowrap${h === "GRN(s)" ? " hidden lg:table-cell" : ""}`}
-                          >
-                            {h}
-                          </th>
-                        ))}
+                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[22%]">
+                          Payment
+                        </th>
+                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[18%]">
+                          Expense Ref
+                        </th>
+                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[10%] hidden md:table-cell">
+                          Mode
+                        </th>
+                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[12%] hidden lg:table-cell">
+                          Cheque / Ref
+                        </th>
+                        <th className="px-4 py-3 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[12%]">
+                          Amount
+                        </th>
+                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[10%] hidden md:table-cell">
+                          Bank
+                        </th>
+                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[8%]">
+                          Status
+                        </th>
+                        <th className="px-4 py-3 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[12%]">
+                          Actions
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
                       {records.length === 0 && (
                         <tr>
                           <td
-                            colSpan={10}
+                            colSpan={8}
                             className="text-center py-14 text-muted-foreground text-sm"
                           >
                             <AlertCircle
@@ -1972,12 +2168,19 @@ const Payment: React.FC = () => {
                           key={rec.id}
                           className="hover:bg-muted/20 transition-colors"
                         >
-                          <td className="px-4 py-3 font-heading font-medium text-foreground max-w-[160px] truncate">
-                            {rec.paymentName || "—"}
+                          {/* Payment name + date stacked */}
+                          <td className="px-4 py-2.5">
+                            <p className="font-heading font-medium text-foreground text-xs truncate max-w-[180px]">
+                              {rec.paymentName || "—"}
+                            </p>
+                            <p className="text-[10px] text-muted-foreground mt-0.5">
+                              {rec.date || "—"}
+                            </p>
                           </td>
-                          <td className="px-4 py-3">
+                          {/* Expense Ref + GRN stacked */}
+                          <td className="px-4 py-2.5">
                             {rec.expenseRef ? (
-                              <span className="font-mono text-xs bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-md">
+                              <span className="font-mono text-[11px] bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-md block w-fit max-w-[160px] truncate">
                                 {rec.expenseRef}
                               </span>
                             ) : (
@@ -1985,14 +2188,18 @@ const Payment: React.FC = () => {
                                 —
                               </span>
                             )}
+                            <div className="mt-0.5">
+                              <PaymentGRNBadges
+                                expenseId={rec.expenseId || ""}
+                              />
+                            </div>
                           </td>
-                          <td className="px-4 py-3 hidden lg:table-cell">
-                            <PaymentGRNBadges expenseId={rec.expenseId || ""} />
-                          </td>
-                          <td className="px-4 py-3">
+                          {/* Mode */}
+                          <td className="px-4 py-2.5 hidden md:table-cell">
                             <ModeBadge mode={rec.mode} />
                           </td>
-                          <td className="px-4 py-3">
+                          {/* Cheque / Ref */}
+                          <td className="px-4 py-2.5 hidden lg:table-cell">
                             {rec.chequeNo ? (
                               <div className="space-y-0.5">
                                 <span className="font-mono text-xs bg-blue-500/10 text-blue-600 border border-blue-500/20 px-2 py-0.5 rounded-md">
@@ -2026,18 +2233,21 @@ const Payment: React.FC = () => {
                               </span>
                             )}
                           </td>
-                          <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
-                            {rec.date || "—"}
-                          </td>
-                          <td className="px-4 py-3 font-mono text-xs font-semibold whitespace-nowrap">
+                          {/* Amount */}
+                          <td className="px-4 py-2.5 font-mono text-xs font-semibold text-right whitespace-nowrap">
                             {formatINR(rec.amount ?? 0)}
                           </td>
-                          <td className="px-4 py-3 text-xs text-muted-foreground max-w-[100px] truncate">
+                          {/* Bank */}
+                          <td className="px-4 py-2.5 text-xs text-muted-foreground max-w-[100px] truncate hidden md:table-cell">
                             {rec.bankName || "—"}
                           </td>
-                          <td className="px-4 py-3">
-                            <div className="flex flex-col gap-1">
-                              <StatusBadge status={rec.status} />
+                          {/* Status */}
+                          <td className="px-4 py-2.5">
+                            <StatusBadge status={rec.status} />
+                          </td>
+                          {/* Actions */}
+                          <td className="px-4 py-2.5">
+                            <div className="flex items-center gap-1 justify-end">
                               <ApprovalActions
                                 status={rec.status}
                                 recordId={Number(rec.id)}
@@ -2050,10 +2260,6 @@ const Payment: React.FC = () => {
                                   })
                                 }
                               />
-                            </div>
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-1.5">
                               <button
                                 onClick={() => openEdit(rec)}
                                 className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
