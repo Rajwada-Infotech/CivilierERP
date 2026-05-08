@@ -33,9 +33,8 @@ export interface DiscountConfig {
   appliedOn: "pre-gst" | "post-gst";
   masterTermId: string | null;
   masterTermName: string | null;
-
-  /** "Addition" adds to net; "Deduction" subtracts (discount) */
-  termType?: "Addition" | "Deduction";
+  /** Whether this term adds to or subtracts from the base amount */
+  deductionType?: "Addition" | "Deduction";
 
   /** Unique local key for React list rendering (not persisted) */
   _key?: string;
@@ -98,8 +97,6 @@ export interface ExpenseRecord {
   emi: EmiConfig;
   /** Payment mode derived from EMI flag. */
   paymentType?: "full" | "partial";
-  /** Amount paid now when paymentType is partial */
-  partialAmount?: number;
   netAmount: number | null;
   status: BookingStatus;
   remarks: string;
@@ -120,6 +117,10 @@ export interface ExpenseRecord {
   workOrderId?: number | string;
   sourceDocNo?: string;
   igstRate?: number;
+  /** Source document type: PO | WO | GRN | TOD — saved to DB and restored on edit */
+  eSourceType?: "PO" | "WO" | "GRN" | "TOD" | null;
+  /** Source document DB id — saved to DB and restored on edit */
+  eSourceId?: number | null;
 
   grnItems?: {
     itemName?: string;
@@ -139,11 +140,8 @@ export interface PriceBreakdown {
   grossAmount: number;
   roundOff: number;
   netAmount: number;
-  // Extended fields for billing terms breakdown
-  preGstDeductionTotal?: number;
-  preGstAdditionTotal?: number;
-  postGstDeductionTotal?: number;
-  postGstAdditionTotal?: number;
-  preGstTerms?: DiscountConfig[];
-  postGstTerms?: DiscountConfig[];
+  /** Resolved pre-GST terms with termType normalised to "Addition" | "Deduction" */
+  preGstTerms?: (DiscountConfig & { termType: "Addition" | "Deduction" })[];
+  /** Resolved post-GST terms with termType normalised */
+  postGstTerms?: (DiscountConfig & { termType: "Addition" | "Deduction" })[];
 }

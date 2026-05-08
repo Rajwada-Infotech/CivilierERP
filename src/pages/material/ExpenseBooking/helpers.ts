@@ -40,31 +40,37 @@ export function computeBreakdown(
   sgstRate: number,
   discount: DiscountConfig | DiscountConfig[],
 ): PriceBreakdown {
+  // Normalise: support both legacy single config and new array
   const terms = Array.isArray(discount) ? discount : [discount];
   const activeTerms = terms.filter((d) => d.applicable);
 
-  // Split into pre-GST and post-GST terms
-  const preGstTerms = activeTerms.filter(
-    (d) => !d.appliedOn || d.appliedOn === "pre-gst",
-  );
-  const postGstTerms = activeTerms.filter((d) => d.appliedOn === "post-gst");
+  // Separate pre-GST and post-GST terms
+  const preGstActive = activeTerms.filter((d) => d.appliedOn !== "post-gst");
+  const postGstActive = activeTerms.filter((d) => d.appliedOn === "post-gst");
+
+  // Build annotated term lists (normalise deductionType → termType)
+  const toAnnotated = (d: DiscountConfig) => ({
+    ...d,
+    termType: (d.deductionType ?? "Deduction") as "Addition" | "Deduction",
+  });
+
+  const preGstTerms = preGstActive.map(toAnnotated);
+  const postGstTerms = postGstActive.map(toAnnotated);
 
   // Apply pre-GST terms sequentially
   let runningBase = basicAmount;
-  let preGstDeductionTotal = 0;
-  let preGstAdditionTotal = 0;
+  let netDiscountDelta = 0; // positive = net deduction, negative = net addition
 
   for (const d of preGstTerms) {
     const amt =
       d.type === "percentage" ? (runningBase * d.value) / 100 : d.value;
-    const isDeduction = d.termType !== "Addition"; // default = Deduction (legacy)
-    if (isDeduction) {
-      const clamped = Math.min(amt, runningBase);
-      preGstDeductionTotal += clamped;
-      runningBase -= clamped;
-    } else {
-      preGstAdditionTotal += amt;
+    if (d.termType === "Addition") {
       runningBase += amt;
+      netDiscountDelta -= amt;
+    } else {
+      const clamped = Math.min(amt, runningBase);
+      runningBase = Math.max(0, runningBase - clamped);
+      netDiscountDelta += clamped;
     }
   }
 
@@ -74,40 +80,31 @@ export function computeBreakdown(
   let grossAmount = taxableAmount + cgstAmount + sgstAmount;
 
   // Apply post-GST terms sequentially
-  let postGstDeductionTotal = 0;
-  let postGstAdditionTotal = 0;
-
   for (const d of postGstTerms) {
-    const base = basicAmount; // post-GST terms apply on original basic
-    const amt = d.type === "percentage" ? (base * d.value) / 100 : d.value;
-    if (d.termType !== "Addition") {
-      postGstDeductionTotal += amt;
-      grossAmount -= amt;
-    } else {
-      postGstAdditionTotal += amt;
+    const amt =
+      d.type === "percentage" ? (grossAmount * d.value) / 100 : d.value;
+    if (d.termType === "Addition") {
       grossAmount += amt;
+      netDiscountDelta -= amt;
+    } else {
+      const clamped = Math.min(amt, grossAmount);
+      grossAmount = Math.max(0, grossAmount - clamped);
+      netDiscountDelta += clamped;
     }
   }
 
-  grossAmount = Math.max(0, grossAmount);
   const rounded = Math.round(grossAmount);
   const roundOff = rounded - grossAmount;
 
   return {
     basicAmount,
-    // legacy field: total deduction for backward compat
-    discountAmount: preGstDeductionTotal + postGstDeductionTotal,
+    discountAmount: netDiscountDelta,
     taxableAmount,
     cgstAmount,
     sgstAmount,
     grossAmount,
     roundOff,
     netAmount: rounded,
-    // extended breakdown fields
-    preGstDeductionTotal,
-    preGstAdditionTotal,
-    postGstDeductionTotal,
-    postGstAdditionTotal,
     preGstTerms,
     postGstTerms,
   };
@@ -155,13 +152,12 @@ export function blankForm(): Omit<ExpenseRecord, "id"> {
     materialCategory: "",
     invoiceReference: "",
     basicAmount: 0,
-    cgstRate: 18,
+    cgstRate: 0,
     sgstRate: 0,
     discount: defaultDiscount(),
     emi: defaultEmi(),
     /** Default payment type for new bookings. */
     paymentType: "full",
-    partialAmount: 0,
     netAmount: null,
     status: "Draft",
     remarks: "",
@@ -243,12 +239,10 @@ export function dbToRecord(row: any): ExpenseRecord {
     materialCategory: row.EDocumentType ?? "",
     invoiceReference: row.EDocNo ?? "",
     basicAmount: parseFloat(row.EAmount) || 0,
-    cgstRate: row.ECgstRate ? parseFloat(row.ECgstRate) : 18,
+    cgstRate: row.ECgstRate ? parseFloat(row.ECgstRate) : 0,
     sgstRate: row.ESgstRate ? parseFloat(row.ESgstRate) : 0,
     discount,
     emi,
-    paymentType: (row.EPaymentType as "full" | "partial") ?? "full",
-    partialAmount: row.EPartialAmount ? parseFloat(row.EPartialAmount) : 0,
     netAmount: row.ENetAmount
       ? parseFloat(row.ENetAmount)
       : parseFloat(row.EAmount) || 0,
@@ -260,6 +254,9 @@ export function dbToRecord(row: any): ExpenseRecord {
     tcId: row.ETCId ? parseInt(row.ETCId, 10) : null,
     tcName: row.ETCName ?? "",
     tcText: row.ETCText ?? "",
+    eSourceType:
+      (row.ESourceType as "PO" | "WO" | "GRN" | "TOD" | null) ?? null,
+    eSourceId: row.ESourceId ? parseInt(row.ESourceId, 10) : null,
   };
 }
 
@@ -298,8 +295,5 @@ export function recordToDb(
     ETCId: form.tcId ?? null,
     ETCName: form.tcName || null,
     ETCText: form.tcText || null,
-    EPaymentType: form.paymentType ?? "full",
-    EPartialAmount:
-      form.paymentType === "partial" ? Number(form.partialAmount) || 0 : null,
   };
 }

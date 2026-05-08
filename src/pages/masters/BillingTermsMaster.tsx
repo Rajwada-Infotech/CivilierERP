@@ -22,8 +22,14 @@ import {
 } from "@/api/billingTermsMasterApi";
 
 // ─── Map DB row → context shape ───────────────────────────────────────────────
-const mapRow = (row: BillingTermRow): BillingTerm => ({
+// NOTE: We also spread the raw DB column names (Name, CalculationType,
+// DeductionType, IsActive) so that MasterPage's handleEdit can populate
+// the form fields correctly when the user clicks Edit.
+const mapRow = (
+  row: BillingTermRow,
+): BillingTerm & Record<string, unknown> => ({
   _id: String(row.BillingTermID),
+  // Context-shape fields
   name: row.Name ?? "",
   description: row.Description ?? "",
   billType: "Tax Invoice",
@@ -31,6 +37,12 @@ const mapRow = (row: BillingTermRow): BillingTerm => ({
   discountValue: 0,
   paymentDueDays: 0,
   status: Boolean(row.IsActive),
+  // Raw DB columns — required by the form fields (Name, CalculationType, etc.)
+  Name: row.Name ?? "",
+  Description: row.Description ?? "",
+  CalculationType: row.CalculationType ?? "Before GST",
+  DeductionType: row.DeductionType ?? "Addition",
+  IsActive: Boolean(row.IsActive),
 });
 
 // ─── Segmented toggler: Addition | Deduction ──────────────────────────────────
