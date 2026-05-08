@@ -3,6 +3,14 @@ const router = express.Router();
 const authenticateToken = require("../middleware/auth");
 const { getPool, sql } = require("../db");
 
+// Guard: fail fast with a clear message if middleware didn't load
+if (typeof authenticateToken !== "function") {
+  throw new Error(
+    "[materialIssues] authenticateToken is not a function — check ../middleware/auth exports"
+  );
+}
+
+
 // Get item options
 router.get("/item-options", authenticateToken, async (req, res) => {
   try {
