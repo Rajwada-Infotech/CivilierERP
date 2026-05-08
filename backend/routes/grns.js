@@ -48,6 +48,14 @@ function normaliseGRNRow(row) {
   } catch {
     row.GRNItems = [];
   }
+  // Parse the parent PO's GST JSON so the frontend can auto-fill GST rates
+  if (row.ParentGST && typeof row.ParentGST === "string") {
+    try {
+      row.ParentGST = JSON.parse(row.ParentGST);
+    } catch {
+      row.ParentGST = null;
+    }
+  }
   return row;
 }
 
@@ -120,14 +128,15 @@ router.get("/filtered", async (req, res) => {
              grn.Status, grn.Remarks, grn.DocNo,
              s.LHeadName AS SupplierName,
              p.PurchaseOrderNo AS PONumber,
-             p.ProjectId, p.CompanyId
+             p.ProjectId, p.CompanyId,
+             p.GST AS ParentGST
       FROM GoodsReceiptNotes grn
       LEFT JOIN dbo.AccountHeadMaster s ON grn.SupplierID = s.LHeadId
       LEFT JOIN PurchaseOrders p ON grn.POID = p.PurchaseOrderID
       ${whereClause}
       ORDER BY grn.GRNID DESC
     `);
-    res.json(result.recordset);
+    res.json(result.recordset.map(normaliseGRNRow));
   } catch (err) {
     console.error("GET filtered GRNs ERROR:", err);
     res.status(500).json({ error: err.message });
@@ -164,6 +173,7 @@ router.get("/", cache("grns", 300), async (req, res) => {
         grn.GRNDate,
         grn.SupplierID,
         grn.POID,
+        p.GST AS ParentGST,
         grn.Status,
         grn.Remarks,
         grn.CreatedDate,
@@ -182,7 +192,7 @@ router.get("/", cache("grns", 300), async (req, res) => {
     `);
 
     res.json({
-      data: result.recordset,
+      data: result.recordset.map(normaliseGRNRow),
       page,
       limit,
       total,
@@ -223,6 +233,7 @@ router.get("/:id", async (req, res) => {
           grn.TotalAmount,
           s.LHeadName AS SupplierName,
           p.PurchaseOrderNo AS PONumber,
+          p.GST AS ParentGST,
           td.Prefix AS DocTypePrefix,
           td.Description AS DocTypeDescription
         FROM GoodsReceiptNotes grn
