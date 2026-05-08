@@ -16,8 +16,10 @@
 
 const express = require("express");
 const router = express.Router();
-const sql = require("mssql");
+const { getPool, sql } = require("../db");
 const authenticateToken = require("../middleware/auth");
+const { cache } = require("../middleware/cache");
+const { bumpCacheVersion } = require("../redis");
 const {
   lockNextDocNumber,
   backPatchRecordId,
@@ -35,7 +37,7 @@ async function resolveIssueDocTypeId(pool, rootExBDocNo) {
 // ── GET /item-options ─────────────────────────────────────────────────────────
 router.get("/item-options", authenticateToken, async (req, res) => {
   try {
-    const pool = await sql.connect();
+    const pool = getPool();
     const result = await pool.request().query(`
       SELECT M_Id, M_Name, M_Group
       FROM   Item_Master_Group
@@ -53,7 +55,7 @@ router.get("/item-options", authenticateToken, async (req, res) => {
 // ?exb=true  →  preview ExB-ISS number
 router.get("/next-number", authenticateToken, async (req, res) => {
   try {
-    const pool = await sql.connect();
+    const pool = getPool();
     const prefix = req.query.exb === "true" ? "ExB-ISS" : "ISS";
     const docTypeId = await resolveDocTypeId(pool, sql, prefix);
     const preview = await previewNextDocNumber(pool, sql, docTypeId);
@@ -64,9 +66,13 @@ router.get("/next-number", authenticateToken, async (req, res) => {
 });
 
 // ── GET / — paginated list ────────────────────────────────────────────────────
-router.get("/", authenticateToken, async (req, res) => {
-  try {
-    const pool = await sql.connect();
+router.get(
+  "/",
+  authenticateToken,
+  cache("material-issues", 300),
+  async (req, res) => {
+    try {
+      const pool = getPool();
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;
     const search = req.query.search || "";
@@ -79,8 +85,8 @@ router.get("/", authenticateToken, async (req, res) => {
       whereClause = `
         WHERE mi.DocNo LIKE @search
            OR mi.IssueNo LIKE @search
-           OR c.label LIKE @search
-           OR p.label LIKE @search
+           OR c.name LIKE @search
+           OR p.name LIKE @search
            OR i.M_Name LIKE @search
       `;
       request.input("search", sql.VarChar, `%${search}%`);
@@ -101,8 +107,8 @@ router.get("/", authenticateToken, async (req, res) => {
     const result = await request.query(`
       SELECT
         mi.*,
-        c.label  AS CompanyName,
-        p.label  AS ProjectName,
+        c.name as CompanyName,
+        p.name as ProjectName,
         i.M_Name AS ItemName
       FROM MaterialIssues mi
       LEFT JOIN Enterprise c ON mi.CompanyId = c.id
@@ -120,21 +126,22 @@ router.get("/", authenticateToken, async (req, res) => {
       limit,
       totalPages: Math.ceil(countResult.recordset[0].total / limit),
     });
-  } catch (error) {
-    console.error("Error fetching material issues:", error);
-    res.status(500).json({ error: "Failed to fetch material issues" });
-  }
-});
+    } catch (error) {
+      console.error("Error fetching material issues:", error);
+      res.status(500).json({ error: "Failed to fetch material issues" });
+    }
+  },
+);
 
 // ── GET /:id — single record ──────────────────────────────────────────────────
 router.get("/:id", authenticateToken, async (req, res) => {
   try {
-    const pool = await sql.connect();
+    const pool = getPool();
     const request = pool.request();
     request.input("id", sql.Int, parseInt(req.params.id));
 
     const result = await request.query(`
-      SELECT mi.*, c.label AS CompanyName, p.label AS ProjectName, i.M_Name AS ItemName
+      SELECT mi.*, c.name as CompanyName, p.name as ProjectName, i.M_Name AS ItemName
       FROM   MaterialIssues mi
       LEFT JOIN Enterprise c ON mi.CompanyId = c.id
       LEFT JOIN Enterprise p ON mi.ProjectId = p.id
@@ -154,7 +161,7 @@ router.get("/:id", authenticateToken, async (req, res) => {
 // ── POST / — create ───────────────────────────────────────────────────────────
 router.post("/", authenticateToken, async (req, res) => {
   try {
-    const pool = await sql.connect();
+    const pool = getPool();
     const {
       CompanyId,
       ProjectId,
@@ -233,6 +240,7 @@ router.post("/", authenticateToken, async (req, res) => {
       newRecord.IssueId,
     );
 
+    await bumpCacheVersion("material-issues");
     res.status(201).json(newRecord);
   } catch (error) {
     console.error("Error creating material issue:", error);
@@ -243,7 +251,7 @@ router.post("/", authenticateToken, async (req, res) => {
 // ── PUT /:id — update (DocNo is immutable after creation) ────────────────────
 router.put("/:id", authenticateToken, async (req, res) => {
   try {
-    const pool = await sql.connect();
+    const pool = getPool();
     const id = parseInt(req.params.id);
     const {
       CompanyId,
@@ -275,6 +283,7 @@ router.put("/:id", authenticateToken, async (req, res) => {
       WHERE  IssueId = @Id
     `);
 
+    await bumpCacheVersion("material-issues");
     res.json({ message: "Issue updated successfully" });
   } catch (error) {
     console.error("Error updating material issue:", error);
@@ -285,10 +294,11 @@ router.put("/:id", authenticateToken, async (req, res) => {
 // ── DELETE /:id ───────────────────────────────────────────────────────────────
 router.delete("/:id", authenticateToken, async (req, res) => {
   try {
-    const pool = await sql.connect();
+    const pool = getPool();
     const request = pool.request();
     request.input("id", sql.Int, parseInt(req.params.id));
     await request.query("DELETE FROM dbo.MaterialIssues WHERE IssueId = @id");
+    await bumpCacheVersion("material-issues");
     res.json({ message: "Issue deleted successfully" });
   } catch (error) {
     res.status(500).json({ error: "Failed to delete issue" });

@@ -62,6 +62,9 @@ interface DbPayment {
   PProject: string | null;
   PCompany: string | null;
   PExpenseRef: string | null;
+  DocNo?: string | null;
+  ParentDocNo?: string | null;
+  RootExBDocNo?: string | null;
   Status?: string;
   // Cheque
   PChequeNo?: string | null;
@@ -123,6 +126,8 @@ interface ExpenseOption {
 interface ExpenseDetail {
   Eid: number;
   EDocNo: string | null;
+  ParentDocNo?: string | null;
+  RootExBDocNo?: string | null;
   EProjectName: string | null;
   ECompanyId: number | null;
   EAmount: number | null;
@@ -156,6 +161,9 @@ interface PaymentRecord {
   company: string;
   expenseRef: string;
   expenseId: string;
+  docNo: string;
+  parentDocNo: string;
+  rootExBDocNo: string;
   docType: string;
   status: string;
   // Cheque
@@ -326,6 +334,9 @@ function blankForm(): Omit<PaymentRecord, "id"> {
     company: "",
     expenseRef: "",
     expenseId: "",
+    docNo: "",
+    parentDocNo: "",
+    rootExBDocNo: "",
     docType: "",
     status: "Draft",
     chequeNo: "",
@@ -359,6 +370,9 @@ function dbToRecord(item: DbPayment): PaymentRecord {
     company: item.PCompany || "",
     expenseRef: item.PExpenseRef || "",
     expenseId: "",
+    docNo: item.DocNo || "",
+    parentDocNo: item.ParentDocNo || "",
+    rootExBDocNo: item.RootExBDocNo || "",
     docType: item.PDocType || "",
     status: (item as any).Status || "Draft",
     chequeNo: item.PChequeNo || "",
@@ -771,6 +785,7 @@ function PaymentGRNBadges({ expenseId }: { expenseId: string }) {
 // ─── Export ───────────────────────────────────────────────────────────────────
 
 const EXPORT_COLUMNS: ExportColumn[] = [
+  { header: "Doc No", accessor: "docNo" },
   { header: "Payment Name", accessor: "paymentName" },
   { header: "Expense Ref", accessor: "expenseRef" },
   { header: "Project", accessor: "project" },
@@ -1298,6 +1313,8 @@ const Payment: React.FC = () => {
           ...prev,
           expenseId: "",
           expenseRef: "",
+          parentDocNo: "",
+          rootExBDocNo: "",
           project: "",
           company: "",
           amount: null,
@@ -1308,6 +1325,11 @@ const Payment: React.FC = () => {
 
       const selectedOption = expenseOptions.find((o) => o.id === expenseId);
       if (selectedOption?.type === "emi") {
+        const parentDocNo =
+          selectedOption.parentDocNo ||
+          selectedOption.refNumber?.replace(/-EMI-\d+$/i, "") ||
+          selectedOption.docNo?.replace(/-EMI-\d+$/i, "") ||
+          "";
         const padded = String(selectedOption.installmentNo ?? 1).padStart(
           2,
           "0",
@@ -1324,6 +1346,8 @@ const Payment: React.FC = () => {
           ...prev,
           expenseId,
           expenseRef: ref,
+          parentDocNo,
+          rootExBDocNo: parentDocNo,
           project: selectedOption.projectName || "",
           company: String(selectedOption.companyId ?? ""),
           amount: selectedOption.amount ?? null,
@@ -1341,10 +1365,14 @@ const Payment: React.FC = () => {
       try {
         const detail = await fetchExpenseDetail(expenseId);
         if (!detail) throw new Error("Not found");
+        const parentDocNo = detail.ParentDocNo || detail.EDocNo || "";
+        const rootExBDocNo = detail.RootExBDocNo || detail.EDocNo || "";
         setForm((prev) => ({
           ...prev,
           expenseId,
           expenseRef: detail.EDocNo || "",
+          parentDocNo,
+          rootExBDocNo,
           project: detail.EProjectName || "",
           company: String(detail.ECompanyId ?? ""),
           amount: detail.ENetAmount ?? detail.EAmount ?? null,
@@ -1370,6 +1398,8 @@ const Payment: React.FC = () => {
       ...prev,
       expenseId: "",
       expenseRef: "",
+      parentDocNo: "",
+      rootExBDocNo: "",
       project: "",
       company: "",
       amount: null,
@@ -1481,6 +1511,8 @@ const Payment: React.FC = () => {
       PProject: form.project || null,
       PCompany: form.company || null,
       PExpenseRef: form.expenseRef || null,
+      parentDocNo: form.parentDocNo || null,
+      rootExBDocNo: form.rootExBDocNo || null,
       // Cheque
       PChequeNo: form.chequeNo || null,
       PChequeLotId: form.chequeLotId ?? null,
@@ -1742,6 +1774,19 @@ const Payment: React.FC = () => {
               {/* ── 2. Payment Details ── */}
               <div className="space-y-3">
                 <SectionHeader icon={Receipt} label="Payment Details" />
+                {editingId && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <Field label="Doc No">
+                      <ReadOnlyField value={form.docNo} placeholder="—" />
+                    </Field>
+                    <Field label="Root ExB Doc No">
+                      <ReadOnlyField
+                        value={form.rootExBDocNo}
+                        placeholder="Standalone payment"
+                      />
+                    </Field>
+                  </div>
+                )}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <Field label="Payment Name" required>
                     <input
@@ -2050,7 +2095,7 @@ const Payment: React.FC = () => {
                 />
                 <input
                   type="text"
-                  placeholder="Filter by supplier…"
+                  placeholder="Search DocNo, payment, expense…"
                   value={supplierFilter}
                   onChange={(e) => {
                     setSupplierFilter(e.target.value);
@@ -2108,6 +2153,11 @@ const Payment: React.FC = () => {
                         </span>
                         <ModeBadge mode={rec.mode} />
                       </div>
+                      {rec.docNo && (
+                        <span className="inline-block font-mono text-[11px] bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 px-2 py-0.5 rounded-md">
+                          {rec.docNo}
+                        </span>
+                      )}
                       {rec.expenseRef && (
                         <span className="inline-block font-mono text-[11px] bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-md">
                           {rec.expenseRef}
@@ -2165,6 +2215,9 @@ const Payment: React.FC = () => {
                         <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[22%]">
                           Payment
                         </th>
+                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[14%]">
+                          Doc No
+                        </th>
                         <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[18%]">
                           Expense Ref
                         </th>
@@ -2192,7 +2245,7 @@ const Payment: React.FC = () => {
                       {records.length === 0 && (
                         <tr>
                           <td
-                            colSpan={8}
+                            colSpan={9}
                             className="text-center py-14 text-muted-foreground text-sm"
                           >
                             <AlertCircle
@@ -2216,6 +2269,11 @@ const Payment: React.FC = () => {
                             <p className="text-[10px] text-muted-foreground mt-0.5">
                               {rec.date || "—"}
                             </p>
+                          </td>
+                          <td className="px-4 py-2.5">
+                            <span className="font-mono text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                              {rec.docNo || "—"}
+                            </span>
                           </td>
                           {/* Expense Ref + GRN stacked */}
                           <td className="px-4 py-2.5">

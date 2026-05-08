@@ -97,6 +97,14 @@ let deleteMutation: { mutate: (id: string) => void };
 
 const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
   {
+    accessorKey: "DocNo",
+    header: "Doc No",
+    cell: ({ row, getValue }) => {
+      const v = (getValue() as string) || row.original.GRNNo;
+      return <span className="font-mono text-xs font-semibold">{v || "—"}</span>;
+    },
+  },
+  {
     accessorKey: "GRNNo",
     header: "GRN No",
     cell: ({ getValue }) => {
@@ -200,6 +208,8 @@ export default function GRN() {
     items: [createEmptyItem()] as GRNItemLine[],
     docTypeId: null as number | null,
     docNo: "",
+    parentDocNo: "",
+    rootExBDocNo: "",
     finYear: activeFinYear || "",
   });
 
@@ -234,6 +244,13 @@ export default function GRN() {
     queryFn: grnApi.getUoms,
   });
 
+  const { data: grnNumberPreview, isFetching: loadingPreview } = useQuery({
+    queryKey: ["grns", "next-number", formData.parentDocNo],
+    queryFn: () => grnApi.previewNextGRNNumber(formData.parentDocNo || null),
+    enabled: !editingId,
+    staleTime: 15_000,
+  });
+
   const pos = posData
     .filter((po: PurchaseOrder) => {
       if (!selectedFinYear) return true;
@@ -250,6 +267,7 @@ export default function GRN() {
     if (!search) return true;
     const q = search.toLowerCase();
     return (
+      grn.DocNo?.toLowerCase().includes(q) ||
       grn.GRNNo?.toLowerCase().includes(q) ||
       grn.PONumber?.toLowerCase().includes(q) ||
       grn.SupplierName?.toLowerCase().includes(q)
@@ -311,6 +329,8 @@ export default function GRN() {
         grnNo: "",
         docNo: "",
         docTypeId: null,
+        parentDocNo: "",
+        rootExBDocNo: "",
       }));
       return;
     }
@@ -348,7 +368,9 @@ export default function GRN() {
         supplierId: String(po.SupplierID ?? ""),
         supplierName: po.SupplierName ?? "",
         items: lineItems.length ? lineItems : [createEmptyItem()],
-        docTypeId: po.DocTypeId ?? null,
+        docTypeId: null,
+        parentDocNo: po.DocNo || po.PurchaseOrderNo || "",
+        rootExBDocNo: po.RootExBDocNo || "",
         finYear: prev.finYear || activeFinYear || "",
         // grnNo will be assigned by backend on save
         grnNo: "",
@@ -406,13 +428,10 @@ export default function GRN() {
       remarks: formData.remarks,
       supplierName: formData.supplierName,
       poNumber: formData.poNumber,
-      docTypeId: null, // GRN prefix resolved automatically by backend from parentDocNo
       docNo: "",
       finYear: selectedFinYear || formData.finYear || null,
-      // Pass the parent PO's DocNo so the backend can resolve the correct GRN
-      // prefix: GRN (normal PO), ExB-PO-GRN (ExB-PO parent), etc.
-      parentDocNo: formData.poNumber || null,
-      rootExBDocNo: null, // set when GRN is raised from within an Expense Booking
+      parentDocNo: formData.parentDocNo || null,
+      rootExBDocNo: formData.rootExBDocNo || null,
     };
 
     if (editingId) {
@@ -492,6 +511,8 @@ export default function GRN() {
       items: parsedItems.length ? parsedItems : [createEmptyItem()],
       docTypeId: grn.DocTypeId ?? null,
       docNo: grn.DocNo || "",
+      parentDocNo: grn.ParentDocNo || "",
+      rootExBDocNo: grn.RootExBDocNo || "",
       finYear: grn.FinYear || activeFinYear || "",
     });
 
@@ -553,6 +574,8 @@ export default function GRN() {
                       items: [createEmptyItem()],
                       grnNo: "",
                       docNo: "",
+                      parentDocNo: "",
+                      rootExBDocNo: "",
                       finYear: e.target.value,
                     }));
                   }}
@@ -634,9 +657,17 @@ export default function GRN() {
                     size={14}
                     className="text-muted-foreground shrink-0"
                   />
-                  {formData.grnNo ? (
+                  {editingId && formData.grnNo ? (
                     <span className="font-mono text-sm text-primary font-semibold tracking-wide">
                       {formData.grnNo}
+                    </span>
+                  ) : grnNumberPreview?.nextDocNo ? (
+                    <span className="font-mono text-sm text-primary font-semibold tracking-wide">
+                      {grnNumberPreview.nextDocNo}
+                    </span>
+                  ) : loadingPreview ? (
+                    <span className="text-sm text-muted-foreground/70">
+                      Loading preview...
                     </span>
                   ) : (
                     <span className="text-sm text-muted-foreground/50 italic">
@@ -982,6 +1013,14 @@ export default function GRN() {
                 <div className="p-6 space-y-5">
                   {/* Meta row */}
                   <div className="grid grid-cols-2 gap-4 text-sm">
+                    <div>
+                      <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
+                        Doc No
+                      </p>
+                      <p className="font-mono font-semibold">
+                        {viewingGrn.DocNo || viewingGrn.GRNNo || "—"}
+                      </p>
+                    </div>
                     <div>
                       <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
                         Purchase Order
