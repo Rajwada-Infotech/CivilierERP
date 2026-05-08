@@ -116,7 +116,13 @@ router.get("/options", async (req, res) => {
           eb.Eid                          AS value,
           ISNULL(eb.EDocNo, CONCAT('Draft #', CAST(eb.Eid AS NVARCHAR))) AS docNo,
           ISNULL(eb.EProjectName, '')     AS projectName,
-          ISNULL(eb.EName, '')            AS supplierName,
+          ISNULL(eb.EName, '')            AS partyName,
+          -- GRN-linked supplier name preferred; falls back to EName
+          ISNULL(
+            CASE WHEN eb.ESourceType = 'GRN' AND eb.ESourceId IS NOT NULL
+                 THEN ahm.LHeadName ELSE NULL END,
+            ISNULL(eb.EName, '')
+          )                               AS supplierName,
           ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0)) AS amount,
           ISNULL(eb.ECompanyId, 0)        AS companyId,
           ISNULL(e.name, '')              AS companyName,
@@ -131,6 +137,9 @@ router.get("/options", async (req, res) => {
           ) AS label
         FROM dbo.ExpenseBooking eb
         LEFT JOIN dbo.enterprise e ON e.id = eb.ECompanyId
+        LEFT JOIN dbo.GoodsReceiptNotes grn
+          ON eb.ESourceType = 'GRN' AND grn.GRNID = TRY_CAST(eb.ESourceId AS INT)
+        LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = grn.SupplierID
         WHERE
           (eb.EEmiPayment = 0 OR eb.EEmiPayment IS NULL)
           AND NOT EXISTS (
@@ -154,9 +163,14 @@ router.get("/options", async (req, res) => {
           ei.Amount                    AS amount,
           ei.Status                    AS status,
           eb.EProjectName              AS projectName,
-          ISNULL(eb.EName, '')         AS supplierName,
+          ISNULL(eb.EName, '')         AS partyName,
+          ISNULL(
+            CASE WHEN eb.ESourceType = 'GRN' AND eb.ESourceId IS NOT NULL
+                 THEN ahm2.LHeadName ELSE NULL END,
+            ISNULL(eb.EName, '')
+          )                            AS supplierName,
           eb.ECompanyId                AS companyId,
-          ISNULL(e2.name, '')           AS companyName,
+          ISNULL(e2.name, '')          AS companyName,
           eb.EDocNo                    AS parentDocNo,
           CONCAT(
             ISNULL(ei.RefNumber, CONCAT('EMI-', RIGHT('00' + CAST(ei.InstallmentNo AS VARCHAR), 2))),
@@ -170,6 +184,9 @@ router.get("/options", async (req, res) => {
         FROM dbo.EmiInstallments ei
         INNER JOIN dbo.ExpenseBooking eb ON eb.Eid = ei.ExpenseBookingId
         LEFT JOIN dbo.enterprise e2 ON e2.id = eb.ECompanyId
+        LEFT JOIN dbo.GoodsReceiptNotes grn2
+          ON eb.ESourceType = 'GRN' AND grn2.GRNID = TRY_CAST(eb.ESourceId AS INT)
+        LEFT JOIN dbo.AccountHeadMaster ahm2 ON ahm2.LHeadId = grn2.SupplierID
         WHERE
           eb.EEmiPayment = 1
           AND ei.Status = 'Pending'
@@ -189,6 +206,7 @@ router.get("/options", async (req, res) => {
       expenseBookingId: r.id,
       docNo: r.docNo,
       projectName: r.projectName,
+      partyName: r.partyName || "",
       supplierName: r.supplierName || "",
       amount: parseFloat(r.amount) || 0,
       companyId: r.companyId || null,
@@ -206,6 +224,7 @@ router.get("/options", async (req, res) => {
       dueDate: r.dueDate ? String(r.dueDate).slice(0, 10) : null,
       docNo: r.refNumber || r.parentDocNo,
       projectName: r.projectName,
+      partyName: r.partyName || "",
       supplierName: r.supplierName || "",
       amount: parseFloat(r.amount) || 0,
       companyId: r.companyId || null,
