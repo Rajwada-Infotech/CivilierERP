@@ -2525,34 +2525,40 @@ export default function MaterialExpenseBooking() {
                   ))}
                 </div>
 
-                {/* Desktop table */}
+                {/* Records table — compact, no horizontal scroll */}
                 <Card className="hidden sm:block border-border shadow-sm">
                   <CardContent className="p-0">
-                    <div className="rounded-md overflow-x-auto">
+                    <div className="rounded-md">
                       <Table>
                         <TableHeader>
                           <TableRow className="bg-muted/30">
-                            {[
-                              "Booking Ref",
-                              "Type",
-                              "Date",
-                              "Vendor / Contractor",
-                              "Basic Amt",
-                              "CGST",
-                              "SGST",
-                              "Net Amt",
-                              "GRN",
-                              "EMI",
-                              "Status",
-                              "Actions",
-                            ].map((h, i) => (
-                              <TableHead
-                                key={h}
-                                className={`text-xs font-heading${[4, 5, 6].includes(i) ? " hidden md:table-cell" : ""}${i === 8 ? " hidden lg:table-cell" : ""}`}
-                              >
-                                {h}
-                              </TableHead>
-                            ))}
+                            <TableHead className="text-xs font-heading w-[22%]">
+                              Booking Ref
+                            </TableHead>
+                            <TableHead className="text-xs font-heading w-[18%]">
+                              Vendor
+                            </TableHead>
+                            <TableHead className="text-xs font-heading w-[10%] text-right">
+                              Basic Amt
+                            </TableHead>
+                            <TableHead className="text-xs font-heading w-[10%] text-right hidden md:table-cell">
+                              CGST
+                            </TableHead>
+                            <TableHead className="text-xs font-heading w-[10%] text-right hidden md:table-cell">
+                              SGST
+                            </TableHead>
+                            <TableHead className="text-xs font-heading w-[12%] text-right">
+                              Net Amt
+                            </TableHead>
+                            <TableHead className="text-xs font-heading w-[8%] hidden lg:table-cell">
+                              GRN
+                            </TableHead>
+                            <TableHead className="text-xs font-heading w-[8%]">
+                              Status
+                            </TableHead>
+                            <TableHead className="text-xs font-heading w-[12%] text-right">
+                              Actions
+                            </TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -2574,50 +2580,57 @@ export default function MaterialExpenseBooking() {
                                 }
                                 className="hover:bg-muted/20"
                               >
-                                <TableCell className="font-mono text-xs font-semibold text-primary">
-                                  {rec.bookingReference || "—"}
+                                {/* Booking Ref + date + type stacked */}
+                                <TableCell className="py-2.5">
+                                  <p className="font-mono text-[11px] font-semibold text-primary leading-tight break-all">
+                                    {rec.bookingReference || "—"}
+                                  </p>
+                                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                                    {rec.bookingDate}
+                                    {rec.docTypeName ? (
+                                      <span className="ml-1 opacity-60">
+                                        · {rec.docTypeName}
+                                      </span>
+                                    ) : null}
+                                    {rec.emi?.enabled ? (
+                                      <span className="ml-1 inline-flex items-center gap-0.5 text-[9px] font-heading font-semibold bg-violet-500/10 text-violet-500 border border-violet-500/20 px-1 py-0.5 rounded-full">
+                                        <CreditCard size={8} />
+                                        {rec.emi.installmentCount}x
+                                      </span>
+                                    ) : null}
+                                  </p>
                                 </TableCell>
-                                <TableCell className="text-xs text-muted-foreground max-w-[90px] truncate">
-                                  {rec.docTypeName || "—"}
-                                </TableCell>
-                                <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                                  {rec.bookingDate}
-                                </TableCell>
-                                <TableCell className="text-xs max-w-[120px] truncate">
+                                {/* Vendor */}
+                                <TableCell className="text-xs max-w-[140px] truncate py-2.5">
                                   {rec.supplier || "—"}
                                 </TableCell>
-                                <TableCell className="font-mono text-xs hidden md:table-cell text-muted-foreground">
+                                {/* Basic Amt */}
+                                <TableCell className="font-mono text-xs text-right text-muted-foreground py-2.5">
                                   ₹{fmt(rec.basicAmount)}
                                 </TableCell>
-                                <TableCell className="font-mono text-xs hidden md:table-cell text-foreground/70">
+                                {/* CGST */}
+                                <TableCell className="font-mono text-xs text-right text-foreground/70 py-2.5 hidden md:table-cell">
                                   {rec.cgstRate}%
                                 </TableCell>
-                                <TableCell className="font-mono text-xs hidden md:table-cell text-foreground/70">
+                                {/* SGST */}
+                                <TableCell className="font-mono text-xs text-right text-foreground/70 py-2.5 hidden md:table-cell">
                                   {rec.sgstRate}%
                                 </TableCell>
-                                <TableCell className="font-mono text-xs font-semibold">
+                                {/* Net Amt */}
+                                <TableCell className="font-mono text-xs font-semibold text-right py-2.5">
                                   ₹{fmt(rbd.netAmount)}
                                 </TableCell>
-                                <TableCell className="hidden lg:table-cell">
+                                {/* GRN */}
+                                <TableCell className="hidden lg:table-cell py-2.5">
                                   <GRNChainBadge bookingId={rec.id} />
                                 </TableCell>
-                                <TableCell>
-                                  {rec.emi?.enabled ? (
-                                    <span className="inline-flex items-center gap-1 text-[10px] font-heading font-semibold bg-violet-500/10 text-violet-500 border border-violet-500/20 px-2 py-0.5 rounded-full">
-                                      <CreditCard size={9} />
-                                      {rec.emi.installmentCount}x
-                                    </span>
-                                  ) : (
-                                    <span className="text-muted-foreground text-xs">
-                                      —
-                                    </span>
-                                  )}
-                                </TableCell>
-                                <TableCell>
+                                {/* Status */}
+                                <TableCell className="py-2.5">
                                   <StatusBadge status={rec.status} />
                                 </TableCell>
-                                <TableCell>
-                                  <div className="flex flex-wrap gap-1.5 items-center">
+                                {/* Actions */}
+                                <TableCell className="py-2.5">
+                                  <div className="flex gap-1 items-center justify-end">
                                     <ApprovalActions
                                       status={rec.status}
                                       recordId={rec.id}
@@ -2658,7 +2671,7 @@ export default function MaterialExpenseBooking() {
                           {filteredRecords.length === 0 && (
                             <TableRow>
                               <TableCell
-                                colSpan={12}
+                                colSpan={9}
                                 className="text-center py-14 text-muted-foreground text-sm"
                               >
                                 <AlertCircle
