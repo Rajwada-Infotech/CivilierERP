@@ -165,6 +165,8 @@ const PO_SELECT = `
     po.ApprovedAt,
     po.DocTypeId,
     po.DocNo,
+    po.ParentDocNo,
+    po.RootExBDocNo,
     po.fy_id,
     po.SequenceNo,
     po.POItems,

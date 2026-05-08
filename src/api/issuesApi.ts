@@ -38,6 +38,18 @@ export const getIssues = async (params: { page: number; limit: number; search: s
   return res.json();
 };
 
+export const previewNextIssueNumber = async (exb = false) => {
+  const query = new URLSearchParams();
+  if (exb) query.set("exb", "true");
+  const suffix = query.toString() ? `?${query.toString()}` : "";
+  const res = await fetchWithAuth(`/api/material-issues/next-number${suffix}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to preview issue number");
+  }
+  return res.json();
+};
+
 export const createIssue = async (payload: any) => {
   const res = await fetchWithAuth("/api/material-issues", {
     method: "POST",
