@@ -115,6 +115,7 @@ interface ExpenseOption {
   docNo?: string;
   projectName?: string;
   supplierName?: string;
+  partyName?: string;
   amount?: number;
   companyId?: number | null;
   installmentNo?: number;
@@ -548,6 +549,181 @@ function InputField({
 
 // ─── GRN badges for list view ─────────────────────────────────────────────────
 
+// ─── PartyFilterCombobox ──────────────────────────────────────────────────────
+
+function PartyFilterCombobox({
+  partyNames,
+  value,
+  onChange,
+  expenseOptions,
+}: {
+  partyNames: string[];
+  value: string;
+  onChange: (val: string) => void;
+  expenseOptions: ExpenseOption[];
+}) {
+  const [search, setSearch] = React.useState("");
+  const [tab, setTab] = React.useState<"suppliers" | "others">("suppliers");
+
+  const suppliers = partyNames.filter((n) =>
+    expenseOptions.some(
+      (o) => o.supplierName === n && o.supplierName !== o.partyName,
+    ),
+  );
+  const others = partyNames.filter((n) => !suppliers.includes(n));
+
+  const activeList = tab === "suppliers" ? suppliers : others;
+  const filtered = activeList.filter((n) =>
+    n.toLowerCase().includes(search.toLowerCase()),
+  );
+
+  const totalCount = expenseOptions.length;
+  const filteredCount = value
+    ? expenseOptions.filter((o) => o.supplierName === value).length
+    : totalCount;
+
+  // Switch tab if selected value belongs to the other group
+  React.useEffect(() => {
+    if (!value) return;
+    if (suppliers.includes(value) && tab !== "suppliers") setTab("suppliers");
+    if (others.includes(value) && tab !== "others") setTab("others");
+  }, [value]);
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-2">
+        <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground">
+          Filter by Party
+        </label>
+        <span className="text-[10px] text-muted-foreground/60 font-heading normal-case tracking-normal">
+          — narrows the booking list below
+        </span>
+      </div>
+
+      <div className="rounded-xl border border-border bg-card overflow-hidden">
+        {/* Tab bar */}
+        <div className="flex border-b border-border">
+          <button
+            type="button"
+            onClick={() => setTab("suppliers")}
+            className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-heading font-semibold transition-colors border-b-2 ${
+              tab === "suppliers"
+                ? "border-primary text-primary bg-primary/5"
+                : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50"
+            }`}
+          >
+            <Truck size={11} />
+            Suppliers
+            <span
+              className={`px-1.5 py-0.5 rounded-full text-[10px] font-heading ${tab === "suppliers" ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}
+            >
+              {suppliers.length}
+            </span>
+          </button>
+          <div className="w-px bg-border" />
+          <button
+            type="button"
+            onClick={() => setTab("others")}
+            className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-heading font-semibold transition-colors border-b-2 ${
+              tab === "others"
+                ? "border-primary text-primary bg-primary/5"
+                : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50"
+            }`}
+          >
+            <FileText size={11} />
+            Others
+            <span
+              className={`px-1.5 py-0.5 rounded-full text-[10px] font-heading ${tab === "others" ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}
+            >
+              {others.length}
+            </span>
+          </button>
+        </div>
+
+        {/* Search */}
+        <div className="p-2 border-b border-border">
+          <div className="relative">
+            <Search
+              size={12}
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+            />
+            <input
+              type="text"
+              placeholder={`Search ${tab}…`}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full pl-7 pr-3 py-1.5 text-xs bg-muted border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+          </div>
+        </div>
+
+        {/* List */}
+        <div className="max-h-48 overflow-y-auto divide-y divide-border/40">
+          {filtered.length === 0 && (
+            <div className="px-4 py-5 text-center text-xs text-muted-foreground">
+              No {tab} match "{search}"
+            </div>
+          )}
+
+          {filtered.map((name) => {
+            const count = expenseOptions.filter(
+              (o) => o.supplierName === name,
+            ).length;
+            const isSelected = value === name;
+            return (
+              <button
+                key={name}
+                type="button"
+                onClick={() => onChange(isSelected ? "" : name)}
+                className={`w-full flex items-center justify-between gap-3 px-3 py-2.5 text-left transition-colors hover:bg-muted/40 ${isSelected ? "bg-primary/5" : ""}`}
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  {isSelected ? (
+                    <div className="w-3.5 h-3.5 shrink-0 rounded-full border-2 border-primary flex items-center justify-center">
+                      <div className="w-1.5 h-1.5 rounded-full bg-primary" />
+                    </div>
+                  ) : (
+                    <div className="w-3.5 h-3.5 shrink-0 rounded-full border border-border" />
+                  )}
+                  <span
+                    className={`text-xs truncate ${isSelected ? "font-semibold text-primary" : "text-foreground"}`}
+                  >
+                    {name}
+                  </span>
+                </div>
+                <span className="text-[10px] font-heading text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full shrink-0">
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Active filter chip */}
+        {value && (
+          <div className="flex items-center justify-between gap-2 px-3 py-2 border-t border-border bg-primary/5">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <Truck size={11} className="text-primary shrink-0" />
+              <span className="text-xs font-medium text-primary truncate">
+                {value}
+              </span>
+              <span className="text-[10px] text-primary/60 font-heading shrink-0">
+                · {filteredCount} booking{filteredCount !== 1 ? "s" : ""}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => onChange("")}
+              className="shrink-0 text-muted-foreground hover:text-destructive transition-colors"
+            >
+              <X size={12} />
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
 // ─── ExpenseBookingPicker ─────────────────────────────────────────────────────
 
 function ExpenseBookingPicker({
@@ -719,6 +895,11 @@ function ExpenseBookingPicker({
                     {o.projectName && (
                       <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
                         {o.projectName}
+                      </p>
+                    )}
+                    {o.supplierName && o.supplierName !== o.projectName && (
+                      <p className="text-[10px] text-primary/60 mt-0.5 truncate">
+                        {o.supplierName}
                       </p>
                     )}
                     {o.type === "emi" && o.installmentNo && (
@@ -1705,8 +1886,8 @@ const Payment: React.FC = () => {
                 {/* Supplier filter — only shown when no booking is linked yet */}
                 {!form.expenseRef &&
                   (() => {
-                    // Derive unique supplier names from EName field
-                    const supplierNames = Array.from(
+                    // Derive unique party/expense names from EName field
+                    const partyNames = Array.from(
                       new Set(
                         expenseOptions
                           .map((o) => o.supplierName)
@@ -1722,81 +1903,25 @@ const Payment: React.FC = () => {
 
                     return (
                       <div className="space-y-3">
-                        {/* Supplier dropdown */}
-                        <div className="space-y-1.5">
-                          <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground">
-                            Filter by Supplier
-                          </label>
-                          <p className="text-[11px] text-muted-foreground -mt-1">
-                            Select a supplier to narrow the expense booking list
-                            below.
-                          </p>
-                          <div className="relative">
-                            <Truck
-                              size={13}
-                              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                            />
-                            <select
-                              value={supplierBookingFilter}
-                              onChange={(e) => {
-                                setSupplierBookingFilter(e.target.value);
-                                // Clear selected booking if it doesn't match new supplier
-                                if (e.target.value && form.expenseId) {
-                                  const match = expenseOptions.find(
-                                    (o) =>
-                                      o.id === form.expenseId &&
-                                      o.supplierName === e.target.value,
-                                  );
-                                  if (!match) clearExpenseLink();
-                                }
-                              }}
-                              className="w-full appearance-none pl-8 pr-9 py-2.5 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary transition-colors hover:border-primary/40"
-                            >
-                              <option value="">— All Suppliers —</option>
-                              {supplierNames.map((name) => {
-                                const count = expenseOptions.filter(
-                                  (o) => o.supplierName === name,
-                                ).length;
-                                return (
-                                  <option key={name} value={name}>
-                                    {name} ({count})
-                                  </option>
-                                );
-                              })}
-                            </select>
-                            <ChevronDown
-                              size={14}
-                              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                            />
-                          </div>
+                        {/* Party / Name filter — custom combobox */}
+                        <PartyFilterCombobox
+                          partyNames={partyNames}
+                          value={supplierBookingFilter}
+                          onChange={(val) => {
+                            setSupplierBookingFilter(val);
+                            if (val && form.expenseId) {
+                              const match = expenseOptions.find(
+                                (o) =>
+                                  o.id === form.expenseId &&
+                                  o.supplierName === val,
+                              );
+                              if (!match) clearExpenseLink();
+                            }
+                          }}
+                          expenseOptions={expenseOptions}
+                        />
 
-                          {/* Active supplier chip */}
-                          {supplierBookingFilter && (
-                            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/5 border border-amber-500/20">
-                              <Truck
-                                size={12}
-                                className="text-amber-600 dark:text-amber-400 shrink-0"
-                              />
-                              <span className="text-xs text-amber-700 dark:text-amber-300 font-medium flex-1 truncate">
-                                {supplierBookingFilter}
-                              </span>
-                              <span className="text-[10px] text-amber-600/70 font-heading">
-                                {filteredBySupplier.length} booking
-                                {filteredBySupplier.length !== 1 ? "s" : ""}
-                              </span>
-                              <button
-                                type="button"
-                                onClick={() => setSupplierBookingFilter("")}
-                                className="text-amber-600 hover:text-amber-800 dark:hover:text-amber-200 transition-colors ml-1"
-                                title="Clear supplier filter"
-                              >
-                                <X size={12} />
-                              </button>
-                            </div>
-                          )}
-                        </div>
-
-                        {/* Expense booking picker — filtered by supplier */}
+                        {/* Expense booking picker — filtered by party */}
                         <ExpenseBookingPicker
                           options={filteredBySupplier}
                           value={form.expenseId}
