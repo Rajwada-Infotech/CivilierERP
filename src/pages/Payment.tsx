@@ -114,6 +114,7 @@ interface ExpenseOption {
   expenseBookingId?: number;
   docNo?: string;
   projectName?: string;
+  supplierName?: string;
   amount?: number;
   companyId?: number | null;
   installmentNo?: number;
@@ -1213,6 +1214,7 @@ const Payment: React.FC = () => {
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [loadingExpense, setLoadingExpense] = useState(false);
   const [linkedGRNs, setLinkedGRNs] = useState<GRNRef[]>([]);
+  const [supplierBookingFilter, setSupplierBookingFilter] = useState("");
 
   // ── Queries ────────────────────────────────────────────────────────────────
 
@@ -1255,6 +1257,7 @@ const Payment: React.FC = () => {
     setEditingId(null);
     setForm(blankForm());
     setLinkedGRNs([]);
+    setSupplierBookingFilter("");
     setView("form");
   };
 
@@ -1266,6 +1269,7 @@ const Payment: React.FC = () => {
       : undefined;
     setForm({ ...rest, expenseId: matchedOption?.id ?? "" });
     setLinkedGRNs([]);
+    setSupplierBookingFilter("");
     setView("form");
   };
 
@@ -1274,6 +1278,7 @@ const Payment: React.FC = () => {
     setEditingId(null);
     setForm(blankForm());
     setLinkedGRNs([]);
+    setSupplierBookingFilter("");
   };
 
   // ── Mode change — clear irrelevant fields ──────────────────────────────────
@@ -1426,6 +1431,7 @@ const Payment: React.FC = () => {
       igstRate: null,
     }));
     setLinkedGRNs([]);
+    setSupplierBookingFilter("");
   };
 
   // ── Bank selection ─────────────────────────────────────────────────────────
@@ -1695,17 +1701,116 @@ const Payment: React.FC = () => {
               {/* ── 1. Link Expense Booking ── */}
               <div className="space-y-3">
                 <SectionHeader icon={Link2} label="Expense Booking" />
-                {form.expenseRef ? (
+
+                {/* Supplier filter — only shown when no booking is linked yet */}
+                {!form.expenseRef &&
+                  (() => {
+                    // Derive unique supplier names from EName field
+                    const supplierNames = Array.from(
+                      new Set(
+                        expenseOptions
+                          .map((o) => o.supplierName)
+                          .filter((n): n is string => !!n && n.trim() !== ""),
+                      ),
+                    ).sort();
+
+                    const filteredBySupplier = supplierBookingFilter
+                      ? expenseOptions.filter(
+                          (o) => o.supplierName === supplierBookingFilter,
+                        )
+                      : expenseOptions;
+
+                    return (
+                      <div className="space-y-3">
+                        {/* Supplier dropdown */}
+                        <div className="space-y-1.5">
+                          <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground">
+                            Filter by Supplier
+                          </label>
+                          <p className="text-[11px] text-muted-foreground -mt-1">
+                            Select a supplier to narrow the expense booking list
+                            below.
+                          </p>
+                          <div className="relative">
+                            <Truck
+                              size={13}
+                              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                            />
+                            <select
+                              value={supplierBookingFilter}
+                              onChange={(e) => {
+                                setSupplierBookingFilter(e.target.value);
+                                // Clear selected booking if it doesn't match new supplier
+                                if (e.target.value && form.expenseId) {
+                                  const match = expenseOptions.find(
+                                    (o) =>
+                                      o.id === form.expenseId &&
+                                      o.supplierName === e.target.value,
+                                  );
+                                  if (!match) clearExpenseLink();
+                                }
+                              }}
+                              className="w-full appearance-none pl-8 pr-9 py-2.5 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary transition-colors hover:border-primary/40"
+                            >
+                              <option value="">— All Suppliers —</option>
+                              {supplierNames.map((name) => {
+                                const count = expenseOptions.filter(
+                                  (o) => o.supplierName === name,
+                                ).length;
+                                return (
+                                  <option key={name} value={name}>
+                                    {name} ({count})
+                                  </option>
+                                );
+                              })}
+                            </select>
+                            <ChevronDown
+                              size={14}
+                              className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                            />
+                          </div>
+
+                          {/* Active supplier chip */}
+                          {supplierBookingFilter && (
+                            <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/5 border border-amber-500/20">
+                              <Truck
+                                size={12}
+                                className="text-amber-600 dark:text-amber-400 shrink-0"
+                              />
+                              <span className="text-xs text-amber-700 dark:text-amber-300 font-medium flex-1 truncate">
+                                {supplierBookingFilter}
+                              </span>
+                              <span className="text-[10px] text-amber-600/70 font-heading">
+                                {filteredBySupplier.length} booking
+                                {filteredBySupplier.length !== 1 ? "s" : ""}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => setSupplierBookingFilter("")}
+                                className="text-amber-600 hover:text-amber-800 dark:hover:text-amber-200 transition-colors ml-1"
+                                title="Clear supplier filter"
+                              >
+                                <X size={12} />
+                              </button>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Expense booking picker — filtered by supplier */}
+                        <ExpenseBookingPicker
+                          options={filteredBySupplier}
+                          value={form.expenseId}
+                          onChange={handleExpenseSelect}
+                          loading={loadingExpense}
+                        />
+                      </div>
+                    );
+                  })()}
+
+                {form.expenseRef && (
                   <AutoFillBanner
                     docNo={form.expenseRef}
                     onClear={clearExpenseLink}
-                  />
-                ) : (
-                  <ExpenseBookingPicker
-                    options={expenseOptions}
-                    value={form.expenseId}
-                    onChange={handleExpenseSelect}
-                    loading={loadingExpense}
                   />
                 )}
 
