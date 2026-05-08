@@ -202,6 +202,10 @@ IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.WorkOr
 GO
 
 -- ── 8. NewPayment ────────────────────────────────────────────────────────────
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.NewPayment') AND name = 'DocNo')
+  ALTER TABLE dbo.NewPayment ADD DocNo NVARCHAR(100) NULL;
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.NewPayment') AND name = 'DocTypeId')
+  ALTER TABLE dbo.NewPayment ADD DocTypeId INT NULL REFERENCES dbo.TypeOfDoc(TypeOfDocId);
 IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.NewPayment') AND name = 'DocYear')
   ALTER TABLE dbo.NewPayment ADD DocYear SMALLINT NULL;
 IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.NewPayment') AND name = 'DocSerial')
@@ -212,7 +216,15 @@ IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.NewPay
   ALTER TABLE dbo.NewPayment ADD RootExBDocNo NVARCHAR(100) NULL;
 GO
 
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID('dbo.NewPayment') AND name = 'IX_NewPayment_DocNo')
+  CREATE INDEX IX_NewPayment_DocNo ON dbo.NewPayment (DocNo) WHERE DocNo IS NOT NULL;
+GO
+
 -- ── 9. ReceivedPayment ───────────────────────────────────────────────────────
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.ReceivedPayment') AND name = 'DocNo')
+  ALTER TABLE dbo.ReceivedPayment ADD DocNo NVARCHAR(100) NULL;
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.ReceivedPayment') AND name = 'DocTypeId')
+  ALTER TABLE dbo.ReceivedPayment ADD DocTypeId INT NULL REFERENCES dbo.TypeOfDoc(TypeOfDocId);
 IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.ReceivedPayment') AND name = 'DocYear')
   ALTER TABLE dbo.ReceivedPayment ADD DocYear SMALLINT NULL;
 IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.ReceivedPayment') AND name = 'DocSerial')
@@ -232,7 +244,23 @@ IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Expens
   ALTER TABLE dbo.ExpenseBooking ADD DocSerial INT NULL;
 GO
 
--- ── 11. vw_DocLineage ────────────────────────────────────────────────────────
+-- 11. DocNumberSequence unique constraint
+-- Required for lockNextDocNumber collision-retry logic to work correctly.
+IF NOT EXISTS (
+  SELECT 1 FROM sys.indexes
+  WHERE object_id = OBJECT_ID('dbo.DocNumberSequence')
+    AND name = 'UQ_DocNumberSequence_DocNo'
+)
+BEGIN
+  ALTER TABLE dbo.DocNumberSequence
+    ADD CONSTRAINT UQ_DocNumberSequence_DocNo UNIQUE (DocNo);
+  PRINT '  + UQ_DocNumberSequence_DocNo unique constraint added';
+END
+ELSE
+  PRINT '  ~ UQ_DocNumberSequence_DocNo already exists';
+GO
+
+-- ── 12. vw_DocLineage ────────────────────────────────────────────────────────
 CREATE OR ALTER VIEW dbo.vw_DocLineage AS
 SELECT
   dns.DocNo,
@@ -258,3 +286,4 @@ FROM dbo.DocNumberSequence dns;
 GO
 
 PRINT 'Migration 035-FIX4 completed successfully.';
+PRINT '  DocNumberSequence - UQ_DocNumberSequence_DocNo unique constraint';
