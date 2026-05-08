@@ -1871,45 +1871,7 @@ const Payment: React.FC = () => {
                 </div>
               </div>
 
-              {/* ── 3. Payment Mode ── */}
-              <div className="space-y-3">
-                <SectionHeader icon={Wallet} label="Payment Mode" />
-                <Field label="Mode" required>
-                  <div className="flex flex-wrap gap-2">
-                    {PAYMENT_MODES.map((m) => {
-                      const s = MODE_STYLE[m] ?? {
-                        ring: "ring-border bg-muted",
-                        text: "text-muted-foreground",
-                        dot: "bg-muted-foreground",
-                      };
-                      const active = form.mode === m;
-                      return (
-                        <button
-                          key={m}
-                          type="button"
-                          onClick={() => handleModeChange(m)}
-                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-heading font-semibold border transition-all ring-1 ${
-                            active
-                              ? `${s.ring} ${s.text} border-transparent shadow-sm`
-                              : "bg-background border-border text-muted-foreground ring-transparent hover:border-primary/40"
-                          }`}
-                        >
-                          {active && (
-                            <span
-                              className={`w-1.5 h-1.5 rounded-full ${s.dot}`}
-                            />
-                          )}
-                          {m}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </Field>
-
-                {form.mode && <ModeInfoBanner mode={form.mode} />}
-              </div>
-
-              {/* ── 4. Bank Account ── */}
+              {/* ── 3. Bank Account ── */}
               <div className="space-y-3">
                 <SectionHeader icon={Landmark} label="Bank Account" />
                 <Field
@@ -1962,6 +1924,44 @@ const Payment: React.FC = () => {
                       );
                     })()}
                 </Field>
+              </div>
+
+              {/* ── 4. Payment Mode ── */}
+              <div className="space-y-3">
+                <SectionHeader icon={Wallet} label="Payment Mode" />
+                <Field label="Mode" required>
+                  <div className="flex flex-wrap gap-2">
+                    {PAYMENT_MODES.map((m) => {
+                      const s = MODE_STYLE[m] ?? {
+                        ring: "ring-border bg-muted",
+                        text: "text-muted-foreground",
+                        dot: "bg-muted-foreground",
+                      };
+                      const active = form.mode === m;
+                      return (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => handleModeChange(m)}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-heading font-semibold border transition-all ring-1 ${
+                            active
+                              ? `${s.ring} ${s.text} border-transparent shadow-sm`
+                              : "bg-background border-border text-muted-foreground ring-transparent hover:border-primary/40"
+                          }`}
+                        >
+                          {active && (
+                            <span
+                              className={`w-1.5 h-1.5 rounded-full ${s.dot}`}
+                            />
+                          )}
+                          {m}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </Field>
+
+                {form.mode && <ModeInfoBanner mode={form.mode} />}
               </div>
 
               {/* ── 5. Mode-specific section ── */}
