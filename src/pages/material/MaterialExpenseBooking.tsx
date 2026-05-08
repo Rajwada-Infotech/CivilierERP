@@ -199,6 +199,7 @@ interface GRNItem {
   TotalItems?: number;
   Remarks?: string;
   GRNItems?: string | GRNItemLine[];
+  ParentGST?: GSTConfig | string | null;
 }
 
 interface BillingTermOption {
@@ -901,6 +902,16 @@ function DocSelectorPanel({
                         date: g.GRNDate,
                         nameLabel: g.Remarks,
                         grnItems: parsedItems,
+                        gst:
+                          typeof g.ParentGST === "string"
+                            ? (() => {
+                                try {
+                                  return JSON.parse(g.ParentGST!);
+                                } catch {
+                                  return null;
+                                }
+                              })()
+                            : (g.ParentGST ?? null),
                       })
                     }
                     className="w-full flex items-start gap-3 px-4 py-3 hover:bg-muted/30 transition-colors border-b border-border/30 last:border-0 text-left group"
@@ -988,13 +999,17 @@ function resolveGstRates(
   fallbackCgst: number,
   fallbackSgst: number,
 ) {
-  if ((doc.kind === "PO" || doc.kind === "WO") && doc.gst?.applicable) {
+  if (
+    (doc.kind === "PO" || doc.kind === "WO" || doc.kind === "GRN") &&
+    doc.gst?.applicable
+  ) {
     const { type, rate } = doc.gst;
     if (type === "cgst_sgst") return { cgst: rate / 2, sgst: rate / 2 };
     if (type === "igst") return { cgst: rate, sgst: 0 };
     return { cgst: 0, sgst: 0 };
   }
-  if (doc.kind === "PO" || doc.kind === "WO") return { cgst: 0, sgst: 0 };
+  if (doc.kind === "PO" || doc.kind === "WO" || doc.kind === "GRN")
+    return { cgst: 0, sgst: 0 };
   return { cgst: fallbackCgst, sgst: fallbackSgst };
 }
 
@@ -1369,6 +1384,16 @@ export default function MaterialExpenseBooking() {
             const canonical = rawDocNo.startsWith("GRN-")
               ? rawDocNo
               : `GRN-${rawDocNo}`;
+            const parsedParentGST: GSTConfig | null = (() => {
+              if (!r.ParentGST) return null;
+              if (typeof r.ParentGST === "object")
+                return r.ParentGST as GSTConfig;
+              try {
+                return JSON.parse(r.ParentGST) as GSTConfig;
+              } catch {
+                return null;
+              }
+            })();
             setSelectedDoc({
               kind: "GRN",
               docNo: canonical,
@@ -1378,6 +1403,7 @@ export default function MaterialExpenseBooking() {
               date: r.GRNDate?.slice(0, 10),
               grnItems: items,
               amount: parseFloat(r.TotalAmount) || 0,
+              gst: parsedParentGST,
             });
           })
           .catch(() => {})
@@ -1632,7 +1658,8 @@ export default function MaterialExpenseBooking() {
     selectedDoc?.kind === "WO" ? "Contractor" : "Supplier / Vendor";
   const isPOorWO = selectedDoc?.kind === "PO" || selectedDoc?.kind === "WO";
   const isGRN = selectedDoc?.kind === "GRN";
-  const gstHighlighted = isPOorWO && !!selectedDoc?.gst?.applicable;
+  const hasParentGST = isPOorWO || isGRN;
+  const gstHighlighted = hasParentGST && !!selectedDoc?.gst?.applicable;
 
   // Compute sets of already-booked source IDs (excluding the record being edited)
   const bookedPOIds = new Set<number>();
@@ -2000,7 +2027,7 @@ export default function MaterialExpenseBooking() {
               {/* ── 2. Amount & GST ────────────────────────────────────── */}
               <div className="space-y-4">
                 <SectionHeader label="Amount & GST" />
-                {isPOorWO && (
+                {hasParentGST && (
                   <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/20 text-xs">
                     <BadgePercent size={12} className="text-primary shrink-0" />
                     {selectedDoc!.gst?.applicable ? (
@@ -2009,7 +2036,9 @@ export default function MaterialExpenseBooking() {
                         <span className="font-semibold">
                           {selectedDoc!.kind === "PO"
                             ? "Purchase Order"
-                            : "Work Order"}
+                            : selectedDoc!.kind === "GRN"
+                              ? "GRN (parent PO)"
+                              : "Work Order"}
                         </span>
                         {" — "}
                         {selectedDoc!.gst!.type === "cgst_sgst"
@@ -2024,7 +2053,9 @@ export default function MaterialExpenseBooking() {
                         Linked{" "}
                         {selectedDoc!.kind === "PO"
                           ? "Purchase Order"
-                          : "Work Order"}{" "}
+                          : selectedDoc!.kind === "GRN"
+                            ? "GRN (parent PO)"
+                            : "Work Order"}{" "}
                         has no GST applied — rates set to 0. Editable if needed.
                       </span>
                     )}
@@ -2724,7 +2755,6 @@ export default function MaterialExpenseBooking() {
         onClose={() => setPreviewRecord(null)}
         onEdit={(record) => openEdit(record)}
       />
-
     </>
   );
 }
