@@ -114,20 +114,19 @@ export function ApprovalActions({
     <div className={`flex items-center gap-2 ${className ?? ""}`}>
       {/* Submit button — visible to all users on Draft/Issued */}
       {showSubmit && (
-        <Button
-          size="sm"
-          variant="outline"
-          className="gap-1.5 border-blue-200 text-blue-700 hover:bg-blue-50"
+        <button
           disabled={loading !== null}
           onClick={() => handleAction("submit")}
+          title="Submit for Approval"
+          className="relative inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold tracking-wide transition-all disabled:opacity-50 bg-gradient-to-r from-violet-600 to-indigo-600 text-white shadow-sm shadow-violet-500/30 hover:from-violet-500 hover:to-indigo-500 hover:shadow-md hover:shadow-violet-500/40 hover:-translate-y-px active:translate-y-0 active:shadow-sm"
         >
           {loading === "submit" ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            <Loader2 className="w-3 h-3 animate-spin" />
           ) : (
-            <SendHorizonal className="w-3.5 h-3.5" />
+            <SendHorizonal className="w-3 h-3" />
           )}
-          Submit for Approval
-        </Button>
+          Submit
+        </button>
       )}
 
       {/* Approve/Reject — visible only to approver roles when Pending */}
