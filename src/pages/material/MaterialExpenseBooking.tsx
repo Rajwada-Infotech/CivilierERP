@@ -1749,46 +1749,6 @@ export default function MaterialExpenseBooking() {
               {/* ── 0. Booking Information ─────────────────────────────── */}
               <div className="space-y-4">
                 <SectionHeader label="Booking Information" />
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  <Field label="Booking Date" required>
-                    <Input
-                      type="date"
-                      value={form.bookingDate}
-                      onChange={(e) => set("bookingDate", e.target.value)}
-                    />
-                  </Field>
-                  <Field label="Due Date">
-                    <Input
-                      type="date"
-                      value={form.dueDate}
-                      onChange={(e) => set("dueDate", e.target.value)}
-                    />
-                  </Field>
-                  <Field
-                    label="Financial Year"
-                    hint={
-                      selectedTod
-                        ? "Changing year updates the booking reference number"
-                        : undefined
-                    }
-                  >
-                    <Select
-                      value={form.financialYear}
-                      onValueChange={(v) => set("financialYear", v)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select year…" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {activeFinYears.map((fy) => (
-                          <SelectItem key={fy.id} value={fy.year}>
-                            {fy.year}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <Field label="Company" required>
                     <Select
@@ -1894,6 +1854,46 @@ export default function MaterialExpenseBooking() {
                         {projectOptions.map((p) => (
                           <SelectItem key={p.id} value={String(p.id)}>
                             {p.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <Field label="Booking Date" required>
+                    <Input
+                      type="date"
+                      value={form.bookingDate}
+                      onChange={(e) => set("bookingDate", e.target.value)}
+                    />
+                  </Field>
+                  <Field label="Due Date">
+                    <Input
+                      type="date"
+                      value={form.dueDate}
+                      onChange={(e) => set("dueDate", e.target.value)}
+                    />
+                  </Field>
+                  <Field
+                    label="Financial Year"
+                    hint={
+                      selectedTod
+                        ? "Changing year updates the booking reference number"
+                        : undefined
+                    }
+                  >
+                    <Select
+                      value={form.financialYear}
+                      onValueChange={(v) => set("financialYear", v)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select year…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {activeFinYears.map((fy) => (
+                          <SelectItem key={fy.id} value={fy.year}>
+                            {fy.year}
                           </SelectItem>
                         ))}
                       </SelectContent>

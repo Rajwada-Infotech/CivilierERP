@@ -147,6 +147,7 @@ interface GRNRef {
   SupplierName?: string;
   PONumber?: string;
   Status?: string;
+  ProjectName?: string;
 }
 
 interface PaymentRecord {
@@ -159,6 +160,7 @@ interface PaymentRecord {
   bankName: string;
   project: string;
   company: string;
+  projectSite: string;
   expenseRef: string;
   expenseId: string;
   docNo: string;
@@ -1349,13 +1351,23 @@ const Payment: React.FC = () => {
           parentDocNo,
           rootExBDocNo: parentDocNo,
           project: selectedOption.projectName || "",
-          company: String(selectedOption.companyId ?? ""),
+          company:
+            selectedOption.companyName ||
+            String(selectedOption.companyId ?? ""),
           amount: selectedOption.amount ?? null,
           docType: `EMI-${padded}`,
         }));
         if (selectedOption.expenseBookingId) {
           fetchExpenseGRNs(String(selectedOption.expenseBookingId))
-            .then(setLinkedGRNs)
+            .then((grns) => {
+              setLinkedGRNs(grns);
+              if (grns.length > 0 && grns[0].ProjectName) {
+                setForm((prev) => ({
+                  ...prev,
+                  projectSite: grns[0].ProjectName!,
+                }));
+              }
+            })
             .catch(() => setLinkedGRNs([]));
         }
         return;
@@ -1374,7 +1386,8 @@ const Payment: React.FC = () => {
           parentDocNo,
           rootExBDocNo,
           project: detail.EProjectName || "",
-          company: String(detail.ECompanyId ?? ""),
+          company:
+            (detail as any).ECompanyName || String(detail.ECompanyId ?? ""),
           amount: detail.ENetAmount ?? detail.EAmount ?? null,
           docType: detail.DocTypeName || detail.EDocumentType || "",
           baseAmount: detail.EAmount ?? null,
@@ -1384,6 +1397,9 @@ const Payment: React.FC = () => {
         }));
         const grns = await fetchExpenseGRNs(expenseId);
         setLinkedGRNs(grns);
+        if (grns.length > 0 && grns[0].ProjectName) {
+          setForm((prev) => ({ ...prev, projectSite: grns[0].ProjectName! }));
+        }
       } catch {
         toast.error("Could not load expense booking details.");
       } finally {
@@ -1694,19 +1710,7 @@ const Payment: React.FC = () => {
                 )}
 
                 {form.expenseRef && (
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-1">
-                    <Field label="Project / Site">
-                      <div className="flex items-center gap-2">
-                        <FolderKanban
-                          size={13}
-                          className="text-muted-foreground shrink-0"
-                        />
-                        <ReadOnlyField
-                          value={form.project}
-                          placeholder="From expense booking"
-                        />
-                      </div>
-                    </Field>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-1">
                     <Field label="Company">
                       <div className="flex items-center gap-2">
                         <Building2
@@ -1715,6 +1719,30 @@ const Payment: React.FC = () => {
                         />
                         <ReadOnlyField
                           value={form.company}
+                          placeholder="From expense booking"
+                        />
+                      </div>
+                    </Field>
+                    <Field label="Project / Site">
+                      <div className="flex items-center gap-2">
+                        <FolderKanban
+                          size={13}
+                          className="text-muted-foreground shrink-0"
+                        />
+                        <ReadOnlyField
+                          value={form.projectSite}
+                          placeholder="From linked GRN"
+                        />
+                      </div>
+                    </Field>
+                    <Field label="Supplier / Party">
+                      <div className="flex items-center gap-2">
+                        <FolderKanban
+                          size={13}
+                          className="text-muted-foreground shrink-0"
+                        />
+                        <ReadOnlyField
+                          value={form.project}
                           placeholder="From expense booking"
                         />
                       </div>
