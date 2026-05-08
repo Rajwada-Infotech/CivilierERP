@@ -21,20 +21,31 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
     const offset = (page - 1) * limit;
+    const supplier = req.query.supplier ? req.query.supplier.trim() : "";
 
-    const countResult = await pool
-      .request()
-      .query("SELECT COUNT(*) AS total FROM dbo.NewPayment");
+    const whereClause = supplier ? "WHERE PPaymentName LIKE @supplier" : "";
+
+    const request = pool.request();
+    if (supplier) request.input("supplier", sql.NVarChar(200), `%${supplier}%`);
+
+    const countResult = await request.query(
+      `SELECT COUNT(*) AS total FROM dbo.NewPayment ${whereClause}`,
+    );
     const total = parseInt(countResult.recordset[0].total);
 
-    const result = await pool
+    const dataRequest = pool
       .request()
       .input("offset", sql.Int, offset)
-      .input("limit", sql.Int, limit).query(`
-        SELECT * FROM dbo.NewPayment
-        ORDER BY PPaymentID DESC
-        OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
-      `);
+      .input("limit", sql.Int, limit);
+    if (supplier)
+      dataRequest.input("supplier", sql.NVarChar(200), `%${supplier}%`);
+
+    const result = await dataRequest.query(`
+      SELECT * FROM dbo.NewPayment
+      ${whereClause}
+      ORDER BY PPaymentID DESC
+      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+    `);
 
     res.json({
       data: result.recordset,
