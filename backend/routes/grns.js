@@ -7,6 +7,8 @@ const { getPool, sql } = require("../db");
 const {
   lockNextDocNumber,
   backPatchRecordId,
+  resolveDocTypeId,
+  resolveGRNPrefix,
 } = require("../utils/docNumberLock");
 
 const requireUserEmail = (req, res) => {
@@ -272,6 +274,8 @@ router.post("/", async (req, res) => {
     docTypeId,
     docNo,
     finYear,
+    parentDocNo = null, // DocNo of the parent PO or WO
+    rootExBDocNo = null, // Root ExB DocNo when raised under Expense Booking
   } = req.body;
 
   if (!grnDate || !supplierId) {
@@ -287,14 +291,29 @@ router.post("/", async (req, res) => {
     await transaction.begin();
 
     let finalDocNo = grnNo || docNo || null;
+    let resolvedDocTypeId = docTypeId ? parseInt(docTypeId, 10) : null;
 
-    if (docTypeId) {
+    // ── Auto-resolve GRN prefix from parent chain ────────────────────────────
+    // If no explicit docTypeId was passed but we have a parentDocNo, derive the
+    // correct prefix automatically:
+    //   parent starts with ExB-PO-  →  ExB-PO-GRN
+    //   parent starts with ExB-WO-  →  ExB-WO-GRN
+    //   parent starts with ExB-     →  ExB-GRN
+    //   otherwise                   →  GRN
+    if (!resolvedDocTypeId && parentDocNo) {
+      const grnPrefix = resolveGRNPrefix(parentDocNo);
+      resolvedDocTypeId = await resolveDocTypeId(pool, sql, grnPrefix);
+    }
+
+    if (resolvedDocTypeId) {
       finalDocNo = await lockNextDocNumber(pool, sql, {
-        docTypeId: parseInt(docTypeId, 10),
+        docTypeId: resolvedDocTypeId,
         finYear,
         tableName: "GoodsReceiptNotes",
         docNoColumn: "GRNNo",
         issuedBy: req.user?.email || req.user?.name || null,
+        parentDocNo,
+        rootExBDocNo,
       });
     } else if (!finalDocNo) {
       const seqResult = await pool
@@ -308,6 +327,13 @@ router.post("/", async (req, res) => {
       finalDocNo = fy ? `CI/REC/${padded}/${fy}` : `CI/REC/${padded}`;
     }
 
+    // Parse year + serial for storage
+    const parts = (finalDocNo || "").split("-");
+    const docYear =
+      parts.length >= 2 ? parseInt(parts[parts.length - 2], 10) || null : null;
+    const docSerial =
+      parts.length >= 1 ? parseInt(parts[parts.length - 1], 10) || null : null;
+
     const grnResult = await transaction
       .request()
       .input("GRNNo", sql.NVarChar(50), finalDocNo)
@@ -317,20 +343,28 @@ router.post("/", async (req, res) => {
       .input("GRNItems", sql.NVarChar(sql.MAX), JSON.stringify(grnItems || []))
       .input("Status", sql.NVarChar(50), status || "Draft")
       .input("Remarks", sql.NVarChar(sql.MAX), remarks || null)
-      .input("DocTypeId", sql.Int, docTypeId ? parseInt(docTypeId, 10) : null)
+      .input("DocTypeId", sql.Int, resolvedDocTypeId || null)
       .input("DocNo", sql.NVarChar(100), finalDocNo)
+      .input("DocYear", sql.SmallInt, docYear)
+      .input("DocSerial", sql.Int, docSerial)
+      .input("ParentDocNo", sql.NVarChar(100), parentDocNo)
+      .input("RootExBDocNo", sql.NVarChar(100), rootExBDocNo)
       .input("TotalAmount", sql.Decimal(18, 2), computeGRNTotal(grnItems))
       .input("CreatedDate", sql.DateTime2, new Date()).query(`
         INSERT INTO GoodsReceiptNotes
-          (GRNNo, GRNDate, SupplierID, POID, GRNItems, Status, Remarks, DocTypeId, DocNo, TotalAmount, CreatedDate)
+          (GRNNo, GRNDate, SupplierID, POID, GRNItems, Status, Remarks,
+           DocTypeId, DocNo, DocYear, DocSerial, ParentDocNo, RootExBDocNo,
+           TotalAmount, CreatedDate)
         OUTPUT INSERTED.GRNID
         VALUES
-          (@GRNNo, @GRNDate, @SupplierID, @POID, @GRNItems, @Status, @Remarks, @DocTypeId, @DocNo, @TotalAmount, @CreatedDate)
+          (@GRNNo, @GRNDate, @SupplierID, @POID, @GRNItems, @Status, @Remarks,
+           @DocTypeId, @DocNo, @DocYear, @DocSerial, @ParentDocNo, @RootExBDocNo,
+           @TotalAmount, @CreatedDate)
       `);
 
     const grnId = grnResult.recordset[0].GRNID;
 
-    if (docTypeId && finalDocNo) {
+    if (resolvedDocTypeId && finalDocNo) {
       await backPatchRecordId(
         pool,
         sql,
