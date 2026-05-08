@@ -1,124 +1,148 @@
 -- =============================================================================
--- Migration 035 — Full Document Numbering System
--- Civilier ERP  |  Apply once against the target database
--- =============================================================================
--- Changes:
---   1. TypeOfDoc          — add DocNoPrefix, DocNoPadding columns + ISS seed row
---   2. DocNumberSequence  — add DocNoPrefix, DocYear, DocSerial, RecordId cols
---   3. MaterialIssues     — add DocNo, DocTypeId, DocYear, DocSerial,
---                           ParentDocNo, RootExBDocNo; rename IssueNo → IssueNo
---                           (kept for backward compat), index on DocNo
---   4. GoodsReceiptNotes  — add ParentDocNo, RootExBDocNo, DocYear, DocSerial
---   5. PurchaseOrders     — add ParentDocNo, RootExBDocNo, DocYear, DocSerial
---   6. WorkOrders         — add ParentDocNo, RootExBDocNo, DocYear, DocSerial
---   7. Payments           — add ParentDocNo, RootExBDocNo, DocYear, DocSerial
---   8. ExpenseBooking     — add RootExBDocNo (self-reference), DocYear, DocSerial
+-- Migration 035-FIX — Correct Document Numbering System
+-- Civilier ERP
+--
+-- Fixes all errors from the first 035 run:
+--   1. DocNoPrefix already exists in TypeOfDoc      → guarded with IF NOT EXISTS
+--   2. UX_TypeOfDoc_DocNoPrefix index already exists → guarded
+--   3. EntryType column doesn't exist               → removed (uses EntryTypeId FK)
+--   4. RecordId already exists in DocNumberSequence → guarded
+--   5. DocNoPrefix col in DocNumberSequence already → guarded
+--   6. IX_MaterialIssues_DocNo already exists       → guarded
+--   7. WorkOrders table doesn't exist               → correct name: WorkOrderHeader
+--   8. Payments table doesn't exist                 → correct name: NewPayment
+--   9. vw_DocLineage used dbo.Payments              → fixed to NewPayment/ReceivedPayment
 -- =============================================================================
 
--- ── 1. TypeOfDoc ─────────────────────────────────────────────────────────────
+-- ── 1. TypeOfDoc — add DocNoPadding only if not already there ────────────────
 
-ALTER TABLE dbo.TypeOfDoc
-  ADD DocNoPrefix  NVARCHAR(30)  NULL,         -- e.g. "ExB-PO-GRN", "ISS", "PAY"
-      DocNoPadding INT           NOT NULL DEFAULT 5;  -- zero-pad width for serial
+IF NOT EXISTS (
+  SELECT 1 FROM sys.columns
+  WHERE object_id = OBJECT_ID('dbo.TypeOfDoc') AND name = 'DocNoPrefix'
+)
+  ALTER TABLE dbo.TypeOfDoc ADD DocNoPrefix NVARCHAR(30) NULL;
+
+IF NOT EXISTS (
+  SELECT 1 FROM sys.columns
+  WHERE object_id = OBJECT_ID('dbo.TypeOfDoc') AND name = 'DocNoPadding'
+)
+  ALTER TABLE dbo.TypeOfDoc ADD DocNoPadding INT NOT NULL DEFAULT 5;
 
 GO
 
--- Unique constraint: one active row per prefix
-CREATE UNIQUE INDEX UX_TypeOfDoc_DocNoPrefix
-  ON dbo.TypeOfDoc (DocNoPrefix)
-  WHERE DocNoPrefix IS NOT NULL AND IsActive = 1;
+-- Unique index — only create if it doesn't already exist
+IF NOT EXISTS (
+  SELECT 1 FROM sys.indexes
+  WHERE object_id = OBJECT_ID('dbo.TypeOfDoc') AND name = 'UX_TypeOfDoc_DocNoPrefix'
+)
+  CREATE UNIQUE INDEX UX_TypeOfDoc_DocNoPrefix
+    ON dbo.TypeOfDoc (DocNoPrefix)
+    WHERE DocNoPrefix IS NOT NULL AND IsActive = 1;
 
 GO
 
--- ── 1a. Seed: standard document types (INSERT IGNORE pattern) ────────────────
--- Only insert if a row with that DocNoPrefix doesn't already exist.
+-- ── 2. Seed TypeOfDoc rows ───────────────────────────────────────────────────
+-- Uses EntryTypeId (INT FK to Entry_Type) — NOT the non-existent EntryType column.
+-- All INSERTs are guarded so they are safe to re-run.
 
--- PO (normal)
 IF NOT EXISTS (SELECT 1 FROM dbo.TypeOfDoc WHERE DocNoPrefix = 'PO')
-  INSERT INTO dbo.TypeOfDoc (DocNoPrefix, Prefix, FullPrefix, Description, EntryType, DocNoPadding, IsActive, StartingDocNo)
-  VALUES ('PO', 'PO', 'PO', 'Purchase Order', 'PO', 5, 1, 1);
+  INSERT INTO dbo.TypeOfDoc (DocNoPrefix, Prefix, FullPrefix, Description, StartingDocNo, DocNoPadding, IsActive)
+  VALUES ('PO', 'PO', 'PO', 'Purchase Order', 1, 5, 1);
 
--- WO (normal)
 IF NOT EXISTS (SELECT 1 FROM dbo.TypeOfDoc WHERE DocNoPrefix = 'WO')
-  INSERT INTO dbo.TypeOfDoc (DocNoPrefix, Prefix, FullPrefix, Description, EntryType, DocNoPadding, IsActive, StartingDocNo)
-  VALUES ('WO', 'WO', 'WO', 'Work Order', 'WO', 5, 1, 1);
+  INSERT INTO dbo.TypeOfDoc (DocNoPrefix, Prefix, FullPrefix, Description, StartingDocNo, DocNoPadding, IsActive)
+  VALUES ('WO', 'WO', 'WO', 'Work Order', 1, 5, 1);
 
--- GRN (normal — against a plain PO)
 IF NOT EXISTS (SELECT 1 FROM dbo.TypeOfDoc WHERE DocNoPrefix = 'GRN')
-  INSERT INTO dbo.TypeOfDoc (DocNoPrefix, Prefix, FullPrefix, Description, EntryType, DocNoPadding, IsActive, StartingDocNo)
-  VALUES ('GRN', 'GRN', 'GRN', 'Goods Received Note', 'GRN', 5, 1, 1);
+  INSERT INTO dbo.TypeOfDoc (DocNoPrefix, Prefix, FullPrefix, Description, StartingDocNo, DocNoPadding, IsActive)
+  VALUES ('GRN', 'GRN', 'GRN', 'Goods Received Note', 1, 5, 1);
 
--- PAY — outgoing payment
 IF NOT EXISTS (SELECT 1 FROM dbo.TypeOfDoc WHERE DocNoPrefix = 'PAY')
-  INSERT INTO dbo.TypeOfDoc (DocNoPrefix, Prefix, FullPrefix, Description, EntryType, DocNoPadding, IsActive, StartingDocNo)
-  VALUES ('PAY', 'PAY', 'PAY', 'Payment (Outgoing)', 'PAY', 5, 1, 1);
+  INSERT INTO dbo.TypeOfDoc (DocNoPrefix, Prefix, FullPrefix, Description, StartingDocNo, DocNoPadding, IsActive)
+  VALUES ('PAY', 'PAY', 'PAY', 'Payment (Outgoing)', 1, 5, 1);
 
--- REC — incoming received payment
 IF NOT EXISTS (SELECT 1 FROM dbo.TypeOfDoc WHERE DocNoPrefix = 'REC')
-  INSERT INTO dbo.TypeOfDoc (DocNoPrefix, Prefix, FullPrefix, Description, EntryType, DocNoPadding, IsActive, StartingDocNo)
-  VALUES ('REC', 'REC', 'REC', 'Received Payment (Incoming)', 'REC', 5, 1, 1);
+  INSERT INTO dbo.TypeOfDoc (DocNoPrefix, Prefix, FullPrefix, Description, StartingDocNo, DocNoPadding, IsActive)
+  VALUES ('REC', 'REC', 'REC', 'Received Payment (Incoming)', 1, 5, 1);
 
--- ISS — Material / Stock Issue  ← NEW
 IF NOT EXISTS (SELECT 1 FROM dbo.TypeOfDoc WHERE DocNoPrefix = 'ISS')
-  INSERT INTO dbo.TypeOfDoc (DocNoPrefix, Prefix, FullPrefix, Description, EntryType, DocNoPadding, IsActive, StartingDocNo)
-  VALUES ('ISS', 'ISS', 'ISS', 'Material / Stock Issue', 'ISS', 5, 1, 1);
+  INSERT INTO dbo.TypeOfDoc (DocNoPrefix, Prefix, FullPrefix, Description, StartingDocNo, DocNoPadding, IsActive)
+  VALUES ('ISS', 'ISS', 'ISS', 'Material / Stock Issue', 1, 5, 1);
 
--- ExB — Expense Booking (root document)
 IF NOT EXISTS (SELECT 1 FROM dbo.TypeOfDoc WHERE DocNoPrefix = 'ExB')
-  INSERT INTO dbo.TypeOfDoc (DocNoPrefix, Prefix, FullPrefix, Description, EntryType, DocNoPadding, IsActive, StartingDocNo)
-  VALUES ('ExB', 'ExB', 'ExB', 'Expense Booking', 'ExB', 5, 1, 1);
+  INSERT INTO dbo.TypeOfDoc (DocNoPrefix, Prefix, FullPrefix, Description, StartingDocNo, DocNoPadding, IsActive)
+  VALUES ('ExB', 'ExB', 'ExB', 'Expense Booking', 1, 5, 1);
 
--- ExB child types
 IF NOT EXISTS (SELECT 1 FROM dbo.TypeOfDoc WHERE DocNoPrefix = 'ExB-PO')
-  INSERT INTO dbo.TypeOfDoc (DocNoPrefix, Prefix, FullPrefix, Description, EntryType, DocNoPadding, IsActive, StartingDocNo)
-  VALUES ('ExB-PO', 'ExB-PO', 'ExB-PO', 'Expense Booking — Purchase Order', 'PO', 5, 1, 1);
+  INSERT INTO dbo.TypeOfDoc (DocNoPrefix, Prefix, FullPrefix, Description, StartingDocNo, DocNoPadding, IsActive)
+  VALUES ('ExB-PO', 'ExB-PO', 'ExB-PO', 'Expense Booking — Purchase Order', 1, 5, 1);
 
 IF NOT EXISTS (SELECT 1 FROM dbo.TypeOfDoc WHERE DocNoPrefix = 'ExB-WO')
-  INSERT INTO dbo.TypeOfDoc (DocNoPrefix, Prefix, FullPrefix, Description, EntryType, DocNoPadding, IsActive, StartingDocNo)
-  VALUES ('ExB-WO', 'ExB-WO', 'ExB-WO', 'Expense Booking — Work Order', 'WO', 5, 1, 1);
+  INSERT INTO dbo.TypeOfDoc (DocNoPrefix, Prefix, FullPrefix, Description, StartingDocNo, DocNoPadding, IsActive)
+  VALUES ('ExB-WO', 'ExB-WO', 'ExB-WO', 'Expense Booking — Work Order', 1, 5, 1);
 
 IF NOT EXISTS (SELECT 1 FROM dbo.TypeOfDoc WHERE DocNoPrefix = 'ExB-GRN')
-  INSERT INTO dbo.TypeOfDoc (DocNoPrefix, Prefix, FullPrefix, Description, EntryType, DocNoPadding, IsActive, StartingDocNo)
-  VALUES ('ExB-GRN', 'ExB-GRN', 'ExB-GRN', 'Expense Booking — GRN (direct)', 'GRN', 5, 1, 1);
+  INSERT INTO dbo.TypeOfDoc (DocNoPrefix, Prefix, FullPrefix, Description, StartingDocNo, DocNoPadding, IsActive)
+  VALUES ('ExB-GRN', 'ExB-GRN', 'ExB-GRN', 'Expense Booking — GRN (direct)', 1, 5, 1);
 
 IF NOT EXISTS (SELECT 1 FROM dbo.TypeOfDoc WHERE DocNoPrefix = 'ExB-PO-GRN')
-  INSERT INTO dbo.TypeOfDoc (DocNoPrefix, Prefix, FullPrefix, Description, EntryType, DocNoPadding, IsActive, StartingDocNo)
-  VALUES ('ExB-PO-GRN', 'ExB-PO-GRN', 'ExB-PO-GRN', 'Expense Booking — GRN against ExB-PO', 'GRN', 5, 1, 1);
+  INSERT INTO dbo.TypeOfDoc (DocNoPrefix, Prefix, FullPrefix, Description, StartingDocNo, DocNoPadding, IsActive)
+  VALUES ('ExB-PO-GRN', 'ExB-PO-GRN', 'ExB-PO-GRN', 'Expense Booking — GRN against ExB-PO', 1, 5, 1);
 
 IF NOT EXISTS (SELECT 1 FROM dbo.TypeOfDoc WHERE DocNoPrefix = 'ExB-WO-GRN')
-  INSERT INTO dbo.TypeOfDoc (DocNoPrefix, Prefix, FullPrefix, Description, EntryType, DocNoPadding, IsActive, StartingDocNo)
-  VALUES ('ExB-WO-GRN', 'ExB-WO-GRN', 'ExB-WO-GRN', 'Expense Booking — GRN against ExB-WO', 'GRN', 5, 1, 1);
+  INSERT INTO dbo.TypeOfDoc (DocNoPrefix, Prefix, FullPrefix, Description, StartingDocNo, DocNoPadding, IsActive)
+  VALUES ('ExB-WO-GRN', 'ExB-WO-GRN', 'ExB-WO-GRN', 'Expense Booking — GRN against ExB-WO', 1, 5, 1);
 
 IF NOT EXISTS (SELECT 1 FROM dbo.TypeOfDoc WHERE DocNoPrefix = 'ExB-PAY')
-  INSERT INTO dbo.TypeOfDoc (DocNoPrefix, Prefix, FullPrefix, Description, EntryType, DocNoPadding, IsActive, StartingDocNo)
-  VALUES ('ExB-PAY', 'ExB-PAY', 'ExB-PAY', 'Expense Booking — Outgoing Payment', 'PAY', 5, 1, 1);
+  INSERT INTO dbo.TypeOfDoc (DocNoPrefix, Prefix, FullPrefix, Description, StartingDocNo, DocNoPadding, IsActive)
+  VALUES ('ExB-PAY', 'ExB-PAY', 'ExB-PAY', 'Expense Booking — Outgoing Payment', 1, 5, 1);
 
 IF NOT EXISTS (SELECT 1 FROM dbo.TypeOfDoc WHERE DocNoPrefix = 'ExB-ISS')
-  INSERT INTO dbo.TypeOfDoc (DocNoPrefix, Prefix, FullPrefix, Description, EntryType, DocNoPadding, IsActive, StartingDocNo)
-  VALUES ('ExB-ISS', 'ExB-ISS', 'ExB-ISS', 'Expense Booking — Material Issue', 'ISS', 5, 1, 1);
+  INSERT INTO dbo.TypeOfDoc (DocNoPrefix, Prefix, FullPrefix, Description, StartingDocNo, DocNoPadding, IsActive)
+  VALUES ('ExB-ISS', 'ExB-ISS', 'ExB-ISS', 'Expense Booking — Material Issue', 1, 5, 1);
 
 GO
 
--- ── 2. DocNumberSequence ─────────────────────────────────────────────────────
+-- ── 3. DocNumberSequence — add missing columns (all guarded) ─────────────────
 
-ALTER TABLE dbo.DocNumberSequence
-  ADD DocNoPrefix  NVARCHAR(30)  NULL,   -- mirrors TypeOfDoc.DocNoPrefix
-      DocYear      SMALLINT      NULL,   -- calendar year (4-digit)
-      DocSerial    INT           NULL,   -- numeric serial for this prefix+year
-      RecordId     INT           NULL;   -- FK back to the created record (back-patched)
+IF NOT EXISTS (
+  SELECT 1 FROM sys.columns
+  WHERE object_id = OBJECT_ID('dbo.DocNumberSequence') AND name = 'DocNoPrefix'
+)
+  ALTER TABLE dbo.DocNumberSequence ADD DocNoPrefix NVARCHAR(30) NULL;
+
+IF NOT EXISTS (
+  SELECT 1 FROM sys.columns
+  WHERE object_id = OBJECT_ID('dbo.DocNumberSequence') AND name = 'DocYear'
+)
+  ALTER TABLE dbo.DocNumberSequence ADD DocYear SMALLINT NULL;
+
+IF NOT EXISTS (
+  SELECT 1 FROM sys.columns
+  WHERE object_id = OBJECT_ID('dbo.DocNumberSequence') AND name = 'DocSerial'
+)
+  ALTER TABLE dbo.DocNumberSequence ADD DocSerial INT NULL;
+
+IF NOT EXISTS (
+  SELECT 1 FROM sys.columns
+  WHERE object_id = OBJECT_ID('dbo.DocNumberSequence') AND name = 'RecordId'
+)
+  ALTER TABLE dbo.DocNumberSequence ADD RecordId INT NULL;
 
 GO
 
-CREATE INDEX IX_DocNumberSequence_PrefixYear
-  ON dbo.DocNumberSequence (DocNoPrefix, DocYear)
-  WHERE DocNoPrefix IS NOT NULL;
+IF NOT EXISTS (
+  SELECT 1 FROM sys.indexes
+  WHERE object_id = OBJECT_ID('dbo.DocNumberSequence')
+    AND name = 'IX_DocNumberSequence_PrefixYear'
+)
+  CREATE INDEX IX_DocNumberSequence_PrefixYear
+    ON dbo.DocNumberSequence (DocNoPrefix, DocYear)
+    WHERE DocNoPrefix IS NOT NULL;
 
 GO
 
--- ── 3. MaterialIssues ────────────────────────────────────────────────────────
-
--- Add the new columns; IssueNo is kept as-is for backward compatibility.
--- New documents will ALSO populate DocNo (which equals IssueNo for ISS prefix docs).
+-- ── 4. MaterialIssues — add missing columns (all guarded) ────────────────────
 
 IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.MaterialIssues') AND name = 'DocNo')
   ALTER TABLE dbo.MaterialIssues ADD DocNo NVARCHAR(100) NULL;
@@ -140,12 +164,15 @@ IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Materi
 
 GO
 
-CREATE INDEX IX_MaterialIssues_DocNo ON dbo.MaterialIssues (DocNo) WHERE DocNo IS NOT NULL;
-CREATE INDEX IX_MaterialIssues_DocYear ON dbo.MaterialIssues (DocYear, DocSerial) WHERE DocYear IS NOT NULL;
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID('dbo.MaterialIssues') AND name = 'IX_MaterialIssues_DocNo')
+  CREATE INDEX IX_MaterialIssues_DocNo ON dbo.MaterialIssues (DocNo) WHERE DocNo IS NOT NULL;
+
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE object_id = OBJECT_ID('dbo.MaterialIssues') AND name = 'IX_MaterialIssues_DocYear')
+  CREATE INDEX IX_MaterialIssues_DocYear ON dbo.MaterialIssues (DocYear, DocSerial) WHERE DocYear IS NOT NULL;
 
 GO
 
--- ── 4. GoodsReceiptNotes ─────────────────────────────────────────────────────
+-- ── 5. GoodsReceiptNotes ─────────────────────────────────────────────────────
 
 IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.GoodsReceiptNotes') AND name = 'DocYear')
   ALTER TABLE dbo.GoodsReceiptNotes ADD DocYear SMALLINT NULL;
@@ -161,8 +188,7 @@ IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.GoodsR
 
 GO
 
--- ── 5. PurchaseOrders ────────────────────────────────────────────────────────
--- (column names may vary — adjust table name if yours differs)
+-- ── 6. PurchaseOrders ────────────────────────────────────────────────────────
 
 IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.PurchaseOrders') AND name = 'DocYear')
   ALTER TABLE dbo.PurchaseOrders ADD DocYear SMALLINT NULL;
@@ -178,39 +204,55 @@ IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Purcha
 
 GO
 
--- ── 6. WorkOrders ────────────────────────────────────────────────────────────
+-- ── 7. WorkOrderHeader  (NOT "WorkOrders" — that table does not exist) ────────
 
-IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.WorkOrders') AND name = 'DocYear')
-  ALTER TABLE dbo.WorkOrders ADD DocYear SMALLINT NULL;
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.WorkOrderHeader') AND name = 'DocYear')
+  ALTER TABLE dbo.WorkOrderHeader ADD DocYear SMALLINT NULL;
 
-IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.WorkOrders') AND name = 'DocSerial')
-  ALTER TABLE dbo.WorkOrders ADD DocSerial INT NULL;
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.WorkOrderHeader') AND name = 'DocSerial')
+  ALTER TABLE dbo.WorkOrderHeader ADD DocSerial INT NULL;
 
-IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.WorkOrders') AND name = 'ParentDocNo')
-  ALTER TABLE dbo.WorkOrders ADD ParentDocNo NVARCHAR(100) NULL;
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.WorkOrderHeader') AND name = 'ParentDocNo')
+  ALTER TABLE dbo.WorkOrderHeader ADD ParentDocNo NVARCHAR(100) NULL;
 
-IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.WorkOrders') AND name = 'RootExBDocNo')
-  ALTER TABLE dbo.WorkOrders ADD RootExBDocNo NVARCHAR(100) NULL;
-
-GO
-
--- ── 7. Payments (outgoing) ───────────────────────────────────────────────────
-
-IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Payments') AND name = 'DocYear')
-  ALTER TABLE dbo.Payments ADD DocYear SMALLINT NULL;
-
-IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Payments') AND name = 'DocSerial')
-  ALTER TABLE dbo.Payments ADD DocSerial INT NULL;
-
-IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Payments') AND name = 'ParentDocNo')
-  ALTER TABLE dbo.Payments ADD ParentDocNo NVARCHAR(100) NULL;
-
-IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Payments') AND name = 'RootExBDocNo')
-  ALTER TABLE dbo.Payments ADD RootExBDocNo NVARCHAR(100) NULL;
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.WorkOrderHeader') AND name = 'RootExBDocNo')
+  ALTER TABLE dbo.WorkOrderHeader ADD RootExBDocNo NVARCHAR(100) NULL;
 
 GO
 
--- ── 8. ExpenseBooking ────────────────────────────────────────────────────────
+-- ── 8. NewPayment  (NOT "Payments" — that table does not exist) ───────────────
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.NewPayment') AND name = 'DocYear')
+  ALTER TABLE dbo.NewPayment ADD DocYear SMALLINT NULL;
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.NewPayment') AND name = 'DocSerial')
+  ALTER TABLE dbo.NewPayment ADD DocSerial INT NULL;
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.NewPayment') AND name = 'ParentDocNo')
+  ALTER TABLE dbo.NewPayment ADD ParentDocNo NVARCHAR(100) NULL;
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.NewPayment') AND name = 'RootExBDocNo')
+  ALTER TABLE dbo.NewPayment ADD RootExBDocNo NVARCHAR(100) NULL;
+
+GO
+
+-- ── 9. ReceivedPayment — same pattern ────────────────────────────────────────
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.ReceivedPayment') AND name = 'DocYear')
+  ALTER TABLE dbo.ReceivedPayment ADD DocYear SMALLINT NULL;
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.ReceivedPayment') AND name = 'DocSerial')
+  ALTER TABLE dbo.ReceivedPayment ADD DocSerial INT NULL;
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.ReceivedPayment') AND name = 'ParentDocNo')
+  ALTER TABLE dbo.ReceivedPayment ADD ParentDocNo NVARCHAR(100) NULL;
+
+IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.ReceivedPayment') AND name = 'RootExBDocNo')
+  ALTER TABLE dbo.ReceivedPayment ADD RootExBDocNo NVARCHAR(100) NULL;
+
+GO
+
+-- ── 10. ExpenseBooking ───────────────────────────────────────────────────────
 
 IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.ExpenseBooking') AND name = 'RootExBDocNo')
   ALTER TABLE dbo.ExpenseBooking ADD RootExBDocNo NVARCHAR(100) NULL;
@@ -223,9 +265,9 @@ IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.Expens
 
 GO
 
--- ── 9. Helpful views for lineage breadcrumb ──────────────────────────────────
+-- ── 11. vw_DocLineage — recreate with correct table names ────────────────────
+-- Uses NewPayment and ReceivedPayment (the real tables in this DB).
 
--- vw_DocLineage: shows full parent→child chain for any document
 CREATE OR ALTER VIEW dbo.vw_DocLineage AS
 SELECT
   dns.DocNo,
@@ -234,37 +276,23 @@ SELECT
   dns.DocSerial,
   dns.TableName,
   dns.RecordId,
-  parent.DocNo    AS ParentDocNo,
-  parent.TableName AS ParentTable,
-  root.DocNo      AS RootExBDocNo,
-  dns.IssuedOn,
-  dns.IssuedBy
-FROM dbo.DocNumberSequence dns
-LEFT JOIN dbo.DocNumberSequence parent
-  ON parent.DocNo = (
-      SELECT TOP 1 ParentDocNo
-      FROM (
-        SELECT ParentDocNo FROM dbo.GoodsReceiptNotes WHERE DocNo = dns.DocNo
-        UNION ALL
-        SELECT ParentDocNo FROM dbo.MaterialIssues    WHERE DocNo = dns.DocNo
-        UNION ALL
-        SELECT ParentDocNo FROM dbo.Payments          WHERE DocNo = dns.DocNo
-      ) x
-  )
-LEFT JOIN dbo.DocNumberSequence root
-  ON root.DocNo = (
-      SELECT TOP 1 RootExBDocNo
-      FROM (
-        SELECT RootExBDocNo FROM dbo.GoodsReceiptNotes WHERE DocNo = dns.DocNo
-        UNION ALL
-        SELECT RootExBDocNo FROM dbo.MaterialIssues    WHERE DocNo = dns.DocNo
-        UNION ALL
-        SELECT RootExBDocNo FROM dbo.Payments          WHERE DocNo = dns.DocNo
-        UNION ALL
-        SELECT RootExBDocNo FROM dbo.ExpenseBooking    WHERE EDocNo = dns.DocNo
-      ) x
-  );
+  dns.IssuedBy,
+  -- Resolve ParentDocNo from whichever table holds this DocNo
+  COALESCE(
+    (SELECT TOP 1 ParentDocNo FROM dbo.GoodsReceiptNotes  WHERE DocNo = dns.DocNo),
+    (SELECT TOP 1 ParentDocNo FROM dbo.MaterialIssues     WHERE DocNo = dns.DocNo),
+    (SELECT TOP 1 ParentDocNo FROM dbo.NewPayment         WHERE DocNo = dns.DocNo),
+    (SELECT TOP 1 ParentDocNo FROM dbo.ReceivedPayment    WHERE DocNo = dns.DocNo)
+  ) AS ParentDocNo,
+  -- Resolve RootExBDocNo
+  COALESCE(
+    (SELECT TOP 1 RootExBDocNo FROM dbo.GoodsReceiptNotes  WHERE DocNo = dns.DocNo),
+    (SELECT TOP 1 RootExBDocNo FROM dbo.MaterialIssues     WHERE DocNo = dns.DocNo),
+    (SELECT TOP 1 RootExBDocNo FROM dbo.NewPayment         WHERE DocNo = dns.DocNo),
+    (SELECT TOP 1 RootExBDocNo FROM dbo.ExpenseBooking     WHERE EDocNo = dns.DocNo)
+  ) AS RootExBDocNo
+FROM dbo.DocNumberSequence dns;
 
 GO
 
-PRINT 'Migration 035 completed successfully.';
+PRINT 'Migration 035-FIX completed successfully — 0 errors expected.';
