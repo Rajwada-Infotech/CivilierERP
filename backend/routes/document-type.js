@@ -4,6 +4,7 @@ const router = express.Router();
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { checkPermission } = require("../middleware/permissions");
+const { previewNextDocNumber } = require("../utils/docNumberLock");
 
 const BYPASS_ROLES = ["admin", "super_admin", "dba", "sa"];
 const bypassOrCheck = (module, subModule, action = "CanView") => [
@@ -21,6 +22,7 @@ const MODULE_KEYWORDS = {
   PO: ["purchase order", "purchase"],
   WO: ["work order"],
   GRN: ["goods receipt", "grn", "goods received"],
+  BOQ: ["boq", "bill of quantities", "bill of quantity", "quantity"],
 };
 
 // ── GET / — list all (or filtered by ?module=PO|WO|GRN) ──────────────────────
@@ -92,6 +94,11 @@ router.get("/:id/next-number", authMiddleware, async (req, res) => {
 
   try {
     const pool = getPool();
+    const preview = await previewNextDocNumber(pool, sql, id, finYear);
+    return res.json({
+      ...preview,
+      finYear: finYear || null,
+    });
 
     // Fetch the doc type config
     const typeResult = await pool.request().input("TypeOfDocId", sql.Int, id)
