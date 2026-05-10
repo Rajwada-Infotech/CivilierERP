@@ -1,16 +1,18 @@
 import { QueryClient } from "@tanstack/react-query";
 
+function shouldRetry(failureCount: number, error: unknown, maxRetries: number) {
+  const status = (error as { status?: number } | null)?.status;
+  if (status === 401 || status === 403 || status === 429) return false;
+  return failureCount < maxRetries;
+}
+
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      // Never retry on 401 (expired session) or 429 (rate limit).
+      // Never retry on 401 (expired session), 403 (forbidden), or 429 (rate limit).
       // Retrying 401s is what causes the request storm visible in the logs —
       // each polling query fires up to 2 extra requests after the token dies.
-      retry: (failureCount, error: any) => {
-        const status = (error as any)?.status ?? (error as Response)?.status;
-        if (status === 401 || status === 429) return false;
-        return failureCount < 2;
-      },
+      retry: (failureCount, error) => shouldRetry(failureCount, error, 2),
       // Always fetch fresh data on mount — if cache is empty the data will load.
       // refetchOnMount: false was the bug: it silently skipped the initial fetch
       // whenever no cached entry existed, leaving dashboards permanently blank.
@@ -20,7 +22,7 @@ export const queryClient = new QueryClient({
       refetchOnWindowFocus: false, // don't hammer the DB on tab-switch
     },
     mutations: {
-      retry: 1,
+      retry: (failureCount, error) => shouldRetry(failureCount, error, 1),
     },
   },
 });

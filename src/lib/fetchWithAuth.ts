@@ -1,11 +1,20 @@
 import { apiUrl } from "./apiBase";
 import { toast } from "sonner";
 
-// Module-level flag: once we have decided to redirect to /login, every
-// subsequent 401 from concurrent in-flight requests is a no-op.
-// A plain module boolean is simpler than sessionStorage and cannot be
-// accidentally cleared by other code during this page-load.
-let _redirectingToLogin = false;
+// Exported so callers can distinguish auth/permission errors from network errors.
+export class ApiError extends Error {
+  status: number;
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+// Dedup key in sessionStorage — survives Vite HMR module re-evaluation
+// (unlike a plain `let`), is cleared when the tab closes, and is not
+// shared across tabs.
+const REDIRECTING_KEY = "__auth_redirecting";
 
 export async function fetchWithAuth(
   url: string,
@@ -13,6 +22,14 @@ export async function fetchWithAuth(
 ): Promise<Response> {
   const token =
     typeof window !== "undefined" ? localStorage.getItem("token") : null;
+
+  // Short-circuit immediately if a redirect is already in flight.
+  if (
+    typeof window !== "undefined" &&
+    sessionStorage.getItem(REDIRECTING_KEY)
+  ) {
+    return new Promise<Response>(() => {}); // intentionally never resolves
+  }
 
   let response: Response;
 
@@ -41,31 +58,28 @@ export async function fetchWithAuth(
   }
 
   if (response.status === 401) {
-    // Only the first 401 in a given session triggers cleanup + redirect.
-    // Every concurrent request that also gets a 401 (the "storm" in the logs)
-    // simply returns a never-resolving promise so the caller is silently
-    // abandoned — no toast spam, no extra navigation pushes, no React
-    // remount loops.
-    if (_redirectingToLogin) {
-      return new Promise<Response>(() => {}); // intentionally never resolves
-    }
-
-    _redirectingToLogin = true;
-
-    if (typeof window !== "undefined") {
+    if (
+      typeof window !== "undefined" &&
+      !sessionStorage.getItem(REDIRECTING_KEY)
+    ) {
+      sessionStorage.setItem(REDIRECTING_KEY, "1");
       toast.error("Session expired. Please login again.");
       localStorage.removeItem("token");
       localStorage.removeItem("user");
-      // Hard navigation so React Router guards re-run from scratch.
       window.location.href = "/login";
     }
-
+    // Never throw — return a hanging promise so every concurrent caller is
+    // silently abandoned. Throwing here causes the 401 storm: callers catch,
+    // set state, React re-renders, contexts remount, new requests fire.
     return new Promise<Response>(() => {}); // caller abandoned; navigation takes over
   }
 
   if (response.status === 403) {
     console.error("Forbidden");
-    throw new Error("You do not have permission to perform this action.");
+    throw new ApiError(
+      "You do not have permission to perform this action.",
+      response.status,
+    );
   }
 
   return response;
