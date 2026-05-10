@@ -11,12 +11,13 @@ async function parseError(res: Response, fallback: string) {
   }
 }
 
-export const getPayments = async (page = 1, limit = 20, supplier = "") => {
+export const getPayments = async (page = 1, limit = 20, supplier = "", company = "") => {
   const params = new URLSearchParams({
     page: String(page),
     limit: String(limit),
   });
   if (supplier) params.set("supplier", supplier);
+  if (company) params.set("company", company);
   const res = await fetchWithAuth(`${BASE_URL}?${params.toString()}`);
   if (!res.ok)
     throw new Error(await parseError(res, `GET failed: ${res.status}`));

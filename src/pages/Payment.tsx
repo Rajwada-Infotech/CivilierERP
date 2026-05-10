@@ -9,6 +9,9 @@ import {
 } from "@/api/newPaymentApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { getBanks } from "@/api/bankMasterApi";
+import { getCompanyById } from "@/api/enterpriseApi";
+import type { CompanyDetail } from "@/api/enterpriseApi";
+import { ExportMenu } from "@/components/ExportMenu";
 import { toast } from "sonner";
 import { formatINR } from "@/utils/formatCurrency";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -22,9 +25,7 @@ import {
   Edit,
   Trash2,
   AlertCircle,
-  Download,
   FileText,
-  FileSpreadsheet,
   ChevronDown,
   Receipt,
   Building2,
@@ -44,8 +45,8 @@ import {
   CalendarClock,
   AlertTriangle,
   Search,
+  Eye,
 } from "lucide-react";
-import { exportToCsv, exportToPdf } from "@/lib/export";
 import type { ExportColumn } from "@/lib/export";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -321,6 +322,14 @@ const deductChequeFromLot = async (
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "Failed to deduct cheque from lot");
   }
+  return res.json();
+};
+
+const fetchCompanyOptions = async (): Promise<
+  { id: number; label: string }[]
+> => {
+  const res = await fetchWithAuth("/api/enterprises/options?business_type=C");
+  if (!res.ok) return [];
   return res.json();
 };
 
@@ -982,58 +991,6 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Status", accessor: "status" },
 ];
 
-function ExportButton({ data }: { data: PaymentRecord[] }) {
-  const [open, setOpen] = useState(false);
-  const ref = React.useRef<HTMLDivElement>(null);
-  React.useEffect(() => {
-    const h = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node))
-        setOpen(false);
-    };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, []);
-  return (
-    <div className="relative" ref={ref}>
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading border border-border bg-card text-muted-foreground hover:text-foreground hover:border-primary/40 transition-all"
-      >
-        <Download size={13} /> Export{" "}
-        <ChevronDown
-          size={11}
-          className={`transition-transform ${open ? "rotate-180" : ""}`}
-        />
-      </button>
-      {open && (
-        <div className="absolute right-0 top-full mt-1 w-44 rounded-lg border border-border bg-card shadow-lg z-50 py-1">
-          <button
-            onClick={() => {
-              exportToCsv(data as any, EXPORT_COLUMNS, "payments");
-              setOpen(false);
-            }}
-            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-          >
-            <FileSpreadsheet size={13} /> Export CSV
-          </button>
-          <button
-            onClick={() => {
-              exportToPdf(data as any, EXPORT_COLUMNS, {
-                title: "Payment Management",
-                filename: "payments",
-              });
-              setOpen(false);
-            }}
-            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-          >
-            <FileText size={13} /> Export PDF
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ─── Mode-specific info banner ─────────────────────────────────────────────────
 
 function ModeInfoBanner({ mode }: { mode: string }) {
@@ -1386,6 +1343,7 @@ const Payment: React.FC = () => {
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [supplierFilter, setSupplierFilter] = useState("");
+  const [companyFilter, setCompanyFilter] = useState("");
   const PAGE_SIZE = 20;
 
   const [view, setView] = useState<"list" | "form">("list");
@@ -1393,6 +1351,7 @@ const Payment: React.FC = () => {
   const [form, setForm] = useState<Omit<PaymentRecord, "id">>(blankForm());
   const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [viewingRec, setViewingRec] = useState<PaymentRecord | null>(null);
   const [loadingExpense, setLoadingExpense] = useState(false);
   const [linkedGRNs, setLinkedGRNs] = useState<GRNRef[]>([]);
   const [supplierBookingFilter, setSupplierBookingFilter] = useState("");
@@ -1400,14 +1359,34 @@ const Payment: React.FC = () => {
   // ── Queries ────────────────────────────────────────────────────────────────
 
   const { data: dbData, isLoading } = useQuery({
-    queryKey: ["payments", page, supplierFilter],
-    queryFn: () => getPayments(page, PAGE_SIZE, supplierFilter),
+    queryKey: ["payments", page, supplierFilter, companyFilter],
+    queryFn: () => getPayments(page, PAGE_SIZE, supplierFilter, companyFilter),
   });
 
   const { data: banks = [] } = useQuery<BankOption[]>({
     queryKey: ["bank-options-payment"],
     queryFn: fetchBankOptions,
   });
+
+  const { data: enterprises = [] } = useQuery<{ id: number; label: string }[]>({
+    queryKey: ["company-options-payment-filter"],
+    queryFn: fetchCompanyOptions,
+  });
+
+  // Companies fetched with business_type=C from enterprise table
+  const companyOptions = enterprises;
+
+  // Fetch full detail (name + logo + address) for the selected company — used in PDF export
+  const { data: selectedCompanyDetail = null } = useQuery<CompanyDetail | null>(
+    {
+      queryKey: ["company-detail-export", companyFilter],
+      queryFn: () =>
+        companyFilter
+          ? getCompanyById(Number(companyFilter))
+          : Promise.resolve(null),
+      enabled: !!companyFilter,
+    },
+  );
 
   const { data: expenseOptions = [] } = useQuery<ExpenseOption[]>({
     queryKey: ["expense-options-payment"],
@@ -1786,7 +1765,25 @@ const Payment: React.FC = () => {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {view === "list" && <ExportButton data={records} />}
+            {view === "list" && (
+              <ExportMenu
+                data={records as unknown as Record<string, unknown>[]}
+                columns={EXPORT_COLUMNS}
+                title="Payment Management"
+                filename="payments"
+                subtitle={
+                  companyFilter
+                    ? `Company: ${companyOptions.find((c) => String(c.id) === companyFilter)?.label || companyFilter}`
+                    : undefined
+                }
+                companyName={
+                  selectedCompanyDetail?.name ||
+                  selectedCompanyDetail?.short_name ||
+                  undefined
+                }
+                logoBase64={selectedCompanyDetail?.logo || undefined}
+              />
+            )}
             {view === "list" && (
               <button
                 onClick={openNew}
@@ -2344,8 +2341,8 @@ const Payment: React.FC = () => {
         {/* ══════════════════════════════════════════════════════════════════ */}
         {view === "list" && (
           <>
-            {/* ── Supplier filter bar ── */}
-            <div className="flex items-center gap-2">
+            {/* ── Supplier + Company filter bar ── */}
+            <div className="flex flex-wrap items-center gap-2">
               <div className="relative flex-1 max-w-xs">
                 <Search
                   size={13}
@@ -2373,13 +2370,64 @@ const Payment: React.FC = () => {
                   </button>
                 )}
               </div>
-              {supplierFilter && (
-                <span className="text-xs text-muted-foreground">
-                  Showing results for{" "}
-                  <span className="font-medium text-foreground">
-                    "{supplierFilter}"
-                  </span>
-                </span>
+
+              {/* Company filter */}
+              <div className="relative">
+                <Building2
+                  size={13}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                />
+                <select
+                  value={companyFilter}
+                  onChange={(e) => {
+                    setCompanyFilter(e.target.value);
+                    setPage(1);
+                  }}
+                  className="appearance-none pl-8 pr-8 py-1.5 rounded-lg border border-border bg-background text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/40 min-w-[160px]"
+                >
+                  <option value="">All Companies</option>
+                  {companyOptions.map((c) => (
+                    <option key={c.id} value={String(c.id)}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown
+                  size={11}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                />
+              </div>
+
+              {/* Active filter chips */}
+              {(supplierFilter || companyFilter) && (
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {supplierFilter && (
+                    <span className="text-xs text-muted-foreground">
+                      "{supplierFilter}"
+                    </span>
+                  )}
+                  {companyFilter &&
+                    (() => {
+                      const co = companyOptions.find(
+                        (c) => String(c.id) === companyFilter,
+                      );
+                      return (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-heading bg-primary/10 text-primary border border-primary/20">
+                          <Building2 size={10} />
+                          {co?.label || companyFilter}
+                          <button
+                            onClick={() => {
+                              setCompanyFilter("");
+                              setPage(1);
+                            }}
+                            className="ml-0.5 text-primary/60 hover:text-destructive transition-colors"
+                          >
+                            <X size={10} />
+                          </button>
+                        </span>
+                      );
+                    })()}
+                </div>
               )}
             </div>
 
@@ -2447,6 +2495,13 @@ const Payment: React.FC = () => {
                               })
                             }
                           />
+                          <button
+                            onClick={() => setViewingRec(rec)}
+                            title="View details"
+                            className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                          >
+                            <Eye size={12} />
+                          </button>
                           <button
                             onClick={() => openEdit(rec)}
                             className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
@@ -2617,6 +2672,13 @@ const Payment: React.FC = () => {
                                 }
                               />
                               <button
+                                onClick={() => setViewingRec(rec)}
+                                title="View details"
+                                className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                              >
+                                <Eye size={12} />
+                              </button>
+                              <button
                                 onClick={() => openEdit(rec)}
                                 className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
                               >
@@ -2678,6 +2740,140 @@ const Payment: React.FC = () => {
           </>
         )}
       </div>
+
+      {/* Payment detail view modal */}
+      {viewingRec && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+          onClick={() => setViewingRec(null)}
+        >
+          <div
+            className="w-full max-w-lg rounded-xl bg-card border border-border shadow-xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30">
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 rounded-lg bg-primary/10">
+                  <Receipt size={15} className="text-primary" />
+                </div>
+                <div>
+                  <h3 className="font-heading font-semibold text-foreground text-sm">
+                    Payment Details
+                  </h3>
+                  {viewingRec.docNo && (
+                    <span className="text-[11px] font-mono text-muted-foreground">
+                      {viewingRec.docNo}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <button
+                onClick={() => setViewingRec(null)}
+                className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                <X size={14} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-5 space-y-4">
+              {/* Status + Mode row */}
+              <div className="flex items-center gap-2">
+                <StatusBadge status={viewingRec.status} />
+                <ModeBadge mode={viewingRec.mode} />
+              </div>
+
+              {/* Grid of fields */}
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { label: "Payment Name", value: viewingRec.paymentName },
+                  { label: "Amount", value: formatINR(viewingRec.amount ?? 0) },
+                  { label: "Date", value: viewingRec.date || "—" },
+                  { label: "Mode", value: viewingRec.mode || "—" },
+                  { label: "Company", value: viewingRec.company || "—" },
+                  { label: "Project", value: viewingRec.project || "—" },
+                  {
+                    label: "Project Site",
+                    value: viewingRec.projectSite || "—",
+                  },
+                  { label: "Expense Ref", value: viewingRec.expenseRef || "—" },
+                  ...(viewingRec.bankName
+                    ? [{ label: "Bank", value: viewingRec.bankName }]
+                    : []),
+                  ...(viewingRec.chequeNo
+                    ? [
+                        {
+                          label: "Cheque No.",
+                          value: `#${viewingRec.chequeNo}`,
+                        },
+                      ]
+                    : []),
+                  ...(viewingRec.chequeDate
+                    ? [{ label: "Cheque Date", value: viewingRec.chequeDate }]
+                    : []),
+                  ...(viewingRec.chequeLotNumber
+                    ? [
+                        {
+                          label: "Cheque Lot",
+                          value: viewingRec.chequeLotNumber,
+                        },
+                      ]
+                    : []),
+                  ...(viewingRec.neftNumber
+                    ? [{ label: "NEFT Ref.", value: viewingRec.neftNumber }]
+                    : []),
+                  ...(viewingRec.upiTransactionId
+                    ? [
+                        {
+                          label: "UPI Txn ID",
+                          value: viewingRec.upiTransactionId,
+                        },
+                      ]
+                    : []),
+                  ...(viewingRec.rtgsReference
+                    ? [{ label: "RTGS Ref.", value: viewingRec.rtgsReference }]
+                    : []),
+                  ...(viewingRec.impsReference
+                    ? [{ label: "IMPS Ref.", value: viewingRec.impsReference }]
+                    : []),
+                  ...(viewingRec.parentDocNo
+                    ? [{ label: "Parent Doc", value: viewingRec.parentDocNo }]
+                    : []),
+                ].map(({ label, value }) => (
+                  <div key={label} className="space-y-0.5">
+                    <p className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+                      {label}
+                    </p>
+                    <p className="text-xs font-medium text-foreground truncate">
+                      {value}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="flex justify-end gap-2 px-5 py-3 border-t border-border bg-muted/20">
+              <button
+                onClick={() => {
+                  setViewingRec(null);
+                  openEdit(viewingRec);
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-foreground hover:bg-muted transition-colors"
+              >
+                <Edit size={12} /> Edit
+              </button>
+              <button
+                onClick={() => setViewingRec(null)}
+                className="px-3 py-1.5 rounded-lg text-xs font-heading font-medium gradient-accent text-white shadow-sm"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Delete confirm */}
       {deleteId && (
