@@ -231,7 +231,21 @@ router.post("/", authenticateToken, async (req, res) => {
 
     const newRecord = result.recordset[0];
 
-    // 5. Back-patch RecordId into DocNumberSequence
+    // 5. Write OUT entry to StockLedger
+    await pool
+      .request()
+      .input("ItemID", sql.NVarChar(50), ItemId)
+      .input("Qty", sql.Decimal(18, 2), Number(Quantity))
+      .input("UOM", sql.NVarChar(20), UOMId || null)
+      .input("Type", sql.NVarChar(10), "OUT")
+      .input("RefType", sql.NVarChar(20), "ISS")
+      .input("RefID", sql.Int, newRecord.IssueId)
+      .input("DocNo", sql.NVarChar(100), docNo).query(`
+        INSERT INTO dbo.StockLedger (ItemID, Qty, UOM, Type, RefType, RefID, DocNo, CreatedDate)
+        VALUES (@ItemID, @Qty, @UOM, @Type, @RefType, @RefID, @DocNo, GETDATE())
+      `);
+
+    // 6. Back-patch RecordId into DocNumberSequence
     await backPatchRecordId(
       pool,
       sql,

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { SummaryCards } from "@/components/reports/SummaryCards";
@@ -8,7 +9,7 @@ import { CashFlowChart } from "@/components/reports/CashFlowChart";
 import { TopPartiesTable } from "@/components/reports/TopPartiesTable";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
-import { getEnterprises, type Enterprise } from "@/api/enterpriseApi";
+import { getCompanyById } from "@/api/enterpriseApi";
 import {
   Building2,
   Calendar,
@@ -136,8 +137,6 @@ const Reports: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [enterprise, setEnterprise] = useState<Enterprise | null>(null);
-
   const [companies, setCompanies] = useState<CompanyOption[]>([]);
   const [finYears, setFinYears] = useState<FinYearOption[]>([]);
   const [companyId, setCompanyId] = useState("");
@@ -151,6 +150,13 @@ const Reports: React.FC = () => {
   const [fyMonth, setFyMonth] = useState("");
   const [fyDay, setFyDay] = useState("");
 
+  // Fetch full company detail (name + logo) for export when a company is filtered
+  const { data: selectedCompanyDetail = null } = useQuery({
+    queryKey: ["company-detail-reports", companyId],
+    queryFn: () => (companyId ? getCompanyById(Number(companyId)) : Promise.resolve(null)),
+    enabled: !!companyId,
+  });
+
   useEffect(() => {
     fetchWithAuth("/api/reports/companies")
       .then((r) => r.json())
@@ -159,12 +165,6 @@ const Reports: React.FC = () => {
     fetchWithAuth("/api/fin-year")
       .then((r) => r.json())
       .then((l: FinYearOption[]) => setFinYears(Array.isArray(l) ? l : []))
-      .catch(() => {});
-    // Fetch enterprise master for company name + logo
-    getEnterprises()
-      .then((list) => {
-        if (list.length > 0) setEnterprise(list[0]);
-      })
       .catch(() => {});
   }, []);
 
@@ -280,34 +280,42 @@ const Reports: React.FC = () => {
   const TOP_PARTIES_COLUMNS: ExportColumn[] = [
     { header: "Party Name", accessor: "name" },
     { header: "Transactions", accessor: "txns" },
-    { header: "Total (₹)", accessor: "total" },
+    { header: "Total (Rs.)", accessor: (r) => fmt(Number(r.total)) },
   ];
+
+  // ── Summary section: key metrics ──────────────────────────────────────────
   const SUMMARY_COLUMNS: ExportColumn[] = [
     { header: "Metric", accessor: "metric" },
     { header: "Value", accessor: "value" },
   ];
   const summaryRows: Record<string, unknown>[] = data
     ? [
-        { metric: "Total Income (Rs.)", value: fmt(data.summary.totalIncome) },
-        {
-          metric: "Total Expenses (Rs.)",
-          value: fmt(data.summary.totalExpenses),
-        },
-        { metric: "Net Profit (Rs.)", value: fmt(data.summary.netProfit) },
-        { metric: "Total Transactions", value: data.summary.transactionCount },
-        { metric: "", value: "" },
-        { metric: "-- Monthly Breakdown --", value: "" },
-        ...data.charts.monthly.map((m) => ({
-          metric: m.month,
-          value: `Income: ${fmt(m.income)} | Expense: ${fmt(m.expense)}`,
-        })),
-        { metric: "", value: "" },
-        { metric: "-- Top Parties --", value: "" },
-        ...data.topParties.map((p, i) => ({
-          metric: `${i + 1}. ${p.name}`,
-          value: `${p.txns} txns - ${fmt(p.total)}`,
-        })),
+        { metric: "Total Income", value: fmt(data.summary.totalIncome) },
+        { metric: "Total Expenses", value: fmt(data.summary.totalExpenses) },
+        { metric: "Net Profit", value: fmt(data.summary.netProfit) },
+        { metric: "Total Transactions", value: String(data.summary.transactionCount) },
       ]
+    : [];
+
+  // ── Monthly breakdown: proper columns ─────────────────────────────────────
+  const MONTHLY_COLUMNS: ExportColumn[] = [
+    { header: "Month", accessor: "month" },
+    { header: "Income (Rs.)", accessor: "income" },
+    { header: "Expense (Rs.)", accessor: "expense" },
+    { header: "Net (Rs.)", accessor: "net" },
+  ];
+  const monthlyRows: Record<string, unknown>[] = data
+    ? data.charts.monthly.map((m) => ({
+        month: m.month,
+        income: fmt(m.income),
+        expense: fmt(m.expense),
+        net: fmt(m.income - m.expense),
+      }))
+    : [];
+
+  // ── Top parties: formatted totals ─────────────────────────────────────────
+  const topPartiesRows: Record<string, unknown>[] = data
+    ? data.topParties.map((p) => ({ name: p.name, txns: p.txns, total: p.total }))
     : [];
 
   return (
@@ -317,26 +325,10 @@ const Reports: React.FC = () => {
       {/* Header */}
       <div className="flex items-center justify-between mb-5">
         <div className="flex items-center gap-3">
-          {/* Enterprise logo */}
-          {enterprise?.logo && (
-            <img
-              src={enterprise.logo}
-              alt={enterprise.name ?? "Company logo"}
-              className="h-10 w-10 rounded-lg object-contain border border-border bg-white p-0.5"
-            />
-          )}
-          <div
-            className="p-2 rounded-lg bg-primary/10 border border-primary/20"
-            style={enterprise?.logo ? { display: "none" } : {}}
-          >
+          <div className="p-2 rounded-lg bg-primary/10 border border-primary/20">
             <BarChart3 size={18} className="text-primary" />
           </div>
           <div>
-            {enterprise?.name && (
-              <p className="text-[11px] font-semibold text-primary leading-tight mb-0.5">
-                {enterprise.name}
-              </p>
-            )}
             <h1 className="text-xl font-heading font-bold text-foreground leading-tight">
               Reports
             </h1>
@@ -347,15 +339,26 @@ const Reports: React.FC = () => {
         </div>
         <div className="flex items-center gap-2">
           {data && (
-            <ExportMenu
-              data={summaryRows}
-              columns={SUMMARY_COLUMNS}
-              title="Financial Reports Summary"
-              filename="reports-summary"
-              subtitle={`Income: ${fmt(data.summary.totalIncome)} · Expenses: ${fmt(data.summary.totalExpenses)} · Net: ${fmt(data.summary.netProfit)}`}
-              companyName={enterprise?.name ?? undefined}
-              logoBase64={enterprise?.logo ?? undefined}
-            />
+            <>
+              <ExportMenu
+                data={summaryRows}
+                columns={SUMMARY_COLUMNS}
+                title="Financial Summary"
+                filename="reports-summary"
+                subtitle={`Income: ${fmt(data.summary.totalIncome)} · Expenses: ${fmt(data.summary.totalExpenses)} · Net: ${fmt(data.summary.netProfit)}`}
+                companyName={selectedCompanyDetail?.name ?? undefined}
+                logoBase64={selectedCompanyDetail?.logo ?? undefined}
+              />
+              <ExportMenu
+                data={monthlyRows}
+                columns={MONTHLY_COLUMNS}
+                title="Monthly Breakdown"
+                filename="reports-monthly"
+                disabled={monthlyRows.length === 0}
+                companyName={selectedCompanyDetail?.name ?? undefined}
+                logoBase64={selectedCompanyDetail?.logo ?? undefined}
+              />
+            </>
           )}
           <button
             onClick={() => setSidebarOpen((s) => !s)}
@@ -541,11 +544,13 @@ const Reports: React.FC = () => {
                   <TopPartiesTable parties={data.topParties} />
                   <div className="absolute top-4 right-4">
                     <ExportMenu
-                      data={data.topParties as Record<string, unknown>[]}
+                      data={topPartiesRows}
                       columns={TOP_PARTIES_COLUMNS}
                       title="Top Parties by Volume"
                       filename="top-parties"
-                      disabled={data.topParties.length === 0}
+                      disabled={topPartiesRows.length === 0}
+                      companyName={selectedCompanyDetail?.name ?? undefined}
+                      logoBase64={selectedCompanyDetail?.logo ?? undefined}
                     />
                   </div>
                 </div>

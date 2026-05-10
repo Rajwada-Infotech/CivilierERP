@@ -1,504 +1,812 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+/**
+ * Brs.tsx — Bank Reconciliation Statement
+ *
+ * Pulls all payments (outgoing NewPayment + incoming ReceivedPayment) that are
+ * linked to a bank account and lets the user tick them as "Clear" (verified in
+ * passbook) or leave them as "Unclear". Supports:
+ *   • Date-range filter (from / to)
+ *   • Clear / Unclear status filter
+ *   • Company filter
+ *   • Bank filter
+ *   • Export (PDF / XLSX / CSV) via ExportMenu
+ */
+
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+} from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
-import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
+import { ExportMenu } from "@/components/ExportMenu";
+import type { ExportColumn } from "@/lib/export";
+import { toast } from "sonner";
+import { formatINR } from "@/utils/formatCurrency";
+import { format, parseISO } from "date-fns";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  getBRS,
+  getBRSFilters,
+  markClear,
+  markUnclear,
+  type BrsEntry,
+  type BrsFilterOption,
+} from "@/api/brsApi";
 import {
-  CheckCircle,
+  CheckCircle2,
   Landmark,
   IndianRupee,
-  ListChecks,
   Clock,
   Search,
   X,
   RefreshCw,
+  ChevronLeft,
+  ChevronRight,
+  ArrowDownLeft,
+  ArrowUpRight,
+  CalendarDays,
+  Hash,
 } from "lucide-react";
-import { formatINR } from "@/utils/formatCurrency";
-import { format } from "date-fns";
-import {
-  getBRS,
-  getBRSFilters,
-  matchBRS,
-  unmatchBRS,
-  autoMatchBRS,
-  type BrsFilterOption,
-} from "@/api/brsApi";
-import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 
-type Payment = {
-  id: number;
-  companyName: string;
-  bankName: string;
-  companyId: number | null;
-  bankId: number;
-  amount: number;
-  docDate: Date;
-  transactionId: string | undefined;
-  type: "CREDIT" | "DEBIT";
-  status: "pending" | "reconciled";
-  createdAt: Date;
-};
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-// ─── Columns ─────────────────────────────────────────────────────────────────
-
-function buildColumns(
-  togglingId: number | null,
-  toggleReconciled: (id: number, status: "pending" | "reconciled") => void,
-): ColumnDef<Payment, unknown>[] {
-  return [
-    {
-      id: "reconcile",
-      header: "✓",
-      enableSorting: false,
-      cell: ({ row: { original: p } }) => (
-        <Checkbox
-          checked={p.status === "reconciled"}
-          disabled={togglingId === p.id}
-          onCheckedChange={() => toggleReconciled(p.id, p.status)}
-          className="data-[state=checked]:bg-emerald-500 data-[state=checked]:border-emerald-500"
-        />
-      ),
-    },
-    {
-      accessorKey: "companyName",
-      header: "Company",
-      cell: ({ getValue }) => (
-        <p className="font-medium text-foreground">{getValue() as string}</p>
-      ),
-    },
-    {
-      accessorKey: "bankName",
-      header: "Bank",
-      cell: ({ getValue }) => (
-        <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-md bg-blue-500/10 flex items-center justify-center shrink-0">
-            <Landmark size={12} className="text-blue-500" />
-          </div>
-          <p className="text-foreground">{getValue() as string}</p>
-        </div>
-      ),
-    },
-    {
-      accessorKey: "amount",
-      header: "Amount",
-      cell: ({ getValue }) => (
-        <span className="font-mono font-medium text-foreground text-right block">
-          {formatINR(getValue() as number)}
-        </span>
-      ),
-    },
-    {
-      accessorKey: "docDate",
-      header: "Date",
-      cell: ({ getValue }) => (
-        <span className="text-muted-foreground tabular-nums">
-          {format(getValue() as Date, "dd MMM yyyy")}
-        </span>
-      ),
-    },
-    {
-      accessorKey: "transactionId",
-      header: "Txn ID",
-      cell: ({ getValue }) => {
-        const v = getValue() as string | undefined;
-        return v ? (
-          <span className="font-mono text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground">
-            {v}
-          </span>
-        ) : (
-          <span className="text-muted-foreground/40">—</span>
-        );
-      },
-    },
-    {
-      accessorKey: "type",
-      header: "Type",
-      cell: ({ getValue }) => {
-        const v = getValue() as string;
-        return (
-          <span
-            className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-              v === "CREDIT"
-                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                : "bg-red-500/10 text-red-600 dark:text-red-400"
-            }`}
-          >
-            {v}
-          </span>
-        );
-      },
-    },
-    {
-      accessorKey: "status",
-      header: "Status",
-      cell: ({ getValue }) => {
-        const v = getValue() as string;
-        return (
-          <span
-            className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-full ${
-              v === "reconciled"
-                ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-                : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
-            }`}
-          >
-            <span
-              className={`w-1.5 h-1.5 rounded-full ${v === "reconciled" ? "bg-emerald-500" : "bg-amber-500"}`}
-            />
-            {v === "reconciled" ? "Reconciled" : "Pending"}
-          </span>
-        );
-      },
-    },
-  ];
+function fmt(d: string | null): string {
+  if (!d) return "—";
+  try {
+    return format(parseISO(d), "dd MMM yyyy");
+  } catch {
+    return d;
+  }
 }
 
-// ─── Component ────────────────────────────────────────────────────────────────
+function isCleared(e: BrsEntry): boolean {
+  return e.IsMatched === true || e.IsMatched === 1;
+}
+
+// Derive a display transaction ID from mode-specific fields or TxnId
+function txnLabel(e: BrsEntry): string {
+  return e.TxnId ?? "—";
+}
+
+// ─── Export column definitions ────────────────────────────────────────────────
+
+const EXPORT_COLUMNS: ExportColumn[] = [
+  {
+    header: "Type",
+    accessor: (r) => (r.SourceType === "RECEIVED" ? "Received" : "Payment"),
+  },
+  { header: "Company", accessor: "CompanyName" },
+  { header: "Bank", accessor: "BankName" },
+  { header: "Date", accessor: (r) => fmt(r.PayDate as string) },
+  {
+    header: "Amount",
+    accessor: (r) =>
+      `Rs. ${Number(r.Amount).toLocaleString("en-IN", { minimumFractionDigits: 2 })}`,
+  },
+  { header: "Mode", accessor: "Mode" },
+  { header: "Doc No.", accessor: (r) => r.DocNo ?? "—" },
+  { header: "Txn ID", accessor: (r) => r.TxnId ?? "—" },
+  { header: "Pay Status", accessor: "PayStatus" },
+  {
+    header: "BRS Status",
+    accessor: (r) =>
+      r.IsMatched === true || r.IsMatched === 1 ? "Clear" : "Unclear",
+  },
+];
+
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function TypePill({ type }: { type: "PAYMENT" | "RECEIVED" }) {
+  if (type === "RECEIVED") {
+    return (
+      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+        <ArrowDownLeft size={9} strokeWidth={2.5} />
+        Received
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-semibold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+      <ArrowUpRight size={9} strokeWidth={2.5} />
+      Payment
+    </span>
+  );
+}
+
+function ClearBadge({ cleared }: { cleared: boolean }) {
+  if (cleared) {
+    return (
+      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800">
+        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0" />
+        Clear
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-semibold rounded-full bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+      <span className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
+      Unclear
+    </span>
+  );
+}
+
+// Custom checkbox styled for the BRS passbook tick
+function PassbookCheck({
+  checked,
+  loading,
+  onChange,
+}: {
+  checked: boolean;
+  loading: boolean;
+  onChange: () => void;
+}) {
+  return (
+    <button
+      onClick={onChange}
+      disabled={loading}
+      title={checked ? "Mark as Unclear" : "Mark as Clear"}
+      className={`
+        relative flex items-center justify-center w-5 h-5 rounded border-2 transition-all duration-150
+        focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/50
+        ${loading ? "opacity-40 cursor-wait" : "cursor-pointer"}
+        ${
+          checked
+            ? "bg-emerald-500 border-emerald-500 shadow-sm shadow-emerald-500/30"
+            : "bg-transparent border-border hover:border-emerald-400 hover:bg-emerald-500/5"
+        }
+      `}
+    >
+      {loading ? (
+        <RefreshCw size={10} className="animate-spin text-white" />
+      ) : checked ? (
+        <svg
+          viewBox="0 0 10 8"
+          className="w-2.5 h-2.5 fill-none stroke-white stroke-[2]"
+        >
+          <path
+            d="M1 4l2.5 2.5L9 1"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      ) : null}
+    </button>
+  );
+}
+
+// ─── Main component ───────────────────────────────────────────────────────────
+
+const PAGE_SIZE = 25;
 
 export default function Brs() {
-  const [payments, setPayments] = useState<Payment[]>([]);
-  const [companies, setCompanies] = useState<BrsFilterOption[]>([]);
+  // ── Filter state ──────────────────────────────────────────────────────────
   const [allBanks, setAllBanks] = useState<BrsFilterOption[]>([]);
-  const [selectedCompanyId, setSelectedCompanyId] = useState<string>("All");
-  const [selectedBankId, setSelectedBankId] = useState<string>("All");
-  const [filterStatus, setFilterStatus] = useState<
-    "All" | "reconciled" | "pending"
-  >("All");
-  const [loading, setLoading] = useState(false);
+  const [bankId, setBankId] = useState("");
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"" | "clear" | "unclear">(
+    "",
+  );
   const [search, setSearch] = useState("");
-  const [togglingId, setTogglingId] = useState<number | null>(null);
+  const [page, setPage] = useState(1);
 
+  // ── Data state ────────────────────────────────────────────────────────────
+  const [entries, setEntries] = useState<BrsEntry[]>([]);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [clearAmount, setClearAmount] = useState(0);
+  const [unclearAmount, setUnclearAmount] = useState(0);
+  const [clearCount, setClearCount] = useState(0);
+  const [unclearCount, setUnclearCount] = useState(0);
+  const [loading, setLoading] = useState(false);
+  const [togglingId, setTogglingId] = useState<string | null>(null); // "TYPE-id"
+
+  // ── Filter options load ───────────────────────────────────────────────────
   useEffect(() => {
     getBRSFilters()
-      .then((res) => {
-        setCompanies(res.data.companies);
-        setAllBanks(res.data.banks);
+      .then((r) => {
+        setAllBanks(r.data?.banks ?? []);
       })
       .catch((err) => console.error("BRS filters error", err));
   }, []);
 
-  const visibleBanks = useMemo<BrsFilterOption[]>(() => {
-    if (selectedCompanyId === "All") return allBanks;
-    return allBanks.filter(
-      (b) => b.companyId != null && String(b.companyId) === selectedCompanyId,
-    );
-  }, [allBanks, selectedCompanyId]);
-
-  useEffect(() => {
-    if (
-      selectedBankId !== "All" &&
-      !visibleBanks.some((b) => String(b.id) === selectedBankId)
-    )
-      setSelectedBankId("All");
-  }, [visibleBanks, selectedBankId]);
-
-  const fetchBRS = useCallback(async () => {
+  // ── Fetch ─────────────────────────────────────────────────────────────────
+  const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const params: Record<string, any> = {};
-      if (selectedBankId !== "All") params.bankId = Number(selectedBankId);
-      else if (selectedCompanyId !== "All")
-        params.companyId = Number(selectedCompanyId);
-      if (filterStatus !== "All") params.status = filterStatus;
+      const params: Record<string, unknown> = { page, limit: PAGE_SIZE };
+      if (bankId) params.bankId = Number(bankId);
+      if (fromDate) params.fromDate = fromDate;
+      if (toDate) params.toDate = toDate;
+      if (statusFilter) params.status = statusFilter;
 
-      const res = await getBRS(params);
-      const rows = res.data.data ?? [];
-      setPayments(
-        rows.map((item) => ({
-          id: item.BRSID,
-          companyName:
-            item.CompanyName ??
-            (item.CompanyID ? `Company ${item.CompanyID}` : "—"),
-          bankName: item.BankName ?? `Bank ${item.BankID}`,
-          companyId: item.CompanyID ?? null,
-          bankId: item.BankID,
-          amount: Number(item.Amount),
-          docDate: new Date(item.BankDate),
-          transactionId: item.TransactionID?.toString(),
-          type: item.Type,
-          status: item.IsMatched ? "reconciled" : "pending",
-          createdAt: new Date(item.CreatedAt),
-        })),
-      );
+      const r = await getBRS(params as Parameters<typeof getBRS>[0]);
+      const d = r.data;
+      setEntries(d.data ?? []);
+      setTotal(d.total ?? 0);
+      setTotalPages(d.totalPages ?? 1);
+      setClearAmount(d.clearAmount ?? 0);
+      setUnclearAmount(d.unclearAmount ?? 0);
+      setClearCount(d.clearCount ?? 0);
+      setUnclearCount(d.unclearCount ?? 0);
     } catch (err) {
       console.error("BRS fetch error", err);
+      toast.error("Failed to load BRS data");
     } finally {
       setLoading(false);
     }
-  }, [selectedBankId, selectedCompanyId, filterStatus]);
+  }, [page, bankId, fromDate, toDate, statusFilter]);
 
   useEffect(() => {
-    fetchBRS();
-  }, [fetchBRS]);
+    fetchData();
+  }, [fetchData]);
 
-  const toggleReconciled = useCallback(
-    async (id: number, status: "pending" | "reconciled") => {
-      setTogglingId(id);
+  // Refetch when user returns to this tab (e.g. after approving a payment elsewhere)
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") fetchData();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [fetchData]);
+
+  // Reset page on filter change
+  useEffect(() => {
+    setPage(1);
+  }, [bankId, fromDate, toDate, statusFilter]);
+
+  // ── Toggle clear / unclear ────────────────────────────────────────────────
+  const toggle = useCallback(
+    async (entry: BrsEntry) => {
+      const key = `${entry.SourceType}-${entry.SourceID}`;
+      setTogglingId(key);
       try {
-        if (status === "reconciled") await unmatchBRS(id);
-        else await matchBRS(id);
-        fetchBRS();
+        const cleared = isCleared(entry);
+        if (cleared) {
+          await markUnclear(entry.SourceType, entry.SourceID);
+          toast.success("Marked as Unclear");
+        } else {
+          await markClear(entry.SourceType, entry.SourceID);
+          toast.success("Marked as Clear ✓");
+        }
+        await fetchData();
       } catch (err) {
-        console.error("Toggle error", err);
+        console.error("BRS toggle error", err);
+        toast.error("Failed to update status");
       } finally {
         setTogglingId(null);
       }
     },
-    [fetchBRS],
+    [fetchData],
   );
 
-  const autoMatch = useCallback(async () => {
-    setLoading(true);
-    try {
-      await autoMatchBRS();
-      alert("Auto reconciliation completed!");
-      fetchBRS();
-    } catch (err) {
-      console.error("Auto match failed", err);
-    } finally {
-      setLoading(false);
-    }
-  }, [fetchBRS]);
-
-  // Client-side search on top of server-filtered data
-  const filteredPayments = useMemo(() => {
-    if (!search) return payments;
+  // ── Client-side search (on top of server-filtered data) ───────────────────
+  const filtered = useMemo(() => {
+    if (!search.trim()) return entries;
     const q = search.toLowerCase();
-    return payments.filter(
-      (p) =>
-        p.companyName.toLowerCase().includes(q) ||
-        p.bankName.toLowerCase().includes(q) ||
-        (p.transactionId ?? "").toLowerCase().includes(q),
+    return entries.filter(
+      (e) =>
+        (e.CompanyName ?? "").toLowerCase().includes(q) ||
+        (e.BankName ?? "").toLowerCase().includes(q) ||
+        (e.TxnId ?? "").toLowerCase().includes(q) ||
+        (e.PaymentName ?? "").toLowerCase().includes(q) ||
+        (e.DocNo ?? "").toLowerCase().includes(q) ||
+        (e.Mode ?? "").toLowerCase().includes(q),
     );
-  }, [payments, search]);
+  }, [entries, search]);
 
-  const columns = useMemo(
-    () => buildColumns(togglingId, toggleReconciled),
-    [togglingId, toggleReconciled],
+  // Export data shaped for ExportMenu
+  const exportData = useMemo(
+    () => filtered as unknown as Record<string, unknown>[],
+    [filtered],
   );
 
-  const totalAmount = filteredPayments.reduce((s, p) => s + p.amount, 0);
-  const reconciledCount = filteredPayments.filter(
-    (p) => p.status === "reconciled",
-  ).length;
-  const pendingCount = filteredPayments.filter(
-    (p) => p.status === "pending",
-  ).length;
-  const reconcileRate =
-    filteredPayments.length > 0
-      ? Math.round((reconciledCount / filteredPayments.length) * 100)
-      : 0;
-
-  const summaryStats = [
+  // ── Stats cards ───────────────────────────────────────────────────────────
+  const stats = [
     {
-      label: "Total Amount",
-      value: formatINR(totalAmount),
-      icon: IndianRupee,
-      iconColor: "text-primary",
-      iconBg: "bg-primary/10",
+      label: "Clear",
+      value: String(clearCount),
+      sub: formatINR(clearAmount),
+      icon: CheckCircle2,
+      ring: "ring-emerald-500/20",
+      bg: "bg-emerald-500/10",
+      color: "text-emerald-500",
     },
     {
-      label: "Reconciled",
-      value: String(reconciledCount),
-      icon: CheckCircle,
-      iconColor: "text-emerald-500",
-      iconBg: "bg-emerald-500/10",
-    },
-    {
-      label: "Pending",
-      value: String(pendingCount),
+      label: "Unclear",
+      value: String(unclearCount),
+      sub: formatINR(unclearAmount),
       icon: Clock,
-      iconColor: "text-amber-500",
-      iconBg: "bg-amber-500/10",
+      ring: "ring-amber-500/20",
+      bg: "bg-amber-500/10",
+      color: "text-amber-500",
+    },
+    {
+      label: "Total Entries",
+      value: String(total),
+      sub: formatINR(clearAmount + unclearAmount),
+      icon: IndianRupee,
+      ring: "ring-primary/20",
+      bg: "bg-primary/10",
+      color: "text-primary",
     },
     {
       label: "Banks",
       value: String(allBanks.length),
+      sub: "linked",
       icon: Landmark,
-      iconColor: "text-blue-500",
-      iconBg: "bg-blue-500/10",
+      ring: "ring-blue-500/20",
+      bg: "bg-blue-500/10",
+      color: "text-blue-500",
     },
   ];
 
+  const reconcileRate = total > 0 ? Math.round((clearCount / total) * 100) : 0;
+
+  // ─────────────────────────────────────────────────────────────────────────
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Finance", "BRS"]} />
 
-      <div className="flex items-center justify-between mb-8">
+      {/* ── Page header ────────────────────────────────────────────────────── */}
+      <div className="flex items-start justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-2xl font-heading font-bold text-foreground tracking-tight">
-            Bank Reconciliation
+          <h1 className="text-xl font-heading font-bold text-foreground">
+            Bank Reconciliation Statement
           </h1>
-          <p className="text-sm text-muted-foreground mt-0.5">
-            Match and reconcile bank transactions
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Verify payments against your bank passbook — tick each entry once
+            confirmed
           </p>
         </div>
-        <Button
-          onClick={autoMatch}
-          disabled={loading}
-          className="flex items-center gap-2 h-10 px-4 text-sm font-medium shadow-sm"
-        >
-          {loading ? (
-            <RefreshCw size={15} className="animate-spin" />
-          ) : (
-            <ListChecks size={15} />
-          )}
-          Auto Reconcile
-        </Button>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={fetchData}
+            disabled={loading}
+            className="p-2 rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40"
+            title="Refresh"
+          >
+            <RefreshCw size={14} className={loading ? "animate-spin" : ""} />
+          </button>
+          <ExportMenu
+            data={exportData}
+            columns={EXPORT_COLUMNS}
+            title="Bank Reconciliation Statement"
+            filename="brs-export"
+            subtitle={
+              [
+                fromDate && `From: ${fmt(fromDate)}`,
+                toDate && `To: ${fmt(toDate)}`,
+                statusFilter &&
+                  `Status: ${statusFilter === "clear" ? "Clear" : "Unclear"}`,
+              ]
+                .filter(Boolean)
+                .join(" · ") || undefined
+            }
+            disabled={filtered.length === 0}
+          />
+        </div>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-7">
-        {summaryStats.map(({ label, value, icon: Icon, iconColor, iconBg }) => (
+      {/* ── Stats ──────────────────────────────────────────────────────────── */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-5">
+        {stats.map(({ label, value, sub, icon: Icon, ring, bg, color }) => (
           <div
             key={label}
-            className="glass rounded-xl px-5 py-4 flex items-center gap-4"
+            className={`glass rounded-xl px-4 py-3.5 flex items-center gap-3.5 ring-1 ${ring}`}
           >
-            <div className={`p-2.5 rounded-lg ${iconBg} ${iconColor}`}>
-              <Icon size={18} />
+            <div className={`p-2 rounded-lg ${bg} ${color} shrink-0`}>
+              <Icon size={16} />
             </div>
-            <div>
-              <p className="text-2xl font-bold font-heading text-foreground leading-none">
+            <div className="min-w-0">
+              <p className="text-lg font-bold font-heading text-foreground leading-none">
                 {value}
               </p>
-              <p className="text-xs text-muted-foreground mt-0.5">{label}</p>
+              <p className="text-[10px] text-muted-foreground mt-0.5 font-heading uppercase tracking-wide">
+                {label}
+              </p>
+              <p className="text-[11px] text-muted-foreground font-mono mt-0.5 truncate">
+                {sub}
+              </p>
             </div>
           </div>
         ))}
       </div>
 
-      {/* Progress bar */}
-      {filteredPayments.length > 0 && (
-        <div className="glass rounded-xl px-5 py-4 mb-6">
-          <div className="flex items-center justify-between mb-2">
+      {/* ── Progress bar ───────────────────────────────────────────────────── */}
+      {total > 0 && (
+        <div className="glass rounded-xl px-5 py-3.5 mb-5">
+          <div className="flex items-center justify-between mb-1.5">
             <span className="text-xs font-medium text-muted-foreground">
-              Reconciliation Progress
+              Reconciliation progress
             </span>
-            <span className="text-xs font-bold text-foreground">
-              {reconcileRate}%
+            <span className="text-xs font-bold text-foreground tabular-nums">
+              {reconcileRate}% · {clearCount}/{total}
             </span>
           </div>
           <div className="h-2 bg-muted rounded-full overflow-hidden">
             <div
-              className="h-full bg-emerald-500 rounded-full transition-all duration-700 ease-out"
-              style={{ width: `${reconcileRate}%` }}
+              className="h-full rounded-full transition-all duration-700 ease-out"
+              style={{
+                width: `${reconcileRate}%`,
+                background:
+                  reconcileRate === 100
+                    ? "linear-gradient(90deg,#10b981,#34d399)"
+                    : "linear-gradient(90deg,#f59e0b,#10b981)",
+              }}
             />
           </div>
-          <p className="text-xs text-muted-foreground mt-1.5">
-            {reconciledCount} of {filteredPayments.length} transactions
-            reconciled
-          </p>
         </div>
       )}
 
-      {/* Filters — kept manual, server controls search/bank/company/status */}
-      <div className="glass rounded-xl px-5 py-4 mb-6">
-        <div className="flex flex-wrap gap-3 items-center">
+      {/* ── Filters ────────────────────────────────────────────────────────── */}
+      <div className="glass rounded-xl px-5 py-4 mb-5 space-y-3">
+        {/* Row 1: search + company + bank */}
+        <div className="flex flex-wrap gap-2 items-center">
+          {/* Search */}
           <div className="relative flex-1 min-w-[180px] max-w-xs">
             <Search
-              size={14}
+              size={13}
               className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
             />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search transactions…"
-              className="w-full h-9 pl-8 pr-8 bg-input/70 border border-border rounded-lg text-sm focus:ring-1 focus:ring-primary focus:border-primary outline-none"
+              placeholder="Search name, bank, txn ID…"
+              className="w-full h-8 pl-8 pr-7 bg-input/70 border border-border rounded-lg text-xs focus:ring-1 focus:ring-primary focus:border-primary outline-none"
             />
             {search && (
               <button
                 onClick={() => setSearch("")}
                 className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
               >
-                <X size={13} />
+                <X size={12} />
               </button>
             )}
           </div>
 
-          <Select
-            value={selectedCompanyId}
-            onValueChange={(v) => {
-              setSelectedCompanyId(v);
-              setSelectedBankId("All");
-            }}
-          >
-            <SelectTrigger className="h-9 w-44 text-sm bg-input/70 border-border">
-              <SelectValue placeholder="All Companies" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="All">All Companies</SelectItem>
-              {companies.map((c) => (
-                <SelectItem key={c.id} value={String(c.id)}>
-                  {c.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Select value={selectedBankId} onValueChange={setSelectedBankId}>
-            <SelectTrigger className="h-9 w-44 text-sm bg-input/70 border-border">
-              <SelectValue placeholder="All Banks" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="All">All Banks</SelectItem>
-              {visibleBanks.map((b) => (
-                <SelectItem key={b.id} value={String(b.id)}>
+          {/* Bank */}
+          <div className="relative">
+            <Landmark
+              size={12}
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+            />
+            <select
+              value={bankId}
+              onChange={(e) => setBankId(e.target.value)}
+              className={`h-8 pl-7 pr-8 bg-input/70 border rounded-lg text-xs appearance-none focus:ring-1 focus:ring-primary outline-none cursor-pointer ${bankId ? "border-primary/60 text-primary font-medium" : "border-border"}`}
+            >
+              <option value="">All Banks</option>
+              {allBanks.map((b) => (
+                <option key={b.id} value={String(b.id)}>
                   {b.name}
-                </SelectItem>
+                </option>
               ))}
-            </SelectContent>
-          </Select>
+            </select>
+          </div>
+        </div>
 
+        {/* Row 2: date range + status pills */}
+        <div className="flex flex-wrap gap-2 items-center">
+          {/* Date from */}
+          <div className="relative">
+            <CalendarDays
+              size={12}
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+            />
+            <input
+              type="date"
+              value={fromDate}
+              onChange={(e) => setFromDate(e.target.value)}
+              className="h-8 pl-7 pr-3 bg-input/70 border border-border rounded-lg text-xs focus:ring-1 focus:ring-primary outline-none cursor-pointer"
+            />
+          </div>
+
+          <span className="text-muted-foreground text-xs">to</span>
+
+          {/* Date to */}
+          <div className="relative">
+            <CalendarDays
+              size={12}
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+            />
+            <input
+              type="date"
+              value={toDate}
+              onChange={(e) => setToDate(e.target.value)}
+              className="h-8 pl-7 pr-3 bg-input/70 border border-border rounded-lg text-xs focus:ring-1 focus:ring-primary outline-none cursor-pointer"
+            />
+          </div>
+
+          {/* Clear date range */}
+          {(fromDate || toDate) && (
+            <button
+              onClick={() => {
+                setFromDate("");
+                setToDate("");
+              }}
+              className="h-8 px-2 rounded-lg text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors border border-dashed border-border"
+              title="Clear date range"
+            >
+              <X size={12} />
+            </button>
+          )}
+
+          {/* Status filter pills */}
           <div className="flex gap-1.5 ml-auto">
-            {(["All", "reconciled", "pending"] as const).map((s) => (
-              <button
-                key={s}
-                onClick={() => setFilterStatus(s)}
-                className={`px-3 h-9 rounded-lg text-xs font-medium transition-all border ${
-                  filterStatus === s
-                    ? s === "reconciled"
-                      ? "bg-emerald-500/10 text-emerald-600 border-emerald-500/30"
-                      : s === "pending"
-                        ? "bg-amber-500/10 text-amber-600 border-amber-500/30"
-                        : "bg-primary/10 text-primary border-primary/30"
-                    : "bg-transparent text-muted-foreground border-border hover:bg-muted"
-                }`}
-              >
-                {s === "All" ? "All" : s.charAt(0).toUpperCase() + s.slice(1)}
-              </button>
-            ))}
+            {(["", "clear", "unclear"] as const).map((s) => {
+              const label =
+                s === "" ? "All" : s === "clear" ? "✓ Clear" : "○ Unclear";
+              const active = statusFilter === s;
+              return (
+                <button
+                  key={s}
+                  onClick={() => setStatusFilter(s)}
+                  className={`px-3 h-8 rounded-lg text-xs font-medium transition-all border ${
+                    active
+                      ? s === "clear"
+                        ? "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/30 font-semibold"
+                        : s === "unclear"
+                          ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/30 font-semibold"
+                          : "bg-primary/10 text-primary border-primary/30 font-semibold"
+                      : "bg-transparent text-muted-foreground border-border hover:bg-muted"
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
           </div>
         </div>
       </div>
 
-      {/* Table */}
-      <div className="glass rounded-xl overflow-hidden">
-        <DataTable
-          data={filteredPayments}
-          columns={columns}
-          loading={loading}
-          searchable={false}
-          paginated={true}
-          defaultPageSize={20}
-          emptyMessage={
-            search ||
-            selectedCompanyId !== "All" ||
-            selectedBankId !== "All" ||
-            filterStatus !== "All"
-              ? "No transactions match your filters."
-              : "No transactions found."
-          }
-          rowClassName={(row) =>
-            row.original.status === "reconciled"
-              ? "hover:bg-emerald-500/5"
-              : "hover:bg-muted/30"
-          }
-        />
+      {/* ── Table ──────────────────────────────────────────────────────────── */}
+      <div className="rounded-xl border border-border bg-card shadow-sm overflow-visible">
+        {/* Table header row */}
+        <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-muted/20 rounded-t-xl">
+          <p className="text-xs text-muted-foreground">
+            <span className="font-semibold text-foreground">
+              {filtered.length}
+            </span>{" "}
+            entr{filtered.length === 1 ? "y" : "ies"}
+            {total !== filtered.length && ` (${total} server-side)`}
+          </p>
+          {loading && (
+            <RefreshCw
+              size={13}
+              className="animate-spin text-muted-foreground"
+            />
+          )}
+        </div>
+
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-border bg-muted/10">
+                {/* Passbook tick */}
+                <th className="px-4 py-2.5 text-center w-10">
+                  <span className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
+                    ✓
+                  </span>
+                </th>
+                <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
+                  Type
+                </th>
+                <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
+                  Company
+                </th>
+                <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden md:table-cell">
+                  Bank
+                </th>
+                <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden lg:table-cell">
+                  Date
+                </th>
+                <th className="px-4 py-2.5 text-right text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
+                  Amount
+                </th>
+                <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden sm:table-cell">
+                  Mode
+                </th>
+                <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground hidden xl:table-cell">
+                  Doc / Txn ID
+                </th>
+                <th className="px-4 py-2.5 text-left text-[10px] font-heading uppercase tracking-widest text-muted-foreground">
+                  Status
+                </th>
+              </tr>
+            </thead>
+
+            <tbody className="divide-y divide-border">
+              {!loading && filtered.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={9}
+                    className="px-5 py-14 text-center text-muted-foreground text-sm"
+                  >
+                    No entries match your filters.
+                  </td>
+                </tr>
+              )}
+
+              {loading && filtered.length === 0 && (
+                <tr>
+                  <td
+                    colSpan={9}
+                    className="px-5 py-14 text-center text-muted-foreground text-sm"
+                  >
+                    <RefreshCw
+                      size={18}
+                      className="animate-spin mx-auto mb-2 opacity-40"
+                    />
+                    Loading…
+                  </td>
+                </tr>
+              )}
+
+              {filtered.map((entry) => {
+                const key = `${entry.SourceType}-${entry.SourceID}`;
+                const cleared = isCleared(entry);
+                const toggling = togglingId === key;
+
+                return (
+                  <tr
+                    key={key}
+                    className={`transition-colors ${
+                      cleared
+                        ? "bg-emerald-500/[0.03] hover:bg-emerald-500/[0.07]"
+                        : "hover:bg-muted/30"
+                    }`}
+                  >
+                    {/* Passbook tick checkbox */}
+                    <td className="px-4 py-3 text-center">
+                      <PassbookCheck
+                        checked={cleared}
+                        loading={toggling}
+                        onChange={() => toggle(entry)}
+                      />
+                    </td>
+
+                    {/* Type */}
+                    <td className="px-4 py-3">
+                      <TypePill type={entry.SourceType} />
+                    </td>
+
+                    {/* Company */}
+                    <td className="px-4 py-3">
+                      <p className="text-xs font-medium text-foreground leading-snug">
+                        {entry.CompanyName || "—"}
+                      </p>
+                      {entry.PaymentName &&
+                        entry.PaymentName !== entry.CompanyName && (
+                          <p className="text-[10px] text-muted-foreground truncate max-w-[140px]">
+                            {entry.PaymentName}
+                          </p>
+                        )}
+                    </td>
+
+                    {/* Bank */}
+                    <td className="px-4 py-3 hidden md:table-cell">
+                      <div className="flex items-center gap-1.5">
+                        <div className="w-5 h-5 rounded bg-blue-500/10 flex items-center justify-center shrink-0">
+                          <Landmark size={10} className="text-blue-500" />
+                        </div>
+                        <span className="text-xs text-foreground truncate max-w-[120px]">
+                          {entry.BankName || "—"}
+                        </span>
+                      </div>
+                    </td>
+
+                    {/* Date */}
+                    <td className="px-4 py-3 hidden lg:table-cell">
+                      <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+                        {fmt(entry.PayDate)}
+                      </span>
+                    </td>
+
+                    {/* Amount */}
+                    <td className="px-4 py-3 text-right">
+                      <span className="text-xs font-mono font-semibold text-foreground whitespace-nowrap">
+                        {formatINR(entry.Amount)}
+                      </span>
+                    </td>
+
+                    {/* Mode */}
+                    <td className="px-4 py-3 hidden sm:table-cell">
+                      <span className="text-xs text-muted-foreground">
+                        {entry.Mode || "—"}
+                      </span>
+                    </td>
+
+                    {/* Doc / Txn ID */}
+                    <td className="px-4 py-3 hidden xl:table-cell">
+                      <div className="space-y-0.5">
+                        {entry.DocNo && (
+                          <span className="block font-mono text-[10px] px-1.5 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 w-fit">
+                            {entry.DocNo}
+                          </span>
+                        )}
+                        {entry.TxnId && (
+                          <span className="flex items-center gap-1 font-mono text-[10px] text-muted-foreground">
+                            <Hash size={9} />
+                            {entry.TxnId}
+                          </span>
+                        )}
+                        {!entry.DocNo && !entry.TxnId && (
+                          <span className="text-muted-foreground/40 text-xs">
+                            —
+                          </span>
+                        )}
+                      </div>
+                    </td>
+
+                    {/* BRS Status */}
+                    <td className="px-4 py-3">
+                      <ClearBadge cleared={cleared} />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {/* ── Pagination ─────────────────────────────────────────────────── */}
+        {totalPages > 1 && (
+          <div className="flex items-center justify-between px-5 py-3 border-t border-border bg-muted/10 rounded-b-xl">
+            <p className="text-xs text-muted-foreground tabular-nums">
+              Page {page} of {totalPages} · {total} total
+            </p>
+            <div className="flex items-center gap-1">
+              <button
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1 || loading}
+                className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors"
+              >
+                <ChevronLeft size={14} />
+              </button>
+              <button
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages || loading}
+                className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted disabled:opacity-40 transition-colors"
+              >
+                <ChevronRight size={14} />
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* ── Legend ─────────────────────────────────────────────────────────── */}
+      <div className="flex flex-wrap items-center gap-4 mt-4 px-1">
+        <p className="text-[11px] text-muted-foreground">
+          <span className="inline-flex items-center gap-1 font-medium text-foreground">
+            <span className="w-3.5 h-3.5 rounded border-2 border-emerald-500 bg-emerald-500 inline-flex items-center justify-center">
+              <svg
+                viewBox="0 0 10 8"
+                className="w-2 h-2 fill-none stroke-white stroke-[2]"
+              >
+                <path
+                  d="M1 4l2.5 2.5L9 1"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </span>
+            Tick
+          </span>{" "}
+          — confirmed in your bank passbook (Clear)
+        </p>
+        <p className="text-[11px] text-muted-foreground">
+          <span className="inline-flex items-center gap-1 font-medium text-foreground">
+            <span className="w-3.5 h-3.5 rounded border-2 border-border inline-block" />
+            Empty
+          </span>{" "}
+          — not yet verified (Unclear)
+        </p>
+        <p className="text-[11px] text-muted-foreground ml-auto">
+          Showing payments and received payments with a linked bank account
+        </p>
       </div>
     </>
   );

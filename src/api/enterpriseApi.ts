@@ -87,3 +87,20 @@ export const getEnterpriseOptions = async (type?: string) => {
   const res = await fetchWithAuth(url);
   return handle<{ id: number; label: string }[]>(res);
 };
+
+export interface CompanyDetail {
+  id: number;
+  name: string | null;
+  short_name: string | null;
+  logo: string | null;
+  email: string | null;
+  phone_number: string | null;
+  address: string | null;
+  city: string | null;
+  state: string | null;
+}
+
+export const getCompanyById = async (id: number): Promise<CompanyDetail> => {
+  const res = await fetchWithAuth(`${BASE_URL}/by-id/${id}`);
+  return handle<CompanyDetail>(res);
+};

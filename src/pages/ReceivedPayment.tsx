@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,16 +19,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { cn } from "@/lib/utils";
 import {
   Plus,
-  CalendarIcon,
   ArrowDownCircle,
   CheckCircle2,
   Clock,
@@ -39,24 +33,28 @@ import {
   Smartphone,
   FileText,
   Trash2,
-  Layers,
-  Check,
+  Hash,
   Pencil,
-  ThumbsUp,
-  ThumbsDown,
   Loader2,
   ChevronLeft,
   ChevronRight,
+  RefreshCw,
+  Landmark,
+  ChevronsUpDown,
+  Check,
+  SendHorizontal,
 } from "lucide-react";
 import {
   getReceivedPayments,
   addReceivedPayment,
   updateReceivedPayment,
   deleteReceivedPayment,
-  approveReceivedPayment,
 } from "@/api/receivedPaymentApi";
-import { getBanks, type BankRecord } from "@/api/bankMasterApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { getBanks, type BankRecord } from "@/api/bankMasterApi";
+import { useFinYear } from "@/contexts/FinYearContext";
+import { fetchNextDocNumber } from "@/pages/material/ExpenseBooking/DocNumberPreview";
+import { formatINR } from "@/utils/formatCurrency";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -69,19 +67,19 @@ export type PaymentMode =
   | "Card"
   | "EMI";
 
-export type EmiInstallment = {
-  emiNo: number;
-  dueDate: string;
-  amount: number;
-  paid: boolean;
-};
-
 export type ReceivedPayment = {
   id: string;
   docNo: string;
+  companyId?: number;
   companyName: string;
-  receivedFrom: string;
+  projectId?: number;
   projectName: string;
+  finYear?: string;
+  docTypeId?: number;
+  receivedFrom: string;
+  customerName?: string;
+  depositBankId?: number;
+  depositBankName?: string;
   docDate: string;
   mode: PaymentMode;
   amount: number;
@@ -91,22 +89,12 @@ export type ReceivedPayment = {
   remarks?: string;
   status: "Draft" | "Approved" | "Rejected";
   createdAt: string;
-  isEmi?: boolean;
-  emiTotal?: number;
-  emiMonths?: number;
-  emiStartDate?: string;
-  emiSchedule?: EmiInstallment[];
-  emiPaying?: number[];
 };
 
-// Project shape from /api/project-master (now includes CompanyName from JOIN)
-interface ProjectOption {
-  Id: number;
-  Name: string;
-  CompanyName: string | null;
+interface CustomerOption {
+  id: number;
+  label: string;
 }
-
-// ─── Static Data ──────────────────────────────────────────────────────────────
 
 const PAYMENT_MODES: PaymentMode[] = [
   "Cash",
@@ -118,33 +106,7 @@ const PAYMENT_MODES: PaymentMode[] = [
   "EMI",
 ];
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-import { formatINR } from "@/utils/formatCurrency";
-
 const fmt = (n: number) => formatINR(n, { decimals: 2 });
-
-const generateEmiSchedule = (
-  total: number,
-  months: number,
-  startDate: string,
-): EmiInstallment[] => {
-  const emiAmt = parseFloat((total / months).toFixed(2));
-  const start = new Date(startDate);
-  return Array.from({ length: months }, (_, i) => {
-    const due = new Date(start);
-    due.setMonth(due.getMonth() + i);
-    return {
-      emiNo: i + 1,
-      dueDate: due.toISOString().slice(0, 10),
-      amount:
-        i === months - 1
-          ? parseFloat((total - emiAmt * (months - 1)).toFixed(2))
-          : emiAmt,
-      paid: false,
-    };
-  });
-};
 
 const modeIcon = (mode: string) => {
   if (mode === "Cash")
@@ -154,7 +116,7 @@ const modeIcon = (mode: string) => {
     return <Smartphone size={13} className="text-violet-500" />;
   if (mode === "Card")
     return <CreditCard size={13} className="text-orange-500" />;
-  if (mode === "EMI") return <Layers size={13} className="text-primary" />;
+  if (mode === "EMI") return <IndianRupee size={13} className="text-primary" />;
   return <Building2 size={13} className="text-sky-500" />;
 };
 
@@ -167,6 +129,138 @@ const modeColor: Record<string, string> = {
   Card: "bg-orange-500/10 text-orange-600",
   EMI: "bg-primary/10 text-primary",
 };
+
+const EMPTY_FORM = {
+  companyId: "" as string,
+  companyName: "",
+  projectId: "" as string,
+  projectName: "",
+  finYear: "",
+  docNo: "",
+  customerName: "",
+  depositBankId: "" as string,
+  depositBankName: "",
+  mode: "NEFT" as PaymentMode,
+  amount: "",
+  bankName: "",
+  transactionId: "",
+  checkNumber: "",
+  remarks: "",
+};
+
+// ─── Form Field Label ──────────────────────────────────────────────────────────
+
+function FieldLabel({
+  children,
+  required,
+}: {
+  children: React.ReactNode;
+  required?: boolean;
+}) {
+  return (
+    <label className="block text-[11px] uppercase tracking-widest font-heading font-semibold text-muted-foreground mb-1.5">
+      {children}
+      {required && <span className="text-destructive ml-0.5">*</span>}
+    </label>
+  );
+}
+
+// ─── Customer Combobox ────────────────────────────────────────────────────────
+
+function CustomerCombobox({
+  value,
+  onChange,
+  customers,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  customers: CustomerOption[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const ref = React.useRef<HTMLDivElement>(null);
+
+  const filtered = useMemo(() => {
+    if (!query.trim()) return customers.slice(0, 80);
+    const q = query.toLowerCase();
+    return customers
+      .filter((c) => c.label.toLowerCase().includes(q))
+      .slice(0, 80);
+  }, [customers, query]);
+
+  const selected = customers.find((c) => c.label === value);
+
+  useEffect(() => {
+    const h = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node))
+        setOpen(false);
+    };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, []);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => {
+          setOpen((o) => !o);
+          setQuery("");
+        }}
+        className={cn(
+          "w-full h-9 px-3 text-sm text-left flex items-center justify-between gap-2 rounded-md border border-input bg-background hover:bg-muted/40 transition-colors",
+          !value && "text-muted-foreground",
+        )}
+      >
+        <span className="truncate">{value || "Select customer…"}</span>
+        <ChevronsUpDown size={13} className="text-muted-foreground shrink-0" />
+      </button>
+
+      {open && (
+        <div className="absolute z-50 top-full mt-1 left-0 right-0 rounded-md border border-border bg-popover shadow-lg overflow-hidden">
+          <div className="p-1.5 border-b border-border">
+            <input
+              autoFocus
+              className="w-full px-2 py-1.5 text-xs rounded border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+              placeholder="Search account head…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+          <div className="max-h-48 overflow-y-auto">
+            {filtered.length === 0 ? (
+              <div className="px-3 py-4 text-xs text-muted-foreground text-center">
+                No customers found
+              </div>
+            ) : (
+              filtered.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => {
+                    onChange(c.label);
+                    setOpen(false);
+                  }}
+                  className={cn(
+                    "w-full flex items-center gap-2 px-3 py-2 text-xs text-left hover:bg-muted transition-colors",
+                    value === c.label &&
+                      "bg-primary/5 text-primary font-medium",
+                  )}
+                >
+                  <Check
+                    size={11}
+                    className={value === c.label ? "opacity-100" : "opacity-0"}
+                  />
+                  {c.label}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ─── Empty State ──────────────────────────────────────────────────────────────
 
@@ -188,146 +282,11 @@ function EmptyState() {
   );
 }
 
-// ─── EMI Schedule Table ────────────────────────────────────────────────────────
-
-function EmiScheduleTable({
-  schedule,
-  payingNos,
-  onToggle,
-}: {
-  schedule: EmiInstallment[];
-  payingNos: number[];
-  onToggle: (emiNo: number) => void;
-}) {
-  const totalAmount = schedule.reduce((s, e) => s + e.amount, 0);
-  const payingTotal = schedule
-    .filter((e) => payingNos.includes(e.emiNo))
-    .reduce((s, e) => s + e.amount, 0);
-
-  return (
-    <div className="rounded-lg border border-border overflow-hidden">
-      <div className="grid grid-cols-3 divide-x divide-border bg-muted/40 border-b border-border">
-        <div className="px-3 py-2.5 text-center">
-          <p className="text-[10px] text-muted-foreground mb-0.5 uppercase tracking-wide font-semibold">
-            Total Amount
-          </p>
-          <p className="text-xs font-bold text-foreground font-mono">
-            {fmt(totalAmount)}
-          </p>
-        </div>
-        <div className="px-3 py-2.5 text-center">
-          <p className="text-[10px] text-muted-foreground mb-0.5 uppercase tracking-wide font-semibold">
-            Instalments
-          </p>
-          <p className="text-xs font-bold text-foreground">
-            {schedule.length} months
-          </p>
-        </div>
-        <div className="px-3 py-2.5 text-center">
-          <p className="text-[10px] text-muted-foreground mb-0.5 uppercase tracking-wide font-semibold">
-            Per EMI
-          </p>
-          <p className="text-xs font-bold text-foreground font-mono">
-            {fmt(schedule[0]?.amount ?? 0)}
-          </p>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-[20px_48px_1fr_80px] gap-2 items-center px-3 py-2 bg-muted/20 border-b border-border">
-        <div />
-        <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
-          No.
-        </span>
-        <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide">
-          Due Date
-        </span>
-        <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide text-right">
-          Amount
-        </span>
-      </div>
-
-      <div className="divide-y divide-border max-h-52 overflow-y-auto">
-        {schedule.map((e) => {
-          const isPaying = payingNos.includes(e.emiNo);
-          const isOverdue = new Date(e.dueDate) < new Date() && !e.paid;
-          return (
-            <button
-              key={e.emiNo}
-              type="button"
-              onClick={() => onToggle(e.emiNo)}
-              className={`w-full grid grid-cols-[20px_48px_1fr_80px] gap-2 items-center px-3 py-2.5 text-left transition-colors
-                ${isPaying ? "bg-muted/50" : "hover:bg-muted/30"}`}
-            >
-              <div
-                className={`w-4 h-4 rounded border flex items-center justify-center shrink-0 transition-colors
-                ${isPaying ? "bg-foreground border-foreground" : "border-border bg-background"}`}
-              >
-                {isPaying && <Check size={10} className="text-background" />}
-              </div>
-
-              <span className="text-xs font-mono font-semibold text-muted-foreground">
-                #{e.emiNo}
-              </span>
-
-              <span className="text-xs text-foreground flex items-center gap-1.5">
-                {format(new Date(e.dueDate), "dd MMM yyyy")}
-                {isOverdue && (
-                  <span className="text-[9px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded font-medium border border-border">
-                    Overdue
-                  </span>
-                )}
-              </span>
-
-              <span
-                className={`text-xs font-semibold text-right ${isPaying ? "text-foreground" : "text-muted-foreground"}`}
-              >
-                {fmt(e.amount)}
-              </span>
-            </button>
-          );
-        })}
-      </div>
-
-      {payingNos.length > 0 ? (
-        <div className="px-3 py-2.5 border-t border-border bg-muted/20 flex items-center justify-between">
-          <span className="text-xs text-muted-foreground">
-            Paying{" "}
-            <span className="font-semibold text-foreground">
-              {payingNos.length}
-            </span>{" "}
-            instalment{payingNos.length !== 1 ? "s" : ""}
-            <span className="text-muted-foreground/60 ml-1">
-              (#{payingNos.join(", #")})
-            </span>
-          </span>
-          <span className="text-sm font-bold text-foreground">
-            {fmt(payingTotal)}
-          </span>
-        </div>
-      ) : (
-        <div className="px-3 py-2 border-t border-border bg-muted/10 text-center text-[11px] text-muted-foreground">
-          Select instalment(s) to mark as paying
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-const EMPTY_FORM = {
-  companyName: "",
-  receivedFrom: "",
-  projectName: "",
-  mode: "NEFT" as PaymentMode,
-  amount: "",
-  bankName: "",
-  transactionId: "",
-  checkNumber: "",
-  remarks: "",
-};
-
 export default function ReceivedPaymentPage() {
+  const { finYears } = useFinYear();
+
   const [payments, setPayments] = useState<ReceivedPayment[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState("");
@@ -336,109 +295,200 @@ export default function ReceivedPaymentPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
+  const [apiLoading, setApiLoading] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [submitTarget, setSubmitTarget] = useState<ReceivedPayment | null>(
+    null,
+  );
   const PAGE_SIZE = 20;
 
+  // ── Form state ───────────────────────────────────────────────────────────────
   const [form, setForm] = useState(EMPTY_FORM);
   const [date, setDate] = useState<Date | undefined>(new Date());
-  const [calOpen, setCalOpen] = useState(false);
-
-  const [emiSchedule, setEmiSchedule] = useState<EmiInstallment[]>([]);
-  const [emiPayingNos, setEmiPayingNos] = useState<number[]>([]);
-  const [emiFetching, setEmiFetching] = useState(false);
+  const [docNoPreview, setDocNoPreview] = useState("");
+  const [docNoLoading, setDocNoLoading] = useState(false);
+  const [companies, setCompanies] = useState<{ id: number; label: string }[]>(
+    [],
+  );
+  const [projects, setProjects] = useState<
+    { id: number; label: string; belongsTo: number | null }[]
+  >([]);
   const [banks, setBanks] = useState<BankRecord[]>([]);
+  const [customers, setCustomers] = useState<CustomerOption[]>([]);
+  // TypeOfDocId for the REC prefix — resolved once on mount
+  const [recDocTypeId, setRecDocTypeId] = useState<number | null>(null);
 
-  // Projects from /api/project-master — includes CompanyName via JOIN
-  const [projects, setProjects] = useState<ProjectOption[]>([]);
+  const finYearOptions = finYears.filter((fy) => fy.status === "Active");
+  const activeFinYear =
+    finYears.find((fy) => fy.status === "Active")?.year || "";
 
-  // Auto-generate transaction ID: TXN-YYYYMMDD-XXXXXX
-  const generateTxnId = () => {
-    const d = new Date();
-    const datePart = d.toISOString().slice(0, 10).replace(/-/g, "");
-    const rand = Math.random().toString(36).toUpperCase().slice(2, 8);
-    return `TXN-${datePart}-${rand}`;
-  };
-
+  // Load masters
   useEffect(() => {
+    // Companies: enterprise table WHERE business_type = 'C'
+    fetchWithAuth("/api/enterprises/options?business_type=C")
+      .then((r) => r.json())
+      .then((data: any[]) => setCompanies(Array.isArray(data) ? data : []))
+      .catch(() => {});
+
     getBanks()
       .then((data) => setBanks(data.filter((b) => b.BStatus)))
       .catch(() => {});
-  }, []);
 
-  // Fetch projects from project-master (includes CompanyName)
-  useEffect(() => {
-    fetchWithAuth("/api/project-master")
-      .then((res) => res.json())
-      .then((data: any[]) => {
+    // Projects: enterprise table WHERE business_type = 'P', with belongs_to for company filter
+    fetchWithAuth("/api/enterprises/options?business_type=P")
+      .then((r) => r.json())
+      .then((data: any[]) =>
         setProjects(
           (Array.isArray(data) ? data : []).map((p) => ({
-            Id: p.Id,
-            Name: p.Name ?? "",
-            CompanyName: p.CompanyName ?? "",
-          }))
+            id: p.id,
+            label: p.label,
+            belongsTo: p.belongs_to ?? null,
+          })),
+        ),
+      )
+      .catch(() => {});
+
+    // Customers: AccountHeadMaster WHERE LHeadType = 'A'
+    fetchWithAuth("/api/account-head/options?type=A")
+      .then((r) => r.json())
+      .then((data: any[]) =>
+        setCustomers(
+          (Array.isArray(data) ? data : []).map((x) => ({
+            id: x.id ?? x.LHeadId,
+            label: x.label ?? x.LHeadName ?? "",
+          })),
+        ),
+      )
+      .catch(() => {});
+
+    // Resolve REC doc type ID once
+    fetchWithAuth("/api/document-type")
+      .then((r) => r.json())
+      .then((data: any[]) => {
+        if (!Array.isArray(data)) return;
+        const rec = data.find(
+          (d) =>
+            (d.Prefix === "REC" || d.FullPrefix === "REC") &&
+            (d.EntryType === "Received Payment" ||
+              d.Description?.toLowerCase().includes("received")),
         );
+        if (rec) setRecDocTypeId(rec.TypeOfDocId);
       })
       .catch(() => {});
   }, []);
 
-  // When project changes, auto-fill companyName
-  const handleProjectChange = (projectName: string) => {
-    const selected = projects.find((p) => p.Name === projectName);
-    setForm((f) => ({
-      ...f,
-      projectName,
-      companyName: selected?.CompanyName ?? f.companyName,
-    }));
-  };
+  // ── Filtered banks: only those linked to selected company ───────────────────
+  const selectedCompanyLabel =
+    companies.find((c) => String(c.id) === form.companyId)?.label ?? "";
+  const depositBanks = useMemo(() => {
+    if (!selectedCompanyLabel) return banks;
+    return banks.filter(
+      (b) => !b.BCompanyName || b.BCompanyName === selectedCompanyLabel,
+    );
+  }, [banks, selectedCompanyLabel]);
 
-  useEffect(() => {
-    if (form.mode === "EMI" && form.projectName) {
-      setEmiFetching(true);
-      setEmiSchedule([]);
-      setEmiPayingNos([]);
-      const project = projects.find((p) => p.Name === form.projectName);
-      if (!project) {
-        setEmiFetching(false);
+  // ── Projects — independent selection, show all ───────────────────────────────
+  const filteredProjects = projects;
+
+  // ── Doc number preview ───────────────────────────────────────────────────────
+  const refreshDocNo = useCallback(
+    async (docTypeId: number | null, finYear: string) => {
+      if (!docTypeId) {
+        setDocNoPreview("");
         return;
       }
-      // Fetch work orders for this project's EMI schedule
-      import("@/api/workOrderApi")
-        .then(({ getWorkOrders }) => getWorkOrders())
-        .then((res: any) => {
-          const rows = Array.isArray(res) ? res : res.data ?? [];
-          const wo = rows.find(
-            (w: any) =>
-              w.ProjectId === project.Id || w.ProjectName === form.projectName
-          );
-          if (wo && wo.TotalAmount && wo.DocumentDate) {
-            const months = wo.EmiMonths ?? wo.emiMonths ?? 6;
-            const total = Number(wo.TotalAmount);
-            const startDate = wo.DocumentDate.slice(0, 10);
-            setEmiSchedule(generateEmiSchedule(total, months, startDate));
-          } else {
-            setEmiSchedule([]);
-          }
-        })
-        .catch(() => setEmiSchedule([]))
-        .finally(() => setEmiFetching(false));
-    } else {
-      setEmiSchedule([]);
-      setEmiPayingNos([]);
+      setDocNoLoading(true);
+      try {
+        const next = await fetchNextDocNumber(docTypeId, finYear || undefined);
+        setDocNoPreview(next);
+      } catch {
+        setDocNoPreview("");
+      } finally {
+        setDocNoLoading(false);
+      }
+    },
+    [],
+  );
+
+  // Auto-refresh doc number when fin year or resolved doc type changes
+  useEffect(() => {
+    if (!editingId && recDocTypeId) {
+      refreshDocNo(recDocTypeId, form.finYear || activeFinYear);
     }
-  }, [form.mode, form.projectName, projects]);
+  }, [form.finYear, recDocTypeId, editingId, activeFinYear, refreshDocNo]);
 
-  // ── API-backed data layer ────────────────────────────────────────────
-  const [apiLoading, setApiLoading] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [approveTarget, setApproveTarget] = useState<ReceivedPayment | null>(null);
-  const [rejectNote, setRejectNote] = useState("");
-  const [actionLoading, setActionLoading] = useState(false);
+  // ── Load payments ─────────────────────────────────────────────────────────────
+  const loadPayments = useCallback(async (page = 1) => {
+    setApiLoading(true);
+    try {
+      const res = await getReceivedPayments(page, PAGE_SIZE);
+      setTotalPages(res.totalPages);
+      setTotalCount(res.total);
+      setCurrentPage(page);
+      setPayments(
+        res.data.map((r) => ({
+          id: String(r.RPPaymentID),
+          docNo:
+            (r as any).RPDocNo ||
+            `REC/${String(r.RPPaymentID).padStart(6, "0")}`,
+          companyId: (r as any).RPCompanyId ?? undefined,
+          companyName: r.RPCompanyName ?? "",
+          projectId: (r as any).RPProjectId ?? undefined,
+          projectName: r.RPProjectName,
+          finYear: (r as any).RPFinYear ?? undefined,
+          docTypeId: (r as any).RPDocTypeId ?? undefined,
+          receivedFrom: r.RPReceivedFrom,
+          customerName: (r as any).RPCustomerName ?? undefined,
+          depositBankId: (r as any).RPDepositBankId ?? undefined,
+          depositBankName: (r as any).RPDepositBankName ?? undefined,
+          docDate: r.RPDocDate,
+          mode: r.RPMode as ReceivedPayment["mode"],
+          amount: Number(r.RPAmount),
+          bankName: r.RPBankName ?? undefined,
+          transactionId: r.RPTransactionId ?? undefined,
+          checkNumber: r.RPCheckNumber ?? undefined,
+          remarks: r.RPRemarks ?? undefined,
+          status: (r.RPStatus as ReceivedPayment["status"]) || "Draft",
+          createdAt: r.RPCreatedAt,
+        })),
+      );
+    } catch {
+      toast.error("Failed to load received payments");
+    } finally {
+      setApiLoading(false);
+    }
+  }, []);
 
+  useEffect(() => {
+    loadPayments(1);
+  }, [loadPayments]);
+
+  const setField = (key: keyof typeof EMPTY_FORM, value: string) =>
+    setForm((f) => ({ ...f, [key]: value }));
+
+  // ── Open add dialog ───────────────────────────────────────────────────────────
+  const openAdd = () => {
+    setEditingId(null);
+    setForm({ ...EMPTY_FORM, finYear: activeFinYear });
+    setDate(new Date());
+    setDocNoPreview("");
+    setIsOpen(true);
+  };
+
+  // ── Open edit dialog ──────────────────────────────────────────────────────────
   const openEdit = (p: ReceivedPayment) => {
     setEditingId(p.id);
     setForm({
+      companyId: String(p.companyId ?? ""),
       companyName: p.companyName,
-      receivedFrom: p.receivedFrom,
+      projectId: String(p.projectId ?? ""),
       projectName: p.projectName,
+      finYear: p.finYear ?? "",
+      docNo: p.docNo,
+      customerName: p.customerName ?? "",
+      depositBankId: String(p.depositBankId ?? ""),
+      depositBankName: p.depositBankName ?? "",
       mode: p.mode,
       amount: String(p.amount),
       bankName: p.bankName ?? "",
@@ -447,204 +497,102 @@ export default function ReceivedPaymentPage() {
       remarks: p.remarks ?? "",
     });
     setDate(p.docDate ? new Date(p.docDate) : new Date());
+    setDocNoPreview(p.docNo);
     setIsOpen(true);
   };
 
-  const handleUpdate = async () => {
-    if (!editingId) return;
-    if (!date) { toast.error("Date is required"); return; }
-    setActionLoading(true);
-    try {
-      await updateReceivedPayment(Number(editingId), {
-        RPCompanyName:   form.companyName,
-        RPReceivedFrom:  form.receivedFrom.trim(),
-        RPProjectName:   form.projectName,
-        RPDocDate:       date.toISOString().slice(0, 10),
-        RPMode:          form.mode,
-        RPAmount:        Number(form.amount),
-        RPBankName:      form.bankName || null,
-        RPTransactionId: form.transactionId || null,
-        RPCheckNumber:   form.checkNumber || null,
-        RPRemarks:       form.remarks || null,
-      });
-      toast.success("Payment updated");
-      setIsOpen(false);
-      setEditingId(null);
-      setForm(EMPTY_FORM);
-      await loadPayments(currentPage);
-    } catch (err) {
-      toast.error("Failed to update payment");
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const handleApprove = async (action: "approve" | "reject") => {
-    if (!approveTarget) return;
-    if (action === "reject" && !rejectNote.trim()) {
-      toast.error("Rejection reason is required");
-      return;
-    }
-    setActionLoading(true);
-    try {
-      await approveReceivedPayment(Number(approveTarget.id), action, rejectNote || undefined);
-      toast.success(action === "approve" ? "Payment approved" : "Payment rejected");
-      setApproveTarget(null);
-      setRejectNote("");
-      await loadPayments(currentPage);
-    } catch (err) {
-      toast.error("Action failed");
-    } finally {
-      setActionLoading(false);
-    }
-  };
-
-  const loadPayments = React.useCallback(async (page = 1) => {
-    setApiLoading(true);
-    try {
-      const res = await getReceivedPayments(page, PAGE_SIZE);
-      setTotalPages(res.totalPages);
-      setTotalCount(res.total);
-      setCurrentPage(page);
-      setPayments(res.data.map((r) => ({
-        id: String(r.RPPaymentID),
-        docNo: `RCP-${String(r.RPPaymentID).padStart(4, "0")}`,
-        companyName: r.RPCompanyName ?? "",
-        receivedFrom: r.RPReceivedFrom,
-        projectName: r.RPProjectName,
-        docDate: r.RPDocDate,
-        mode: r.RPMode as ReceivedPayment["mode"],
-        amount: Number(r.RPAmount),
-        bankName: r.RPBankName ?? undefined,
-        transactionId: r.RPTransactionId ?? undefined,
-        checkNumber: r.RPCheckNumber ?? undefined,
-        remarks: r.RPRemarks ?? undefined,
-        status: (r.RPStatus as ReceivedPayment["status"]) || "Draft",
-        createdAt: r.RPCreatedAt,
-        isEmi: Boolean(r.RPIsEmi),
-        emiTotal: r.RPEmiTotal ?? undefined,
-        emiMonths: r.RPEmiMonths ?? undefined,
-        emiStartDate: r.RPEmiStartDate ?? undefined,
-        emiSchedule: r.RPEmiSchedule ? JSON.parse(r.RPEmiSchedule) : undefined,
-        emiPaying: r.RPEmiPaying ? JSON.parse(r.RPEmiPaying) : undefined,
-      })));
-    } catch (err) {
-      toast.error("Failed to load received payments");
-      console.error(err);
-    } finally {
-      setApiLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { loadPayments(1); }, [loadPayments]);
-
-  const setField = (key: keyof typeof EMPTY_FORM, value: string) =>
-    setForm((f) => ({ ...f, [key]: value }));
-
-  const toggleEmiNo = (no: number) =>
-    setEmiPayingNos((prev) =>
-      prev.includes(no) ? prev.filter((n) => n !== no) : [...prev, no],
-    );
-
-  const emiPayingAmount = useMemo(
-    () =>
-      emiSchedule
-        .filter((e) => emiPayingNos.includes(e.emiNo))
-        .reduce((s, e) => s + e.amount, 0),
-    [emiSchedule, emiPayingNos],
-  );
-
+  // ── Submit ────────────────────────────────────────────────────────────────────
   const handleSubmit = async () => {
-    if (!form.companyName) {
-      toast.error("Company name is required");
+    if (!form.companyId) {
+      toast.error("Company is required");
       return;
     }
-    if (!form.receivedFrom.trim()) {
-      toast.error("Received from is required");
-      return;
-    }
-    if (!form.projectName) {
+    if (!form.projectId) {
       toast.error("Project is required");
       return;
     }
-    if (!date) {
-      toast.error("Date is required");
+    if (!form.finYear) {
+      toast.error("Financial year is required");
       return;
     }
-    const isEmi = form.mode === "EMI";
-    if (isEmi) {
-      if (!emiSchedule.length) {
-        toast.error("No EMI schedule found for this project");
-        return;
-      }
-      if (!emiPayingNos.length) {
-        toast.error("Select at least one EMI instalment");
-        return;
-      }
-    } else {
-      if (!form.amount || Number(form.amount) <= 0) {
-        toast.error("Valid amount is required");
-        return;
-      }
+    if (!date) {
+      toast.error("Date of receipt is required");
+      return;
+    }
+    if (!form.customerName.trim()) {
+      toast.error("Customer name is required");
+      return;
+    }
+    if (!form.depositBankId) {
+      toast.error("Deposit bank is required");
+      return;
+    }
+    if (!form.amount || Number(form.amount) <= 0) {
+      toast.error("Valid amount is required");
+      return;
     }
 
-    const newPay: ReceivedPayment = {
-      id: "",
-      docNo: "",
-      companyName: form.companyName,
-      receivedFrom: form.receivedFrom.trim(),
-      projectName: form.projectName,
-      docDate: date.toISOString().slice(0, 10),
-      mode: form.mode,
-      amount: isEmi ? emiPayingAmount : Number(form.amount),
-      bankName: form.bankName || undefined,
-      transactionId: form.transactionId || undefined,
-      checkNumber: form.checkNumber || undefined,
-      remarks: form.remarks || undefined,
-      status: "Draft",
-      createdAt: new Date().toISOString(),
-      isEmi,
-      emiTotal: isEmi
-        ? emiSchedule.reduce((s, e) => s + e.amount, 0)
-        : undefined,
-      emiMonths: isEmi ? emiSchedule.length : undefined,
-      emiStartDate: isEmi ? emiSchedule[0]?.dueDate : undefined,
-      emiSchedule: isEmi ? emiSchedule : undefined,
-      emiPaying: isEmi ? emiPayingNos : undefined,
+    setActionLoading(true);
+    const payload = {
+      RPCompanyName: selectedCompanyLabel || form.companyName,
+      RPCompanyId: Number(form.companyId) || null,
+      RPReceivedFrom: form.customerName.trim(),
+      RPCustomerName: form.customerName.trim(),
+      RPProjectName: form.projectName,
+      RPProjectId: Number(form.projectId) || null,
+      RPDocDate: date!.toISOString().slice(0, 10),
+      RPFinYear: form.finYear || activeFinYear,
+      RPDocTypeId: recDocTypeId,
+      RPMode: form.mode,
+      RPAmount: Number(form.amount),
+      RPBankName: form.bankName || null,
+      RPTransactionId: form.transactionId || null,
+      RPCheckNumber: form.checkNumber || null,
+      RPRemarks: form.remarks || null,
+      RPDepositBankId: Number(form.depositBankId) || null,
+      RPDepositBankName: form.depositBankName || null,
     };
 
     try {
-      await addReceivedPayment({
-        RPCompanyName:  newPay.companyName,
-        RPReceivedFrom: newPay.receivedFrom,
-        RPProjectName:  newPay.projectName,
-        RPDocDate:      newPay.docDate,
-        RPMode:         newPay.mode,
-        RPAmount:       newPay.amount,
-        RPBankName:     newPay.bankName,
-        RPTransactionId:newPay.transactionId,
-        RPCheckNumber:  newPay.checkNumber,
-        RPRemarks:      newPay.remarks,
-        RPStatus:       newPay.status,
-        RPIsEmi:        newPay.isEmi,
-        RPEmiTotal:     newPay.emiTotal,
-        RPEmiMonths:    newPay.emiMonths,
-        RPEmiStartDate: newPay.emiStartDate,
-        RPEmiSchedule:  newPay.emiSchedule ? JSON.stringify(newPay.emiSchedule) : null,
-        RPEmiPaying:    newPay.emiPaying ? JSON.stringify(newPay.emiPaying) : null,
-      });
-      toast.success("Payment recorded successfully");
-      await loadPayments(1);
-    } catch (err) {
-      toast.error("Failed to save payment");
-      console.error(err);
-      return;
+      if (editingId) {
+        await updateReceivedPayment(Number(editingId), payload as any);
+        toast.success("Payment updated");
+      } else {
+        await addReceivedPayment(payload as any);
+        toast.success("Payment recorded successfully");
+      }
+      setIsOpen(false);
+      setEditingId(null);
+      await loadPayments(currentPage);
+    } catch {
+      toast.error(
+        editingId ? "Failed to update payment" : "Failed to save payment",
+      );
+    } finally {
+      setActionLoading(false);
     }
-    setForm(EMPTY_FORM);
-    setDate(new Date());
-    setEmiSchedule([]);
-    setEmiPayingNos([]);
-    setIsOpen(false);
+  };
+
+  const handleSubmitForApproval = async () => {
+    if (!submitTarget) return;
+    setActionLoading(true);
+    try {
+      const res = await fetchWithAuth(
+        `/api/received-payment/${submitTarget.id}/submit`,
+        { method: "PATCH" },
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Submit failed");
+      }
+      toast.success("Sent to Approval Inbox ✓");
+      setSubmitTarget(null);
+      await loadPayments(currentPage);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to submit");
+    } finally {
+      setActionLoading(false);
+    }
   };
 
   const deletePayment = async (id: string) => {
@@ -652,22 +600,26 @@ export default function ReceivedPaymentPage() {
       await deleteReceivedPayment(Number(id));
       toast.success("Payment deleted");
       await loadPayments(currentPage);
-    } catch (err) {
+    } catch {
       toast.error("Failed to delete payment");
-      console.error(err);
     }
   };
 
+  // ── Filtered list ─────────────────────────────────────────────────────────────
   const filtered = payments.filter((p) => {
     const q = search.toLowerCase();
     const matchSearch =
+      p.customerName?.toLowerCase().includes(q) ||
       p.receivedFrom.toLowerCase().includes(q) ||
       p.projectName.toLowerCase().includes(q) ||
       p.companyName.toLowerCase().includes(q) ||
-      p.docNo.toLowerCase().includes(q) || p.id.includes(q);
-    const matchMode = filterMode === "All" || p.mode === filterMode;
-    const matchStatus = filterStatus === "All" || p.status === filterStatus;
-    return matchSearch && matchMode && matchStatus;
+      p.docNo.toLowerCase().includes(q) ||
+      p.id.includes(q);
+    return (
+      matchSearch &&
+      (filterMode === "All" || p.mode === filterMode) &&
+      (filterStatus === "All" || p.status === filterStatus)
+    );
   });
 
   const totalReceived = payments.reduce((s, p) => s + p.amount, 0);
@@ -679,11 +631,11 @@ export default function ReceivedPaymentPage() {
       label: "Total Received",
       value: fmt(totalReceived),
       icon: IndianRupee,
-      color: "hsl(142, 71%, 45%)",
+      color: "hsl(142,71%,45%)",
     },
     {
       label: "Total Entries",
-      value: String(payments.length),
+      value: String(totalCount),
       icon: ArrowDownCircle,
       color: "hsl(var(--primary))",
     },
@@ -691,17 +643,19 @@ export default function ReceivedPaymentPage() {
       label: "Cleared",
       value: String(approved),
       icon: CheckCircle2,
-      color: "hsl(142, 71%, 45%)",
+      color: "hsl(142,71%,45%)",
     },
     {
       label: "Pending",
       value: String(pending),
       icon: Clock,
-      color: "hsl(38, 92%, 50%)",
+      color: "hsl(38,92%,50%)",
     },
   ];
 
-  const isEmiMode = form.mode === "EMI";
+  const needsBankRef = ["Check", "UPI", "NEFT", "RTGS", "Card"].includes(
+    form.mode,
+  );
 
   return (
     <>
@@ -718,10 +672,7 @@ export default function ReceivedPaymentPage() {
             All inbound payments received from clients &amp; customers
           </p>
         </div>
-        <Button size="sm" onClick={() => {
-          setForm({ ...EMPTY_FORM, transactionId: generateTxnId() });
-          setIsOpen(true);
-        }} className="shrink-0">
+        <Button size="sm" onClick={openAdd} className="shrink-0">
           <Plus size={15} className="mr-1" />
           Add Payment
         </Button>
@@ -756,10 +707,10 @@ export default function ReceivedPaymentPage() {
       {/* Filters */}
       <div className="flex flex-wrap gap-2 mb-4">
         <Input
-          placeholder="Search by party, company, project, ID…"
+          placeholder="Search by customer, company, project, doc no…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="h-8 text-xs max-w-64 flex-1 min-w-0 sm:flex-none"
+          className="h-8 text-xs max-w-72 flex-1 min-w-0 sm:flex-none"
         />
         <Select value={filterMode} onValueChange={setFilterMode}>
           <SelectTrigger className="h-8 text-xs w-32">
@@ -819,10 +770,12 @@ export default function ReceivedPaymentPage() {
                     {[
                       "Doc No.",
                       "Date",
+                      "Fin Year",
                       "Company",
-                      "Received From",
                       "Project",
+                      "Customer",
                       "Mode",
+                      "Deposit Bank",
                       "Amount (₹)",
                       "Status",
                       "",
@@ -845,17 +798,20 @@ export default function ReceivedPaymentPage() {
                       <td className="px-4 py-3 text-primary font-heading text-xs font-medium whitespace-nowrap">
                         {p.docNo}
                       </td>
-                      <td className="px-4 py-3 text-foreground whitespace-nowrap">
+                      <td className="px-4 py-3 text-foreground whitespace-nowrap text-xs">
                         {format(new Date(p.docDate), "dd/MM/yyyy")}
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground text-xs max-w-[120px] truncate">
+                      <td className="px-4 py-3 text-muted-foreground text-xs">
+                        {p.finYear || "—"}
+                      </td>
+                      <td className="px-4 py-3 text-muted-foreground text-xs max-w-[110px] truncate">
                         {p.companyName}
                       </td>
-                      <td className="px-4 py-3 font-medium text-foreground max-w-[130px] truncate">
-                        {p.receivedFrom}
-                      </td>
-                      <td className="px-4 py-3 text-muted-foreground max-w-[110px] truncate">
+                      <td className="px-4 py-3 text-muted-foreground text-xs max-w-[110px] truncate">
                         {p.projectName}
+                      </td>
+                      <td className="px-4 py-3 font-medium text-foreground text-xs max-w-[120px] truncate">
+                        {p.customerName || p.receivedFrom}
                       </td>
                       <td className="px-4 py-3">
                         <span
@@ -864,40 +820,51 @@ export default function ReceivedPaymentPage() {
                           {modeIcon(p.mode)}
                           {p.mode}
                         </span>
-                        {p.isEmi && p.emiPaying && (
-                          <span className="text-[10px] text-muted-foreground mt-0.5 block">
-                            EMI {p.emiPaying.join(", ")} of {p.emiMonths}
-                          </span>
-                        )}
                       </td>
-                      <td className="px-4 py-3 font-heading font-semibold text-emerald-600 whitespace-nowrap">
+                      <td className="px-4 py-3 text-muted-foreground text-xs max-w-[110px] truncate">
+                        {p.depositBankName || "—"}
+                      </td>
+                      <td className="px-4 py-3 font-heading font-semibold text-emerald-600 whitespace-nowrap text-xs">
                         +{fmt(p.amount)}
                       </td>
                       <td className="px-4 py-3">
-                        <span className={`px-2 py-0.5 rounded-full text-xs font-heading ${
-                            p.status === "Approved" ? "bg-green-500/15 text-green-600"
-                            : p.status === "Rejected" ? "bg-red-500/15 text-red-600"
-                            : "bg-yellow-500/15 text-yellow-600"
-                          }`}>
+                        <span
+                          className={`px-2 py-0.5 rounded-full text-xs font-heading ${
+                            p.status === "Approved"
+                              ? "bg-green-500/15 text-green-600"
+                              : p.status === "Rejected"
+                                ? "bg-red-500/15 text-red-600"
+                                : "bg-yellow-500/15 text-yellow-600"
+                          }`}
+                        >
                           {p.status}
                         </span>
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-1">
                           {p.status === "Draft" && (
-                            <button onClick={() => openEdit(p)} title="Edit"
-                              className="p-1.5 rounded-md text-muted-foreground/50 hover:text-blue-500 hover:bg-blue-500/10 transition-colors">
+                            <button
+                              onClick={() => openEdit(p)}
+                              title="Edit"
+                              className="p-1.5 rounded-md text-muted-foreground/50 hover:text-blue-500 hover:bg-blue-500/10 transition-colors"
+                            >
                               <Pencil size={13} />
                             </button>
                           )}
                           {p.status === "Draft" && (
-                            <button onClick={() => { setApproveTarget(p); setRejectNote(""); }} title="Approve / Reject"
-                              className="p-1.5 rounded-md text-muted-foreground/50 hover:text-green-500 hover:bg-green-500/10 transition-colors">
-                              <ThumbsUp size={13} />
+                            <button
+                              onClick={() => setSubmitTarget(p)}
+                              title="Submit for Approval"
+                              className="p-1.5 rounded-md text-muted-foreground/50 hover:text-primary hover:bg-primary/10 transition-colors"
+                            >
+                              <SendHorizontal size={13} />
                             </button>
                           )}
-                          <button onClick={() => deletePayment(p.id)} title="Delete"
-                            className="p-1.5 rounded-md text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-colors">
+                          <button
+                            onClick={() => deletePayment(p.id)}
+                            title="Delete"
+                            className="p-1.5 rounded-md text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-colors"
+                          >
                             <Trash2 size={13} />
                           </button>
                         </div>
@@ -917,11 +884,11 @@ export default function ReceivedPaymentPage() {
                       <p className="text-xs text-primary font-heading font-medium">
                         {p.docNo}
                       </p>
-                      <p className="text-[10px] text-muted-foreground truncate">
-                        {p.companyName}
+                      <p className="text-[10px] text-muted-foreground">
+                        {p.companyName} · {p.finYear}
                       </p>
                       <p className="text-sm font-semibold text-foreground">
-                        {p.receivedFrom}
+                        {p.customerName || p.receivedFrom}
                       </p>
                       <p className="text-xs text-muted-foreground">
                         {p.projectName} ·{" "}
@@ -932,44 +899,48 @@ export default function ReceivedPaymentPage() {
                       <p className="text-base font-heading font-bold text-emerald-600">
                         +{fmt(p.amount)}
                       </p>
-                      <span className={`px-2 py-0.5 rounded-full text-xs font-heading ${
-                          p.status === "Approved" ? "bg-green-500/15 text-green-600"
-                          : p.status === "Rejected" ? "bg-red-500/15 text-red-600"
-                          : "bg-yellow-500/15 text-yellow-600"
-                        }`}>
+                      <span
+                        className={`px-2 py-0.5 rounded-full text-xs font-heading ${
+                          p.status === "Approved"
+                            ? "bg-green-500/15 text-green-600"
+                            : p.status === "Rejected"
+                              ? "bg-red-500/15 text-red-600"
+                              : "bg-yellow-500/15 text-yellow-600"
+                        }`}
+                      >
                         {p.status}
                       </span>
                     </div>
                   </div>
                   <div className="flex items-center justify-between">
-                    <div>
-                      <span
-                        className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-heading w-fit ${modeColor[p.mode]}`}
-                      >
-                        {modeIcon(p.mode)}
-                        {p.mode}
-                      </span>
-                      {p.isEmi && p.emiPaying && (
-                        <span className="text-[10px] text-muted-foreground mt-0.5 block">
-                          EMI {p.emiPaying.join(", ")} of {p.emiMonths}
-                        </span>
-                      )}
-                    </div>
+                    <span
+                      className={`flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-heading w-fit ${modeColor[p.mode]}`}
+                    >
+                      {modeIcon(p.mode)}
+                      {p.mode}
+                    </span>
                     <div className="flex items-center gap-1">
                       {p.status === "Draft" && (
-                        <button onClick={() => openEdit(p)}
-                          className="p-1.5 text-muted-foreground/50 hover:text-blue-500">
+                        <button
+                          onClick={() => openEdit(p)}
+                          className="p-1.5 text-muted-foreground/50 hover:text-blue-500"
+                        >
                           <Pencil size={13} />
                         </button>
                       )}
                       {p.status === "Draft" && (
-                        <button onClick={() => { setApproveTarget(p); setRejectNote(""); }}
-                          className="p-1.5 text-muted-foreground/50 hover:text-green-500">
-                          <ThumbsUp size={13} />
+                        <button
+                          onClick={() => setSubmitTarget(p)}
+                          className="p-1.5 text-muted-foreground/50 hover:text-primary"
+                          title="Submit for Approval"
+                        >
+                          <SendHorizontal size={13} />
                         </button>
                       )}
-                      <button onClick={() => deletePayment(p.id)}
-                        className="p-1.5 text-muted-foreground/50 hover:text-destructive">
+                      <button
+                        onClick={() => deletePayment(p.id)}
+                        className="p-1.5 text-muted-foreground/50 hover:text-destructive"
+                      >
                         <Trash2 size={13} />
                       </button>
                     </div>
@@ -985,7 +956,7 @@ export default function ReceivedPaymentPage() {
       {totalPages > 1 && (
         <div className="flex items-center justify-between mt-4 px-1">
           <span className="text-xs text-muted-foreground">
-            Showing page {currentPage} of {totalPages} · {totalCount} total entries
+            Page {currentPage} of {totalPages} · {totalCount} total
           </span>
           <div className="flex items-center gap-1">
             <button
@@ -995,18 +966,6 @@ export default function ReceivedPaymentPage() {
             >
               <ChevronLeft size={14} />
             </button>
-            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-              const pg = currentPage <= 3 ? i + 1
-                : currentPage >= totalPages - 2 ? totalPages - 4 + i
-                : currentPage - 2 + i;
-              if (pg < 1 || pg > totalPages) return null;
-              return (
-                <button key={pg} onClick={() => loadPayments(pg)}
-                  className={`w-7 h-7 rounded-md text-xs font-medium transition-colors ${pg === currentPage ? "bg-primary text-primary-foreground" : "border border-border text-muted-foreground hover:bg-muted"}`}>
-                  {pg}
-                </button>
-              );
-            })}
             <button
               onClick={() => loadPayments(currentPage + 1)}
               disabled={currentPage >= totalPages || apiLoading}
@@ -1018,322 +977,435 @@ export default function ReceivedPaymentPage() {
         </div>
       )}
 
-      {/* Approve / Reject Dialog */}
-      <Dialog open={!!approveTarget} onOpenChange={(open) => { if (!open) { setApproveTarget(null); setRejectNote(""); } }}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <ThumbsUp size={16} className="text-green-500" />
-              Approve or Reject Payment
+      {/* ── Add / Edit Dialog ────────────────────────────────────────────────── */}
+      <Dialog
+        open={isOpen}
+        onOpenChange={(o) => {
+          if (!o) {
+            setIsOpen(false);
+            setEditingId(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto p-0">
+          {/* Header */}
+          <DialogHeader className="px-7 pt-6 pb-4 border-b border-border bg-muted/20">
+            <DialogTitle className="font-heading text-lg flex items-center gap-2.5">
+              <div className="p-1.5 rounded-lg bg-emerald-500/10">
+                <ArrowDownCircle size={18} className="text-emerald-500" />
+              </div>
+              {editingId ? "Edit Received Payment" : "Record Received Payment"}
             </DialogTitle>
-            <DialogDescription>
-              {approveTarget?.docNo} · {approveTarget && fmt(approveTarget.amount)} · {approveTarget?.receivedFrom}
+            <DialogDescription className="text-xs text-muted-foreground">
+              Fill in all required fields. Document number is auto-generated
+              (REC/XXXXXX/YYYY-YYYY).
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3 py-1">
-            <p className="text-xs text-muted-foreground">
-              Approving will mark this payment as <span className="font-semibold text-green-600">Approved</span>. Rejecting requires a reason.
-            </p>
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Rejection Reason (required if rejecting)
-              </label>
-              <Input
-                placeholder="e.g. Incorrect amount, wrong account…"
-                value={rejectNote}
-                onChange={(e) => setRejectNote(e.target.value)}
-              />
+
+          <div className="px-7 py-6">
+            {/* ── Two-column layout: form left, calendar right ── */}
+            <div className="grid grid-cols-1 lg:grid-cols-[1fr_260px] gap-8">
+              {/* LEFT — form fields */}
+              <div className="space-y-5">
+                {/* Row 1: Company + Project */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <FieldLabel required>Company</FieldLabel>
+                    <Select
+                      value={form.companyId}
+                      onValueChange={(v) => {
+                        const co = companies.find((c) => String(c.id) === v);
+                        setForm((f) => ({
+                          ...f,
+                          companyId: v,
+                          companyName: co?.label ?? "",
+                          projectId: "",
+                          projectName: "",
+                          depositBankId: "",
+                          depositBankName: "",
+                        }));
+                      }}
+                    >
+                      <SelectTrigger className="h-9 text-sm">
+                        <SelectValue placeholder="Select company…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {companies.map((c) => (
+                          <SelectItem key={c.id} value={String(c.id)}>
+                            {c.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <FieldLabel required>Project</FieldLabel>
+                    <Select
+                      value={form.projectId}
+                      onValueChange={(v) => {
+                        const proj = filteredProjects.find(
+                          (p) => String(p.id) === v,
+                        );
+                        setForm((f) => ({
+                          ...f,
+                          projectId: v,
+                          projectName: proj?.label ?? "",
+                        }));
+                      }}
+                    >
+                      <SelectTrigger className="h-9 text-sm">
+                        <SelectValue placeholder="Select project…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {filteredProjects.map((p) => (
+                          <SelectItem key={p.id} value={String(p.id)}>
+                            {p.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {/* Row 2: Fin Year + Payment Mode */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <FieldLabel required>Financial Year</FieldLabel>
+                    <Select
+                      value={form.finYear}
+                      onValueChange={(v) => setField("finYear", v)}
+                    >
+                      <SelectTrigger className="h-9 text-sm">
+                        <SelectValue placeholder="Select fin year…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {finYearOptions.map((fy) => (
+                          <SelectItem key={fy.id} value={fy.year}>
+                            {fy.year}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <FieldLabel required>Payment Type</FieldLabel>
+                    <Select
+                      value={form.mode}
+                      onValueChange={(v) => setField("mode", v as PaymentMode)}
+                    >
+                      <SelectTrigger className="h-9 text-sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PAYMENT_MODES.map((m) => (
+                          <SelectItem key={m} value={m}>
+                            <span className="flex items-center gap-2">
+                              {modeIcon(m)} {m}
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {/* Row 3: Customer + Deposit Bank */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <FieldLabel required>Customer Name</FieldLabel>
+                    <CustomerCombobox
+                      value={form.customerName}
+                      onChange={(v) => setField("customerName", v)}
+                      customers={customers}
+                    />
+                  </div>
+                  <div>
+                    <FieldLabel required>Deposit Bank</FieldLabel>
+                    <Select
+                      value={form.depositBankId}
+                      disabled={!form.companyId}
+                      onValueChange={(v) => {
+                        const bank = depositBanks.find(
+                          (b) => String(b.BId) === v,
+                        );
+                        setForm((f) => ({
+                          ...f,
+                          depositBankId: v,
+                          depositBankName: bank
+                            ? `${bank.BName}${bank.BBranch ? ` – ${bank.BBranch}` : ""}`
+                            : "",
+                        }));
+                      }}
+                    >
+                      <SelectTrigger className="h-9 text-sm">
+                        <SelectValue
+                          placeholder={
+                            form.companyId
+                              ? "Select deposit bank…"
+                              : "Select company first"
+                          }
+                        />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {depositBanks.map((b) => (
+                          <SelectItem key={b.BId} value={String(b.BId)}>
+                            <span className="flex items-center gap-2">
+                              <Landmark
+                                size={13}
+                                className="text-muted-foreground"
+                              />
+                              {b.BName}
+                              {b.BBranch ? ` – ${b.BBranch}` : ""}
+                              {b.BAccountNumber ? (
+                                <span className="text-muted-foreground text-[10px]">
+                                  ···{b.BAccountNumber.slice(-4)}
+                                </span>
+                              ) : null}
+                            </span>
+                          </SelectItem>
+                        ))}
+                        {depositBanks.length === 0 && (
+                          <div className="px-3 py-2 text-xs text-muted-foreground">
+                            No active banks found for this company
+                          </div>
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {/* Row 4: Amount + Doc No */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <FieldLabel required>Amount (₹)</FieldLabel>
+                    <div className="relative">
+                      <IndianRupee
+                        size={14}
+                        className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                      />
+                      <Input
+                        type="number"
+                        className="pl-8 h-9 text-sm font-mono"
+                        placeholder="0.00"
+                        value={form.amount}
+                        onChange={(e) => setField("amount", e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <FieldLabel>Document Number</FieldLabel>
+                    {docNoLoading ? (
+                      <div className="h-9 flex items-center gap-2 px-3 text-sm text-muted-foreground border border-input rounded-md bg-muted/30">
+                        <Loader2 size={13} className="animate-spin shrink-0" />
+                        Generating…
+                      </div>
+                    ) : (
+                      <div
+                        className={cn(
+                          "h-9 flex items-center justify-between gap-2 px-3 rounded-md border font-heading font-semibold text-sm",
+                          docNoPreview || form.docNo
+                            ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400"
+                            : "border-input bg-muted/30 text-muted-foreground font-normal",
+                        )}
+                      >
+                        <span className="flex items-center gap-2 truncate">
+                          <Hash size={13} className="shrink-0 opacity-60" />
+                          <span className="truncate">
+                            {docNoPreview ||
+                              form.docNo ||
+                              (recDocTypeId ? "Auto-assigned" : "Resolving…")}
+                          </span>
+                        </span>
+                        {(docNoPreview || form.docNo) && !editingId && (
+                          <button
+                            onClick={() =>
+                              refreshDocNo(
+                                recDocTypeId,
+                                form.finYear || activeFinYear,
+                              )
+                            }
+                            className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                            title="Refresh"
+                          >
+                            <RefreshCw size={12} />
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    <p className="text-[10px] text-muted-foreground mt-1 font-mono">
+                      REC / 000001 / {form.finYear || activeFinYear} — locked on
+                      save
+                    </p>
+                  </div>
+                </div>
+
+                {/* Row 5: Bank ref (conditional) */}
+                {needsBankRef && (
+                  <div className="grid grid-cols-2 gap-4">
+                    {form.mode === "Check" ? (
+                      <div>
+                        <FieldLabel>Cheque Number</FieldLabel>
+                        <Input
+                          className="h-9 text-sm"
+                          placeholder="Cheque No."
+                          value={form.checkNumber}
+                          onChange={(e) =>
+                            setField("checkNumber", e.target.value)
+                          }
+                        />
+                      </div>
+                    ) : (
+                      <div>
+                        <FieldLabel>Transaction / UTR Ref</FieldLabel>
+                        <Input
+                          className="h-9 text-sm"
+                          placeholder="Transaction ID / UTR"
+                          value={form.transactionId}
+                          onChange={(e) =>
+                            setField("transactionId", e.target.value)
+                          }
+                        />
+                      </div>
+                    )}
+                    <div>
+                      <FieldLabel>Customer Bank Name</FieldLabel>
+                      <Input
+                        className="h-9 text-sm"
+                        placeholder="Bank of customer"
+                        value={form.bankName}
+                        onChange={(e) => setField("bankName", e.target.value)}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Row 6: Remarks */}
+                <div>
+                  <FieldLabel>Remarks</FieldLabel>
+                  <textarea
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-ring min-h-[80px]"
+                    placeholder="Optional remarks or notes…"
+                    value={form.remarks}
+                    onChange={(e) => setField("remarks", e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {/* RIGHT — inline calendar */}
+              <div className="flex flex-col gap-3">
+                <div>
+                  <FieldLabel required>Date of Receipt</FieldLabel>
+                  {/* Selected date display */}
+                  <div
+                    className={cn(
+                      "mb-3 px-3 py-2 rounded-lg border text-sm font-medium flex items-center gap-2",
+                      date
+                        ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-400"
+                        : "border-dashed border-border text-muted-foreground",
+                    )}
+                  >
+                    <svg
+                      viewBox="0 0 16 16"
+                      className="w-3.5 h-3.5 shrink-0 opacity-70"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                    >
+                      <rect x="1" y="3" width="14" height="12" rx="2" />
+                      <path d="M1 7h14M5 1v4M11 1v4" strokeLinecap="round" />
+                    </svg>
+                    {date ? format(date, "dd MMMM yyyy") : "No date selected"}
+                  </div>
+
+                  {/* Inline calendar — no popover */}
+                  <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+                    <CalendarComponent
+                      mode="single"
+                      selected={date}
+                      onSelect={(d) => setDate(d)}
+                      initialFocus
+                      className="w-full [&_.rdp]:w-full [&_.rdp-months]:w-full [&_.rdp-month]:w-full [&_.rdp-table]:w-full"
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => { setApproveTarget(null); setRejectNote(""); }}>
+
+          <DialogFooter className="px-7 py-4 border-t border-border bg-muted/10 gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setIsOpen(false)}
+              disabled={actionLoading}
+            >
               Cancel
             </Button>
-            <Button variant="destructive" onClick={() => handleApprove("reject")} disabled={actionLoading} className="gap-1.5">
-              {actionLoading ? <Loader2 size={13} className="animate-spin" /> : <ThumbsDown size={13} />}
-              Reject
-            </Button>
-            <Button onClick={() => handleApprove("approve")} disabled={actionLoading} className="gap-1.5 bg-green-600 hover:bg-green-700">
-              {actionLoading ? <Loader2 size={13} className="animate-spin" /> : <ThumbsUp size={13} />}
-              Approve
+            <Button size="sm" onClick={handleSubmit} disabled={actionLoading}>
+              {actionLoading ? (
+                <Loader2 size={14} className="animate-spin mr-1.5" />
+              ) : null}
+              {editingId ? "Update Payment" : "Save Payment"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Add / Edit Dialog */}
-      <Dialog open={isOpen} onOpenChange={(open) => {
-        if (!open) { setIsOpen(false); setEditingId(null); setForm(EMPTY_FORM); setDate(new Date()); }
-      }}>
-        <DialogContent className="max-w-lg max-h-[92vh] overflow-y-auto">
+      {/* ── Submit for Approval Confirm ─────────────────────────────────────── */}
+      <Dialog
+        open={!!submitTarget}
+        onOpenChange={(o) => {
+          if (!o) setSubmitTarget(null);
+        }}
+      >
+        <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              {editingId
-                ? <><Pencil size={18} className="text-blue-500" /> Edit Payment</>
-                : <><ArrowDownCircle size={18} className="text-emerald-500" /> Record Received Payment</>
-              }
+            <DialogTitle className="font-heading text-base flex items-center gap-2">
+              <SendHorizontal size={16} className="text-primary" />
+              Submit for Approval
             </DialogTitle>
-            <DialogDescription>
-              {editingId ? "Update the payment details below." : "Log an inbound payment received from a client or customer."}
+            <DialogDescription className="text-xs text-muted-foreground">
+              This will send the payment to the admin Approval Inbox. You won't
+              be able to edit it until it's reviewed.
             </DialogDescription>
           </DialogHeader>
-
-          <div className="space-y-4 py-1">
-
-            {/* Project — select first, company auto-fills */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Project <span className="text-red-500">*</span>
-              </label>
-              <Select
-                value={form.projectName}
-                onValueChange={handleProjectChange}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select project" />
-                </SelectTrigger>
-                <SelectContent>
-                  {projects.length === 0 ? (
-                    <SelectItem value="__none__" disabled>No projects found</SelectItem>
-                  ) : (
-                    projects.map((p) => (
-                      <SelectItem key={p.Id} value={p.Name}>
-                        {p.Name}
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Company — read-only, auto-filled when project is selected */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Company Name <span className="text-red-500">*</span>
-              </label>
-              <Input
-                value={form.companyName}
-                readOnly
-                placeholder="Auto-filled on project select"
-                className="bg-muted/40 text-muted-foreground cursor-not-allowed"
-              />
-            </div>
-
-            {/* Received From */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Received From <span className="text-red-500">*</span>
-              </label>
-              <Input
-                placeholder="Client / Customer name"
-                value={form.receivedFrom}
-                onChange={(e) => setField("receivedFrom", e.target.value)}
-              />
-            </div>
-
-            {/* Date + Mode */}
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                  Date <span className="text-red-500">*</span>
-                </label>
-                <Popover open={calOpen} onOpenChange={setCalOpen}>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className={cn(
-                        "w-full justify-between font-normal text-sm",
-                        !date && "text-muted-foreground",
-                      )}
-                    >
-                      {date ? format(date, "dd/MM/yyyy") : "Pick date"}
-                      <CalendarIcon size={14} className="opacity-50" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <CalendarComponent
-                      mode="single"
-                      selected={date}
-                      onSelect={(d) => {
-                        setDate(d);
-                        setCalOpen(false);
-                      }}
-                      initialFocus
-                    />
-                  </PopoverContent>
-                </Popover>
-              </div>
-
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                  Payment Mode <span className="text-red-500">*</span>
-                </label>
-                <Select
-                  value={form.mode}
-                  onValueChange={(v) => setField("mode", v)}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PAYMENT_MODES.map((m) => (
-                      <SelectItem key={m} value={m}>
-                        <span className="flex items-center gap-2">
-                          {modeIcon(m)}
-                          {m}
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            {/* Amount (non-EMI) */}
-            {!isEmiMode && (
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                  Amount (₹) <span className="text-red-500">*</span>
-                </label>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground font-mono text-sm">
-                    ₹
-                  </span>
-                  <Input
-                    className="pl-7 font-mono"
-                    placeholder="0"
-                    value={form.amount}
-                    onChange={(e) =>
-                      setField("amount", e.target.value.replace(/[^0-9.]/g, ""))
-                    }
-                  />
-                </div>
-              </div>
-            )}
-
-            {/* EMI section */}
-            {isEmiMode && (
-              <div className="rounded-lg border border-border bg-muted/20 p-4 space-y-3">
-                <div className="flex items-center gap-2 mb-1">
-                  <Layers size={13} className="text-muted-foreground" />
-                  <span className="text-xs font-semibold text-foreground uppercase tracking-wide">
-                    EMI Schedule
-                  </span>
-                  <span className="ml-auto text-[10px] text-muted-foreground">
-                    Loaded from project record
-                  </span>
-                </div>
-
-                {!form.projectName && (
-                  <div className="rounded-lg bg-background border border-border px-3 py-4 text-center text-xs text-muted-foreground">
-                    Select a project above to load its EMI schedule.
-                  </div>
-                )}
-
-                {form.projectName && emiFetching && (
-                  <div className="rounded-lg bg-background border border-border px-3 py-5 flex items-center justify-center gap-2 text-xs text-muted-foreground">
-                    <span className="w-4 h-4 border-2 border-border border-t-foreground rounded-full animate-spin" />
-                    Loading EMI schedule…
-                  </div>
-                )}
-
-                {form.projectName && !emiFetching && emiSchedule.length > 0 && (
-                  <EmiScheduleTable
-                    schedule={emiSchedule}
-                    payingNos={emiPayingNos}
-                    onToggle={toggleEmiNo}
-                  />
-                )}
-              </div>
-            )}
-
-            {/* Bank / TxnID */}
-            {form.mode !== "Cash" && form.mode !== "EMI" && (
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                    Bank Name
-                  </label>
-                  <Select
-                    value={form.bankName}
-                    onValueChange={(v) => setField("bankName", v)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select bank…" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {banks.length === 0 ? (
-                        <SelectItem value="__none__" disabled>
-                          No banks found
-                        </SelectItem>
-                      ) : (
-                        banks.map((b) => (
-                          <SelectItem key={b.BId} value={b.BName ?? String(b.BId)}>
-                            <span className="flex flex-col">
-                              <span>{b.BName}</span>
-                              {b.BBranch && (
-                                <span className="text-[10px] text-muted-foreground">
-                                  {b.BBranch}
-                                </span>
-                              )}
-                            </span>
-                          </SelectItem>
-                        ))
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1.5">
-                  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                    {form.mode === "Check" ? "Check No." : "Transaction ID"}
-                  </label>
-                  {form.mode === "Check" ? (
-                    <Input
-                      placeholder="CHK001"
-                      value={form.checkNumber}
-                      onChange={(e) => setField("checkNumber", e.target.value)}
-                    />
-                  ) : (
-                    <div className="relative">
-                      <Input
-                        readOnly
-                        value={form.transactionId}
-                        className="font-mono text-xs bg-muted/40 cursor-default select-all"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setField("transactionId", generateTxnId())}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground hover:text-foreground transition-colors font-medium"
-                        title="Regenerate"
-                      >
-                        ↻
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Remarks */}
-            <div className="space-y-1.5">
-              <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Remarks
-              </label>
-              <Input
-                placeholder="Optional note…"
-                value={form.remarks}
-                onChange={(e) => setField("remarks", e.target.value)}
-              />
+          <div className="py-3 space-y-2">
+            <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 space-y-1">
+              <p className="text-xs text-muted-foreground font-heading uppercase tracking-wide">
+                Payment
+              </p>
+              <p className="text-sm font-semibold text-foreground">
+                {submitTarget?.docNo}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {submitTarget?.customerName || submitTarget?.receivedFrom}
+              </p>
+              <p className="text-sm font-mono font-bold text-emerald-600">
+                +{submitTarget ? fmt(submitTarget.amount) : ""}
+              </p>
             </div>
           </div>
-
           <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setIsOpen(false)}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSubmitTarget(null)}
+              disabled={actionLoading}
+            >
               Cancel
             </Button>
-            <Button onClick={editingId ? handleUpdate : handleSubmit} className="gap-1.5" disabled={actionLoading}>
-              {actionLoading ? <Loader2 size={14} className="animate-spin" /> : editingId ? <Pencil size={14} /> : <ArrowDownCircle size={14} />}
-              {editingId ? "Save Changes" : "Record Payment"}
+            <Button
+              size="sm"
+              onClick={handleSubmitForApproval}
+              disabled={actionLoading}
+              className="gap-1.5"
+            >
+              {actionLoading ? (
+                <Loader2 size={13} className="animate-spin" />
+              ) : (
+                <SendHorizontal size={13} />
+              )}
+              Submit
             </Button>
           </DialogFooter>
         </DialogContent>

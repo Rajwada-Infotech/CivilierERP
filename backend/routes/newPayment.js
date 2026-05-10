@@ -27,18 +27,27 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
     const offset = (page - 1) * limit;
     const search = req.query.supplier ? req.query.supplier.trim() : "";
+    const companyId = req.query.company ? req.query.company.trim() : "";
 
-    const whereClause = search
-      ? `WHERE PPaymentName LIKE @search
+    const conditions = [];
+    if (search) {
+      conditions.push(`(PPaymentName LIKE @search
           OR DocNo LIKE @search
           OR PExpenseRef LIKE @search
           OR PProject LIKE @search
           OR PCompany LIKE @search
-          OR PBankName LIKE @search`
+          OR PBankName LIKE @search)`);
+    }
+    if (companyId) {
+      conditions.push(`PCompany = @companyId`);
+    }
+    const whereClause = conditions.length
+      ? `WHERE ${conditions.join(" AND ")}`
       : "";
 
     const request = pool.request();
     if (search) request.input("search", sql.NVarChar(200), `%${search}%`);
+    if (companyId) request.input("companyId", sql.NVarChar(50), companyId);
 
     const countResult = await request.query(
       `SELECT COUNT(*) AS total FROM dbo.NewPayment ${whereClause}`,
@@ -50,6 +59,7 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
       .input("offset", sql.Int, offset)
       .input("limit", sql.Int, limit);
     if (search) dataRequest.input("search", sql.NVarChar(200), `%${search}%`);
+    if (companyId) dataRequest.input("companyId", sql.NVarChar(50), companyId);
 
     const result = await dataRequest.query(`
       SELECT * FROM dbo.NewPayment
@@ -574,7 +584,10 @@ router.put("/:id/approve", async (req, res) => {
       console.warn("EMI sync on approve failed:", emiErr.message);
     }
 
-    await bumpCacheVersion("new-payment");
+    await Promise.all([
+      bumpCacheVersion("new-payment"),
+      bumpCacheVersion("brs"),
+    ]);
     res.json({ message: "Payment approved", ...result });
   } catch (err) {
     console.error("Payment approve error:", err.message);
@@ -599,7 +612,10 @@ router.put("/:id/reject", async (req, res) => {
       req.user?.role,
       note || null,
     );
-    await bumpCacheVersion("new-payment");
+    await Promise.all([
+      bumpCacheVersion("new-payment"),
+      bumpCacheVersion("brs"),
+    ]);
     res.json({ message: "Payment rejected", ...result });
   } catch (err) {
     console.error("Payment reject error:", err.message);
