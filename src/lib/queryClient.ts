@@ -3,9 +3,12 @@ import { QueryClient } from "@tanstack/react-query";
 export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      // No retry on 429 rate limit
+      // Never retry on 401 (expired session) or 429 (rate limit).
+      // Retrying 401s is what causes the request storm visible in the logs —
+      // each polling query fires up to 2 extra requests after the token dies.
       retry: (failureCount, error: any) => {
-        if ((error as Response)?.status === 429) return false;
+        const status = (error as any)?.status ?? (error as Response)?.status;
+        if (status === 401 || status === 429) return false;
         return failureCount < 2;
       },
       // Always fetch fresh data on mount — if cache is empty the data will load.
