@@ -41,7 +41,9 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     if (companyId) {
       conditions.push(`PCompany = @companyId`);
     }
-    const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+    const whereClause = conditions.length
+      ? `WHERE ${conditions.join(" AND ")}`
+      : "";
 
     const request = pool.request();
     if (search) request.input("search", sql.NVarChar(200), `%${search}%`);
@@ -582,7 +584,10 @@ router.put("/:id/approve", async (req, res) => {
       console.warn("EMI sync on approve failed:", emiErr.message);
     }
 
-    await bumpCacheVersion("new-payment");
+    await Promise.all([
+      bumpCacheVersion("new-payment"),
+      bumpCacheVersion("brs"),
+    ]);
     res.json({ message: "Payment approved", ...result });
   } catch (err) {
     console.error("Payment approve error:", err.message);
@@ -607,7 +612,10 @@ router.put("/:id/reject", async (req, res) => {
       req.user?.role,
       note || null,
     );
-    await bumpCacheVersion("new-payment");
+    await Promise.all([
+      bumpCacheVersion("new-payment"),
+      bumpCacheVersion("brs"),
+    ]);
     res.json({ message: "Payment rejected", ...result });
   } catch (err) {
     console.error("Payment reject error:", err.message);
