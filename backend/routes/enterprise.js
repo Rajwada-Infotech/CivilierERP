@@ -277,6 +277,27 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
+// GET /by-id/:id — fetch a single enterprise/company record by ID (any business_type)
+router.get("/by-id/:id", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!id) return res.status(400).json({ error: "Invalid id" });
+  try {
+    const { getPool, sql } = require("../db");
+    const pool = getPool();
+    const result = await pool
+      .request()
+      .input("id", sql.Int, id)
+      .query(
+        "SELECT id, name, short_name, logo, email, phone_number, address, city, state, gst_type FROM dbo.enterprise WHERE id = @id",
+      );
+    if (!result.recordset.length)
+      return res.status(404).json({ error: "Not found" });
+    res.json(result.recordset[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET options for FK dropdowns
 // Supports: ?type=<entity_type>  (legacy)
 //           ?business_type=C     (filter companies by business_type column)

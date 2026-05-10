@@ -28,6 +28,8 @@ export interface POLineItem {
 export interface PurchaseOrder {
   PurchaseOrderID: number;
   PurchaseOrderNo: string;
+  DocNo?: string | null;
+  RootExBDocNo?: string | null;
   SupplierID?: number;
   SupplierName?: string; // joined from AccountHeadMaster
   // Single line item fields (PO is flat, not nested items)
@@ -100,6 +102,17 @@ export interface GRNFormDataPayload {
   docTypeId?: number | null;
   docNo?: string;
   finYear?: string | null;
+  /** DocNo of the parent PO or WO (used to resolve correct GRN prefix). */
+  parentDocNo?: string | null;
+  /** Root ExB DocNo — present when this GRN is under an Expense Booking. */
+  rootExBDocNo?: string | null;
+}
+
+export interface DocNumberPreview {
+  nextDocNo: string;
+  prefix?: string;
+  nextSeq?: number;
+  year?: number | null;
 }
 
 export interface PaginatedResponse<T> {
@@ -196,6 +209,19 @@ export const deleteGRN = async (id: string) => {
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || "Failed to delete GRN");
+  }
+  return res.json();
+};
+
+export const previewNextGRNNumber = async (
+  parentDocNo?: string | null,
+): Promise<DocNumberPreview> => {
+  const res = await fetch(buildUrl(`${BASE}/next-number`, { parentDocNo }), {
+    headers: getAuthHeaders(),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to preview GRN number");
   }
   return res.json();
 };

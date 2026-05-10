@@ -4,6 +4,11 @@ const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition } = require("../services/approvalService");
+const {
+  lockNextDocNumber,
+  backPatchRecordId,
+  resolveDocTypeId,
+} = require("../utils/docNumberLock");
 
 const requireUserEmail = (req, res) => {
   const email = req.user?.email;
@@ -21,20 +26,47 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
     const offset = (page - 1) * limit;
+    const search = req.query.supplier ? req.query.supplier.trim() : "";
+    const companyId = req.query.company ? req.query.company.trim() : "";
 
-    const countResult = await pool
-      .request()
-      .query("SELECT COUNT(*) AS total FROM dbo.NewPayment");
+    const conditions = [];
+    if (search) {
+      conditions.push(`(PPaymentName LIKE @search
+          OR DocNo LIKE @search
+          OR PExpenseRef LIKE @search
+          OR PProject LIKE @search
+          OR PCompany LIKE @search
+          OR PBankName LIKE @search)`);
+    }
+    if (companyId) {
+      conditions.push(`PCompany = @companyId`);
+    }
+    const whereClause = conditions.length
+      ? `WHERE ${conditions.join(" AND ")}`
+      : "";
+
+    const request = pool.request();
+    if (search) request.input("search", sql.NVarChar(200), `%${search}%`);
+    if (companyId) request.input("companyId", sql.NVarChar(50), companyId);
+
+    const countResult = await request.query(
+      `SELECT COUNT(*) AS total FROM dbo.NewPayment ${whereClause}`,
+    );
     const total = parseInt(countResult.recordset[0].total);
 
-    const result = await pool
+    const dataRequest = pool
       .request()
       .input("offset", sql.Int, offset)
-      .input("limit", sql.Int, limit).query(`
-        SELECT * FROM dbo.NewPayment
-        ORDER BY PPaymentID DESC
-        OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
-      `);
+      .input("limit", sql.Int, limit);
+    if (search) dataRequest.input("search", sql.NVarChar(200), `%${search}%`);
+    if (companyId) dataRequest.input("companyId", sql.NVarChar(50), companyId);
+
+    const result = await dataRequest.query(`
+      SELECT * FROM dbo.NewPayment
+      ${whereClause}
+      ORDER BY PPaymentID DESC
+      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+    `);
 
     res.json({
       data: result.recordset,
@@ -216,6 +248,8 @@ router.post("/", async (req, res) => {
     PProject,
     PCompany,
     PExpenseRef,
+    parentDocNo,
+    rootExBDocNo,
     // Cheque
     PChequeNo,
     PChequeLotId,
@@ -236,13 +270,26 @@ router.post("/", async (req, res) => {
     if (!userEmail) return;
 
     const pool = getPool();
+    const prefix = rootExBDocNo ? "ExB-PAY" : "PAY";
+    const docTypeId = await resolveDocTypeId(pool, sql, prefix);
+    const finalDocNo = await lockNextDocNumber(pool, sql, {
+      docTypeId,
+      tableName: "NewPayment",
+      docNoColumn: "DocNo",
+      issuedBy: userEmail,
+      parentDocNo,
+      rootExBDocNo,
+    });
+    const parts = finalDocNo.split("-");
+    const docYear = parseInt(parts[parts.length - 2], 10) || null;
+    const docSerial = parseInt(parts[parts.length - 1], 10) || null;
 
     // Determine Status: digital modes start as Pending (submitted for approval),
     // all others start as Draft.
     const digitalModes = ["NEFT", "UPI", "RTGS", "IMPS"];
     const initialStatus = digitalModes.includes(PMode) ? "Pending" : "Draft";
 
-    await pool
+    const insertResult = await pool
       .request()
       .input("PPaymentName", sql.VarChar, PPaymentName || "")
       .input("PMode", sql.VarChar, PMode || "")
@@ -271,6 +318,13 @@ router.post("/", async (req, res) => {
       .input("PUpiTransactionId", sql.NVarChar(100), PUpiTransactionId || null)
       .input("PRtgsReference", sql.NVarChar(100), PRtgsReference || null)
       .input("PImpsReference", sql.NVarChar(100), PImpsReference || null)
+      // Document numbering
+      .input("DocNo", sql.NVarChar(100), finalDocNo)
+      .input("DocTypeId", sql.Int, docTypeId)
+      .input("DocYear", sql.SmallInt, docYear)
+      .input("DocSerial", sql.Int, docSerial)
+      .input("ParentDocNo", sql.NVarChar(100), parentDocNo || null)
+      .input("RootExBDocNo", sql.NVarChar(100), rootExBDocNo || null)
       // Audit
       .input("PCreatedAt", sql.DateTime, new Date())
       .input("PCreatedBy", sql.NVarChar(100), userEmail)
@@ -282,19 +336,30 @@ router.post("/", async (req, res) => {
           PChequeNo, PChequeLotId, PChequeLotNumber, PChequeDate,
           PChequeAccountNumber, PChequeIfsc, PIsPostDated,
           PNeftNumber, PUpiTransactionId, PRtgsReference, PImpsReference,
+          DocNo, DocTypeId, DocYear, DocSerial, ParentDocNo, RootExBDocNo,
           PCreatedAt, PCreatedBy, PApprovedBy, Status
-        ) VALUES (
+        )
+        OUTPUT INSERTED.PPaymentID
+        VALUES (
           @PPaymentName, @PMode, @PAmount, @PDocType, @PDate,
           @PBankID, @PBankName, @PProject, @PCompany, @PExpenseRef,
           @PChequeNo, @PChequeLotId, @PChequeLotNumber, @PChequeDate,
           @PChequeAccountNumber, @PChequeIfsc, @PIsPostDated,
           @PNeftNumber, @PUpiTransactionId, @PRtgsReference, @PImpsReference,
+          @DocNo, @DocTypeId, @DocYear, @DocSerial, @ParentDocNo, @RootExBDocNo,
           @PCreatedAt, @PCreatedBy, @PApprovedBy, @Status
         )
       `);
 
+    const newId = insertResult.recordset[0]?.PPaymentID;
+    await backPatchRecordId(pool, sql, finalDocNo, "NewPayment", newId);
+
     await bumpCacheVersion("new-payment");
-    res.json({ message: "Payment added successfully" });
+    res.json({
+      message: "Payment added successfully",
+      PPaymentID: newId,
+      docNo: finalDocNo,
+    });
   } catch (err) {
     console.error("PAYMENT INSERT ERROR:", err.message);
     res.status(500).json({ error: err.message });
@@ -348,6 +413,8 @@ router.put("/:id", async (req, res) => {
       .input("PProject", sql.VarChar, PProject || "")
       .input("PCompany", sql.VarChar, PCompany || "")
       .input("PExpenseRef", sql.NVarChar(100), PExpenseRef || null)
+      .input("ParentDocNo", sql.NVarChar(100), parentDocNo || null)
+      .input("RootExBDocNo", sql.NVarChar(100), rootExBDocNo || null)
       // Cheque
       .input("PChequeNo", sql.NVarChar(50), PChequeNo || null)
       .input("PChequeLotId", sql.Int, PChequeLotId || null)
@@ -377,6 +444,8 @@ router.put("/:id", async (req, res) => {
           PProject             = @PProject,
           PCompany             = @PCompany,
           PExpenseRef          = @PExpenseRef,
+          ParentDocNo          = @ParentDocNo,
+          RootExBDocNo         = @RootExBDocNo,
           PChequeNo            = @PChequeNo,
           PChequeLotId         = @PChequeLotId,
           PChequeLotNumber     = @PChequeLotNumber,
@@ -430,7 +499,7 @@ router.put("/:id/submit", async (req, res) => {
       userEmail,
       req.user?.role,
     );
-    await bumpCacheVersion("payments");
+    await bumpCacheVersion("new-payment");
     res.json({ message: "Payment submitted for approval", ...result });
   } catch (err) {
     console.error("Payment submit error:", err.message);
@@ -515,7 +584,10 @@ router.put("/:id/approve", async (req, res) => {
       console.warn("EMI sync on approve failed:", emiErr.message);
     }
 
-    await bumpCacheVersion("new-payment");
+    await Promise.all([
+      bumpCacheVersion("new-payment"),
+      bumpCacheVersion("brs"),
+    ]);
     res.json({ message: "Payment approved", ...result });
   } catch (err) {
     console.error("Payment approve error:", err.message);
@@ -540,7 +612,10 @@ router.put("/:id/reject", async (req, res) => {
       req.user?.role,
       note || null,
     );
-    await bumpCacheVersion("payments");
+    await Promise.all([
+      bumpCacheVersion("new-payment"),
+      bumpCacheVersion("brs"),
+    ]);
     res.json({ message: "Payment rejected", ...result });
   } catch (err) {
     console.error("Payment reject error:", err.message);

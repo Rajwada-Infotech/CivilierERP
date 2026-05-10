@@ -346,9 +346,7 @@ const DebitNoteMaster: React.FC = () => {
     queryFn: getDebitNotes,
     staleTime: 5 * 60 * 1000,
     retry: false,
-    // Backend is currently crashing on /api/debit-note (500).
-    // React Query retries create a retry storm and hammer the backend.
-    refetchOnMount: false,
+    refetchOnMount: "always",
     refetchOnWindowFocus: false,
   });
 

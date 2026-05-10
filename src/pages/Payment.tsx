@@ -9,6 +9,9 @@ import {
 } from "@/api/newPaymentApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { getBanks } from "@/api/bankMasterApi";
+import { getCompanyById } from "@/api/enterpriseApi";
+import type { CompanyDetail } from "@/api/enterpriseApi";
+import { ExportMenu } from "@/components/ExportMenu";
 import { toast } from "sonner";
 import { formatINR } from "@/utils/formatCurrency";
 import { StatusBadge } from "@/components/StatusBadge";
@@ -22,9 +25,7 @@ import {
   Edit,
   Trash2,
   AlertCircle,
-  Download,
   FileText,
-  FileSpreadsheet,
   ChevronDown,
   Receipt,
   Building2,
@@ -43,8 +44,9 @@ import {
   BookOpen,
   CalendarClock,
   AlertTriangle,
+  Search,
+  Eye,
 } from "lucide-react";
-import { exportToCsv, exportToPdf } from "@/lib/export";
 import type { ExportColumn } from "@/lib/export";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -61,6 +63,9 @@ interface DbPayment {
   PProject: string | null;
   PCompany: string | null;
   PExpenseRef: string | null;
+  DocNo?: string | null;
+  ParentDocNo?: string | null;
+  RootExBDocNo?: string | null;
   Status?: string;
   // Cheque
   PChequeNo?: string | null;
@@ -110,6 +115,8 @@ interface ExpenseOption {
   expenseBookingId?: number;
   docNo?: string;
   projectName?: string;
+  supplierName?: string;
+  partyName?: string;
   amount?: number;
   companyId?: number | null;
   installmentNo?: number;
@@ -122,6 +129,8 @@ interface ExpenseOption {
 interface ExpenseDetail {
   Eid: number;
   EDocNo: string | null;
+  ParentDocNo?: string | null;
+  RootExBDocNo?: string | null;
   EProjectName: string | null;
   ECompanyId: number | null;
   EAmount: number | null;
@@ -141,6 +150,7 @@ interface GRNRef {
   SupplierName?: string;
   PONumber?: string;
   Status?: string;
+  ProjectName?: string;
 }
 
 interface PaymentRecord {
@@ -153,8 +163,12 @@ interface PaymentRecord {
   bankName: string;
   project: string;
   company: string;
+  projectSite: string;
   expenseRef: string;
   expenseId: string;
+  docNo: string;
+  parentDocNo: string;
+  rootExBDocNo: string;
   docType: string;
   status: string;
   // Cheque
@@ -311,6 +325,14 @@ const deductChequeFromLot = async (
   return res.json();
 };
 
+const fetchCompanyOptions = async (): Promise<
+  { id: number; label: string }[]
+> => {
+  const res = await fetchWithAuth("/api/enterprises/options?business_type=C");
+  if (!res.ok) return [];
+  return res.json();
+};
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function blankForm(): Omit<PaymentRecord, "id"> {
@@ -325,6 +347,9 @@ function blankForm(): Omit<PaymentRecord, "id"> {
     company: "",
     expenseRef: "",
     expenseId: "",
+    docNo: "",
+    parentDocNo: "",
+    rootExBDocNo: "",
     docType: "",
     status: "Draft",
     chequeNo: "",
@@ -358,6 +383,9 @@ function dbToRecord(item: DbPayment): PaymentRecord {
     company: item.PCompany || "",
     expenseRef: item.PExpenseRef || "",
     expenseId: "",
+    docNo: item.DocNo || "",
+    parentDocNo: item.ParentDocNo || "",
+    rootExBDocNo: item.RootExBDocNo || "",
     docType: item.PDocType || "",
     status: (item as any).Status || "Draft",
     chequeNo: item.PChequeNo || "",
@@ -530,6 +558,397 @@ function InputField({
 
 // ─── GRN badges for list view ─────────────────────────────────────────────────
 
+// ─── PartyFilterCombobox ──────────────────────────────────────────────────────
+
+function PartyFilterCombobox({
+  partyNames,
+  value,
+  onChange,
+  expenseOptions,
+}: {
+  partyNames: string[];
+  value: string;
+  onChange: (val: string) => void;
+  expenseOptions: ExpenseOption[];
+}) {
+  const [search, setSearch] = React.useState("");
+  const [tab, setTab] = React.useState<"suppliers" | "others">("suppliers");
+
+  const suppliers = partyNames.filter((n) =>
+    expenseOptions.some(
+      (o) => o.supplierName === n && o.supplierName !== o.partyName,
+    ),
+  );
+  const others = partyNames.filter((n) => !suppliers.includes(n));
+
+  const activeList = tab === "suppliers" ? suppliers : others;
+  const filtered = activeList.filter((n) =>
+    n.toLowerCase().includes(search.toLowerCase()),
+  );
+
+  const totalCount = expenseOptions.length;
+  const filteredCount = value
+    ? expenseOptions.filter((o) => o.supplierName === value).length
+    : totalCount;
+
+  // Switch tab if selected value belongs to the other group
+  React.useEffect(() => {
+    if (!value) return;
+    if (suppliers.includes(value) && tab !== "suppliers") setTab("suppliers");
+    if (others.includes(value) && tab !== "others") setTab("others");
+  }, [value]);
+
+  return (
+    <div className="space-y-1.5">
+      <div className="flex items-center gap-2">
+        <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground">
+          Filter by Party
+        </label>
+        <span className="text-[10px] text-muted-foreground/60 font-heading normal-case tracking-normal">
+          — narrows the booking list below
+        </span>
+      </div>
+
+      <div className="rounded-xl border border-border bg-card overflow-hidden">
+        {/* Tab bar */}
+        <div className="flex border-b border-border">
+          <button
+            type="button"
+            onClick={() => setTab("suppliers")}
+            className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-heading font-semibold transition-colors border-b-2 ${
+              tab === "suppliers"
+                ? "border-primary text-primary bg-primary/5"
+                : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50"
+            }`}
+          >
+            <Truck size={11} />
+            Suppliers
+            <span
+              className={`px-1.5 py-0.5 rounded-full text-[10px] font-heading ${tab === "suppliers" ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}
+            >
+              {suppliers.length}
+            </span>
+          </button>
+          <div className="w-px bg-border" />
+          <button
+            type="button"
+            onClick={() => setTab("others")}
+            className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-xs font-heading font-semibold transition-colors border-b-2 ${
+              tab === "others"
+                ? "border-primary text-primary bg-primary/5"
+                : "border-transparent text-muted-foreground hover:text-foreground hover:bg-muted/50"
+            }`}
+          >
+            <FileText size={11} />
+            Others
+            <span
+              className={`px-1.5 py-0.5 rounded-full text-[10px] font-heading ${tab === "others" ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}
+            >
+              {others.length}
+            </span>
+          </button>
+        </div>
+
+        {/* Search */}
+        <div className="p-2 border-b border-border">
+          <div className="relative">
+            <Search
+              size={12}
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+            />
+            <input
+              type="text"
+              placeholder={`Search ${tab}…`}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="w-full pl-7 pr-3 py-1.5 text-xs bg-muted border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+          </div>
+        </div>
+
+        {/* List */}
+        <div className="max-h-48 overflow-y-auto divide-y divide-border/40">
+          {filtered.length === 0 && (
+            <div className="px-4 py-5 text-center text-xs text-muted-foreground">
+              No {tab} match "{search}"
+            </div>
+          )}
+
+          {filtered.map((name) => {
+            const count = expenseOptions.filter(
+              (o) => o.supplierName === name,
+            ).length;
+            const isSelected = value === name;
+            return (
+              <button
+                key={name}
+                type="button"
+                onClick={() => onChange(isSelected ? "" : name)}
+                className={`w-full flex items-center justify-between gap-3 px-3 py-2.5 text-left transition-colors hover:bg-muted/40 ${isSelected ? "bg-primary/5" : ""}`}
+              >
+                <div className="flex items-center gap-2.5 min-w-0">
+                  {isSelected ? (
+                    <div className="w-3.5 h-3.5 shrink-0 rounded-full border-2 border-primary flex items-center justify-center">
+                      <div className="w-1.5 h-1.5 rounded-full bg-primary" />
+                    </div>
+                  ) : (
+                    <div className="w-3.5 h-3.5 shrink-0 rounded-full border border-border" />
+                  )}
+                  <span
+                    className={`text-xs truncate ${isSelected ? "font-semibold text-primary" : "text-foreground"}`}
+                  >
+                    {name}
+                  </span>
+                </div>
+                <span className="text-[10px] font-heading text-muted-foreground bg-muted px-1.5 py-0.5 rounded-full shrink-0">
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Active filter chip */}
+        {value && (
+          <div className="flex items-center justify-between gap-2 px-3 py-2 border-t border-border bg-primary/5">
+            <div className="flex items-center gap-1.5 min-w-0">
+              <Truck size={11} className="text-primary shrink-0" />
+              <span className="text-xs font-medium text-primary truncate">
+                {value}
+              </span>
+              <span className="text-[10px] text-primary/60 font-heading shrink-0">
+                · {filteredCount} booking{filteredCount !== 1 ? "s" : ""}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => onChange("")}
+              className="shrink-0 text-muted-foreground hover:text-destructive transition-colors"
+            >
+              <X size={12} />
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+// ─── ExpenseBookingPicker ─────────────────────────────────────────────────────
+
+function ExpenseBookingPicker({
+  options,
+  value,
+  onChange,
+  loading,
+}: {
+  options: ExpenseOption[];
+  value: string;
+  onChange: (id: string) => void;
+  loading?: boolean;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const [search, setSearch] = React.useState("");
+  const [typeFilter, setTypeFilter] = React.useState<"all" | "booking" | "emi">(
+    "all",
+  );
+  const ref = React.useRef<HTMLDivElement>(null);
+
+  // Close on outside click
+  React.useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node))
+        setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  const selected = options.find((o) => o.id === value);
+
+  const filtered = options.filter((o) => {
+    if (typeFilter !== "all" && o.type !== typeFilter) return false;
+    if (!search) return true;
+    const q = search.toLowerCase();
+    return (
+      o.label.toLowerCase().includes(q) ||
+      (o.projectName ?? "").toLowerCase().includes(q)
+    );
+  });
+
+  const bookingCount = options.filter((o) => o.type === "booking").length;
+  const emiCount = options.filter((o) => o.type === "emi").length;
+
+  return (
+    <div className="space-y-1.5">
+      <label className="block text-xs uppercase tracking-widest font-heading text-muted-foreground">
+        Select Expense Booking
+      </label>
+      <p className="text-[11px] text-muted-foreground -mt-1">
+        Selecting a booking auto-fills project, company, amount &amp; doc type.
+      </p>
+      <div className="relative" ref={ref}>
+        {/* Trigger */}
+        <button
+          type="button"
+          disabled={loading}
+          onClick={() => setOpen((v) => !v)}
+          className="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-60 disabled:cursor-wait hover:border-primary/40 transition-colors"
+        >
+          {loading ? (
+            <span className="flex items-center gap-2 text-muted-foreground">
+              <div className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+              Loading bookings…
+            </span>
+          ) : selected ? (
+            <span className="flex items-center gap-2 min-w-0">
+              <span
+                className={`shrink-0 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-heading font-semibold ${selected.type === "emi" ? "bg-violet-500/10 text-violet-600 border border-violet-500/20" : "bg-primary/10 text-primary border border-primary/20"}`}
+              >
+                {selected.type === "emi" ? "EMI" : "EXB"}
+              </span>
+              <span className="font-mono text-xs text-primary font-semibold truncate">
+                {selected.label}
+              </span>
+            </span>
+          ) : (
+            <span className="text-muted-foreground">
+              — Choose expense booking —
+            </span>
+          )}
+          <ChevronDown
+            size={14}
+            className={`shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
+          />
+        </button>
+
+        {/* Dropdown panel */}
+        {open && (
+          <div className="absolute z-50 mt-1 w-full bg-card border border-border rounded-xl shadow-xl overflow-hidden">
+            {/* Search + filter bar */}
+            <div className="p-2.5 border-b border-border space-y-2">
+              <div className="relative">
+                <Search
+                  size={13}
+                  className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+                />
+                <input
+                  autoFocus
+                  type="text"
+                  placeholder="Search by ref, project…"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="w-full pl-8 pr-3 py-1.5 text-sm bg-muted border border-border rounded-lg focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </div>
+              {/* Type filter pills */}
+              <div className="flex gap-1.5">
+                {(["all", "booking", "emi"] as const).map((t) => {
+                  const count =
+                    t === "all"
+                      ? options.length
+                      : t === "booking"
+                        ? bookingCount
+                        : emiCount;
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => setTypeFilter(t)}
+                      className={`flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-heading font-semibold transition-all border ${
+                        typeFilter === t
+                          ? t === "emi"
+                            ? "bg-violet-500/15 text-violet-600 border-violet-500/30"
+                            : "bg-primary/10 text-primary border-primary/30"
+                          : "bg-muted text-muted-foreground border-border hover:border-primary/20"
+                      }`}
+                    >
+                      {t === "all"
+                        ? "All"
+                        : t === "booking"
+                          ? "Bookings"
+                          : "EMI"}
+                      <span className="opacity-70">{count}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Options list */}
+            <div className="max-h-64 overflow-y-auto divide-y divide-border/50">
+              {filtered.length === 0 && (
+                <div className="px-4 py-6 text-center text-xs text-muted-foreground">
+                  No matches found
+                </div>
+              )}
+              {filtered.map((o) => (
+                <button
+                  key={o.id}
+                  type="button"
+                  onClick={() => {
+                    onChange(o.id);
+                    setOpen(false);
+                    setSearch("");
+                  }}
+                  className={`w-full flex items-start gap-3 px-3 py-2.5 text-left hover:bg-muted/50 transition-colors ${o.id === value ? "bg-primary/5" : ""}`}
+                >
+                  <span
+                    className={`shrink-0 mt-0.5 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-heading font-semibold ${o.type === "emi" ? "bg-violet-500/10 text-violet-600 border border-violet-500/20" : "bg-primary/10 text-primary border border-primary/20"}`}
+                  >
+                    {o.type === "emi" ? "EMI" : "EXB"}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <p className="font-mono text-xs font-semibold text-foreground truncate">
+                      {o.label}
+                    </p>
+                    {o.projectName && (
+                      <p className="text-[10px] text-muted-foreground mt-0.5 truncate">
+                        {o.projectName}
+                      </p>
+                    )}
+                    {o.supplierName && o.supplierName !== o.projectName && (
+                      <p className="text-[10px] text-primary/60 mt-0.5 truncate">
+                        {o.supplierName}
+                      </p>
+                    )}
+                    {o.type === "emi" && o.installmentNo && (
+                      <p className="text-[10px] text-violet-500 mt-0.5">
+                        Installment #{o.installmentNo}
+                      </p>
+                    )}
+                  </div>
+                  {o.amount != null && (
+                    <span className="shrink-0 text-[11px] font-mono font-semibold text-foreground/70 mt-0.5">
+                      ₹{o.amount.toLocaleString("en-IN")}
+                    </span>
+                  )}
+                </button>
+              ))}
+            </div>
+
+            {/* Footer clear */}
+            {value && (
+              <div className="border-t border-border p-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    onChange("");
+                    setOpen(false);
+                    setSearch("");
+                  }}
+                  className="w-full text-xs text-muted-foreground hover:text-destructive transition-colors py-1"
+                >
+                  Clear selection
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function PaymentGRNBadges({ expenseId }: { expenseId: string }) {
   const [grns, setGrns] = React.useState<GRNRef[]>([]);
   React.useEffect(() => {
@@ -559,6 +978,7 @@ function PaymentGRNBadges({ expenseId }: { expenseId: string }) {
 // ─── Export ───────────────────────────────────────────────────────────────────
 
 const EXPORT_COLUMNS: ExportColumn[] = [
+  { header: "Doc No", accessor: "docNo" },
   { header: "Payment Name", accessor: "paymentName" },
   { header: "Expense Ref", accessor: "expenseRef" },
   { header: "Project", accessor: "project" },
@@ -570,58 +990,6 @@ const EXPORT_COLUMNS: ExportColumn[] = [
   { header: "Cheque No", accessor: "chequeNo" },
   { header: "Status", accessor: "status" },
 ];
-
-function ExportButton({ data }: { data: PaymentRecord[] }) {
-  const [open, setOpen] = useState(false);
-  const ref = React.useRef<HTMLDivElement>(null);
-  React.useEffect(() => {
-    const h = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node))
-        setOpen(false);
-    };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, []);
-  return (
-    <div className="relative" ref={ref}>
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading border border-border bg-card text-muted-foreground hover:text-foreground hover:border-primary/40 transition-all"
-      >
-        <Download size={13} /> Export{" "}
-        <ChevronDown
-          size={11}
-          className={`transition-transform ${open ? "rotate-180" : ""}`}
-        />
-      </button>
-      {open && (
-        <div className="absolute right-0 top-full mt-1 w-44 rounded-lg border border-border bg-card shadow-lg z-50 py-1">
-          <button
-            onClick={() => {
-              exportToCsv(data as any, EXPORT_COLUMNS, "payments");
-              setOpen(false);
-            }}
-            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-          >
-            <FileSpreadsheet size={13} /> Export CSV
-          </button>
-          <button
-            onClick={() => {
-              exportToPdf(data as any, EXPORT_COLUMNS, {
-                title: "Payment Management",
-                filename: "payments",
-              });
-              setOpen(false);
-            }}
-            className="w-full flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-          >
-            <FileText size={13} /> Export PDF
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ─── Mode-specific info banner ─────────────────────────────────────────────────
 
@@ -974,6 +1342,8 @@ function DigitalRefPanel({
 const Payment: React.FC = () => {
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
+  const [supplierFilter, setSupplierFilter] = useState("");
+  const [companyFilter, setCompanyFilter] = useState("");
   const PAGE_SIZE = 20;
 
   const [view, setView] = useState<"list" | "form">("list");
@@ -981,20 +1351,43 @@ const Payment: React.FC = () => {
   const [form, setForm] = useState<Omit<PaymentRecord, "id">>(blankForm());
   const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [viewingRec, setViewingRec] = useState<PaymentRecord | null>(null);
   const [loadingExpense, setLoadingExpense] = useState(false);
   const [linkedGRNs, setLinkedGRNs] = useState<GRNRef[]>([]);
+  const [supplierBookingFilter, setSupplierBookingFilter] = useState("");
 
   // ── Queries ────────────────────────────────────────────────────────────────
 
-  const { data: dbData, isLoading } = useQuery({
-    queryKey: ["payments", page],
-    queryFn: () => getPayments(page, PAGE_SIZE),
+  const { data: dbData, isLoading, refetch: refetchPayments } = useQuery({
+    queryKey: ["payments", page, supplierFilter, companyFilter],
+    queryFn: () => getPayments(page, PAGE_SIZE, supplierFilter, companyFilter),
+    staleTime: 0,
   });
 
   const { data: banks = [] } = useQuery<BankOption[]>({
     queryKey: ["bank-options-payment"],
     queryFn: fetchBankOptions,
   });
+
+  const { data: enterprises = [] } = useQuery<{ id: number; label: string }[]>({
+    queryKey: ["company-options-payment-filter"],
+    queryFn: fetchCompanyOptions,
+  });
+
+  // Companies fetched with business_type=C from enterprise table
+  const companyOptions = enterprises;
+
+  // Fetch full detail (name + logo + address) for the selected company — used in PDF export
+  const { data: selectedCompanyDetail = null } = useQuery<CompanyDetail | null>(
+    {
+      queryKey: ["company-detail-export", companyFilter],
+      queryFn: () =>
+        companyFilter
+          ? getCompanyById(Number(companyFilter))
+          : Promise.resolve(null),
+      enabled: !!companyFilter,
+    },
+  );
 
   const { data: expenseOptions = [] } = useQuery<ExpenseOption[]>({
     queryKey: ["expense-options-payment"],
@@ -1025,6 +1418,7 @@ const Payment: React.FC = () => {
     setEditingId(null);
     setForm(blankForm());
     setLinkedGRNs([]);
+    setSupplierBookingFilter("");
     setView("form");
   };
 
@@ -1036,6 +1430,7 @@ const Payment: React.FC = () => {
       : undefined;
     setForm({ ...rest, expenseId: matchedOption?.id ?? "" });
     setLinkedGRNs([]);
+    setSupplierBookingFilter("");
     setView("form");
   };
 
@@ -1044,6 +1439,7 @@ const Payment: React.FC = () => {
     setEditingId(null);
     setForm(blankForm());
     setLinkedGRNs([]);
+    setSupplierBookingFilter("");
   };
 
   // ── Mode change — clear irrelevant fields ──────────────────────────────────
@@ -1085,6 +1481,8 @@ const Payment: React.FC = () => {
           ...prev,
           expenseId: "",
           expenseRef: "",
+          parentDocNo: "",
+          rootExBDocNo: "",
           project: "",
           company: "",
           amount: null,
@@ -1095,6 +1493,11 @@ const Payment: React.FC = () => {
 
       const selectedOption = expenseOptions.find((o) => o.id === expenseId);
       if (selectedOption?.type === "emi") {
+        const parentDocNo =
+          selectedOption.parentDocNo ||
+          selectedOption.refNumber?.replace(/-EMI-\d+$/i, "") ||
+          selectedOption.docNo?.replace(/-EMI-\d+$/i, "") ||
+          "";
         const padded = String(selectedOption.installmentNo ?? 1).padStart(
           2,
           "0",
@@ -1111,14 +1514,26 @@ const Payment: React.FC = () => {
           ...prev,
           expenseId,
           expenseRef: ref,
+          parentDocNo,
+          rootExBDocNo: parentDocNo,
           project: selectedOption.projectName || "",
-          company: String(selectedOption.companyId ?? ""),
+          company:
+            selectedOption.companyName ||
+            String(selectedOption.companyId ?? ""),
           amount: selectedOption.amount ?? null,
           docType: `EMI-${padded}`,
         }));
         if (selectedOption.expenseBookingId) {
           fetchExpenseGRNs(String(selectedOption.expenseBookingId))
-            .then(setLinkedGRNs)
+            .then((grns) => {
+              setLinkedGRNs(grns);
+              if (grns.length > 0 && grns[0].ProjectName) {
+                setForm((prev) => ({
+                  ...prev,
+                  projectSite: grns[0].ProjectName!,
+                }));
+              }
+            })
             .catch(() => setLinkedGRNs([]));
         }
         return;
@@ -1128,12 +1543,17 @@ const Payment: React.FC = () => {
       try {
         const detail = await fetchExpenseDetail(expenseId);
         if (!detail) throw new Error("Not found");
+        const parentDocNo = detail.ParentDocNo || detail.EDocNo || "";
+        const rootExBDocNo = detail.RootExBDocNo || detail.EDocNo || "";
         setForm((prev) => ({
           ...prev,
           expenseId,
           expenseRef: detail.EDocNo || "",
+          parentDocNo,
+          rootExBDocNo,
           project: detail.EProjectName || "",
-          company: String(detail.ECompanyId ?? ""),
+          company:
+            (detail as any).ECompanyName || String(detail.ECompanyId ?? ""),
           amount: detail.ENetAmount ?? detail.EAmount ?? null,
           docType: detail.DocTypeName || detail.EDocumentType || "",
           baseAmount: detail.EAmount ?? null,
@@ -1143,6 +1563,9 @@ const Payment: React.FC = () => {
         }));
         const grns = await fetchExpenseGRNs(expenseId);
         setLinkedGRNs(grns);
+        if (grns.length > 0 && grns[0].ProjectName) {
+          setForm((prev) => ({ ...prev, projectSite: grns[0].ProjectName! }));
+        }
       } catch {
         toast.error("Could not load expense booking details.");
       } finally {
@@ -1157,6 +1580,8 @@ const Payment: React.FC = () => {
       ...prev,
       expenseId: "",
       expenseRef: "",
+      parentDocNo: "",
+      rootExBDocNo: "",
       project: "",
       company: "",
       amount: null,
@@ -1167,6 +1592,7 @@ const Payment: React.FC = () => {
       igstRate: null,
     }));
     setLinkedGRNs([]);
+    setSupplierBookingFilter("");
   };
 
   // ── Bank selection ─────────────────────────────────────────────────────────
@@ -1268,6 +1694,8 @@ const Payment: React.FC = () => {
       PProject: form.project || null,
       PCompany: form.company || null,
       PExpenseRef: form.expenseRef || null,
+      parentDocNo: form.parentDocNo || null,
+      rootExBDocNo: form.rootExBDocNo || null,
       // Cheque
       PChequeNo: form.chequeNo || null,
       PChequeLotId: form.chequeLotId ?? null,
@@ -1338,7 +1766,25 @@ const Payment: React.FC = () => {
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {view === "list" && <ExportButton data={records} />}
+            {view === "list" && (
+              <ExportMenu
+                data={records as unknown as Record<string, unknown>[]}
+                columns={EXPORT_COLUMNS}
+                title="Payment Management"
+                filename="payments"
+                subtitle={
+                  companyFilter
+                    ? `Company: ${companyOptions.find((c) => String(c.id) === companyFilter)?.label || companyFilter}`
+                    : undefined
+                }
+                companyName={
+                  selectedCompanyDetail?.name ||
+                  selectedCompanyDetail?.short_name ||
+                  undefined
+                }
+                logoBase64={selectedCompanyDetail?.logo || undefined}
+              />
+            )}
             {view === "list" && (
               <button
                 onClick={openNew}
@@ -1434,55 +1880,65 @@ const Payment: React.FC = () => {
               {/* ── 1. Link Expense Booking ── */}
               <div className="space-y-3">
                 <SectionHeader icon={Link2} label="Expense Booking" />
-                {form.expenseRef ? (
+
+                {/* Supplier filter — only shown when no booking is linked yet */}
+                {!form.expenseRef &&
+                  (() => {
+                    // Derive unique party/expense names from EName field
+                    const partyNames = Array.from(
+                      new Set(
+                        expenseOptions
+                          .map((o) => o.supplierName)
+                          .filter((n): n is string => !!n && n.trim() !== ""),
+                      ),
+                    ).sort();
+
+                    const filteredBySupplier = supplierBookingFilter
+                      ? expenseOptions.filter(
+                          (o) => o.supplierName === supplierBookingFilter,
+                        )
+                      : expenseOptions;
+
+                    return (
+                      <div className="space-y-3">
+                        {/* Party / Name filter — custom combobox */}
+                        <PartyFilterCombobox
+                          partyNames={partyNames}
+                          value={supplierBookingFilter}
+                          onChange={(val) => {
+                            setSupplierBookingFilter(val);
+                            if (val && form.expenseId) {
+                              const match = expenseOptions.find(
+                                (o) =>
+                                  o.id === form.expenseId &&
+                                  o.supplierName === val,
+                              );
+                              if (!match) clearExpenseLink();
+                            }
+                          }}
+                          expenseOptions={expenseOptions}
+                        />
+
+                        {/* Expense booking picker — filtered by party */}
+                        <ExpenseBookingPicker
+                          options={filteredBySupplier}
+                          value={form.expenseId}
+                          onChange={handleExpenseSelect}
+                          loading={loadingExpense}
+                        />
+                      </div>
+                    );
+                  })()}
+
+                {form.expenseRef && (
                   <AutoFillBanner
                     docNo={form.expenseRef}
                     onClear={clearExpenseLink}
                   />
-                ) : (
-                  <Field
-                    label="Select Expense Booking"
-                    hint="Selecting a booking auto-fills project, company, amount & doc type."
-                  >
-                    <div className="relative">
-                      <select
-                        value={form.expenseId}
-                        onChange={(e) => handleExpenseSelect(e.target.value)}
-                        disabled={loadingExpense}
-                        className="w-full appearance-none px-3 py-2 pr-9 rounded-lg text-sm bg-background border border-border text-foreground focus:outline-none focus:ring-2 focus:ring-primary disabled:opacity-60 disabled:cursor-wait"
-                      >
-                        <option value="">— Choose expense booking —</option>
-                        {expenseOptions.map((e) => (
-                          <option key={e.id} value={e.id}>
-                            {e.label}
-                          </option>
-                        ))}
-                      </select>
-                      <div className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground">
-                        {loadingExpense ? (
-                          <div className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                        ) : (
-                          <ChevronDown size={14} />
-                        )}
-                      </div>
-                    </div>
-                  </Field>
                 )}
 
                 {form.expenseRef && (
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-1">
-                    <Field label="Project / Site">
-                      <div className="flex items-center gap-2">
-                        <FolderKanban
-                          size={13}
-                          className="text-muted-foreground shrink-0"
-                        />
-                        <ReadOnlyField
-                          value={form.project}
-                          placeholder="From expense booking"
-                        />
-                      </div>
-                    </Field>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-1">
                     <Field label="Company">
                       <div className="flex items-center gap-2">
                         <Building2
@@ -1491,6 +1947,30 @@ const Payment: React.FC = () => {
                         />
                         <ReadOnlyField
                           value={form.company}
+                          placeholder="From expense booking"
+                        />
+                      </div>
+                    </Field>
+                    <Field label="Project / Site">
+                      <div className="flex items-center gap-2">
+                        <FolderKanban
+                          size={13}
+                          className="text-muted-foreground shrink-0"
+                        />
+                        <ReadOnlyField
+                          value={form.projectSite}
+                          placeholder="From linked GRN"
+                        />
+                      </div>
+                    </Field>
+                    <Field label="Supplier / Party">
+                      <div className="flex items-center gap-2">
+                        <FolderKanban
+                          size={13}
+                          className="text-muted-foreground shrink-0"
+                        />
+                        <ReadOnlyField
+                          value={form.project}
                           placeholder="From expense booking"
                         />
                       </div>
@@ -1550,6 +2030,19 @@ const Payment: React.FC = () => {
               {/* ── 2. Payment Details ── */}
               <div className="space-y-3">
                 <SectionHeader icon={Receipt} label="Payment Details" />
+                {editingId && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <Field label="Doc No">
+                      <ReadOnlyField value={form.docNo} placeholder="—" />
+                    </Field>
+                    <Field label="Root ExB Doc No">
+                      <ReadOnlyField
+                        value={form.rootExBDocNo}
+                        placeholder="Standalone payment"
+                      />
+                    </Field>
+                  </div>
+                )}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <Field label="Payment Name" required>
                     <input
@@ -1680,45 +2173,7 @@ const Payment: React.FC = () => {
                 </div>
               </div>
 
-              {/* ── 3. Payment Mode ── */}
-              <div className="space-y-3">
-                <SectionHeader icon={Wallet} label="Payment Mode" />
-                <Field label="Mode" required>
-                  <div className="flex flex-wrap gap-2">
-                    {PAYMENT_MODES.map((m) => {
-                      const s = MODE_STYLE[m] ?? {
-                        ring: "ring-border bg-muted",
-                        text: "text-muted-foreground",
-                        dot: "bg-muted-foreground",
-                      };
-                      const active = form.mode === m;
-                      return (
-                        <button
-                          key={m}
-                          type="button"
-                          onClick={() => handleModeChange(m)}
-                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-heading font-semibold border transition-all ring-1 ${
-                            active
-                              ? `${s.ring} ${s.text} border-transparent shadow-sm`
-                              : "bg-background border-border text-muted-foreground ring-transparent hover:border-primary/40"
-                          }`}
-                        >
-                          {active && (
-                            <span
-                              className={`w-1.5 h-1.5 rounded-full ${s.dot}`}
-                            />
-                          )}
-                          {m}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </Field>
-
-                {form.mode && <ModeInfoBanner mode={form.mode} />}
-              </div>
-
-              {/* ── 4. Bank Account ── */}
+              {/* ── 3. Bank Account ── */}
               <div className="space-y-3">
                 <SectionHeader icon={Landmark} label="Bank Account" />
                 <Field
@@ -1771,6 +2226,44 @@ const Payment: React.FC = () => {
                       );
                     })()}
                 </Field>
+              </div>
+
+              {/* ── 4. Payment Mode ── */}
+              <div className="space-y-3">
+                <SectionHeader icon={Wallet} label="Payment Mode" />
+                <Field label="Mode" required>
+                  <div className="flex flex-wrap gap-2">
+                    {PAYMENT_MODES.map((m) => {
+                      const s = MODE_STYLE[m] ?? {
+                        ring: "ring-border bg-muted",
+                        text: "text-muted-foreground",
+                        dot: "bg-muted-foreground",
+                      };
+                      const active = form.mode === m;
+                      return (
+                        <button
+                          key={m}
+                          type="button"
+                          onClick={() => handleModeChange(m)}
+                          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-heading font-semibold border transition-all ring-1 ${
+                            active
+                              ? `${s.ring} ${s.text} border-transparent shadow-sm`
+                              : "bg-background border-border text-muted-foreground ring-transparent hover:border-primary/40"
+                          }`}
+                        >
+                          {active && (
+                            <span
+                              className={`w-1.5 h-1.5 rounded-full ${s.dot}`}
+                            />
+                          )}
+                          {m}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </Field>
+
+                {form.mode && <ModeInfoBanner mode={form.mode} />}
               </div>
 
               {/* ── 5. Mode-specific section ── */}
@@ -1849,6 +2342,96 @@ const Payment: React.FC = () => {
         {/* ══════════════════════════════════════════════════════════════════ */}
         {view === "list" && (
           <>
+            {/* ── Supplier + Company filter bar ── */}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative flex-1 max-w-xs">
+                <Search
+                  size={13}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                />
+                <input
+                  type="text"
+                  placeholder="Search DocNo, payment, expense…"
+                  value={supplierFilter}
+                  onChange={(e) => {
+                    setSupplierFilter(e.target.value);
+                    setPage(1);
+                  }}
+                  className="w-full pl-8 pr-8 py-1.5 rounded-lg border border-border bg-background text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
+                />
+                {supplierFilter && (
+                  <button
+                    onClick={() => {
+                      setSupplierFilter("");
+                      setPage(1);
+                    }}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                  >
+                    <X size={12} />
+                  </button>
+                )}
+              </div>
+
+              {/* Company filter */}
+              <div className="relative">
+                <Building2
+                  size={13}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                />
+                <select
+                  value={companyFilter}
+                  onChange={(e) => {
+                    setCompanyFilter(e.target.value);
+                    setPage(1);
+                  }}
+                  className="appearance-none pl-8 pr-8 py-1.5 rounded-lg border border-border bg-background text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/40 min-w-[160px]"
+                >
+                  <option value="">All Companies</option>
+                  {companyOptions.map((c) => (
+                    <option key={c.id} value={String(c.id)}>
+                      {c.label}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown
+                  size={11}
+                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                />
+              </div>
+
+              {/* Active filter chips */}
+              {(supplierFilter || companyFilter) && (
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  {supplierFilter && (
+                    <span className="text-xs text-muted-foreground">
+                      "{supplierFilter}"
+                    </span>
+                  )}
+                  {companyFilter &&
+                    (() => {
+                      const co = companyOptions.find(
+                        (c) => String(c.id) === companyFilter,
+                      );
+                      return (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-heading bg-primary/10 text-primary border border-primary/20">
+                          <Building2 size={10} />
+                          {co?.label || companyFilter}
+                          <button
+                            onClick={() => {
+                              setCompanyFilter("");
+                              setPage(1);
+                            }}
+                            className="ml-0.5 text-primary/60 hover:text-destructive transition-colors"
+                          >
+                            <X size={10} />
+                          </button>
+                        </span>
+                      );
+                    })()}
+                </div>
+              )}
+            </div>
+
             {isLoading && (
               <div className="text-center py-16 text-muted-foreground text-sm">
                 <div className="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin mx-auto mb-3" />
@@ -1877,6 +2460,11 @@ const Payment: React.FC = () => {
                         </span>
                         <ModeBadge mode={rec.mode} />
                       </div>
+                      {rec.docNo && (
+                        <span className="inline-block font-mono text-[11px] bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 px-2 py-0.5 rounded-md">
+                          {rec.docNo}
+                        </span>
+                      )}
                       {rec.expenseRef && (
                         <span className="inline-block font-mono text-[11px] bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-md">
                           {rec.expenseRef}
@@ -1901,13 +2489,21 @@ const Payment: React.FC = () => {
                             recordId={Number(rec.id)}
                             endpoint="/api/new-payment"
                             submitOnly
-                            onSuccess={() =>
+                            onSuccess={() => {
                               queryClient.invalidateQueries({
                                 queryKey: ["payments"],
                                 exact: false,
-                              })
-                            }
+                              });
+                              refetchPayments();
+                            }}
                           />
+                          <button
+                            onClick={() => setViewingRec(rec)}
+                            title="View details"
+                            className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                          >
+                            <Eye size={12} />
+                          </button>
                           <button
                             onClick={() => openEdit(rec)}
                             className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
@@ -1926,37 +2522,45 @@ const Payment: React.FC = () => {
                   ))}
                 </div>
 
-                {/* Desktop table */}
-                <div className="hidden sm:block overflow-auto">
+                {/* Desktop table — compact, no horizontal scroll */}
+                <div className="hidden sm:block">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="bg-muted/30 border-b border-border">
-                        {[
-                          "Payment Name",
-                          "Expense Ref",
-                          "GRN(s)",
-                          "Mode",
-                          "Cheque / Ref",
-                          "Date",
-                          "Amount",
-                          "Bank",
-                          "Status",
-                          "Actions",
-                        ].map((h) => (
-                          <th
-                            key={h}
-                            className={`px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground whitespace-nowrap${h === "GRN(s)" ? " hidden lg:table-cell" : ""}`}
-                          >
-                            {h}
-                          </th>
-                        ))}
+                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[22%]">
+                          Payment
+                        </th>
+                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[14%]">
+                          Doc No
+                        </th>
+                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[18%]">
+                          Expense Ref
+                        </th>
+                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[10%] hidden md:table-cell">
+                          Mode
+                        </th>
+                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[12%] hidden lg:table-cell">
+                          Cheque / Ref
+                        </th>
+                        <th className="px-4 py-3 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[12%]">
+                          Amount
+                        </th>
+                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[10%] hidden md:table-cell">
+                          Bank
+                        </th>
+                        <th className="px-4 py-3 text-left text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[8%]">
+                          Status
+                        </th>
+                        <th className="px-4 py-3 text-right text-[11px] font-heading uppercase tracking-wider text-muted-foreground w-[12%]">
+                          Actions
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
                       {records.length === 0 && (
                         <tr>
                           <td
-                            colSpan={10}
+                            colSpan={9}
                             className="text-center py-14 text-muted-foreground text-sm"
                           >
                             <AlertCircle
@@ -1972,12 +2576,24 @@ const Payment: React.FC = () => {
                           key={rec.id}
                           className="hover:bg-muted/20 transition-colors"
                         >
-                          <td className="px-4 py-3 font-heading font-medium text-foreground max-w-[160px] truncate">
-                            {rec.paymentName || "—"}
+                          {/* Payment name + date stacked */}
+                          <td className="px-4 py-2.5">
+                            <p className="font-heading font-medium text-foreground text-xs truncate max-w-[180px]">
+                              {rec.paymentName || "—"}
+                            </p>
+                            <p className="text-[10px] text-muted-foreground mt-0.5">
+                              {rec.date || "—"}
+                            </p>
                           </td>
-                          <td className="px-4 py-3">
+                          <td className="px-4 py-2.5">
+                            <span className="font-mono text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                              {rec.docNo || "—"}
+                            </span>
+                          </td>
+                          {/* Expense Ref + GRN stacked */}
+                          <td className="px-4 py-2.5">
                             {rec.expenseRef ? (
-                              <span className="font-mono text-xs bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-md">
+                              <span className="font-mono text-[11px] bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 rounded-md block w-fit max-w-[160px] truncate">
                                 {rec.expenseRef}
                               </span>
                             ) : (
@@ -1985,14 +2601,18 @@ const Payment: React.FC = () => {
                                 —
                               </span>
                             )}
+                            <div className="mt-0.5">
+                              <PaymentGRNBadges
+                                expenseId={rec.expenseId || ""}
+                              />
+                            </div>
                           </td>
-                          <td className="px-4 py-3 hidden lg:table-cell">
-                            <PaymentGRNBadges expenseId={rec.expenseId || ""} />
-                          </td>
-                          <td className="px-4 py-3">
+                          {/* Mode */}
+                          <td className="px-4 py-2.5 hidden md:table-cell">
                             <ModeBadge mode={rec.mode} />
                           </td>
-                          <td className="px-4 py-3">
+                          {/* Cheque / Ref */}
+                          <td className="px-4 py-2.5 hidden lg:table-cell">
                             {rec.chequeNo ? (
                               <div className="space-y-0.5">
                                 <span className="font-mono text-xs bg-blue-500/10 text-blue-600 border border-blue-500/20 px-2 py-0.5 rounded-md">
@@ -2026,18 +2646,21 @@ const Payment: React.FC = () => {
                               </span>
                             )}
                           </td>
-                          <td className="px-4 py-3 text-xs text-muted-foreground whitespace-nowrap">
-                            {rec.date || "—"}
-                          </td>
-                          <td className="px-4 py-3 font-mono text-xs font-semibold whitespace-nowrap">
+                          {/* Amount */}
+                          <td className="px-4 py-2.5 font-mono text-xs font-semibold text-right whitespace-nowrap">
                             {formatINR(rec.amount ?? 0)}
                           </td>
-                          <td className="px-4 py-3 text-xs text-muted-foreground max-w-[100px] truncate">
+                          {/* Bank */}
+                          <td className="px-4 py-2.5 text-xs text-muted-foreground max-w-[100px] truncate hidden md:table-cell">
                             {rec.bankName || "—"}
                           </td>
-                          <td className="px-4 py-3">
-                            <div className="flex flex-col gap-1">
-                              <StatusBadge status={rec.status} />
+                          {/* Status */}
+                          <td className="px-4 py-2.5">
+                            <StatusBadge status={rec.status} />
+                          </td>
+                          {/* Actions */}
+                          <td className="px-4 py-2.5">
+                            <div className="flex items-center gap-1 justify-end">
                               <ApprovalActions
                                 status={rec.status}
                                 recordId={Number(rec.id)}
@@ -2047,13 +2670,17 @@ const Payment: React.FC = () => {
                                   queryClient.invalidateQueries({
                                     queryKey: ["payments"],
                                     exact: false,
-                                  })
+                                  });
+                                  refetchPayments();
                                 }
                               />
-                            </div>
-                          </td>
-                          <td className="px-4 py-3">
-                            <div className="flex items-center gap-1.5">
+                              <button
+                                onClick={() => setViewingRec(rec)}
+                                title="View details"
+                                className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
+                              >
+                                <Eye size={12} />
+                              </button>
                               <button
                                 onClick={() => openEdit(rec)}
                                 className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
@@ -2116,6 +2743,140 @@ const Payment: React.FC = () => {
           </>
         )}
       </div>
+
+      {/* Payment detail view modal */}
+      {viewingRec && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+          onClick={() => setViewingRec(null)}
+        >
+          <div
+            className="w-full max-w-lg rounded-xl bg-card border border-border shadow-xl overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border bg-muted/30">
+              <div className="flex items-center gap-2.5">
+                <div className="p-1.5 rounded-lg bg-primary/10">
+                  <Receipt size={15} className="text-primary" />
+                </div>
+                <div>
+                  <h3 className="font-heading font-semibold text-foreground text-sm">
+                    Payment Details
+                  </h3>
+                  {viewingRec.docNo && (
+                    <span className="text-[11px] font-mono text-muted-foreground">
+                      {viewingRec.docNo}
+                    </span>
+                  )}
+                </div>
+              </div>
+              <button
+                onClick={() => setViewingRec(null)}
+                className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              >
+                <X size={14} />
+              </button>
+            </div>
+
+            {/* Body */}
+            <div className="p-5 space-y-4">
+              {/* Status + Mode row */}
+              <div className="flex items-center gap-2">
+                <StatusBadge status={viewingRec.status} />
+                <ModeBadge mode={viewingRec.mode} />
+              </div>
+
+              {/* Grid of fields */}
+              <div className="grid grid-cols-2 gap-3">
+                {[
+                  { label: "Payment Name", value: viewingRec.paymentName },
+                  { label: "Amount", value: formatINR(viewingRec.amount ?? 0) },
+                  { label: "Date", value: viewingRec.date || "—" },
+                  { label: "Mode", value: viewingRec.mode || "—" },
+                  { label: "Company", value: viewingRec.company || "—" },
+                  { label: "Project", value: viewingRec.project || "—" },
+                  {
+                    label: "Project Site",
+                    value: viewingRec.projectSite || "—",
+                  },
+                  { label: "Expense Ref", value: viewingRec.expenseRef || "—" },
+                  ...(viewingRec.bankName
+                    ? [{ label: "Bank", value: viewingRec.bankName }]
+                    : []),
+                  ...(viewingRec.chequeNo
+                    ? [
+                        {
+                          label: "Cheque No.",
+                          value: `#${viewingRec.chequeNo}`,
+                        },
+                      ]
+                    : []),
+                  ...(viewingRec.chequeDate
+                    ? [{ label: "Cheque Date", value: viewingRec.chequeDate }]
+                    : []),
+                  ...(viewingRec.chequeLotNumber
+                    ? [
+                        {
+                          label: "Cheque Lot",
+                          value: viewingRec.chequeLotNumber,
+                        },
+                      ]
+                    : []),
+                  ...(viewingRec.neftNumber
+                    ? [{ label: "NEFT Ref.", value: viewingRec.neftNumber }]
+                    : []),
+                  ...(viewingRec.upiTransactionId
+                    ? [
+                        {
+                          label: "UPI Txn ID",
+                          value: viewingRec.upiTransactionId,
+                        },
+                      ]
+                    : []),
+                  ...(viewingRec.rtgsReference
+                    ? [{ label: "RTGS Ref.", value: viewingRec.rtgsReference }]
+                    : []),
+                  ...(viewingRec.impsReference
+                    ? [{ label: "IMPS Ref.", value: viewingRec.impsReference }]
+                    : []),
+                  ...(viewingRec.parentDocNo
+                    ? [{ label: "Parent Doc", value: viewingRec.parentDocNo }]
+                    : []),
+                ].map(({ label, value }) => (
+                  <div key={label} className="space-y-0.5">
+                    <p className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+                      {label}
+                    </p>
+                    <p className="text-xs font-medium text-foreground truncate">
+                      {value}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="flex justify-end gap-2 px-5 py-3 border-t border-border bg-muted/20">
+              <button
+                onClick={() => {
+                  setViewingRec(null);
+                  openEdit(viewingRec);
+                }}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-foreground hover:bg-muted transition-colors"
+              >
+                <Edit size={12} /> Edit
+              </button>
+              <button
+                onClick={() => setViewingRec(null)}
+                className="px-3 py-1.5 rounded-lg text-xs font-heading font-medium gradient-accent text-white shadow-sm"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Delete confirm */}
       {deleteId && (

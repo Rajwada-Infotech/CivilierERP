@@ -5,29 +5,35 @@
  *  • CSV  — zero deps, always works
  *  • XLSX — native aoa approach via a lightweight ArrayBuffer writer (no SheetJS)
  *  • PDF  — jsPDF + jspdf-autotable (browser-native, Vite-safe)
- *
- * Usage:
- *   exportToCsv(rows, columns, "bank-master")
- *   exportToXlsx(rows, columns, "bank-master")
- *   exportToPdf(rows, columns, { title: "Bank Master", filename: "bank-master" })
  */
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export interface ExportColumn {
-  /** Header label shown in the output file */
   header: string;
-  /** Key on each data row, or accessor function */
   accessor: string | ((row: Record<string, unknown>) => unknown);
+}
+
+export interface PdfStatCard {
+  label: string;
+  value: string;
 }
 
 export interface PdfExportOptions {
   title: string;
   filename?: string;
-  /** Optional subtitle / date range shown under the title */
+  /** Filter context shown as a subtitle pill e.g. "Company: Eshita Builders" */
   subtitle?: string;
-  /** Hex colour for header row background — defaults to brand blue */
+  /** Hex colour for table header row — defaults to #1e3a5f */
   headerColor?: string;
+  /** Company name shown top-right */
+  companyName?: string;
+  /** Company sub-line (address / GST / email) shown under company name */
+  companyAddress?: string;
+  /** Base64 logo — shown top-right next to company name */
+  logoBase64?: string;
+  /** Summary stat cards rendered below the header band */
+  stats?: PdfStatCard[];
 }
 
 // ─── Shared helpers ───────────────────────────────────────────────────────────
@@ -40,13 +46,12 @@ function getCell(row: Record<string, unknown>, col: ExportColumn): string {
   return String(raw);
 }
 
-// jsPDF's built-in Helvetica only covers Latin-1 (ISO 8859-1).
-// Characters outside that range (e.g. ₹ U+20B9) render as garbage glyphs.
-// This helper replaces known symbols with ASCII-safe equivalents for PDF output.
+// jsPDF Helvetica only covers Latin-1. Replace known out-of-range chars.
 function sanitizeForPdf(value: string): string {
   return value
-    .replace(/₹/g, "Rs.") // Indian rupee sign → Rs.
-    .replace(/[^\x00-\xFF]/g, "?"); // any remaining non-Latin1 → ?
+    .replace(/₹/g, "Rs.")
+    .replace(/[─━─\u2500-\u257F]/g, "-")
+    .replace(/[^\x00-\xFF]/g, "?");
 }
 
 function getPdfCell(row: Record<string, unknown>, col: ExportColumn): string {
@@ -62,6 +67,15 @@ function triggerDownload(blob: Blob, filename: string) {
   URL.revokeObjectURL(url);
 }
 
+function hexToRgb(hex: string): [number, number, number] {
+  const clean = hex.replace("#", "");
+  return [
+    parseInt(clean.slice(0, 2), 16),
+    parseInt(clean.slice(2, 4), 16),
+    parseInt(clean.slice(4, 6), 16),
+  ];
+}
+
 // ─── CSV ──────────────────────────────────────────────────────────────────────
 
 export function exportToCsv(
@@ -73,12 +87,10 @@ export function exportToCsv(
     v.includes(",") || v.includes('"') || v.includes("\n")
       ? `"${v.replace(/"/g, '""')}"`
       : v;
-
   const header = columns.map((c) => escape(c.header)).join(",");
   const body = rows
     .map((row) => columns.map((c) => escape(getCell(row, c))).join(","))
     .join("\n");
-
   const blob = new Blob([`${header}\n${body}`], {
     type: "text/csv;charset=utf-8;",
   });
@@ -86,9 +98,6 @@ export function exportToCsv(
 }
 
 // ─── XLSX (lightweight — no SheetJS) ─────────────────────────────────────────
-// Writes a minimal XLSX using the Open XML SpreadsheetML spec.
-// No external dependency required — generates a valid .xlsx that Excel,
-// LibreOffice, and Google Sheets can all open.
 
 function escapeXml(v: string): string {
   return v
@@ -105,18 +114,15 @@ export async function exportToXlsx(
   filename = "export",
   sheetName = "Sheet1",
 ): Promise<void> {
-  // Build rows: header first
   const allRows = [
     columns.map((c) => c.header),
     ...rows.map((row) => columns.map((c) => getCell(row, c))),
   ];
-
-  // ── Worksheet XML ──────────────────────────────────────────────────────────
   const rowsXml = allRows
     .map((cells, ri) => {
       const cellsXml = cells
         .map((val, ci) => {
-          const col = String.fromCharCode(65 + ci); // A, B, C ...
+          const col = String.fromCharCode(65 + ci);
           const ref = `${col}${ri + 1}`;
           const safe = escapeXml(val);
           return `<c r="${ref}" t="inlineStr"><is><t>${safe}</t></is></c>`;
@@ -130,31 +136,23 @@ export async function exportToXlsx(
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
   <sheetData>${rowsXml}</sheetData>
 </worksheet>`;
-
-  // ── Workbook XML ───────────────────────────────────────────────────────────
   const wbXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
           xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-  <sheets>
-    <sheet name="${escapeXml(sheetName)}" sheetId="1" r:id="rId1"/>
-  </sheets>
+  <sheets><sheet name="${escapeXml(sheetName)}" sheetId="1" r:id="rId1"/></sheets>
 </workbook>`;
-
-  // ── Relationships ──────────────────────────────────────────────────────────
   const wbRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1"
     Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet"
     Target="worksheets/sheet1.xml"/>
 </Relationships>`;
-
   const pkgRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1"
     Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
     Target="xl/workbook.xml"/>
 </Relationships>`;
-
   const contentTypes = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
@@ -165,9 +163,7 @@ export async function exportToXlsx(
     ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
 </Types>`;
 
-  // ── Zip using fflate (bundled with Vite) ───────────────────────────────────
   const { zipSync, strToU8 } = await import("fflate");
-
   const zipped = zipSync({
     "[Content_Types].xml": strToU8(contentTypes),
     "_rels/.rels": strToU8(pkgRels),
@@ -175,7 +171,6 @@ export async function exportToXlsx(
     "xl/_rels/workbook.xml.rels": strToU8(wbRels),
     "xl/worksheets/sheet1.xml": strToU8(wsXml),
   });
-
   const blob = new Blob([zipped], {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   });
@@ -183,6 +178,19 @@ export async function exportToXlsx(
 }
 
 // ─── PDF (jsPDF + jspdf-autotable) ────────────────────────────────────────────
+// Layout (landscape A4, 841 × 595 pt):
+//
+//  ┌─────────────────────────────────────────────────────────────┐
+//  │  [HEADER BAND — dark navy fill, full width]                  │
+//  │   Report title (bold white, large)          [Logo] CompanyName│
+//  │   Export date · N records                   CompanyAddress   │
+//  └─────────────────────────────────────────────────────────────┘
+//  │  [SUBTITLE PILL — if filter active]                          │
+//  │  [STAT CARDS — 3–4 cards, light grey fills]                 │
+//  ┌─────────────────────────────────────────────────────────────┐
+//  │  TABLE (navy header, alt-row shading, thin borders)          │
+//  └─────────────────────────────────────────────────────────────┘
+//  │  Footer: CivilierERP · title                Page N of M     │
 
 export async function exportToPdf(
   rows: Record<string, unknown>[],
@@ -193,13 +201,21 @@ export async function exportToPdf(
     title,
     filename = "export",
     subtitle,
-    headerColor = "#1e40af",
+    headerColor = "#1e3a5f",
+    companyName,
+    companyAddress,
+    logoBase64,
+    stats,
   } = options;
 
   const { default: jsPDF } = await import("jspdf");
   const { default: autoTable } = await import("jspdf-autotable");
 
   const doc = new jsPDF({ orientation: "landscape", unit: "pt", format: "a4" });
+
+  const pageW = doc.internal.pageSize.getWidth();   // 841.89
+  const pageH = doc.internal.pageSize.getHeight();  // 595.28
+  const marginX = 36;
 
   const now = new Date();
   const dateStr = now.toLocaleDateString("en-IN", {
@@ -212,87 +228,177 @@ export async function exportToPdf(
     minute: "2-digit",
   });
 
-  // ── Header ────────────────────────────────────────────────────────────────
-  const pageW = doc.internal.pageSize.getWidth();
+  const [hr, hg, hb] = hexToRgb(headerColor);
 
-  doc.setFontSize(16);
-  doc.setTextColor("#0f172a");
+  // ── 1. Header band ────────────────────────────────────────────────────────
+  const bandH = 64;
+  doc.setFillColor(hr, hg, hb);
+  doc.rect(0, 0, pageW, bandH, "F");
+
+  // Left: Report title
   doc.setFont("helvetica", "bold");
-  doc.text(title, 36, 40);
+  doc.setFontSize(18);
+  doc.setTextColor(255, 255, 255);
+  doc.text(sanitizeForPdf(title), marginX, 26);
 
-  let cursorY = 52;
+  // Left: subtitle line
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(7.5);
+  doc.setTextColor(180, 200, 230);
+  const metaLine = `Exported on ${dateStr} at ${timeStr}  ·  ${rows.length} record${rows.length !== 1 ? "s" : ""}`;
+  doc.text(metaLine, marginX, 40);
 
-  if (subtitle) {
-    doc.setFontSize(8);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor("#64748b");
-    doc.text(subtitle, 36, cursorY);
-    cursorY += 12;
+  // Right: logo + company block
+  let rightX = pageW - marginX;
+  const logoSize = 38;
+  const logoY = (bandH - logoSize) / 2;
+
+  if (logoBase64) {
+    try {
+      // Detect image type from data URI or default to JPEG
+      const imgType = logoBase64.startsWith("data:image/png") ? "PNG" : "JPEG";
+      const logoX = rightX - logoSize;
+      doc.addImage(logoBase64, imgType, logoX, logoY, logoSize, logoSize);
+      rightX = logoX - 8;
+    } catch {
+      // logo failed — continue without it
+    }
   }
 
-  doc.setFontSize(7);
-  doc.setTextColor("#94a3b8");
-  doc.text(
-    `Exported on ${dateStr} at ${timeStr} · ${rows.length} record${rows.length !== 1 ? "s" : ""}`,
-    36,
-    cursorY,
-  );
-  cursorY += 6;
+  if (companyName) {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(9);
+    doc.setTextColor(255, 255, 255);
+    doc.text(sanitizeForPdf(companyName), rightX, 24, { align: "right" });
+  }
+  if (companyAddress) {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(180, 200, 230);
+    doc.text(sanitizeForPdf(companyAddress), rightX, 36, { align: "right" });
+  }
 
-  // Thin divider
-  doc.setDrawColor("#e2e8f0");
-  doc.setLineWidth(0.5);
-  doc.line(36, cursorY, pageW - 36, cursorY);
-  cursorY += 8;
+  // Thin accent line at bottom of band
+  doc.setDrawColor(255, 255, 255);
+  doc.setLineWidth(0.4);
+  doc.line(0, bandH, pageW, bandH);
 
-  // ── Table ─────────────────────────────────────────────────────────────────
+  let cursorY = bandH + 14;
+
+  // ── 2. Active filter pill ─────────────────────────────────────────────────
+  if (subtitle) {
+    const pillW = Math.min(
+      doc.getStringUnitWidth(sanitizeForPdf(subtitle)) * 7.5 + 24,
+      320,
+    );
+    doc.setFillColor(235, 241, 255);
+    doc.roundedRect(marginX, cursorY, pillW, 15, 3, 3, "F");
+    doc.setDrawColor(180, 200, 240);
+    doc.setLineWidth(0.5);
+    doc.roundedRect(marginX, cursorY, pillW, 15, 3, 3, "S");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7);
+    doc.setTextColor(hr, hg, hb);
+    doc.text(sanitizeForPdf(subtitle), marginX + 8, cursorY + 10);
+    cursorY += 26;
+  }
+
+  // ── 3. Stat cards ─────────────────────────────────────────────────────────
+  if (stats && stats.length > 0) {
+    const cardCount = stats.length;
+    const gap = 10;
+    const totalGap = gap * (cardCount - 1);
+    const cardW = (pageW - marginX * 2 - totalGap) / cardCount;
+    const cardH = 48;
+
+    stats.forEach((s, i) => {
+      const cx = marginX + i * (cardW + gap);
+      const cy = cursorY;
+
+      // Card background
+      doc.setFillColor(248, 250, 252);
+      doc.roundedRect(cx, cy, cardW, cardH, 4, 4, "F");
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.5);
+      doc.roundedRect(cx, cy, cardW, cardH, 4, 4, "S");
+
+      // Top accent bar
+      doc.setFillColor(hr, hg, hb);
+      doc.rect(cx, cy, cardW, 3, "F");
+
+      // Label
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7);
+      doc.setTextColor(100, 116, 139);
+      doc.text(sanitizeForPdf(s.label.toUpperCase()), cx + 10, cy + 16);
+
+      // Value
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(13);
+      doc.setTextColor(15, 23, 42);
+      doc.text(sanitizeForPdf(s.value), cx + 10, cy + 36);
+    });
+
+    cursorY += cardH + 16;
+  }
+
+  // ── 4. Table ──────────────────────────────────────────────────────────────
   const head = [columns.map((c) => c.header)];
   const body = rows.map((row) => columns.map((c) => getPdfCell(row, c)));
-
-  // Parse hex to RGB for jsPDF
-  const hexToRgb = (hex: string) => {
-    const r = parseInt(hex.slice(1, 3), 16);
-    const g = parseInt(hex.slice(3, 5), 16);
-    const b = parseInt(hex.slice(5, 7), 16);
-    return [r, g, b] as [number, number, number];
-  };
-  const [hr, hg, hb] = hexToRgb(headerColor);
 
   autoTable(doc, {
     head,
     body,
     startY: cursorY,
-    margin: { left: 36, right: 36 },
+    margin: { left: marginX, right: marginX },
+    tableLineColor: [226, 232, 240],
+    tableLineWidth: 0.3,
     styles: {
       fontSize: 7.5,
-      cellPadding: 4,
-      textColor: "#334155",
-      lineColor: "#f1f5f9",
+      cellPadding: { top: 5, bottom: 5, left: 6, right: 6 },
+      textColor: [51, 65, 85],
+      lineColor: [241, 245, 249],
       lineWidth: 0.3,
     },
     headStyles: {
       fillColor: [hr, hg, hb],
-      textColor: "#ffffff",
+      textColor: [255, 255, 255],
       fontStyle: "bold",
       fontSize: 7,
+      cellPadding: { top: 6, bottom: 6, left: 6, right: 6 },
     },
     alternateRowStyles: {
-      fillColor: "#f8fafc",
+      fillColor: [248, 250, 252],
+    },
+    columnStyles: {
+      // Right-align numeric columns heuristically — columns whose header contains
+      // "Amount", "No", "Count" get right alignment
+      ...Object.fromEntries(
+        columns
+          .map((c, i) =>
+            /amount|count|qty|no\.?$/i.test(c.header)
+              ? [i, { halign: "right" as const }]
+              : null,
+          )
+          .filter(Boolean) as [number, { halign: "right" }][],
+      ),
     },
     didDrawPage: (data: any) => {
-      // Footer on every page
+      // Footer band
       const pageCount = (doc as any).internal.getNumberOfPages();
-      doc.setFontSize(7);
-      doc.setTextColor("#94a3b8");
-      doc.text(
-        `CivilierERP · ${title}`,
-        36,
-        doc.internal.pageSize.getHeight() - 16,
-      );
+      doc.setFillColor(248, 250, 252);
+      doc.rect(0, pageH - 22, pageW, 22, "F");
+      doc.setDrawColor(226, 232, 240);
+      doc.setLineWidth(0.4);
+      doc.line(0, pageH - 22, pageW, pageH - 22);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(6.5);
+      doc.setTextColor(148, 163, 184);
+      doc.text(`CivilierERP  ·  ${sanitizeForPdf(title)}`, marginX, pageH - 8);
       doc.text(
         `Page ${data.pageNumber} of ${pageCount}`,
-        pageW - 36,
-        doc.internal.pageSize.getHeight() - 16,
+        pageW - marginX,
+        pageH - 8,
         { align: "right" },
       );
     },

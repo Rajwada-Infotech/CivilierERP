@@ -512,8 +512,8 @@ export const MasterPage: React.FC<MasterPageProps> = ({
 
       {/* ── TABLE CARD ── */}
       {!hideTable && (
-        <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-hidden">
-          <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-card/60">
+        <div className="rounded-xl bg-card/80 backdrop-blur-lg border border-border shadow-sm overflow-visible">
+          <div className="flex items-center justify-between px-5 py-3.5 border-b border-border bg-card/60 rounded-t-xl overflow-visible">
             <div>
               <h3 className="font-heading font-semibold text-foreground text-sm">
                 {title} Records
@@ -549,7 +549,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
             </div>
           </div>
 
-          <div className="overflow-x-auto">
+          <div className="overflow-x-auto overflow-y-hidden rounded-b-xl">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border bg-muted/30">
