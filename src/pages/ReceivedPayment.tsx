@@ -48,7 +48,8 @@ import {
   ChevronRight,
   RefreshCw,
   Landmark,
-  Users,
+  ChevronsUpDown,
+  Check,
 } from "lucide-react";
 import {
   getReceivedPayments,
@@ -58,7 +59,6 @@ import {
   approveReceivedPayment,
 } from "@/api/receivedPaymentApi";
 import { getBanks, type BankRecord } from "@/api/bankMasterApi";
-import { getEnterprises, type Enterprise } from "@/api/enterpriseApi";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { fetchNextDocNumber } from "@/pages/material/ExpenseBooking/DocNumberPreview";
@@ -99,17 +99,9 @@ export type ReceivedPayment = {
   createdAt: string;
 };
 
-interface ProjectOption {
+interface CustomerOption {
   id: number;
-  name: string;
-  belongsTo: number | null;
-}
-interface DocTypeOption {
-  TypeOfDocId: number;
-  Prefix: string;
-  FullPrefix: string;
-  Description: string;
-  EntryType: string;
+  label: string;
 }
 
 const PAYMENT_MODES: PaymentMode[] = [
@@ -152,7 +144,6 @@ const EMPTY_FORM = {
   projectId: "" as string,
   projectName: "",
   finYear: "",
-  docTypeId: "" as string,
   docNo: "",
   customerName: "",
   depositBankId: "" as string,
@@ -165,7 +156,7 @@ const EMPTY_FORM = {
   remarks: "",
 };
 
-// ─── Form Field ───────────────────────────────────────────────────────────────
+// ─── Form Field Label ──────────────────────────────────────────────────────────
 
 function FieldLabel({
   children,
@@ -179,6 +170,103 @@ function FieldLabel({
       {children}
       {required && <span className="text-destructive ml-0.5">*</span>}
     </label>
+  );
+}
+
+// ─── Customer Combobox ────────────────────────────────────────────────────────
+
+function CustomerCombobox({
+  value,
+  onChange,
+  customers,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  customers: CustomerOption[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const ref = React.useRef<HTMLDivElement>(null);
+
+  const filtered = useMemo(() => {
+    if (!query.trim()) return customers.slice(0, 80);
+    const q = query.toLowerCase();
+    return customers
+      .filter((c) => c.label.toLowerCase().includes(q))
+      .slice(0, 80);
+  }, [customers, query]);
+
+  const selected = customers.find((c) => c.label === value);
+
+  useEffect(() => {
+    const h = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node))
+        setOpen(false);
+    };
+    document.addEventListener("mousedown", h);
+    return () => document.removeEventListener("mousedown", h);
+  }, []);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => {
+          setOpen((o) => !o);
+          setQuery("");
+        }}
+        className={cn(
+          "w-full h-9 px-3 text-sm text-left flex items-center justify-between gap-2 rounded-md border border-input bg-background hover:bg-muted/40 transition-colors",
+          !value && "text-muted-foreground",
+        )}
+      >
+        <span className="truncate">{value || "Select customer…"}</span>
+        <ChevronsUpDown size={13} className="text-muted-foreground shrink-0" />
+      </button>
+
+      {open && (
+        <div className="absolute z-50 top-full mt-1 left-0 right-0 rounded-md border border-border bg-popover shadow-lg overflow-hidden">
+          <div className="p-1.5 border-b border-border">
+            <input
+              autoFocus
+              className="w-full px-2 py-1.5 text-xs rounded border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+              placeholder="Search account head…"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          </div>
+          <div className="max-h-48 overflow-y-auto">
+            {filtered.length === 0 ? (
+              <div className="px-3 py-4 text-xs text-muted-foreground text-center">
+                No customers found
+              </div>
+            ) : (
+              filtered.map((c) => (
+                <button
+                  key={c.id}
+                  type="button"
+                  onClick={() => {
+                    onChange(c.label);
+                    setOpen(false);
+                  }}
+                  className={cn(
+                    "w-full flex items-center gap-2 px-3 py-2 text-xs text-left hover:bg-muted transition-colors",
+                    value === c.label &&
+                      "bg-primary/5 text-primary font-medium",
+                  )}
+                >
+                  <Check
+                    size={11}
+                    className={value === c.label ? "opacity-100" : "opacity-0"}
+                  />
+                  {c.label}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -232,10 +320,16 @@ export default function ReceivedPaymentPage() {
   const [docNoLoading, setDocNoLoading] = useState(false);
 
   // ── Master data ───────────────────────────────────────────────────────────────
-  const [enterprises, setEnterprises] = useState<Enterprise[]>([]);
-  const [projects, setProjects] = useState<ProjectOption[]>([]);
+  const [companies, setCompanies] = useState<{ id: number; label: string }[]>(
+    [],
+  );
+  const [projects, setProjects] = useState<
+    { id: number; label: string; belongsTo: number | null }[]
+  >([]);
   const [banks, setBanks] = useState<BankRecord[]>([]);
-  const [docTypes, setDocTypes] = useState<DocTypeOption[]>([]);
+  const [customers, setCustomers] = useState<CustomerOption[]>([]);
+  // TypeOfDocId for the REC prefix — resolved once on mount
+  const [recDocTypeId, setRecDocTypeId] = useState<number | null>(null);
 
   const finYearOptions = finYears.filter((fy) => fy.status === "Active");
   const activeFinYear =
@@ -243,58 +337,82 @@ export default function ReceivedPaymentPage() {
 
   // Load masters
   useEffect(() => {
-    getEnterprises()
-      .then((data) => setEnterprises(data.filter((e) => !e.discontinue)))
+    // Companies: enterprise table WHERE business_type = 'C'
+    fetchWithAuth("/api/enterprises/options?business_type=C")
+      .then((r) => r.json())
+      .then((data: any[]) => setCompanies(Array.isArray(data) ? data : []))
       .catch(() => {});
+
     getBanks()
       .then((data) => setBanks(data.filter((b) => b.BStatus)))
       .catch(() => {});
-    fetchWithAuth("/api/project-master")
+
+    // Projects: enterprise table WHERE business_type = 'P', with belongs_to for company filter
+    fetchWithAuth("/api/enterprises/options?business_type=P")
       .then((r) => r.json())
       .then((data: any[]) =>
         setProjects(
           (Array.isArray(data) ? data : []).map((p) => ({
-            id: p.Id ?? p.id,
-            name: p.Name ?? p.name ?? "",
+            id: p.id,
+            label: p.label,
             belongsTo: p.belongs_to ?? null,
           })),
         ),
       )
       .catch(() => {});
+
+    // Customers: AccountHeadMaster WHERE LHeadType = 'A'
+    fetchWithAuth("/api/account-head/options?type=A")
+      .then((r) => r.json())
+      .then((data: any[]) =>
+        setCustomers(
+          (Array.isArray(data) ? data : []).map((x) => ({
+            id: x.id ?? x.LHeadId,
+            label: x.label ?? x.LHeadName ?? "",
+          })),
+        ),
+      )
+      .catch(() => {});
+
+    // Resolve REC doc type ID once
     fetchWithAuth("/api/document-type")
       .then((r) => r.json())
-      .then((data: any[]) => setDocTypes(Array.isArray(data) ? data : []))
+      .then((data: any[]) => {
+        if (!Array.isArray(data)) return;
+        const rec = data.find(
+          (d) =>
+            (d.Prefix === "REC" || d.FullPrefix === "REC") &&
+            (d.EntryType === "Received Payment" ||
+              d.Description?.toLowerCase().includes("received")),
+        );
+        if (rec) setRecDocTypeId(rec.TypeOfDocId);
+      })
       .catch(() => {});
   }, []);
 
   // ── Filtered banks: only those linked to selected company ───────────────────
+  const selectedCompanyLabel =
+    companies.find((c) => String(c.id) === form.companyId)?.label ?? "";
   const depositBanks = useMemo(() => {
-    if (!form.companyName) return banks;
+    if (!selectedCompanyLabel) return banks;
     return banks.filter(
-      (b) => !b.BCompanyName || b.BCompanyName === form.companyName,
+      (b) => !b.BCompanyName || b.BCompanyName === selectedCompanyLabel,
     );
-  }, [banks, form.companyName]);
+  }, [banks, selectedCompanyLabel]);
 
-  // ── Projects filtered by selected company ────────────────────────────────────
-  const filteredProjects = useMemo(() => {
-    if (!form.companyId) return projects;
-    const cid = Number(form.companyId);
-    return projects.filter((p) => p.belongsTo === cid || p.belongsTo === null);
-  }, [projects, form.companyId]);
+  // ── Projects — independent selection, show all ───────────────────────────────
+  const filteredProjects = projects;
 
   // ── Doc number preview ───────────────────────────────────────────────────────
   const refreshDocNo = useCallback(
-    async (docTypeId: string, finYear: string) => {
+    async (docTypeId: number | null, finYear: string) => {
       if (!docTypeId) {
         setDocNoPreview("");
         return;
       }
       setDocNoLoading(true);
       try {
-        const next = await fetchNextDocNumber(
-          Number(docTypeId),
-          finYear || undefined,
-        );
+        const next = await fetchNextDocNumber(docTypeId, finYear || undefined);
         setDocNoPreview(next);
       } catch {
         setDocNoPreview("");
@@ -305,9 +423,12 @@ export default function ReceivedPaymentPage() {
     [],
   );
 
+  // Auto-refresh doc number when fin year or resolved doc type changes
   useEffect(() => {
-    if (!editingId) refreshDocNo(form.docTypeId, form.finYear);
-  }, [form.docTypeId, form.finYear, editingId, refreshDocNo]);
+    if (!editingId && recDocTypeId) {
+      refreshDocNo(recDocTypeId, form.finYear || activeFinYear);
+    }
+  }, [form.finYear, recDocTypeId, editingId, activeFinYear, refreshDocNo]);
 
   // ── Load payments ─────────────────────────────────────────────────────────────
   const loadPayments = useCallback(async (page = 1) => {
@@ -322,7 +443,7 @@ export default function ReceivedPaymentPage() {
           id: String(r.RPPaymentID),
           docNo:
             (r as any).RPDocNo ||
-            `RCP-${String(r.RPPaymentID).padStart(4, "0")}`,
+            `REC/${String(r.RPPaymentID).padStart(6, "0")}`,
           companyId: (r as any).RPCompanyId ?? undefined,
           companyName: r.RPCompanyName ?? "",
           projectId: (r as any).RPProjectId ?? undefined,
@@ -376,7 +497,6 @@ export default function ReceivedPaymentPage() {
       projectId: String(p.projectId ?? ""),
       projectName: p.projectName,
       finYear: p.finYear ?? "",
-      docTypeId: String(p.docTypeId ?? ""),
       docNo: p.docNo,
       customerName: p.customerName ?? "",
       depositBankId: String(p.depositBankId ?? ""),
@@ -419,10 +539,6 @@ export default function ReceivedPaymentPage() {
       toast.error("Deposit bank is required");
       return;
     }
-    if (!form.docTypeId) {
-      toast.error("Document type is required");
-      return;
-    }
     if (!form.amount || Number(form.amount) <= 0) {
       toast.error("Valid amount is required");
       return;
@@ -430,15 +546,15 @@ export default function ReceivedPaymentPage() {
 
     setActionLoading(true);
     const payload = {
-      RPCompanyName: form.companyName,
+      RPCompanyName: selectedCompanyLabel || form.companyName,
       RPCompanyId: Number(form.companyId) || null,
       RPReceivedFrom: form.customerName.trim(),
       RPCustomerName: form.customerName.trim(),
       RPProjectName: form.projectName,
       RPProjectId: Number(form.projectId) || null,
       RPDocDate: date!.toISOString().slice(0, 10),
-      RPFinYear: form.finYear,
-      RPDocTypeId: Number(form.docTypeId) || null,
+      RPFinYear: form.finYear || activeFinYear,
+      RPDocTypeId: recDocTypeId,
       RPMode: form.mode,
       RPAmount: Number(form.amount),
       RPBankName: form.bankName || null,
@@ -882,7 +998,7 @@ export default function ReceivedPaymentPage() {
         </div>
       )}
 
-      {/* ── Add / Edit Dialog ─────────────────────────────────────────────────── */}
+      {/* ── Add / Edit Dialog ────────────────────────────────────────────────── */}
       <Dialog
         open={isOpen}
         onOpenChange={(o) => {
@@ -900,7 +1016,7 @@ export default function ReceivedPaymentPage() {
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
               Fill in all required fields. Document number is auto-generated
-              from the selected doc type.
+              (REC/XXXXXX/YYYY-YYYY).
             </DialogDescription>
           </DialogHeader>
 
@@ -912,11 +1028,11 @@ export default function ReceivedPaymentPage() {
                 <Select
                   value={form.companyId}
                   onValueChange={(v) => {
-                    const ent = enterprises.find((e) => String(e.id) === v);
+                    const co = companies.find((c) => String(c.id) === v);
                     setForm((f) => ({
                       ...f,
                       companyId: v,
-                      companyName: ent?.name ?? "",
+                      companyName: co?.label ?? "",
                       projectId: "",
                       projectName: "",
                       depositBankId: "",
@@ -928,9 +1044,9 @@ export default function ReceivedPaymentPage() {
                     <SelectValue placeholder="Select company…" />
                   </SelectTrigger>
                   <SelectContent>
-                    {enterprises.map((e) => (
-                      <SelectItem key={e.id} value={String(e.id)}>
-                        {e.name}
+                    {companies.map((c) => (
+                      <SelectItem key={c.id} value={String(c.id)}>
+                        {c.label}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -940,7 +1056,6 @@ export default function ReceivedPaymentPage() {
                 <FieldLabel required>Project</FieldLabel>
                 <Select
                   value={form.projectId}
-                  disabled={!form.companyId}
                   onValueChange={(v) => {
                     const proj = filteredProjects.find(
                       (p) => String(p.id) === v,
@@ -948,23 +1063,17 @@ export default function ReceivedPaymentPage() {
                     setForm((f) => ({
                       ...f,
                       projectId: v,
-                      projectName: proj?.name ?? "",
+                      projectName: proj?.label ?? "",
                     }));
                   }}
                 >
                   <SelectTrigger className="h-9 text-sm">
-                    <SelectValue
-                      placeholder={
-                        form.companyId
-                          ? "Select project…"
-                          : "Select company first"
-                      }
-                    />
+                    <SelectValue placeholder="Select project…" />
                   </SelectTrigger>
                   <SelectContent>
                     {filteredProjects.map((p) => (
                       <SelectItem key={p.id} value={String(p.id)}>
-                        {p.name}
+                        {p.label}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -978,9 +1087,7 @@ export default function ReceivedPaymentPage() {
                 <FieldLabel required>Financial Year</FieldLabel>
                 <Select
                   value={form.finYear}
-                  onValueChange={(v) => {
-                    setField("finYear", v);
-                  }}
+                  onValueChange={(v) => setField("finYear", v)}
                 >
                   <SelectTrigger className="h-9 text-sm">
                     <SelectValue placeholder="Select fin year…" />
@@ -996,7 +1103,7 @@ export default function ReceivedPaymentPage() {
               </div>
               <div>
                 <FieldLabel required>Date of Receipt</FieldLabel>
-                <Popover open={calOpen} onOpenChange={setCalOpen}>
+                <Popover open={calOpen} onOpenChange={setCalOpen} modal>
                   <PopoverTrigger asChild>
                     <button
                       className={cn(
@@ -1011,7 +1118,11 @@ export default function ReceivedPaymentPage() {
                       {date ? format(date, "dd MMM yyyy") : "Pick a date"}
                     </button>
                   </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
+                  <PopoverContent
+                    className="w-auto p-0 z-[200]"
+                    align="start"
+                    side="bottom"
+                  >
                     <CalendarComponent
                       mode="single"
                       selected={date}
@@ -1026,22 +1137,15 @@ export default function ReceivedPaymentPage() {
               </div>
             </div>
 
-            {/* Row 3: Customer name + Payment mode */}
+            {/* Row 3: Customer name (combobox from AccountHeadMaster) + Payment mode */}
             <div className="grid grid-cols-2 gap-4">
               <div>
                 <FieldLabel required>Customer Name</FieldLabel>
-                <div className="relative">
-                  <Users
-                    size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                  />
-                  <Input
-                    className="pl-8 h-9 text-sm"
-                    placeholder="Customer / received from…"
-                    value={form.customerName}
-                    onChange={(e) => setField("customerName", e.target.value)}
-                  />
-                </div>
+                <CustomerCombobox
+                  value={form.customerName}
+                  onChange={(v) => setField("customerName", v)}
+                  customers={customers}
+                />
               </div>
               <div>
                 <FieldLabel required>Payment Type</FieldLabel>
@@ -1116,77 +1220,50 @@ export default function ReceivedPaymentPage() {
               </Select>
             </div>
 
-            {/* Row 5: Doc Type + Doc No */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <FieldLabel required>Document Type</FieldLabel>
-                <Select
-                  value={form.docTypeId}
-                  disabled={!!editingId}
-                  onValueChange={(v) => {
-                    const dt = docTypes.find(
-                      (d) => String(d.TypeOfDocId) === v,
-                    );
-                    setForm((f) => ({ ...f, docTypeId: v }));
-                  }}
+            {/* Row 5: Doc Number (auto-generated, read-only) */}
+            <div>
+              <FieldLabel>Document Number</FieldLabel>
+              {docNoLoading ? (
+                <div className="h-9 flex items-center gap-2 px-3 text-sm text-muted-foreground border border-input rounded-md bg-muted/30">
+                  <Loader2 size={13} className="animate-spin shrink-0" />
+                  Generating…
+                </div>
+              ) : (
+                <div
+                  className={cn(
+                    "h-auto min-h-[36px] flex items-center justify-between gap-2 px-3 py-2 rounded-md border font-heading font-semibold text-sm",
+                    docNoPreview || form.docNo
+                      ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400"
+                      : "border-input bg-muted/30 text-muted-foreground font-normal",
+                  )}
                 >
-                  <SelectTrigger className="h-9 text-sm">
-                    <SelectValue placeholder="Select doc type…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {docTypes.map((d) => (
-                      <SelectItem
-                        key={d.TypeOfDocId}
-                        value={String(d.TypeOfDocId)}
-                      >
-                        {d.FullPrefix || d.Prefix} —{" "}
-                        {d.Description || d.EntryType}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <FieldLabel>Document Number</FieldLabel>
-                <div className="relative">
-                  <Hash
-                    size={14}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                  />
-                  {docNoLoading ? (
-                    <div className="pl-8 h-9 flex items-center text-sm text-muted-foreground border border-input rounded-md bg-muted/30 px-3">
-                      <Loader2 size={13} className="animate-spin mr-1.5" />
-                      Generating…
-                    </div>
-                  ) : (
-                    <div
-                      className={cn(
-                        "pl-8 h-9 flex items-center text-sm border rounded-md px-3",
-                        docNoPreview || form.docNo
-                          ? "border-primary/30 bg-primary/5 text-primary font-heading font-semibold"
-                          : "border-input bg-muted/30 text-muted-foreground",
-                      )}
+                  <span className="flex items-center gap-2">
+                    <Hash size={13} className="shrink-0 opacity-60" />
+                    {docNoPreview ||
+                      form.docNo ||
+                      (recDocTypeId
+                        ? "Will be assigned on save"
+                        : "Resolving…")}
+                  </span>
+                  {(docNoPreview || form.docNo) && !editingId && (
+                    <button
+                      onClick={() =>
+                        refreshDocNo(
+                          recDocTypeId,
+                          form.finYear || activeFinYear,
+                        )
+                      }
+                      className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                      title="Refresh"
                     >
-                      {docNoPreview ||
-                        form.docNo ||
-                        (form.docTypeId
-                          ? "Will be assigned on save"
-                          : "Select a doc type first")}
-                      {(docNoPreview || form.docNo) && !editingId && (
-                        <button
-                          onClick={() =>
-                            refreshDocNo(form.docTypeId, form.finYear)
-                          }
-                          className="ml-auto text-muted-foreground hover:text-foreground"
-                          title="Refresh"
-                        >
-                          <RefreshCw size={12} />
-                        </button>
-                      )}
-                    </div>
+                      <RefreshCw size={12} />
+                    </button>
                   )}
                 </div>
-              </div>
+              )}
+              <p className="text-[10px] text-muted-foreground mt-1 font-mono">
+                REC / 000001 / {form.finYear || activeFinYear} — locked on save
+              </p>
             </div>
 
             {/* Row 6: Amount */}
@@ -1276,7 +1353,7 @@ export default function ReceivedPaymentPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Approve / Reject Dialog ────────────────────────────────────────────── */}
+      {/* ── Approve / Reject Dialog ─────────────────────────────────────────── */}
       <Dialog
         open={!!approveTarget}
         onOpenChange={(o) => {
