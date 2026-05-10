@@ -19,7 +19,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { cn } from "@/lib/utils";
 import {
   Plus,
@@ -1004,7 +1003,7 @@ export default function ReceivedPaymentPage() {
 
           <div className="px-7 py-6">
             {/* ── Two-column layout: form left, calendar right ── */}
-            <div className="grid grid-cols-1 lg:grid-cols-[1fr_260px] gap-8">
+            <div className="grid grid-cols-1 gap-8">
               {/* LEFT — form fields */}
               <div className="space-y-5">
                 {/* Row 1: Company + Project */}
@@ -1064,6 +1063,23 @@ export default function ReceivedPaymentPage() {
                         ))}
                       </SelectContent>
                     </Select>
+                  </div>
+                </div>
+
+                {/* Date of Receipt */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <FieldLabel required>Date of Receipt</FieldLabel>
+                    <input
+                      type="date"
+                      value={date ? format(date, "yyyy-MM-dd") : ""}
+                      onChange={(e) =>
+                        setDate(
+                          e.target.value ? new Date(e.target.value) : undefined,
+                        )
+                      }
+                      className="w-full h-9 rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                    />
                   </div>
                 </div>
 
@@ -1288,45 +1304,6 @@ export default function ReceivedPaymentPage() {
                     value={form.remarks}
                     onChange={(e) => setField("remarks", e.target.value)}
                   />
-                </div>
-              </div>
-
-              {/* RIGHT — inline calendar */}
-              <div className="flex flex-col gap-3">
-                <div>
-                  <FieldLabel required>Date of Receipt</FieldLabel>
-                  {/* Selected date display */}
-                  <div
-                    className={cn(
-                      "mb-3 px-3 py-2 rounded-lg border text-sm font-medium flex items-center gap-2",
-                      date
-                        ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-400"
-                        : "border-dashed border-border text-muted-foreground",
-                    )}
-                  >
-                    <svg
-                      viewBox="0 0 16 16"
-                      className="w-3.5 h-3.5 shrink-0 opacity-70"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.5"
-                    >
-                      <rect x="1" y="3" width="14" height="12" rx="2" />
-                      <path d="M1 7h14M5 1v4M11 1v4" strokeLinecap="round" />
-                    </svg>
-                    {date ? format(date, "dd MMMM yyyy") : "No date selected"}
-                  </div>
-
-                  {/* Inline calendar — no popover */}
-                  <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-                    <CalendarComponent
-                      mode="single"
-                      selected={date}
-                      onSelect={(d) => setDate(d)}
-                      initialFocus
-                      className="w-full [&_.rdp]:w-full [&_.rdp-months]:w-full [&_.rdp-month]:w-full [&_.rdp-table]:w-full"
-                    />
-                  </div>
                 </div>
               </div>
             </div>
