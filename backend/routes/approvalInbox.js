@@ -77,6 +77,29 @@ router.get("/", async (req, res) => {
       `);
     }
 
+    if (!module || module === "received-payment") {
+      queries.push(`
+        SELECT
+          'received-payment'                    AS Module,
+          'Received Payment'                    AS ModuleLabel,
+          CAST(RPPaymentID AS NVARCHAR)         AS RecordId,
+          ISNULL(RPDocNo, CONCAT('REC/', CAST(RPPaymentID AS NVARCHAR))) AS Reference,
+          RPDocDate                             AS RecordDate,
+          ISNULL(RPStatus, 'Draft')             AS Status,
+          NULL                                  AS ContractorName,
+          ISNULL(RPCustomerName, RPReceivedFrom) AS SupplierName,
+          RPAmount                              AS Amount,
+          RPCreatedBy                           AS CreatedBy,
+          ISNULL(RPApprovedBy, '')              AS ApprovedBy,
+          ISNULL(CAST(RPApprovedAt AS NVARCHAR), '') AS ApprovedAt,
+          ISNULL(RPRejectedBy, '')              AS RejectedBy,
+          ISNULL(RPRejectionNote, '')           AS RejectionNote,
+          RPUpdatedAt                           AS LastModified
+        FROM dbo.ReceivedPayment
+        WHERE ISNULL(RPStatus, 'Draft') = 'Pending'
+      `);
+    }
+
     // KEY FIX: module key is 'goods-receipt' (matches approvalService TABLE_REGISTRY)
     // ApprovalActions will call /api/grns/:id/approve|reject which is correct
     // But the Module field sent to frontend must match what ApprovalActions uses as endpoint prefix
@@ -148,6 +171,7 @@ router.get("/count", async (req, res) => {
         (SELECT COUNT(*) FROM dbo.PurchaseOrders    WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.WorkOrderHeader    WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.NewPayment         WHERE ISNULL(Status,'Draft') = 'Pending') +
+        (SELECT COUNT(*) FROM dbo.ReceivedPayment    WHERE ISNULL(RPStatus,'Draft') = 'Pending') +
         (SELECT COUNT(*) FROM dbo.GoodsReceiptNotes  WHERE ISNULL(Status,'Draft') = 'Pending') +
         (SELECT COUNT(*) FROM dbo.ExpenseBooking     WHERE ISNULL(EStatus,'Draft') = 'Pending')
       AS TotalPending
