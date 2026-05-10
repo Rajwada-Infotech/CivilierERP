@@ -1,6 +1,18 @@
 import { apiUrl } from "./apiBase";
 import { toast } from "sonner";
 
+export class ApiError extends Error {
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
+
+let isRedirectingToLogin = false;
+
 export async function fetchWithAuth(
   url: string,
   options: RequestInit = {},
@@ -40,30 +52,25 @@ export async function fetchWithAuth(
     // Always force re-auth on 401.
     // This avoids “silent broken UI” when callers don't catch the thrown error.
     if (typeof window !== "undefined") {
-      // Anti-spam: avoid repeating the toast multiple times during the same re-auth flow.
-      const flagKey = "__reauth_toast_until";
-      const now = Date.now();
-      const until = Number(sessionStorage.getItem(flagKey) || 0);
-      const shouldToast = now >= until;
-
-      if (shouldToast) {
-        sessionStorage.setItem(flagKey, String(now + 5000));
-        toast.error("Session expired. Please login again.");
-      }
-
       localStorage.removeItem("token");
       localStorage.removeItem("user");
 
-      // Prefer a hard navigation so React Router + guards re-run reliably.
-      window.location.href = "/login";
+      if (!isRedirectingToLogin) {
+        isRedirectingToLogin = true;
+        toast.error("Session expired. Please login again.");
+        window.location.href = "/login";
+      }
     }
 
-    throw new Error("Unauthorized. Please login again.");
+    throw new ApiError("Unauthorized. Please login again.", response.status);
   }
 
   if (response.status === 403) {
     console.error("Forbidden");
-    throw new Error("You do not have permission to perform this action.");
+    throw new ApiError(
+      "You do not have permission to perform this action.",
+      response.status,
+    );
   }
 
   return response;

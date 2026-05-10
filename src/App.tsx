@@ -237,17 +237,33 @@ function RequireRole({
 }
 
 // ─── Admin Protected Route ────────────────────────────────────────────────────
+function ProtectedProviders({ children }: { children: React.ReactNode }) {
+  return (
+    <RecordsProvider>
+      <TdsProvider>
+        <DebitNoteProvider>
+          <BillingTermsProvider>
+            <TaskProvider>{children}</TaskProvider>
+          </BillingTermsProvider>
+        </DebitNoteProvider>
+      </TdsProvider>
+    </RecordsProvider>
+  );
+}
+
 const ADMIN_ROLES = ["super_admin", "admin", "dba"] as const;
 
 function AdminRoute({ children }: { children: React.ReactNode }) {
   return (
     <RequireAuth>
       <RequireRole allowed={[...ADMIN_ROLES]}>
-        <AppLayout>
-          <RouteErrorBoundary>
-            <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
-          </RouteErrorBoundary>
-        </AppLayout>
+        <ProtectedProviders>
+          <AppLayout>
+            <RouteErrorBoundary>
+              <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
+            </RouteErrorBoundary>
+          </AppLayout>
+        </ProtectedProviders>
       </RequireRole>
     </RequireAuth>
   );
@@ -258,11 +274,13 @@ function SuperAdminRoute({ children }: { children: React.ReactNode }) {
   return (
     <RequireAuth>
       <RequireRole allowed={["super_admin"]}>
-        <AppLayout>
-          <RouteErrorBoundary>
-            <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
-          </RouteErrorBoundary>
-        </AppLayout>
+        <ProtectedProviders>
+          <AppLayout>
+            <RouteErrorBoundary>
+              <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
+            </RouteErrorBoundary>
+          </AppLayout>
+        </ProtectedProviders>
       </RequireRole>
     </RequireAuth>
   );
@@ -272,11 +290,13 @@ function SuperAdminRoute({ children }: { children: React.ReactNode }) {
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return (
     <RequireAuth>
-      <AppLayout>
-        <RouteErrorBoundary>
-          <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
-        </RouteErrorBoundary>
-      </AppLayout>
+      <ProtectedProviders>
+        <AppLayout>
+          <RouteErrorBoundary>
+            <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
+          </RouteErrorBoundary>
+        </AppLayout>
+      </ProtectedProviders>
     </RequireAuth>
   );
 }
@@ -1023,17 +1043,7 @@ function App() {
                 <ThemeProvider>
                   <FinYearProvider>
                     <HsnProvider>
-                      <RecordsProvider>
-                        <TdsProvider>
-                          <DebitNoteProvider>
-                            <BillingTermsProvider>
-                              <TaskProvider>
-                                <AppRoutes />
-                              </TaskProvider>
-                            </BillingTermsProvider>
-                          </DebitNoteProvider>
-                        </TdsProvider>
-                      </RecordsProvider>
+                      <AppRoutes />
                     </HsnProvider>
                   </FinYearProvider>
                 </ThemeProvider>
