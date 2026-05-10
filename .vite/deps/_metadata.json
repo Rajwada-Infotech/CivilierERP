@@ -1,8 +1,76 @@
 {
-  "hash": "d3c0cc3f",
+  "hash": "387965c1",
   "configHash": "633d2356",
-  "lockfileHash": "e3b0c442",
-  "browserHash": "912b9f1f",
-  "optimized": {},
-  "chunks": {}
+  "lockfileHash": "6785d375",
+  "browserHash": "eb4a1408",
+  "optimized": {
+    "react/jsx-dev-runtime": {
+      "src": "../../node_modules/react/jsx-dev-runtime.js",
+      "file": "react_jsx-dev-runtime.js",
+      "fileHash": "80adcf27",
+      "needsInterop": true
+    },
+    "react-dom/client": {
+      "src": "../../node_modules/react-dom/client.js",
+      "file": "react-dom_client.js",
+      "fileHash": "df4d3b61",
+      "needsInterop": true
+    },
+    "react": {
+      "src": "../../node_modules/react/index.js",
+      "file": "react.js",
+      "fileHash": "8f67b378",
+      "needsInterop": true
+    },
+    "@tanstack/react-query": {
+      "src": "../../node_modules/@tanstack/react-query/build/modern/index.js",
+      "file": "@tanstack_react-query.js",
+      "fileHash": "5e21e339",
+      "needsInterop": false
+    },
+    "sonner": {
+      "src": "../../node_modules/sonner/dist/index.mjs",
+      "file": "sonner.js",
+      "fileHash": "587a744b",
+      "needsInterop": false
+    },
+    "react-router-dom": {
+      "src": "../../node_modules/react-router-dom/dist/index.js",
+      "file": "react-router-dom.js",
+      "fileHash": "f34db7fa",
+      "needsInterop": false
+    },
+    "lucide-react": {
+      "src": "../../node_modules/lucide-react/dist/esm/lucide-react.js",
+      "file": "lucide-react.js",
+      "fileHash": "8ec87e16",
+      "needsInterop": false
+    },
+    "framer-motion": {
+      "src": "../../node_modules/framer-motion/dist/es/index.mjs",
+      "file": "framer-motion.js",
+      "fileHash": "6a1109e3",
+      "needsInterop": false
+    },
+    "axios": {
+      "src": "../../node_modules/axios/index.js",
+      "file": "axios.js",
+      "fileHash": "53d08412",
+      "needsInterop": false
+    }
+  },
+  "chunks": {
+    "chunk-SO43GD6T": {
+      "file": "chunk-SO43GD6T.js"
+    },
+    "chunk-CVGP52V2": {
+      "file": "chunk-CVGP52V2.js"
+    },
+    "chunk-HQJSOCRU": {
+      "file": "chunk-HQJSOCRU.js"
+    },
+    "chunk-RDKGUBC5": {
+      "file": "chunk-RDKGUBC5.js"
+    }
+  }
 }
