@@ -2666,13 +2666,13 @@ const Payment: React.FC = () => {
                                 recordId={Number(rec.id)}
                                 endpoint="/api/new-payment"
                                 submitOnly
-                                onSuccess={() =>
+                                onSuccess={() => {
                                   queryClient.invalidateQueries({
                                     queryKey: ["payments"],
                                     exact: false,
                                   });
                                   refetchPayments();
-                                }
+                                }}
                               />
                               <button
                                 onClick={() => setViewingRec(rec)}
