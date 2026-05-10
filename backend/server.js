@@ -120,6 +120,7 @@ const ALL_ROUTES = [
   { path: "/api/menu-type", file: "./routes/menuType" },
   { path: "/api/menu-types", file: "./routes/menuType" },
   { path: "/api/typeofdoc", file: "./routes/typeofdoc" },
+  { path: "/api/boq", file: "./routes/boq" },
 ];
 
 // ─── createApp ──────────────────────────────────────────────────────────────
