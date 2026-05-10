@@ -1358,9 +1358,10 @@ const Payment: React.FC = () => {
 
   // ── Queries ────────────────────────────────────────────────────────────────
 
-  const { data: dbData, isLoading } = useQuery({
+  const { data: dbData, isLoading, refetch: refetchPayments } = useQuery({
     queryKey: ["payments", page, supplierFilter, companyFilter],
     queryFn: () => getPayments(page, PAGE_SIZE, supplierFilter, companyFilter),
+    staleTime: 0,
   });
 
   const { data: banks = [] } = useQuery<BankOption[]>({
@@ -2488,12 +2489,13 @@ const Payment: React.FC = () => {
                             recordId={Number(rec.id)}
                             endpoint="/api/new-payment"
                             submitOnly
-                            onSuccess={() =>
+                            onSuccess={() => {
                               queryClient.invalidateQueries({
                                 queryKey: ["payments"],
                                 exact: false,
-                              })
-                            }
+                              });
+                              refetchPayments();
+                            }}
                           />
                           <button
                             onClick={() => setViewingRec(rec)}
@@ -2668,7 +2670,8 @@ const Payment: React.FC = () => {
                                   queryClient.invalidateQueries({
                                     queryKey: ["payments"],
                                     exact: false,
-                                  })
+                                  });
+                                  refetchPayments();
                                 }
                               />
                               <button
