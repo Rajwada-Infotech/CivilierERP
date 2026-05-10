@@ -178,15 +178,16 @@ router.get("/", cache("brs", 60), async (req, res) => {
         SELECT
           rp.RPPaymentID           AS SourceID,
           'RECEIVED'               AS SourceType,
-          rp.RPReceivedFrom        AS PaymentName,
+          ISNULL(rp.RPCustomerName, rp.RPReceivedFrom) AS PaymentName,
           rp.RPCompanyName         AS CompanyName,
           ent2.id                  AS CompanyID,
-          bk.LHeadId               AS BankID,
-          rp.RPBankName            AS BankName,
+          -- Prefer RPDepositBankId (accurate FK), fall back to name-match
+          COALESCE(rp.RPDepositBankId, bk.LHeadId) AS BankID,
+          ISNULL(rp.RPDepositBankName, rp.RPBankName) AS BankName,
           rp.RPAmount              AS Amount,
           rp.RPDocDate             AS PayDate,
           rp.RPMode                AS Mode,
-          NULL                     AS DocNo,
+          rp.RPDocNo               AS DocNo,
           COALESCE(
             rp.RPTransactionId,
             rp.RPCheckNumber
@@ -196,18 +197,20 @@ router.get("/", cache("brs", 60), async (req, res) => {
           COALESCE(brc2.IsMatched, 0) AS IsMatched,
           brc2.BRSID               AS BRSID
         FROM dbo.ReceivedPayment rp
+        -- Join by ID first (reliable), then fall back to name match
         LEFT JOIN dbo.AccountHeadMaster bk
           ON  bk.LHeadType   = 'B'
           AND bk.LHeadStatus = 1
-          AND bk.LHeadName   = rp.RPBankName
+          AND bk.LHeadId     = rp.RPDepositBankId
         LEFT JOIN dbo.enterprise ent2
           ON  ent2.business_type = 'C'
           AND ent2.name          = rp.RPCompanyName
         LEFT JOIN BankReconciliation brc2
           ON  brc2.SourceType = 'RECEIVED'
           AND brc2.SourceID   = rp.RPPaymentID
-        WHERE rp.RPBankName IS NOT NULL
-          AND rp.RPStatus NOT IN ('Draft','Rejected')
+        -- Show Draft, Pending, and Approved — exclude only Rejected
+        WHERE (rp.RPDepositBankId IS NOT NULL OR rp.RPBankName IS NOT NULL)
+          AND ISNULL(rp.RPStatus, 'Draft') NOT IN ('Rejected')
       )
     `;
 

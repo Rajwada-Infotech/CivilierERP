@@ -19,16 +19,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { cn } from "@/lib/utils";
 import {
   Plus,
-  CalendarIcon,
   ArrowDownCircle,
   CheckCircle2,
   Clock,
@@ -41,8 +35,6 @@ import {
   Trash2,
   Hash,
   Pencil,
-  ThumbsUp,
-  ThumbsDown,
   Loader2,
   ChevronLeft,
   ChevronRight,
@@ -50,17 +42,17 @@ import {
   Landmark,
   ChevronsUpDown,
   Check,
+  SendHorizontal,
 } from "lucide-react";
 import {
   getReceivedPayments,
   addReceivedPayment,
   updateReceivedPayment,
   deleteReceivedPayment,
-  approveReceivedPayment,
 } from "@/api/receivedPaymentApi";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { getBanks, type BankRecord } from "@/api/bankMasterApi";
 import { useFinYear } from "@/contexts/FinYearContext";
-import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { fetchNextDocNumber } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { formatINR } from "@/utils/formatCurrency";
 
@@ -306,20 +298,16 @@ export default function ReceivedPaymentPage() {
   const [apiLoading, setApiLoading] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
-  const [approveTarget, setApproveTarget] = useState<ReceivedPayment | null>(
+  const [submitTarget, setSubmitTarget] = useState<ReceivedPayment | null>(
     null,
   );
-  const [rejectNote, setRejectNote] = useState("");
   const PAGE_SIZE = 20;
 
   // ── Form state ───────────────────────────────────────────────────────────────
   const [form, setForm] = useState(EMPTY_FORM);
   const [date, setDate] = useState<Date | undefined>(new Date());
-  const [calOpen, setCalOpen] = useState(false);
   const [docNoPreview, setDocNoPreview] = useState("");
   const [docNoLoading, setDocNoLoading] = useState(false);
-
-  // ── Master data ───────────────────────────────────────────────────────────────
   const [companies, setCompanies] = useState<{ id: number; label: string }[]>(
     [],
   );
@@ -585,27 +573,23 @@ export default function ReceivedPaymentPage() {
     }
   };
 
-  const handleApprove = async (action: "approve" | "reject") => {
-    if (!approveTarget) return;
-    if (action === "reject" && !rejectNote.trim()) {
-      toast.error("Rejection reason required");
-      return;
-    }
+  const handleSubmitForApproval = async () => {
+    if (!submitTarget) return;
     setActionLoading(true);
     try {
-      await approveReceivedPayment(
-        Number(approveTarget.id),
-        action,
-        rejectNote || undefined,
+      const res = await fetchWithAuth(
+        `/api/received-payment/${submitTarget.id}/submit`,
+        { method: "PATCH" },
       );
-      toast.success(
-        action === "approve" ? "Payment approved" : "Payment rejected",
-      );
-      setApproveTarget(null);
-      setRejectNote("");
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Submit failed");
+      }
+      toast.success("Sent to Approval Inbox ✓");
+      setSubmitTarget(null);
       await loadPayments(currentPage);
-    } catch {
-      toast.error("Action failed");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to submit");
     } finally {
       setActionLoading(false);
     }
@@ -869,14 +853,11 @@ export default function ReceivedPaymentPage() {
                           )}
                           {p.status === "Draft" && (
                             <button
-                              onClick={() => {
-                                setApproveTarget(p);
-                                setRejectNote("");
-                              }}
-                              title="Approve / Reject"
-                              className="p-1.5 rounded-md text-muted-foreground/50 hover:text-green-500 hover:bg-green-500/10 transition-colors"
+                              onClick={() => setSubmitTarget(p)}
+                              title="Submit for Approval"
+                              className="p-1.5 rounded-md text-muted-foreground/50 hover:text-primary hover:bg-primary/10 transition-colors"
                             >
-                              <ThumbsUp size={13} />
+                              <SendHorizontal size={13} />
                             </button>
                           )}
                           <button
@@ -949,13 +930,11 @@ export default function ReceivedPaymentPage() {
                       )}
                       {p.status === "Draft" && (
                         <button
-                          onClick={() => {
-                            setApproveTarget(p);
-                            setRejectNote("");
-                          }}
-                          className="p-1.5 text-muted-foreground/50 hover:text-green-500"
+                          onClick={() => setSubmitTarget(p)}
+                          className="p-1.5 text-muted-foreground/50 hover:text-primary"
+                          title="Submit for Approval"
                         >
-                          <ThumbsUp size={13} />
+                          <SendHorizontal size={13} />
                         </button>
                       )}
                       <button
@@ -1008,11 +987,14 @@ export default function ReceivedPaymentPage() {
           }
         }}
       >
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="font-heading text-base flex items-center gap-2">
-              <ArrowDownCircle size={18} className="text-emerald-500" />
-              {editingId ? "Edit Payment" : "Record Received Payment"}
+        <DialogContent className="max-w-5xl max-h-[92vh] overflow-y-auto p-0">
+          {/* Header */}
+          <DialogHeader className="px-7 pt-6 pb-4 border-b border-border bg-muted/20">
+            <DialogTitle className="font-heading text-lg flex items-center gap-2.5">
+              <div className="p-1.5 rounded-lg bg-emerald-500/10">
+                <ArrowDownCircle size={18} className="text-emerald-500" />
+              </div>
+              {editingId ? "Edit Received Payment" : "Record Received Payment"}
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
               Fill in all required fields. Document number is auto-generated
@@ -1020,321 +1002,337 @@ export default function ReceivedPaymentPage() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-5 py-2">
-            {/* Row 1: Company + Project */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <FieldLabel required>Company</FieldLabel>
-                <Select
-                  value={form.companyId}
-                  onValueChange={(v) => {
-                    const co = companies.find((c) => String(c.id) === v);
-                    setForm((f) => ({
-                      ...f,
-                      companyId: v,
-                      companyName: co?.label ?? "",
-                      projectId: "",
-                      projectName: "",
-                      depositBankId: "",
-                      depositBankName: "",
-                    }));
-                  }}
-                >
-                  <SelectTrigger className="h-9 text-sm">
-                    <SelectValue placeholder="Select company…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {companies.map((c) => (
-                      <SelectItem key={c.id} value={String(c.id)}>
-                        {c.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <FieldLabel required>Project</FieldLabel>
-                <Select
-                  value={form.projectId}
-                  onValueChange={(v) => {
-                    const proj = filteredProjects.find(
-                      (p) => String(p.id) === v,
-                    );
-                    setForm((f) => ({
-                      ...f,
-                      projectId: v,
-                      projectName: proj?.label ?? "",
-                    }));
-                  }}
-                >
-                  <SelectTrigger className="h-9 text-sm">
-                    <SelectValue placeholder="Select project…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {filteredProjects.map((p) => (
-                      <SelectItem key={p.id} value={String(p.id)}>
-                        {p.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            {/* Row 2: Fin Year + Date */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <FieldLabel required>Financial Year</FieldLabel>
-                <Select
-                  value={form.finYear}
-                  onValueChange={(v) => setField("finYear", v)}
-                >
-                  <SelectTrigger className="h-9 text-sm">
-                    <SelectValue placeholder="Select fin year…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {finYearOptions.map((fy) => (
-                      <SelectItem key={fy.id} value={fy.year}>
-                        {fy.year}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <FieldLabel required>Date of Receipt</FieldLabel>
-                <Popover open={calOpen} onOpenChange={setCalOpen} modal>
-                  <PopoverTrigger asChild>
-                    <button
-                      className={cn(
-                        "w-full h-9 px-3 text-sm text-left flex items-center gap-2 rounded-md border border-input bg-background hover:bg-muted/40 transition-colors",
-                        !date && "text-muted-foreground",
-                      )}
+          <div className="px-7 py-6">
+            {/* ── Two-column layout: form left, calendar right ── */}
+            <div className="grid grid-cols-1 lg:grid-cols-[1fr_260px] gap-8">
+              {/* LEFT — form fields */}
+              <div className="space-y-5">
+                {/* Row 1: Company + Project */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <FieldLabel required>Company</FieldLabel>
+                    <Select
+                      value={form.companyId}
+                      onValueChange={(v) => {
+                        const co = companies.find((c) => String(c.id) === v);
+                        setForm((f) => ({
+                          ...f,
+                          companyId: v,
+                          companyName: co?.label ?? "",
+                          projectId: "",
+                          projectName: "",
+                          depositBankId: "",
+                          depositBankName: "",
+                        }));
+                      }}
                     >
-                      <CalendarIcon
+                      <SelectTrigger className="h-9 text-sm">
+                        <SelectValue placeholder="Select company…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {companies.map((c) => (
+                          <SelectItem key={c.id} value={String(c.id)}>
+                            {c.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <FieldLabel required>Project</FieldLabel>
+                    <Select
+                      value={form.projectId}
+                      onValueChange={(v) => {
+                        const proj = filteredProjects.find(
+                          (p) => String(p.id) === v,
+                        );
+                        setForm((f) => ({
+                          ...f,
+                          projectId: v,
+                          projectName: proj?.label ?? "",
+                        }));
+                      }}
+                    >
+                      <SelectTrigger className="h-9 text-sm">
+                        <SelectValue placeholder="Select project…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {filteredProjects.map((p) => (
+                          <SelectItem key={p.id} value={String(p.id)}>
+                            {p.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {/* Row 2: Fin Year + Payment Mode */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <FieldLabel required>Financial Year</FieldLabel>
+                    <Select
+                      value={form.finYear}
+                      onValueChange={(v) => setField("finYear", v)}
+                    >
+                      <SelectTrigger className="h-9 text-sm">
+                        <SelectValue placeholder="Select fin year…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {finYearOptions.map((fy) => (
+                          <SelectItem key={fy.id} value={fy.year}>
+                            {fy.year}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <FieldLabel required>Payment Type</FieldLabel>
+                    <Select
+                      value={form.mode}
+                      onValueChange={(v) => setField("mode", v as PaymentMode)}
+                    >
+                      <SelectTrigger className="h-9 text-sm">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PAYMENT_MODES.map((m) => (
+                          <SelectItem key={m} value={m}>
+                            <span className="flex items-center gap-2">
+                              {modeIcon(m)} {m}
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {/* Row 3: Customer + Deposit Bank */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <FieldLabel required>Customer Name</FieldLabel>
+                    <CustomerCombobox
+                      value={form.customerName}
+                      onChange={(v) => setField("customerName", v)}
+                      customers={customers}
+                    />
+                  </div>
+                  <div>
+                    <FieldLabel required>Deposit Bank</FieldLabel>
+                    <Select
+                      value={form.depositBankId}
+                      disabled={!form.companyId}
+                      onValueChange={(v) => {
+                        const bank = depositBanks.find(
+                          (b) => String(b.BId) === v,
+                        );
+                        setForm((f) => ({
+                          ...f,
+                          depositBankId: v,
+                          depositBankName: bank
+                            ? `${bank.BName}${bank.BBranch ? ` – ${bank.BBranch}` : ""}`
+                            : "",
+                        }));
+                      }}
+                    >
+                      <SelectTrigger className="h-9 text-sm">
+                        <SelectValue
+                          placeholder={
+                            form.companyId
+                              ? "Select deposit bank…"
+                              : "Select company first"
+                          }
+                        />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {depositBanks.map((b) => (
+                          <SelectItem key={b.BId} value={String(b.BId)}>
+                            <span className="flex items-center gap-2">
+                              <Landmark
+                                size={13}
+                                className="text-muted-foreground"
+                              />
+                              {b.BName}
+                              {b.BBranch ? ` – ${b.BBranch}` : ""}
+                              {b.BAccountNumber ? (
+                                <span className="text-muted-foreground text-[10px]">
+                                  ···{b.BAccountNumber.slice(-4)}
+                                </span>
+                              ) : null}
+                            </span>
+                          </SelectItem>
+                        ))}
+                        {depositBanks.length === 0 && (
+                          <div className="px-3 py-2 text-xs text-muted-foreground">
+                            No active banks found for this company
+                          </div>
+                        )}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                {/* Row 4: Amount + Doc No */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <FieldLabel required>Amount (₹)</FieldLabel>
+                    <div className="relative">
+                      <IndianRupee
                         size={14}
-                        className="text-muted-foreground shrink-0"
+                        className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
                       />
-                      {date ? format(date, "dd MMM yyyy") : "Pick a date"}
-                    </button>
-                  </PopoverTrigger>
-                  <PopoverContent
-                    className="w-auto p-0 z-[200]"
-                    align="start"
-                    side="bottom"
+                      <Input
+                        type="number"
+                        className="pl-8 h-9 text-sm font-mono"
+                        placeholder="0.00"
+                        value={form.amount}
+                        onChange={(e) => setField("amount", e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <FieldLabel>Document Number</FieldLabel>
+                    {docNoLoading ? (
+                      <div className="h-9 flex items-center gap-2 px-3 text-sm text-muted-foreground border border-input rounded-md bg-muted/30">
+                        <Loader2 size={13} className="animate-spin shrink-0" />
+                        Generating…
+                      </div>
+                    ) : (
+                      <div
+                        className={cn(
+                          "h-9 flex items-center justify-between gap-2 px-3 rounded-md border font-heading font-semibold text-sm",
+                          docNoPreview || form.docNo
+                            ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400"
+                            : "border-input bg-muted/30 text-muted-foreground font-normal",
+                        )}
+                      >
+                        <span className="flex items-center gap-2 truncate">
+                          <Hash size={13} className="shrink-0 opacity-60" />
+                          <span className="truncate">
+                            {docNoPreview ||
+                              form.docNo ||
+                              (recDocTypeId ? "Auto-assigned" : "Resolving…")}
+                          </span>
+                        </span>
+                        {(docNoPreview || form.docNo) && !editingId && (
+                          <button
+                            onClick={() =>
+                              refreshDocNo(
+                                recDocTypeId,
+                                form.finYear || activeFinYear,
+                              )
+                            }
+                            className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
+                            title="Refresh"
+                          >
+                            <RefreshCw size={12} />
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    <p className="text-[10px] text-muted-foreground mt-1 font-mono">
+                      REC / 000001 / {form.finYear || activeFinYear} — locked on
+                      save
+                    </p>
+                  </div>
+                </div>
+
+                {/* Row 5: Bank ref (conditional) */}
+                {needsBankRef && (
+                  <div className="grid grid-cols-2 gap-4">
+                    {form.mode === "Check" ? (
+                      <div>
+                        <FieldLabel>Cheque Number</FieldLabel>
+                        <Input
+                          className="h-9 text-sm"
+                          placeholder="Cheque No."
+                          value={form.checkNumber}
+                          onChange={(e) =>
+                            setField("checkNumber", e.target.value)
+                          }
+                        />
+                      </div>
+                    ) : (
+                      <div>
+                        <FieldLabel>Transaction / UTR Ref</FieldLabel>
+                        <Input
+                          className="h-9 text-sm"
+                          placeholder="Transaction ID / UTR"
+                          value={form.transactionId}
+                          onChange={(e) =>
+                            setField("transactionId", e.target.value)
+                          }
+                        />
+                      </div>
+                    )}
+                    <div>
+                      <FieldLabel>Customer Bank Name</FieldLabel>
+                      <Input
+                        className="h-9 text-sm"
+                        placeholder="Bank of customer"
+                        value={form.bankName}
+                        onChange={(e) => setField("bankName", e.target.value)}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Row 6: Remarks */}
+                <div>
+                  <FieldLabel>Remarks</FieldLabel>
+                  <textarea
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-ring min-h-[80px]"
+                    placeholder="Optional remarks or notes…"
+                    value={form.remarks}
+                    onChange={(e) => setField("remarks", e.target.value)}
+                  />
+                </div>
+              </div>
+
+              {/* RIGHT — inline calendar */}
+              <div className="flex flex-col gap-3">
+                <div>
+                  <FieldLabel required>Date of Receipt</FieldLabel>
+                  {/* Selected date display */}
+                  <div
+                    className={cn(
+                      "mb-3 px-3 py-2 rounded-lg border text-sm font-medium flex items-center gap-2",
+                      date
+                        ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-700 dark:text-emerald-400"
+                        : "border-dashed border-border text-muted-foreground",
+                    )}
                   >
+                    <svg
+                      viewBox="0 0 16 16"
+                      className="w-3.5 h-3.5 shrink-0 opacity-70"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.5"
+                    >
+                      <rect x="1" y="3" width="14" height="12" rx="2" />
+                      <path d="M1 7h14M5 1v4M11 1v4" strokeLinecap="round" />
+                    </svg>
+                    {date ? format(date, "dd MMMM yyyy") : "No date selected"}
+                  </div>
+
+                  {/* Inline calendar — no popover */}
+                  <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
                     <CalendarComponent
                       mode="single"
                       selected={date}
-                      onSelect={(d) => {
-                        setDate(d);
-                        setCalOpen(false);
-                      }}
+                      onSelect={(d) => setDate(d)}
                       initialFocus
-                    />
-                  </PopoverContent>
-                </Popover>
-              </div>
-            </div>
-
-            {/* Row 3: Customer name (combobox from AccountHeadMaster) + Payment mode */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <FieldLabel required>Customer Name</FieldLabel>
-                <CustomerCombobox
-                  value={form.customerName}
-                  onChange={(v) => setField("customerName", v)}
-                  customers={customers}
-                />
-              </div>
-              <div>
-                <FieldLabel required>Payment Type</FieldLabel>
-                <Select
-                  value={form.mode}
-                  onValueChange={(v) => setField("mode", v as PaymentMode)}
-                >
-                  <SelectTrigger className="h-9 text-sm">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PAYMENT_MODES.map((m) => (
-                      <SelectItem key={m} value={m}>
-                        <span className="flex items-center gap-2">
-                          {modeIcon(m)}
-                          {m}
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            {/* Row 4: Deposit Bank */}
-            <div>
-              <FieldLabel required>Deposit Bank</FieldLabel>
-              <Select
-                value={form.depositBankId}
-                disabled={!form.companyId}
-                onValueChange={(v) => {
-                  const bank = depositBanks.find((b) => String(b.BId) === v);
-                  setForm((f) => ({
-                    ...f,
-                    depositBankId: v,
-                    depositBankName: bank
-                      ? `${bank.BName}${bank.BBranch ? ` – ${bank.BBranch}` : ""}`
-                      : "",
-                  }));
-                }}
-              >
-                <SelectTrigger className="h-9 text-sm">
-                  <SelectValue
-                    placeholder={
-                      form.companyId
-                        ? "Select deposit bank…"
-                        : "Select company first"
-                    }
-                  />
-                </SelectTrigger>
-                <SelectContent>
-                  {depositBanks.map((b) => (
-                    <SelectItem key={b.BId} value={String(b.BId)}>
-                      <span className="flex items-center gap-2">
-                        <Landmark size={13} className="text-muted-foreground" />
-                        {b.BName}
-                        {b.BBranch ? ` – ${b.BBranch}` : ""}
-                        {b.BAccountNumber ? (
-                          <span className="text-muted-foreground text-[10px]">
-                            ···{b.BAccountNumber.slice(-4)}
-                          </span>
-                        ) : null}
-                      </span>
-                    </SelectItem>
-                  ))}
-                  {depositBanks.length === 0 && (
-                    <div className="px-3 py-2 text-xs text-muted-foreground">
-                      No active banks found for this company
-                    </div>
-                  )}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Row 5: Doc Number (auto-generated, read-only) */}
-            <div>
-              <FieldLabel>Document Number</FieldLabel>
-              {docNoLoading ? (
-                <div className="h-9 flex items-center gap-2 px-3 text-sm text-muted-foreground border border-input rounded-md bg-muted/30">
-                  <Loader2 size={13} className="animate-spin shrink-0" />
-                  Generating…
-                </div>
-              ) : (
-                <div
-                  className={cn(
-                    "h-auto min-h-[36px] flex items-center justify-between gap-2 px-3 py-2 rounded-md border font-heading font-semibold text-sm",
-                    docNoPreview || form.docNo
-                      ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-600 dark:text-emerald-400"
-                      : "border-input bg-muted/30 text-muted-foreground font-normal",
-                  )}
-                >
-                  <span className="flex items-center gap-2">
-                    <Hash size={13} className="shrink-0 opacity-60" />
-                    {docNoPreview ||
-                      form.docNo ||
-                      (recDocTypeId
-                        ? "Will be assigned on save"
-                        : "Resolving…")}
-                  </span>
-                  {(docNoPreview || form.docNo) && !editingId && (
-                    <button
-                      onClick={() =>
-                        refreshDocNo(
-                          recDocTypeId,
-                          form.finYear || activeFinYear,
-                        )
-                      }
-                      className="text-muted-foreground hover:text-foreground transition-colors shrink-0"
-                      title="Refresh"
-                    >
-                      <RefreshCw size={12} />
-                    </button>
-                  )}
-                </div>
-              )}
-              <p className="text-[10px] text-muted-foreground mt-1 font-mono">
-                REC / 000001 / {form.finYear || activeFinYear} — locked on save
-              </p>
-            </div>
-
-            {/* Row 6: Amount */}
-            <div>
-              <FieldLabel required>Amount (₹)</FieldLabel>
-              <div className="relative">
-                <IndianRupee
-                  size={14}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                />
-                <Input
-                  type="number"
-                  className="pl-8 h-9 text-sm font-mono"
-                  placeholder="0.00"
-                  value={form.amount}
-                  onChange={(e) => setField("amount", e.target.value)}
-                />
-              </div>
-            </div>
-
-            {/* Row 7: Bank Ref (conditional) */}
-            {needsBankRef && (
-              <div className="grid grid-cols-2 gap-4">
-                {form.mode === "Check" ? (
-                  <div>
-                    <FieldLabel>Cheque Number</FieldLabel>
-                    <Input
-                      className="h-9 text-sm"
-                      placeholder="Cheque No."
-                      value={form.checkNumber}
-                      onChange={(e) => setField("checkNumber", e.target.value)}
+                      className="w-full [&_.rdp]:w-full [&_.rdp-months]:w-full [&_.rdp-month]:w-full [&_.rdp-table]:w-full"
                     />
                   </div>
-                ) : (
-                  <div>
-                    <FieldLabel>Transaction / UTR Ref</FieldLabel>
-                    <Input
-                      className="h-9 text-sm"
-                      placeholder="Transaction ID / UTR"
-                      value={form.transactionId}
-                      onChange={(e) =>
-                        setField("transactionId", e.target.value)
-                      }
-                    />
-                  </div>
-                )}
-                <div>
-                  <FieldLabel>Customer Bank Name</FieldLabel>
-                  <Input
-                    className="h-9 text-sm"
-                    placeholder="Bank of customer"
-                    value={form.bankName}
-                    onChange={(e) => setField("bankName", e.target.value)}
-                  />
                 </div>
               </div>
-            )}
-
-            {/* Row 8: Remarks */}
-            <div>
-              <FieldLabel>Remarks</FieldLabel>
-              <textarea
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-ring min-h-[72px]"
-                placeholder="Optional remarks or notes…"
-                value={form.remarks}
-                onChange={(e) => setField("remarks", e.target.value)}
-              />
             </div>
           </div>
 
-          <DialogFooter className="gap-2">
+          <DialogFooter className="px-7 py-4 border-t border-border bg-muted/10 gap-2">
             <Button
               variant="outline"
               size="sm"
@@ -1353,69 +1351,61 @@ export default function ReceivedPaymentPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Approve / Reject Dialog ─────────────────────────────────────────── */}
+      {/* ── Submit for Approval Confirm ─────────────────────────────────────── */}
       <Dialog
-        open={!!approveTarget}
+        open={!!submitTarget}
         onOpenChange={(o) => {
-          if (!o) setApproveTarget(null);
+          if (!o) setSubmitTarget(null);
         }}
       >
         <DialogContent className="max-w-sm">
           <DialogHeader>
-            <DialogTitle className="font-heading text-base">
-              Approve or Reject Payment
+            <DialogTitle className="font-heading text-base flex items-center gap-2">
+              <SendHorizontal size={16} className="text-primary" />
+              Submit for Approval
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
-              {approveTarget?.docNo} ·{" "}
-              {approveTarget && fmt(approveTarget.amount)} ·{" "}
-              {approveTarget?.customerName || approveTarget?.receivedFrom}
+              This will send the payment to the admin Approval Inbox. You won't
+              be able to edit it until it's reviewed.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3 py-2">
-            <div>
-              <FieldLabel>Rejection Reason (if rejecting)</FieldLabel>
-              <textarea
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm resize-none focus:outline-none focus:ring-1 focus:ring-ring min-h-[64px]"
-                placeholder="Reason for rejection…"
-                value={rejectNote}
-                onChange={(e) => setRejectNote(e.target.value)}
-              />
+          <div className="py-3 space-y-2">
+            <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 space-y-1">
+              <p className="text-xs text-muted-foreground font-heading uppercase tracking-wide">
+                Payment
+              </p>
+              <p className="text-sm font-semibold text-foreground">
+                {submitTarget?.docNo}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {submitTarget?.customerName || submitTarget?.receivedFrom}
+              </p>
+              <p className="text-sm font-mono font-bold text-emerald-600">
+                +{submitTarget ? fmt(submitTarget.amount) : ""}
+              </p>
             </div>
           </div>
           <DialogFooter className="gap-2">
             <Button
               variant="outline"
               size="sm"
-              onClick={() => setApproveTarget(null)}
+              onClick={() => setSubmitTarget(null)}
               disabled={actionLoading}
             >
               Cancel
             </Button>
             <Button
-              variant="destructive"
               size="sm"
-              onClick={() => handleApprove("reject")}
+              onClick={handleSubmitForApproval}
               disabled={actionLoading}
+              className="gap-1.5"
             >
               {actionLoading ? (
-                <Loader2 size={13} className="animate-spin mr-1" />
+                <Loader2 size={13} className="animate-spin" />
               ) : (
-                <ThumbsDown size={13} className="mr-1" />
+                <SendHorizontal size={13} />
               )}
-              Reject
-            </Button>
-            <Button
-              size="sm"
-              className="bg-green-600 hover:bg-green-700"
-              onClick={() => handleApprove("approve")}
-              disabled={actionLoading}
-            >
-              {actionLoading ? (
-                <Loader2 size={13} className="animate-spin mr-1" />
-              ) : (
-                <ThumbsUp size={13} className="mr-1" />
-              )}
-              Approve
+              Submit
             </Button>
           </DialogFooter>
         </DialogContent>
