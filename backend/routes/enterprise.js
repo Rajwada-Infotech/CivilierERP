@@ -316,7 +316,7 @@ router.get("/options", async (req, res) => {
       request.input("businessType", sql.NVarChar(100), req.query.business_type);
     }
 
-    let query = "SELECT id, name AS label FROM dbo.enterprise";
+    let query = "SELECT id, name AS label, belongs_to FROM dbo.enterprise";
     if (conditions.length > 0) {
       query += " WHERE " + conditions.join(" AND ");
     }
