@@ -70,6 +70,7 @@ function buildWhere(filters, ledgerDateExpr) {
       OR grn.GRNNo LIKE @search
       OR po.PurchaseOrderNo LIKE @search
       OR CONVERT(NVARCHAR(50), sl.ItemID) LIKE @search
+      OR sl.DocNo LIKE @search
     )`);
   }
 
@@ -105,6 +106,7 @@ router.get("/", cache("stock-ledger", 120), async (req, res) => {
     const hasCreatedDate = await hasColumn(pool, "dbo.StockLedger", "CreatedDate");
     const hasEntryDate = await hasColumn(pool, "dbo.StockLedger", "EntryDate");
     const hasUom = await hasColumn(pool, "dbo.StockLedger", "UOM");
+    const hasDocNo = await hasColumn(pool, "dbo.StockLedger", "DocNo");
 
     const ledgerDateExpr =
       hasCreatedDate && hasEntryDate
@@ -138,6 +140,8 @@ router.get("/", cache("stock-ledger", 120), async (req, res) => {
         ON sl.RefType = 'GRN' AND grn.GRNID = sl.RefID
       LEFT JOIN dbo.PurchaseOrders po
         ON grn.POID = po.PurchaseOrderID
+      LEFT JOIN dbo.MaterialIssues iss
+        ON sl.RefType = 'ISS' AND iss.IssueId = sl.RefID
     `;
     const where = buildWhere(filters, ledgerDateExpr);
 
@@ -168,9 +172,11 @@ router.get("/", cache("stock-ledger", 120), async (req, res) => {
         ${uomSymbolSelect} AS UOMSymbol,
         sl.RefType,
         sl.RefID,
+        ${hasDocNo ? "sl.DocNo" : "COALESCE(grn.DocNo, iss.DocNo)"} AS DocNo,
         grn.GRNNo,
         grn.GRNDate,
         po.PurchaseOrderNo,
+        iss.IssueNo,
         ${ledgerDateExpr} AS LedgerDate
       ${fromJoin}
       ${where}
