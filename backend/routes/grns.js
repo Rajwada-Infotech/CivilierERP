@@ -62,7 +62,7 @@ function normaliseGRNRow(row) {
   return row;
 }
 
-async function insertStockLedgerEntries(transaction, grnId, grnItems) {
+async function insertStockLedgerEntries(transaction, grnId, grnItems, docNo) {
   const items = parseGRNItems(grnItems);
 
   for (const item of items) {
@@ -74,9 +74,10 @@ async function insertStockLedgerEntries(transaction, grnId, grnItems) {
         .input("UOM", sql.NVarChar(20), item.uom || null)
         .input("Type", sql.NVarChar(10), "IN")
         .input("RefType", sql.NVarChar(20), "GRN")
-        .input("RefID", sql.Int, grnId).query(`
-          INSERT INTO StockLedger (ItemID, Qty, UOM, Type, RefType, RefID, CreatedDate)
-          VALUES (@ItemID, @Qty, @UOM, @Type, @RefType, @RefID, GETDATE())
+        .input("RefID", sql.Int, grnId)
+        .input("DocNo", sql.NVarChar(100), docNo || null).query(`
+          INSERT INTO StockLedger (ItemID, Qty, UOM, Type, RefType, RefID, DocNo, CreatedDate)
+          VALUES (@ItemID, @Qty, @UOM, @Type, @RefType, @RefID, @DocNo, GETDATE())
         `);
     }
   }
@@ -378,7 +379,7 @@ router.post("/", async (req, res) => {
       grnId,
     );
 
-    await insertStockLedgerEntries(transaction, grnId, grnItems);
+    await insertStockLedgerEntries(transaction, grnId, grnItems, finalDocNo);
 
     await transaction.commit();
     await bumpCacheVersion("grns");
@@ -467,7 +468,7 @@ router.put("/:id", async (req, res) => {
         "DELETE FROM StockLedger WHERE RefType = 'GRN' AND RefID = @RefID",
       );
 
-    await insertStockLedgerEntries(transaction, grnId, grnItems);
+    await insertStockLedgerEntries(transaction, grnId, grnItems, docNo);
     await transaction.commit();
 
     await bumpCacheVersion("grns");
