@@ -1,67 +1,70 @@
 import axios from "./axios";
 
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+export type BrsSourceType = "PAYMENT" | "RECEIVED";
+
 export interface BrsEntry {
-  BRSID:         number;
-  BankID:        number;
-  CompanyID:     number | null;   // resolved via bank's LParentId, may be null
-  TransactionID: number;
-  Amount:        number;
-  Type:          "CREDIT" | "DEBIT";
-  IsMatched:     boolean;
-  BankDate:      string;
-  SystemDate:    string;
-  CreatedAt:     string;
-  BankName:      string | null;
-  CompanyName:   string | null;
+  BRSID: number | null;
+  SourceID: number;
+  SourceType: BrsSourceType;
+  PaymentName: string;
+  CompanyName: string | null;
+  CompanyID: number | null;
+  BankID: number | null;
+  BankName: string | null;
+  Amount: number;
+  PayDate: string; // ISO date string
+  Mode: string;
+  DocNo: string | null;
+  TxnId: string | null;
+  PayStatus: string;
+  IsMatched: boolean | number; // SQL BIT comes back as 0/1 or true/false
+  CreatedAt: string;
 }
 
-export interface BrsResponse {
-  data:       BrsEntry[];
-  matched:    number;
-  unmatched:  number;
-  difference: number;
-  page:       number;
-  limit:      number;
-  total:      number;
+export interface BrsListResponse {
+  data: BrsEntry[];
+  total: number;
+  page: number;
+  limit: number;
   totalPages: number;
+  clearAmount: number;
+  unclearAmount: number;
+  clearCount: number;
+  unclearCount: number;
 }
 
 export interface BrsFilterOption {
-  id:           number;
-  name:         string;
-  companyId?:   number | null;    // only on banks — resolved via LBelongsTo
-  companyName?: string | null;    // only on banks — the matched company name
+  id: number;
+  name: string;
+  companyId?: number | null;
+  companyName?: string | null;
 }
 
 export interface BrsFilters {
   companies: BrsFilterOption[];
-  banks:     BrsFilterOption[];
+  banks: BrsFilterOption[];
 }
 
-export const getBRSFilters = () =>
-  axios.get<BrsFilters>("/brs/filters");
+// ─── API calls ────────────────────────────────────────────────────────────────
+
+export const getBRSFilters = () => axios.get<BrsFilters>("/brs/filters");
 
 export const getBRS = (params: {
-  bankId?:     number;
-  companyId?:  number;   // filters via bank's LParentId on backend
-  fromDate?:   string;
-  toDate?:     string;
-  status?:     "reconciled" | "pending";
-  page?:       number;
-  limit?:      number;
-}) => axios.get<BrsResponse>("/brs", { params });
+  bankId?: number;
+  companyName?: string;
+  fromDate?: string; // YYYY-MM-DD
+  toDate?: string; // YYYY-MM-DD
+  status?: "clear" | "unclear";
+  page?: number;
+  limit?: number;
+}) => axios.get<BrsListResponse>("/brs", { params });
 
-// No companyId field — BankReconciliation table has no CompanyID column.
-// Company is resolved from bank.LBelongsTo matching company.LHeadName in AccountHeadMaster.
-export const addBRS = (data: {
-  bankId:        number;
-  transactionId: number;
-  amount:        number;
-  type:          "CREDIT" | "DEBIT";
-  bankDate:      string;
-  systemDate:    string;
-}) => axios.post("/brs", data);
+/** Mark a payment as Clear (bank-confirmed) */
+export const markClear = (sourceType: BrsSourceType, sourceId: number) =>
+  axios.put(`/brs/${sourceType}/${sourceId}/clear`);
 
-export const matchBRS     = (id: number) => axios.put(`/brs/${id}/match`);
-export const unmatchBRS   = (id: number) => axios.put(`/brs/${id}/unmatch`);
-export const autoMatchBRS = ()           => axios.put("/brs/auto-match");
+/** Mark a payment as Unclear (unconfirmed in passbook) */
+export const markUnclear = (sourceType: BrsSourceType, sourceId: number) =>
+  axios.put(`/brs/${sourceType}/${sourceId}/unclear`);

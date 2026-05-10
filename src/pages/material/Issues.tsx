@@ -38,6 +38,7 @@ import { StatusBadge } from "@/components/StatusBadge";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface IssueForm {
+  issueNo: string;
   companyId: string;
   projectId: string;
   date: string;
@@ -49,6 +50,7 @@ interface IssueForm {
 }
 
 const defaultForm: IssueForm = {
+  issueNo: "",
   companyId: "",
   projectId: "",
   date: new Date().toISOString().slice(0, 10),
@@ -127,11 +129,23 @@ export default function Issues() {
     queryFn: () => issuesApi.getIssues({ page, limit, search }),
   });
 
+  const { data: issueNumberPreview, isFetching: loadingIssuePreview } = useQuery({
+    queryKey: ["issues", "next-number"],
+    queryFn: () => issuesApi.previewNextIssueNumber(false),
+    enabled: viewMode === "form" && !editingId,
+    staleTime: 15_000,
+  });
+
   // ── Mutations ─────────────────────────────────────────────────────────────
   const createMutation = useMutation({
     mutationFn: issuesApi.createIssue,
-    onSuccess: () => {
-      toast.success("Material issue created successfully");
+    onSuccess: (record: any) => {
+      const issueNo = record?.IssueNo || record?.DocNo;
+      toast.success(
+        issueNo
+          ? `Material issue ${issueNo} created successfully`
+          : "Material issue created successfully",
+      );
       queryClient.invalidateQueries({ queryKey: ["issues"] });
       goToList();
     },
@@ -167,6 +181,7 @@ export default function Issues() {
 
   const handleEdit = (record: any) => {
     setForm({
+      issueNo: record.IssueNo ?? record.DocNo ?? "",
       companyId: String(record.CompanyId ?? ""),
       projectId: String(record.ProjectId ?? ""),
       date: record.Date ? String(record.Date).slice(0, 10) : defaultForm.date,
@@ -225,6 +240,15 @@ export default function Issues() {
 
   // ── Column definitions ────────────────────────────────────────────────────
   const columns: ColumnDef<any, unknown>[] = [
+    {
+      accessorKey: "DocNo",
+      header: "Doc No",
+      cell: ({ row, getValue }) => (
+        <span className="font-mono font-semibold text-primary text-sm">
+          {String(getValue() || row.original.IssueNo || "—")}
+        </span>
+      ),
+    },
     {
       accessorKey: "IssueNo",
       header: "Issue No",
@@ -422,6 +446,31 @@ export default function Issues() {
       </CardHeader>
 
       <CardContent className="p-6">
+        <div className="mb-5">
+          <Field label="Issue Number">
+            <div className="flex items-center gap-2 rounded-md border border-dashed border-border bg-muted/40 px-3 py-2.5">
+              <FileText size={14} className="text-muted-foreground shrink-0" />
+              {editingId && form.issueNo ? (
+                <span className="font-mono text-sm font-semibold text-primary tracking-wide">
+                  {form.issueNo}
+                </span>
+              ) : issueNumberPreview?.nextDocNo ? (
+                <span className="font-mono text-sm font-semibold text-primary tracking-wide">
+                  {issueNumberPreview.nextDocNo}
+                </span>
+              ) : loadingIssuePreview ? (
+                <span className="text-sm text-muted-foreground/70">
+                  Loading preview...
+                </span>
+              ) : (
+                <span className="text-sm text-muted-foreground/50 italic">
+                  Auto-generated on save
+                </span>
+              )}
+            </div>
+          </Field>
+        </div>
+
         {/* Row 1: Company | Project | Date */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-5">
           <Field label="Company" required>
@@ -693,6 +742,10 @@ export default function Issues() {
 
         <CardContent className="p-6">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-6">
+            <DetailRow
+              label="Doc No"
+              value={viewingRecord.DocNo || viewingRecord.IssueNo || "—"}
+            />
             <DetailRow label="Company" value={viewingRecord.CompanyName} />
             <DetailRow label="Project" value={viewingRecord.ProjectName} />
             <DetailRow

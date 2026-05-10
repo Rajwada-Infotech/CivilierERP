@@ -291,6 +291,8 @@ const ApprovalInbox: React.FC = () => {
 
   const handleActionDone = () => {
     queryClient.invalidateQueries({ queryKey: ["approval-inbox"] });
+    // Invalidate payment list so Payment page reflects approve/reject immediately
+    queryClient.invalidateQueries({ queryKey: ["payments"], exact: false });
   };
 
   // Unfiltered counts for tab badges

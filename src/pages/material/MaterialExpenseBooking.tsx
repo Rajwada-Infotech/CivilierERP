@@ -67,6 +67,7 @@ import { BillingAccordion } from "./ExpenseBooking/BillingAccordion";
 import { EmiSection } from "./ExpenseBooking/EmiSection";
 import { ApprovalTrailPanel } from "./ExpenseBooking/ApprovalTrailPanel";
 import { RecordCard } from "./ExpenseBooking/RecordCard";
+import { ExpenseBookingPreviewModal } from "../../utils/ExpenseBookingPreviewModal";
 import {
   blankForm,
   computeBreakdown,
@@ -198,6 +199,7 @@ interface GRNItem {
   TotalItems?: number;
   Remarks?: string;
   GRNItems?: string | GRNItemLine[];
+  ParentGST?: GSTConfig | string | null;
 }
 
 interface BillingTermOption {
@@ -900,6 +902,16 @@ function DocSelectorPanel({
                         date: g.GRNDate,
                         nameLabel: g.Remarks,
                         grnItems: parsedItems,
+                        gst:
+                          typeof g.ParentGST === "string"
+                            ? (() => {
+                                try {
+                                  return JSON.parse(g.ParentGST!);
+                                } catch {
+                                  return null;
+                                }
+                              })()
+                            : (g.ParentGST ?? null),
                       })
                     }
                     className="w-full flex items-start gap-3 px-4 py-3 hover:bg-muted/30 transition-colors border-b border-border/30 last:border-0 text-left group"
@@ -987,13 +999,17 @@ function resolveGstRates(
   fallbackCgst: number,
   fallbackSgst: number,
 ) {
-  if ((doc.kind === "PO" || doc.kind === "WO") && doc.gst?.applicable) {
+  if (
+    (doc.kind === "PO" || doc.kind === "WO" || doc.kind === "GRN") &&
+    doc.gst?.applicable
+  ) {
     const { type, rate } = doc.gst;
     if (type === "cgst_sgst") return { cgst: rate / 2, sgst: rate / 2 };
     if (type === "igst") return { cgst: rate, sgst: 0 };
     return { cgst: 0, sgst: 0 };
   }
-  if (doc.kind === "PO" || doc.kind === "WO") return { cgst: 0, sgst: 0 };
+  if (doc.kind === "PO" || doc.kind === "WO" || doc.kind === "GRN")
+    return { cgst: 0, sgst: 0 };
   return { cgst: fallbackCgst, sgst: fallbackSgst };
 }
 
@@ -1368,6 +1384,16 @@ export default function MaterialExpenseBooking() {
             const canonical = rawDocNo.startsWith("GRN-")
               ? rawDocNo
               : `GRN-${rawDocNo}`;
+            const parsedParentGST: GSTConfig | null = (() => {
+              if (!r.ParentGST) return null;
+              if (typeof r.ParentGST === "object")
+                return r.ParentGST as GSTConfig;
+              try {
+                return JSON.parse(r.ParentGST) as GSTConfig;
+              } catch {
+                return null;
+              }
+            })();
             setSelectedDoc({
               kind: "GRN",
               docNo: canonical,
@@ -1377,6 +1403,7 @@ export default function MaterialExpenseBooking() {
               date: r.GRNDate?.slice(0, 10),
               grnItems: items,
               amount: parseFloat(r.TotalAmount) || 0,
+              gst: parsedParentGST,
             });
           })
           .catch(() => {})
@@ -1631,7 +1658,8 @@ export default function MaterialExpenseBooking() {
     selectedDoc?.kind === "WO" ? "Contractor" : "Supplier / Vendor";
   const isPOorWO = selectedDoc?.kind === "PO" || selectedDoc?.kind === "WO";
   const isGRN = selectedDoc?.kind === "GRN";
-  const gstHighlighted = isPOorWO && !!selectedDoc?.gst?.applicable;
+  const hasParentGST = isPOorWO || isGRN;
+  const gstHighlighted = hasParentGST && !!selectedDoc?.gst?.applicable;
 
   // Compute sets of already-booked source IDs (excluding the record being edited)
   const bookedPOIds = new Set<number>();
@@ -1721,46 +1749,6 @@ export default function MaterialExpenseBooking() {
               {/* ── 0. Booking Information ─────────────────────────────── */}
               <div className="space-y-4">
                 <SectionHeader label="Booking Information" />
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  <Field label="Booking Date" required>
-                    <Input
-                      type="date"
-                      value={form.bookingDate}
-                      onChange={(e) => set("bookingDate", e.target.value)}
-                    />
-                  </Field>
-                  <Field label="Due Date">
-                    <Input
-                      type="date"
-                      value={form.dueDate}
-                      onChange={(e) => set("dueDate", e.target.value)}
-                    />
-                  </Field>
-                  <Field
-                    label="Financial Year"
-                    hint={
-                      selectedTod
-                        ? "Changing year updates the booking reference number"
-                        : undefined
-                    }
-                  >
-                    <Select
-                      value={form.financialYear}
-                      onValueChange={(v) => set("financialYear", v)}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select year…" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {activeFinYears.map((fy) => (
-                          <SelectItem key={fy.id} value={fy.year}>
-                            {fy.year}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </Field>
-                </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <Field label="Company" required>
                     <Select
@@ -1866,6 +1854,46 @@ export default function MaterialExpenseBooking() {
                         {projectOptions.map((p) => (
                           <SelectItem key={p.id} value={String(p.id)}>
                             {p.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                  <Field label="Booking Date" required>
+                    <Input
+                      type="date"
+                      value={form.bookingDate}
+                      onChange={(e) => set("bookingDate", e.target.value)}
+                    />
+                  </Field>
+                  <Field label="Due Date">
+                    <Input
+                      type="date"
+                      value={form.dueDate}
+                      onChange={(e) => set("dueDate", e.target.value)}
+                    />
+                  </Field>
+                  <Field
+                    label="Financial Year"
+                    hint={
+                      selectedTod
+                        ? "Changing year updates the booking reference number"
+                        : undefined
+                    }
+                  >
+                    <Select
+                      value={form.financialYear}
+                      onValueChange={(v) => set("financialYear", v)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select year…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {activeFinYears.map((fy) => (
+                          <SelectItem key={fy.id} value={fy.year}>
+                            {fy.year}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -1999,7 +2027,7 @@ export default function MaterialExpenseBooking() {
               {/* ── 2. Amount & GST ────────────────────────────────────── */}
               <div className="space-y-4">
                 <SectionHeader label="Amount & GST" />
-                {isPOorWO && (
+                {hasParentGST && (
                   <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-primary/5 border border-primary/20 text-xs">
                     <BadgePercent size={12} className="text-primary shrink-0" />
                     {selectedDoc!.gst?.applicable ? (
@@ -2008,7 +2036,9 @@ export default function MaterialExpenseBooking() {
                         <span className="font-semibold">
                           {selectedDoc!.kind === "PO"
                             ? "Purchase Order"
-                            : "Work Order"}
+                            : selectedDoc!.kind === "GRN"
+                              ? "GRN (parent PO)"
+                              : "Work Order"}
                         </span>
                         {" — "}
                         {selectedDoc!.gst!.type === "cgst_sgst"
@@ -2023,7 +2053,9 @@ export default function MaterialExpenseBooking() {
                         Linked{" "}
                         {selectedDoc!.kind === "PO"
                           ? "Purchase Order"
-                          : "Work Order"}{" "}
+                          : selectedDoc!.kind === "GRN"
+                            ? "GRN (parent PO)"
+                            : "Work Order"}{" "}
                         has no GST applied — rates set to 0. Editable if needed.
                       </span>
                     )}
@@ -2493,34 +2525,40 @@ export default function MaterialExpenseBooking() {
                   ))}
                 </div>
 
-                {/* Desktop table */}
+                {/* Records table — compact, no horizontal scroll */}
                 <Card className="hidden sm:block border-border shadow-sm">
                   <CardContent className="p-0">
-                    <div className="rounded-md overflow-x-auto">
+                    <div className="rounded-md">
                       <Table>
                         <TableHeader>
                           <TableRow className="bg-muted/30">
-                            {[
-                              "Booking Ref",
-                              "Type",
-                              "Date",
-                              "Vendor / Contractor",
-                              "Basic Amt",
-                              "CGST",
-                              "SGST",
-                              "Net Amt",
-                              "GRN",
-                              "EMI",
-                              "Status",
-                              "Actions",
-                            ].map((h, i) => (
-                              <TableHead
-                                key={h}
-                                className={`text-xs font-heading${[4, 5, 6].includes(i) ? " hidden md:table-cell" : ""}${i === 8 ? " hidden lg:table-cell" : ""}`}
-                              >
-                                {h}
-                              </TableHead>
-                            ))}
+                            <TableHead className="text-xs font-heading w-[22%]">
+                              Booking Ref
+                            </TableHead>
+                            <TableHead className="text-xs font-heading w-[18%]">
+                              Vendor
+                            </TableHead>
+                            <TableHead className="text-xs font-heading w-[10%] text-right">
+                              Basic Amt
+                            </TableHead>
+                            <TableHead className="text-xs font-heading w-[10%] text-right hidden md:table-cell">
+                              CGST
+                            </TableHead>
+                            <TableHead className="text-xs font-heading w-[10%] text-right hidden md:table-cell">
+                              SGST
+                            </TableHead>
+                            <TableHead className="text-xs font-heading w-[12%] text-right">
+                              Net Amt
+                            </TableHead>
+                            <TableHead className="text-xs font-heading w-[8%] hidden lg:table-cell">
+                              GRN
+                            </TableHead>
+                            <TableHead className="text-xs font-heading w-[8%]">
+                              Status
+                            </TableHead>
+                            <TableHead className="text-xs font-heading w-[12%] text-right">
+                              Actions
+                            </TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -2542,50 +2580,57 @@ export default function MaterialExpenseBooking() {
                                 }
                                 className="hover:bg-muted/20"
                               >
-                                <TableCell className="font-mono text-xs font-semibold text-primary">
-                                  {rec.bookingReference || "—"}
+                                {/* Booking Ref + date + type stacked */}
+                                <TableCell className="py-2.5">
+                                  <p className="font-mono text-[11px] font-semibold text-primary leading-tight break-all">
+                                    {rec.bookingReference || "—"}
+                                  </p>
+                                  <p className="text-[10px] text-muted-foreground mt-0.5">
+                                    {rec.bookingDate}
+                                    {rec.docTypeName ? (
+                                      <span className="ml-1 opacity-60">
+                                        · {rec.docTypeName}
+                                      </span>
+                                    ) : null}
+                                    {rec.emi?.enabled ? (
+                                      <span className="ml-1 inline-flex items-center gap-0.5 text-[9px] font-heading font-semibold bg-violet-500/10 text-violet-500 border border-violet-500/20 px-1 py-0.5 rounded-full">
+                                        <CreditCard size={8} />
+                                        {rec.emi.installmentCount}x
+                                      </span>
+                                    ) : null}
+                                  </p>
                                 </TableCell>
-                                <TableCell className="text-xs text-muted-foreground max-w-[90px] truncate">
-                                  {rec.docTypeName || "—"}
-                                </TableCell>
-                                <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-                                  {rec.bookingDate}
-                                </TableCell>
-                                <TableCell className="text-xs max-w-[120px] truncate">
+                                {/* Vendor */}
+                                <TableCell className="text-xs max-w-[140px] truncate py-2.5">
                                   {rec.supplier || "—"}
                                 </TableCell>
-                                <TableCell className="font-mono text-xs hidden md:table-cell text-muted-foreground">
+                                {/* Basic Amt */}
+                                <TableCell className="font-mono text-xs text-right text-muted-foreground py-2.5">
                                   ₹{fmt(rec.basicAmount)}
                                 </TableCell>
-                                <TableCell className="font-mono text-xs hidden md:table-cell text-foreground/70">
+                                {/* CGST */}
+                                <TableCell className="font-mono text-xs text-right text-foreground/70 py-2.5 hidden md:table-cell">
                                   {rec.cgstRate}%
                                 </TableCell>
-                                <TableCell className="font-mono text-xs hidden md:table-cell text-foreground/70">
+                                {/* SGST */}
+                                <TableCell className="font-mono text-xs text-right text-foreground/70 py-2.5 hidden md:table-cell">
                                   {rec.sgstRate}%
                                 </TableCell>
-                                <TableCell className="font-mono text-xs font-semibold">
+                                {/* Net Amt */}
+                                <TableCell className="font-mono text-xs font-semibold text-right py-2.5">
                                   ₹{fmt(rbd.netAmount)}
                                 </TableCell>
-                                <TableCell className="hidden lg:table-cell">
+                                {/* GRN */}
+                                <TableCell className="hidden lg:table-cell py-2.5">
                                   <GRNChainBadge bookingId={rec.id} />
                                 </TableCell>
-                                <TableCell>
-                                  {rec.emi?.enabled ? (
-                                    <span className="inline-flex items-center gap-1 text-[10px] font-heading font-semibold bg-violet-500/10 text-violet-500 border border-violet-500/20 px-2 py-0.5 rounded-full">
-                                      <CreditCard size={9} />
-                                      {rec.emi.installmentCount}x
-                                    </span>
-                                  ) : (
-                                    <span className="text-muted-foreground text-xs">
-                                      —
-                                    </span>
-                                  )}
-                                </TableCell>
-                                <TableCell>
+                                {/* Status */}
+                                <TableCell className="py-2.5">
                                   <StatusBadge status={rec.status} />
                                 </TableCell>
-                                <TableCell>
-                                  <div className="flex flex-wrap gap-1.5 items-center">
+                                {/* Actions */}
+                                <TableCell className="py-2.5">
+                                  <div className="flex gap-1 items-center justify-end">
                                     <ApprovalActions
                                       status={rec.status}
                                       recordId={rec.id}
@@ -2626,7 +2671,7 @@ export default function MaterialExpenseBooking() {
                           {filteredRecords.length === 0 && (
                             <TableRow>
                               <TableCell
-                                colSpan={12}
+                                colSpan={9}
                                 className="text-center py-14 text-muted-foreground text-sm"
                               >
                                 <AlertCircle
@@ -2717,547 +2762,12 @@ export default function MaterialExpenseBooking() {
         </DialogContent>
       </Dialog>
 
-      {/* Preview Dialog */}
-      <Dialog
-        open={!!previewRecord}
-        onOpenChange={() => setPreviewRecord(null)}
-      >
-        <DialogContent className="w-[calc(100vw-2rem)] max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Expense Booking Preview</DialogTitle>
-            <DialogDescription>
-              Details for booking {previewRecord?.bookingReference}
-            </DialogDescription>
-          </DialogHeader>
-          {previewRecord &&
-            (() => {
-              const hasEmi = !!(
-                previewRecord.emi?.enabled &&
-                previewRecord.emi?.installmentCount
-              );
-              return (
-                <>
-                  <div className="px-4 sm:px-6 py-4 sm:py-5 space-y-5">
-                    {/* ── Section 1: Booking Info ── */}
-                    <div>
-                      <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-                        <CalendarDays size={10} className="text-primary" />{" "}
-                        Booking Information
-                      </p>
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-4">
-                        <div className="space-y-0.5">
-                          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
-                            Booking Date
-                          </p>
-                          <p className="text-sm font-medium">
-                            {previewRecord.bookingDate || "—"}
-                          </p>
-                        </div>
-                        <div className="space-y-0.5">
-                          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
-                            Due Date
-                          </p>
-                          <p className="text-sm font-medium">
-                            {previewRecord.dueDate || "—"}
-                          </p>
-                        </div>
-                        <div className="space-y-0.5">
-                          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
-                            Document Type
-                          </p>
-                          <p className="text-sm font-medium truncate">
-                            {previewRecord.docTypeName ||
-                              previewRecord.materialCategory ||
-                              "—"}
-                          </p>
-                        </div>
-                        <div className="space-y-0.5">
-                          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
-                            Source Document
-                          </p>
-                          <p className="text-sm font-mono font-semibold text-foreground">
-                            {previewRecord.sourceDocNo ||
-                            previewRecord.purchaseOrderId
-                              ? `PO-${previewRecord.purchaseOrderId}`
-                              : previewRecord.workOrderId
-                                ? `WO-${previewRecord.workOrderId}`
-                                : "—"}
-                          </p>
-                        </div>
-                        <div className="space-y-0.5">
-                          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
-                            Company
-                          </p>
-                          <p className="text-sm font-medium truncate">
-                            {previewRecord.companyName ||
-                              (previewRecord.companyId
-                                ? `Company #${previewRecord.companyId}`
-                                : "—")}
-                          </p>
-                        </div>
-                        <div className="space-y-0.5">
-                          <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
-                            Project
-                          </p>
-                          <p className="text-sm font-medium truncate">
-                            {previewRecord.projectName ||
-                              (previewRecord.projectId
-                                ? `Project #${previewRecord.projectId}`
-                                : "—")}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* ── Section 2: Vendor / Supplier ── */}
-                    <div className="border-t border-border/60 pt-4">
-                      <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-                        <Truck size={10} className="text-primary" /> Vendor /
-                        Supplier
-                      </p>
-                      <div className="flex flex-col sm:flex-row gap-3">
-                        <div className="flex-1 flex items-center gap-3 bg-muted/30 border border-border rounded-xl px-4 py-3">
-                          <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                            <User size={14} className="text-primary" />
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
-                              Supplier / Contractor
-                            </p>
-                            <p className="text-sm font-semibold truncate">
-                              {previewRecord.supplier || "—"}
-                            </p>
-                          </div>
-                        </div>
-                        {previewRecord.materialCategory && (
-                          <div className="flex-1 flex items-center gap-3 bg-muted/30 border border-border rounded-xl px-4 py-3">
-                            <div className="w-8 h-8 rounded-lg bg-blue-500/10 flex items-center justify-center shrink-0">
-                              <Package size={14} className="text-blue-500" />
-                            </div>
-                            <div className="min-w-0">
-                              <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
-                                Material Category
-                              </p>
-                              <p className="text-sm font-semibold truncate">
-                                {previewRecord.materialCategory}
-                              </p>
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Compute breakdown for preview */}
-                    {(() => {
-                      const rbd = computeBreakdown(
-                        previewRecord.basicAmount,
-                        previewRecord.cgstRate,
-                        previewRecord.sgstRate,
-                        previewRecord.discount,
-                      );
-                      const hasIgst = (previewRecord.igstRate || 0) > 0;
-                      const hasDiscount =
-                        previewRecord.discount &&
-                        (previewRecord.discount.value || 0) > 0;
-                      const cgstAmt =
-                        (rbd as any).cgstAmt ??
-                        (previewRecord.basicAmount *
-                          (previewRecord.cgstRate || 0)) /
-                          100;
-                      const sgstAmt =
-                        (rbd as any).sgstAmt ??
-                        (previewRecord.basicAmount *
-                          (previewRecord.sgstRate || 0)) /
-                          100;
-                      const igstAmt =
-                        (rbd as any).igstAmt ??
-                        (previewRecord.basicAmount *
-                          (previewRecord.igstRate || 0)) /
-                          100;
-
-                      return (
-                        <>
-                          {/* ── Section 3: Amount Breakdown ── */}
-                          <div className="border-t border-border/60 pt-4">
-                            <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-                              <Banknote size={10} className="text-primary" />{" "}
-                              Amount Breakdown
-                            </p>
-                            <div className="rounded-xl border border-border overflow-hidden">
-                              {/* Breakdown rows */}
-                              <div className="divide-y divide-border/60">
-                                <div className="flex items-center justify-between px-4 py-2.5 bg-muted/10">
-                                  <p className="text-xs text-muted-foreground">
-                                    Basic Amount
-                                  </p>
-                                  <p className="font-mono text-sm font-semibold">
-                                    ₹{fmt(previewRecord.basicAmount)}
-                                  </p>
-                                </div>
-                                {!hasIgst &&
-                                  (previewRecord.cgstRate || 0) > 0 && (
-                                    <div className="flex items-center justify-between px-4 py-2.5">
-                                      <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-                                        <BadgePercent
-                                          size={10}
-                                          className="text-amber-500"
-                                        />
-                                        CGST{" "}
-                                        <span className="font-mono text-[10px] bg-amber-500/10 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded">
-                                          {previewRecord.cgstRate}%
-                                        </span>
-                                      </p>
-                                      <p className="font-mono text-sm text-foreground/80">
-                                        + ₹{fmt(cgstAmt)}
-                                      </p>
-                                    </div>
-                                  )}
-                                {!hasIgst &&
-                                  (previewRecord.sgstRate || 0) > 0 && (
-                                    <div className="flex items-center justify-between px-4 py-2.5">
-                                      <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-                                        <BadgePercent
-                                          size={10}
-                                          className="text-amber-500"
-                                        />
-                                        SGST{" "}
-                                        <span className="font-mono text-[10px] bg-amber-500/10 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded">
-                                          {previewRecord.sgstRate}%
-                                        </span>
-                                      </p>
-                                      <p className="font-mono text-sm text-foreground/80">
-                                        + ₹{fmt(sgstAmt)}
-                                      </p>
-                                    </div>
-                                  )}
-                                {hasIgst && (
-                                  <div className="flex items-center justify-between px-4 py-2.5">
-                                    <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-                                      <BadgePercent
-                                        size={10}
-                                        className="text-amber-500"
-                                      />
-                                      IGST{" "}
-                                      <span className="font-mono text-[10px] bg-amber-500/10 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded">
-                                        {previewRecord.igstRate}%
-                                      </span>
-                                    </p>
-                                    <p className="font-mono text-sm text-foreground/80">
-                                      + ₹{fmt(igstAmt)}
-                                    </p>
-                                  </div>
-                                )}
-                                {!hasIgst &&
-                                  (previewRecord.cgstRate || 0) === 0 &&
-                                  (previewRecord.sgstRate || 0) === 0 && (
-                                    <div className="flex items-center justify-between px-4 py-2.5">
-                                      <p className="text-xs text-muted-foreground">
-                                        GST
-                                      </p>
-                                      <p className="text-xs text-muted-foreground">
-                                        Not applicable
-                                      </p>
-                                    </div>
-                                  )}
-                                {hasDiscount && (
-                                  <div className="flex items-center justify-between px-4 py-2.5 bg-red-500/5">
-                                    <p className="text-xs text-red-600 dark:text-red-400 flex items-center gap-1.5">
-                                      <TrendingUp size={10} />
-                                      Discount
-                                      {previewRecord.discount?.type ===
-                                        "percentage" &&
-                                      previewRecord.discount?.value ? (
-                                        <span className="font-mono text-[10px] bg-red-500/10 px-1.5 py-0.5 rounded">
-                                          {previewRecord.discount.value}%
-                                        </span>
-                                      ) : null}
-                                    </p>
-                                    <p className="font-mono text-sm text-red-500 dark:text-red-400">
-                                      − ₹{fmt((rbd as any).discountAmount)}
-                                    </p>
-                                  </div>
-                                )}
-                              </div>
-                              {/* Total row */}
-                              <div className="flex items-center justify-between px-4 py-3 bg-primary/10 border-t border-primary/20">
-                                <p className="text-xs font-heading font-bold text-primary uppercase tracking-wider">
-                                  Net Payable
-                                </p>
-                                <p className="font-mono text-base font-bold text-primary">
-                                  ₹
-                                  {fmt(
-                                    previewRecord.netAmount ?? rbd.netAmount,
-                                  )}
-                                </p>
-                              </div>
-                            </div>
-
-                            {/* GST type pill */}
-                            {previewRecord.cgstRate ||
-                            previewRecord.sgstRate ||
-                            previewRecord.igstRate ? (
-                              <div className="mt-2 flex flex-wrap gap-2">
-                                <span className="inline-flex items-center gap-1 text-[10px] font-medium text-amber-700 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded-full">
-                                  <BadgePercent size={9} />
-                                  {hasIgst
-                                    ? `IGST @ ${previewRecord.igstRate}%`
-                                    : `CGST ${previewRecord.cgstRate}% + SGST ${previewRecord.sgstRate}%`}
-                                </span>
-                                <span className="inline-flex items-center gap-1 text-[10px] font-medium text-foreground/60 bg-muted/40 border border-border px-2 py-0.5 rounded-full">
-                                  Total Tax: ₹{fmt(cgstAmt + sgstAmt + igstAmt)}
-                                </span>
-                              </div>
-                            ) : null}
-                          </div>
-                        </>
-                      );
-                    })()}
-
-                    {/* ── Section 4: EMI Details ── */}
-                    {hasEmi && (
-                      <div className="border-t border-border/60 pt-4">
-                        <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-                          <CreditCard size={10} className="text-primary" /> EMI
-                          / Installment Plan
-                        </p>
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                          <div className="bg-violet-500/5 border border-violet-500/20 rounded-xl p-3 text-center">
-                            <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">
-                              Installments
-                            </p>
-                            <p className="font-mono text-lg font-bold text-violet-600 dark:text-violet-400">
-                              {previewRecord.emi!.installmentCount}
-                            </p>
-                            <p className="text-[10px] text-muted-foreground">
-                              total
-                            </p>
-                          </div>
-                          <div className="bg-violet-500/5 border border-violet-500/20 rounded-xl p-3 text-center">
-                            <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">
-                              Per EMI
-                            </p>
-                            <p className="font-mono text-base font-bold text-violet-600 dark:text-violet-400">
-                              ₹{fmt(previewRecord.emi!.emiAmount ?? 0)}
-                            </p>
-                            <p className="text-[10px] text-muted-foreground">
-                              amount
-                            </p>
-                          </div>
-                          <div className="bg-muted/30 border border-border rounded-xl p-3 text-center">
-                            <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">
-                              Start Date
-                            </p>
-                            <p className="text-sm font-semibold">
-                              {previewRecord.emi!.startDate || "—"}
-                            </p>
-                            <p className="text-[10px] text-muted-foreground">
-                              first emi
-                            </p>
-                          </div>
-                          <div className="bg-muted/30 border border-border rounded-xl p-3 text-center">
-                            <p className="text-[10px] text-muted-foreground uppercase tracking-wider mb-1">
-                              Frequency
-                            </p>
-                            <p className="text-sm font-semibold capitalize">
-                              {previewRecord.emi!.frequency || "Monthly"}
-                            </p>
-                            <p className="text-[10px] text-muted-foreground">
-                              cycle
-                            </p>
-                          </div>
-                        </div>
-                        {previewRecord.emi!.installmentCount &&
-                          previewRecord.emi!.emiAmount && (
-                            <div className="mt-2 flex items-center gap-2 text-[10px] text-muted-foreground bg-muted/20 border border-border/50 rounded-lg px-3 py-2">
-                              <Hash size={10} className="shrink-0" />
-                              Total via EMI:{" "}
-                              <span className="font-mono font-semibold text-foreground">
-                                ₹
-                                {fmt(
-                                  previewRecord.emi!.emiAmount *
-                                    previewRecord.emi!.installmentCount,
-                                )}
-                              </span>
-                              <span className="mx-1">·</span>
-                              Remaining:{" "}
-                              <span className="font-mono font-semibold text-foreground">
-                                ₹
-                                {fmt(
-                                  Math.max(
-                                    0,
-                                    (previewRecord.netAmount ?? 0) -
-                                      previewRecord.emi!.emiAmount *
-                                        previewRecord.emi!.installmentCount,
-                                  ),
-                                )}
-                              </span>
-                            </div>
-                          )}
-                      </div>
-                    )}
-
-                    {/* ── Section 5: GRN Items ── */}
-                    {previewRecord.grnItems &&
-                      Array.isArray(previewRecord.grnItems) &&
-                      previewRecord.grnItems.length > 0 && (
-                        <div className="border-t border-border/60 pt-4">
-                          <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-                            <Truck size={10} className="text-primary" /> GRN
-                            Items Summary
-                            <span className="ml-auto font-mono text-[10px] bg-muted px-1.5 py-0.5 rounded-full border border-border">
-                              {previewRecord.grnItems.length} items
-                            </span>
-                          </p>
-                          <div className="rounded-xl border border-border overflow-hidden">
-                            <div className="overflow-x-auto">
-                              <table className="w-full text-xs">
-                                <thead>
-                                  <tr className="bg-muted/40 border-b border-border">
-                                    <th className="text-left px-3 py-2 text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
-                                      Item
-                                    </th>
-                                    <th className="text-right px-3 py-2 text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
-                                      Ordered
-                                    </th>
-                                    <th className="text-right px-3 py-2 text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
-                                      Received
-                                    </th>
-                                    <th className="text-right px-3 py-2 text-[10px] font-heading uppercase tracking-wider text-muted-foreground hidden sm:table-cell">
-                                      Remaining
-                                    </th>
-                                    <th className="text-left px-3 py-2 text-[10px] font-heading uppercase tracking-wider text-muted-foreground hidden sm:table-cell">
-                                      UOM
-                                    </th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-border/50">
-                                  {(
-                                    previewRecord.grnItems as GRNItemLine[]
-                                  ).map((item, idx) => (
-                                    <tr key={idx} className="hover:bg-muted/20">
-                                      <td className="px-3 py-2.5 font-medium max-w-[140px] truncate">
-                                        {item.itemName || `Item ${idx + 1}`}
-                                      </td>
-                                      <td className="px-3 py-2.5 text-right font-mono text-muted-foreground">
-                                        {item.orderedQty}
-                                      </td>
-                                      <td className="px-3 py-2.5 text-right font-mono text-emerald-600 dark:text-emerald-400 font-semibold">
-                                        {item.receivedQty}
-                                      </td>
-                                      <td className="px-3 py-2.5 text-right font-mono hidden sm:table-cell">
-                                        <span
-                                          className={
-                                            item.remainingQty > 0
-                                              ? "text-amber-600 dark:text-amber-400"
-                                              : "text-muted-foreground"
-                                          }
-                                        >
-                                          {item.remainingQty}
-                                        </span>
-                                      </td>
-                                      <td className="px-3 py-2.5 text-muted-foreground hidden sm:table-cell">
-                                        {item.uom || "—"}
-                                      </td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                    {/* ── Section 6: Billing Terms ── */}
-                    {previewRecord.billingTerms && (
-                      <div className="border-t border-border/60 pt-4">
-                        <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-                          <Receipt size={10} className="text-primary" /> Billing
-                          Terms
-                        </p>
-                        <div className="bg-muted/20 border border-border rounded-xl px-4 py-3 text-sm text-foreground">
-                          {previewRecord.billingTerms}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* ── Section 7: Remarks ── */}
-                    {previewRecord.remarks && (
-                      <div className="border-t border-border/60 pt-4">
-                        <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-                          <StickyNote size={10} className="text-primary" />{" "}
-                          Remarks
-                        </p>
-                        <div className="bg-muted/20 border border-border rounded-xl px-4 py-3 text-sm text-foreground leading-relaxed">
-                          {previewRecord.remarks}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* ── Section 8: Approval Status ── */}
-                    <div className="border-t border-border/60 pt-4">
-                      <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-                        <CheckCircle2 size={10} className="text-primary" />{" "}
-                        Approval Status
-                      </p>
-                      <div className="flex flex-wrap items-center gap-3">
-                        <div className="flex items-center gap-2 bg-muted/30 border border-border rounded-xl px-4 py-2.5">
-                          <StatusBadge status={previewRecord.status} />
-                          <span className="text-xs text-muted-foreground">
-                            Current Status
-                          </span>
-                        </div>
-                        {previewRecord.status === "Approved" && (
-                          <div className="flex items-center gap-1.5 text-[10px] text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-2 rounded-xl">
-                            <CheckCircle2 size={11} /> Approved & Processed
-                          </div>
-                        )}
-                        {previewRecord.status === "Pending" && (
-                          <div className="flex items-center gap-1.5 text-[10px] text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/20 px-3 py-2 rounded-xl">
-                            <Clock size={11} /> Awaiting Approval
-                          </div>
-                        )}
-                        {previewRecord.status === "Rejected" && (
-                          <div className="flex items-center gap-1.5 text-[10px] text-red-600 dark:text-red-400 bg-red-500/10 border border-red-500/20 px-3 py-2 rounded-xl">
-                            <AlertCircle size={11} /> Rejected — Review Required
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Footer */}
-                  <div className="border-t border-border px-4 sm:px-6 py-3 flex flex-col-reverse sm:flex-row items-center justify-between gap-2 bg-muted/10">
-                    <p className="text-[10px] text-muted-foreground">
-                      ID:{" "}
-                      <span className="font-mono">
-                        {previewRecord.id || "—"}
-                      </span>
-                    </p>
-                    <div className="flex gap-2 w-full sm:w-auto">
-                      <Button
-                        variant="outline"
-                        className="flex-1 sm:flex-none h-8 text-xs"
-                        onClick={() => {
-                          setPreviewRecord(null);
-                          openEdit(previewRecord);
-                        }}
-                      >
-                        <Edit size={11} className="mr-1.5" /> Edit
-                      </Button>
-                      <Button
-                        variant="outline"
-                        className="flex-1 sm:flex-none h-8 text-xs"
-                        onClick={() => setPreviewRecord(null)}
-                      >
-                        Close
-                      </Button>
-                    </div>
-                  </div>
-                </>
-              );
-            })()}
-        </DialogContent>
-      </Dialog>
+      {/* Preview modal */}
+      <ExpenseBookingPreviewModal
+        previewRecord={previewRecord}
+        onClose={() => setPreviewRecord(null)}
+        onEdit={(record) => openEdit(record)}
+      />
     </>
   );
 }

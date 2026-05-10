@@ -1,0 +1,10 @@
+Payment Name,Expense Ref,Project,Company,Mode,Date,Amount,Bank,Cheque No,Status
+for project ,ExB/GRN-CI/REC/000021/2026-2027,Saha Enterprise,34,Cheque,2026-05-07,"₹79,695",RBL,432,Approved
+test,ExB/GRN-CI/REC/000019/2026-2027,Saha Enterprise,34,Cheque,2026-05-07,"₹3,896",RBL,431,Draft
+Test,CI/OTH/000002/2025-2026,35,34,Cheque,2026-05-07,"₹23,60,000",AXIS BANK,110172,Draft
+Test Payment ,CI/OTH/000001/2026-2027,35,34,Cash,2026-05-07,"₹23,600",AXIS BANK,,Draft
+test,CI/PUR/000002/2026-2027,Dinesh Pvt. Ltd.,34,Cheque,2026-05-06,"₹2,62,394",AXIS BANK,,Approved
+emi2,CI/OTH/000001/2026-2027-EMI-02,na,34,Cheque,2026-05-03,"₹24,780",AXIS BANK,,Approved
+Bottle For Office ,CI/OTH/000001/2025-2026,35,34,Cash,2026-05-02,"₹2,360",AXIS BANK,,Approved
+EMI#1,CI/WO/000001/2025-2026-EMI-01,Kavya Enterprise,34,Cash,2026-05-02,"₹1,21,933",AXIS BANK,,Approved
+Work Order,CI/WO/000001/2025-2026,Kavya Enterprise,34,Cash,2026-05-02,"₹7,37,500",AXIS BANK,,Approved
