@@ -1,6 +1,12 @@
 import { apiUrl } from "./apiBase";
 import { toast } from "sonner";
 
+// Module-level flag: once we have decided to redirect to /login, every
+// subsequent 401 from concurrent in-flight requests is a no-op.
+// A plain module boolean is simpler than sessionStorage and cannot be
+// accidentally cleared by other code during this page-load.
+let _redirectingToLogin = false;
+
 export async function fetchWithAuth(
   url: string,
   options: RequestInit = {},
@@ -35,30 +41,26 @@ export async function fetchWithAuth(
   }
 
   if (response.status === 401) {
-    console.error("Unauthorized", url);
+    // Only the first 401 in a given session triggers cleanup + redirect.
+    // Every concurrent request that also gets a 401 (the "storm" in the logs)
+    // simply returns a never-resolving promise so the caller is silently
+    // abandoned — no toast spam, no extra navigation pushes, no React
+    // remount loops.
+    if (_redirectingToLogin) {
+      return new Promise<Response>(() => {}); // intentionally never resolves
+    }
 
-    // Always force re-auth on 401.
-    // This avoids “silent broken UI” when callers don't catch the thrown error.
+    _redirectingToLogin = true;
+
     if (typeof window !== "undefined") {
-      // Anti-spam: avoid repeating the toast multiple times during the same re-auth flow.
-      const flagKey = "__reauth_toast_until";
-      const now = Date.now();
-      const until = Number(sessionStorage.getItem(flagKey) || 0);
-      const shouldToast = now >= until;
-
-      if (shouldToast) {
-        sessionStorage.setItem(flagKey, String(now + 5000));
-        toast.error("Session expired. Please login again.");
-      }
-
+      toast.error("Session expired. Please login again.");
       localStorage.removeItem("token");
       localStorage.removeItem("user");
-
-      // Prefer a hard navigation so React Router + guards re-run reliably.
+      // Hard navigation so React Router guards re-run from scratch.
       window.location.href = "/login";
     }
 
-    throw new Error("Unauthorized. Please login again.");
+    return new Promise<Response>(() => {}); // caller abandoned; navigation takes over
   }
 
   if (response.status === 403) {
@@ -68,4 +70,3 @@ export async function fetchWithAuth(
 
   return response;
 }
-
