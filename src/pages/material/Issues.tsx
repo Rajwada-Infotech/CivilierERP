@@ -860,26 +860,16 @@ export default function Issues() {
         {/* ── Cart card ── */}
         <Card className="border-border shadow-sm">
           <CardHeader className="pb-3 border-b border-border bg-muted/20 flex flex-row items-center justify-between">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2.5">
               <ShoppingCart size={15} className="text-primary" />
-              <CardTitle className="text-base font-semibold">
-                Item Cart
-              </CardTitle>
-              <Badge variant="secondary" className="text-xs">
-                {cart.length} line{cart.length !== 1 ? "s" : ""}
-              </Badge>
-              {totalCartQty > 0 && (
-                <Badge variant="outline" className="text-xs font-mono">
-                  {totalCartQty.toFixed(2)} units total
-                </Badge>
-              )}
+              <CardTitle className="text-base font-semibold">Items</CardTitle>
+              <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs font-semibold">
+                {cart.length}
+              </span>
               {hasStockError && (
-                <Badge
-                  variant="destructive"
-                  className="text-xs flex items-center gap-1"
-                >
+                <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-destructive/10 text-destructive text-xs font-semibold">
                   <AlertTriangle size={10} /> Stock exceeded
-                </Badge>
+                </span>
               )}
             </div>
             <Button
@@ -893,34 +883,31 @@ export default function Issues() {
             </Button>
           </CardHeader>
 
-          <CardContent className="p-0">
-            {/* Table header */}
-            <div className="hidden md:grid grid-cols-[2fr_1.2fr_1fr_1.8fr_40px] gap-3 px-4 py-2.5 bg-muted/30 border-b border-border text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-              <span>Item</span>
-              <span>Unit (UOM)</span>
-              <span>Quantity</span>
-              <span>Stock / Remarks</span>
-              <span></span>
-            </div>
+          <CardContent className="p-4 space-y-3">
+            {cart.map((ci, idx) => {
+              const availStock = getStockForRow(ci._key, ci.ItemId);
+              const reqQty = Number(ci.Quantity) || 0;
+              const isOver = reqQty > 0 && reqQty > availStock;
+              const uomObj = uomMap[ci.UOMCode];
+              const stockPct =
+                availStock > 0 ? Math.min((reqQty / availStock) * 100, 100) : 0;
 
-            <div className="divide-y divide-border">
-              {cart.map((ci, idx) => {
-                const masterItem = itemMap[ci.ItemId];
-                const availStock = getStockForRow(ci._key, ci.ItemId);
-                const reqQty = Number(ci.Quantity) || 0;
-                const isOver = reqQty > 0 && reqQty > availStock;
-                const uomObj = uomMap[ci.UOMCode];
+              return (
+                <div
+                  key={ci._key}
+                  className={`rounded-lg border transition-colors ${
+                    isOver
+                      ? "border-destructive/50 bg-destructive/5"
+                      : "border-border bg-muted/10 hover:bg-muted/20"
+                  }`}
+                >
+                  {/* Row top: index + item select + remove */}
+                  <div className="flex items-center gap-3 px-3 pt-3 pb-2">
+                    <span className="w-5 h-5 rounded-full bg-muted flex items-center justify-center text-[10px] font-bold text-muted-foreground shrink-0">
+                      {idx + 1}
+                    </span>
 
-                return (
-                  <div
-                    key={ci._key}
-                    className={`grid md:grid-cols-[2fr_1.2fr_1fr_1.8fr_40px] gap-3 p-4 items-start transition-colors ${isOver ? "bg-destructive/5" : "hover:bg-muted/20"}`}
-                  >
-                    {/* Item select */}
-                    <div>
-                      <span className="md:hidden text-xs text-muted-foreground font-semibold uppercase tracking-widest mb-1 block">
-                        Item *
-                      </span>
+                    <div className="flex-1 min-w-0">
                       <Select
                         value={ci.ItemId}
                         onValueChange={(v) => pickItem(ci._key, v)}
@@ -962,11 +949,24 @@ export default function Issues() {
                       </Select>
                     </div>
 
-                    {/* UOM select */}
-                    <div>
-                      <span className="md:hidden text-xs text-muted-foreground font-semibold uppercase tracking-widest mb-1 block">
-                        UOM *
-                      </span>
+                    <button
+                      type="button"
+                      onClick={() => removeCartRow(ci._key)}
+                      disabled={cart.length === 1}
+                      title="Remove"
+                      className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-30"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+
+                  {/* Row bottom: UOM + Qty + stock status */}
+                  <div className="grid grid-cols-2 gap-3 px-3 pb-3">
+                    {/* UOM */}
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                        Unit (UOM) *
+                      </label>
                       <Select
                         value={ci.UOMCode}
                         onValueChange={(v) =>
@@ -980,7 +980,9 @@ export default function Issues() {
                               className="text-muted-foreground shrink-0"
                             />
                             <SelectValue
-                              placeholder={loadingUoms ? "Loading…" : "UOM"}
+                              placeholder={
+                                loadingUoms ? "Loading…" : "Select UOM"
+                              }
                             />
                           </div>
                         </SelectTrigger>
@@ -1000,10 +1002,10 @@ export default function Issues() {
                     </div>
 
                     {/* Quantity */}
-                    <div>
-                      <span className="md:hidden text-xs text-muted-foreground font-semibold uppercase tracking-widest mb-1 block">
-                        Qty *
-                      </span>
+                    <div className="space-y-1">
+                      <label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                        Quantity *
+                      </label>
                       <div className="relative">
                         <Hash
                           size={12}
@@ -1012,7 +1014,6 @@ export default function Issues() {
                         <Input
                           type="number"
                           min={0}
-                          max={availStock > 0 ? availStock : undefined}
                           step="0.01"
                           value={ci.Quantity}
                           onChange={(e) =>
@@ -1023,16 +1024,46 @@ export default function Issues() {
                         />
                       </div>
                     </div>
+                  </div>
 
-                    {/* Stock info + remarks */}
-                    <div className="space-y-2">
-                      {ci.ItemId && (
-                        <StockPill
-                          available={availStock}
-                          requested={reqQty}
-                          uomSymbol={uomObj?.Symbol || ci.UOMCode}
+                  {/* Stock bar + remarks — only when item selected */}
+                  {ci.ItemId && (
+                    <div className="border-t border-border/60 mx-3 pt-2.5 pb-3 space-y-2">
+                      {/* Stock indicator */}
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-muted-foreground flex items-center gap-1">
+                          <BarChart3 size={10} />
+                          Available:{" "}
+                          <span className="font-semibold text-foreground ml-0.5">
+                            {availStock.toFixed(2)}{" "}
+                            {uomObj?.Symbol || ci.UOMCode}
+                          </span>
+                        </span>
+                        {isOver ? (
+                          <span className="flex items-center gap-1 font-semibold text-destructive">
+                            <AlertTriangle size={10} /> Exceeds stock
+                          </span>
+                        ) : reqQty > 0 ? (
+                          <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                            Remaining: {(availStock - reqQty).toFixed(2)}{" "}
+                            {uomObj?.Symbol || ci.UOMCode}
+                          </span>
+                        ) : null}
+                      </div>
+                      {/* Progress bar */}
+                      <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all ${
+                            isOver
+                              ? "bg-destructive"
+                              : stockPct > 80
+                                ? "bg-amber-500"
+                                : "bg-emerald-500"
+                          }`}
+                          style={{ width: `${isOver ? 100 : stockPct}%` }}
                         />
-                      )}
+                      </div>
+                      {/* Remarks */}
                       <Input
                         value={ci.Remarks}
                         onChange={(e) =>
@@ -1042,49 +1073,37 @@ export default function Issues() {
                         className="h-8 text-xs"
                       />
                     </div>
+                  )}
+                </div>
+              );
+            })}
 
-                    {/* Remove button */}
-                    <div className="flex items-start justify-center pt-1">
-                      <button
-                        type="button"
-                        onClick={() => removeCartRow(ci._key)}
-                        className="p-1.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
-                        title="Remove line"
-                        disabled={cart.length === 1}
-                      >
-                        <X size={14} />
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-
-            {/* Cart footer summary */}
+            {/* Footer summary */}
             {cart.some((ci) => ci.ItemId && ci.Quantity) && (
-              <div className="border-t border-border bg-muted/20 px-4 py-3 flex items-center justify-between gap-4">
-                <div className="flex items-center gap-4 text-sm">
-                  <span className="flex items-center gap-1.5 text-muted-foreground">
-                    <Package size={13} />
-                    {cart.filter((ci) => ci.ItemId).length} item(s)
-                  </span>
-                  <span className="font-semibold">
-                    {totalCartQty.toFixed(2)} units total
+              <div className="flex items-center justify-between rounded-lg border border-border bg-muted/20 px-4 py-2.5 text-sm">
+                <div className="flex items-center gap-3 text-muted-foreground">
+                  <Package size={13} />
+                  <span>
+                    <span className="font-semibold text-foreground">
+                      {cart.filter((ci) => ci.ItemId).length}
+                    </span>{" "}
+                    item{cart.filter((ci) => ci.ItemId).length !== 1 ? "s" : ""}{" "}
+                    ·{" "}
+                    <span className="font-semibold text-foreground font-mono">
+                      {totalCartQty.toFixed(2)}
+                    </span>{" "}
+                    units total
                   </span>
                 </div>
-                {hasStockError && (
-                  <div className="flex items-center gap-1.5 text-destructive text-sm font-medium">
-                    <AlertTriangle size={14} />
-                    One or more items exceed available stock
-                  </div>
+                {hasStockError ? (
+                  <span className="flex items-center gap-1.5 text-destructive font-medium">
+                    <AlertTriangle size={13} /> Stock limit exceeded
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-medium">
+                    <CheckCircle2 size={13} /> Within stock limits
+                  </span>
                 )}
-                {!hasStockError &&
-                  cart.every((ci) => ci.ItemId && ci.Quantity) && (
-                    <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 text-sm font-medium">
-                      <CheckCircle2 size={14} />
-                      All quantities within stock limits
-                    </div>
-                  )}
               </div>
             )}
           </CardContent>
