@@ -1,52 +1,47 @@
-const BASE_URL = "/api/hsn"
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
-const getAuthHeaders = () => ({
-  "Content-Type": "application/json",
-  Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
-});
+const BASE_URL = "/api/hsn";
 
 export const getHsn = async () => {
-  const res = await fetch(BASE_URL, {
-    headers: getAuthHeaders(),
-  })
-  if (!res.ok) throw new Error(`GET failed: ${res.status}`)
-  return res.json()
-}
+  const res = await fetchWithAuth(BASE_URL);
+  if (!res.ok) throw new Error(`GET failed: ${res.status}`);
+  return res.json();
+};
 
 export const addHsn = async (data: Record<string, unknown>) => {
-  const res = await fetch(BASE_URL, {
+  const res = await fetchWithAuth(BASE_URL, {
     method: "POST",
-    headers: getAuthHeaders(),
     body: JSON.stringify(data),
-  })
+  });
   if (!res.ok) {
-    const err = await res.json()
-    throw new Error(err.error || "POST failed")
+    const err = await res.json();
+    throw new Error((err as any).error || "POST failed");
   }
-  return res.json()
-}
+  return res.json();
+};
 
-export const updateHsn = async (code: string, data: Record<string, unknown>) => {
-  const res = await fetch(`${BASE_URL}/${code}`, {
+export const updateHsn = async (
+  code: string,
+  data: Record<string, unknown>,
+) => {
+  const res = await fetchWithAuth(`${BASE_URL}/${code}`, {
     method: "PUT",
-    headers: getAuthHeaders(),
     body: JSON.stringify(data),
-  })
+  });
   if (!res.ok) {
-    const err = await res.json()
-    throw new Error(err.error || "PUT failed")
+    const err = await res.json();
+    throw new Error((err as any).error || "PUT failed");
   }
-  return res.json()
-}
+  return res.json();
+};
 
 export const deleteHsn = async (code: string) => {
-  const res = await fetch(`${BASE_URL}/${code}`, {
+  const res = await fetchWithAuth(`${BASE_URL}/${code}`, {
     method: "DELETE",
-    headers: getAuthHeaders(),
-  })
+  });
   if (!res.ok) {
-    const err = await res.json()
-    throw new Error(err.error || "DELETE failed")
+    const err = await res.json();
+    throw new Error((err as any).error || "DELETE failed");
   }
-  return res.json()
-}
+  return res.json();
+};
