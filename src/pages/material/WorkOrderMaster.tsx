@@ -108,7 +108,11 @@ interface MaterialItem {
   id: string;
   itemId: string;
   itemName: string;
-  quantity: number;
+  /**
+   * Consumption ratio per unit of activity area/work quantity.
+   * Material cost = consumptionRatio × activityArea × price
+   */
+  consumptionRatio: number;
   uomId: number | null;
   unit: string;
   price: number;
@@ -274,7 +278,7 @@ const EMPTY_MATERIAL = (): MaterialItem => ({
   id: uid(),
   itemId: "",
   itemName: "",
-  quantity: 0,
+  consumptionRatio: 0,
   uomId: null,
   unit: "",
   price: 0,
@@ -371,7 +375,7 @@ const MaterialBreakdownModal: React.FC<{
   const [open, setOpen] = useState(false);
 
   const materialsTotal = activity.materials.reduce(
-    (sum, m) => sum + m.quantity * m.price,
+    (sum, m) => sum + m.consumptionRatio * activity.area * m.price,
     0,
   );
   const labourTotal = activity.ratePerUnit * activity.area;
@@ -510,7 +514,8 @@ const MaterialBreakdownModal: React.FC<{
               {activity.materials.length > 0 && (
                 <div className="space-y-2">
                   {activity.materials.map((mat, idx) => {
-                    const lineTotal = mat.quantity * mat.price;
+                    const lineTotal =
+                      mat.consumptionRatio * activity.area * mat.price;
                     return (
                       <div
                         key={mat.id}
@@ -546,26 +551,42 @@ const MaterialBreakdownModal: React.FC<{
                             <X size={13} />
                           </button>
                         </div>
-                        <div className="grid grid-cols-3 gap-2">
+                        <div className="grid grid-cols-2 gap-2">
                           <div>
                             <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
-                              Qty
+                              Consumption Ratio
                             </p>
                             <input
                               type="number"
                               min={0}
-                              value={mat.quantity || ""}
+                              value={mat.consumptionRatio || ""}
                               onChange={(e) =>
                                 updateMaterial(idx, {
-                                  quantity: parseFloat(e.target.value) || 0,
+                                  consumptionRatio:
+                                    parseFloat(e.target.value) || 0,
                                 })
                               }
-                              placeholder={
-                                activity.area > 0 ? String(activity.area) : "0"
-                              }
+                              placeholder="qty per unit area"
                               className={cellInput}
                             />
                           </div>
+                          <div>
+                            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1 flex items-center gap-1">
+                              Activity Area
+                              <span className="text-[9px] text-primary bg-primary/10 px-1.5 py-0.5 rounded font-semibold tracking-normal normal-case">
+                                auto
+                              </span>
+                            </p>
+                            <input
+                              type="number"
+                              readOnly
+                              value={activity.area || ""}
+                              placeholder="set in activity row"
+                              className={`${cellInput} bg-muted/40 text-muted-foreground cursor-not-allowed`}
+                            />
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-2">
                           <div>
                             <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
                               Unit
@@ -629,8 +650,9 @@ const MaterialBreakdownModal: React.FC<{
                         )}
                         {lineTotal > 0 && (
                           <div className="flex items-center justify-between pt-1 border-t border-border/50">
-                            <span className="text-xs text-muted-foreground">
-                              {mat.quantity} {mat.unit} × ₹{mat.price}
+                            <span className="text-xs text-muted-foreground font-mono">
+                              {mat.consumptionRatio} × {activity.area} × ₹
+                              {mat.price}
                             </span>
                             <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">
                               {fmt(
@@ -655,7 +677,8 @@ const MaterialBreakdownModal: React.FC<{
                   </div>
                   <div className="divide-y divide-border/50">
                     {activity.materials.map((mat) => {
-                      const lt = mat.quantity * mat.price;
+                      const lt =
+                        mat.consumptionRatio * activity.area * mat.price;
                       return (
                         <div
                           key={mat.id}
@@ -668,13 +691,10 @@ const MaterialBreakdownModal: React.FC<{
                               </span>
                             )}
                           </span>
-                          <span className="text-muted-foreground shrink-0">
-                            {mat.quantity > 0
-                              ? `${mat.quantity} ${mat.unit}`
+                          <span className="text-muted-foreground shrink-0 font-mono text-[11px]">
+                            {mat.consumptionRatio > 0
+                              ? `${mat.consumptionRatio}×${activity.area}×₹${mat.price}`
                               : "—"}
-                          </span>
-                          <span className="text-muted-foreground shrink-0">
-                            {mat.price > 0 ? `× ₹${mat.price}` : "—"}
                           </span>
                           <span
                             className={`font-semibold shrink-0 w-24 text-right ${lt > 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}
@@ -772,7 +792,7 @@ const ActivityRow: React.FC<{
 
   const labourTotal = activity.ratePerUnit * activity.area;
   const materialsTotal = activity.materials.reduce(
-    (sum, m) => sum + m.quantity * m.price,
+    (sum, m) => sum + m.consumptionRatio * activity.area * m.price,
     0,
   );
   const activityTotal = labourTotal + materialsTotal;
@@ -1045,7 +1065,11 @@ const ActivityGroupCard: React.FC<{
   );
   const groupMaterialsTotal = group.activities.reduce(
     (sum, a) =>
-      sum + a.materials.reduce((ms, m) => ms + m.quantity * m.price, 0),
+      sum +
+      a.materials.reduce(
+        (ms, m) => ms + m.consumptionRatio * a.area * m.price,
+        0,
+      ),
     0,
   );
   const groupTotal = groupLabourTotal + groupMaterialsTotal;
@@ -1769,10 +1793,11 @@ const WorkOrderDetailPanel: React.FC<{
                                 {matExpanded && (
                                   <div className="border-t border-border/40 bg-amber-50/30 dark:bg-amber-950/10">
                                     {/* Desktop material header */}
-                                    <div className="hidden sm:grid grid-cols-[1fr_80px_80px_80px_120px] gap-2 px-6 py-1.5 border-b border-border/30">
+                                    <div className="hidden sm:grid grid-cols-[1fr_70px_70px_70px_80px_110px] gap-2 px-6 py-1.5 border-b border-border/30">
                                       {[
                                         "Item Name",
-                                        "Qty",
+                                        "Ratio",
+                                        "Area",
                                         "Unit",
                                         "Rate",
                                         "Amount",
@@ -1787,7 +1812,9 @@ const WorkOrderDetailPanel: React.FC<{
                                     </div>
                                     {act.materials.map((mat, matIdx) => {
                                       const lineTotal =
-                                        (mat.Quantity || 0) * (mat.Rate || 0);
+                                        (mat.Quantity || 0) *
+                                        (act.Area || 0) *
+                                        (mat.Rate || 0);
                                       return (
                                         <div key={mat.Id}>
                                           {/* Mobile material */}
@@ -1796,8 +1823,8 @@ const WorkOrderDetailPanel: React.FC<{
                                               <p className="text-xs font-medium text-foreground">
                                                 {mat.ItemName || "—"}
                                               </p>
-                                              <p className="text-[10px] text-muted-foreground">
-                                                {mat.Quantity} {mat.UOMName} × ₹
+                                              <p className="text-[10px] text-muted-foreground font-mono">
+                                                {mat.Quantity} × {act.Area} × ₹
                                                 {mat.Rate}
                                               </p>
                                             </div>
@@ -1808,15 +1835,18 @@ const WorkOrderDetailPanel: React.FC<{
                                             </span>
                                           </div>
                                           {/* Desktop material */}
-                                          <div className="hidden sm:grid grid-cols-[1fr_80px_80px_80px_120px] gap-2 items-center px-6 py-2 border-b border-border/20 last:border-0">
+                                          <div className="hidden sm:grid grid-cols-[1fr_70px_70px_70px_80px_110px] gap-2 items-center px-6 py-2 border-b border-border/20 last:border-0">
                                             <span className="text-xs font-medium text-foreground flex items-center gap-1.5">
                                               <span className="w-4 h-4 rounded flex items-center justify-center bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 text-[10px] font-bold shrink-0">
                                                 {matIdx + 1}
                                               </span>
                                               {mat.ItemName || "—"}
                                             </span>
-                                            <span className="text-xs text-muted-foreground">
+                                            <span className="text-xs text-muted-foreground font-mono">
                                               {mat.Quantity ?? "—"}
+                                            </span>
+                                            <span className="text-xs text-muted-foreground font-mono">
+                                              {act.Area ?? "—"}
                                             </span>
                                             <span className="text-xs text-muted-foreground">
                                               {mat.UOMName || "—"}
@@ -2365,17 +2395,15 @@ const WorkOrderEditPanel: React.FC<{
             fetchActivities(),
             fetchWithAuth("/api/uom-master").then((r) =>
               r.ok
-                ? r
-                    .json()
-                    .then((rows: any[]) =>
-                      rows
-                        .filter((u) => u.IsActive !== false)
-                        .map((u) => ({
-                          id: u.Id,
-                          name: u.UOMName,
-                          uomCode: u.UOMCode,
-                        })),
-                    )
+                ? r.json().then((rows: any[]) =>
+                    rows
+                      .filter((u) => u.IsActive !== false)
+                      .map((u) => ({
+                        id: u.Id,
+                        name: u.UOMName,
+                        uomCode: u.UOMCode,
+                      })),
+                  )
                 : [],
             ),
             getWorkOrder(workOrderId),
@@ -2482,7 +2510,7 @@ const WorkOrderEditPanel: React.FC<{
                       dbId: m.Id,
                       itemId: m.ItemIdStr || (m.ItemId ? String(m.ItemId) : ""),
                       itemName: m.ItemName || "",
-                      quantity: m.Quantity || 0,
+                      consumptionRatio: m.Quantity || 0,
                       uomId: m.UOMId ? Number(m.UOMId) : null,
                       unit: m.UOMName || "",
                       price: m.Rate || 0,
@@ -2521,9 +2549,14 @@ const WorkOrderEditPanel: React.FC<{
     for (const g of groups) {
       for (const a of g.activities) {
         labour += a.ratePerUnit * a.area;
-        materials += a.materials.reduce((s, m) => s + m.quantity * m.price, 0);
+        materials += a.materials.reduce(
+          (s, m) => s + m.consumptionRatio * a.area * m.price,
+          0,
+        );
         materialsGST += a.materials.reduce(
-          (s, m) => s + (m.quantity * m.price * (m.gstRate || 0)) / 100,
+          (s, m) =>
+            s +
+            (m.consumptionRatio * a.area * m.price * (m.gstRate || 0)) / 100,
           0,
         );
       }
@@ -2582,10 +2615,16 @@ const WorkOrderEditPanel: React.FC<{
           Area: a.area || null,
           LabourAmount: a.ratePerUnit * a.area || null,
           MaterialAmount:
-            a.materials.reduce((s, m) => s + m.quantity * m.price, 0) || null,
+            a.materials.reduce(
+              (s, m) => s + m.consumptionRatio * a.area * m.price,
+              0,
+            ) || null,
           GrandTotal:
             a.ratePerUnit * a.area +
-              a.materials.reduce((s, m) => s + m.quantity * m.price, 0) || null,
+              a.materials.reduce(
+                (s, m) => s + m.consumptionRatio * a.area * m.price,
+                0,
+              ) || null,
           Remarks: null,
           UpdatedBy: userId,
           materials: a.materials
@@ -2595,7 +2634,7 @@ const WorkOrderEditPanel: React.FC<{
               Id: (m as MaterialItem & { dbId?: number }).dbId ?? undefined,
               ItemId: m.itemId,
               UOMId: m.uomId ?? null,
-              Quantity: m.quantity || null,
+              Quantity: m.consumptionRatio || null,
               Rate: m.price || null,
               GSTRate: m.gstRate ?? 0,
               Remarks: null,
@@ -3336,17 +3375,15 @@ const WorkOrderMaster: React.FC = () => {
             fetchActivities(),
             fetchWithAuth("/api/uom-master").then((r) =>
               r.ok
-                ? r
-                    .json()
-                    .then((rows: any[]) =>
-                      rows
-                        .filter((u) => u.IsActive !== false)
-                        .map((u) => ({
-                          id: u.Id,
-                          name: u.UOMName,
-                          uomCode: u.UOMCode,
-                        })),
-                    )
+                ? r.json().then((rows: any[]) =>
+                    rows
+                      .filter((u) => u.IsActive !== false)
+                      .map((u) => ({
+                        id: u.Id,
+                        name: u.UOMName,
+                        uomCode: u.UOMCode,
+                      })),
+                  )
                 : [],
             ),
             getTCRecords().catch(() => []),
@@ -3422,9 +3459,14 @@ const WorkOrderMaster: React.FC = () => {
     for (const g of groups) {
       for (const a of g.activities) {
         labour += a.ratePerUnit * a.area;
-        materials += a.materials.reduce((s, m) => s + m.quantity * m.price, 0);
+        materials += a.materials.reduce(
+          (s, m) => s + m.consumptionRatio * a.area * m.price,
+          0,
+        );
         materialsGST += a.materials.reduce(
-          (s, m) => s + (m.quantity * m.price * (m.gstRate || 0)) / 100,
+          (s, m) =>
+            s +
+            (m.consumptionRatio * a.area * m.price * (m.gstRate || 0)) / 100,
           0,
         );
       }
@@ -3520,7 +3562,7 @@ const WorkOrderMaster: React.FC = () => {
         g.activities.map((a) => {
           const labourAmt = a.ratePerUnit * a.area;
           const materialAmt = a.materials.reduce(
-            (s, m) => s + m.quantity * m.price,
+            (s, m) => s + m.consumptionRatio * a.area * m.price,
             0,
           );
           return {
@@ -3538,7 +3580,7 @@ const WorkOrderMaster: React.FC = () => {
               .map((m) => ({
                 ItemId: m.itemId,
                 UOMId: m.uomId ?? null,
-                Quantity: m.quantity || null,
+                Quantity: m.consumptionRatio || null,
                 Rate: m.price || null,
                 GSTRate: m.gstRate ?? 0,
                 Remarks: null,
