@@ -88,17 +88,26 @@ router.get("/fin-years", authenticateToken, async (req, res) => {
 router.get("/item-options", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
+
+    // M_UOM column was added in a later migration — check before referencing it
+    // (mirrors the same guard used in itemMaster.js)
+    const colCheck = await pool.request().query(`
+      SELECT COUNT(1) AS cnt FROM sys.columns
+      WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group') AND name = N'M_UOM'
+    `);
+    const hasUOM = colCheck.recordset[0].cnt > 0;
+
     const result = await pool.request().query(`
       SELECT img.M_Id, img.M_Name, img.M_Group,
              ISNULL(SUM(CASE WHEN sl.Type='IN'  THEN sl.Qty ELSE 0 END), 0)
            - ISNULL(SUM(CASE WHEN sl.Type='OUT' THEN sl.Qty ELSE 0 END), 0)
              AS AvailableStock,
-             COALESCE(MAX(sl.UOM), img.M_BaseUOM) AS DefaultUOM
+             COALESCE(MAX(sl.UOM), ${hasUOM ? "img.M_UOM" : "NULL"}) AS DefaultUOM
       FROM   dbo.Item_Master_Group img
       LEFT JOIN dbo.StockLedger sl
         ON  CONVERT(NVARCHAR(50), sl.ItemID) = CONVERT(NVARCHAR(50), img.M_Id)
-      WHERE  img.M_IdentityCode = 1
-      GROUP  BY img.M_Id, img.M_Name, img.M_Group, img.M_BaseUOM
+      WHERE  (img.Parent_Id IS NOT NULL OR img.M_IdentityCode = 1)
+      GROUP  BY img.M_Id, img.M_Name, img.M_Group${hasUOM ? ", img.M_UOM" : ""}
       ORDER  BY img.M_Name
     `);
     res.json(result.recordset);
