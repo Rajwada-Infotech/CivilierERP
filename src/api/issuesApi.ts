@@ -30,16 +30,26 @@ export const getUomOptions = async () => {
   const res = await fetchWithAuth("/api/uom-master");
   if (!res.ok) throw new Error("Failed to fetch UOMs");
   const data = await res.json();
-  return (Array.isArray(data) ? data : []).filter((u: any) => u.IsActive !== false);
+  return Array.isArray(data) ? data : [];
 };
 
 export const getStockBalance = async (itemId: string) => {
-  const res = await fetchWithAuth(`${BASE}/stock/${encodeURIComponent(itemId)}`);
+  const res = await fetchWithAuth(
+    `${BASE}/stock/${encodeURIComponent(itemId)}`,
+  );
   if (!res.ok) throw new Error("Failed to fetch stock");
-  return res.json() as Promise<{ stockIn: number; stockOut: number; balance: number }>;
+  return res.json() as Promise<{
+    stockIn: number;
+    stockOut: number;
+    balance: number;
+  }>;
 };
 
-export const getIssues = async (params: { page: number; limit: number; search: string }) => {
+export const getIssues = async (params: {
+  page: number;
+  limit: number;
+  search: string;
+}) => {
   const q = new URLSearchParams({
     page: String(params.page),
     limit: String(params.limit),
