@@ -115,6 +115,8 @@ export const AuthProvider = ({
     const token = localStorage.getItem("token");
     if (!token) return;
 
+    // Use currentUser.id as the dep so a new object reference from an avatar
+    // patch doesn't re-fetch the full user list unnecessarily.
     getUsers()
       .then((rawUsers) => {
         const mapped: AppUser[] = rawUsers.map((u: any) => ({
@@ -134,7 +136,7 @@ export const AuthProvider = ({
       .catch((err) => {
         console.warn("Failed to load users:", err);
       });
-  }, [currentUser]);
+  }, [currentUser?.id, currentUser?.role]);
 
   // ── HYDRATE AVATAR ─────────────────────────────────────────────────────────
   // After login or page reload, fetch avatar_url from the profile API and

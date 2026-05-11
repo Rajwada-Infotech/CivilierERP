@@ -1,18 +1,20 @@
+"use strict";
+
 /**
  * backend/routes/materialIssues.js
  *
- * Material / Stock Issue routes.
+ * Material / Stock Issue routes — multi-item cart model.
  *
  * Document numbering:
- *   Normal issue  →  ISS-YYYY-NNNNN      (e.g. ISS-2026-00012)
- *   Under ExB     →  ExB-ISS-YYYY-NNNNN  (e.g. ExB-ISS-2026-00005)
+ *   Normal issue  →  ISS-YYYY-NNNNN
+ *   Under ExB     →  ExB-ISS-YYYY-NNNNN
  *
- * The prefix is determined by:
- *   - If req.body.rootExBDocNo is present → use "ExB-ISS"
- *   - Otherwise → use "ISS"
+ * Tables touched:
+ *   dbo.MaterialIssues       — header (company, project, fin year, date, reason)
+ *   dbo.MaterialIssueItems   — line items (item, uom, qty, per-line remarks)
+ *   dbo.StockLedger          — one OUT row per line item on create
+ *   dbo.DocNumberSequence    — doc number locking
  */
-
-"use strict";
 
 const express = require("express");
 const router = express.Router();
@@ -34,25 +36,99 @@ async function resolveIssueDocTypeId(pool, rootExBDocNo) {
   return resolveDocTypeId(pool, sql, prefix);
 }
 
+// ── GET /companies ────────────────────────────────────────────────────────────
+router.get("/companies", authenticateToken, async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT id, name, short_name
+      FROM   dbo.enterprise
+      WHERE  business_type = 'E' AND (status IS NULL OR status = 'Active')
+      ORDER  BY name
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /projects ─────────────────────────────────────────────────────────────
+router.get("/projects", authenticateToken, async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT id, name, short_name
+      FROM   dbo.enterprise
+      WHERE  business_type = 'P' AND (status IS NULL OR status = 'Active')
+      ORDER  BY name
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /fin-years ────────────────────────────────────────────────────────────
+router.get("/fin-years", authenticateToken, async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool.request().query(`
+      SELECT FId AS id, FName AS name, FStartDate AS startDate, FEndDate AS endDate,
+             FStatus AS isActive, FisLocked AS isLocked
+      FROM   dbo.FinYear
+      ORDER  BY FStartDate DESC
+    `);
+    res.json(result.recordset);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── GET /item-options ─────────────────────────────────────────────────────────
 router.get("/item-options", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT M_Id, M_Name, M_Group
-      FROM   Item_Master_Group
-      WHERE  M_IdentityCode = 1
-      ORDER  BY M_Name
+      SELECT img.M_Id, img.M_Name, img.M_Group,
+             ISNULL(SUM(CASE WHEN sl.Type='IN'  THEN sl.Qty ELSE 0 END), 0)
+           - ISNULL(SUM(CASE WHEN sl.Type='OUT' THEN sl.Qty ELSE 0 END), 0)
+             AS AvailableStock,
+             MAX(sl.UOM) AS DefaultUOM
+      FROM   dbo.Item_Master_Group img
+      LEFT JOIN dbo.StockLedger sl
+        ON  CONVERT(NVARCHAR(50), sl.ItemID) = CONVERT(NVARCHAR(50), img.M_Id)
+      WHERE  img.M_IdentityCode = 1
+      GROUP  BY img.M_Id, img.M_Name, img.M_Group
+      ORDER  BY img.M_Name
     `);
     res.json(result.recordset);
-  } catch (error) {
-    console.error("Error fetching items:", error);
+  } catch (err) {
+    console.error("Error fetching item options:", err);
     res.status(500).json({ error: "Failed to fetch items" });
   }
 });
 
-// ── GET /next-number — preview (no lock) ──────────────────────────────────────
-// ?exb=true  →  preview ExB-ISS number
+// ── GET /stock/:itemId ────────────────────────────────────────────────────────
+router.get("/stock/:itemId", authenticateToken, async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool
+      .request()
+      .input("ItemID", sql.NVarChar(100), req.params.itemId).query(`
+        SELECT
+          ISNULL(SUM(CASE WHEN Type='IN'  THEN Qty ELSE 0 END), 0) AS stockIn,
+          ISNULL(SUM(CASE WHEN Type='OUT' THEN Qty ELSE 0 END), 0) AS stockOut,
+          ISNULL(SUM(CASE WHEN Type='IN'  THEN Qty ELSE -Qty END), 0) AS balance
+        FROM dbo.StockLedger
+        WHERE CONVERT(NVARCHAR(100), ItemID) = @ItemID
+      `);
+    res.json(result.recordset[0] || { stockIn: 0, stockOut: 0, balance: 0 });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /next-number ──────────────────────────────────────────────────────────
 router.get("/next-number", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
@@ -65,17 +141,13 @@ router.get("/next-number", authenticateToken, async (req, res) => {
   }
 });
 
-// ── GET / — paginated list ────────────────────────────────────────────────────
-router.get(
-  "/",
-  authenticateToken,
-  cache("material-issues", 300),
-  async (req, res) => {
-    try {
-      const pool = getPool();
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    const search = req.query.search || "";
+// ── GET / ─────────────────────────────────────────────────────────────────────
+router.get("/", authenticateToken, cache("material-issues", 300), async (req, res) => {
+  try {
+    const pool = getPool();
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+    const search = req.query.search ? String(req.query.search).trim() : "";
     const offset = (page - 1) * limit;
 
     const request = pool.request();
@@ -83,13 +155,12 @@ router.get(
 
     if (search) {
       whereClause = `
-        WHERE mi.DocNo LIKE @search
+        WHERE mi.DocNo   LIKE @search
            OR mi.IssueNo LIKE @search
-           OR c.name LIKE @search
-           OR p.name LIKE @search
-           OR i.M_Name LIKE @search
+           OR c.name     LIKE @search
+           OR p.name     LIKE @search
       `;
-      request.input("search", sql.VarChar, `%${search}%`);
+      request.input("search", sql.NVarChar(200), `%${search}%`);
     }
 
     request.input("offset", sql.Int, offset);
@@ -97,91 +168,114 @@ router.get(
 
     const countResult = await request.query(`
       SELECT COUNT(*) AS total
-      FROM   MaterialIssues mi
-      LEFT JOIN Enterprise c ON mi.CompanyId = c.id
-      LEFT JOIN Enterprise p ON mi.ProjectId = p.id
-      LEFT JOIN Item_Master_Group i ON mi.ItemId = i.M_Id
+      FROM   dbo.MaterialIssues mi
+      LEFT JOIN dbo.enterprise c ON mi.CompanyId = c.id
+      LEFT JOIN dbo.enterprise p ON mi.ProjectId = p.id
       ${whereClause}
     `);
 
-    const result = await request.query(`
+    const dataResult = await request.query(`
       SELECT
-        mi.*,
-        c.name as CompanyName,
-        p.name as ProjectName,
-        i.M_Name AS ItemName
-      FROM MaterialIssues mi
-      LEFT JOIN Enterprise c ON mi.CompanyId = c.id
-      LEFT JOIN Enterprise p ON mi.ProjectId = p.id
-      LEFT JOIN Item_Master_Group i ON mi.ItemId = i.M_Id
+        mi.IssueId, mi.IssueNo, mi.DocNo, mi.Status,
+        mi.CompanyId, c.name AS CompanyName,
+        mi.ProjectId, p.name AS ProjectName,
+        mi.FinYearId, fy.FName AS FinYearName,
+        mi.Date, mi.Reason, mi.Remarks, mi.CreatedAt,
+        (SELECT COUNT(*) FROM dbo.MaterialIssueItems mii WHERE mii.IssueId = mi.IssueId) AS ItemCount,
+        (SELECT ISNULL(SUM(mii.Quantity),0) FROM dbo.MaterialIssueItems mii WHERE mii.IssueId = mi.IssueId) AS TotalQty
+      FROM dbo.MaterialIssues mi
+      LEFT JOIN dbo.enterprise c  ON mi.CompanyId = c.id
+      LEFT JOIN dbo.enterprise p  ON mi.ProjectId = p.id
+      LEFT JOIN dbo.FinYear    fy ON mi.FinYearId = fy.FId
       ${whereClause}
       ORDER BY mi.CreatedAt DESC
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
     `);
 
     res.json({
-      data: result.recordset,
+      data: dataResult.recordset,
       total: countResult.recordset[0].total,
       page,
       limit,
       totalPages: Math.ceil(countResult.recordset[0].total / limit),
     });
-    } catch (error) {
-      console.error("Error fetching material issues:", error);
-      res.status(500).json({ error: "Failed to fetch material issues" });
-    }
-  },
-);
+  } catch (error) {
+    console.error("Error fetching material issues:", error);
+    res.status(500).json({ error: "Failed to fetch material issues" });
+  }
+});
 
-// ── GET /:id — single record ──────────────────────────────────────────────────
+// ── GET /:id ──────────────────────────────────────────────────────────────────
 router.get("/:id", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
-    const request = pool.request();
-    request.input("id", sql.Int, parseInt(req.params.id));
+    const id = parseInt(req.params.id, 10);
 
-    const result = await request.query(`
-      SELECT mi.*, c.name as CompanyName, p.name as ProjectName, i.M_Name AS ItemName
-      FROM   MaterialIssues mi
-      LEFT JOIN Enterprise c ON mi.CompanyId = c.id
-      LEFT JOIN Enterprise p ON mi.ProjectId = p.id
-      LEFT JOIN Item_Master_Group i ON mi.ItemId = i.M_Id
-      WHERE  mi.IssueId = @id
+    const headerResult = await pool.request().input("id", sql.Int, id).query(`
+      SELECT mi.*, c.name AS CompanyName, p.name AS ProjectName, fy.FName AS FinYearName
+      FROM dbo.MaterialIssues mi
+      LEFT JOIN dbo.enterprise c  ON mi.CompanyId = c.id
+      LEFT JOIN dbo.enterprise p  ON mi.ProjectId = p.id
+      LEFT JOIN dbo.FinYear    fy ON mi.FinYearId = fy.FId
+      WHERE mi.IssueId = @id
     `);
 
-    if (result.recordset.length === 0)
+    if (headerResult.recordset.length === 0)
       return res.status(404).json({ error: "Issue not found" });
 
-    res.json(result.recordset[0]);
+    const itemsResult = await pool.request().input("id", sql.Int, id).query(`
+      SELECT
+        mii.IssueItemId, mii.ItemId, mii.UOMCode, mii.Quantity, mii.Remarks,
+        img.M_Name AS ItemName, img.M_Group AS ItemGroup,
+        uom.UOMName, uom.Symbol AS UOMSymbol,
+        ISNULL(SUM(CASE WHEN sl.Type='IN'  THEN sl.Qty ELSE 0 END),0)
+      - ISNULL(SUM(CASE WHEN sl.Type='OUT' THEN sl.Qty ELSE 0 END),0)
+        AS CurrentBalance
+      FROM dbo.MaterialIssueItems mii
+      LEFT JOIN dbo.Item_Master_Group img
+        ON CONVERT(NVARCHAR(100), img.M_Id) = mii.ItemId
+      LEFT JOIN dbo.UOMMaster uom ON uom.UOMCode = mii.UOMCode
+      LEFT JOIN dbo.StockLedger sl
+        ON CONVERT(NVARCHAR(100), sl.ItemID) = mii.ItemId
+      WHERE mii.IssueId = @id
+      GROUP BY mii.IssueItemId, mii.ItemId, mii.UOMCode, mii.Quantity, mii.Remarks,
+               img.M_Name, img.M_Group, uom.UOMName, uom.Symbol
+    `);
+
+    res.json({ ...headerResult.recordset[0], items: itemsResult.recordset });
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch issue" });
   }
 });
 
-// ── POST / — create ───────────────────────────────────────────────────────────
+// ── POST / ────────────────────────────────────────────────────────────────────
 router.post("/", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
     const {
       CompanyId,
       ProjectId,
+      FinYearId = null,
       Date: IssueDate,
-      ItemId,
-      UOMId,
-      Quantity,
-      Remarks,
       Reason,
+      Remarks,
+      items = [],
       ParentDocNo = null,
       RootExBDocNo = null,
     } = req.body;
 
+    if (!Array.isArray(items) || items.length === 0)
+      return res.status(400).json({ error: "At least one item is required" });
+
+    for (const it of items) {
+      if (!it.ItemId || !it.Quantity || Number(it.Quantity) <= 0)
+        return res.status(400).json({ error: "Each item must have ItemId and Quantity > 0" });
+    }
+
     const userId = req.user?.id || null;
     const issuedBy = req.user?.email || null;
 
-    // 1. Resolve doc type: ISS or ExB-ISS
     const docTypeId = await resolveIssueDocTypeId(pool, RootExBDocNo);
-
-    // 2. Lock next number
     const docNo = await lockNextDocNumber(pool, sql, {
       docTypeId,
       tableName: "MaterialIssues",
@@ -191,113 +285,153 @@ router.post("/", authenticateToken, async (req, res) => {
       rootExBDocNo: RootExBDocNo,
     });
 
-    // 3. Parse year + serial from docNo (PREFIX-YYYY-NNNNN)
     const parts = docNo.split("-");
     const docYear = parseInt(parts[parts.length - 2], 10) || null;
     const docSerial = parseInt(parts[parts.length - 1], 10) || null;
 
-    // 4. Insert record
-    const insertReq = pool.request();
-    insertReq.input("IssueNo", sql.VarChar(100), docNo);
-    insertReq.input("DocNo", sql.NVarChar(100), docNo);
-    insertReq.input("DocTypeId", sql.Int, docTypeId);
-    insertReq.input("DocYear", sql.SmallInt, docYear);
-    insertReq.input("DocSerial", sql.Int, docSerial);
-    insertReq.input("ParentDocNo", sql.NVarChar(100), ParentDocNo);
-    insertReq.input("RootExBDocNo", sql.NVarChar(100), RootExBDocNo);
-    insertReq.input("CompanyId", sql.Int, CompanyId);
-    insertReq.input("ProjectId", sql.Int, ProjectId);
-    insertReq.input("Date", sql.Date, IssueDate);
-    insertReq.input("ItemId", sql.VarChar(100), ItemId);
-    insertReq.input("UOMId", sql.VarChar(50), UOMId);
-    insertReq.input("Quantity", sql.Decimal(18, 2), Quantity);
-    insertReq.input("Remarks", sql.NVarChar(sql.MAX), Remarks || null);
-    insertReq.input("Reason", sql.NVarChar(sql.MAX), Reason);
-    insertReq.input("CreatedBy", sql.Int, userId);
+    const headerReq = pool.request();
+    headerReq.input("IssueNo",      sql.VarChar(100),      docNo);
+    headerReq.input("DocNo",        sql.NVarChar(100),     docNo);
+    headerReq.input("DocTypeId",    sql.Int,               docTypeId);
+    headerReq.input("DocYear",      sql.SmallInt,          docYear);
+    headerReq.input("DocSerial",    sql.Int,               docSerial);
+    headerReq.input("ParentDocNo",  sql.NVarChar(100),     ParentDocNo);
+    headerReq.input("RootExBDocNo", sql.NVarChar(100),     RootExBDocNo);
+    headerReq.input("CompanyId",    sql.Int,               CompanyId);
+    headerReq.input("ProjectId",    sql.Int,               ProjectId);
+    headerReq.input("FinYearId",    sql.Int,               FinYearId || null);
+    headerReq.input("Date",         sql.Date,              IssueDate);
+    headerReq.input("Reason",       sql.NVarChar(sql.MAX), Reason);
+    headerReq.input("Remarks",      sql.NVarChar(sql.MAX), Remarks || null);
+    headerReq.input("CreatedBy",    sql.Int,               userId);
 
-    const result = await insertReq.query(`
+    const headerResult = await headerReq.query(`
       INSERT INTO dbo.MaterialIssues
         (IssueNo, DocNo, DocTypeId, DocYear, DocSerial,
          ParentDocNo, RootExBDocNo,
-         CompanyId, ProjectId, Date, ItemId, UOMId,
-         Quantity, Remarks, Reason, CreatedBy)
+         CompanyId, ProjectId, FinYearId, Date,
+         Reason, Remarks, CreatedBy)
       OUTPUT INSERTED.*
       VALUES
         (@IssueNo, @DocNo, @DocTypeId, @DocYear, @DocSerial,
          @ParentDocNo, @RootExBDocNo,
-         @CompanyId, @ProjectId, @Date, @ItemId, @UOMId,
-         @Quantity, @Remarks, @Reason, @CreatedBy)
+         @CompanyId, @ProjectId, @FinYearId, @Date,
+         @Reason, @Remarks, @CreatedBy)
     `);
 
-    const newRecord = result.recordset[0];
+    const newRecord = headerResult.recordset[0];
+    const issueId = newRecord.IssueId;
 
-    // 5. Write OUT entry to StockLedger
-    await pool
-      .request()
-      .input("ItemID", sql.NVarChar(50), ItemId)
-      .input("Qty", sql.Decimal(18, 2), Number(Quantity))
-      .input("UOM", sql.NVarChar(20), UOMId || null)
-      .input("Type", sql.NVarChar(10), "OUT")
-      .input("RefType", sql.NVarChar(20), "ISS")
-      .input("RefID", sql.Int, newRecord.IssueId)
-      .input("DocNo", sql.NVarChar(100), docNo).query(`
-        INSERT INTO dbo.StockLedger (ItemID, Qty, UOM, Type, RefType, RefID, DocNo, CreatedDate)
-        VALUES (@ItemID, @Qty, @UOM, @Type, @RefType, @RefID, @DocNo, GETDATE())
-      `);
+    for (const it of items) {
+      const qty = Number(it.Quantity);
+      const itemId = String(it.ItemId);
+      const uomCode = it.UOMCode || null;
 
-    // 6. Back-patch RecordId into DocNumberSequence
-    await backPatchRecordId(
-      pool,
-      sql,
-      docNo,
-      "MaterialIssues",
-      newRecord.IssueId,
-    );
+      await pool.request()
+        .input("IssueId",  sql.Int,               issueId)
+        .input("ItemId",   sql.NVarChar(100),      itemId)
+        .input("UOMCode",  sql.NVarChar(20),       uomCode)
+        .input("Quantity", sql.Decimal(18, 2),     qty)
+        .input("Remarks",  sql.NVarChar(sql.MAX),  it.Remarks || null)
+        .query(`
+          INSERT INTO dbo.MaterialIssueItems (IssueId, ItemId, UOMCode, Quantity, Remarks)
+          VALUES (@IssueId, @ItemId, @UOMCode, @Quantity, @Remarks)
+        `);
 
+      await pool.request()
+        .input("ItemID",  sql.NVarChar(50),   itemId)
+        .input("Qty",     sql.Decimal(18, 2), qty)
+        .input("UOM",     sql.NVarChar(20),   uomCode)
+        .input("Type",    sql.NVarChar(10),   "OUT")
+        .input("RefType", sql.NVarChar(20),   "ISS")
+        .input("RefID",   sql.Int,            issueId)
+        .input("DocNo",   sql.NVarChar(100),  docNo)
+        .query(`
+          INSERT INTO dbo.StockLedger (ItemID, Qty, UOM, Type, RefType, RefID, DocNo, CreatedDate)
+          VALUES (@ItemID, @Qty, @UOM, @Type, @RefType, @RefID, @DocNo, GETDATE())
+        `);
+    }
+
+    await backPatchRecordId(pool, sql, docNo, "MaterialIssues", issueId);
     await bumpCacheVersion("material-issues");
-    res.status(201).json(newRecord);
+    await bumpCacheVersion("stock-ledger");
+
+    res.status(201).json({ ...newRecord, items });
   } catch (error) {
     console.error("Error creating material issue:", error);
     res.status(500).json({ error: "Failed to create material issue" });
   }
 });
 
-// ── PUT /:id — update (DocNo is immutable after creation) ────────────────────
+// ── PUT /:id ──────────────────────────────────────────────────────────────────
 router.put("/:id", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
-    const id = parseInt(req.params.id);
-    const {
-      CompanyId,
-      ProjectId,
-      Date: IssueDate,
-      ItemId,
-      UOMId,
-      Quantity,
-      Remarks,
-      Reason,
-    } = req.body;
+    const id = parseInt(req.params.id, 10);
+    const { CompanyId, ProjectId, FinYearId = null, Date: IssueDate, Reason, Remarks, items = [] } = req.body;
 
-    const request = pool.request();
-    request.input("Id", sql.Int, id);
-    request.input("CompanyId", sql.Int, CompanyId);
-    request.input("ProjectId", sql.Int, ProjectId);
-    request.input("Date", sql.Date, IssueDate);
-    request.input("ItemId", sql.VarChar(100), ItemId);
-    request.input("UOMId", sql.VarChar(50), UOMId);
-    request.input("Quantity", sql.Decimal(18, 2), Quantity);
-    request.input("Remarks", sql.NVarChar(sql.MAX), Remarks || null);
-    request.input("Reason", sql.NVarChar(sql.MAX), Reason);
+    if (!Array.isArray(items) || items.length === 0)
+      return res.status(400).json({ error: "At least one item is required" });
 
-    await request.query(`
-      UPDATE dbo.MaterialIssues
-      SET    CompanyId = @CompanyId, ProjectId = @ProjectId, Date = @Date,
-             ItemId = @ItemId, UOMId = @UOMId, Quantity = @Quantity,
-             Remarks = @Remarks, Reason = @Reason, UpdatedAt = GETDATE()
-      WHERE  IssueId = @Id
-    `);
+    const existing = await pool.request().input("id", sql.Int, id)
+      .query("SELECT DocNo FROM dbo.MaterialIssues WHERE IssueId = @id");
+    if (existing.recordset.length === 0)
+      return res.status(404).json({ error: "Issue not found" });
+
+    const docNo = existing.recordset[0].DocNo;
+
+    await pool.request()
+      .input("Id",        sql.Int,               id)
+      .input("CompanyId", sql.Int,               CompanyId)
+      .input("ProjectId", sql.Int,               ProjectId)
+      .input("FinYearId", sql.Int,               FinYearId || null)
+      .input("Date",      sql.Date,              IssueDate)
+      .input("Reason",    sql.NVarChar(sql.MAX), Reason)
+      .input("Remarks",   sql.NVarChar(sql.MAX), Remarks || null)
+      .query(`
+        UPDATE dbo.MaterialIssues
+        SET CompanyId=@CompanyId, ProjectId=@ProjectId, FinYearId=@FinYearId,
+            Date=@Date, Reason=@Reason, Remarks=@Remarks, UpdatedAt=GETDATE()
+        WHERE IssueId=@Id
+      `);
+
+    await pool.request().input("Id", sql.Int, id)
+      .query("DELETE FROM dbo.MaterialIssueItems WHERE IssueId = @Id");
+    await pool.request().input("Id", sql.Int, id)
+      .query("DELETE FROM dbo.StockLedger WHERE RefType='ISS' AND RefID=@Id");
+
+    for (const it of items) {
+      const qty = Number(it.Quantity);
+      const itemId = String(it.ItemId);
+      const uomCode = it.UOMCode || null;
+
+      await pool.request()
+        .input("IssueId",  sql.Int,               id)
+        .input("ItemId",   sql.NVarChar(100),      itemId)
+        .input("UOMCode",  sql.NVarChar(20),       uomCode)
+        .input("Quantity", sql.Decimal(18, 2),     qty)
+        .input("Remarks",  sql.NVarChar(sql.MAX),  it.Remarks || null)
+        .query(`
+          INSERT INTO dbo.MaterialIssueItems (IssueId, ItemId, UOMCode, Quantity, Remarks)
+          VALUES (@IssueId, @ItemId, @UOMCode, @Quantity, @Remarks)
+        `);
+
+      await pool.request()
+        .input("ItemID",  sql.NVarChar(50),   itemId)
+        .input("Qty",     sql.Decimal(18, 2), qty)
+        .input("UOM",     sql.NVarChar(20),   uomCode)
+        .input("Type",    sql.NVarChar(10),   "OUT")
+        .input("RefType", sql.NVarChar(20),   "ISS")
+        .input("RefID",   sql.Int,            id)
+        .input("DocNo",   sql.NVarChar(100),  docNo)
+        .query(`
+          INSERT INTO dbo.StockLedger (ItemID, Qty, UOM, Type, RefType, RefID, DocNo, CreatedDate)
+          VALUES (@ItemID, @Qty, @UOM, @Type, @RefType, @RefID, @DocNo, GETDATE())
+        `);
+    }
 
     await bumpCacheVersion("material-issues");
+    await bumpCacheVersion("stock-ledger");
     res.json({ message: "Issue updated successfully" });
   } catch (error) {
     console.error("Error updating material issue:", error);
@@ -309,10 +443,13 @@ router.put("/:id", authenticateToken, async (req, res) => {
 router.delete("/:id", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
-    const request = pool.request();
-    request.input("id", sql.Int, parseInt(req.params.id));
-    await request.query("DELETE FROM dbo.MaterialIssues WHERE IssueId = @id");
+    const id = parseInt(req.params.id, 10);
+    await pool.request().input("id", sql.Int, id)
+      .query("DELETE FROM dbo.StockLedger WHERE RefType='ISS' AND RefID=@id");
+    await pool.request().input("id", sql.Int, id)
+      .query("DELETE FROM dbo.MaterialIssues WHERE IssueId = @id");
     await bumpCacheVersion("material-issues");
+    await bumpCacheVersion("stock-ledger");
     res.json({ message: "Issue deleted successfully" });
   } catch (error) {
     res.status(500).json({ error: "Failed to delete issue" });

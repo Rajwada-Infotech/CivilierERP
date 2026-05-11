@@ -81,15 +81,35 @@ export const BillingTermsProvider: React.FC<{ children: React.ReactNode }> = ({
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    let cancelled = false;
+
     fetchWithAuth("/api/billing-terms")
       .then((r) => (r.ok ? r.json() : []))
       .then((data: any[]) => {
+        if (cancelled) return;
         if (Array.isArray(data)) {
           setBillingTermsState(data.map(mapDbRow));
         }
       })
-      .catch(() => {})
-      .finally(() => setLoading(false));
+      .catch((err) => {
+        // fetchWithAuth throws on network errors and 403.
+        // On 401 it returns a never-resolving promise, so this catch branch
+        // is not reached in that case — the redirect handles cleanup instead.
+        // For other errors, just leave billingTerms empty; no toast needed here.
+        if (!cancelled) {
+          console.warn("BillingTerms fetch failed:", err?.message ?? err);
+        }
+      })
+      .finally(() => {
+        // Always clear the loading spinner, even if the fetch is abandoned.
+        // Without this, the 401 never-resolving-promise case left loading=true
+        // forever, freezing any UI that gated on it.
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const setBillingTerms = useCallback((records: BillingTerm[]) => {
