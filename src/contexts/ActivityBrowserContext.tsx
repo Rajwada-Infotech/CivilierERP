@@ -187,6 +187,10 @@ export const ActivityBrowserProvider: React.FC<{
   // Store dateFilters in a ref so SSE callback always reads current value
   const dateFiltersRef = useRef<DateFilters>(dateFilters);
   const sseSourceRef = useRef<EventSource | null>(null);
+  const sseReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const sseRetryRef = useRef(0);
   const cachedIp = useRef<string | null>(null);
   // Track if a fetch is in-flight to avoid SSE overwriting it
   const fetchingRef = useRef(false);
@@ -289,21 +293,51 @@ export const ActivityBrowserProvider: React.FC<{
   // SSE only triggers a refresh — it never directly sets rawSessions
   // (which was overwriting the filtered fetch with unfiltered latest-25 rows)
   useEffect(() => {
-    const token = localStorage.getItem("token");
-    if (!token) return;
+    let isMounted = true;
 
-    sseSourceRef.current = subscribeToActivityStream(() => {
-      // Only refresh if not currently fetching to avoid race conditions
-      if (!fetchingRef.current) {
-        void fetchActivityCore(
-          currentPageRef.current,
-          currentFiltersRef.current,
-          dateFiltersRef.current,
-        );
-      }
-    });
+    const connect = () => {
+      const token = localStorage.getItem("token");
+      if (!token || sseSourceRef.current || !isMounted) return;
+
+      sseSourceRef.current = subscribeToActivityStream(
+        () => {
+          sseRetryRef.current = 0;
+          if (!fetchingRef.current) {
+            void fetchActivityCore(
+              currentPageRef.current,
+              currentFiltersRef.current,
+              dateFiltersRef.current,
+            );
+          }
+        },
+        () => {
+          sseSourceRef.current?.close();
+          sseSourceRef.current = null;
+
+          if (sseReconnectTimerRef.current || !isMounted) return;
+
+          const delay = Math.min(30_000, 3_000 * 2 ** sseRetryRef.current);
+          sseRetryRef.current += 1;
+
+          sseReconnectTimerRef.current = setTimeout(() => {
+            sseReconnectTimerRef.current = null;
+            if (document.visibilityState === "visible") {
+              connect();
+            }
+          }, delay);
+        },
+      );
+    };
+
+    connect();
+    document.addEventListener("visibilitychange", connect);
 
     return () => {
+      isMounted = false;
+      document.removeEventListener("visibilitychange", connect);
+      if (sseReconnectTimerRef.current) {
+        clearTimeout(sseReconnectTimerRef.current);
+      }
       sseSourceRef.current?.close();
     };
     // fetchActivityCore is stable (no deps) — safe to use here without re-running

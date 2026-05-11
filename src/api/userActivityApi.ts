@@ -158,6 +158,7 @@ export const logUserActivity = async (
 
 export const subscribeToActivityStream = (
   onMessage: (data: SessionEvent[]) => void,
+  onError?: (error: Event) => void,
 ): EventSource => {
   const token = localStorage.getItem("token");
 
@@ -176,8 +177,9 @@ export const subscribeToActivityStream = (
     console.log("SSE ping received");
   });
 
-  source.onerror = (err) => {
+  source.onerror = (err: Event) => {
     console.error("SSE connection error:", err);
+    onError?.(err);
   };
 
   return source;
