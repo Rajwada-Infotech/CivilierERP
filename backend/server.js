@@ -8,19 +8,24 @@ const helmet = require("helmet");
 const cors = require("cors");
 const compression = require("compression");
 
-const { connectDB } = require("./db");
+const { connectDB, closeDB } = require("./db");
 const authMiddleware = require("./middleware/auth");
 const rateLimit = require("express-rate-limit");
 const { RedisStore } = require("rate-limit-redis");
 
 const logger = require("./logger");
 const requestLogger = require("./requestLogger");
+const {
+  addRequestTiming,
+  requestTimeout,
+} = require("./middleware/requestObservability");
 
 const { ipKeyGenerator } = require("express-rate-limit");
 const { safeLoadRoutes, printRoutesSummary } = require("./utils/loadRoutes");
 
 const {
   getRedis,
+  closeRedis,
   redisZScore,
   incrGlobalRequests,
   pfaddActiveUser,
@@ -127,9 +132,12 @@ const ALL_ROUTES = [
 // ─── createApp ──────────────────────────────────────────────────────────────
 async function createApp() {
   const app = express();
+  app.locals.startupTime = new Date().toISOString();
 
   app.disable("x-powered-by");
   app.use(requestLogger);
+  app.use(addRequestTiming);
+  app.use(requestTimeout());
 
   app.use((req, res, next) => {
     res.setHeader("X-Request-Id", req.id || "test");
@@ -174,7 +182,7 @@ async function createApp() {
   }
 
   app.get("/", (req, res) => res.send("CivilierERP API running"));
-  app.get("/health", (req, res) => res.json({ status: "ok" }));
+  app.use("/health", require("./routes/health"));
 
   app.use("/api/users", require("./routes/users"));
 
@@ -257,7 +265,8 @@ async function startServer() {
   try {
     logger.info("[DB] Connecting to database...");
     await connectDB();
-    require("./worker"); // Redis engagement decay + cleanup worker
+    const worker = require("./worker"); // Redis engagement decay + cleanup worker
+    await worker.startWorker();
 
     logger.info("[OK] Database connected");
 
@@ -308,16 +317,61 @@ async function startServer() {
 
     const PORT = process.env.PORT || 5000;
 
-    app.listen(PORT, () => {
+    const server = app.listen(PORT, () => {
       printBanner(PORT);
       logger.info(`[START] Server ready on port ${PORT}`);
     });
+
+    setupGracefulShutdown(server, worker);
 
     return app;
   } catch (err) {
     logger.error(`[FATAL] Server failed to start: ${err.message}`);
     process.exit(1);
   }
+}
+
+function setupGracefulShutdown(server, worker) {
+  let shuttingDown = false;
+
+  async function shutdown(signal) {
+    if (shuttingDown) return;
+    shuttingDown = true;
+
+    logger.warn({ event: "SHUTDOWN_START", signal }, "Graceful shutdown started");
+
+    const forceExitTimer = setTimeout(() => {
+      logger.fatal(
+        { event: "SHUTDOWN_FORCE_EXIT", signal },
+        "Graceful shutdown timed out",
+      );
+      process.exit(1);
+    }, Number(process.env.SHUTDOWN_TIMEOUT_MS || 10000));
+    forceExitTimer.unref();
+
+    server.close(async (err) => {
+      if (err) {
+        logger.error({ event: "HTTP_SERVER_CLOSE_ERROR", err }, "HTTP close failed");
+      }
+
+      try {
+        worker?.stopWorker?.();
+        await closeRedis();
+        await closeDB();
+        logger.info({ event: "SHUTDOWN_DONE", signal }, "Graceful shutdown complete");
+        process.exit(err ? 1 : 0);
+      } catch (closeErr) {
+        logger.error(
+          { event: "SHUTDOWN_CLOSE_ERROR", err: closeErr },
+          "Graceful shutdown failed",
+        );
+        process.exit(1);
+      }
+    });
+  }
+
+  process.once("SIGTERM", () => shutdown("SIGTERM"));
+  process.once("SIGINT", () => shutdown("SIGINT"));
 }
 
 // ─── Exports ────────────────────────────────────────────────────────────────
