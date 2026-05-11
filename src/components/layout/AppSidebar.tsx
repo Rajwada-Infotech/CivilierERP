@@ -209,8 +209,8 @@ const buildAdminNavItems = (pendingCount: number): NavItem[] => [
     icon: Building2,
     children: [
       { label: "Enterprise", path: "/admin/masters/business-unit" },
-      { label: "Project", path: "/admin/masters/project" },
       { label: "Company", path: "/admin/masters/company" },
+      { label: "Project", path: "/admin/masters/project" },
     ],
   },
   {
@@ -291,8 +291,8 @@ const SUPER_ADMIN_NAV_ITEMS: NavItem[] = [
     icon: Globe,
     children: [
       { label: "Enterprise", path: "/admin/masters/business-unit" },
-      { label: "Project", path: "/admin/masters/project" },
       { label: "Company", path: "/admin/masters/company" },
+      { label: "Project", path: "/admin/masters/project" },
     ],
   },
   { label: "API Integration", icon: Shield, path: "/admin/api-integration" },
