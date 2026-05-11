@@ -31,9 +31,10 @@ interface Project {
   name: string;
   shortName: string;
   type: string;
-  enterpriseId?: number | string;
-  companyId?: number | string;
-  businessUnit: string;
+  // enterpriseName stores the selected enterprise name (saved to belongs_to)
+  enterpriseName: string;
+  // companyName stores the selected company name (saved to b_sub_identity_type)
+  companyName: string;
   clientName: string;
   clientCode: string;
   teamSize: string;
@@ -47,7 +48,6 @@ interface Project {
   remarks: string;
   isActive: boolean;
   projectImage?: string | File | null;
-  belongsTo?: number | string;
 }
 
 function ProjectAvatar({
@@ -97,9 +97,8 @@ const emptyProject: Project = {
   name: "",
   shortName: "",
   type: "Construction",
-  enterpriseId: "",
-  companyId: "",
-  businessUnit: "",
+  enterpriseName: "",
+  companyName: "",
   clientName: "",
   clientCode: "",
   teamSize: "",
@@ -113,10 +112,10 @@ const emptyProject: Project = {
   remarks: "",
   isActive: true,
   projectImage: null,
-  belongsTo: "",
 };
 
-// Maps the raw DB row (field names come from projectMaster.js GET) to the form shape
+// Maps raw DB row → form shape.
+// belongs_to → enterpriseName, b_sub_identity_type → companyName (fully independent)
 function rowToForm(row: any): Project {
   return {
     Id: row.Id,
@@ -124,17 +123,14 @@ function rowToForm(row: any): Project {
     name: row.Name ?? "",
     shortName: row.ShortName ?? "",
     type: row.Type ?? "Construction",
-    // These are resolved post-mount based on loaded lists
-    enterpriseId: "",
-    companyId: "",
-    belongsTo: row.belongs_to ?? "",
-    businessUnit: row.BusinessUnit ?? "",
+    enterpriseName: row.belongs_to ?? "",
+    companyName: row.b_sub_identity_type ?? "",
     clientName: row.ClientName ?? "",
     clientCode: row.ClientCode ?? "",
     teamSize: row.TeamSize != null ? String(row.TeamSize) : "",
     startDate: row.StartDate ? row.StartDate.slice(0, 10) : "",
     endDate: row.EndDate ? row.EndDate.slice(0, 10) : "",
-    currency: row.Currency ?? "INR",
+    currency: row.Currency ?? row.currency ?? "INR",
     status: row.Status ?? "Planning",
     priority: row.Priority ?? "Medium",
     location: row.Location ?? "",
@@ -246,11 +242,8 @@ function ProjectViewModal({
             <Section title="General" />
             <Row label="Short Name" value={project.shortName} />
             <Row label="Type" value={project.type} />
-            <Row
-              label="Enterprise / Company"
-              value={project.belongsTo as string}
-            />
-            <Row label="Business Unit" value={project.businessUnit} />
+            <Row label="Enterprise" value={project.enterpriseName} />
+            <Row label="Company" value={project.companyName} />
             <Row label="Client Name" value={project.clientName} />
             <Row label="Client Code" value={project.clientCode} />
             <Row label="Location" value={project.location} />
@@ -311,13 +304,19 @@ function buildProjectColumns(
       ),
     },
     {
-      accessorKey: "belongs_to",
+      id: "belongs_to_combined",
       header: "Enterprise / Company",
-      cell: ({ getValue }) => (
-        <span className="text-xs text-muted-foreground max-w-[140px] truncate block">
-          {(getValue() as string) || "—"}
-        </span>
-      ),
+      cell: ({ row }) => {
+        const enterprise = row.original.belongs_to || "";
+        const company = row.original.b_sub_identity_type || "";
+        const display =
+          [enterprise, company].filter(Boolean).join(" / ") || "—";
+        return (
+          <span className="text-xs text-muted-foreground max-w-[160px] truncate block">
+            {display}
+          </span>
+        );
+      },
     },
     {
       accessorKey: "ClientName",
@@ -464,19 +463,11 @@ export default function ProjectMaster() {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      // Determine the final belongs_to value (company name takes priority)
-      const resolvedBelongsTo =
-        (form.companyId as string) ||
-        (form.enterpriseId as string) ||
-        (form.belongsTo as string) ||
-        null;
-
       const payload: Record<string, any> = {
         code: form.code,
         name: form.name,
         shortName: form.shortName,
         type: form.type,
-        businessUnit: form.businessUnit,
         clientName: form.clientName,
         clientCode: form.clientCode,
         teamSize: form.teamSize,
@@ -489,7 +480,9 @@ export default function ProjectMaster() {
         description: form.description,
         remarks: form.remarks,
         isActive: form.isActive,
-        belongsTo: resolvedBelongsTo,
+        // Each field saved independently — no merging, no priority logic
+        enterpriseName: form.enterpriseName || null,
+        companyName: form.companyName || null,
       };
 
       if (form.projectImage instanceof File) {
@@ -571,23 +564,15 @@ export default function ProjectMaster() {
   );
 
   const openNew = () => {
-    resetForm();
+    setForm({ ...emptyProject });
+    setImagePreview("");
+    setEditId(null);
     setShowForm(true);
     setActiveTab("general");
   };
 
   const openEdit = (row: any) => {
     const f = rowToForm(row);
-    const storedName = f.belongsTo as string;
-    // Try to match stored name to a company first, then enterprise
-    const matchedCompany = companies.find(
-      (c: any) => (c.Name ?? c.name) === storedName,
-    ) as any;
-    const matchedEnterprise = !matchedCompany
-      ? (enterprises.find((e: any) => (e.name ?? e.Name) === storedName) as any)
-      : null;
-    f.companyId = matchedCompany ? storedName : "";
-    f.enterpriseId = matchedEnterprise ? storedName : "";
     setForm(f);
     setImagePreview(typeof f.projectImage === "string" ? f.projectImage : "");
     setEditId(row.Id);
@@ -804,21 +789,17 @@ export default function ProjectMaster() {
                   {fi("Short Name", "shortName")}
                   {se("Type", "type", PROJECT_TYPES)}
 
-                  {/* Enterprise Dropdown */}
+                  {/* Enterprise Dropdown — fully independent */}
                   <div>
                     <label className="block text-xs font-medium text-muted-foreground mb-1">
-                      Enterprise{" "}
-                      <span className="text-xs text-muted-foreground/60">
-                        (Parent)
-                      </span>
+                      Enterprise
                     </label>
                     <select
-                      value={form.enterpriseId as string}
+                      value={form.enterpriseName}
                       onChange={(e) =>
                         setForm((p) => ({
                           ...p,
-                          enterpriseId: e.target.value,
-                          companyId: "",
+                          enterpriseName: e.target.value,
                         }))
                       }
                       className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
@@ -826,8 +807,9 @@ export default function ProjectMaster() {
                       <option value="">— Select Enterprise —</option>
                       {enterprises.map((e: any) => {
                         const name = e.name ?? e.Name ?? "";
+                        const id = String(e.id ?? e.Id ?? "");
                         return (
-                          <option key={e.id ?? e.Id} value={name}>
+                          <option key={id} value={name}>
                             {name}
                           </option>
                         );
@@ -835,20 +817,17 @@ export default function ProjectMaster() {
                     </select>
                   </div>
 
-                  {/* Company Dropdown */}
+                  {/* Company Dropdown — fully independent */}
                   <div>
                     <label className="block text-xs font-medium text-muted-foreground mb-1">
-                      Company{" "}
-                      <span className="text-xs text-muted-foreground/60">
-                        (Overrides Enterprise)
-                      </span>
+                      Company
                     </label>
                     <select
-                      value={form.companyId as string}
+                      value={form.companyName}
                       onChange={(e) =>
                         setForm((p) => ({
                           ...p,
-                          companyId: e.target.value,
+                          companyName: e.target.value,
                         }))
                       }
                       className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
@@ -856,8 +835,9 @@ export default function ProjectMaster() {
                       <option value="">— Select Company —</option>
                       {companies.map((c: any) => {
                         const name = c.Name ?? c.name ?? "";
+                        const id = String(c.Id ?? c.id ?? "");
                         return (
-                          <option key={c.Id ?? c.id} value={name}>
+                          <option key={id} value={name}>
                             {name}
                           </option>
                         );
@@ -867,7 +847,6 @@ export default function ProjectMaster() {
 
                   {fi("Client Name", "clientName")}
                   {fi("Client Code", "clientCode")}
-                  {fi("Business Unit", "businessUnit")}
                   {fi("Location", "location")}
 
                   <div className="flex items-center gap-3 pt-5 col-span-full">

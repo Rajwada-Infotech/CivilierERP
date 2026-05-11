@@ -152,9 +152,9 @@ function EnterpriseViewModal({
                   </span>
                 )}
                 <span
-                  className={`px-2 py-0.5 rounded-full text-xs font-medium ${enterprise.active ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
+                  className={`px-2 py-0.5 rounded-full text-xs font-medium ${enterprise.status === "Active" ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
                 >
-                  {enterprise.active ? "Active" : "Inactive"}
+                  {enterprise.status || "Inactive"}
                 </span>
               </div>
             </div>
@@ -325,15 +325,16 @@ function buildEnterpriseColumns(
       ),
     },
     {
-      accessorKey: "active",
+      accessorKey: "status",
       header: "Status",
       cell: ({ getValue }) => {
-        const active = getValue() as boolean;
+        const status = getValue() as string | null;
+        const isActive = status === "Active";
         return (
           <span
-            className={`px-2 py-0.5 rounded-full text-xs font-medium ${active ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
+            className={`px-2 py-0.5 rounded-full text-xs font-medium ${isActive ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
           >
-            {active ? "Active" : "Inactive"}
+            {status || "Inactive"}
           </span>
         );
       },
