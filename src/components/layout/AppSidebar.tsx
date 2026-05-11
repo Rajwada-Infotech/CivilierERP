@@ -40,24 +40,37 @@ import {
 // ── Approval pending count (polls every 60 s) ────────────────────────────────
 function useApprovalCount() {
   const [count, setCount] = useState(0);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const failureCountRef = useRef(0);
 
   const fetch = () => {
+    if (document.visibilityState === "hidden") {
+      timerRef.current = setTimeout(fetch, 60_000);
+      return;
+    }
+
     const token = localStorage.getItem("token");
     window
       .fetch("/api/approval-inbox/count", {
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       })
       .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then((d) => setCount(d.total ?? 0))
-      .catch(() => {});
+      .then((d) => {
+        failureCountRef.current = 0;
+        setCount(d.total ?? 0);
+        timerRef.current = setTimeout(fetch, 60_000);
+      })
+      .catch(() => {
+        failureCountRef.current += 1;
+        const delay = Math.min(5 * 60_000, 60_000 * failureCountRef.current);
+        timerRef.current = setTimeout(fetch, delay);
+      });
   };
 
   useEffect(() => {
     fetch();
-    timerRef.current = setInterval(fetch, 60_000);
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+      if (timerRef.current) clearTimeout(timerRef.current);
     };
   }, []);
 
