@@ -183,6 +183,7 @@ export interface WOItemOption {
   name: string;
   gstRate: number;
   hsnCode: string | null;
+  uomName: string | null;
 }
 
 export const fetchItems = async (): Promise<WOItemOption[]> => {

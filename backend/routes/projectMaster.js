@@ -25,10 +25,10 @@ router.get("/", async (req, res) => {
         status                AS Status,
         rera_no               AS Priority,
         start_date            AS StartDate,
-        rera_date             AS EndDate,
-        trade_license         AS ClientName,
-        tan                   AS ClientCode,
-        cin                   AS TeamSize,
+        end_date              AS EndDate,
+        client_name           AS ClientName,
+        client_code           AS ClientCode,
+        team_size             AS TeamSize,
         pan                   AS Remarks,
         CASE WHEN discontinue = 1 THEN 0 ELSE 1 END AS IsActive,
         logo                  AS ProjectImage,
@@ -63,10 +63,10 @@ router.post("/", adminOnly, async (req, res) => {
       .input("status", sql.NVarChar(50), f.status || "Planning")
       .input("rera_no", sql.NVarChar(100), f.priority || null)
       .input("start_date", sql.Date, f.startDate || null)
-      .input("rera_date", sql.Date, f.endDate || null)
-      .input("trade_license", sql.NVarChar(200), f.clientName || null)
-      .input("tan", sql.NVarChar(15), f.clientCode || null)
-      .input("cin", sql.NVarChar(50), f.teamSize ? String(f.teamSize) : null)
+      .input("end_date", sql.Date, f.endDate || null)
+      .input("client_name", sql.NVarChar(255), f.clientName || null)
+      .input("client_code", sql.NVarChar(50), f.clientCode || null)
+      .input("team_size", sql.Int, f.teamSize ? parseInt(f.teamSize) : null)
       .input("pan", sql.NVarChar(20), f.remarks || null)
       .input("logo", sql.NVarChar(sql.MAX), f.projectImage || null)
       // Enterprise stored in belongs_to, Company stored in b_sub_identity_type — independent
@@ -77,14 +77,14 @@ router.post("/", adminOnly, async (req, res) => {
         INSERT INTO dbo.enterprise (
           name, short_name, business_identity, business_type, entity_type, description,
           address, currency,
-          status, rera_no, start_date, rera_date,
-          trade_license, tan, cin, pan,
+          status, rera_no, start_date, end_date,
+          client_name, client_code, team_size, pan,
           logo, belongs_to, b_sub_identity_type, discontinue, date_of_entry
         ) VALUES (
           @name, @short_name, @business_identity, @business_type, @entity_type, @description,
           @address, @currency,
-          @status, @rera_no, @start_date, @rera_date,
-          @trade_license, @tan, @cin, @pan,
+          @status, @rera_no, @start_date, @end_date,
+          @client_name, @client_code, @team_size, @pan,
           @logo, @belongs_to, @b_sub_identity_type, @discontinue, @date_of_entry
         )
       `);
@@ -113,10 +113,10 @@ router.put("/:id", adminOnly, async (req, res) => {
       .input("status", sql.NVarChar(50), f.status || "Planning")
       .input("rera_no", sql.NVarChar(100), f.priority || null)
       .input("start_date", sql.Date, f.startDate || null)
-      .input("rera_date", sql.Date, f.endDate || null)
-      .input("trade_license", sql.NVarChar(200), f.clientName || null)
-      .input("tan", sql.NVarChar(15), f.clientCode || null)
-      .input("cin", sql.NVarChar(50), f.teamSize ? String(f.teamSize) : null)
+      .input("end_date", sql.Date, f.endDate || null)
+      .input("client_name", sql.NVarChar(255), f.clientName || null)
+      .input("client_code", sql.NVarChar(50), f.clientCode || null)
+      .input("team_size", sql.Int, f.teamSize ? parseInt(f.teamSize) : null)
       .input("pan", sql.NVarChar(20), f.remarks || null)
       .input("logo", sql.NVarChar(sql.MAX), f.projectImage || null)
       // Enterprise stored in belongs_to, Company stored in b_sub_identity_type — independent
@@ -127,8 +127,8 @@ router.put("/:id", adminOnly, async (req, res) => {
           name=@name, short_name=@short_name, business_identity=@business_identity,
           entity_type=@entity_type, description=@description,
           address=@address, currency=@currency,
-          status=@status, rera_no=@rera_no, start_date=@start_date, rera_date=@rera_date,
-          trade_license=@trade_license, tan=@tan, cin=@cin, pan=@pan,
+          status=@status, rera_no=@rera_no, start_date=@start_date, end_date=@end_date,
+          client_name=@client_name, client_code=@client_code, team_size=@team_size, pan=@pan,
           logo=@logo, belongs_to=@belongs_to, b_sub_identity_type=@b_sub_identity_type,
           discontinue=@discontinue
         WHERE id=@id AND business_type='P'
