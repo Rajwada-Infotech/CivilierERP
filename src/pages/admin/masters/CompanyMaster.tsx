@@ -139,9 +139,11 @@ function rowToForm(row: any): Company {
     panNumber: row.PAN ?? "",
     tanNumber: row.TAN ?? "",
     gstType: row.GSTType ?? "Regular",
+    // GST number is stored in b_sub_identity_type → aliased as GST in backend
     gstNumber: row.GST ?? "",
     gstDate: row.GSTDate ? row.GSTDate.slice(0, 10) : "",
     tradeLicenseNo: row.TradeLicenseNo ?? "",
+    // TradeLicenseDate stored in rera_date → aliased as TradeLicenseDate
     tradeLicenseDate: row.TradeLicenseDate
       ? row.TradeLicenseDate.slice(0, 10)
       : "",
@@ -154,15 +156,19 @@ function rowToForm(row: any): Company {
     fax: row.Fax ?? "",
     email: row.Email ?? "",
     website: row.Website ?? "",
+    // AuthorizedCapital stored in cost_center → aliased as AuthorizedCapital
     authorizedCapital:
       row.AuthorizedCapital != null ? String(row.AuthorizedCapital) : "",
+    // PaidUpCapital stored in profit_center → aliased as PaidUpCapital
     paidUpCapital: row.PaidUpCapital != null ? String(row.PaidUpCapital) : "",
-    currency: row.Currency ?? "INR",
+    currency: row.currency ?? row.Currency ?? "INR",
     fiscalYearStart: row.FiscalYearStart ?? "April",
+    // AuditorName stored in start_fin_year → aliased as AuditorName
     auditorName: row.AuditorName ?? "",
     isActive: row.IsActive !== 0,
     remarks: row.Remarks ?? "",
     logoUrl: row.LogoUrl ?? "",
+    // belongs_to stores the enterprise name string
     belongsTo: row.belongs_to ?? "",
   };
 }
@@ -491,6 +497,7 @@ export default function CompanyMaster() {
         : "/api/company-master";
       const res = await fetchWithAuth(url, {
         method: editId ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
       });
       if (!res.ok) {
@@ -794,8 +801,10 @@ export default function CompanyMaster() {
                       <option value="">— Select Enterprise —</option>
                       {enterprises.map((e: any) => {
                         const name = e.name ?? e.Name ?? "";
+                        const id = String(e.id ?? e.Id ?? "");
                         return (
-                          <option key={e.id ?? e.Id} value={name}>
+                          // Store enterprise name in belongs_to (nvarchar column)
+                          <option key={id} value={name}>
                             {name}
                           </option>
                         );
