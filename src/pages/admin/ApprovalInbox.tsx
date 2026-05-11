@@ -13,6 +13,7 @@ import {
   Banknote,
   Truck,
   Receipt,
+  ArrowDownCircle,
   RefreshCw,
   ArrowUpRight,
   Inbox,
@@ -90,6 +91,13 @@ const MODULE_CONFIG: Record<
     navPath: "/material/expense-booking",
     apiEndpoint: "/api/expense-booking",
     label: "Expense Bookings",
+  },
+  "received-payment": {
+    icon: ArrowDownCircle,
+    color: "text-teal-500 bg-teal-500/10",
+    navPath: "/received-payments",
+    apiEndpoint: "/api/received-payment",
+    label: "Received Payments",
   },
 };
 

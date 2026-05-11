@@ -348,35 +348,45 @@ router.patch("/:id/submit", async (req, res) => {
   }
 });
 
-// ── PATCH /:id/approve (admin only — called from Approval Inbox) ──────────────
-router.patch("/:id/approve", async (req, res) => {
+// ── PUT /:id/approve (admin only — called from Approval Inbox) ───────────────
+router.put("/:id/approve", async (req, res) => {
   try {
     const { id } = req.params;
-    const { action, rejectionNote } = req.body;
     const actor = req.user?.name || req.user?.email || null;
     const pool = getPool();
-    if (action === "approve") {
-      await pool
-        .request()
-        .input("id", sql.Int, id)
-        .input("by", sql.NVarChar(150), actor)
-        .query(
-          `UPDATE dbo.ReceivedPayment SET RPStatus='Approved', RPApprovedBy=@by, RPApprovedAt=GETDATE() WHERE RPPaymentID=@id`,
-        );
-    } else {
-      await pool
-        .request()
-        .input("id", sql.Int, id)
-        .input("by", sql.NVarChar(150), actor)
-        .input("note", sql.NVarChar(500), rejectionNote || null)
-        .query(
-          `UPDATE dbo.ReceivedPayment SET RPStatus='Rejected', RPRejectedBy=@by, RPRejectedAt=GETDATE(), RPRejectionNote=@note WHERE RPPaymentID=@id`,
-        );
-    }
+    await pool
+      .request()
+      .input("id", sql.Int, id)
+      .input("by", sql.NVarChar(150), actor)
+      .query(
+        `UPDATE dbo.ReceivedPayment SET RPStatus='Approved', RPApprovedBy=@by, RPApprovedAt=GETDATE() WHERE RPPaymentID=@id`,
+      );
     res.json({ success: true });
   } catch (err) {
-    console.error("PATCH approve error:", err);
+    console.error("PUT /:id/approve error:", err);
     res.status(500).json({ error: "Approval failed" });
+  }
+});
+
+// ── PUT /:id/reject (admin only — called from Approval Inbox) ────────────────
+router.put("/:id/reject", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { note } = req.body;
+    const actor = req.user?.name || req.user?.email || null;
+    const pool = getPool();
+    await pool
+      .request()
+      .input("id", sql.Int, id)
+      .input("by", sql.NVarChar(150), actor)
+      .input("note", sql.NVarChar(500), note || null)
+      .query(
+        `UPDATE dbo.ReceivedPayment SET RPStatus='Rejected', RPRejectedBy=@by, RPRejectedAt=GETDATE(), RPRejectionNote=@note WHERE RPPaymentID=@id`,
+      );
+    res.json({ success: true });
+  } catch (err) {
+    console.error("PUT /:id/reject error:", err);
+    res.status(500).json({ error: "Rejection failed" });
   }
 });
 

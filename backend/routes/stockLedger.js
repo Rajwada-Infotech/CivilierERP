@@ -83,7 +83,10 @@ router.get("/", cache("stock-ledger", 120), async (req, res) => {
     const pool = getPool();
 
     const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
-    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 10, 1), 100);
+    const limit = Math.min(
+      Math.max(parseInt(req.query.limit, 10) || 10, 1),
+      100,
+    );
     const offset = (page - 1) * limit;
 
     const filters = {
@@ -96,14 +99,21 @@ router.get("/", cache("stock-ledger", 120), async (req, res) => {
       search: req.query.search ? String(req.query.search).trim() : "",
     };
 
-    if (filters.type && !["IN", "OUT"].includes(String(filters.type).toUpperCase())) {
+    if (
+      filters.type &&
+      !["IN", "OUT"].includes(String(filters.type).toUpperCase())
+    ) {
       return res.status(400).json({ error: "type must be IN or OUT" });
     }
     if (filters.refId && !Number.isFinite(parseInt(filters.refId, 10))) {
       return res.status(400).json({ error: "refId must be a number" });
     }
 
-    const hasCreatedDate = await hasColumn(pool, "dbo.StockLedger", "CreatedDate");
+    const hasCreatedDate = await hasColumn(
+      pool,
+      "dbo.StockLedger",
+      "CreatedDate",
+    );
     const hasEntryDate = await hasColumn(pool, "dbo.StockLedger", "EntryDate");
     const hasUom = await hasColumn(pool, "dbo.StockLedger", "UOM");
     const hasDocNo = await hasColumn(pool, "dbo.StockLedger", "DocNo");
@@ -162,7 +172,7 @@ router.get("/", cache("stock-ledger", 120), async (req, res) => {
       SELECT
         sl.StockID,
         CONVERT(NVARCHAR(50), sl.ItemID) AS ItemID,
-        img.M_Name AS ItemName,
+        COALESCE(sl.ItemName, img.M_Name) AS ItemName,
         parent.M_Name AS ItemGroupName,
         sl.Qty,
         sl.Type,
