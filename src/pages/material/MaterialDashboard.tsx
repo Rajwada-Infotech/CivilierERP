@@ -865,6 +865,13 @@ export default function MaterialDashboard() {
                 bg: "bg-emerald-500/10",
               },
               {
+                label: "Inventory",
+                icon: ClipboardList,
+                path: "/material/inventory-master",
+                color: "text-teal-600",
+                bg: "bg-teal-500/10",
+              },
+              {
                 label: "T&C Master",
                 icon: FileText,
                 path: "/material/t-c-master",

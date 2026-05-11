@@ -40,6 +40,7 @@ import {
   TrendingUp,
   CheckSquare,
   PackageMinus,
+  ClipboardList,
 } from "lucide-react";
 
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -182,7 +183,7 @@ export const MobileNav: React.FC = () => {
   // Module-specific Navigation Items
   const getModuleNavItems = (): NavItem[] => {
     switch (activeModule) {
-case "material":
+      case "material":
         return [
           {
             label: "Dashboard",
@@ -217,6 +218,16 @@ case "material":
                 label: "Issues",
                 path: "/material/issues",
                 icon: PackageMinus,
+              },
+              {
+                label: "BOQ",
+                path: "/material/boq",
+                icon: FileText,
+              },
+              {
+                label: "Amendment Menu",
+                path: "/material/amendment-menu",
+                icon: CheckSquare,
               },
             ],
           },
@@ -480,6 +491,18 @@ case "material":
       label: "Billing",
       path: "/masters/billing-terms",
       color: "text-lime-500",
+    },
+    {
+      icon: FileText,
+      label: "T&C",
+      path: "/material/t-c-master",
+      color: "text-purple-500",
+    },
+    {
+      icon: ClipboardList,
+      label: "Inventory",
+      path: "/material/inventory-master",
+      color: "text-teal-400",
     },
   ];
   const adminSetupItems = [
