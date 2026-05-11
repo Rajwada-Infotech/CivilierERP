@@ -13,6 +13,7 @@ import {
   ToggleRight,
   Upload,
   X,
+  Eye,
 } from "lucide-react";
 import { toast } from "sonner";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -49,7 +50,6 @@ interface Project {
   belongsTo?: number | string;
 }
 
-// ── Project avatar shown beside name in table + form header ──────────────────
 function ProjectAvatar({
   imageUrl,
   name,
@@ -116,16 +116,15 @@ const emptyProject: Project = {
   belongsTo: "",
 };
 
+// Maps the raw DB row (field names come from projectMaster.js GET) to the form shape
 function rowToForm(row: any): Project {
-  // belongs_to is a name string — we'll let the component resolve it into
-  // enterpriseId / companyId after mount using the loaded lists.
-  // Store it in belongsTo so the dropdowns can be pre-selected.
   return {
     Id: row.Id,
     code: row.Code ?? "",
     name: row.Name ?? "",
     shortName: row.ShortName ?? "",
     type: row.Type ?? "Construction",
+    // These are resolved post-mount based on loaded lists
     enterpriseId: "",
     companyId: "",
     belongsTo: row.belongs_to ?? "",
@@ -146,69 +145,283 @@ function rowToForm(row: any): Project {
   };
 }
 
+// ── View Modal ────────────────────────────────────────────────────────────────
+function ProjectViewModal({
+  project,
+  onClose,
+}: {
+  project: Project;
+  onClose: () => void;
+}) {
+  const STATUS_COLORS: Record<string, string> = {
+    Active: "bg-emerald-500/10 text-emerald-600",
+    Planning: "bg-blue-500/10 text-blue-600",
+    "On Hold": "bg-amber-500/10 text-amber-600",
+    Completed: "bg-purple-500/10 text-purple-600",
+    Cancelled: "bg-muted text-muted-foreground",
+  };
+  const PRIORITY_COLORS: Record<string, string> = {
+    Critical: "bg-red-500/10 text-red-600",
+    High: "bg-orange-500/10 text-orange-600",
+    Medium: "bg-amber-500/10 text-amber-600",
+    Low: "bg-emerald-500/10 text-emerald-600",
+  };
+
+  const Row = ({ label, value }: { label: string; value?: string | null }) =>
+    value ? (
+      <div className="flex flex-col gap-0.5">
+        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          {label}
+        </span>
+        <span className="text-sm text-foreground break-words">{value}</span>
+      </div>
+    ) : null;
+
+  const Section = ({ title }: { title: string }) => (
+    <div className="col-span-full pt-2">
+      <p className="text-xs font-heading font-semibold text-muted-foreground uppercase tracking-widest border-b border-border pb-1 mb-2">
+        {title}
+      </p>
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+        {/* Header */}
+        <div className="p-5 border-b border-border flex items-center justify-between bg-muted/30 flex-shrink-0">
+          <div className="flex items-center gap-3">
+            <ProjectAvatar
+              imageUrl={
+                typeof project.projectImage === "string"
+                  ? project.projectImage
+                  : null
+              }
+              name={project.name || "?"}
+              size="md"
+            />
+            <div>
+              <h2 className="font-heading font-semibold text-foreground text-base">
+                {project.name}
+              </h2>
+              <div className="flex items-center gap-2 mt-0.5 flex-wrap">
+                {project.code && (
+                  <span className="font-mono text-xs text-primary">
+                    {project.code}
+                  </span>
+                )}
+                {project.status && (
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[project.status] || "bg-muted text-muted-foreground"}`}
+                  >
+                    {project.status}
+                  </span>
+                )}
+                {project.priority && (
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-xs font-medium ${PRIORITY_COLORS[project.priority] || "bg-muted text-muted-foreground"}`}
+                  >
+                    {project.priority}
+                  </span>
+                )}
+                <span
+                  className={`px-2 py-0.5 rounded-full text-xs font-medium ${project.isActive ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
+                >
+                  {project.isActive ? "Active" : "Inactive"}
+                </span>
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="overflow-y-auto p-5 flex-1">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-4">
+            <Section title="General" />
+            <Row label="Short Name" value={project.shortName} />
+            <Row label="Type" value={project.type} />
+            <Row
+              label="Enterprise / Company"
+              value={project.belongsTo as string}
+            />
+            <Row label="Business Unit" value={project.businessUnit} />
+            <Row label="Client Name" value={project.clientName} />
+            <Row label="Client Code" value={project.clientCode} />
+            <Row label="Location" value={project.location} />
+            <Row label="Description" value={project.description} />
+            <Row label="Remarks" value={project.remarks} />
+
+            <Section title="Timeline" />
+            <Row label="Start Date" value={project.startDate} />
+            <Row label="End Date" value={project.endDate} />
+            <Row label="Team Size" value={project.teamSize} />
+
+            <Section title="Financial" />
+            <Row label="Currency" value={project.currency} />
+          </div>
+        </div>
+
+        <div className="p-4 border-t border-border flex justify-end flex-shrink-0">
+          <button
+            onClick={onClose}
+            className="px-5 py-2 text-sm rounded-lg border border-border hover:bg-muted transition-colors"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function buildProjectColumns(
+  openView: (row: any) => void,
   openEdit: (row: any) => void,
   setDeleteConfirm: (id: number) => void,
 ): ColumnDef<any, unknown>[] {
   return [
-  { accessorKey: "Code", header: "Code", cell: ({ getValue }) => <span className="font-mono text-xs font-medium text-primary">{getValue() as string}</span> },
-  {
-    accessorKey: "Name",
-    header: "Project Name",
-    cell: ({ row }) => (
-      <div className="flex items-center gap-2">
-        <ProjectAvatar imageUrl={row.original.ProjectImage} name={row.original.Name || "?"} />
-        <span className="font-medium text-foreground max-w-[160px] truncate">{row.original.Name}</span>
-      </div>
-    ),
-  },
-  { accessorKey: "belongs_to", header: "Enterprise / Company", cell: ({ getValue }) => <span className="text-xs text-muted-foreground max-w-[140px] truncate block">{(getValue() as string) || "—"}</span> },
-  { accessorKey: "ClientName",  header: "Client",   cell: ({ getValue }) => <span className="text-muted-foreground text-xs">{getValue() as string}</span> },
-  { accessorKey: "Type",        header: "Type",     cell: ({ getValue }) => <span className="text-xs text-muted-foreground">{getValue() as string}</span> },
-  {
-    accessorKey: "Status",
-    header: "Status",
-    cell: ({ getValue }) => {
-      const v = getValue() as string;
-      return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${v === "Active" ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}>{v || "—"}</span>;
+    {
+      accessorKey: "Code",
+      header: "Code",
+      cell: ({ getValue }) => (
+        <span className="font-mono text-xs font-medium text-primary">
+          {getValue() as string}
+        </span>
+      ),
     },
-  },
-  {
-    accessorKey: "Priority",
-    header: "Priority",
-    cell: ({ getValue }) => {
-      const v = getValue() as string;
-      const styles: Record<string,string> = { High: "text-red-500 bg-red-500/10", Medium: "text-amber-500 bg-amber-500/10", Low: "text-emerald-500 bg-emerald-500/10" };
-      return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${styles[v] || "bg-muted text-muted-foreground"}`}>{v || "—"}</span>;
+    {
+      accessorKey: "Name",
+      header: "Project Name",
+      cell: ({ row }) => (
+        <div className="flex items-center gap-2">
+          <ProjectAvatar
+            imageUrl={row.original.ProjectImage}
+            name={row.original.Name || "?"}
+          />
+          <span className="font-medium text-foreground max-w-[160px] truncate">
+            {row.original.Name}
+          </span>
+        </div>
+      ),
     },
-  },
-  {
-    accessorKey: "IsActive",
-    header: "Active",
-    cell: ({ getValue }) => {
-      const active = getValue() as boolean;
-      return <span className={`w-2 h-2 rounded-full inline-block ${active ? "bg-emerald-500" : "bg-muted-foreground/40"}`} />;
+    {
+      accessorKey: "belongs_to",
+      header: "Enterprise / Company",
+      cell: ({ getValue }) => (
+        <span className="text-xs text-muted-foreground max-w-[140px] truncate block">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
     },
-  },
-  {
-    id: "actions",
-    header: "",
-    enableSorting: false,
-    cell: ({ row }) => (
-      <div className="flex items-center justify-end gap-1">
-        <button onClick={() => openEdit(row.original)} className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"><Pencil size={13} /></button>
-        <button onClick={() => setDeleteConfirm(row.original.Id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"><Trash2 size={13} /></button>
-      </div>
-    ),
-  },
+    {
+      accessorKey: "ClientName",
+      header: "Client",
+      cell: ({ getValue }) => (
+        <span className="text-muted-foreground text-xs">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "Type",
+      header: "Type",
+      cell: ({ getValue }) => (
+        <span className="text-xs text-muted-foreground">
+          {getValue() as string}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "Status",
+      header: "Status",
+      cell: ({ getValue }) => {
+        const v = getValue() as string;
+        return (
+          <span
+            className={`px-2 py-0.5 rounded-full text-xs font-medium ${v === "Active" ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
+          >
+            {v || "—"}
+          </span>
+        );
+      },
+    },
+    {
+      accessorKey: "Priority",
+      header: "Priority",
+      cell: ({ getValue }) => {
+        const v = getValue() as string;
+        const styles: Record<string, string> = {
+          High: "text-red-500 bg-red-500/10",
+          Medium: "text-amber-500 bg-amber-500/10",
+          Low: "text-emerald-500 bg-emerald-500/10",
+          Critical: "text-red-600 bg-red-600/10",
+        };
+        return (
+          <span
+            className={`px-2 py-0.5 rounded-full text-xs font-medium ${styles[v] || "bg-muted text-muted-foreground"}`}
+          >
+            {v || "—"}
+          </span>
+        );
+      },
+    },
+    {
+      accessorKey: "IsActive",
+      header: "Active",
+      cell: ({ getValue }) => {
+        const active = getValue() as boolean;
+        return (
+          <span
+            className={`w-2 h-2 rounded-full inline-block ${active ? "bg-emerald-500" : "bg-muted-foreground/40"}`}
+          />
+        );
+      },
+    },
+    {
+      id: "actions",
+      header: "",
+      enableSorting: false,
+      cell: ({ row }) => (
+        <div className="flex items-center justify-end gap-1">
+          <button
+            onClick={() => openView(row.original)}
+            className="p-1.5 rounded-lg text-muted-foreground hover:text-blue-600 hover:bg-blue-500/10"
+            title="View details"
+          >
+            <Eye size={13} />
+          </button>
+          <button
+            onClick={() => openEdit(row.original)}
+            className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
+            title="Edit"
+          >
+            <Pencil size={13} />
+          </button>
+          <button
+            onClick={() => setDeleteConfirm(row.original.Id)}
+            className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+            title="Delete"
+          >
+            <Trash2 size={13} />
+          </button>
+        </div>
+      ),
+    },
   ];
 }
+
 export default function ProjectMaster() {
   const qc = useQueryClient();
   const [form, setForm] = useState<Project>(emptyProject);
   const [editId, setEditId] = useState<number | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [viewTarget, setViewTarget] = useState<Project | null>(null);
   const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState<
     "general" | "timeline" | "financial"
@@ -223,7 +436,7 @@ export default function ProjectMaster() {
     queryFn: getProjects,
   });
 
-  // Enterprise dropdown (business_type = 'E')
+  // Enterprise dropdown
   const { data: enterprises = [] } = useQuery({
     queryKey: ["enterprises-list"],
     queryFn: async () => {
@@ -235,7 +448,7 @@ export default function ProjectMaster() {
     staleTime: 5 * 60 * 1000,
   });
 
-  // Company dropdown (business_type = 'C')
+  // Company dropdown
   const { data: companies = [] } = useQuery({
     queryKey: ["companies-list"],
     queryFn: async () => {
@@ -251,26 +464,33 @@ export default function ProjectMaster() {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const payload: Record<string, any> = {};
-      Object.entries(form).forEach(([key, value]) => {
-        if (
-          key !== "projectImage" &&
-          key !== "enterpriseId" &&
-          key !== "companyId" &&
-          value !== null &&
-          value !== undefined &&
-          value !== ""
-        ) {
-          payload[key] = value;
-        }
-      });
-      // belongsTo: company name takes priority over enterprise name
+      // Determine the final belongs_to value (company name takes priority)
       const resolvedBelongsTo =
         (form.companyId as string) ||
         (form.enterpriseId as string) ||
         (form.belongsTo as string) ||
         null;
-      if (resolvedBelongsTo) payload.belongsTo = resolvedBelongsTo;
+
+      const payload: Record<string, any> = {
+        code: form.code,
+        name: form.name,
+        shortName: form.shortName,
+        type: form.type,
+        businessUnit: form.businessUnit,
+        clientName: form.clientName,
+        clientCode: form.clientCode,
+        teamSize: form.teamSize,
+        startDate: form.startDate || null,
+        endDate: form.endDate || null,
+        currency: form.currency,
+        status: form.status,
+        priority: form.priority,
+        location: form.location,
+        description: form.description,
+        remarks: form.remarks,
+        isActive: form.isActive,
+        belongsTo: resolvedBelongsTo,
+      };
 
       if (form.projectImage instanceof File) {
         const base64 = await new Promise<string>((resolve) => {
@@ -282,6 +502,7 @@ export default function ProjectMaster() {
       } else if (typeof form.projectImage === "string") {
         payload.projectImage = form.projectImage;
       }
+
       if (editId) {
         return updateProject(editId, payload);
       } else {
@@ -374,10 +595,14 @@ export default function ProjectMaster() {
     setActiveTab("general");
   };
 
+  const openView = (row: any) => {
+    setViewTarget(rowToForm(row));
+  };
+
   const columns = useMemo(
-    () => buildProjectColumns(openEdit, setDeleteConfirm),
+    () => buildProjectColumns(openView, openEdit, setDeleteConfirm),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    []
+    [],
   );
 
   const fi = (label: string, key: keyof Project, type = "text", ph = "") => (
@@ -642,6 +867,7 @@ export default function ProjectMaster() {
 
                   {fi("Client Name", "clientName")}
                   {fi("Client Code", "clientCode")}
+                  {fi("Business Unit", "businessUnit")}
                   {fi("Location", "location")}
 
                   <div className="flex items-center gap-3 pt-5 col-span-full">
@@ -716,6 +942,14 @@ export default function ProjectMaster() {
               </button>
             </div>
           </div>
+        )}
+
+        {/* View Modal */}
+        {viewTarget && (
+          <ProjectViewModal
+            project={viewTarget}
+            onClose={() => setViewTarget(null)}
+          />
         )}
 
         {/* Delete Confirmation */}
