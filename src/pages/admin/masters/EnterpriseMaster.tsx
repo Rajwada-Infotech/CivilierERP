@@ -10,6 +10,7 @@ import {
   ToggleRight,
   Upload,
   X,
+  Eye,
 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
@@ -73,7 +74,6 @@ const ENTITY_COLORS: Record<string, string> = {
   "Business Unit": "bg-amber-500/10 text-amber-600",
 };
 
-// Logo avatar shown in the table beside enterprise name
 function LogoAvatar({
   logo,
   name,
@@ -102,56 +102,276 @@ function LogoAvatar({
   );
 }
 
+// ── View Modal ───────────────────────────────────────────────────────────────
+function EnterpriseViewModal({
+  enterprise,
+  onClose,
+}: {
+  enterprise: Enterprise;
+  onClose: () => void;
+}) {
+  const Row = ({ label, value }: { label: string; value?: string | null }) =>
+    value ? (
+      <div className="flex flex-col gap-0.5">
+        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          {label}
+        </span>
+        <span className="text-sm text-foreground break-words">{value}</span>
+      </div>
+    ) : null;
+
+  const Section = ({ title }: { title: string }) => (
+    <div className="col-span-full pt-2">
+      <p className="text-xs font-heading font-semibold text-muted-foreground uppercase tracking-widest border-b border-border pb-1 mb-2">
+        {title}
+      </p>
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+        {/* Header */}
+        <div className="p-5 border-b border-border flex items-center justify-between bg-muted/30 flex-shrink-0">
+          <div className="flex items-center gap-3">
+            <LogoAvatar
+              logo={enterprise.logo}
+              name={enterprise.name || "?"}
+              size="md"
+            />
+            <div>
+              <h2 className="font-heading font-semibold text-foreground text-base">
+                {enterprise.name}
+              </h2>
+              <div className="flex items-center gap-2 mt-0.5">
+                {enterprise.entity_type && (
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-xs font-medium ${ENTITY_COLORS[enterprise.entity_type] || "bg-muted text-muted-foreground"}`}
+                  >
+                    {enterprise.entity_type}
+                  </span>
+                )}
+                <span
+                  className={`px-2 py-0.5 rounded-full text-xs font-medium ${enterprise.status === "Active" ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
+                >
+                  {enterprise.status || "Inactive"}
+                </span>
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="overflow-y-auto p-5 flex-1">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-4">
+            <Section title="General" />
+            <Row label="Short Name" value={enterprise.short_name} />
+            <Row label="Description" value={enterprise.description} />
+            <Row
+              label="Start Date"
+              value={enterprise.start_date?.slice(0, 10)}
+            />
+            <Row label="Start Fin Year" value={enterprise.start_fin_year} />
+            <Row label="Status" value={enterprise.status} />
+            {enterprise.discontinue && (
+              <div className="col-span-full">
+                <span className="px-2 py-0.5 rounded-full text-xs bg-red-500/10 text-red-600">
+                  Discontinued
+                </span>
+              </div>
+            )}
+
+            <Section title="Address" />
+            <Row label="Address Line 1" value={enterprise.address} />
+            <Row label="Address Line 2" value={enterprise.address_line2} />
+            <Row label="City" value={enterprise.city} />
+            <Row label="State" value={enterprise.state} />
+            <Row label="Country" value={enterprise.country} />
+            <Row label="Pincode" value={enterprise.pincode} />
+            <Row label="Phone" value={enterprise.phone_number} />
+            <Row label="Email" value={enterprise.email} />
+            <Row label="Website" value={enterprise.website} />
+            <Row
+              label="Latitude"
+              value={
+                enterprise.latitude != null
+                  ? String(enterprise.latitude)
+                  : undefined
+              }
+            />
+            <Row
+              label="Longitude"
+              value={
+                enterprise.longitude != null
+                  ? String(enterprise.longitude)
+                  : undefined
+              }
+            />
+
+            <Section title="Legal / Compliance" />
+            <Row label="GST Type" value={enterprise.gst_type} />
+            <Row
+              label="GST Issue Date"
+              value={enterprise.gst_issue_date?.slice(0, 10)}
+            />
+            <Row label="TAN" value={enterprise.tan} />
+            <Row label="PAN" value={enterprise.pan} />
+            <Row label="CIN" value={enterprise.cin} />
+            <Row label="CR Code" value={enterprise.cr_code} />
+            <Row label="RERA No." value={enterprise.rera_no} />
+            <Row label="RERA Date" value={enterprise.rera_date?.slice(0, 10)} />
+            <Row label="Trade License" value={enterprise.trade_license} />
+            <Row
+              label="Date of Entry"
+              value={enterprise.date_of_entry?.slice(0, 10)}
+            />
+            <Row
+              label="Date of Establishment"
+              value={enterprise.date_of_establishment?.slice(0, 10)}
+            />
+          </div>
+        </div>
+
+        <div className="p-4 border-t border-border flex justify-end flex-shrink-0">
+          <button
+            onClick={onClose}
+            className="px-5 py-2 text-sm rounded-lg border border-border hover:bg-muted transition-colors"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function buildEnterpriseColumns(
+  openView: (r: Enterprise) => void,
   openEdit: (r: Enterprise) => void,
   setDeleteTarget: (id: number) => void,
 ): ColumnDef<Enterprise, unknown>[] {
   return [
-  {
-    id: "logo",
-    header: "Logo",
-    enableSorting: false,
-    cell: ({ row }) => <LogoAvatar logo={row.original.logo} name={row.original.name || "?"} />,
-  },
-  { accessorKey: "name",       header: "Name",       cell: ({ getValue }) => <span className="font-medium text-foreground">{getValue() as string}</span> },
-  { accessorKey: "short_name", header: "Short Name", cell: ({ getValue }) => <span className="text-muted-foreground">{(getValue() as string) || "—"}</span> },
-  {
-    accessorKey: "entity_type",
-    header: "Type",
-    cell: ({ getValue }) => {
-      const v = getValue() as string;
-      return <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${ENTITY_COLORS[v || ""] || "bg-muted text-muted-foreground"}`}>{v || "—"}</span>;
+    {
+      id: "logo",
+      header: "Logo",
+      enableSorting: false,
+      cell: ({ row }) => (
+        <LogoAvatar logo={row.original.logo} name={row.original.name || "?"} />
+      ),
     },
-  },
-  { accessorKey: "pan",          header: "PAN",      cell: ({ getValue }) => <span className="font-mono text-xs text-muted-foreground">{(getValue() as string) || "—"}</span> },
-  { accessorKey: "gst_type",     header: "GST Type", cell: ({ getValue }) => <span className="text-muted-foreground">{(getValue() as string) || "—"}</span> },
-  { accessorKey: "phone_number", header: "Phone",    cell: ({ getValue }) => <span className="text-muted-foreground">{(getValue() as string) || "—"}</span> },
-  {
-    accessorKey: "active",
-    header: "Status",
-    cell: ({ getValue }) => {
-      const active = getValue() as boolean;
-      return (
-        <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${active ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}>
-          {active ? "Active" : "Inactive"}
+    {
+      accessorKey: "name",
+      header: "Name",
+      cell: ({ getValue }) => (
+        <span className="font-medium text-foreground">
+          {getValue() as string}
         </span>
-      );
+      ),
     },
-  },
-  {
-    id: "actions",
-    header: "",
-    enableSorting: false,
-    cell: ({ row }) => (
-      <div className="flex items-center justify-end gap-1">
-        <button onClick={() => openEdit(row.original)} className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"><Pencil size={13} /></button>
-        <button onClick={() => setDeleteTarget(row.original.id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"><Trash2 size={13} /></button>
-      </div>
-    ),
-  },
+    {
+      accessorKey: "short_name",
+      header: "Short Name",
+      cell: ({ getValue }) => (
+        <span className="text-muted-foreground">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "entity_type",
+      header: "Type",
+      cell: ({ getValue }) => {
+        const v = getValue() as string;
+        return (
+          <span
+            className={`px-2 py-0.5 rounded-full text-xs font-medium ${ENTITY_COLORS[v || ""] || "bg-muted text-muted-foreground"}`}
+          >
+            {v || "—"}
+          </span>
+        );
+      },
+    },
+    {
+      accessorKey: "pan",
+      header: "PAN",
+      cell: ({ getValue }) => (
+        <span className="font-mono text-xs text-muted-foreground">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "gst_type",
+      header: "GST Type",
+      cell: ({ getValue }) => (
+        <span className="text-muted-foreground">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "phone_number",
+      header: "Phone",
+      cell: ({ getValue }) => (
+        <span className="text-muted-foreground">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
+    },
+    {
+      accessorKey: "status",
+      header: "Status",
+      cell: ({ getValue }) => {
+        const status = getValue() as string | null;
+        const isActive = status === "Active";
+        return (
+          <span
+            className={`px-2 py-0.5 rounded-full text-xs font-medium ${isActive ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
+          >
+            {status || "Inactive"}
+          </span>
+        );
+      },
+    },
+    {
+      id: "actions",
+      header: "",
+      enableSorting: false,
+      cell: ({ row }) => (
+        <div className="flex items-center justify-end gap-1">
+          <button
+            onClick={() => openView(row.original)}
+            className="p-1.5 rounded-lg text-muted-foreground hover:text-blue-600 hover:bg-blue-500/10"
+            title="View details"
+          >
+            <Eye size={13} />
+          </button>
+          <button
+            onClick={() => openEdit(row.original)}
+            className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
+            title="Edit"
+          >
+            <Pencil size={13} />
+          </button>
+          <button
+            onClick={() => setDeleteTarget(row.original.id)}
+            className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+            title="Delete"
+          >
+            <Trash2 size={13} />
+          </button>
+        </div>
+      ),
+    },
   ];
 }
+
 export default function EnterpriseMaster() {
   const queryClient = useQueryClient();
   const {
@@ -167,6 +387,7 @@ export default function EnterpriseMaster() {
   const [form, setForm] = useState<Partial<Enterprise>>(empty);
   const [editId, setEditId] = useState<number | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [viewTarget, setViewTarget] = useState<Enterprise | null>(null);
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState<Tab>("general");
   const [deleteTarget, setDeleteTarget] = useState<number | null>(null);
@@ -204,9 +425,14 @@ export default function EnterpriseMaster() {
   };
 
   const columns = useMemo(
-    () => buildEnterpriseColumns(openEdit, setDeleteTarget),
+    () =>
+      buildEnterpriseColumns(
+        (r) => setViewTarget(r),
+        openEdit,
+        setDeleteTarget,
+      ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    []
+    [],
   );
 
   const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -386,7 +612,6 @@ export default function EnterpriseMaster() {
         <div className="rounded-xl border border-border bg-card overflow-hidden">
           <div className="p-4 border-b border-border flex items-center justify-between bg-muted/30">
             <div className="flex items-center gap-3">
-              {/* Live logo preview in form header */}
               <LogoAvatar
                 logo={logoPreview || null}
                 name={form.name || "?"}
@@ -423,7 +648,6 @@ export default function EnterpriseMaster() {
             {/* General */}
             {tab === "general" && (
               <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                {/* Logo upload — full width */}
                 <div className="col-span-full">
                   <label className="block text-xs font-medium text-muted-foreground mb-2">
                     Enterprise Logo
@@ -569,6 +793,14 @@ export default function EnterpriseMaster() {
             </button>
           </div>
         </div>
+      )}
+
+      {/* View Modal */}
+      {viewTarget && (
+        <EnterpriseViewModal
+          enterprise={viewTarget}
+          onClose={() => setViewTarget(null)}
+        />
       )}
 
       {/* Delete Confirm */}

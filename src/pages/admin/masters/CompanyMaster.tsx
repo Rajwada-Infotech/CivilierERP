@@ -13,6 +13,7 @@ import {
   ToggleRight,
   Upload,
   X,
+  Eye,
 } from "lucide-react";
 import { toast } from "sonner";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -138,9 +139,11 @@ function rowToForm(row: any): Company {
     panNumber: row.PAN ?? "",
     tanNumber: row.TAN ?? "",
     gstType: row.GSTType ?? "Regular",
+    // GST number is stored in b_sub_identity_type → aliased as GST in backend
     gstNumber: row.GST ?? "",
     gstDate: row.GSTDate ? row.GSTDate.slice(0, 10) : "",
     tradeLicenseNo: row.TradeLicenseNo ?? "",
+    // TradeLicenseDate stored in rera_date → aliased as TradeLicenseDate
     tradeLicenseDate: row.TradeLicenseDate
       ? row.TradeLicenseDate.slice(0, 10)
       : "",
@@ -153,20 +156,23 @@ function rowToForm(row: any): Company {
     fax: row.Fax ?? "",
     email: row.Email ?? "",
     website: row.Website ?? "",
+    // AuthorizedCapital stored in cost_center → aliased as AuthorizedCapital
     authorizedCapital:
       row.AuthorizedCapital != null ? String(row.AuthorizedCapital) : "",
+    // PaidUpCapital stored in profit_center → aliased as PaidUpCapital
     paidUpCapital: row.PaidUpCapital != null ? String(row.PaidUpCapital) : "",
-    currency: row.Currency ?? "INR",
+    currency: row.currency ?? row.Currency ?? "INR",
     fiscalYearStart: row.FiscalYearStart ?? "April",
+    // AuditorName stored in start_fin_year → aliased as AuditorName
     auditorName: row.AuditorName ?? "",
     isActive: row.IsActive !== 0,
     remarks: row.Remarks ?? "",
     logoUrl: row.LogoUrl ?? "",
+    // belongs_to stores the enterprise name string
     belongsTo: row.belongs_to ?? "",
   };
 }
 
-// Logo avatar shown in the table beside company name
 function LogoAvatar({
   logoUrl,
   name,
@@ -195,7 +201,134 @@ function LogoAvatar({
   );
 }
 
+// ── View Modal ───────────────────────────────────────────────────────────────
+function CompanyViewModal({ row, onClose }: { row: any; onClose: () => void }) {
+  const c = rowToForm(row);
+
+  const Row = ({ label, value }: { label: string; value?: string | null }) =>
+    value ? (
+      <div className="flex flex-col gap-0.5">
+        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          {label}
+        </span>
+        <span className="text-sm text-foreground break-words">{value}</span>
+      </div>
+    ) : null;
+
+  const Section = ({ title }: { title: string }) => (
+    <div className="col-span-full pt-2">
+      <p className="text-xs font-heading font-semibold text-muted-foreground uppercase tracking-widest border-b border-border pb-1 mb-2">
+        {title}
+      </p>
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+      <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
+        {/* Header */}
+        <div className="p-5 border-b border-border flex items-center justify-between bg-muted/30 flex-shrink-0">
+          <div className="flex items-center gap-3">
+            <LogoAvatar logoUrl={c.logoUrl} name={c.name || "?"} size="md" />
+            <div>
+              <h2 className="font-heading font-semibold text-foreground text-base">
+                {c.name}
+              </h2>
+              <div className="flex items-center gap-2 mt-0.5">
+                {c.code && (
+                  <span className="font-mono text-xs text-primary">
+                    {c.code}
+                  </span>
+                )}
+                {c.type && (
+                  <span className="px-2 py-0.5 rounded-full text-xs bg-emerald-500/10 text-emerald-600">
+                    {c.type}
+                  </span>
+                )}
+                <span
+                  className={`px-2 py-0.5 rounded-full text-xs font-medium ${c.isActive ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
+                >
+                  {c.isActive ? "Active" : "Inactive"}
+                </span>
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="overflow-y-auto p-5 flex-1">
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-4">
+            <Section title="General" />
+            <Row label="Legal Name" value={c.legalName} />
+            <Row label="Short Name" value={c.shortName} />
+            <Row label="Industry" value={c.industry} />
+            <Row label="Incorporation Date" value={c.incorporationDate} />
+            <Row label="Currency" value={c.currency} />
+            <Row label="Fiscal Year Start" value={c.fiscalYearStart} />
+            <Row label="Enterprise (Parent)" value={c.belongsTo as string} />
+            <Row label="Remarks" value={c.remarks} />
+
+            <Section title="Address" />
+            <Row label="Registered Address" value={c.registeredAddress} />
+            <Row label="City" value={c.city} />
+            <Row label="State" value={c.state} />
+            <Row label="Country" value={c.country} />
+            <Row label="Pincode" value={c.pincode} />
+            <Row label="Phone" value={c.phone} />
+            <Row label="Fax" value={c.fax} />
+            <Row label="Email" value={c.email} />
+            <Row label="Website" value={c.website} />
+            <Row label="Auditor Name" value={c.auditorName} />
+
+            <Section title="Legal / Compliance" />
+            <Row label="CIN Number" value={c.cinNumber} />
+            <Row label="PAN Number" value={c.panNumber} />
+            <Row label="TAN Number" value={c.tanNumber} />
+            <Row label="GST Type" value={c.gstType} />
+            <Row label="GST Number" value={c.gstNumber} />
+            <Row label="GST Date" value={c.gstDate} />
+            <Row label="Trade License No." value={c.tradeLicenseNo} />
+            <Row label="Trade License Date" value={c.tradeLicenseDate} />
+            <Row
+              label="Authorized Capital"
+              value={
+                c.authorizedCapital
+                  ? `₹ ${Number(c.authorizedCapital).toLocaleString()}`
+                  : undefined
+              }
+            />
+            <Row
+              label="Paid Up Capital"
+              value={
+                c.paidUpCapital
+                  ? `₹ ${Number(c.paidUpCapital).toLocaleString()}`
+                  : undefined
+              }
+            />
+          </div>
+        </div>
+
+        <div className="p-4 border-t border-border flex justify-end flex-shrink-0">
+          <button
+            onClick={onClose}
+            className="px-5 py-2 text-sm rounded-lg border border-border hover:bg-muted transition-colors"
+          >
+            Close
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function buildCompanyColumns(
+  openView: (row: any) => void,
   openEdit: (row: any) => void,
   setDeleteConfirm: (id: number) => void,
 ): ColumnDef<any, unknown>[] {
@@ -295,14 +428,23 @@ function buildCompanyColumns(
       cell: ({ row }) => (
         <div className="flex items-center justify-end gap-1">
           <button
+            onClick={() => openView(row.original)}
+            className="p-1.5 rounded-lg text-muted-foreground hover:text-blue-600 hover:bg-blue-500/10"
+            title="View details"
+          >
+            <Eye size={13} />
+          </button>
+          <button
             onClick={() => openEdit(row.original)}
             className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
+            title="Edit"
           >
             <Pencil size={13} />
           </button>
           <button
             onClick={() => setDeleteConfirm(row.original.Id)}
             className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+            title="Delete"
           >
             <Trash2 size={13} />
           </button>
@@ -311,11 +453,13 @@ function buildCompanyColumns(
     },
   ];
 }
+
 export default function CompanyMaster() {
   const qc = useQueryClient();
   const [form, setForm] = useState<Company>(empty);
   const [editId, setEditId] = useState<number | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [viewTarget, setViewTarget] = useState<any | null>(null);
   const [search, setSearch] = useState("");
   const [activeTab, setActiveTab] = useState<"general" | "address" | "legal">(
     "general",
@@ -353,6 +497,7 @@ export default function CompanyMaster() {
         : "/api/company-master";
       const res = await fetchWithAuth(url, {
         method: editId ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(form),
       });
       if (!res.ok) {
@@ -407,7 +552,12 @@ export default function CompanyMaster() {
   };
 
   const columns = useMemo(
-    () => buildCompanyColumns(openEdit, setDeleteConfirm),
+    () =>
+      buildCompanyColumns(
+        (row) => setViewTarget(row),
+        openEdit,
+        setDeleteConfirm,
+      ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
@@ -542,7 +692,6 @@ export default function CompanyMaster() {
           <div className="rounded-xl border border-border bg-card overflow-hidden">
             <div className="p-4 border-b border-border flex items-center justify-between bg-muted/30">
               <div className="flex items-center gap-3">
-                {/* Live logo preview in form header */}
                 <LogoAvatar
                   logoUrl={logoPreview}
                   name={form.name || "?"}
@@ -577,7 +726,6 @@ export default function CompanyMaster() {
               {/* General tab */}
               {activeTab === "general" && (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                  {/* Logo upload — spans full width */}
                   <div className="col-span-full">
                     <label className="block text-xs font-medium text-muted-foreground mb-2">
                       Company Logo
@@ -653,8 +801,10 @@ export default function CompanyMaster() {
                       <option value="">— Select Enterprise —</option>
                       {enterprises.map((e: any) => {
                         const name = e.name ?? e.Name ?? "";
+                        const id = String(e.id ?? e.Id ?? "");
                         return (
-                          <option key={e.id ?? e.Id} value={name}>
+                          // Store enterprise name in belongs_to (nvarchar column)
+                          <option key={id} value={name}>
                             {name}
                           </option>
                         );
@@ -773,6 +923,14 @@ export default function CompanyMaster() {
               </button>
             </div>
           </div>
+        )}
+
+        {/* View Modal */}
+        {viewTarget && (
+          <CompanyViewModal
+            row={viewTarget}
+            onClose={() => setViewTarget(null)}
+          />
         )}
 
         {/* Delete confirm modal */}
