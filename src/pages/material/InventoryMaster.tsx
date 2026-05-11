@@ -11,17 +11,33 @@ import {
   TrendingUp,
   TrendingDown,
   Layers,
+  ChevronDown,
+  ChevronRight,
+  ArrowDownToLine,
+  ArrowUpFromLine,
 } from "lucide-react";
 import {
   getInventoryMaster,
   type InventoryMasterRow,
 } from "@/api/inventoryMasterApi";
+import { getStockLedger } from "@/api/stockLedgerApi";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const fmtNum = (n: number) =>
   new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(n ?? 0);
 
 const today = () => new Date().toISOString().slice(0, 10);
+
+const fmtDate = (d: string | null) => {
+  if (!d) return "—";
+  return new Date(d).toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+};
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 function SummaryCard({
@@ -46,7 +62,9 @@ function SummaryCard({
       </div>
       <div>
         <p className="text-xs text-muted-foreground">{label}</p>
-        <p className="text-sm font-heading font-bold text-foreground">{value}</p>
+        <p className="text-sm font-heading font-bold text-foreground">
+          {value}
+        </p>
       </div>
     </div>
   );
@@ -71,6 +89,118 @@ function StockBadge({ value }: { value: number }) {
     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium bg-muted text-muted-foreground border border-border">
       —
     </span>
+  );
+}
+
+// ─── Stock Ledger Panel (per item drill-down) ─────────────────────────────────
+function StockLedgerPanel({ itemId }: { itemId: string }) {
+  const { data, isLoading } = useQuery({
+    queryKey: ["stock-ledger-item", itemId],
+    queryFn: () => getStockLedger({ itemId, limit: 50, page: 1 }),
+    staleTime: 60_000,
+  });
+
+  const entries = data?.data ?? [];
+
+  if (isLoading) {
+    return (
+      <div className="px-6 py-4 flex items-center gap-2 text-xs text-muted-foreground">
+        <RefreshCw size={12} className="animate-spin" /> Loading ledger…
+      </div>
+    );
+  }
+
+  if (entries.length === 0) {
+    return (
+      <div className="px-6 py-4 text-xs text-muted-foreground italic">
+        No ledger entries found for this item.
+      </div>
+    );
+  }
+
+  return (
+    <div className="border-t border-border bg-muted/20">
+      <div className="overflow-x-auto">
+        <table className="w-full text-[11px]">
+          <thead>
+            <tr className="border-b border-border bg-muted/40">
+              <th className="px-4 py-2 text-left font-semibold text-muted-foreground">
+                Stock ID
+              </th>
+              <th className="px-4 py-2 text-left font-semibold text-muted-foreground">
+                Item Name
+              </th>
+              <th className="px-4 py-2 text-left font-semibold text-muted-foreground">
+                Type
+              </th>
+              <th className="px-4 py-2 text-right font-semibold text-muted-foreground">
+                Qty
+              </th>
+              <th className="px-4 py-2 text-left font-semibold text-muted-foreground">
+                UOM
+              </th>
+              <th className="px-4 py-2 text-left font-semibold text-muted-foreground">
+                Ref Type
+              </th>
+              <th className="px-4 py-2 text-left font-semibold text-muted-foreground">
+                Doc No
+              </th>
+              <th className="px-4 py-2 text-left font-semibold text-muted-foreground">
+                Date
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {entries.map((e) => (
+              <tr
+                key={e.StockID}
+                className="border-b border-border/50 hover:bg-muted/30 transition-colors"
+              >
+                <td className="px-4 py-2 font-mono text-muted-foreground">
+                  {e.StockID}
+                </td>
+                <td className="px-4 py-2 font-medium text-foreground">
+                  {e.ItemName || "—"}
+                </td>
+                <td className="px-4 py-2">
+                  {e.Type === "IN" ? (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-emerald-500/10 text-emerald-600">
+                      <ArrowDownToLine size={9} /> IN
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold bg-red-500/10 text-red-600">
+                      <ArrowUpFromLine size={9} /> OUT
+                    </span>
+                  )}
+                </td>
+                <td className="px-4 py-2 text-right font-mono font-semibold">
+                  {fmtNum(e.Qty)}
+                </td>
+                <td className="px-4 py-2 text-muted-foreground">
+                  {e.UOMName || e.UOM || "—"}
+                </td>
+                <td className="px-4 py-2">
+                  <span className="px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono">
+                    {e.RefType || "—"}
+                  </span>
+                </td>
+                <td className="px-4 py-2 font-mono text-primary">
+                  {(e as any).DocNo || e.GRNNo || "—"}
+                </td>
+                <td className="px-4 py-2 text-muted-foreground whitespace-nowrap">
+                  {fmtDate(e.LedgerDate)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {(data?.total ?? 0) > 50 && (
+        <p className="px-4 py-2 text-[10px] text-muted-foreground border-t border-border">
+          Showing 50 of {data?.total} entries
+        </p>
+      )}
+    </div>
   );
 }
 
@@ -100,7 +230,7 @@ function exportToCsv(rows: InventoryMasterRow[], date: string) {
         r.StockIn,
         r.StockOut,
         r.ClosingStock,
-      ].join(",")
+      ].join(","),
     ),
   ];
   const blob = new Blob([csvRows.join("\n")], { type: "text/csv" });
@@ -116,15 +246,9 @@ function exportToCsv(rows: InventoryMasterRow[], date: string) {
 export default function InventoryMaster() {
   const [selectedDate, setSelectedDate] = useState<string>(today());
   const [search, setSearch] = useState("");
+  const [expandedItemId, setExpandedItemId] = useState<string | null>(null);
 
-  const {
-    data,
-    isLoading,
-    isError,
-    error,
-    refetch,
-    isFetching,
-  } = useQuery({
+  const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
     queryKey: ["inventory-master", selectedDate],
     queryFn: () => getInventoryMaster(selectedDate),
     staleTime: 60_000,
@@ -142,7 +266,7 @@ export default function InventoryMaster() {
         r.ItemName?.toLowerCase().includes(q) ||
         r.ItemGroupName?.toLowerCase().includes(q) ||
         r.UOMName?.toLowerCase().includes(q) ||
-        r.UOMCode?.toLowerCase().includes(q)
+        r.UOMCode?.toLowerCase().includes(q),
     );
   }, [rows, search]);
 
@@ -152,18 +276,23 @@ export default function InventoryMaster() {
       filtered.reduce(
         (acc, r) => ({
           opening: acc.opening + r.OpeningStock,
-          in:      acc.in      + r.StockIn,
-          out:     acc.out     + r.StockOut,
+          in: acc.in + r.StockIn,
+          out: acc.out + r.StockOut,
           closing: acc.closing + r.ClosingStock,
         }),
-        { opening: 0, in: 0, out: 0, closing: 0 }
+        { opening: 0, in: 0, out: 0, closing: 0 },
       ),
-    [filtered]
+    [filtered],
   );
+
+  const toggleExpand = (itemId: string) =>
+    setExpandedItemId((prev) => (prev === itemId ? null : itemId));
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "Material Module", "Inventory Master"]} />
+      <Breadcrumbs
+        items={["Dashboard", "Material Module", "Inventory Master"]}
+      />
 
       <div className="p-6 space-y-5">
         {/* ── Header ──────────────────────────────────────────────────────── */}
@@ -174,7 +303,8 @@ export default function InventoryMaster() {
               Inventory Master
             </h1>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Daily stock positions: opening, received, issued, and closing balance
+              Daily stock positions: opening, received, issued, and closing
+              balance
             </p>
           </div>
 
@@ -207,7 +337,10 @@ export default function InventoryMaster() {
               disabled={isFetching}
               className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-50"
             >
-              <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+              <RefreshCw
+                size={13}
+                className={isFetching ? "animate-spin" : ""}
+              />
               Refresh
             </button>
           </div>
@@ -218,7 +351,8 @@ export default function InventoryMaster() {
           <div className="px-4 py-3 rounded-lg bg-red-500/10 text-red-600 text-sm border border-red-500/20 flex items-center gap-2">
             <AlertCircle size={15} />
             Failed to load inventory data
-            {(error as Error)?.message ? `: ${(error as Error).message}` : ""}. Please refresh.
+            {(error as Error)?.message ? `: ${(error as Error).message}` : ""}.
+            Please refresh.
           </div>
         )}
 
@@ -263,8 +397,13 @@ export default function InventoryMaster() {
                 Stock Position
               </p>
               <p className="text-xs text-muted-foreground">
-                {selectedDate} · {filtered.length} item{filtered.length !== 1 ? "s" : ""}
+                {selectedDate} · {filtered.length} item
+                {filtered.length !== 1 ? "s" : ""}
                 {search ? ` (filtered from ${rows.length})` : ""}
+                {" · "}
+                <span className="text-muted-foreground/70">
+                  Click a row to view ledger entries
+                </span>
               </p>
             </div>
             <label className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border bg-background text-xs">
@@ -284,21 +423,38 @@ export default function InventoryMaster() {
             <table className="w-full text-xs">
               <thead>
                 <tr className="border-b border-border bg-muted/40">
-                  <th className="px-4 py-3 text-left font-semibold text-muted-foreground">#</th>
-                  <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Item Name</th>
-                  <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Item Group</th>
-                  <th className="px-4 py-3 text-left font-semibold text-muted-foreground">UOM</th>
-                  <th className="px-4 py-3 text-right font-semibold text-muted-foreground">Opening Stock</th>
-                  <th className="px-4 py-3 text-right font-semibold text-muted-foreground">Stock In</th>
-                  <th className="px-4 py-3 text-right font-semibold text-muted-foreground">Stock Out</th>
-                  <th className="px-4 py-3 text-right font-semibold text-muted-foreground">Closing Stock</th>
+                  <th className="px-4 py-3 w-8"></th>
+                  <th className="px-4 py-3 text-left font-semibold text-muted-foreground">
+                    #
+                  </th>
+                  <th className="px-4 py-3 text-left font-semibold text-muted-foreground">
+                    Item Name
+                  </th>
+                  <th className="px-4 py-3 text-left font-semibold text-muted-foreground">
+                    Item Group
+                  </th>
+                  <th className="px-4 py-3 text-left font-semibold text-muted-foreground">
+                    UOM
+                  </th>
+                  <th className="px-4 py-3 text-right font-semibold text-muted-foreground">
+                    Opening Stock
+                  </th>
+                  <th className="px-4 py-3 text-right font-semibold text-muted-foreground">
+                    Stock In
+                  </th>
+                  <th className="px-4 py-3 text-right font-semibold text-muted-foreground">
+                    Stock Out
+                  </th>
+                  <th className="px-4 py-3 text-right font-semibold text-muted-foreground">
+                    Closing Stock
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {isLoading ? (
                   Array.from({ length: 8 }).map((_, i) => (
                     <tr key={i} className="border-b border-border">
-                      {Array.from({ length: 8 }).map((_, j) => (
+                      {Array.from({ length: 9 }).map((_, j) => (
                         <td key={j} className="px-4 py-3">
                           <div className="h-3 bg-muted rounded animate-pulse" />
                         </td>
@@ -308,7 +464,7 @@ export default function InventoryMaster() {
                 ) : filtered.length === 0 ? (
                   <tr>
                     <td
-                      colSpan={8}
+                      colSpan={9}
                       className="px-4 py-12 text-center text-muted-foreground"
                     >
                       {search
@@ -317,93 +473,119 @@ export default function InventoryMaster() {
                     </td>
                   </tr>
                 ) : (
-                  filtered.map((row, idx) => (
-                    <tr
-                      key={row.ItemID}
-                      className="border-b border-border hover:bg-muted/30 transition-colors"
-                    >
-                      {/* # */}
-                      <td className="px-4 py-3 text-muted-foreground font-mono">
-                        {idx + 1}
-                      </td>
-
-                      {/* Item Name */}
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <span className="w-7 h-7 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
-                            <Package size={13} className="text-emerald-600" />
-                          </span>
-                          <span className="font-medium text-foreground">
-                            {row.ItemName || "—"}
-                          </span>
-                        </div>
-                      </td>
-
-                      {/* Item Group */}
-                      <td className="px-4 py-3 text-muted-foreground">
-                        {row.ItemGroupName || "—"}
-                      </td>
-
-                      {/* UOM */}
-                      <td className="px-4 py-3">
-                        {row.UOMCode ? (
-                          <span
-                            className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-500/10 text-blue-600 border border-blue-400/20"
-                            title={row.UOMName || ""}
-                          >
-                            {row.UOMCode}
-                            {row.UOMSymbol && row.UOMSymbol !== row.UOMCode
-                              ? ` (${row.UOMSymbol})`
-                              : ""}
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </td>
-
-                      {/* Opening Stock */}
-                      <td className="px-4 py-3 text-right">
-                        <StockBadge value={row.OpeningStock} />
-                      </td>
-
-                      {/* Stock In */}
-                      <td className="px-4 py-3 text-right">
-                        {row.StockIn > 0 ? (
-                          <span className="text-emerald-600 font-medium">
-                            +{fmtNum(row.StockIn)}
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </td>
-
-                      {/* Stock Out */}
-                      <td className="px-4 py-3 text-right">
-                        {row.StockOut > 0 ? (
-                          <span className="text-red-600 font-medium">
-                            -{fmtNum(row.StockOut)}
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground">—</span>
-                        )}
-                      </td>
-
-                      {/* Closing Stock */}
-                      <td className="px-4 py-3 text-right">
-                        <span
-                          className={`font-heading font-bold ${
-                            row.ClosingStock > 0
-                              ? "text-emerald-600"
-                              : row.ClosingStock < 0
-                                ? "text-red-600"
-                                : "text-muted-foreground"
-                          }`}
+                  filtered.map((row, idx) => {
+                    const isExpanded = expandedItemId === row.ItemID;
+                    return (
+                      <React.Fragment key={row.ItemID}>
+                        <tr
+                          className={`border-b border-border hover:bg-muted/30 transition-colors cursor-pointer ${isExpanded ? "bg-muted/20" : ""}`}
+                          onClick={() => toggleExpand(row.ItemID)}
                         >
-                          {fmtNum(row.ClosingStock)}
-                        </span>
-                      </td>
-                    </tr>
-                  ))
+                          {/* Expand toggle */}
+                          <td className="px-4 py-3 text-muted-foreground">
+                            {isExpanded ? (
+                              <ChevronDown size={13} />
+                            ) : (
+                              <ChevronRight size={13} />
+                            )}
+                          </td>
+
+                          {/* # */}
+                          <td className="px-4 py-3 text-muted-foreground font-mono">
+                            {idx + 1}
+                          </td>
+
+                          {/* Item Name */}
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <span className="w-7 h-7 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
+                                <Package
+                                  size={13}
+                                  className="text-emerald-600"
+                                />
+                              </span>
+                              <span className="font-medium text-foreground">
+                                {row.ItemName || "—"}
+                              </span>
+                            </div>
+                          </td>
+
+                          {/* Item Group */}
+                          <td className="px-4 py-3 text-muted-foreground">
+                            {row.ItemGroupName || "—"}
+                          </td>
+
+                          {/* UOM */}
+                          <td className="px-4 py-3">
+                            {row.UOMCode ? (
+                              <span
+                                className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold bg-blue-500/10 text-blue-600 border border-blue-400/20"
+                                title={row.UOMName || ""}
+                              >
+                                {row.UOMCode}
+                                {row.UOMSymbol && row.UOMSymbol !== row.UOMCode
+                                  ? ` (${row.UOMSymbol})`
+                                  : ""}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </td>
+
+                          {/* Opening Stock */}
+                          <td className="px-4 py-3 text-right">
+                            <StockBadge value={row.OpeningStock} />
+                          </td>
+
+                          {/* Stock In */}
+                          <td className="px-4 py-3 text-right">
+                            {row.StockIn > 0 ? (
+                              <span className="text-emerald-600 font-medium">
+                                +{fmtNum(row.StockIn)}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </td>
+
+                          {/* Stock Out */}
+                          <td className="px-4 py-3 text-right">
+                            {row.StockOut > 0 ? (
+                              <span className="text-red-600 font-medium">
+                                -{fmtNum(row.StockOut)}
+                              </span>
+                            ) : (
+                              <span className="text-muted-foreground">—</span>
+                            )}
+                          </td>
+
+                          {/* Closing Stock */}
+                          <td className="px-4 py-3 text-right">
+                            <span
+                              className={`font-heading font-bold ${
+                                row.ClosingStock > 0
+                                  ? "text-emerald-600"
+                                  : row.ClosingStock < 0
+                                    ? "text-red-600"
+                                    : "text-muted-foreground"
+                              }`}
+                            >
+                              {fmtNum(row.ClosingStock)}
+                            </span>
+                          </td>
+                        </tr>
+
+                        {/* ── Ledger drill-down ── */}
+                        {isExpanded && (
+                          <tr className="border-b border-border">
+                            <td colSpan={9} className="p-0">
+                              <StockLedgerPanel itemId={row.ItemID} />
+                            </td>
+                          </tr>
+                        )}
+                      </React.Fragment>
+                    );
+                  })
                 )}
               </tbody>
 
@@ -411,7 +593,10 @@ export default function InventoryMaster() {
               {!isLoading && filtered.length > 0 && (
                 <tfoot>
                   <tr className="border-t-2 border-border bg-muted/60">
-                    <td colSpan={4} className="px-4 py-3 font-semibold text-foreground">
+                    <td
+                      colSpan={5}
+                      className="px-4 py-3 font-semibold text-foreground"
+                    >
                       Total ({filtered.length} items)
                     </td>
                     <td className="px-4 py-3 text-right font-bold text-foreground">
