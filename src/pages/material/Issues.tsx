@@ -4,15 +4,39 @@ import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import * as issuesApi from "@/api/issuesApi";
 import {
-  CalendarDays, FileText, Save, Search, Eye, Trash2, Plus,
-  RefreshCw, X, PackageMinus, Edit3, Building2, FolderOpen,
-  Box, Ruler, Hash, ChevronDown, AlertTriangle, TrendingDown,
-  BarChart3, ShoppingCart, Package, CheckCircle2, Calendar,
+  CalendarDays,
+  FileText,
+  Save,
+  Search,
+  Eye,
+  Trash2,
+  Plus,
+  RefreshCw,
+  X,
+  PackageMinus,
+  Edit3,
+  Building2,
+  FolderOpen,
+  Box,
+  Ruler,
+  Hash,
+  ChevronDown,
+  AlertTriangle,
+  TrendingDown,
+  BarChart3,
+  ShoppingCart,
+  Package,
+  CheckCircle2,
+  Calendar,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,7 +47,7 @@ import { Badge } from "@/components/ui/badge";
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface CartItem {
-  _key: string;       // local unique key for React
+  _key: string; // local unique key for React
   ItemId: string;
   UOMCode: string;
   Quantity: string;
@@ -79,13 +103,24 @@ function StockPill({
     <div className="flex flex-col gap-0.5">
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <BarChart3 size={11} />
-        <span>Available: <span className="font-semibold text-foreground">{available.toFixed(2)} {uomSymbol}</span></span>
+        <span>
+          Available:{" "}
+          <span className="font-semibold text-foreground">
+            {available.toFixed(2)} {uomSymbol}
+          </span>
+        </span>
       </div>
       {requested > 0 && (
-        <div className={`flex items-center gap-1 text-xs font-semibold ${isOver ? "text-destructive" : isWarn ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}>
+        <div
+          className={`flex items-center gap-1 text-xs font-semibold ${isOver ? "text-destructive" : isWarn ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}
+        >
           {isOver ? <AlertTriangle size={11} /> : <TrendingDown size={11} />}
           After: {remaining.toFixed(2)} {uomSymbol}
-          {isOver && <span className="ml-1 text-destructive font-bold">EXCEEDS STOCK</span>}
+          {isOver && (
+            <span className="ml-1 text-destructive font-bold">
+              EXCEEDS STOCK
+            </span>
+          )}
         </div>
       )}
     </div>
@@ -95,21 +130,36 @@ function StockPill({
 // ─── Field wrapper ────────────────────────────────────────────────────────────
 
 const Field = ({
-  label, required, children, className = "",
+  label,
+  required,
+  children,
+  className = "",
 }: {
-  label: string; required?: boolean; children: React.ReactNode; className?: string;
+  label: string;
+  required?: boolean;
+  children: React.ReactNode;
+  className?: string;
 }) => (
   <div className={className}>
     <label className="block text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-1.5">
-      {label}{required && <span className="text-destructive ml-0.5">*</span>}
+      {label}
+      {required && <span className="text-destructive ml-0.5">*</span>}
     </label>
     {children}
   </div>
 );
 
-const DetailRow = ({ label, value }: { label: string; value?: React.ReactNode }) => (
+const DetailRow = ({
+  label,
+  value,
+}: {
+  label: string;
+  value?: React.ReactNode;
+}) => (
   <div>
-    <p className="text-xs uppercase tracking-widest font-semibold text-muted-foreground mb-1">{label}</p>
+    <p className="text-xs uppercase tracking-widest font-semibold text-muted-foreground mb-1">
+      {label}
+    </p>
     <div className="font-medium text-foreground">{value ?? "—"}</div>
   </div>
 );
@@ -180,7 +230,12 @@ export default function Issues() {
   // ── Auto-select active fin year ──────────────────────────────────────────
 
   useEffect(() => {
-    if (finYears.length > 0 && !header.finYearId && viewMode === "form" && !editingId) {
+    if (
+      finYears.length > 0 &&
+      !header.finYearId &&
+      viewMode === "form" &&
+      !editingId
+    ) {
       const active = (finYears as any[]).find((f) => f.isActive);
       if (active) setH("finYearId", String(active.id));
     }
@@ -206,11 +261,11 @@ export default function Issues() {
     <K extends keyof CartItem>(key: string, field: K, value: CartItem[K]) => {
       setCart((prev) =>
         prev.map((item) =>
-          item._key === key ? { ...item, [field]: value } : item
-        )
+          item._key === key ? { ...item, [field]: value } : item,
+        ),
       );
     },
-    []
+    [],
   );
 
   const pickItem = useCallback(
@@ -227,16 +282,16 @@ export default function Issues() {
                 DefaultUOM: found?.DefaultUOM || "",
                 UOMCode: found?.DefaultUOM || ci.UOMCode,
               }
-            : ci
-        )
+            : ci,
+        ),
       );
     },
-    [itemMap]
+    [itemMap],
   );
 
   const addCartRow = () => setCart((p) => [...p, blankCartItem()]);
   const removeCartRow = (key: string) =>
-    setCart((p) => p.length > 1 ? p.filter((i) => i._key !== key) : p);
+    setCart((p) => (p.length > 1 ? p.filter((i) => i._key !== key) : p));
 
   // Realtime stock including already-issued qty for other rows in the same item
   const getStockForRow = (cartKey: string, itemId: string): number => {
@@ -259,7 +314,7 @@ export default function Issues() {
           ci.UOMCode &&
           ci.Quantity &&
           Number(ci.Quantity) > 0 &&
-          Number(ci.Quantity) <= getStockForRow(ci._key, ci.ItemId)
+          Number(ci.Quantity) <= getStockForRow(ci._key, ci.ItemId),
       )
     );
   }, [cart, itemMap]);
@@ -268,12 +323,12 @@ export default function Issues() {
     () =>
       Boolean(
         header.companyId &&
-          header.projectId &&
-          header.finYearId &&
-          header.date &&
-          header.reason.trim()
+        header.projectId &&
+        header.finYearId &&
+        header.date &&
+        header.reason.trim(),
       ),
-    [header]
+    [header],
   );
 
   const canSave = headerIsValid && cartIsValid;
@@ -362,7 +417,10 @@ export default function Issues() {
   const onSave = () => {
     if (!canSave) {
       if (!headerIsValid) toast.error("Fill all required header fields");
-      else toast.error("Each cart item needs item, UOM, and valid quantity ≤ available stock");
+      else
+        toast.error(
+          "Each cart item needs item, UOM, and valid quantity ≤ available stock",
+        );
       return;
     }
     const payload = {
@@ -418,7 +476,9 @@ export default function Issues() {
       accessorKey: "FinYearName",
       header: "Fin Year",
       cell: ({ getValue }) => (
-        <span className="text-xs font-medium text-muted-foreground">{String(getValue() || "—")}</span>
+        <span className="text-xs font-medium text-muted-foreground">
+          {String(getValue() || "—")}
+        </span>
       ),
     },
     {
@@ -427,8 +487,12 @@ export default function Issues() {
       cell: ({ row }) => (
         <div className="flex items-center gap-1.5">
           <ShoppingCart size={12} className="text-muted-foreground" />
-          <span className="font-semibold text-sm">{row.original.ItemCount || 0}</span>
-          <span className="text-xs text-muted-foreground">({(row.original.TotalQty || 0).toFixed(2)} units)</span>
+          <span className="font-semibold text-sm">
+            {row.original.ItemCount || 0}
+          </span>
+          <span className="text-xs text-muted-foreground">
+            ({(row.original.TotalQty || 0).toFixed(2)} units)
+          </span>
         </div>
       ),
     },
@@ -439,7 +503,13 @@ export default function Issues() {
         const v = getValue() as string;
         return (
           <span className="text-sm text-muted-foreground">
-            {v ? new Date(v).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"}
+            {v
+              ? new Date(v).toLocaleDateString("en-IN", {
+                  day: "2-digit",
+                  month: "short",
+                  year: "numeric",
+                })
+              : "—"}
           </span>
         );
       },
@@ -447,7 +517,9 @@ export default function Issues() {
     {
       accessorKey: "Status",
       header: "Status",
-      cell: ({ getValue }) => <StatusBadge status={(getValue() as string) || "Draft"} />,
+      cell: ({ getValue }) => (
+        <StatusBadge status={(getValue() as string) || "Draft"} />
+      ),
     },
     {
       id: "actions",
@@ -473,7 +545,11 @@ export default function Issues() {
           <button
             type="button"
             onClick={() => {
-              if (confirm("Delete this issue permanently? This will reverse the stock deduction."))
+              if (
+                confirm(
+                  "Delete this issue permanently? This will reverse the stock deduction.",
+                )
+              )
                 deleteMutation.mutate(row.original.IssueId);
             }}
             className="p-1.5 rounded hover:bg-destructive/10 text-destructive transition-colors"
@@ -498,7 +574,9 @@ export default function Issues() {
         <CardHeader className="pb-3 border-b border-border">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
-              <CardTitle className="text-base font-semibold">Issue Register</CardTitle>
+              <CardTitle className="text-base font-semibold">
+                Issue Register
+              </CardTitle>
               {!loadingIssues && (
                 <p className="text-xs text-muted-foreground mt-0.5">
                   {totalCount} record{totalCount !== 1 ? "s" : ""}
@@ -506,10 +584,16 @@ export default function Issues() {
               )}
             </div>
             <div className="relative w-full sm:w-64">
-              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Search
+                size={13}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+              />
               <Input
                 value={search}
-                onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setPage(1);
+                }}
                 placeholder="Search issue no, company…"
                 className="pl-9 h-9 text-sm"
               />
@@ -532,10 +616,28 @@ export default function Issues() {
               />
               {totalPages > 1 && (
                 <div className="flex items-center justify-between border-t border-border px-6 py-3 text-sm">
-                  <span className="text-muted-foreground">Page {page} of {totalPages}</span>
+                  <span className="text-muted-foreground">
+                    Page {page} of {totalPages}
+                  </span>
                   <div className="flex gap-2">
-                    <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(p - 1, 1))} disabled={page <= 1}>Previous</Button>
-                    <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.min(p + 1, totalPages))} disabled={page >= totalPages}>Next</Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPage((p) => Math.max(p - 1, 1))}
+                      disabled={page <= 1}
+                    >
+                      Previous
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        setPage((p) => Math.min(p + 1, totalPages))
+                      }
+                      disabled={page >= totalPages}
+                    >
+                      Next
+                    </Button>
                   </div>
                 </div>
               )}
@@ -549,12 +651,15 @@ export default function Issues() {
   // ── Form view ─────────────────────────────────────────────────────────────
 
   const IssueForm = () => {
-    const totalCartQty = cart.reduce((s, ci) => s + (Number(ci.Quantity) || 0), 0);
+    const totalCartQty = cart.reduce(
+      (s, ci) => s + (Number(ci.Quantity) || 0),
+      0,
+    );
     const hasStockError = cart.some(
       (ci) =>
         ci.ItemId &&
         ci.Quantity &&
-        Number(ci.Quantity) > getStockForRow(ci._key, ci.ItemId)
+        Number(ci.Quantity) > getStockForRow(ci._key, ci.ItemId),
     );
 
     return (
@@ -563,10 +668,19 @@ export default function Issues() {
         <Card className="border-border shadow-sm">
           <CardHeader className="pb-3 border-b border-border bg-muted/20 flex flex-row items-center justify-between">
             <CardTitle className="text-base font-semibold flex items-center gap-2">
-              {editingId ? <Edit3 size={15} className="text-primary" /> : <FileText size={15} className="text-primary" />}
+              {editingId ? (
+                <Edit3 size={15} className="text-primary" />
+              ) : (
+                <FileText size={15} className="text-primary" />
+              )}
               {editingId ? "Edit Material Issue" : "New Material Issue"}
             </CardTitle>
-            <Button variant="ghost" size="icon" onClick={goToList} className="h-8 w-8">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={goToList}
+              className="h-8 w-8"
+            >
               <X size={15} />
             </Button>
           </CardHeader>
@@ -575,67 +689,119 @@ export default function Issues() {
             {/* Doc number preview */}
             <div className="flex items-center gap-2 rounded-lg border border-dashed border-border bg-muted/30 px-4 py-2.5">
               <FileText size={13} className="text-muted-foreground shrink-0" />
-              <span className="text-xs text-muted-foreground font-medium uppercase tracking-widest mr-2">Issue No:</span>
+              <span className="text-xs text-muted-foreground font-medium uppercase tracking-widest mr-2">
+                Issue No:
+              </span>
               {editingId ? (
                 <span className="font-mono font-bold text-primary text-sm">
-                  {header.companyId ? viewingRecord?.DocNo ?? "Immutable after creation" : "—"}
+                  {header.companyId
+                    ? (viewingRecord?.DocNo ?? "Immutable after creation")
+                    : "—"}
                 </span>
               ) : issueNumberPreview?.nextDocNo ? (
-                <span className="font-mono font-bold text-primary text-sm">{issueNumberPreview.nextDocNo}</span>
+                <span className="font-mono font-bold text-primary text-sm">
+                  {issueNumberPreview.nextDocNo}
+                </span>
               ) : loadingPreview ? (
-                <span className="text-sm text-muted-foreground animate-pulse">Loading…</span>
+                <span className="text-sm text-muted-foreground animate-pulse">
+                  Loading…
+                </span>
               ) : (
-                <span className="text-sm text-muted-foreground/50 italic">Auto-generated on save</span>
+                <span className="text-sm text-muted-foreground/50 italic">
+                  Auto-generated on save
+                </span>
               )}
             </div>
 
             {/* Row 1: Company | Project | Fin Year | Date */}
             <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
               <Field label="Company" required>
-                <Select value={header.companyId} onValueChange={(v) => setH("companyId", v)}>
+                <Select
+                  value={header.companyId}
+                  onValueChange={(v) => setH("companyId", v)}
+                >
                   <SelectTrigger className="h-9">
                     <div className="flex items-center gap-2 min-w-0">
-                      <Building2 size={13} className="text-muted-foreground shrink-0" />
-                      <SelectValue placeholder={loadingCompanies ? "Loading…" : "Select company"} />
+                      <Building2
+                        size={13}
+                        className="text-muted-foreground shrink-0"
+                      />
+                      <SelectValue
+                        placeholder={
+                          loadingCompanies ? "Loading…" : "Select company"
+                        }
+                      />
                     </div>
                   </SelectTrigger>
                   <SelectContent>
                     {(companies as any[]).map((c) => (
-                      <SelectItem key={c.id} value={String(c.id)}>{c.name}</SelectItem>
+                      <SelectItem key={c.id} value={String(c.id)}>
+                        {c.label ?? c.name}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </Field>
 
               <Field label="Project" required>
-                <Select value={header.projectId} onValueChange={(v) => setH("projectId", v)}>
+                <Select
+                  value={header.projectId}
+                  onValueChange={(v) => setH("projectId", v)}
+                >
                   <SelectTrigger className="h-9">
                     <div className="flex items-center gap-2 min-w-0">
-                      <FolderOpen size={13} className="text-muted-foreground shrink-0" />
-                      <SelectValue placeholder={loadingProjects ? "Loading…" : "Select project"} />
+                      <FolderOpen
+                        size={13}
+                        className="text-muted-foreground shrink-0"
+                      />
+                      <SelectValue
+                        placeholder={
+                          loadingProjects ? "Loading…" : "Select project"
+                        }
+                      />
                     </div>
                   </SelectTrigger>
                   <SelectContent>
                     {(projects as any[]).map((p) => (
-                      <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
+                      <SelectItem key={p.id} value={String(p.id)}>
+                        {p.name}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </Field>
 
               <Field label="Financial Year" required>
-                <Select value={header.finYearId} onValueChange={(v) => setH("finYearId", v)}>
+                <Select
+                  value={header.finYearId}
+                  onValueChange={(v) => setH("finYearId", v)}
+                >
                   <SelectTrigger className="h-9">
                     <div className="flex items-center gap-2 min-w-0">
-                      <Calendar size={13} className="text-muted-foreground shrink-0" />
-                      <SelectValue placeholder={loadingFinYears ? "Loading…" : "Select fin year"} />
+                      <Calendar
+                        size={13}
+                        className="text-muted-foreground shrink-0"
+                      />
+                      <SelectValue
+                        placeholder={
+                          loadingFinYears ? "Loading…" : "Select fin year"
+                        }
+                      />
                     </div>
                   </SelectTrigger>
                   <SelectContent>
                     {(finYears as any[]).map((fy) => (
-                      <SelectItem key={fy.id} value={String(fy.id)} disabled={fy.isLocked}>
+                      <SelectItem
+                        key={fy.id}
+                        value={String(fy.id)}
+                        disabled={fy.isLocked}
+                      >
                         {fy.name}
-                        {fy.isLocked && <span className="ml-1 text-xs text-muted-foreground">(locked)</span>}
+                        {fy.isLocked && (
+                          <span className="ml-1 text-xs text-muted-foreground">
+                            (locked)
+                          </span>
+                        )}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -644,7 +810,10 @@ export default function Issues() {
 
               <Field label="Issue Date" required>
                 <div className="relative">
-                  <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                  <CalendarDays
+                    size={13}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
                   <Input
                     type="date"
                     value={header.date}
@@ -684,13 +853,22 @@ export default function Issues() {
           <CardHeader className="pb-3 border-b border-border bg-muted/20 flex flex-row items-center justify-between">
             <div className="flex items-center gap-2">
               <ShoppingCart size={15} className="text-primary" />
-              <CardTitle className="text-base font-semibold">Item Cart</CardTitle>
-              <Badge variant="secondary" className="text-xs">{cart.length} line{cart.length !== 1 ? "s" : ""}</Badge>
+              <CardTitle className="text-base font-semibold">
+                Item Cart
+              </CardTitle>
+              <Badge variant="secondary" className="text-xs">
+                {cart.length} line{cart.length !== 1 ? "s" : ""}
+              </Badge>
               {totalCartQty > 0 && (
-                <Badge variant="outline" className="text-xs font-mono">{totalCartQty.toFixed(2)} units total</Badge>
+                <Badge variant="outline" className="text-xs font-mono">
+                  {totalCartQty.toFixed(2)} units total
+                </Badge>
               )}
               {hasStockError && (
-                <Badge variant="destructive" className="text-xs flex items-center gap-1">
+                <Badge
+                  variant="destructive"
+                  className="text-xs flex items-center gap-1"
+                >
                   <AlertTriangle size={10} /> Stock exceeded
                 </Badge>
               )}
@@ -731,24 +909,41 @@ export default function Issues() {
                   >
                     {/* Item select */}
                     <div>
-                      <span className="md:hidden text-xs text-muted-foreground font-semibold uppercase tracking-widest mb-1 block">Item *</span>
+                      <span className="md:hidden text-xs text-muted-foreground font-semibold uppercase tracking-widest mb-1 block">
+                        Item *
+                      </span>
                       <Select
                         value={ci.ItemId}
                         onValueChange={(v) => pickItem(ci._key, v)}
                       >
-                        <SelectTrigger className={`h-9 ${isOver ? "border-destructive" : ""}`}>
+                        <SelectTrigger
+                          className={`h-9 ${isOver ? "border-destructive" : ""}`}
+                        >
                           <div className="flex items-center gap-2 min-w-0 text-sm">
-                            <Box size={12} className="text-muted-foreground shrink-0" />
-                            <SelectValue placeholder={loadingItems ? "Loading…" : "Select item"} />
+                            <Box
+                              size={12}
+                              className="text-muted-foreground shrink-0"
+                            />
+                            <SelectValue
+                              placeholder={
+                                loadingItems ? "Loading…" : "Select item"
+                              }
+                            />
                           </div>
                         </SelectTrigger>
                         <SelectContent className="max-h-64">
                           {(itemOptions as any[]).map((item) => (
-                            <SelectItem key={item.M_Id} value={String(item.M_Id)}>
+                            <SelectItem
+                              key={item.M_Id}
+                              value={String(item.M_Id)}
+                            >
                               <div className="flex flex-col">
                                 <span>{item.M_Name}</span>
-                                <span className={`text-xs ${Number(item.AvailableStock) <= 0 ? "text-destructive" : "text-muted-foreground"}`}>
-                                  Stock: {Number(item.AvailableStock).toFixed(2)}
+                                <span
+                                  className={`text-xs ${Number(item.AvailableStock) <= 0 ? "text-destructive" : "text-muted-foreground"}`}
+                                >
+                                  Stock:{" "}
+                                  {Number(item.AvailableStock).toFixed(2)}
                                   {item.M_Group && ` · ${item.M_Group}`}
                                 </span>
                               </div>
@@ -760,21 +955,35 @@ export default function Issues() {
 
                     {/* UOM select */}
                     <div>
-                      <span className="md:hidden text-xs text-muted-foreground font-semibold uppercase tracking-widest mb-1 block">UOM *</span>
+                      <span className="md:hidden text-xs text-muted-foreground font-semibold uppercase tracking-widest mb-1 block">
+                        UOM *
+                      </span>
                       <Select
                         value={ci.UOMCode}
-                        onValueChange={(v) => updateCartItem(ci._key, "UOMCode", v)}
+                        onValueChange={(v) =>
+                          updateCartItem(ci._key, "UOMCode", v)
+                        }
                       >
                         <SelectTrigger className="h-9">
                           <div className="flex items-center gap-2 min-w-0 text-sm">
-                            <Ruler size={12} className="text-muted-foreground shrink-0" />
-                            <SelectValue placeholder={loadingUoms ? "Loading…" : "UOM"} />
+                            <Ruler
+                              size={12}
+                              className="text-muted-foreground shrink-0"
+                            />
+                            <SelectValue
+                              placeholder={loadingUoms ? "Loading…" : "UOM"}
+                            />
                           </div>
                         </SelectTrigger>
                         <SelectContent>
                           {(uoms as any[]).map((u) => (
                             <SelectItem key={u.UOMCode} value={u.UOMCode}>
-                              {u.UOMName}{u.Symbol && <span className="text-muted-foreground ml-1">({u.Symbol})</span>}
+                              {u.UOMName}
+                              {u.Symbol && (
+                                <span className="text-muted-foreground ml-1">
+                                  ({u.Symbol})
+                                </span>
+                              )}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -783,16 +992,23 @@ export default function Issues() {
 
                     {/* Quantity */}
                     <div>
-                      <span className="md:hidden text-xs text-muted-foreground font-semibold uppercase tracking-widest mb-1 block">Qty *</span>
+                      <span className="md:hidden text-xs text-muted-foreground font-semibold uppercase tracking-widest mb-1 block">
+                        Qty *
+                      </span>
                       <div className="relative">
-                        <Hash size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                        <Hash
+                          size={12}
+                          className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                        />
                         <Input
                           type="number"
                           min={0}
                           max={availStock > 0 ? availStock : undefined}
                           step="0.01"
                           value={ci.Quantity}
-                          onChange={(e) => updateCartItem(ci._key, "Quantity", e.target.value)}
+                          onChange={(e) =>
+                            updateCartItem(ci._key, "Quantity", e.target.value)
+                          }
                           className={`pl-8 h-9 font-mono text-sm ${isOver ? "border-destructive text-destructive focus-visible:ring-destructive" : ""}`}
                           placeholder="0.00"
                         />
@@ -810,7 +1026,9 @@ export default function Issues() {
                       )}
                       <Input
                         value={ci.Remarks}
-                        onChange={(e) => updateCartItem(ci._key, "Remarks", e.target.value)}
+                        onChange={(e) =>
+                          updateCartItem(ci._key, "Remarks", e.target.value)
+                        }
                         placeholder="Line remarks (optional)"
                         className="h-8 text-xs"
                       />
@@ -851,12 +1069,13 @@ export default function Issues() {
                     One or more items exceed available stock
                   </div>
                 )}
-                {!hasStockError && cart.every((ci) => ci.ItemId && ci.Quantity) && (
-                  <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 text-sm font-medium">
-                    <CheckCircle2 size={14} />
-                    All quantities within stock limits
-                  </div>
-                )}
+                {!hasStockError &&
+                  cart.every((ci) => ci.ItemId && ci.Quantity) && (
+                    <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 text-sm font-medium">
+                      <CheckCircle2 size={14} />
+                      All quantities within stock limits
+                    </div>
+                  )}
               </div>
             )}
           </CardContent>
@@ -864,7 +1083,12 @@ export default function Issues() {
 
         {/* ── Save bar ── */}
         <div className="flex items-center gap-3 pt-1">
-          <Button variant="outline" onClick={goToList} disabled={isSaving} className="px-6">
+          <Button
+            variant="outline"
+            onClick={goToList}
+            disabled={isSaving}
+            className="px-6"
+          >
             Cancel
           </Button>
           <Button
@@ -872,12 +1096,18 @@ export default function Issues() {
             disabled={!canSave || isSaving}
             className="px-6 gap-2"
           >
-            {isSaving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
+            {isSaving ? (
+              <RefreshCw size={14} className="animate-spin" />
+            ) : (
+              <Save size={14} />
+            )}
             {isSaving ? "Saving…" : editingId ? "Update Issue" : "Save Issue"}
           </Button>
           {!canSave && (
             <span className="text-xs text-muted-foreground">
-              {!headerIsValid ? "Fill required header fields" : "Fix cart errors above"}
+              {!headerIsValid
+                ? "Fill required header fields"
+                : "Fix cart errors above"}
             </span>
           )}
         </div>
@@ -897,34 +1127,79 @@ export default function Issues() {
           <CardHeader className="pb-3 border-b border-border bg-muted/20 flex flex-row items-center justify-between">
             <CardTitle className="text-base font-semibold flex items-center gap-2">
               <FileText size={15} className="text-primary" />
-              Issue — {viewingRecord.DocNo || viewingRecord.IssueNo || `#${viewingRecord.IssueId}`}
+              Issue —{" "}
+              {viewingRecord.DocNo ||
+                viewingRecord.IssueNo ||
+                `#${viewingRecord.IssueId}`}
             </CardTitle>
             <div className="flex items-center gap-2">
-              <Button variant="outline" size="sm" onClick={() => handleEdit(viewingRecord)} className="gap-1.5 h-8">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleEdit(viewingRecord)}
+                className="gap-1.5 h-8"
+              >
                 <Edit3 size={13} /> Edit
               </Button>
-              <Button variant="ghost" size="icon" onClick={goToList} className="h-8 w-8">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={goToList}
+                className="h-8 w-8"
+              >
                 <X size={15} />
               </Button>
             </div>
           </CardHeader>
           <CardContent className="p-5">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-5 mb-5">
-              <DetailRow label="Doc No" value={<span className="font-mono font-bold text-primary">{viewingRecord.DocNo || viewingRecord.IssueNo}</span>} />
+              <DetailRow
+                label="Doc No"
+                value={
+                  <span className="font-mono font-bold text-primary">
+                    {viewingRecord.DocNo || viewingRecord.IssueNo}
+                  </span>
+                }
+              />
               <DetailRow label="Company" value={viewingRecord.CompanyName} />
               <DetailRow label="Project" value={viewingRecord.ProjectName} />
-              <DetailRow label="Financial Year" value={viewingRecord.FinYearName} />
-              <DetailRow label="Date" value={viewingRecord.Date ? new Date(viewingRecord.Date).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—"} />
-              <DetailRow label="Status" value={<StatusBadge status={viewingRecord.Status || "Draft"} />} />
+              <DetailRow
+                label="Financial Year"
+                value={viewingRecord.FinYearName}
+              />
+              <DetailRow
+                label="Date"
+                value={
+                  viewingRecord.Date
+                    ? new Date(viewingRecord.Date).toLocaleDateString("en-IN", {
+                        day: "2-digit",
+                        month: "short",
+                        year: "numeric",
+                      })
+                    : "—"
+                }
+              />
+              <DetailRow
+                label="Status"
+                value={<StatusBadge status={viewingRecord.Status || "Draft"} />}
+              />
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <p className="text-xs uppercase tracking-widest font-semibold text-muted-foreground mb-1.5">Reason for Issue</p>
-                <div className="bg-muted/40 border border-border rounded-lg p-3 text-sm min-h-[56px]">{viewingRecord.Reason || "—"}</div>
+                <p className="text-xs uppercase tracking-widest font-semibold text-muted-foreground mb-1.5">
+                  Reason for Issue
+                </p>
+                <div className="bg-muted/40 border border-border rounded-lg p-3 text-sm min-h-[56px]">
+                  {viewingRecord.Reason || "—"}
+                </div>
               </div>
               <div>
-                <p className="text-xs uppercase tracking-widest font-semibold text-muted-foreground mb-1.5">Remarks</p>
-                <div className="bg-muted/40 border border-border rounded-lg p-3 text-sm min-h-[56px]">{viewingRecord.Remarks || "—"}</div>
+                <p className="text-xs uppercase tracking-widest font-semibold text-muted-foreground mb-1.5">
+                  Remarks
+                </p>
+                <div className="bg-muted/40 border border-border rounded-lg p-3 text-sm min-h-[56px]">
+                  {viewingRecord.Remarks || "—"}
+                </div>
               </div>
             </div>
           </CardContent>
@@ -936,29 +1211,54 @@ export default function Issues() {
             <CardTitle className="text-sm font-semibold flex items-center gap-2">
               <ShoppingCart size={14} className="text-primary" />
               Issued Items
-              <Badge variant="secondary" className="text-xs">{items.length}</Badge>
+              <Badge variant="secondary" className="text-xs">
+                {items.length}
+              </Badge>
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
             <div className="hidden md:grid grid-cols-[2fr_1fr_1fr_1.5fr_1.5fr] px-4 py-2.5 bg-muted/30 border-b border-border text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-              <span>Item</span><span>UOM</span><span>Quantity</span><span>Current Stock</span><span>Remarks</span>
+              <span>Item</span>
+              <span>UOM</span>
+              <span>Quantity</span>
+              <span>Current Stock</span>
+              <span>Remarks</span>
             </div>
             <div className="divide-y divide-border">
               {items.length === 0 ? (
-                <div className="px-4 py-8 text-center text-sm text-muted-foreground">No items found</div>
+                <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+                  No items found
+                </div>
               ) : (
                 items.map((it, i) => (
-                  <div key={i} className="grid md:grid-cols-[2fr_1fr_1fr_1.5fr_1.5fr] gap-3 px-4 py-3 items-center hover:bg-muted/20 transition-colors text-sm">
+                  <div
+                    key={i}
+                    className="grid md:grid-cols-[2fr_1fr_1fr_1.5fr_1.5fr] gap-3 px-4 py-3 items-center hover:bg-muted/20 transition-colors text-sm"
+                  >
                     <div>
-                      <span className="font-medium">{it.ItemName || it.ItemId}</span>
-                      {it.ItemGroup && <span className="text-xs text-muted-foreground ml-1">· {it.ItemGroup}</span>}
+                      <span className="font-medium">
+                        {it.ItemName || it.ItemId}
+                      </span>
+                      {it.ItemGroup && (
+                        <span className="text-xs text-muted-foreground ml-1">
+                          · {it.ItemGroup}
+                        </span>
+                      )}
                     </div>
-                    <span className="text-muted-foreground">{it.UOMName || it.UOMCode}</span>
-                    <span className="font-mono font-semibold">{Number(it.Quantity).toFixed(2)}</span>
-                    <span className={`font-mono text-xs font-semibold ${Number(it.CurrentBalance) < 0 ? "text-destructive" : "text-emerald-600 dark:text-emerald-400"}`}>
+                    <span className="text-muted-foreground">
+                      {it.UOMName || it.UOMCode}
+                    </span>
+                    <span className="font-mono font-semibold">
+                      {Number(it.Quantity).toFixed(2)}
+                    </span>
+                    <span
+                      className={`font-mono text-xs font-semibold ${Number(it.CurrentBalance) < 0 ? "text-destructive" : "text-emerald-600 dark:text-emerald-400"}`}
+                    >
                       {Number(it.CurrentBalance).toFixed(2)} {it.UOMSymbol}
                     </span>
-                    <span className="text-xs text-muted-foreground">{it.Remarks || "—"}</span>
+                    <span className="text-xs text-muted-foreground">
+                      {it.Remarks || "—"}
+                    </span>
                   </div>
                 ))
               )}
@@ -966,7 +1266,12 @@ export default function Issues() {
             {items.length > 0 && (
               <div className="border-t border-border bg-muted/20 px-4 py-2.5 flex items-center gap-4 text-sm">
                 <span className="text-muted-foreground">Total issued:</span>
-                <span className="font-bold font-mono">{items.reduce((s, it) => s + Number(it.Quantity), 0).toFixed(2)} units</span>
+                <span className="font-bold font-mono">
+                  {items
+                    .reduce((s, it) => s + Number(it.Quantity), 0)
+                    .toFixed(2)}{" "}
+                  units
+                </span>
               </div>
             )}
           </CardContent>
@@ -992,7 +1297,10 @@ export default function Issues() {
           </p>
         </div>
         {viewMode === "list" && (
-          <Button onClick={() => setViewMode("form")} className="gap-2 shrink-0">
+          <Button
+            onClick={() => setViewMode("form")}
+            className="gap-2 shrink-0"
+          >
             <Plus size={15} /> New Issue
           </Button>
         )}

@@ -3,7 +3,7 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 const BASE = "/api/material-issues";
 
 export const getCompanies = async () => {
-  const res = await fetchWithAuth(`${BASE}/companies`);
+  const res = await fetchWithAuth("/api/enterprises/options?business_type=C");
   if (!res.ok) throw new Error("Failed to fetch companies");
   return res.json();
 };
