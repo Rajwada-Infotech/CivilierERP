@@ -1,5 +1,6 @@
 const express = require("express");
 const router = express.Router();
+const logger = require("../logger");
 const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const { redisZScore, redisZIncrBy, getSystemMetrics, getPredictedRPM, getDynamicLimit } = require("../redis");
@@ -216,6 +217,19 @@ router.get("/", authMiddleware, checkPermission("UserActivity", "List", "CanView
 
 // SSE stream - IMPROVED FOR VERCEL
 router.get("/stream", authMiddleware, checkPermission("UserActivity", "List", "CanView"), async (req, res) => {
+  let pingInterval;
+  let dataInterval;
+
+  const safeWrite = (payload) => {
+    if (res.writableEnded || res.destroyed) return;
+    try {
+      res.write(payload);
+    } catch (err) {
+      logger.error({ err, requestId: req.id }, "SSE write failed");
+      cleanup();
+    }
+  };
+
   // Set SSE headers with improved configuration
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache, no-transform");
@@ -231,7 +245,7 @@ router.get("/stream", authMiddleware, checkPermission("UserActivity", "List", "C
   res.setTimeout(0);
 
   // Send initial connection confirmation
-  res.write(":ok\n\n");
+  safeWrite(":ok\n\n");
 
   activeStreams.push(res);
 
@@ -249,20 +263,22 @@ router.get("/stream", authMiddleware, checkPermission("UserActivity", "List", "C
         );
 
       if (!res.writableEnded && !res.destroyed) {
-        res.write(
+        safeWrite(
           `data: ${JSON.stringify(result.recordset.map(mapActivityRow))}\n\n`,
         );
       }
     } catch (err) {
-      if (process.env.NODE_ENV === "development") {
-        console.error("SSE data error:", err.message);
-      }
+      logger.error({ err, requestId: req.id }, "SSE data error");
     }
   };
 
   const sendPing = () => {
-    if (!res.writableEnded && !res.destroyed) {
+    if (res.writableEnded || res.destroyed) return;
+    try {
       res.write(":ping\n\n");
+    } catch (err) {
+      logger.error({ err, requestId: req.id }, "SSE ping failed");
+      cleanup();
     }
   };
 
@@ -276,16 +292,18 @@ router.get("/stream", authMiddleware, checkPermission("UserActivity", "List", "C
   }
 
   // More frequent pings to keep connection alive (every 15s)
-  const pingInterval = setInterval(sendPing, 15000);
+  pingInterval = setInterval(sendPing, 15000);
 
   // Data updates every 5 seconds
-  const dataInterval = setInterval(sendLatest, 5000);
+  dataInterval = setInterval(sendLatest, 5000);
 
   // Cleanup function
   const cleanup = () => {
     activeStreams = activeStreams.filter((stream) => stream !== res);
-    clearInterval(dataInterval);
-    clearInterval(pingInterval);
+    if (pingInterval) clearInterval(pingInterval);
+    if (dataInterval) clearInterval(dataInterval);
+    pingInterval = null;
+    dataInterval = null;
   };
 
   // Handle client disconnect

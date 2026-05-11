@@ -1,5 +1,6 @@
 const express = require("express");
 const router = express.Router();
+const logger = require("../logger");
 const { getPool, sql } = require("../db");
 router.get("/", async (req, res) => {
   try {
@@ -157,8 +158,10 @@ router.get("/", async (req, res) => {
 
     res.json(result.recordset);
   } catch (err) {
-    console.error("approval-inbox error:", err.message);
-    res.status(500).json({ error: err.message });
+    logger.error({ err, requestId: req.id }, "approval-inbox error");
+    res.status(500).json({
+      error: process.env.NODE_ENV === "development" ? err.message : "Internal Server Error",
+    });
   }
 });
 
@@ -178,8 +181,10 @@ router.get("/count", async (req, res) => {
     `);
     res.json({ count: result.recordset[0].TotalPending ?? 0 });
   } catch (err) {
-    console.error("approval-inbox count error:", err.message);
-    res.status(500).json({ error: err.message });
+    logger.error({ err, requestId: req.id }, "approval-inbox count error");
+    res.status(500).json({
+      error: process.env.NODE_ENV === "development" ? err.message : "Internal Server Error",
+    });
   }
 });
 

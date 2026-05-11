@@ -3,13 +3,9 @@
 const logger = require("./logger");
 const { getRedis } = require("./redis");
 
-logger.info(
-  { event: "WORKER_STARTED" },
-  "Redis Worker started — decay & cleanup every hour",
-);
+let workerInterval = null;
+let workerRunning = false;
 
-// ─── Decay engagement scores by 10% each hour ────────────────────────────────
-// Key: engagement:score  (sorted set, member = userId, score = engagement pts)
 async function decayEngagement() {
   try {
     const redis = await getRedis();
@@ -45,12 +41,10 @@ async function decayEngagement() {
   }
 }
 
-// ─── Remove users inactive for > 30 days ─────────────────────────────────────
-// Key pattern: engagement:last:<userId>  (string, unix ms timestamp)
 async function cleanupInactiveUsers() {
   try {
     const redis = await getRedis();
-    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000; // 30 days ago
+    const cutoff = Date.now() - 30 * 24 * 60 * 60 * 1000;
 
     const keys = await redis.keys("engagement:last:*");
     if (!keys || keys.length === 0) return;
@@ -84,37 +78,51 @@ async function cleanupInactiveUsers() {
   }
 }
 
-// ─── Heartbeat + hourly interval ─────────────────────────────────────────────
-setInterval(async () => {
-  try {
-    const redis = await getRedis();
-    await redis.set("worker:heartbeat", Date.now(), "EX", 7200);
-    logger.debug({ event: "WORKER_HEARTBEAT" }, "Worker heartbeat sent");
+async function startWorker() {
+  if (workerRunning) return;
+  workerRunning = true;
 
-    logger.info({ event: "WORKER_DECAY_START" }, "Running engagement decay...");
-    await decayEngagement();
+  logger.info({ event: "WORKER_STARTED" }, "Redis Worker starting — decay & cleanup every hour");
 
-    logger.info(
-      { event: "WORKER_CLEANUP_START" },
-      "Running inactive user cleanup...",
-    );
-    await cleanupInactiveUsers();
-  } catch (err) {
-    logger.error({ event: "WORKER_ERROR", err }, "Worker interval crashed");
-  }
-}, 3600000);
-
-// ─── Run once on startup ──────────────────────────────────────────────────────
-(async () => {
   try {
     logger.info({ event: "WORKER_INIT" }, "Running initial decay & cleanup...");
     await decayEngagement();
     await cleanupInactiveUsers();
-    logger.info(
-      { event: "WORKER_INIT_DONE" },
-      "Initial decay & cleanup complete",
-    );
+    logger.info({ event: "WORKER_INIT_DONE" }, "Initial decay & cleanup complete");
   } catch (err) {
     logger.error({ event: "WORKER_INIT_ERROR", err }, "Worker init failed");
   }
-})();
+
+  workerInterval = setInterval(async () => {
+    try {
+      const redis = await getRedis();
+      await redis.set("worker:heartbeat", Date.now(), "EX", 7200);
+      logger.debug({ event: "WORKER_HEARTBEAT" }, "Worker heartbeat sent");
+
+      logger.info({ event: "WORKER_DECAY_START" }, "Running engagement decay...");
+      await decayEngagement();
+
+      logger.info(
+        { event: "WORKER_CLEANUP_START" },
+        "Running inactive user cleanup...",
+      );
+      await cleanupInactiveUsers();
+    } catch (err) {
+      logger.error({ event: "WORKER_ERROR", err }, "Worker interval crashed");
+    }
+  }, 3600000);
+}
+
+function stopWorker() {
+  if (!workerRunning) return;
+  clearInterval(workerInterval);
+  workerInterval = null;
+  workerRunning = false;
+  logger.info({ event: "WORKER_STOPPED" }, "Redis worker stopped");
+}
+
+function isRunning() {
+  return workerRunning;
+}
+
+module.exports = { startWorker, stopWorker, isRunning };
