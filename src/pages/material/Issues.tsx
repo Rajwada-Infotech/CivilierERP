@@ -211,7 +211,13 @@ export default function Issues() {
 
   const { data: uoms = [], isLoading: loadingUoms } = useQuery({
     queryKey: ["issues-uoms"],
-    queryFn: issuesApi.getUomOptions,
+    queryFn: async () => {
+      const data = await issuesApi.getUomOptions();
+      // IsActive comes as integer 1/0 from MSSQL, not a boolean
+      return (Array.isArray(data) ? data : []).filter(
+        (u: any) => u.IsActive === true || u.IsActive === 1,
+      );
+    },
     staleTime: 5 * 60_000,
   });
 
@@ -271,6 +277,9 @@ export default function Issues() {
   const pickItem = useCallback(
     (cartKey: string, itemId: string) => {
       const found = itemMap[itemId];
+      // Use DefaultUOM from item master; if absent, fall back to first available UOM
+      const defaultUom =
+        found?.DefaultUOM || (uoms as any[]).find(Boolean)?.UOMCode || "";
       setCart((prev) =>
         prev.map((ci) =>
           ci._key === cartKey
@@ -279,14 +288,14 @@ export default function Issues() {
                 ItemId: itemId,
                 ItemName: found?.M_Name,
                 AvailableStock: Number(found?.AvailableStock ?? 0),
-                DefaultUOM: found?.DefaultUOM || "",
-                UOMCode: found?.DefaultUOM || ci.UOMCode,
+                DefaultUOM: defaultUom,
+                UOMCode: defaultUom,
               }
             : ci,
         ),
       );
     },
-    [itemMap],
+    [itemMap, uoms],
   );
 
   const addCartRow = () => setCart((p) => [...p, blankCartItem()]);
