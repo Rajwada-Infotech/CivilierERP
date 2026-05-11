@@ -6,84 +6,83 @@ const { cache } = require("../middleware/cache");
 /**
  * GET /api/finance-dashboard
  *
- * Returns all stats needed for the Finance Dashboard in a single round-trip:
- *   - Payments: total count, today's count, total amount, today's amount
- *   - Purchase Orders: total, open (Status != 'Closed'), total PO value
- *   - GRNs: total count, this-month count
- *   - Cheques: total count, pending count
- *   - Suppliers: total count (AccountHeadMaster LHeadType='S')
- *   - Customers: total count (AccountHeadMaster LHeadType='C')
- *   - General Ledger heads: total active
- *   - Recent payments: last 8 records
- *   - Recent POs: last 5 records
+ * Returns all stats scoped to the Finance module only:
+ *   - Payments Made  (NewPayment)        : total, today count/amount
+ *   - Received Payments (ReceivedPayment): total, today count/amount
+ *   - Cheques (ChequeMaster)             : total, pending, cleared
+ *   - Cards   (card_master)              : total, active
+ *   - Banks   (AccountHeadMaster)        : total bank heads (LHeadType='B')
+ *   - Recent payments made               : last 8 rows
+ *   - Recent received payments           : last 8 rows
  */
 router.get("/", cache("finance-dashboard", 60), async (req, res) => {
   try {
     const pool = getPool();
 
     const [
-      paymentStats,
-      poStats,
-      grnStats,
+      paymentMadeStats,
+      receivedPaymentStats,
       chequeStats,
-      partyStats,
-      recentPayments,
-      recentPOs,
+      cardStats,
+      bankStats,
+      recentPaymentsMade,
+      recentPaymentsReceived,
     ] = await Promise.all([
-      // ── Payments ────────────────────────────────────────────────────────────
+      // ── Payments Made (NewPayment) ──────────────────────────────────────────
       pool.request().query(`
         SELECT
-          COUNT(*)                                          AS TotalCount,
+          COUNT(*)                                                              AS TotalCount,
           COUNT(CASE WHEN CAST(PDate AS DATE) = CAST(GETDATE() AS DATE) THEN 1 END)
-                                                            AS TodayCount,
-          ISNULL(SUM(PAmount), 0)                           AS TotalAmount,
+                                                                                AS TodayCount,
+          ISNULL(SUM(PAmount), 0)                                               AS TotalAmount,
           ISNULL(SUM(CASE WHEN CAST(PDate AS DATE) = CAST(GETDATE() AS DATE)
-                          THEN PAmount ELSE 0 END), 0)      AS TodayAmount
+                          THEN PAmount ELSE 0 END), 0)                          AS TodayAmount
         FROM dbo.NewPayment
       `),
 
-      // ── Purchase Orders ─────────────────────────────────────────────────────
+      // ── Received Payments (ReceivedPayment) ────────────────────────────────
       pool.request().query(`
         SELECT
-          COUNT(*)                                              AS TotalCount,
-          COUNT(CASE WHEN ISNULL(Status,'') != 'Closed' THEN 1 END)
-                                                                AS OpenCount,
-          ISNULL(SUM(TotalAmount), 0)                           AS TotalValue,
-          ISNULL(SUM(CASE WHEN ISNULL(Status,'') != 'Closed'
-                          THEN TotalAmount ELSE 0 END), 0)      AS OpenValue
-        FROM dbo.PurchaseOrders
+          COUNT(*)                                                              AS TotalCount,
+          COUNT(CASE WHEN CAST(RPDocDate AS DATE) = CAST(GETDATE() AS DATE) THEN 1 END)
+                                                                                AS TodayCount,
+          ISNULL(SUM(RPAmount), 0)                                              AS TotalAmount,
+          ISNULL(SUM(CASE WHEN CAST(RPDocDate AS DATE) = CAST(GETDATE() AS DATE)
+                          THEN RPAmount ELSE 0 END), 0)                         AS TodayAmount,
+          COUNT(CASE WHEN RPStatus = 'Approved' THEN 1 END)                     AS ApprovedCount,
+          COUNT(CASE WHEN RPStatus = 'Draft' OR RPStatus IS NULL THEN 1 END)    AS DraftCount
+        FROM dbo.ReceivedPayment
       `),
 
-      // ── GRNs ────────────────────────────────────────────────────────────────
+      // ── Cheques (ChequeMaster) ──────────────────────────────────────────────
       pool.request().query(`
         SELECT
-          COUNT(*) AS TotalCount,
-          COUNT(CASE WHEN YEAR(GRNDate)  = YEAR(GETDATE())
-                      AND MONTH(GRNDate) = MONTH(GETDATE()) THEN 1 END)
-                   AS ThisMonthCount
-        FROM dbo.GoodsReceiptNotes
-      `),
-
-      // ── Cheques ─────────────────────────────────────────────────────────────
-      // Status is a bit column: 1 = active/pending, 0 = cleared/inactive
-      pool.request().query(`
-        SELECT
-          COUNT(*)                            AS TotalCount,
-          COUNT(CASE WHEN Status = 'Draft' OR Status = 'Pending' OR Status IS NULL THEN 1 END) AS PendingCount
+          COUNT(*)                                                              AS TotalCount,
+          COUNT(CASE WHEN Status = 'Pending' OR Status IS NULL THEN 1 END)     AS PendingCount,
+          COUNT(CASE WHEN Status = 'Draft'   THEN 1 END)                        AS DraftCount,
+          COUNT(CASE WHEN Status = 'Cleared' OR Status = 'Used' THEN 1 END)    AS ClearedCount
         FROM dbo.ChequeMaster
       `),
 
-      // ── Suppliers + Customers + GL heads ────────────────────────────────────
+      // ── Cards (card_master) ─────────────────────────────────────────────────
       pool.request().query(`
         SELECT
-          COUNT(CASE WHEN LHeadType = 'S' THEN 1 END) AS SupplierCount,
-          COUNT(CASE WHEN LHeadType = 'C' THEN 1 END) AS CustomerCount,
-          COUNT(CASE WHEN LHeadType = 'GL' AND LHeadStatus = 1 THEN 1 END)
-                                                        AS ActiveGLCount
-        FROM dbo.AccountHeadMaster
+          COUNT(*)                                  AS TotalCount,
+          COUNT(CASE WHEN status = 1 THEN 1 END)   AS ActiveCount,
+          COUNT(CASE WHEN status = 0 THEN 1 END)   AS InactiveCount
+        FROM dbo.card_master
       `),
 
-      // ── Recent Payments (last 8) ─────────────────────────────────────────────
+      // ── Banks (AccountHeadMaster, LHeadType = 'B') ─────────────────────────
+      pool.request().query(`
+        SELECT
+          COUNT(*)                                                AS TotalCount,
+          COUNT(CASE WHEN LHeadStatus = 1 THEN 1 END)            AS ActiveCount
+        FROM dbo.AccountHeadMaster
+        WHERE LHeadType = 'B'
+      `),
+
+      // ── Recent Payments Made (last 8) ───────────────────────────────────────
       pool.request().query(`
         SELECT TOP 8
           PPaymentID,
@@ -99,56 +98,60 @@ router.get("/", cache("finance-dashboard", 60), async (req, res) => {
         ORDER BY PCreatedAt DESC
       `),
 
-      // ── Recent Purchase Orders (last 5) ──────────────────────────────────────
+      // ── Recent Received Payments (last 8) ───────────────────────────────────
       pool.request().query(`
-        SELECT TOP 5
-          po.PurchaseOrderID,
-          po.PurchaseOrderNo,
-          po.PODate,
-          po.TotalAmount,
-          po.Status,
-          ah.LHeadName AS SupplierName,
-          po.ItemDescription
-        FROM dbo.PurchaseOrders po
-        LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = po.SupplierID
-        ORDER BY po.PurchaseOrderID DESC
+        SELECT TOP 8
+          RPPaymentID,
+          RPReceivedFrom,
+          RPMode,
+          RPAmount,
+          RPDocDate,
+          RPBankName,
+          RPStatus,
+          RPCreatedAt
+        FROM dbo.ReceivedPayment
+        ORDER BY RPCreatedAt DESC
       `),
     ]);
 
-    const p = paymentStats.recordset[0];
-    const po = poStats.recordset[0];
-    const g = grnStats.recordset[0];
+    const pm = paymentMadeStats.recordset[0];
+    const rp = receivedPaymentStats.recordset[0];
     const ch = chequeStats.recordset[0];
-    const pt = partyStats.recordset[0];
+    const cd = cardStats.recordset[0];
+    const bk = bankStats.recordset[0];
 
     res.json({
-      payments: {
-        totalCount: p.TotalCount,
-        todayCount: p.TodayCount,
-        totalAmount: parseFloat(p.TotalAmount),
-        todayAmount: parseFloat(p.TodayAmount),
+      paymentsMade: {
+        totalCount: pm.TotalCount,
+        todayCount: pm.TodayCount,
+        totalAmount: parseFloat(pm.TotalAmount),
+        todayAmount: parseFloat(pm.TodayAmount),
       },
-      purchaseOrders: {
-        totalCount: po.TotalCount,
-        openCount: po.OpenCount,
-        totalValue: parseFloat(po.TotalValue),
-        openValue: parseFloat(po.OpenValue),
-      },
-      grns: {
-        totalCount: g.TotalCount,
-        thisMonthCount: g.ThisMonthCount,
+      receivedPayments: {
+        totalCount: rp.TotalCount,
+        todayCount: rp.TodayCount,
+        totalAmount: parseFloat(rp.TotalAmount),
+        todayAmount: parseFloat(rp.TodayAmount),
+        approvedCount: rp.ApprovedCount,
+        draftCount: rp.DraftCount,
       },
       cheques: {
         totalCount: ch.TotalCount,
         pendingCount: ch.PendingCount,
+        draftCount: ch.DraftCount,
+        clearedCount: ch.ClearedCount,
       },
-      parties: {
-        supplierCount: pt.SupplierCount,
-        customerCount: pt.CustomerCount,
-        activeGLCount: pt.ActiveGLCount,
+      cards: {
+        totalCount: cd.TotalCount,
+        activeCount: cd.ActiveCount,
+        inactiveCount: cd.InactiveCount,
       },
-      recentPayments: recentPayments.recordset,
-      recentPOs: recentPOs.recordset,
+      banks: {
+        totalCount: bk.TotalCount,
+        activeCount: bk.ActiveCount,
+      },
+      recentPaymentsMade: recentPaymentsMade.recordset,
+      recentPaymentsReceived: recentPaymentsReceived.recordset,
     });
   } catch (err) {
     console.error("FINANCE DASHBOARD ERROR:", err.message);
@@ -157,4 +160,3 @@ router.get("/", cache("finance-dashboard", 60), async (req, res) => {
 });
 
 module.exports = router;
-

@@ -37,16 +37,16 @@ router.get("/", async (req, res) => {
         country       AS Country,
         pincode       AS Pincode,
         phone_number              AS Phone,
-        rera_no                   AS Fax,
+        fax                       AS Fax,
         email         AS Email,
         website       AS Website,
-        cost_center               AS AuthorizedCapital,
-        profit_center             AS PaidUpCapital,
+        authorized_capital        AS AuthorizedCapital,
+        paid_up_capital           AS PaidUpCapital,
         currency,
         fiscal_year_start         AS FiscalYearStart,
-        start_fin_year            AS AuditorName,
+        auditor_name              AS AuditorName,
         CASE WHEN discontinue = 1 THEN 0 ELSE 1 END AS IsActive,
-        tds_limit                 AS Remarks,
+        remarks                   AS Remarks,
         logo                      AS LogoUrl,
         status,
         belongs_to
@@ -89,23 +89,23 @@ router.post("/", adminOnly, async (req, res) => {
       .input("country", sql.NVarChar(100), f.country || null)
       .input("pincode", sql.NVarChar(10), f.pincode || null)
       .input("phone_number", sql.NVarChar(20), f.phone || null)
-      .input("rera_no", sql.NVarChar(100), f.fax || null)
+      .input("fax", sql.NVarChar(30), f.fax || null)
       .input("email", sql.NVarChar(255), f.email || null)
       .input("website", sql.NVarChar(255), f.website || null)
       .input(
-        "cost_center",
-        sql.NVarChar(50),
-        f.authorizedCapital ? String(f.authorizedCapital) : null,
+        "authorized_capital",
+        sql.Decimal(18, 2),
+        f.authorizedCapital ? parseFloat(f.authorizedCapital) : null,
       )
       .input(
-        "profit_center",
-        sql.NVarChar(50),
-        f.paidUpCapital ? String(f.paidUpCapital) : null,
+        "paid_up_capital",
+        sql.Decimal(18, 2),
+        f.paidUpCapital ? parseFloat(f.paidUpCapital) : null,
       )
       .input("currency", sql.NVarChar(10), f.currency || "INR")
       .input("fiscal_year_start", sql.NVarChar(20), f.fiscalYearStart || null)
-      .input("start_fin_year", sql.NVarChar(20), f.auditorName || null)
-      .input("tds_limit", sql.Decimal(15, 2), f.remarks ? null : null) // remarks stored as text — use description2 workaround below
+      .input("auditor_name", sql.NVarChar(255), f.auditorName || null)
+      .input("remarks", sql.NVarChar(500), f.remarks || null)
       .input("logo", sql.NVarChar(sql.MAX), f.logoUrl || null)
       .input(
         "belongs_to",
@@ -119,16 +119,16 @@ router.post("/", adminOnly, async (req, res) => {
           name, short_name, business_identity, business_type, entity_type, description,
           cr_code, date_of_establishment, cin, pan, tan, gst_type, b_sub_identity_type, gst_issue_date,
           trade_license, rera_date, address, city, state, country, pincode,
-          phone_number, rera_no, email, website,
-          cost_center, profit_center, currency, fiscal_year_start, start_fin_year,
-          logo, belongs_to, discontinue, status, date_of_entry
+          phone_number, fax, email, website,
+          authorized_capital, paid_up_capital, currency, fiscal_year_start, auditor_name,
+          remarks, logo, belongs_to, discontinue, status, date_of_entry
         ) VALUES (
           @name, @short_name, @business_identity, @business_type, @entity_type, @description,
           @cr_code, @date_of_establishment, @cin, @pan, @tan, @gst_type, @b_sub_identity_type, @gst_issue_date,
           @trade_license, @rera_date, @address, @city, @state, @country, @pincode,
-          @phone_number, @rera_no, @email, @website,
-          @cost_center, @profit_center, @currency, @fiscal_year_start, @start_fin_year,
-          @logo, @belongs_to, @discontinue, @status, @date_of_entry
+          @phone_number, @fax, @email, @website,
+          @authorized_capital, @paid_up_capital, @currency, @fiscal_year_start, @auditor_name,
+          @remarks, @logo, @belongs_to, @discontinue, @status, @date_of_entry
         )
       `);
     await bumpCacheVersion("enterprises");
@@ -167,22 +167,23 @@ router.put("/:id", adminOnly, async (req, res) => {
       .input("country", sql.NVarChar(100), f.country || null)
       .input("pincode", sql.NVarChar(10), f.pincode || null)
       .input("phone_number", sql.NVarChar(20), f.phone || null)
-      .input("rera_no", sql.NVarChar(100), f.fax || null)
+      .input("fax", sql.NVarChar(30), f.fax || null)
       .input("email", sql.NVarChar(255), f.email || null)
       .input("website", sql.NVarChar(255), f.website || null)
       .input(
-        "cost_center",
-        sql.NVarChar(50),
-        f.authorizedCapital ? String(f.authorizedCapital) : null,
+        "authorized_capital",
+        sql.Decimal(18, 2),
+        f.authorizedCapital ? parseFloat(f.authorizedCapital) : null,
       )
       .input(
-        "profit_center",
-        sql.NVarChar(50),
-        f.paidUpCapital ? String(f.paidUpCapital) : null,
+        "paid_up_capital",
+        sql.Decimal(18, 2),
+        f.paidUpCapital ? parseFloat(f.paidUpCapital) : null,
       )
       .input("currency", sql.NVarChar(10), f.currency || "INR")
       .input("fiscal_year_start", sql.NVarChar(20), f.fiscalYearStart || null)
-      .input("start_fin_year", sql.NVarChar(20), f.auditorName || null)
+      .input("auditor_name", sql.NVarChar(255), f.auditorName || null)
+      .input("remarks", sql.NVarChar(500), f.remarks || null)
       .input("logo", sql.NVarChar(sql.MAX), f.logoUrl || null)
       .input(
         "belongs_to",
@@ -200,10 +201,10 @@ router.put("/:id", adminOnly, async (req, res) => {
           gst_type=@gst_type, b_sub_identity_type=@b_sub_identity_type, gst_issue_date=@gst_issue_date,
           trade_license=@trade_license, rera_date=@rera_date,
           address=@address, city=@city, state=@state, country=@country, pincode=@pincode,
-          phone_number=@phone_number, rera_no=@rera_no, email=@email, website=@website,
-          cost_center=@cost_center, profit_center=@profit_center,
-          currency=@currency, fiscal_year_start=@fiscal_year_start, start_fin_year=@start_fin_year,
-          logo=@logo, belongs_to=@belongs_to, discontinue=@discontinue, status=@status
+          phone_number=@phone_number, fax=@fax, email=@email, website=@website,
+          authorized_capital=@authorized_capital, paid_up_capital=@paid_up_capital,
+          currency=@currency, fiscal_year_start=@fiscal_year_start, auditor_name=@auditor_name,
+          remarks=@remarks, logo=@logo, belongs_to=@belongs_to, discontinue=@discontinue, status=@status
         WHERE id=@id AND business_type='C'
       `);
     await bumpCacheVersion("enterprises");
