@@ -43,4 +43,35 @@ function getPool() {
   return pool;
 }
 
-module.exports = { sql, connectDB, getPool };
+function getPoolStats(targetPool = pool) {
+  if (!targetPool) return null;
+
+  return {
+    size: targetPool.size,
+    available: targetPool.available,
+    borrowed: targetPool.borrowed,
+    pending: targetPool.pending,
+  };
+}
+
+async function closeDB() {
+  if (!pool) return;
+
+  const currentPool = pool;
+  pool = null;
+  await currentPool.close();
+  logger.info({ event: "DB_CLOSED" }, "Database pool closed");
+}
+
+async function isDbReady() {
+  try {
+    const pool = getPool();
+    await pool.request().query("SELECT 1 AS ok");
+    return true;
+  } catch (err) {
+    logger.warn({ event: "DB_HEALTH_CHECK_FAILED", err }, "Database readiness check failed");
+    return false;
+  }
+}
+
+module.exports = { sql, connectDB, getPool, getPoolStats, closeDB, isDbReady };

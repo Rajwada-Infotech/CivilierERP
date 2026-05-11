@@ -34,6 +34,8 @@ jest.mock("../db", function () {
       MAX: "MAX",
     },
     connectDB: jest.fn().mockResolvedValue(undefined),
+    getPoolStats: jest.fn().mockReturnValue(null),
+    isDbReady: jest.fn().mockResolvedValue(true),
   };
 });
 
@@ -66,6 +68,15 @@ jest.mock("../redis", function () {
     trackHourLoad: jest.fn().mockResolvedValue(undefined),
     getPredictedRPM: jest.fn().mockResolvedValue(100),
     getDynamicLimit: jest.fn().mockReturnValue(500),
+    isRedisReady: jest.fn().mockResolvedValue(true),
+  };
+});
+
+jest.mock("../worker", function () {
+  return {
+    startWorker: jest.fn().mockResolvedValue(undefined),
+    stopWorker: jest.fn().mockResolvedValue(undefined),
+    isRunning: jest.fn().mockReturnValue(true),
   };
 });
 
@@ -219,7 +230,28 @@ describe("Auth Routes (/api/users)", function () {
     });
   });
 });
+describe("Health Routes (/health)", function () {
+  it("GET /health/live returns alive", async function () {
+    var res = await request(await getApp()).get("/health/live");
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("alive");
+    expect(typeof res.body.uptimeSeconds).toBe("number");
+  });
 
+  it("GET /health/startup returns startup metadata", async function () {
+    var res = await request(await getApp()).get("/health/startup");
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("ok");
+  });
+
+  it("GET /health/ready returns ok when dependencies are mocked healthy", async function () {
+    var res = await request(await getApp()).get("/health/ready");
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("ok");
+    expect(res.body.details.db).toBe("ok");
+    expect(res.body.details.redis).toBe("ok");
+  });
+});
 // ─── Work Order Routes ────────────────────────────────────────────────────────
 
 describe("Work Order Routes (/api/work-orders)", function () {
@@ -351,7 +383,7 @@ describe("Material Issue Routes (/api/material-issues)", function () {
       var req = result.value;
       return req && req.query ? req.query.mock.calls.map(function (call) { return call[0]; }) : [];
     });
-    expect(queries.join("\n")).toContain("c.name as CompanyName");
+    expect(queries.join("\n")).toMatch(/c\.name\s+as\s+CompanyName/i);
     expect(queries.join("\n")).not.toContain("c.label");
   });
 });

@@ -91,6 +91,43 @@ async function getRedis() {
   return connectPromise;
 }
 
+async function closeRedis() {
+  if (!client) return;
+
+  const redis = client;
+  const pendingConnect = connectPromise;
+
+  if (pendingConnect) {
+    try {
+      await pendingConnect;
+    } catch {
+      // The connection may already be closed or unavailable during shutdown.
+    }
+  }
+
+  client = null;
+  connectPromise = null;
+
+  if (redis.status === "ready") {
+    await redis.quit();
+  } else if (redis.status !== "end") {
+    redis.disconnect();
+  }
+
+  logger.info({ event: "REDIS_CLOSED_CLEANLY" }, "Redis client closed");
+}
+
+async function isRedisReady() {
+  try {
+    const redis = await getRedis();
+    const pong = await redis.ping();
+    return pong === "PONG";
+  } catch (err) {
+    logger.warn({ event: "REDIS_HEALTH_CHECK_FAILED", err }, "Redis readiness check failed");
+    return false;
+  }
+}
+
 // ─────────────────────────────
 // SAFE EXEC — every public helper goes through this so Redis being down
 // never crashes the app; callers just get the fallback value.
@@ -410,6 +447,7 @@ function getDynamicLimit(score, rpm, memoryUsage) {
 
 module.exports = {
   getRedis,
+  closeRedis,
   redisGet,
   redisSet,
   redisDel,
