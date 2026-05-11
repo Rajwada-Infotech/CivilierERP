@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useMemo, useState, useCallback, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -20,8 +20,15 @@ import {
   Box,
   Ruler,
   Hash,
+  ChevronDown,
+  AlertTriangle,
+  TrendingDown,
+  BarChart3,
+  ShoppingCart,
+  Package,
+  CheckCircle2,
+  Calendar,
 } from "lucide-react";
-
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -35,60 +42,130 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { StatusBadge } from "@/components/StatusBadge";
+import { Badge } from "@/components/ui/badge";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-interface IssueForm {
-  issueNo: string;
-  companyId: string;
-  projectId: string;
-  date: string;
-  itemId: string;
-  uomCode: string;
-  qty: string;
-  remarks: string;
-  reason: string;
+
+interface CartItem {
+  _key: string; // local unique key for React
+  ItemId: string;
+  UOMCode: string;
+  Quantity: string;
+  Remarks: string;
+  // derived from item master
+  ItemName?: string;
+  AvailableStock?: number;
+  DefaultUOM?: string;
 }
 
-const defaultForm: IssueForm = {
-  issueNo: "",
+interface IssueHeader {
+  companyId: string;
+  projectId: string;
+  finYearId: string;
+  date: string;
+  reason: string;
+  remarks: string;
+}
+
+const defaultHeader: IssueHeader = {
   companyId: "",
   projectId: "",
+  finYearId: "",
   date: new Date().toISOString().slice(0, 10),
-  itemId: "",
-  uomCode: "",
-  qty: "",
-  remarks: "",
   reason: "",
+  remarks: "",
 };
 
-// ─── Field wrapper ─────────────────────────────────────────────────────────
+const blankCartItem = (): CartItem => ({
+  _key: crypto.randomUUID(),
+  ItemId: "",
+  UOMCode: "",
+  Quantity: "",
+  Remarks: "",
+});
+
+// ─── Stock badge ──────────────────────────────────────────────────────────────
+
+function StockPill({
+  available,
+  requested,
+  uomSymbol,
+}: {
+  available: number;
+  requested: number;
+  uomSymbol?: string;
+}) {
+  const remaining = available - requested;
+  const isOver = remaining < 0;
+  const isWarn = remaining >= 0 && remaining < available * 0.1;
+
+  return (
+    <div className="flex flex-col gap-0.5">
+      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <BarChart3 size={11} />
+        <span>
+          Available:{" "}
+          <span className="font-semibold text-foreground">
+            {available.toFixed(2)} {uomSymbol}
+          </span>
+        </span>
+      </div>
+      {requested > 0 && (
+        <div
+          className={`flex items-center gap-1 text-xs font-semibold ${isOver ? "text-destructive" : isWarn ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}
+        >
+          {isOver ? <AlertTriangle size={11} /> : <TrendingDown size={11} />}
+          After: {remaining.toFixed(2)} {uomSymbol}
+          {isOver && (
+            <span className="ml-1 text-destructive font-bold">
+              EXCEEDS STOCK
+            </span>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Field wrapper ────────────────────────────────────────────────────────────
+
 const Field = ({
   label,
   required,
   children,
+  className = "",
 }: {
   label: string;
   required?: boolean;
   children: React.ReactNode;
+  className?: string;
 }) => (
-  <div>
-    <label className="block text-xs uppercase tracking-widest font-semibold text-muted-foreground mb-1.5">
+  <div className={className}>
+    <label className="block text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-1.5">
       {label}
-      {required && <span className="text-destructive ml-1">*</span>}
+      {required && <span className="text-destructive ml-0.5">*</span>}
     </label>
     {children}
   </div>
 );
 
-// ─── Detail row for view mode ──────────────────────────────────────────────
-const DetailRow = ({ label, value }: { label: string; value?: React.ReactNode }) => (
+const DetailRow = ({
+  label,
+  value,
+}: {
+  label: string;
+  value?: React.ReactNode;
+}) => (
   <div>
-    <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">{label}</p>
-    <p className="font-medium text-foreground">{value || "—"}</p>
+    <p className="text-xs uppercase tracking-widest font-semibold text-muted-foreground mb-1">
+      {label}
+    </p>
+    <div className="font-medium text-foreground">{value ?? "—"}</div>
   </div>
 );
 
-// ─── Main Component ────────────────────────────────────────────────────────
+// ─── Main component ───────────────────────────────────────────────────────────
+
 export default function Issues() {
   const queryClient = useQueryClient();
   const [viewMode, setViewMode] = useState<"list" | "form" | "view">("list");
@@ -97,66 +174,184 @@ export default function Issues() {
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState("");
   const limit = 10;
-  const [form, setForm] = useState<IssueForm>(defaultForm);
 
-  // ── Queries ──────────────────────────────────────────────────────────────
-  const { data: companies, isLoading: loadingCompanies } = useQuery({
-    queryKey: ["issues", "companies"],
-    queryFn: issuesApi.getCompanyOptions,
-    staleTime: 5 * 60 * 1000,
+  // Header form
+  const [header, setHeader] = useState<IssueHeader>(defaultHeader);
+  // Cart
+  const [cart, setCart] = useState<CartItem[]>([blankCartItem()]);
+
+  const setH = <K extends keyof IssueHeader>(k: K, v: IssueHeader[K]) =>
+    setHeader((p) => ({ ...p, [k]: v }));
+
+  // ── Master data queries ──────────────────────────────────────────────────
+
+  const { data: companies = [], isLoading: loadingCompanies } = useQuery({
+    queryKey: ["issues-companies"],
+    queryFn: issuesApi.getCompanies,
+    staleTime: 5 * 60_000,
   });
 
-  const { data: projects, isLoading: loadingProjects } = useQuery({
-    queryKey: ["issues", "projects"],
-    queryFn: issuesApi.getProjectOptions,
-    staleTime: 5 * 60 * 1000,
+  const { data: projects = [], isLoading: loadingProjects } = useQuery({
+    queryKey: ["issues-projects"],
+    queryFn: issuesApi.getProjects,
+    staleTime: 5 * 60_000,
   });
 
-  const { data: items, isLoading: loadingItems } = useQuery({
-    queryKey: ["issues", "items"],
+  const { data: finYears = [], isLoading: loadingFinYears } = useQuery({
+    queryKey: ["issues-finyears"],
+    queryFn: issuesApi.getFinYears,
+    staleTime: 5 * 60_000,
+  });
+
+  const { data: itemOptions = [], isLoading: loadingItems } = useQuery({
+    queryKey: ["issues-items"],
     queryFn: issuesApi.getItemOptions,
-    staleTime: 5 * 60 * 1000,
+    staleTime: 60_000,
   });
 
-  const { data: uoms, isLoading: loadingUoms } = useQuery({
-    queryKey: ["issues", "uoms"],
+  const { data: uoms = [], isLoading: loadingUoms } = useQuery({
+    queryKey: ["issues-uoms"],
     queryFn: issuesApi.getUomOptions,
-    staleTime: 5 * 60 * 1000,
+    staleTime: 5 * 60_000,
   });
 
   const { data: issuesData, isLoading: loadingIssues } = useQuery({
-    queryKey: ["issues", "list", page, search],
+    queryKey: ["issues-list", page, search],
     queryFn: () => issuesApi.getIssues({ page, limit, search }),
   });
 
-  const { data: issueNumberPreview, isFetching: loadingIssuePreview } = useQuery({
-    queryKey: ["issues", "next-number"],
+  const { data: issueNumberPreview, isFetching: loadingPreview } = useQuery({
+    queryKey: ["issues-next-number"],
     queryFn: () => issuesApi.previewNextIssueNumber(false),
     enabled: viewMode === "form" && !editingId,
     staleTime: 15_000,
   });
 
-  // ── Mutations ─────────────────────────────────────────────────────────────
+  // ── Auto-select active fin year ──────────────────────────────────────────
+
+  useEffect(() => {
+    if (
+      finYears.length > 0 &&
+      !header.finYearId &&
+      viewMode === "form" &&
+      !editingId
+    ) {
+      const active = (finYears as any[]).find((f) => f.isActive);
+      if (active) setH("finYearId", String(active.id));
+    }
+  }, [finYears, viewMode, editingId]);
+
+  // ── Item lookup helpers ──────────────────────────────────────────────────
+
+  const itemMap = useMemo(() => {
+    const m: Record<string, any> = {};
+    for (const item of itemOptions as any[]) m[String(item.M_Id)] = item;
+    return m;
+  }, [itemOptions]);
+
+  const uomMap = useMemo(() => {
+    const m: Record<string, any> = {};
+    for (const u of uoms as any[]) m[u.UOMCode] = u;
+    return m;
+  }, [uoms]);
+
+  // ── Cart helpers ─────────────────────────────────────────────────────────
+
+  const updateCartItem = useCallback(
+    <K extends keyof CartItem>(key: string, field: K, value: CartItem[K]) => {
+      setCart((prev) =>
+        prev.map((item) =>
+          item._key === key ? { ...item, [field]: value } : item,
+        ),
+      );
+    },
+    [],
+  );
+
+  const pickItem = useCallback(
+    (cartKey: string, itemId: string) => {
+      const found = itemMap[itemId];
+      setCart((prev) =>
+        prev.map((ci) =>
+          ci._key === cartKey
+            ? {
+                ...ci,
+                ItemId: itemId,
+                ItemName: found?.M_Name,
+                AvailableStock: Number(found?.AvailableStock ?? 0),
+                DefaultUOM: found?.DefaultUOM || "",
+                UOMCode: found?.DefaultUOM || ci.UOMCode,
+              }
+            : ci,
+        ),
+      );
+    },
+    [itemMap],
+  );
+
+  const addCartRow = () => setCart((p) => [...p, blankCartItem()]);
+  const removeCartRow = (key: string) =>
+    setCart((p) => (p.length > 1 ? p.filter((i) => i._key !== key) : p));
+
+  // Realtime stock including already-issued qty for other rows in the same item
+  const getStockForRow = (cartKey: string, itemId: string): number => {
+    const base = Number(itemMap[itemId]?.AvailableStock ?? 0);
+    // subtract qty from other cart rows with same item
+    const otherQty = cart
+      .filter((ci) => ci._key !== cartKey && ci.ItemId === itemId)
+      .reduce((s, ci) => s + (Number(ci.Quantity) || 0), 0);
+    return base - otherQty;
+  };
+
+  // ── Validation ───────────────────────────────────────────────────────────
+
+  const cartIsValid = useMemo(() => {
+    return (
+      cart.length > 0 &&
+      cart.every(
+        (ci) =>
+          ci.ItemId &&
+          ci.UOMCode &&
+          ci.Quantity &&
+          Number(ci.Quantity) > 0 &&
+          Number(ci.Quantity) <= getStockForRow(ci._key, ci.ItemId),
+      )
+    );
+  }, [cart, itemMap]);
+
+  const headerIsValid = useMemo(
+    () =>
+      Boolean(
+        header.companyId &&
+        header.projectId &&
+        header.finYearId &&
+        header.date &&
+        header.reason.trim(),
+      ),
+    [header],
+  );
+
+  const canSave = headerIsValid && cartIsValid;
+
+  // ── Mutations ────────────────────────────────────────────────────────────
+
   const createMutation = useMutation({
     mutationFn: issuesApi.createIssue,
-    onSuccess: (record: any) => {
-      const issueNo = record?.IssueNo || record?.DocNo;
-      toast.success(
-        issueNo
-          ? `Material issue ${issueNo} created successfully`
-          : "Material issue created successfully",
-      );
-      queryClient.invalidateQueries({ queryKey: ["issues"] });
+    onSuccess: (rec: any) => {
+      toast.success(`Issue ${rec?.DocNo || rec?.IssueNo || ""} created`);
+      queryClient.invalidateQueries({ queryKey: ["issues-list"] });
+      queryClient.invalidateQueries({ queryKey: ["issues-items"] });
       goToList();
     },
     onError: (err: any) => toast.error(err.message || "Failed to create issue"),
   });
 
   const updateMutation = useMutation({
-    mutationFn: (payload: any) => issuesApi.updateIssue(editingId!, payload),
+    mutationFn: (p: any) => issuesApi.updateIssue(editingId!, p),
     onSuccess: () => {
-      toast.success("Material issue updated successfully");
-      queryClient.invalidateQueries({ queryKey: ["issues"] });
+      toast.success("Issue updated");
+      queryClient.invalidateQueries({ queryKey: ["issues-list"] });
+      queryClient.invalidateQueries({ queryKey: ["issues-items"] });
       goToList();
     },
     onError: (err: any) => toast.error(err.message || "Failed to update issue"),
@@ -166,95 +361,94 @@ export default function Issues() {
     mutationFn: issuesApi.deleteIssue,
     onSuccess: () => {
       toast.success("Issue deleted");
-      queryClient.invalidateQueries({ queryKey: ["issues"] });
+      queryClient.invalidateQueries({ queryKey: ["issues-list"] });
+      queryClient.invalidateQueries({ queryKey: ["issues-items"] });
     },
     onError: (err: any) => toast.error(err.message || "Failed to delete issue"),
   });
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
+  const isSaving = createMutation.isPending || updateMutation.isPending;
+
+  // ── Navigation helpers ───────────────────────────────────────────────────
+
   const goToList = () => {
     setViewMode("list");
     setEditingId(null);
     setViewingRecord(null);
-    setForm(defaultForm);
+    setHeader(defaultHeader);
+    setCart([blankCartItem()]);
   };
 
   const handleEdit = (record: any) => {
-    setForm({
-      issueNo: record.IssueNo ?? record.DocNo ?? "",
+    setHeader({
       companyId: String(record.CompanyId ?? ""),
       projectId: String(record.ProjectId ?? ""),
-      date: record.Date ? String(record.Date).slice(0, 10) : defaultForm.date,
-      itemId: String(record.ItemId ?? ""),
-      uomCode: String(record.UOMId ?? ""),
-      qty: String(record.Quantity ?? ""),
-      remarks: record.Remarks ?? "",
+      finYearId: String(record.FinYearId ?? ""),
+      date: record.Date ? String(record.Date).slice(0, 10) : defaultHeader.date,
       reason: record.Reason ?? "",
+      remarks: record.Remarks ?? "",
     });
+    // Map child items to cart
+    const items: CartItem[] = (record.items || []).map((it: any) => ({
+      _key: crypto.randomUUID(),
+      ItemId: String(it.ItemId ?? ""),
+      UOMCode: String(it.UOMCode ?? ""),
+      Quantity: String(it.Quantity ?? ""),
+      Remarks: it.Remarks ?? "",
+      ItemName: it.ItemName,
+      AvailableStock: Number(itemMap[it.ItemId]?.AvailableStock ?? 0),
+    }));
+    setCart(items.length > 0 ? items : [blankCartItem()]);
     setEditingId(record.IssueId);
     setViewMode("form");
   };
 
-  const handleView = (record: any) => {
-    setViewingRecord(record);
+  const handleView = async (record: any) => {
+    // Fetch full record with items
+    try {
+      const full = await issuesApi.getIssue(record.IssueId);
+      setViewingRecord(full);
+    } catch {
+      setViewingRecord(record);
+    }
     setViewMode("view");
   };
 
-  const setField = <K extends keyof IssueForm>(key: K, value: IssueForm[K]) =>
-    setForm((prev) => ({ ...prev, [key]: value }));
-
-  const canSave = useMemo(
-    () =>
-      Boolean(
-        form.companyId &&
-          form.projectId &&
-          form.date &&
-          form.itemId &&
-          form.uomCode &&
-          form.qty &&
-          Number(form.qty) > 0 &&
-          form.reason.trim()
-      ),
-    [form]
-  );
-
-  const isSaving = createMutation.isPending || updateMutation.isPending;
-
   const onSave = () => {
     if (!canSave) {
-      toast.error("Please fill all required fields");
+      if (!headerIsValid) toast.error("Fill all required header fields");
+      else
+        toast.error(
+          "Each cart item needs item, UOM, and valid quantity ≤ available stock",
+        );
       return;
     }
     const payload = {
-      CompanyId: Number(form.companyId),
-      ProjectId: Number(form.projectId),
-      Date: form.date,
-      ItemId: form.itemId,
-      UOMId: form.uomCode,
-      Quantity: Number(form.qty),
-      Remarks: form.remarks || null,
-      Reason: form.reason,
+      CompanyId: Number(header.companyId),
+      ProjectId: Number(header.projectId),
+      FinYearId: Number(header.finYearId) || null,
+      Date: header.date,
+      Reason: header.reason,
+      Remarks: header.remarks || null,
+      items: cart.map((ci) => ({
+        ItemId: ci.ItemId,
+        UOMCode: ci.UOMCode,
+        Quantity: Number(ci.Quantity),
+        Remarks: ci.Remarks || null,
+      })),
     };
     editingId ? updateMutation.mutate(payload) : createMutation.mutate(payload);
   };
 
-  // ── Column definitions ────────────────────────────────────────────────────
+  // ── Columns ───────────────────────────────────────────────────────────────
+
   const columns: ColumnDef<any, unknown>[] = [
     {
       accessorKey: "DocNo",
       header: "Doc No",
       cell: ({ row, getValue }) => (
-        <span className="font-mono font-semibold text-primary text-sm">
+        <span className="font-mono font-bold text-primary text-sm">
           {String(getValue() || row.original.IssueNo || "—")}
-        </span>
-      ),
-    },
-    {
-      accessorKey: "IssueNo",
-      header: "Issue No",
-      cell: ({ getValue }) => (
-        <span className="font-semibold text-primary text-sm">
-          {String(getValue() || "—")}
         </span>
       ),
     },
@@ -262,43 +456,60 @@ export default function Issues() {
       accessorKey: "CompanyName",
       header: "Company",
       cell: ({ getValue }) => (
-        <span className="text-sm text-foreground">{String(getValue() || "—")}</span>
+        <div className="flex items-center gap-1.5 text-sm">
+          <Building2 size={12} className="text-muted-foreground shrink-0" />
+          {String(getValue() || "—")}
+        </div>
       ),
     },
     {
       accessorKey: "ProjectName",
       header: "Project",
       cell: ({ getValue }) => (
-        <span className="text-sm text-muted-foreground">{String(getValue() || "—")}</span>
+        <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+          <FolderOpen size={12} className="shrink-0" />
+          {String(getValue() || "—")}
+        </div>
       ),
     },
     {
-      accessorKey: "ItemName",
-      header: "Item",
+      accessorKey: "FinYearName",
+      header: "Fin Year",
       cell: ({ getValue }) => (
-        <span className="text-sm font-medium">{String(getValue() || "—")}</span>
+        <span className="text-xs font-medium text-muted-foreground">
+          {String(getValue() || "—")}
+        </span>
       ),
     },
     {
-      accessorKey: "Quantity",
-      header: "Qty",
+      accessorKey: "ItemCount",
+      header: "Items",
       cell: ({ row }) => (
-        <span className="font-semibold text-sm">
-          {row.original.Quantity}{" "}
-          <span className="text-xs text-muted-foreground font-normal">
-            {row.original.UOMId}
+        <div className="flex items-center gap-1.5">
+          <ShoppingCart size={12} className="text-muted-foreground" />
+          <span className="font-semibold text-sm">
+            {row.original.ItemCount || 0}
           </span>
-        </span>
+          <span className="text-xs text-muted-foreground">
+            ({(row.original.TotalQty || 0).toFixed(2)} units)
+          </span>
+        </div>
       ),
     },
     {
       accessorKey: "Date",
       header: "Date",
       cell: ({ getValue }) => {
-        const val = getValue() as string;
+        const v = getValue() as string;
         return (
           <span className="text-sm text-muted-foreground">
-            {val ? new Date(val).toLocaleDateString("en-IN") : "—"}
+            {v
+              ? new Date(v).toLocaleDateString("en-IN", {
+                  day: "2-digit",
+                  month: "short",
+                  year: "numeric",
+                })
+              : "—"}
           </span>
         );
       },
@@ -321,7 +532,7 @@ export default function Issues() {
             className="p-1.5 rounded hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
             title="View"
           >
-            <Eye size={15} />
+            <Eye size={14} />
           </button>
           <button
             type="button"
@@ -329,19 +540,22 @@ export default function Issues() {
             className="p-1.5 rounded hover:bg-primary/10 text-primary transition-colors"
             title="Edit"
           >
-            <Edit3 size={15} />
+            <Edit3 size={14} />
           </button>
           <button
             type="button"
             onClick={() => {
-              if (confirm("Delete this issue permanently?")) {
+              if (
+                confirm(
+                  "Delete this issue permanently? This will reverse the stock deduction.",
+                )
+              )
                 deleteMutation.mutate(row.original.IssueId);
-              }
             }}
             className="p-1.5 rounded hover:bg-destructive/10 text-destructive transition-colors"
             title="Delete"
           >
-            <Trash2 size={15} />
+            <Trash2 size={14} />
           </button>
         </div>
       ),
@@ -349,6 +563,7 @@ export default function Issues() {
   ];
 
   // ── List view ─────────────────────────────────────────────────────────────
+
   const IssueList = () => {
     const totalPages = issuesData?.totalPages || 1;
     const listData: any[] = issuesData?.data || [];
@@ -356,36 +571,39 @@ export default function Issues() {
 
     return (
       <Card className="border-border shadow-sm">
-        <CardHeader className="pb-3 border-b border-border flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-          <div>
-            <CardTitle className="text-base font-semibold">Issue Register</CardTitle>
-            {!loadingIssues && (
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {totalCount} record{totalCount !== 1 ? "s" : ""}
-              </p>
-            )}
-          </div>
-          <div className="relative w-full sm:w-64">
-            <Search
-              size={14}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-            />
-            <Input
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setPage(1);
-              }}
-              placeholder="Search by issue no, company, item…"
-              className="pl-9 h-9 text-sm"
-            />
+        <CardHeader className="pb-3 border-b border-border">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <CardTitle className="text-base font-semibold">
+                Issue Register
+              </CardTitle>
+              {!loadingIssues && (
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  {totalCount} record{totalCount !== 1 ? "s" : ""}
+                </p>
+              )}
+            </div>
+            <div className="relative w-full sm:w-64">
+              <Search
+                size={13}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+              />
+              <Input
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setPage(1);
+                }}
+                placeholder="Search issue no, company…"
+                className="pl-9 h-9 text-sm"
+              />
+            </div>
           </div>
         </CardHeader>
-
         <CardContent className="p-0">
           {loadingIssues ? (
             <div className="flex items-center justify-center h-40 text-muted-foreground text-sm gap-2">
-              <RefreshCw size={16} className="animate-spin" /> Loading issues…
+              <RefreshCw size={16} className="animate-spin" /> Loading…
             </div>
           ) : (
             <>
@@ -413,7 +631,9 @@ export default function Issues() {
                     <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => setPage((p) => Math.min(p + 1, totalPages))}
+                      onClick={() =>
+                        setPage((p) => Math.min(p + 1, totalPages))
+                      }
                       disabled={page >= totalPages}
                     >
                       Next
@@ -429,38 +649,62 @@ export default function Issues() {
   };
 
   // ── Form view ─────────────────────────────────────────────────────────────
-  const IssueForm = () => (
-    <Card className="rounded-xl border border-border shadow-sm overflow-hidden">
-      <CardHeader className="pb-4 border-b border-border bg-muted/30 flex items-center justify-between">
-        <CardTitle className="text-base font-semibold flex items-center gap-2">
-          {editingId ? (
-            <Edit3 size={16} className="text-primary" />
-          ) : (
-            <FileText size={16} className="text-primary" />
-          )}
-          {editingId ? "Edit Material Issue" : "New Material Issue"}
-        </CardTitle>
-        <Button variant="ghost" size="icon" onClick={goToList} className="h-8 w-8">
-          <X size={16} />
-        </Button>
-      </CardHeader>
 
-      <CardContent className="p-6">
-        <div className="mb-5">
-          <Field label="Issue Number">
-            <div className="flex items-center gap-2 rounded-md border border-dashed border-border bg-muted/40 px-3 py-2.5">
-              <FileText size={14} className="text-muted-foreground shrink-0" />
-              {editingId && form.issueNo ? (
-                <span className="font-mono text-sm font-semibold text-primary tracking-wide">
-                  {form.issueNo}
+  const IssueForm = () => {
+    const totalCartQty = cart.reduce(
+      (s, ci) => s + (Number(ci.Quantity) || 0),
+      0,
+    );
+    const hasStockError = cart.some(
+      (ci) =>
+        ci.ItemId &&
+        ci.Quantity &&
+        Number(ci.Quantity) > getStockForRow(ci._key, ci.ItemId),
+    );
+
+    return (
+      <div className="space-y-5">
+        {/* ── Header card ── */}
+        <Card className="border-border shadow-sm">
+          <CardHeader className="pb-3 border-b border-border bg-muted/20 flex flex-row items-center justify-between">
+            <CardTitle className="text-base font-semibold flex items-center gap-2">
+              {editingId ? (
+                <Edit3 size={15} className="text-primary" />
+              ) : (
+                <FileText size={15} className="text-primary" />
+              )}
+              {editingId ? "Edit Material Issue" : "New Material Issue"}
+            </CardTitle>
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={goToList}
+              className="h-8 w-8"
+            >
+              <X size={15} />
+            </Button>
+          </CardHeader>
+
+          <CardContent className="p-5 space-y-4">
+            {/* Doc number preview */}
+            <div className="flex items-center gap-2 rounded-lg border border-dashed border-border bg-muted/30 px-4 py-2.5">
+              <FileText size={13} className="text-muted-foreground shrink-0" />
+              <span className="text-xs text-muted-foreground font-medium uppercase tracking-widest mr-2">
+                Issue No:
+              </span>
+              {editingId ? (
+                <span className="font-mono font-bold text-primary text-sm">
+                  {header.companyId
+                    ? (viewingRecord?.DocNo ?? "Immutable after creation")
+                    : "—"}
                 </span>
               ) : issueNumberPreview?.nextDocNo ? (
-                <span className="font-mono text-sm font-semibold text-primary tracking-wide">
+                <span className="font-mono font-bold text-primary text-sm">
                   {issueNumberPreview.nextDocNo}
                 </span>
-              ) : loadingIssuePreview ? (
-                <span className="text-sm text-muted-foreground/70">
-                  Loading preview...
+              ) : loadingPreview ? (
+                <span className="text-sm text-muted-foreground animate-pulse">
+                  Loading…
                 </span>
               ) : (
                 <span className="text-sm text-muted-foreground/50 italic">
@@ -468,218 +712,377 @@ export default function Issues() {
                 </span>
               )}
             </div>
-          </Field>
-        </div>
 
-        {/* Row 1: Company | Project | Date */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-5">
-          <Field label="Company" required>
-            <Select
-              value={form.companyId}
-              onValueChange={(val) => {
-                setField("companyId", val);
-                setField("projectId", ""); // reset project on company change
-              }}
-            >
-              <SelectTrigger className="h-10">
-                <div className="flex items-center gap-2 min-w-0">
-                  <Building2 size={14} className="text-muted-foreground shrink-0" />
-                  <SelectValue
-                    placeholder={loadingCompanies ? "Loading…" : "Select company"}
+            {/* Row 1: Company | Project | Fin Year | Date */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+              <Field label="Company" required>
+                <Select
+                  value={header.companyId}
+                  onValueChange={(v) => setH("companyId", v)}
+                >
+                  <SelectTrigger className="h-9">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Building2
+                        size={13}
+                        className="text-muted-foreground shrink-0"
+                      />
+                      <SelectValue
+                        placeholder={
+                          loadingCompanies ? "Loading…" : "Select company"
+                        }
+                      />
+                    </div>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(companies as any[]).map((c) => (
+                      <SelectItem key={c.id} value={String(c.id)}>
+                        {c.label ?? c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+
+              <Field label="Project" required>
+                <Select
+                  value={header.projectId}
+                  onValueChange={(v) => setH("projectId", v)}
+                >
+                  <SelectTrigger className="h-9">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <FolderOpen
+                        size={13}
+                        className="text-muted-foreground shrink-0"
+                      />
+                      <SelectValue
+                        placeholder={
+                          loadingProjects ? "Loading…" : "Select project"
+                        }
+                      />
+                    </div>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(projects as any[]).map((p) => (
+                      <SelectItem key={p.id} value={String(p.id)}>
+                        {p.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+
+              <Field label="Financial Year" required>
+                <Select
+                  value={header.finYearId}
+                  onValueChange={(v) => setH("finYearId", v)}
+                >
+                  <SelectTrigger className="h-9">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Calendar
+                        size={13}
+                        className="text-muted-foreground shrink-0"
+                      />
+                      <SelectValue
+                        placeholder={
+                          loadingFinYears ? "Loading…" : "Select fin year"
+                        }
+                      />
+                    </div>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(finYears as any[]).map((fy) => (
+                      <SelectItem
+                        key={fy.id}
+                        value={String(fy.id)}
+                        disabled={fy.isLocked}
+                      >
+                        {fy.name}
+                        {fy.isLocked && (
+                          <span className="ml-1 text-xs text-muted-foreground">
+                            (locked)
+                          </span>
+                        )}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+
+              <Field label="Issue Date" required>
+                <div className="relative">
+                  <CalendarDays
+                    size={13}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                  />
+                  <Input
+                    type="date"
+                    value={header.date}
+                    onChange={(e) => setH("date", e.target.value)}
+                    className="pl-9 h-9"
                   />
                 </div>
-              </SelectTrigger>
-              <SelectContent>
-                {loadingCompanies ? (
-                  <SelectItem value="__loading" disabled>
-                    Loading companies…
-                  </SelectItem>
-                ) : (companies || []).length === 0 ? (
-                  <SelectItem value="__empty" disabled>
-                    No companies found
-                  </SelectItem>
-                ) : (
-                  (companies || []).map((c: any) => (
-                    <SelectItem key={c.id} value={String(c.id)}>
-                      {c.label}
-                    </SelectItem>
-                  ))
-                )}
-              </SelectContent>
-            </Select>
-          </Field>
-
-          <Field label="Project" required>
-            <Select
-              value={form.projectId}
-              onValueChange={(val) => setField("projectId", val)}
-            >
-              <SelectTrigger className="h-10">
-                <div className="flex items-center gap-2 min-w-0">
-                  <FolderOpen size={14} className="text-muted-foreground shrink-0" />
-                  <SelectValue
-                    placeholder={loadingProjects ? "Loading…" : "Select project"}
-                  />
-                </div>
-              </SelectTrigger>
-              <SelectContent>
-                {loadingProjects ? (
-                  <SelectItem value="__loading" disabled>
-                    Loading projects…
-                  </SelectItem>
-                ) : (projects || []).length === 0 ? (
-                  <SelectItem value="__empty" disabled>
-                    No projects found
-                  </SelectItem>
-                ) : (
-                  (projects || []).map((p: any) => (
-                    <SelectItem key={p.id} value={String(p.id)}>
-                      {p.label}
-                    </SelectItem>
-                  ))
-                )}
-              </SelectContent>
-            </Select>
-          </Field>
-
-          <Field label="Issue Date" required>
-            <div className="relative">
-              <CalendarDays
-                size={14}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-              />
-              <Input
-                type="date"
-                value={form.date}
-                onChange={(e) => setField("date", e.target.value)}
-                className="pl-9 h-10"
-              />
+              </Field>
             </div>
-          </Field>
-        </div>
 
-        {/* Row 2: Item | UOM | Quantity */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-5">
-          <Field label="Item" required>
-            <Select
-              value={form.itemId}
-              onValueChange={(val) => setField("itemId", val)}
-            >
-              <SelectTrigger className="h-10">
-                <div className="flex items-center gap-2 min-w-0">
-                  <Box size={14} className="text-muted-foreground shrink-0" />
-                  <SelectValue
-                    placeholder={loadingItems ? "Loading…" : "Select item"}
-                  />
-                </div>
-              </SelectTrigger>
-              <SelectContent className="max-h-60">
-                {loadingItems ? (
-                  <SelectItem value="__loading" disabled>
-                    Loading items…
-                  </SelectItem>
-                ) : (items || []).length === 0 ? (
-                  <SelectItem value="__empty" disabled>
-                    No items found
-                  </SelectItem>
-                ) : (
-                  (items || []).map((item: any) => (
-                    <SelectItem key={item.M_Id} value={String(item.M_Id)}>
-                      {item.M_Name}
-                      {item.M_Group && (
-                        <span className="text-muted-foreground text-xs ml-1">
-                          · {item.M_Group}
-                        </span>
-                      )}
-                    </SelectItem>
-                  ))
-                )}
-              </SelectContent>
-            </Select>
-          </Field>
-
-          <Field label="Unit of Measure" required>
-            <Select
-              value={form.uomCode}
-              onValueChange={(val) => setField("uomCode", val)}
-            >
-              <SelectTrigger className="h-10">
-                <div className="flex items-center gap-2 min-w-0">
-                  <Ruler size={14} className="text-muted-foreground shrink-0" />
-                  <SelectValue
-                    placeholder={loadingUoms ? "Loading…" : "Select UOM"}
-                  />
-                </div>
-              </SelectTrigger>
-              <SelectContent>
-                {loadingUoms ? (
-                  <SelectItem value="__loading" disabled>
-                    Loading UOMs…
-                  </SelectItem>
-                ) : (uoms || []).length === 0 ? (
-                  <SelectItem value="__empty" disabled>
-                    No UOMs found
-                  </SelectItem>
-                ) : (
-                  (uoms || []).map((uom: any) => (
-                    <SelectItem key={uom.UOMCode} value={uom.UOMCode}>
-                      {uom.UOMName}
-                      {uom.Symbol && (
-                        <span className="text-muted-foreground text-xs ml-1">
-                          ({uom.Symbol})
-                        </span>
-                      )}
-                    </SelectItem>
-                  ))
-                )}
-              </SelectContent>
-            </Select>
-          </Field>
-
-          <Field label="Quantity" required>
-            <div className="relative">
-              <Hash
-                size={14}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-              />
-              <Input
-                type="number"
-                min={0}
-                step="0.01"
-                value={form.qty}
-                onChange={(e) => setField("qty", e.target.value)}
-                className="pl-9 h-10"
-                placeholder="0.00"
-              />
+            {/* Row 2: Reason | Remarks */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Field label="Reason for Issue" required>
+                <Textarea
+                  value={header.reason}
+                  onChange={(e) => setH("reason", e.target.value)}
+                  rows={2}
+                  className="resize-none text-sm"
+                  placeholder="State the reason for this material issue…"
+                />
+              </Field>
+              <Field label="Remarks">
+                <Textarea
+                  value={header.remarks}
+                  onChange={(e) => setH("remarks", e.target.value)}
+                  rows={2}
+                  className="resize-none text-sm"
+                  placeholder="Optional notes…"
+                />
+              </Field>
             </div>
-          </Field>
-        </div>
+          </CardContent>
+        </Card>
 
-        {/* Row 3: Reason | Remarks */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 mb-6">
-          <Field label="Reason for Issue" required>
-            <Textarea
-              value={form.reason}
-              onChange={(e) => setField("reason", e.target.value)}
-              rows={3}
-              className="resize-none text-sm"
-              placeholder="State the reason for this material issue…"
-            />
-          </Field>
+        {/* ── Cart card ── */}
+        <Card className="border-border shadow-sm">
+          <CardHeader className="pb-3 border-b border-border bg-muted/20 flex flex-row items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ShoppingCart size={15} className="text-primary" />
+              <CardTitle className="text-base font-semibold">
+                Item Cart
+              </CardTitle>
+              <Badge variant="secondary" className="text-xs">
+                {cart.length} line{cart.length !== 1 ? "s" : ""}
+              </Badge>
+              {totalCartQty > 0 && (
+                <Badge variant="outline" className="text-xs font-mono">
+                  {totalCartQty.toFixed(2)} units total
+                </Badge>
+              )}
+              {hasStockError && (
+                <Badge
+                  variant="destructive"
+                  className="text-xs flex items-center gap-1"
+                >
+                  <AlertTriangle size={10} /> Stock exceeded
+                </Badge>
+              )}
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={addCartRow}
+              className="gap-1.5 h-8 text-xs"
+            >
+              <Plus size={13} /> Add Item
+            </Button>
+          </CardHeader>
 
-          <Field label="Remarks">
-            <Textarea
-              value={form.remarks}
-              onChange={(e) => setField("remarks", e.target.value)}
-              rows={3}
-              className="resize-none text-sm"
-              placeholder="Optional additional notes…"
-            />
-          </Field>
-        </div>
+          <CardContent className="p-0">
+            {/* Table header */}
+            <div className="hidden md:grid grid-cols-[2fr_1.2fr_1fr_1.8fr_40px] gap-3 px-4 py-2.5 bg-muted/30 border-b border-border text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+              <span>Item</span>
+              <span>Unit (UOM)</span>
+              <span>Quantity</span>
+              <span>Stock / Remarks</span>
+              <span></span>
+            </div>
 
-        {/* Actions */}
-        <div className="flex items-center gap-3 pt-5 border-t border-border">
+            <div className="divide-y divide-border">
+              {cart.map((ci, idx) => {
+                const masterItem = itemMap[ci.ItemId];
+                const availStock = getStockForRow(ci._key, ci.ItemId);
+                const reqQty = Number(ci.Quantity) || 0;
+                const isOver = reqQty > 0 && reqQty > availStock;
+                const uomObj = uomMap[ci.UOMCode];
+
+                return (
+                  <div
+                    key={ci._key}
+                    className={`grid md:grid-cols-[2fr_1.2fr_1fr_1.8fr_40px] gap-3 p-4 items-start transition-colors ${isOver ? "bg-destructive/5" : "hover:bg-muted/20"}`}
+                  >
+                    {/* Item select */}
+                    <div>
+                      <span className="md:hidden text-xs text-muted-foreground font-semibold uppercase tracking-widest mb-1 block">
+                        Item *
+                      </span>
+                      <Select
+                        value={ci.ItemId}
+                        onValueChange={(v) => pickItem(ci._key, v)}
+                      >
+                        <SelectTrigger
+                          className={`h-9 ${isOver ? "border-destructive" : ""}`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0 text-sm">
+                            <Box
+                              size={12}
+                              className="text-muted-foreground shrink-0"
+                            />
+                            <SelectValue
+                              placeholder={
+                                loadingItems ? "Loading…" : "Select item"
+                              }
+                            />
+                          </div>
+                        </SelectTrigger>
+                        <SelectContent className="max-h-64">
+                          {(itemOptions as any[]).map((item) => (
+                            <SelectItem
+                              key={item.M_Id}
+                              value={String(item.M_Id)}
+                            >
+                              <div className="flex flex-col">
+                                <span>{item.M_Name}</span>
+                                <span
+                                  className={`text-xs ${Number(item.AvailableStock) <= 0 ? "text-destructive" : "text-muted-foreground"}`}
+                                >
+                                  Stock:{" "}
+                                  {Number(item.AvailableStock).toFixed(2)}
+                                  {item.M_Group && ` · ${item.M_Group}`}
+                                </span>
+                              </div>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* UOM select */}
+                    <div>
+                      <span className="md:hidden text-xs text-muted-foreground font-semibold uppercase tracking-widest mb-1 block">
+                        UOM *
+                      </span>
+                      <Select
+                        value={ci.UOMCode}
+                        onValueChange={(v) =>
+                          updateCartItem(ci._key, "UOMCode", v)
+                        }
+                      >
+                        <SelectTrigger className="h-9">
+                          <div className="flex items-center gap-2 min-w-0 text-sm">
+                            <Ruler
+                              size={12}
+                              className="text-muted-foreground shrink-0"
+                            />
+                            <SelectValue
+                              placeholder={loadingUoms ? "Loading…" : "UOM"}
+                            />
+                          </div>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {(uoms as any[]).map((u) => (
+                            <SelectItem key={u.UOMCode} value={u.UOMCode}>
+                              {u.UOMName}
+                              {u.Symbol && (
+                                <span className="text-muted-foreground ml-1">
+                                  ({u.Symbol})
+                                </span>
+                              )}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Quantity */}
+                    <div>
+                      <span className="md:hidden text-xs text-muted-foreground font-semibold uppercase tracking-widest mb-1 block">
+                        Qty *
+                      </span>
+                      <div className="relative">
+                        <Hash
+                          size={12}
+                          className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                        />
+                        <Input
+                          type="number"
+                          min={0}
+                          max={availStock > 0 ? availStock : undefined}
+                          step="0.01"
+                          value={ci.Quantity}
+                          onChange={(e) =>
+                            updateCartItem(ci._key, "Quantity", e.target.value)
+                          }
+                          className={`pl-8 h-9 font-mono text-sm ${isOver ? "border-destructive text-destructive focus-visible:ring-destructive" : ""}`}
+                          placeholder="0.00"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Stock info + remarks */}
+                    <div className="space-y-2">
+                      {ci.ItemId && (
+                        <StockPill
+                          available={availStock}
+                          requested={reqQty}
+                          uomSymbol={uomObj?.Symbol || ci.UOMCode}
+                        />
+                      )}
+                      <Input
+                        value={ci.Remarks}
+                        onChange={(e) =>
+                          updateCartItem(ci._key, "Remarks", e.target.value)
+                        }
+                        placeholder="Line remarks (optional)"
+                        className="h-8 text-xs"
+                      />
+                    </div>
+
+                    {/* Remove button */}
+                    <div className="flex items-start justify-center pt-1">
+                      <button
+                        type="button"
+                        onClick={() => removeCartRow(ci._key)}
+                        className="p-1.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors"
+                        title="Remove line"
+                        disabled={cart.length === 1}
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Cart footer summary */}
+            {cart.some((ci) => ci.ItemId && ci.Quantity) && (
+              <div className="border-t border-border bg-muted/20 px-4 py-3 flex items-center justify-between gap-4">
+                <div className="flex items-center gap-4 text-sm">
+                  <span className="flex items-center gap-1.5 text-muted-foreground">
+                    <Package size={13} />
+                    {cart.filter((ci) => ci.ItemId).length} item(s)
+                  </span>
+                  <span className="font-semibold">
+                    {totalCartQty.toFixed(2)} units total
+                  </span>
+                </div>
+                {hasStockError && (
+                  <div className="flex items-center gap-1.5 text-destructive text-sm font-medium">
+                    <AlertTriangle size={14} />
+                    One or more items exceed available stock
+                  </div>
+                )}
+                {!hasStockError &&
+                  cart.every((ci) => ci.ItemId && ci.Quantity) && (
+                    <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 text-sm font-medium">
+                      <CheckCircle2 size={14} />
+                      All quantities within stock limits
+                    </div>
+                  )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        {/* ── Save bar ── */}
+        <div className="flex items-center gap-3 pt-1">
           <Button
             variant="outline"
             onClick={goToList}
@@ -694,124 +1097,191 @@ export default function Issues() {
             className="px-6 gap-2"
           >
             {isSaving ? (
-              <RefreshCw size={15} className="animate-spin" />
+              <RefreshCw size={14} className="animate-spin" />
             ) : (
-              <Save size={15} />
+              <Save size={14} />
             )}
-            {isSaving
-              ? "Saving…"
-              : editingId
-              ? "Update Issue"
-              : "Save Issue"}
+            {isSaving ? "Saving…" : editingId ? "Update Issue" : "Save Issue"}
           </Button>
+          {!canSave && (
+            <span className="text-xs text-muted-foreground">
+              {!headerIsValid
+                ? "Fill required header fields"
+                : "Fix cart errors above"}
+            </span>
+          )}
         </div>
-      </CardContent>
-    </Card>
-  );
-
-  // ── Detail / View mode ────────────────────────────────────────────────────
-  const IssueView = () => {
-    if (!viewingRecord) return null;
-
-    return (
-      <Card className="rounded-xl border border-border shadow-sm overflow-hidden">
-        <CardHeader className="pb-4 border-b border-border bg-muted/30 flex items-center justify-between">
-          <CardTitle className="text-base font-semibold flex items-center gap-2">
-            <FileText size={16} className="text-primary" />
-            Issue — {viewingRecord.IssueNo || `#${viewingRecord.IssueId}`}
-          </CardTitle>
-          <div className="flex items-center gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handleEdit(viewingRecord)}
-              className="gap-1.5 h-8"
-            >
-              <Edit3 size={13} /> Edit
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              onClick={goToList}
-              className="h-8 w-8"
-            >
-              <X size={16} />
-            </Button>
-          </div>
-        </CardHeader>
-
-        <CardContent className="p-6">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 mb-6">
-            <DetailRow
-              label="Doc No"
-              value={viewingRecord.DocNo || viewingRecord.IssueNo || "—"}
-            />
-            <DetailRow label="Company" value={viewingRecord.CompanyName} />
-            <DetailRow label="Project" value={viewingRecord.ProjectName} />
-            <DetailRow
-              label="Date"
-              value={
-                viewingRecord.Date
-                  ? new Date(viewingRecord.Date).toLocaleDateString("en-IN", {
-                      day: "2-digit",
-                      month: "short",
-                      year: "numeric",
-                    })
-                  : undefined
-              }
-            />
-            <DetailRow
-              label="Status"
-              value={<StatusBadge status={viewingRecord.Status || "Draft"} />}
-            />
-          </div>
-
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-6 mb-6">
-            <DetailRow
-              label="Item"
-              value={viewingRecord.ItemName || viewingRecord.ItemId}
-            />
-            <DetailRow
-              label="Quantity"
-              value={
-                <>
-                  <span className="font-bold">{viewingRecord.Quantity}</span>{" "}
-                  <span className="text-sm text-muted-foreground">
-                    {viewingRecord.UOMId}
-                  </span>
-                </>
-              }
-            />
-            <DetailRow
-              label="Issue No"
-              value={viewingRecord.IssueNo || "—"}
-            />
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1.5">
-                Reason for Issue
-              </p>
-              <div className="bg-muted/40 border border-border rounded-lg p-3 text-sm min-h-[64px]">
-                {viewingRecord.Reason || "—"}
-              </div>
-            </div>
-            <div>
-              <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1.5">
-                Remarks
-              </p>
-              <div className="bg-muted/40 border border-border rounded-lg p-3 text-sm min-h-[64px]">
-                {viewingRecord.Remarks || "—"}
-              </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+      </div>
     );
   };
 
-  // ── Page render ────────────────────────────────────────────────────────────
+  // ── View mode ─────────────────────────────────────────────────────────────
+
+  const IssueView = () => {
+    if (!viewingRecord) return null;
+    const items: any[] = viewingRecord.items || [];
+
+    return (
+      <div className="space-y-5">
+        <Card className="border-border shadow-sm">
+          <CardHeader className="pb-3 border-b border-border bg-muted/20 flex flex-row items-center justify-between">
+            <CardTitle className="text-base font-semibold flex items-center gap-2">
+              <FileText size={15} className="text-primary" />
+              Issue —{" "}
+              {viewingRecord.DocNo ||
+                viewingRecord.IssueNo ||
+                `#${viewingRecord.IssueId}`}
+            </CardTitle>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => handleEdit(viewingRecord)}
+                className="gap-1.5 h-8"
+              >
+                <Edit3 size={13} /> Edit
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={goToList}
+                className="h-8 w-8"
+              >
+                <X size={15} />
+              </Button>
+            </div>
+          </CardHeader>
+          <CardContent className="p-5">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-5 mb-5">
+              <DetailRow
+                label="Doc No"
+                value={
+                  <span className="font-mono font-bold text-primary">
+                    {viewingRecord.DocNo || viewingRecord.IssueNo}
+                  </span>
+                }
+              />
+              <DetailRow label="Company" value={viewingRecord.CompanyName} />
+              <DetailRow label="Project" value={viewingRecord.ProjectName} />
+              <DetailRow
+                label="Financial Year"
+                value={viewingRecord.FinYearName}
+              />
+              <DetailRow
+                label="Date"
+                value={
+                  viewingRecord.Date
+                    ? new Date(viewingRecord.Date).toLocaleDateString("en-IN", {
+                        day: "2-digit",
+                        month: "short",
+                        year: "numeric",
+                      })
+                    : "—"
+                }
+              />
+              <DetailRow
+                label="Status"
+                value={<StatusBadge status={viewingRecord.Status || "Draft"} />}
+              />
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <p className="text-xs uppercase tracking-widest font-semibold text-muted-foreground mb-1.5">
+                  Reason for Issue
+                </p>
+                <div className="bg-muted/40 border border-border rounded-lg p-3 text-sm min-h-[56px]">
+                  {viewingRecord.Reason || "—"}
+                </div>
+              </div>
+              <div>
+                <p className="text-xs uppercase tracking-widest font-semibold text-muted-foreground mb-1.5">
+                  Remarks
+                </p>
+                <div className="bg-muted/40 border border-border rounded-lg p-3 text-sm min-h-[56px]">
+                  {viewingRecord.Remarks || "—"}
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Items table */}
+        <Card className="border-border shadow-sm">
+          <CardHeader className="pb-3 border-b border-border bg-muted/20">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <ShoppingCart size={14} className="text-primary" />
+              Issued Items
+              <Badge variant="secondary" className="text-xs">
+                {items.length}
+              </Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="p-0">
+            <div className="hidden md:grid grid-cols-[2fr_1fr_1fr_1.5fr_1.5fr] px-4 py-2.5 bg-muted/30 border-b border-border text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+              <span>Item</span>
+              <span>UOM</span>
+              <span>Quantity</span>
+              <span>Current Stock</span>
+              <span>Remarks</span>
+            </div>
+            <div className="divide-y divide-border">
+              {items.length === 0 ? (
+                <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+                  No items found
+                </div>
+              ) : (
+                items.map((it, i) => (
+                  <div
+                    key={i}
+                    className="grid md:grid-cols-[2fr_1fr_1fr_1.5fr_1.5fr] gap-3 px-4 py-3 items-center hover:bg-muted/20 transition-colors text-sm"
+                  >
+                    <div>
+                      <span className="font-medium">
+                        {it.ItemName || it.ItemId}
+                      </span>
+                      {it.ItemGroup && (
+                        <span className="text-xs text-muted-foreground ml-1">
+                          · {it.ItemGroup}
+                        </span>
+                      )}
+                    </div>
+                    <span className="text-muted-foreground">
+                      {it.UOMName || it.UOMCode}
+                    </span>
+                    <span className="font-mono font-semibold">
+                      {Number(it.Quantity).toFixed(2)}
+                    </span>
+                    <span
+                      className={`font-mono text-xs font-semibold ${Number(it.CurrentBalance) < 0 ? "text-destructive" : "text-emerald-600 dark:text-emerald-400"}`}
+                    >
+                      {Number(it.CurrentBalance).toFixed(2)} {it.UOMSymbol}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {it.Remarks || "—"}
+                    </span>
+                  </div>
+                ))
+              )}
+            </div>
+            {items.length > 0 && (
+              <div className="border-t border-border bg-muted/20 px-4 py-2.5 flex items-center gap-4 text-sm">
+                <span className="text-muted-foreground">Total issued:</span>
+                <span className="font-bold font-mono">
+                  {items
+                    .reduce((s, it) => s + Number(it.Quantity), 0)
+                    .toFixed(2)}{" "}
+                  units
+                </span>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  };
+
+  // ── Page render ───────────────────────────────────────────────────────────
+
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Materials", "Issues"]} />
@@ -823,13 +1293,15 @@ export default function Issues() {
             Material Issues
           </h1>
           <p className="text-sm text-muted-foreground mt-1">
-            Record and track material issued to projects.
+            Issue stock items to projects with real-time availability tracking.
           </p>
         </div>
-
         {viewMode === "list" && (
-          <Button onClick={() => setViewMode("form")} className="gap-2 shrink-0">
-            <Plus size={16} /> New Issue
+          <Button
+            onClick={() => setViewMode("form")}
+            className="gap-2 shrink-0"
+          >
+            <Plus size={15} /> New Issue
           </Button>
         )}
       </div>

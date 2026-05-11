@@ -142,9 +142,11 @@ const TCMaster = lazy(() => import("./pages/material/T&CMaster"));
 const UnitOfMeasurementMaster = lazy(
   () => import("./pages/material/UnitOfMeasurementMaster"),
 );
+const InventoryMaster = lazy(() => import("./pages/material/InventoryMaster"));
 const EnterpriseMasterPage = lazy(
   () => import("./pages/admin/masters/EnterpriseMaster"),
 );
+const BOQ = lazy(() => import("./pages/material/BOQ"));
 
 // Admin Pages
 const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
@@ -205,9 +207,7 @@ const Amendments = lazy(() => import("./pages/material/Amendments"));
 const Issues = lazy(() => import("./pages/material/Issues"));
 const RemindersManager = lazy(() => import("./pages/dba/RemindersManager"));
 
-
 const PaymentLogs = lazy(() => import("./pages/dba/PaymentLogs"));
-
 
 // ─── Auth Guard ───────────────────────────────────────────────────────────────
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -235,17 +235,33 @@ function RequireRole({
 }
 
 // ─── Admin Protected Route ────────────────────────────────────────────────────
+function ProtectedProviders({ children }: { children: React.ReactNode }) {
+  return (
+    <RecordsProvider>
+      <TdsProvider>
+        <DebitNoteProvider>
+          <BillingTermsProvider>
+            <TaskProvider>{children}</TaskProvider>
+          </BillingTermsProvider>
+        </DebitNoteProvider>
+      </TdsProvider>
+    </RecordsProvider>
+  );
+}
+
 const ADMIN_ROLES = ["super_admin", "admin", "dba"] as const;
 
 function AdminRoute({ children }: { children: React.ReactNode }) {
   return (
     <RequireAuth>
       <RequireRole allowed={[...ADMIN_ROLES]}>
-        <AppLayout>
-          <RouteErrorBoundary>
-            <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
-          </RouteErrorBoundary>
-        </AppLayout>
+        <ProtectedProviders>
+          <AppLayout>
+            <RouteErrorBoundary>
+              <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
+            </RouteErrorBoundary>
+          </AppLayout>
+        </ProtectedProviders>
       </RequireRole>
     </RequireAuth>
   );
@@ -256,11 +272,13 @@ function SuperAdminRoute({ children }: { children: React.ReactNode }) {
   return (
     <RequireAuth>
       <RequireRole allowed={["super_admin"]}>
-        <AppLayout>
-          <RouteErrorBoundary>
-            <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
-          </RouteErrorBoundary>
-        </AppLayout>
+        <ProtectedProviders>
+          <AppLayout>
+            <RouteErrorBoundary>
+              <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
+            </RouteErrorBoundary>
+          </AppLayout>
+        </ProtectedProviders>
       </RequireRole>
     </RequireAuth>
   );
@@ -270,11 +288,13 @@ function SuperAdminRoute({ children }: { children: React.ReactNode }) {
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return (
     <RequireAuth>
-      <AppLayout>
-        <RouteErrorBoundary>
-          <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
-        </RouteErrorBoundary>
-      </AppLayout>
+      <ProtectedProviders>
+        <AppLayout>
+          <RouteErrorBoundary>
+            <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
+          </RouteErrorBoundary>
+        </AppLayout>
+      </ProtectedProviders>
     </RequireAuth>
   );
 }
@@ -568,6 +588,15 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/material/boq"
+        element={
+          <ProtectedRoute>
+            <BOQ />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
         path="/material/work-order"
         element={
           <ProtectedRoute>
@@ -612,6 +641,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <TCMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/material/inventory-master"
+        element={
+          <ProtectedRoute>
+            <InventoryMaster />
           </ProtectedRoute>
         }
       />
@@ -1012,17 +1049,7 @@ function App() {
                 <ThemeProvider>
                   <FinYearProvider>
                     <HsnProvider>
-                      <RecordsProvider>
-                        <TdsProvider>
-                          <DebitNoteProvider>
-                            <BillingTermsProvider>
-                              <TaskProvider>
-                                <AppRoutes />
-                              </TaskProvider>
-                            </BillingTermsProvider>
-                          </DebitNoteProvider>
-                        </TdsProvider>
-                      </RecordsProvider>
+                      <AppRoutes />
                     </HsnProvider>
                   </FinYearProvider>
                 </ThemeProvider>

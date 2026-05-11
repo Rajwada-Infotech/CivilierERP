@@ -95,6 +95,7 @@ const ALL_ROUTES = [
   { path: "/api/transactions", file: "./routes/transactions" },
   { path: "/api/grns", file: "./routes/grns" },
   { path: "/api/stock-ledger", file: "./routes/stockLedger" },
+  { path: "/api/inventory-master", file: "./routes/inventoryMaster" },
   { path: "/api/brs", file: "./routes/brs" },
   { path: "/api/reports", file: "./routes/reports" },
   { path: "/api/finance-dashboard", file: "./routes/financeDashboard" },
@@ -120,6 +121,7 @@ const ALL_ROUTES = [
   { path: "/api/menu-type", file: "./routes/menuType" },
   { path: "/api/menu-types", file: "./routes/menuType" },
   { path: "/api/typeofdoc", file: "./routes/typeofdoc" },
+  { path: "/api/boq", file: "./routes/boq" },
 ];
 
 // ─── createApp ──────────────────────────────────────────────────────────────

@@ -36,6 +36,7 @@ import {
   ChevronDown,
   Database,
   TrendingUp,
+  ClipboardList,
 } from "lucide-react";
 import { BillingIcon } from "@/components/icons/BillingIcon";
 import { ADMIN_PATHS } from "@/constants/pageDefinitions";
@@ -192,6 +193,12 @@ const materialSetupItems = [
     label: "T&C",
     path: "/material/t-c-master",
     color: "text-purple-500",
+  },
+  {
+    icon: ClipboardList,
+    label: "Inventory",
+    path: "/material/inventory-master",
+    color: "text-teal-400",
   },
 ];
 
