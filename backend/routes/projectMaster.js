@@ -14,39 +14,27 @@ router.get("/", async (req, res) => {
     const pool = getPool();
     const result = await pool.request().query(`
       SELECT
-        id          AS Id,
-        business_identity AS Code,
-        name        AS Name,
-        description AS LegalName,
-        short_name  AS ShortName,
-        entity_type AS Type,
-        cr_code     AS Industry,
-        date_of_establishment AS IncorporationDate,
-        cin         AS CIN,
-        pan         AS PAN,
-        tan         AS TAN,
-        gst_type    AS GSTType,
-        business_identity AS GST,
-        gst_issue_date AS GSTDate,
-        trade_license  AS TradeLicenseNo,
-        NULL           AS TradeLicenseDate,
-        address        AS RegisteredAddress,
-        address_line2  AS Address2,
-        city, state, country, pincode,
-        phone_number   AS Phone,
-        NULL           AS Fax,
-        email,
-        website,
-        NULL           AS AuthorizedCapital,
-        NULL           AS PaidUpCapital,
-        currency,
-        fiscal_year_start AS FiscalYearStart,
-        NULL           AS AuditorName,
+        id                    AS Id,
+        business_identity     AS Code,
+        name                  AS Name,
+        short_name            AS ShortName,
+        entity_type           AS Type,
+        description           AS Description,
+        address               AS Location,
+        currency              AS Currency,
+        status                AS Status,
+        rera_no               AS Priority,
+        start_date            AS StartDate,
+        rera_date             AS EndDate,
+        trade_license         AS ClientName,
+        tan                   AS ClientCode,
+        cin                   AS TeamSize,
+        pan                   AS Remarks,
         CASE WHEN discontinue = 1 THEN 0 ELSE 1 END AS IsActive,
-        NULL           AS Remarks,
-        logo           AS LogoUrl,
-        status,
-        belongs_to
+        logo                  AS ProjectImage,
+        belongs_to,
+        b_sub_identity_type,
+        date_of_entry         AS CreatedAt
       FROM dbo.enterprise
       WHERE business_type = 'P'
       ORDER BY name
@@ -67,43 +55,37 @@ router.post("/", adminOnly, async (req, res) => {
       .input("name", sql.NVarChar(255), f.name || null)
       .input("short_name", sql.NVarChar(100), f.shortName || null)
       .input("business_identity", sql.NVarChar(100), f.code || null)
-      .input("business_type", sql.NVarChar(100), "P")
+      .input("business_type", sql.NVarChar(10), "P")
       .input("entity_type", sql.NVarChar(50), f.type || null)
-      .input("description", sql.NVarChar(sql.MAX), f.legalName || null)
-      .input("cr_code", sql.NVarChar(50), f.industry || null)
-      .input("date_of_establishment", sql.Date, f.incorporationDate || null)
-      .input("cin", sql.NVarChar(50), f.cinNumber || null)
-      .input("pan", sql.NVarChar(20), f.panNumber || null)
-      .input("tan", sql.NVarChar(15), f.tanNumber || null)
-      .input("gst_type", sql.NVarChar(50), f.gstType || null)
-      .input("gst_issue_date", sql.Date, f.gstDate || null)
-      .input("trade_license", sql.NVarChar(100), f.tradeLicenseNo || null)
-      .input("address", sql.NVarChar(sql.MAX), f.registeredAddress || null)
-      .input("city", sql.NVarChar(100), f.city || null)
-      .input("state", sql.NVarChar(100), f.state || null)
-      .input("country", sql.NVarChar(100), f.country || null)
-      .input("pincode", sql.NVarChar(10), f.pincode || null)
-      .input("phone_number", sql.NVarChar(20), f.phone || null)
-      .input("email", sql.NVarChar(255), f.email || null)
-      .input("website", sql.NVarChar(255), f.website || null)
+      .input("description", sql.NVarChar(sql.MAX), f.description || null)
+      .input("address", sql.NVarChar(sql.MAX), f.location || null)
       .input("currency", sql.NVarChar(10), f.currency || "INR")
-      .input("fiscal_year_start", sql.NVarChar(20), f.fiscalYearStart || null)
-      .input("logo", sql.NVarChar(sql.MAX), f.logoUrl || null)
-      .input("belongs_to", sql.NVarChar(50), f.belongsTo || null)
+      .input("status", sql.NVarChar(50), f.status || "Planning")
+      .input("rera_no", sql.NVarChar(100), f.priority || null)
+      .input("start_date", sql.Date, f.startDate || null)
+      .input("rera_date", sql.Date, f.endDate || null)
+      .input("trade_license", sql.NVarChar(200), f.clientName || null)
+      .input("tan", sql.NVarChar(15), f.clientCode || null)
+      .input("cin", sql.NVarChar(50), f.teamSize ? String(f.teamSize) : null)
+      .input("pan", sql.NVarChar(20), f.remarks || null)
+      .input("logo", sql.NVarChar(sql.MAX), f.projectImage || null)
+      // Enterprise stored in belongs_to, Company stored in b_sub_identity_type — independent
+      .input("belongs_to", sql.NVarChar(255), f.enterpriseName || null)
+      .input("b_sub_identity_type", sql.NVarChar(255), f.companyName || null)
       .input("discontinue", sql.Bit, f.isActive ? 0 : 1)
       .input("date_of_entry", sql.Date, new Date()).query(`
         INSERT INTO dbo.enterprise (
           name, short_name, business_identity, business_type, entity_type, description,
-          cr_code, date_of_establishment, cin, pan, tan, gst_type, gst_issue_date,
-          trade_license, address, city, state, country, pincode,
-          phone_number, email, website, currency, fiscal_year_start,
-          logo, belongs_to, discontinue, date_of_entry
+          address, currency,
+          status, rera_no, start_date, rera_date,
+          trade_license, tan, cin, pan,
+          logo, belongs_to, b_sub_identity_type, discontinue, date_of_entry
         ) VALUES (
           @name, @short_name, @business_identity, @business_type, @entity_type, @description,
-          @cr_code, @date_of_establishment, @cin, @pan, @tan, @gst_type, @gst_issue_date,
-          @trade_license, @address, @city, @state, @country, @pincode,
-          @phone_number, @email, @website, @currency, @fiscal_year_start,
-          @logo, @belongs_to, @discontinue, @date_of_entry
+          @address, @currency,
+          @status, @rera_no, @start_date, @rera_date,
+          @trade_license, @tan, @cin, @pan,
+          @logo, @belongs_to, @b_sub_identity_type, @discontinue, @date_of_entry
         )
       `);
     await bumpCacheVersion("enterprises");
@@ -113,7 +95,7 @@ router.post("/", adminOnly, async (req, res) => {
   }
 });
 
-// PUT — updates enterprise row
+// PUT — updates enterprise row (project)
 router.put("/:id", adminOnly, async (req, res) => {
   const f = req.body;
   try {
@@ -125,37 +107,30 @@ router.put("/:id", adminOnly, async (req, res) => {
       .input("short_name", sql.NVarChar(100), f.shortName || null)
       .input("business_identity", sql.NVarChar(100), f.code || null)
       .input("entity_type", sql.NVarChar(50), f.type || null)
-      .input("description", sql.NVarChar(sql.MAX), f.legalName || null)
-      .input("cr_code", sql.NVarChar(50), f.industry || null)
-      .input("date_of_establishment", sql.Date, f.incorporationDate || null)
-      .input("cin", sql.NVarChar(50), f.cinNumber || null)
-      .input("pan", sql.NVarChar(20), f.panNumber || null)
-      .input("tan", sql.NVarChar(15), f.tanNumber || null)
-      .input("gst_type", sql.NVarChar(50), f.gstType || null)
-      .input("gst_issue_date", sql.Date, f.gstDate || null)
-      .input("trade_license", sql.NVarChar(100), f.tradeLicenseNo || null)
-      .input("address", sql.NVarChar(sql.MAX), f.registeredAddress || null)
-      .input("city", sql.NVarChar(100), f.city || null)
-      .input("state", sql.NVarChar(100), f.state || null)
-      .input("country", sql.NVarChar(100), f.country || null)
-      .input("pincode", sql.NVarChar(10), f.pincode || null)
-      .input("phone_number", sql.NVarChar(20), f.phone || null)
-      .input("email", sql.NVarChar(255), f.email || null)
-      .input("website", sql.NVarChar(255), f.website || null)
+      .input("description", sql.NVarChar(sql.MAX), f.description || null)
+      .input("address", sql.NVarChar(sql.MAX), f.location || null)
       .input("currency", sql.NVarChar(10), f.currency || "INR")
-      .input("fiscal_year_start", sql.NVarChar(20), f.fiscalYearStart || null)
-      .input("logo", sql.NVarChar(sql.MAX), f.logoUrl || null)
-      .input("belongs_to", sql.NVarChar(50), f.belongsTo || null)
+      .input("status", sql.NVarChar(50), f.status || "Planning")
+      .input("rera_no", sql.NVarChar(100), f.priority || null)
+      .input("start_date", sql.Date, f.startDate || null)
+      .input("rera_date", sql.Date, f.endDate || null)
+      .input("trade_license", sql.NVarChar(200), f.clientName || null)
+      .input("tan", sql.NVarChar(15), f.clientCode || null)
+      .input("cin", sql.NVarChar(50), f.teamSize ? String(f.teamSize) : null)
+      .input("pan", sql.NVarChar(20), f.remarks || null)
+      .input("logo", sql.NVarChar(sql.MAX), f.projectImage || null)
+      // Enterprise stored in belongs_to, Company stored in b_sub_identity_type — independent
+      .input("belongs_to", sql.NVarChar(255), f.enterpriseName || null)
+      .input("b_sub_identity_type", sql.NVarChar(255), f.companyName || null)
       .input("discontinue", sql.Bit, f.isActive ? 0 : 1).query(`
         UPDATE dbo.enterprise SET
           name=@name, short_name=@short_name, business_identity=@business_identity,
-          entity_type=@entity_type, description=@description, cr_code=@cr_code,
-          date_of_establishment=@date_of_establishment, cin=@cin, pan=@pan, tan=@tan,
-          gst_type=@gst_type, gst_issue_date=@gst_issue_date, trade_license=@trade_license,
-          address=@address, city=@city, state=@state, country=@country, pincode=@pincode,
-          phone_number=@phone_number, email=@email, website=@website,
-          currency=@currency, fiscal_year_start=@fiscal_year_start,
-          logo=@logo, belongs_to=@belongs_to, discontinue=@discontinue
+          entity_type=@entity_type, description=@description,
+          address=@address, currency=@currency,
+          status=@status, rera_no=@rera_no, start_date=@start_date, rera_date=@rera_date,
+          trade_license=@trade_license, tan=@tan, cin=@cin, pan=@pan,
+          logo=@logo, belongs_to=@belongs_to, b_sub_identity_type=@b_sub_identity_type,
+          discontinue=@discontinue
         WHERE id=@id AND business_type='P'
       `);
     await bumpCacheVersion("enterprises");

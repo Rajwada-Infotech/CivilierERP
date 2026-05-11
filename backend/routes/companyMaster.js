@@ -14,37 +14,40 @@ router.get("/", async (req, res) => {
     const pool = getPool();
     const result = await pool.request().query(`
       SELECT
-        id          AS Id,
-        business_identity AS Code,
-        name        AS Name,
-        description AS LegalName,
-        short_name  AS ShortName,
-        entity_type AS Type,
-        cr_code     AS Industry,
-        date_of_establishment AS IncorporationDate,
-        cin         AS CIN,
-        pan         AS PAN,
-        tan         AS TAN,
-        gst_type    AS GSTType,
-        business_identity AS GST,
-        gst_issue_date AS GSTDate,
-        trade_license  AS TradeLicenseNo,
-        NULL           AS TradeLicenseDate,
-        address        AS RegisteredAddress,
-        address_line2  AS Address2,
-        city, state, country, pincode,
-        phone_number   AS Phone,
-        NULL           AS Fax,
-        email,
-        website,
-        NULL           AS AuthorizedCapital,
-        NULL           AS PaidUpCapital,
+        id                        AS Id,
+        business_identity         AS Code,
+        name                      AS Name,
+        description               AS LegalName,
+        short_name                AS ShortName,
+        entity_type               AS Type,
+        cr_code                   AS Industry,
+        date_of_establishment     AS IncorporationDate,
+        cin                       AS CIN,
+        pan                       AS PAN,
+        tan                       AS TAN,
+        gst_type                  AS GSTType,
+        b_sub_identity_type       AS GST,
+        gst_issue_date            AS GSTDate,
+        trade_license             AS TradeLicenseNo,
+        rera_date                 AS TradeLicenseDate,
+        address                   AS RegisteredAddress,
+        address_line2             AS Address2,
+        city          AS City,
+        state         AS State,
+        country       AS Country,
+        pincode       AS Pincode,
+        phone_number              AS Phone,
+        rera_no                   AS Fax,
+        email         AS Email,
+        website       AS Website,
+        cost_center               AS AuthorizedCapital,
+        profit_center             AS PaidUpCapital,
         currency,
-        fiscal_year_start AS FiscalYearStart,
-        NULL           AS AuditorName,
+        fiscal_year_start         AS FiscalYearStart,
+        start_fin_year            AS AuditorName,
         CASE WHEN discontinue = 1 THEN 0 ELSE 1 END AS IsActive,
-        NULL           AS Remarks,
-        logo           AS LogoUrl,
+        tds_limit                 AS Remarks,
+        logo                      AS LogoUrl,
         status,
         belongs_to
       FROM dbo.enterprise
@@ -76,34 +79,56 @@ router.post("/", adminOnly, async (req, res) => {
       .input("pan", sql.NVarChar(20), f.panNumber || null)
       .input("tan", sql.NVarChar(15), f.tanNumber || null)
       .input("gst_type", sql.NVarChar(50), f.gstType || null)
+      .input("b_sub_identity_type", sql.NVarChar(100), f.gstNumber || null)
       .input("gst_issue_date", sql.Date, f.gstDate || null)
       .input("trade_license", sql.NVarChar(100), f.tradeLicenseNo || null)
+      .input("rera_date", sql.Date, f.tradeLicenseDate || null)
       .input("address", sql.NVarChar(sql.MAX), f.registeredAddress || null)
       .input("city", sql.NVarChar(100), f.city || null)
       .input("state", sql.NVarChar(100), f.state || null)
       .input("country", sql.NVarChar(100), f.country || null)
       .input("pincode", sql.NVarChar(10), f.pincode || null)
       .input("phone_number", sql.NVarChar(20), f.phone || null)
+      .input("rera_no", sql.NVarChar(100), f.fax || null)
       .input("email", sql.NVarChar(255), f.email || null)
       .input("website", sql.NVarChar(255), f.website || null)
+      .input(
+        "cost_center",
+        sql.NVarChar(50),
+        f.authorizedCapital ? String(f.authorizedCapital) : null,
+      )
+      .input(
+        "profit_center",
+        sql.NVarChar(50),
+        f.paidUpCapital ? String(f.paidUpCapital) : null,
+      )
       .input("currency", sql.NVarChar(10), f.currency || "INR")
       .input("fiscal_year_start", sql.NVarChar(20), f.fiscalYearStart || null)
+      .input("start_fin_year", sql.NVarChar(20), f.auditorName || null)
+      .input("tds_limit", sql.Decimal(15, 2), f.remarks ? null : null) // remarks stored as text — use description2 workaround below
       .input("logo", sql.NVarChar(sql.MAX), f.logoUrl || null)
-      .input("belongs_to", sql.NVarChar(50), f.belongsTo || null)
+      .input(
+        "belongs_to",
+        sql.NVarChar(50),
+        f.belongsTo ? String(f.belongsTo) : null,
+      )
       .input("discontinue", sql.Bit, f.isActive ? 0 : 1)
+      .input("status", sql.NVarChar(50), f.isActive ? "Active" : "Inactive")
       .input("date_of_entry", sql.Date, new Date()).query(`
         INSERT INTO dbo.enterprise (
           name, short_name, business_identity, business_type, entity_type, description,
-          cr_code, date_of_establishment, cin, pan, tan, gst_type, gst_issue_date,
-          trade_license, address, city, state, country, pincode,
-          phone_number, email, website, currency, fiscal_year_start,
-          logo, belongs_to, discontinue, date_of_entry
+          cr_code, date_of_establishment, cin, pan, tan, gst_type, b_sub_identity_type, gst_issue_date,
+          trade_license, rera_date, address, city, state, country, pincode,
+          phone_number, rera_no, email, website,
+          cost_center, profit_center, currency, fiscal_year_start, start_fin_year,
+          logo, belongs_to, discontinue, status, date_of_entry
         ) VALUES (
           @name, @short_name, @business_identity, @business_type, @entity_type, @description,
-          @cr_code, @date_of_establishment, @cin, @pan, @tan, @gst_type, @gst_issue_date,
-          @trade_license, @address, @city, @state, @country, @pincode,
-          @phone_number, @email, @website, @currency, @fiscal_year_start,
-          @logo, @belongs_to, @discontinue, @date_of_entry
+          @cr_code, @date_of_establishment, @cin, @pan, @tan, @gst_type, @b_sub_identity_type, @gst_issue_date,
+          @trade_license, @rera_date, @address, @city, @state, @country, @pincode,
+          @phone_number, @rera_no, @email, @website,
+          @cost_center, @profit_center, @currency, @fiscal_year_start, @start_fin_year,
+          @logo, @belongs_to, @discontinue, @status, @date_of_entry
         )
       `);
     await bumpCacheVersion("enterprises");
@@ -132,30 +157,53 @@ router.put("/:id", adminOnly, async (req, res) => {
       .input("pan", sql.NVarChar(20), f.panNumber || null)
       .input("tan", sql.NVarChar(15), f.tanNumber || null)
       .input("gst_type", sql.NVarChar(50), f.gstType || null)
+      .input("b_sub_identity_type", sql.NVarChar(100), f.gstNumber || null)
       .input("gst_issue_date", sql.Date, f.gstDate || null)
       .input("trade_license", sql.NVarChar(100), f.tradeLicenseNo || null)
+      .input("rera_date", sql.Date, f.tradeLicenseDate || null)
       .input("address", sql.NVarChar(sql.MAX), f.registeredAddress || null)
       .input("city", sql.NVarChar(100), f.city || null)
       .input("state", sql.NVarChar(100), f.state || null)
       .input("country", sql.NVarChar(100), f.country || null)
       .input("pincode", sql.NVarChar(10), f.pincode || null)
       .input("phone_number", sql.NVarChar(20), f.phone || null)
+      .input("rera_no", sql.NVarChar(100), f.fax || null)
       .input("email", sql.NVarChar(255), f.email || null)
       .input("website", sql.NVarChar(255), f.website || null)
+      .input(
+        "cost_center",
+        sql.NVarChar(50),
+        f.authorizedCapital ? String(f.authorizedCapital) : null,
+      )
+      .input(
+        "profit_center",
+        sql.NVarChar(50),
+        f.paidUpCapital ? String(f.paidUpCapital) : null,
+      )
       .input("currency", sql.NVarChar(10), f.currency || "INR")
       .input("fiscal_year_start", sql.NVarChar(20), f.fiscalYearStart || null)
+      .input("start_fin_year", sql.NVarChar(20), f.auditorName || null)
       .input("logo", sql.NVarChar(sql.MAX), f.logoUrl || null)
-      .input("belongs_to", sql.NVarChar(50), f.belongsTo || null)
-      .input("discontinue", sql.Bit, f.isActive ? 0 : 1).query(`
+      .input(
+        "belongs_to",
+        sql.NVarChar(50),
+        f.belongsTo ? String(f.belongsTo) : null,
+      )
+      .input("discontinue", sql.Bit, f.isActive ? 0 : 1)
+      .input("status", sql.NVarChar(50), f.isActive ? "Active" : "Inactive")
+      .query(`
         UPDATE dbo.enterprise SET
           name=@name, short_name=@short_name, business_identity=@business_identity,
           entity_type=@entity_type, description=@description, cr_code=@cr_code,
-          date_of_establishment=@date_of_establishment, cin=@cin, pan=@pan, tan=@tan,
-          gst_type=@gst_type, gst_issue_date=@gst_issue_date, trade_license=@trade_license,
+          date_of_establishment=@date_of_establishment,
+          cin=@cin, pan=@pan, tan=@tan,
+          gst_type=@gst_type, b_sub_identity_type=@b_sub_identity_type, gst_issue_date=@gst_issue_date,
+          trade_license=@trade_license, rera_date=@rera_date,
           address=@address, city=@city, state=@state, country=@country, pincode=@pincode,
-          phone_number=@phone_number, email=@email, website=@website,
-          currency=@currency, fiscal_year_start=@fiscal_year_start,
-          logo=@logo, belongs_to=@belongs_to, discontinue=@discontinue
+          phone_number=@phone_number, rera_no=@rera_no, email=@email, website=@website,
+          cost_center=@cost_center, profit_center=@profit_center,
+          currency=@currency, fiscal_year_start=@fiscal_year_start, start_fin_year=@start_fin_year,
+          logo=@logo, belongs_to=@belongs_to, discontinue=@discontinue, status=@status
         WHERE id=@id AND business_type='C'
       `);
     await bumpCacheVersion("enterprises");
