@@ -99,7 +99,16 @@ interface NavItem {
 
 // ── Finance module sidebar ──────────────────────────────────────────────────
 const buildFinanceNavItems = (overdueCount: number): NavItem[] => [
-  { label: "Amendments", icon: BarChart3, path: "/finance" },
+  { label: "Dashboard", icon: BarChart3, path: "/finance" },
+  {
+    label: "Transaction",
+    icon: Landmark,
+    children: [
+      { label: "Payment", path: "/payments" },
+      { label: "Received Payment", path: "/received-payments" },
+      { label: "BRS", path: "/brs" },
+    ],
+  },
   {
     label: "Query",
     icon: Scale,
@@ -110,15 +119,6 @@ const buildFinanceNavItems = (overdueCount: number): NavItem[] => [
         path: "/tasks",
         badge: overdueCount > 0 ? overdueCount : undefined,
       },
-    ],
-  },
-  {
-    label: "Transaction",
-    icon: Landmark,
-    children: [
-      { label: "Payment", path: "/payments" },
-      { label: "Received Payment", path: "/received-payments" },
-      { label: "BRS", path: "/brs" },
     ],
   },
   {

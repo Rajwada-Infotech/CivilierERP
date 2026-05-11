@@ -1,4 +1,11 @@
-import React, { useState, useMemo, useEffect, useCallback } from "react";
+import React, {
+  useState,
+  useMemo,
+  useEffect,
+  useCallback,
+  useRef,
+} from "react";
+import { createPortal } from "react-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   Plus,
@@ -108,13 +115,17 @@ interface MaterialItem {
   id: string;
   itemId: string;
   itemName: string;
-  quantity: number;
+  /** Consumption ratio per unit of activity area (e.g. 60 units per m³) */
+  consumptionRatio: number;
   uomId: number | null;
   unit: string;
   price: number;
   /** GST rate % auto-filled from HSN when item is selected */
   gstRate: number;
 }
+
+// GST type for per-activity HSN selection
+type WOGSTType = "cgst_sgst" | "igst";
 
 interface Activity {
   id: string;
@@ -125,6 +136,12 @@ interface Activity {
   ratePerUnit: number;
   area: number;
   materials: MaterialItem[];
+  /** HSN code selected for this activity */
+  hsnCode: string;
+  /** GST rate derived from selected HSN */
+  hsnGstRate: number;
+  /** GST type derived from selected HSN */
+  hsnGstType: WOGSTType;
 }
 
 interface ActivityGroup {
@@ -143,9 +160,6 @@ interface WorkOrderForm {
   contractorId: string;
   remarks: string;
   termsAndConditions: string;
-  gstApplicable: boolean;
-  gstType: WOGSTType;
-  gstRate: number;
 }
 
 interface DropdownOption {
@@ -265,16 +279,13 @@ const EMPTY_FORM = (): WorkOrderForm => ({
   contractorId: "",
   remarks: "",
   termsAndConditions: "",
-  gstApplicable: false,
-  gstType: "cgst_sgst",
-  gstRate: 18,
 });
 
 const EMPTY_MATERIAL = (): MaterialItem => ({
   id: uid(),
   itemId: "",
   itemName: "",
-  quantity: 0,
+  consumptionRatio: 0,
   uomId: null,
   unit: "",
   price: 0,
@@ -290,6 +301,9 @@ const EMPTY_ACTIVITY = (): Activity => ({
   ratePerUnit: 0,
   area: 0,
   materials: [],
+  hsnCode: "",
+  hsnGstRate: 0,
+  hsnGstType: "cgst_sgst",
 });
 
 const EMPTY_GROUP = (): ActivityGroup => ({
@@ -371,7 +385,7 @@ const MaterialBreakdownModal: React.FC<{
   const [open, setOpen] = useState(false);
 
   const materialsTotal = activity.materials.reduce(
-    (sum, m) => sum + m.quantity * m.price,
+    (sum, m) => sum + m.consumptionRatio * activity.area * m.price,
     0,
   );
   const labourTotal = activity.ratePerUnit * activity.area;
@@ -397,6 +411,7 @@ const MaterialBreakdownModal: React.FC<{
     updateMaterial(idx, {
       itemId: found ? found.id : "",
       itemName: found ? found.name : "",
+      consumptionRatio: 0,
       gstRate: found ? (found.gstRate ?? 0) : 0,
       ...(resolvedUom != null
         ? { uomId: resolvedUom.id, unit: resolvedUom.name }
@@ -468,20 +483,48 @@ const MaterialBreakdownModal: React.FC<{
                 <X size={14} />
               </button>
             </div>
+            {/* Activity area multiplier info bar */}
+            <div className="px-4 py-2.5 bg-blue-50 dark:bg-blue-950/30 border-b border-blue-200 dark:border-blue-800 shrink-0">
+              <div className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <div
+                    className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border text-xs font-semibold
+                    ${
+                      activity.area > 0
+                        ? "bg-blue-100 dark:bg-blue-900/50 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-300"
+                        : "bg-muted/50 border-border text-muted-foreground"
+                    }`}
+                  >
+                    <Layers size={11} className="shrink-0" />
+                    <span>Activity Area:</span>
+                    {activity.area > 0 ? (
+                      <span className="font-bold">
+                        {activity.area} {activity.unit || ""}
+                      </span>
+                    ) : (
+                      <span className="italic font-normal opacity-60">
+                        not set
+                      </span>
+                    )}
+                  </div>
+                  <span className="text-[10px] text-blue-600 dark:text-blue-400 font-medium hidden sm:block">
+                    Auto-applied as multiplier to all materials
+                  </span>
+                </div>
+                <div className="flex items-center gap-1.5 text-[10px] text-blue-700 dark:text-blue-300 font-medium bg-blue-100 dark:bg-blue-900/30 px-2 py-1 rounded">
+                  <Calculator size={10} />
+                  Ratio × Area × Price
+                </div>
+              </div>
+              {activity.area === 0 && (
+                <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-1.5 flex items-center gap-1">
+                  <AlertCircle size={10} className="shrink-0" />
+                  Set the Activity Area in the activity row first — material
+                  totals will be 0 until then.
+                </p>
+              )}
+            </div>
             <div className="flex items-center gap-4 px-4 py-2 bg-muted/30 border-b border-border text-xs shrink-0 flex-wrap gap-y-1">
-              <span className="flex items-center gap-1.5 text-muted-foreground">
-                <Layers size={11} className="shrink-0" />
-                <span className="text-foreground font-medium">Area:</span>
-                {activity.area > 0 ? (
-                  <span className="font-semibold text-primary">
-                    {activity.area} {activity.unit || "—"}
-                  </span>
-                ) : (
-                  <span className="italic text-muted-foreground/50">
-                    not set in activity row
-                  </span>
-                )}
-              </span>
               {materialsTotal > 0 && (
                 <span className="flex items-center gap-1.5 text-muted-foreground ml-auto">
                   <span className="text-foreground font-medium">
@@ -510,7 +553,8 @@ const MaterialBreakdownModal: React.FC<{
               {activity.materials.length > 0 && (
                 <div className="space-y-2">
                   {activity.materials.map((mat, idx) => {
-                    const lineTotal = mat.quantity * mat.price;
+                    const lineTotal =
+                      mat.consumptionRatio * activity.area * mat.price;
                     return (
                       <div
                         key={mat.id}
@@ -549,20 +593,19 @@ const MaterialBreakdownModal: React.FC<{
                         <div className="grid grid-cols-3 gap-2">
                           <div>
                             <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
-                              Qty
+                              Ratio / Unit
                             </p>
                             <input
                               type="number"
                               min={0}
-                              value={mat.quantity || ""}
+                              value={mat.consumptionRatio || ""}
                               onChange={(e) =>
                                 updateMaterial(idx, {
-                                  quantity: parseFloat(e.target.value) || 0,
+                                  consumptionRatio:
+                                    parseFloat(e.target.value) || 0,
                                 })
                               }
-                              placeholder={
-                                activity.area > 0 ? String(activity.area) : "0"
-                              }
+                              placeholder="e.g. 60"
                               className={cellInput}
                             />
                           </div>
@@ -630,7 +673,8 @@ const MaterialBreakdownModal: React.FC<{
                         {lineTotal > 0 && (
                           <div className="flex items-center justify-between pt-1 border-t border-border/50">
                             <span className="text-xs text-muted-foreground">
-                              {mat.quantity} {mat.unit} × ₹{mat.price}
+                              {mat.consumptionRatio} × {activity.area}{" "}
+                              {activity.unit} × ₹{mat.price}
                             </span>
                             <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">
                               {fmt(
@@ -655,7 +699,8 @@ const MaterialBreakdownModal: React.FC<{
                   </div>
                   <div className="divide-y divide-border/50">
                     {activity.materials.map((mat) => {
-                      const lt = mat.quantity * mat.price;
+                      const lt =
+                        mat.consumptionRatio * activity.area * mat.price;
                       return (
                         <div
                           key={mat.id}
@@ -669,8 +714,8 @@ const MaterialBreakdownModal: React.FC<{
                             )}
                           </span>
                           <span className="text-muted-foreground shrink-0">
-                            {mat.quantity > 0
-                              ? `${mat.quantity} ${mat.unit}`
+                            {mat.consumptionRatio > 0
+                              ? `${mat.consumptionRatio} × ${activity.area}`
                               : "—"}
                           </span>
                           <span className="text-muted-foreground shrink-0">
@@ -689,7 +734,7 @@ const MaterialBreakdownModal: React.FC<{
                     <div className="flex items-center justify-between px-3 py-2">
                       <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
                         <Package size={11} className="text-amber-500" />
-                        Raw Materials
+                        Materials (Ratio × Area × Price)
                       </span>
                       <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">
                         {fmt(materialsTotal)}
@@ -740,7 +785,160 @@ const MaterialBreakdownModal: React.FC<{
   );
 };
 
-// ─── Activity Row ─────────────────────────────────────────────────────────────
+// ─── HSN Dropdown (Portal) ────────────────────────────────────────────────────
+// Renders the dropdown via a portal so it escapes any overflow:hidden ancestor.
+
+const HsnDropdown: React.FC<{
+  activity: Activity;
+  filteredHsn: {
+    code: string;
+    shortDesc: string;
+    igstRate: number;
+    cgstRate: number;
+    sgstRate: number;
+  }[];
+  hsnSearch: string;
+  setHsnSearch: (v: string) => void;
+  hsnOpen: boolean;
+  setHsnOpen: (v: boolean) => void;
+  onUpdate: (patch: Partial<Activity>) => void;
+}> = ({
+  activity,
+  filteredHsn,
+  hsnSearch,
+  setHsnSearch,
+  hsnOpen,
+  setHsnOpen,
+  onUpdate,
+}) => {
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+
+  useEffect(() => {
+    if (hsnOpen && btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect();
+      setPos({
+        top: rect.bottom + 4,
+        left: Math.max(4, rect.right - 288),
+      });
+    }
+  }, [hsnOpen]);
+
+  return (
+    <div>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => setHsnOpen(!hsnOpen)}
+        className={`w-full flex items-center gap-1 px-2 py-1.5 rounded-md border text-xs font-medium transition-colors
+          ${
+            activity.hsnCode
+              ? "border-violet-300 dark:border-violet-700 bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-300"
+              : "border-border bg-background text-muted-foreground hover:border-violet-300 hover:text-foreground"
+          }`}
+      >
+        <Receipt size={11} className="shrink-0" />
+        <span className="truncate text-[11px]">
+          {activity.hsnCode || "HSN"}
+        </span>
+      </button>
+
+      {hsnOpen &&
+        createPortal(
+          <>
+            <div
+              className="fixed inset-0 z-[9998]"
+              onClick={() => setHsnOpen(false)}
+            />
+            <div
+              className="fixed z-[9999] w-72 rounded-xl border border-border bg-card shadow-2xl overflow-hidden"
+              style={{ top: pos.top, left: pos.left }}
+            >
+              <div className="px-3 py-2 border-b border-border flex items-center justify-between">
+                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                  Select HSN Code
+                </p>
+                <button
+                  onClick={() => setHsnOpen(false)}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+              <div className="px-3 py-2 border-b border-border">
+                <input
+                  autoFocus
+                  value={hsnSearch}
+                  onChange={(e) => setHsnSearch(e.target.value)}
+                  placeholder="Search code or description…"
+                  className="w-full text-xs rounded-md border border-border px-2.5 py-1.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                />
+              </div>
+              <div className="max-h-56 overflow-y-auto divide-y divide-border/50">
+                {activity.hsnCode && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onUpdate({
+                        hsnCode: "",
+                        hsnGstRate: 0,
+                        hsnGstType: "cgst_sgst",
+                      });
+                      setHsnOpen(false);
+                    }}
+                    className="w-full text-left px-3 py-2 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 transition"
+                  >
+                    ✕ Remove HSN
+                  </button>
+                )}
+                {filteredHsn.length === 0 ? (
+                  <p className="px-3 py-6 text-xs text-center text-muted-foreground">
+                    No HSN records found
+                  </p>
+                ) : (
+                  filteredHsn.map((h) => {
+                    const gstRate = h.cgstRate + h.sgstRate || h.igstRate;
+                    const gstType: WOGSTType =
+                      h.cgstRate > 0 || h.sgstRate > 0 ? "cgst_sgst" : "igst";
+                    return (
+                      <button
+                        key={h.code}
+                        type="button"
+                        onClick={() => {
+                          onUpdate({
+                            hsnCode: h.code,
+                            hsnGstRate: gstRate,
+                            hsnGstType: gstType,
+                          });
+                          setHsnOpen(false);
+                        }}
+                        className={`w-full text-left px-3 py-2.5 flex items-center justify-between gap-2 hover:bg-muted/40 transition text-xs ${activity.hsnCode === h.code ? "bg-violet-50 dark:bg-violet-950/20" : ""}`}
+                      >
+                        <span>
+                          <span className="font-mono font-semibold text-foreground">
+                            {h.code}
+                          </span>
+                          <span className="text-muted-foreground ml-1.5">
+                            {h.shortDesc}
+                          </span>
+                        </span>
+                        <span className="shrink-0 font-semibold text-violet-600 dark:text-violet-400">
+                          {gstRate}%
+                        </span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          </>,
+          document.body,
+        )}
+    </div>
+  );
+};
+
+// ─── Activity Row ─────────────────────────────────────────────────────────────────────────────
 
 const ActivityRow: React.FC<{
   activity: Activity;
@@ -754,6 +952,13 @@ const ActivityRow: React.FC<{
   itemOptions: ItemOption[];
   loadingActivities: boolean;
   loadingItems: boolean;
+  hsnRecords: {
+    code: string;
+    shortDesc: string;
+    igstRate: number;
+    cgstRate: number;
+    sgstRate: number;
+  }[];
 }> = ({
   activity,
   index,
@@ -766,16 +971,30 @@ const ActivityRow: React.FC<{
   itemOptions,
   loadingActivities,
   loadingItems,
+  hsnRecords,
 }) => {
   const safeOptions = ensureArray<ActivityOption>(activityOptions);
   const safeUomOptions = ensureArray<DropdownOption>(uomOptions);
+  const [hsnOpen, setHsnOpen] = useState(false);
+  const [hsnSearch, setHsnSearch] = useState("");
+
+  const filteredHsn = hsnRecords.filter(
+    (h) =>
+      h.code.toLowerCase().includes(hsnSearch.toLowerCase()) ||
+      h.shortDesc.toLowerCase().includes(hsnSearch.toLowerCase()),
+  );
 
   const labourTotal = activity.ratePerUnit * activity.area;
   const materialsTotal = activity.materials.reduce(
-    (sum, m) => sum + m.quantity * m.price,
+    (sum, m) => sum + m.consumptionRatio * activity.area * m.price,
     0,
   );
-  const activityTotal = labourTotal + materialsTotal;
+  const activitySubtotal = labourTotal + materialsTotal;
+  const activityGstAmount =
+    activity.hsnGstRate > 0
+      ? (activitySubtotal * activity.hsnGstRate) / 100
+      : 0;
+  const activityTotal = activitySubtotal + activityGstAmount;
   const label = `${groupIndex + 1}.${index + 1}`;
 
   const handleActivityChange = (selectedId: string) => {
@@ -905,7 +1124,7 @@ const ActivityRow: React.FC<{
             </div>
           </div>
         </div>
-        {(labourTotal > 0 || materialsTotal > 0) && (
+        {(labourTotal > 0 || materialsTotal > 0 || activityGstAmount > 0) && (
           <div className="flex items-center gap-2 flex-wrap">
             {labourTotal > 0 && (
               <span className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400 border border-blue-200 dark:border-blue-800">
@@ -919,8 +1138,116 @@ const ActivityRow: React.FC<{
                 Materials: {fmt(materialsTotal)}
               </span>
             )}
+            {activityGstAmount > 0 && (
+              <span className="flex items-center gap-1 text-[10px] font-medium px-2 py-1 rounded-md bg-violet-50 dark:bg-violet-950/30 text-violet-600 dark:text-violet-400 border border-violet-200 dark:border-violet-800">
+                <Receipt size={9} />
+                GST {activity.hsnCode} ({activity.hsnGstRate}%):{" "}
+                {fmt(activityGstAmount)}
+              </span>
+            )}
           </div>
         )}
+        {/* Mobile HSN button */}
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => {
+              setHsnOpen((o) => !o);
+              setHsnSearch("");
+            }}
+            className={`w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border text-xs font-medium transition-colors
+              ${
+                activity.hsnCode
+                  ? "border-violet-300 dark:border-violet-700 bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-300"
+                  : "border-border bg-background text-muted-foreground hover:border-violet-300 hover:text-foreground"
+              }`}
+          >
+            <Receipt size={12} />
+            {activity.hsnCode
+              ? `HSN: ${activity.hsnCode} (${activity.hsnGstRate}%)`
+              : "Add HSN / GST"}
+          </button>
+          {hsnOpen && (
+            <div className="absolute left-0 top-full mt-1 z-30 w-72 rounded-xl border border-border bg-card shadow-xl overflow-hidden">
+              <div className="px-3 py-2 border-b border-border flex items-center justify-between">
+                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+                  Select HSN Code
+                </p>
+                <button
+                  onClick={() => setHsnOpen(false)}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  <X size={13} />
+                </button>
+              </div>
+              <div className="px-3 py-2 border-b border-border">
+                <input
+                  autoFocus
+                  value={hsnSearch}
+                  onChange={(e) => setHsnSearch(e.target.value)}
+                  placeholder="Search code or description…"
+                  className="w-full text-xs rounded-md border border-border px-2.5 py-1.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+                />
+              </div>
+              <div className="max-h-52 overflow-y-auto divide-y divide-border/50">
+                {activity.hsnCode && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onUpdate({
+                        hsnCode: "",
+                        hsnGstRate: 0,
+                        hsnGstType: "cgst_sgst",
+                      });
+                      setHsnOpen(false);
+                    }}
+                    className="w-full text-left px-3 py-2 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 transition"
+                  >
+                    Remove HSN
+                  </button>
+                )}
+                {filteredHsn.length === 0 ? (
+                  <p className="px-3 py-4 text-xs text-center text-muted-foreground">
+                    No HSN records found
+                  </p>
+                ) : (
+                  filteredHsn.map((h) => {
+                    const gstRate = h.cgstRate + h.sgstRate || h.igstRate;
+                    const gstType: WOGSTType =
+                      h.cgstRate > 0 || h.sgstRate > 0 ? "cgst_sgst" : "igst";
+                    return (
+                      <button
+                        key={h.code}
+                        type="button"
+                        onClick={() => {
+                          onUpdate({
+                            hsnCode: h.code,
+                            hsnGstRate: gstRate,
+                            hsnGstType: gstType,
+                          });
+                          setHsnOpen(false);
+                        }}
+                        className={`w-full text-left px-3 py-2 flex items-center justify-between gap-2 hover:bg-muted/40 transition text-xs ${activity.hsnCode === h.code ? "bg-violet-50 dark:bg-violet-950/20" : ""}`}
+                      >
+                        <span>
+                          <span className="font-mono font-semibold text-foreground">
+                            {h.code}
+                          </span>
+                          <span className="text-muted-foreground ml-1.5">
+                            {h.shortDesc}
+                          </span>
+                        </span>
+                        <span className="shrink-0 font-semibold text-violet-600 dark:text-violet-400">
+                          {gstRate}%
+                        </span>
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            </div>
+          )}
+        </div>
         <MaterialBreakdownModal
           activity={activity}
           uomOptions={uomOptions}
@@ -931,8 +1258,8 @@ const ActivityRow: React.FC<{
       </div>
 
       {/* Desktop */}
-      <div className="hidden sm:block rounded-lg border border-border/50 overflow-hidden">
-        <div className="grid grid-cols-[48px_1fr_120px_128px_112px_auto_120px_32px] gap-2 items-center px-3 py-2.5 bg-muted/20">
+      <div className="hidden sm:block rounded-lg border border-border/50">
+        <div className="grid grid-cols-[48px_1fr_120px_128px_112px_90px_100px_120px_32px] gap-2 items-center px-3 py-2.5 bg-muted/20">
           <div className="text-xs font-mono text-primary font-semibold">
             {label}
           </div>
@@ -970,6 +1297,16 @@ const ActivityRow: React.FC<{
             loadingItems={loadingItems}
             onUpdateMaterials={(mats) => onUpdate({ materials: mats })}
           />
+          {/* Desktop HSN button */}
+          <HsnDropdown
+            activity={activity}
+            filteredHsn={filteredHsn}
+            hsnSearch={hsnSearch}
+            setHsnSearch={setHsnSearch}
+            hsnOpen={hsnOpen}
+            setHsnOpen={setHsnOpen}
+            onUpdate={onUpdate}
+          />
           <div className="text-right">
             <span
               className={`text-sm font-semibold ${activityTotal > 0 ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground"}`}
@@ -985,7 +1322,7 @@ const ActivityRow: React.FC<{
             <X size={13} />
           </button>
         </div>
-        {(labourTotal > 0 || materialsTotal > 0) && (
+        {(labourTotal > 0 || materialsTotal > 0 || activityGstAmount > 0) && (
           <div className="flex items-center gap-3 px-3 py-1.5 bg-muted/10 border-t border-border/40 flex-wrap">
             <span className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mr-1">
               Breakdown:
@@ -999,7 +1336,14 @@ const ActivityRow: React.FC<{
             {materialsTotal > 0 && (
               <span className="flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded bg-amber-50 dark:bg-amber-950/30 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
                 <Package size={9} />
-                Raw Materials: {fmt(materialsTotal)}
+                Materials: {fmt(materialsTotal)}
+              </span>
+            )}
+            {activityGstAmount > 0 && (
+              <span className="flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded bg-violet-50 dark:bg-violet-950/30 text-violet-600 dark:text-violet-400 border border-violet-200 dark:border-violet-800">
+                <Receipt size={9} />
+                GST {activity.hsnCode} ({activity.hsnGstRate}%):{" "}
+                {fmt(activityGstAmount)}
               </span>
             )}
           </div>
@@ -1023,6 +1367,13 @@ const ActivityGroupCard: React.FC<{
   itemOptions: ItemOption[];
   loadingDropdowns: boolean;
   loadingItems: boolean;
+  hsnRecords: {
+    code: string;
+    shortDesc: string;
+    igstRate: number;
+    cgstRate: number;
+    sgstRate: number;
+  }[];
 }> = ({
   group,
   index,
@@ -1035,6 +1386,7 @@ const ActivityGroupCard: React.FC<{
   itemOptions,
   loadingDropdowns,
   loadingItems,
+  hsnRecords,
 }) => {
   const safeGroupOptions = ensureArray<DropdownOption>(activityGroupOptions);
   const safeActivityOptions = ensureArray<ActivityOption>(activityOptions);
@@ -1045,7 +1397,11 @@ const ActivityGroupCard: React.FC<{
   );
   const groupMaterialsTotal = group.activities.reduce(
     (sum, a) =>
-      sum + a.materials.reduce((ms, m) => ms + m.quantity * m.price, 0),
+      sum +
+      a.materials.reduce(
+        (ms, m) => ms + m.consumptionRatio * a.area * m.price,
+        0,
+      ),
     0,
   );
   const groupTotal = groupLabourTotal + groupMaterialsTotal;
@@ -1088,8 +1444,8 @@ const ActivityGroupCard: React.FC<{
   };
 
   return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden">
-      <div className="flex items-center gap-2 px-3 sm:px-4 py-3 bg-muted/30 border-b border-border">
+    <div className="rounded-xl border border-border bg-card">
+      <div className="flex items-center gap-2 px-3 sm:px-4 py-3 bg-muted/30 border-b border-border rounded-t-xl">
         <button
           onClick={toggleExpand}
           className="w-6 h-6 flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors shrink-0"
@@ -1139,7 +1495,7 @@ const ActivityGroupCard: React.FC<{
       {group.expanded && (
         <div className="p-3 space-y-2">
           {group.activities.length > 0 && (
-            <div className="hidden sm:grid grid-cols-[48px_1fr_120px_128px_112px_auto_120px_32px] gap-2 px-3 pb-1">
+            <div className="hidden sm:grid grid-cols-[48px_1fr_120px_128px_112px_90px_100px_120px_32px] gap-2 px-3 pb-1">
               {[
                 "#",
                 "Activity",
@@ -1147,6 +1503,7 @@ const ActivityGroupCard: React.FC<{
                 "Rate / Unit (Labour)",
                 "Area",
                 "Materials",
+                "HSN / GST",
                 "Activity Total",
                 "",
               ].map((h) => (
@@ -1173,6 +1530,7 @@ const ActivityGroupCard: React.FC<{
               itemOptions={itemOptions}
               loadingActivities={loadingDropdowns}
               loadingItems={loadingItems}
+              hsnRecords={hsnRecords}
             />
           ))}
           {group.groupId !== null &&
@@ -1772,9 +2130,9 @@ const WorkOrderDetailPanel: React.FC<{
                                     <div className="hidden sm:grid grid-cols-[1fr_80px_80px_80px_120px] gap-2 px-6 py-1.5 border-b border-border/30">
                                       {[
                                         "Item Name",
-                                        "Qty",
+                                        "Ratio",
                                         "Unit",
-                                        "Rate",
+                                        "Rate / Unit",
                                         "Amount",
                                       ].map((h) => (
                                         <div
@@ -1786,8 +2144,11 @@ const WorkOrderDetailPanel: React.FC<{
                                       ))}
                                     </div>
                                     {act.materials.map((mat, matIdx) => {
+                                      // Quantity stored in DB = consumption ratio; Area from parent activity
                                       const lineTotal =
-                                        (mat.Quantity || 0) * (mat.Rate || 0);
+                                        (mat.Quantity || 0) *
+                                        (act.Area || 0) *
+                                        (mat.Rate || 0);
                                       return (
                                         <div key={mat.Id}>
                                           {/* Mobile material */}
@@ -1797,8 +2158,8 @@ const WorkOrderDetailPanel: React.FC<{
                                                 {mat.ItemName || "—"}
                                               </p>
                                               <p className="text-[10px] text-muted-foreground">
-                                                {mat.Quantity} {mat.UOMName} × ₹
-                                                {mat.Rate}
+                                                {mat.Quantity} × {act.Area}{" "}
+                                                {act.UOMName} × ₹{mat.Rate}
                                               </p>
                                             </div>
                                             <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">
@@ -1816,7 +2177,9 @@ const WorkOrderDetailPanel: React.FC<{
                                               {mat.ItemName || "—"}
                                             </span>
                                             <span className="text-xs text-muted-foreground">
-                                              {mat.Quantity ?? "—"}
+                                              {mat.Quantity != null
+                                                ? `${mat.Quantity} × ${act.Area}`
+                                                : "—"}
                                             </span>
                                             <span className="text-xs text-muted-foreground">
                                               {mat.UOMName || "—"}
@@ -2365,17 +2728,15 @@ const WorkOrderEditPanel: React.FC<{
             fetchActivities(),
             fetchWithAuth("/api/uom-master").then((r) =>
               r.ok
-                ? r
-                    .json()
-                    .then((rows: any[]) =>
-                      rows
-                        .filter((u) => u.IsActive !== false)
-                        .map((u) => ({
-                          id: u.Id,
-                          name: u.UOMName,
-                          uomCode: u.UOMCode,
-                        })),
-                    )
+                ? r.json().then((rows: any[]) =>
+                    rows
+                      .filter((u) => u.IsActive !== false)
+                      .map((u) => ({
+                        id: u.Id,
+                        name: u.UOMName,
+                        uomCode: u.UOMCode,
+                      })),
+                  )
                 : [],
             ),
             getWorkOrder(workOrderId),
@@ -2418,12 +2779,6 @@ const WorkOrderEditPanel: React.FC<{
         const contId =
           contList.find((c) => c.name === detail.ContractorName)?.id ?? "";
 
-        const gstData = detail.GST as {
-          applicable?: boolean;
-          hsnCode?: string;
-          type?: string;
-          rate?: number;
-        } | null;
         setFormState({
           companyId: compId ? String(compId) : "",
           projectId: projId ? String(projId) : "",
@@ -2434,9 +2789,6 @@ const WorkOrderEditPanel: React.FC<{
           contractorId: contId ? String(contId) : "",
           remarks: detail.Remarks || "",
           termsAndConditions: detail.TermsAndConditions || "",
-          hsnCode: gstData?.hsnCode || "",
-          gstType: (gstData?.type as WOGSTType) || "cgst_sgst",
-          gstRate: gstData?.rate ?? 0,
         });
 
         // Map server activities → local ActivityGroup[]
@@ -2482,10 +2834,12 @@ const WorkOrderEditPanel: React.FC<{
                       dbId: m.Id,
                       itemId: m.ItemIdStr || (m.ItemId ? String(m.ItemId) : ""),
                       itemName: m.ItemName || "",
-                      quantity: m.Quantity || 0,
+                      // Quantity stored in DB is the consumption ratio per unit area
+                      consumptionRatio: m.Quantity || 0,
                       uomId: m.UOMId ? Number(m.UOMId) : null,
                       unit: m.UOMName || "",
                       price: m.Rate || 0,
+                      gstRate: 0,
                     };
                   }),
                 };
@@ -2507,41 +2861,31 @@ const WorkOrderEditPanel: React.FC<{
     loadAll();
   }, [workOrderId]);
 
-  const {
-    grandLabourTotal,
-    grandMaterialsTotal,
-    grandMaterialsGST,
-    grandSubtotal,
-    gstAmount,
-    grandTotal,
-  } = useMemo(() => {
-    let labour = 0;
-    let materials = 0;
-    let materialsGST = 0;
-    for (const g of groups) {
-      for (const a of g.activities) {
-        labour += a.ratePerUnit * a.area;
-        materials += a.materials.reduce((s, m) => s + m.quantity * m.price, 0);
-        materialsGST += a.materials.reduce(
-          (s, m) => s + (m.quantity * m.price * (m.gstRate || 0)) / 100,
-          0,
-        );
+  const { grandLabourTotal, grandMaterialsTotal, grandHsnGst, grandTotal } =
+    useMemo(() => {
+      let labour = 0;
+      let materials = 0;
+      let hsnGst = 0;
+      for (const g of groups) {
+        for (const a of g.activities) {
+          const aLabour = a.ratePerUnit * a.area;
+          const aMaterials = a.materials.reduce(
+            (s, m) => s + m.consumptionRatio * a.area * m.price,
+            0,
+          );
+          const aSubtotal = aLabour + aMaterials;
+          labour += aLabour;
+          materials += aMaterials;
+          hsnGst += a.hsnGstRate > 0 ? (aSubtotal * a.hsnGstRate) / 100 : 0;
+        }
       }
-    }
-    const subtotal = labour + materials;
-    const gst =
-      form.gstApplicable && form.gstRate > 0
-        ? (subtotal * form.gstRate) / 100
-        : 0;
-    return {
-      grandLabourTotal: labour,
-      grandMaterialsTotal: materials,
-      grandMaterialsGST: materialsGST,
-      grandSubtotal: subtotal,
-      gstAmount: gst,
-      grandTotal: subtotal + gst,
-    };
-  }, [groups, form.gstApplicable, form.gstRate]);
+      return {
+        grandLabourTotal: labour,
+        grandMaterialsTotal: materials,
+        grandHsnGst: hsnGst,
+        grandTotal: labour + materials + hsnGst,
+      };
+    }, [groups]);
 
   const setField = (key: keyof WorkOrderForm, value: string) => {
     setFormState((p) => ({ ...p, [key]: value }));
@@ -2582,10 +2926,16 @@ const WorkOrderEditPanel: React.FC<{
           Area: a.area || null,
           LabourAmount: a.ratePerUnit * a.area || null,
           MaterialAmount:
-            a.materials.reduce((s, m) => s + m.quantity * m.price, 0) || null,
+            a.materials.reduce(
+              (s, m) => s + m.consumptionRatio * a.area * m.price,
+              0,
+            ) || null,
           GrandTotal:
             a.ratePerUnit * a.area +
-              a.materials.reduce((s, m) => s + m.quantity * m.price, 0) || null,
+              a.materials.reduce(
+                (s, m) => s + m.consumptionRatio * a.area * m.price,
+                0,
+              ) || null,
           Remarks: null,
           UpdatedBy: userId,
           materials: a.materials
@@ -2595,7 +2945,7 @@ const WorkOrderEditPanel: React.FC<{
               Id: (m as MaterialItem & { dbId?: number }).dbId ?? undefined,
               ItemId: m.itemId,
               UOMId: m.uomId ?? null,
-              Quantity: m.quantity || null,
+              Quantity: m.consumptionRatio || null,
               Rate: m.price || null,
               GSTRate: m.gstRate ?? 0,
               Remarks: null,
@@ -2617,11 +2967,6 @@ const WorkOrderEditPanel: React.FC<{
               ? selectedTCs.map((tc) => `${tc.name}: ${tc.terms}`).join("\n\n")
               : form.termsAndConditions || null,
           UpdatedBy: userId,
-          GST: {
-            applicable: form.gstApplicable,
-            type: form.gstType,
-            rate: form.gstRate,
-          },
         },
         activities,
       });
@@ -2879,75 +3224,6 @@ const WorkOrderEditPanel: React.FC<{
               </p>
             </div>
             <div className="col-span-1 sm:col-span-2 lg:col-span-3">
-              <div className="rounded-xl border border-border bg-muted/10 p-4 space-y-4">
-                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
-                  <Receipt size={11} className="text-primary" />
-                  GST Details
-                </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                  <div>
-                    <FieldLabel>GST Applicable</FieldLabel>
-                    <select
-                      value={form.gstApplicable ? "Yes" : "No"}
-                      onChange={(e) =>
-                        setFormState((p) => ({
-                          ...p,
-                          gstApplicable: e.target.value === "Yes",
-                        }))
-                      }
-                      className={inputCls}
-                    >
-                      <option value="No">No</option>
-                      <option value="Yes">Yes</option>
-                    </select>
-                  </div>
-                  {form.gstApplicable && (
-                    <>
-                      <div>
-                        <FieldLabel>GST Type</FieldLabel>
-                        <select
-                          value={form.gstType}
-                          onChange={(e) =>
-                            setFormState((p) => ({
-                              ...p,
-                              gstType: e.target.value as WOGSTType,
-                            }))
-                          }
-                          className={inputCls}
-                        >
-                          <option value="cgst_sgst">CGST + SGST</option>
-                          <option value="igst">IGST</option>
-                        </select>
-                      </div>
-                      <div>
-                        <FieldLabel>GST Rate (%)</FieldLabel>
-                        <input
-                          type="number"
-                          min={0}
-                          max={100}
-                          step={0.01}
-                          value={form.gstRate}
-                          onChange={(e) =>
-                            setFormState((p) => ({
-                              ...p,
-                              gstRate: parseFloat(e.target.value) || 0,
-                            }))
-                          }
-                          className={inputCls}
-                        />
-                        {form.gstApplicable && form.gstType === "cgst_sgst" && (
-                          <p className="text-[11px] text-muted-foreground mt-1">
-                            CGST {(form.gstRate / 2).toFixed(2)}% + SGST{" "}
-                            {(form.gstRate / 2).toFixed(2)}%
-                          </p>
-                        )}
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-            </div>
-            <div className="col-span-1 sm:col-span-2 lg:col-span-3">
               <FieldLabel>Remarks</FieldLabel>
               <input
                 value={form.remarks}
@@ -3120,6 +3396,7 @@ const WorkOrderEditPanel: React.FC<{
               itemOptions={itemOptions}
               loadingDropdowns={loadingDropdowns}
               loadingItems={loadingItems}
+              hsnRecords={hsnRecords}
             />
           ))}
         </div>
@@ -3145,11 +3422,11 @@ const WorkOrderEditPanel: React.FC<{
             </div>
             <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3">
               <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                <Receipt size={11} className="text-primary" />
-                GST (from HSN)
+                <Receipt size={11} className="text-violet-500" />
+                HSN GST
               </span>
               <span className="text-base font-bold text-violet-600 dark:text-violet-400">
-                {fmt(grandMaterialsGST)}
+                {fmt(grandHsnGst)}
               </span>
             </div>
             <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3 bg-muted/20">
@@ -3162,37 +3439,6 @@ const WorkOrderEditPanel: React.FC<{
               </span>
             </div>
           </div>
-          {form.gstApplicable && gstAmount > 0 && (
-            <div className="border-t border-border/50 px-4 sm:px-6 py-2 flex flex-wrap gap-4 text-xs text-muted-foreground">
-              <span>
-                Subtotal:{" "}
-                <strong className="text-foreground">
-                  {fmt(grandSubtotal)}
-                </strong>
-              </span>
-              {form.gstType === "cgst_sgst" ? (
-                <>
-                  <span>
-                    CGST ({(form.gstRate / 2).toFixed(2)}%):{" "}
-                    <strong className="text-foreground">
-                      {fmt(gstAmount / 2)}
-                    </strong>
-                  </span>
-                  <span>
-                    SGST ({(form.gstRate / 2).toFixed(2)}%):{" "}
-                    <strong className="text-foreground">
-                      {fmt(gstAmount / 2)}
-                    </strong>
-                  </span>
-                </>
-              ) : (
-                <span>
-                  IGST ({form.gstRate}%):{" "}
-                  <strong className="text-foreground">{fmt(gstAmount)}</strong>
-                </span>
-              )}
-            </div>
-          )}
         </div>
       </div>
 
@@ -3336,17 +3582,15 @@ const WorkOrderMaster: React.FC = () => {
             fetchActivities(),
             fetchWithAuth("/api/uom-master").then((r) =>
               r.ok
-                ? r
-                    .json()
-                    .then((rows: any[]) =>
-                      rows
-                        .filter((u) => u.IsActive !== false)
-                        .map((u) => ({
-                          id: u.Id,
-                          name: u.UOMName,
-                          uomCode: u.UOMCode,
-                        })),
-                    )
+                ? r.json().then((rows: any[]) =>
+                    rows
+                      .filter((u) => u.IsActive !== false)
+                      .map((u) => ({
+                        id: u.Id,
+                        name: u.UOMName,
+                        uomCode: u.UOMCode,
+                      })),
+                  )
                 : [],
             ),
             getTCRecords().catch(() => []),
@@ -3408,41 +3652,31 @@ const WorkOrderMaster: React.FC = () => {
   }, []);
 
   // ── Totals ────────────────────────────────────────────────────────────────
-  const {
-    grandLabourTotal,
-    grandMaterialsTotal,
-    grandMaterialsGST,
-    grandSubtotal,
-    gstAmount,
-    grandTotal,
-  } = useMemo(() => {
-    let labour = 0;
-    let materials = 0;
-    let materialsGST = 0;
-    for (const g of groups) {
-      for (const a of g.activities) {
-        labour += a.ratePerUnit * a.area;
-        materials += a.materials.reduce((s, m) => s + m.quantity * m.price, 0);
-        materialsGST += a.materials.reduce(
-          (s, m) => s + (m.quantity * m.price * (m.gstRate || 0)) / 100,
-          0,
-        );
+  const { grandLabourTotal, grandMaterialsTotal, grandHsnGst, grandTotal } =
+    useMemo(() => {
+      let labour = 0;
+      let materials = 0;
+      let hsnGst = 0;
+      for (const g of groups) {
+        for (const a of g.activities) {
+          const aLabour = a.ratePerUnit * a.area;
+          const aMaterials = a.materials.reduce(
+            (s, m) => s + m.consumptionRatio * a.area * m.price,
+            0,
+          );
+          const aSubtotal = aLabour + aMaterials;
+          labour += aLabour;
+          materials += aMaterials;
+          hsnGst += a.hsnGstRate > 0 ? (aSubtotal * a.hsnGstRate) / 100 : 0;
+        }
       }
-    }
-    const subtotal = labour + materials;
-    const gst =
-      form.gstApplicable && form.gstRate > 0
-        ? (subtotal * form.gstRate) / 100
-        : 0;
-    return {
-      grandLabourTotal: labour,
-      grandMaterialsTotal: materials,
-      grandMaterialsGST: materialsGST,
-      grandSubtotal: subtotal,
-      gstAmount: gst,
-      grandTotal: subtotal + gst,
-    };
-  }, [groups, form.gstApplicable, form.gstRate]);
+      return {
+        grandLabourTotal: labour,
+        grandMaterialsTotal: materials,
+        grandHsnGst: hsnGst,
+        grandTotal: labour + materials + hsnGst,
+      };
+    }, [groups]);
 
   const setField = (key: keyof WorkOrderForm, value: string) => {
     setForm((p) => ({ ...p, [key]: value }));
@@ -3507,11 +3741,6 @@ const WorkOrderMaster: React.FC = () => {
         DocNo: form.docNumber || woDocNo || null,
         finYear: selectedFinYear || null,
         CreatedBy: userId,
-        GST: {
-          applicable: form.gstApplicable,
-          type: form.gstType,
-          rate: form.gstRate,
-        },
       });
       const newHeaderId: number = created.Id;
       const confirmedDocNumber =
@@ -3520,7 +3749,7 @@ const WorkOrderMaster: React.FC = () => {
         g.activities.map((a) => {
           const labourAmt = a.ratePerUnit * a.area;
           const materialAmt = a.materials.reduce(
-            (s, m) => s + m.quantity * m.price,
+            (s, m) => s + m.consumptionRatio * a.area * m.price,
             0,
           );
           return {
@@ -3538,7 +3767,7 @@ const WorkOrderMaster: React.FC = () => {
               .map((m) => ({
                 ItemId: m.itemId,
                 UOMId: m.uomId ?? null,
-                Quantity: m.quantity || null,
+                Quantity: m.consumptionRatio || null,
                 Rate: m.price || null,
                 GSTRate: m.gstRate ?? 0,
                 Remarks: null,
@@ -3563,11 +3792,6 @@ const WorkOrderMaster: React.FC = () => {
           DocTypeId: woDocTypeId,
           DocNo: confirmedDocNumber || null,
           UpdatedBy: userId,
-          GST: {
-            applicable: form.gstApplicable,
-            type: form.gstType,
-            rate: form.gstRate,
-          },
         },
         activities,
       });
@@ -3976,76 +4200,6 @@ const WorkOrderMaster: React.FC = () => {
                   </p>
                 </div>
                 <div className="col-span-1 sm:col-span-2 lg:col-span-3">
-                  <div className="rounded-xl border border-border bg-muted/10 p-4 space-y-4">
-                    <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5">
-                      <Receipt size={11} className="text-primary" />
-                      GST Details
-                    </h3>
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                      <div>
-                        <FieldLabel>GST Applicable</FieldLabel>
-                        <select
-                          value={form.gstApplicable ? "Yes" : "No"}
-                          onChange={(e) =>
-                            setForm((p) => ({
-                              ...p,
-                              gstApplicable: e.target.value === "Yes",
-                            }))
-                          }
-                          className={inputCls}
-                        >
-                          <option value="No">No</option>
-                          <option value="Yes">Yes</option>
-                        </select>
-                      </div>
-                      {form.gstApplicable && (
-                        <>
-                          <div>
-                            <FieldLabel>GST Type</FieldLabel>
-                            <select
-                              value={form.gstType}
-                              onChange={(e) =>
-                                setForm((p) => ({
-                                  ...p,
-                                  gstType: e.target.value as WOGSTType,
-                                }))
-                              }
-                              className={inputCls}
-                            >
-                              <option value="cgst_sgst">CGST + SGST</option>
-                              <option value="igst">IGST</option>
-                            </select>
-                          </div>
-                          <div>
-                            <FieldLabel>GST Rate (%)</FieldLabel>
-                            <input
-                              type="number"
-                              min={0}
-                              max={100}
-                              step={0.01}
-                              value={form.gstRate}
-                              onChange={(e) =>
-                                setForm((p) => ({
-                                  ...p,
-                                  gstRate: parseFloat(e.target.value) || 0,
-                                }))
-                              }
-                              className={inputCls}
-                            />
-                            {form.gstApplicable &&
-                              form.gstType === "cgst_sgst" && (
-                                <p className="text-[11px] text-muted-foreground mt-1">
-                                  CGST {(form.gstRate / 2).toFixed(2)}% + SGST{" "}
-                                  {(form.gstRate / 2).toFixed(2)}%
-                                </p>
-                              )}
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                <div className="col-span-1 sm:col-span-2 lg:col-span-3">
                   <FieldLabel>Remarks</FieldLabel>
                   <input
                     value={form.remarks}
@@ -4218,6 +4372,7 @@ const WorkOrderMaster: React.FC = () => {
                   itemOptions={itemOptions}
                   loadingDropdowns={loadingDropdowns}
                   loadingItems={loadingItems}
+                  hsnRecords={hsnRecords}
                 />
               ))}
             </div>
@@ -4226,7 +4381,7 @@ const WorkOrderMaster: React.FC = () => {
                 <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3">
                   <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                     <Package size={11} className="text-amber-500" />
-                    Raw Materials
+                    Materials
                   </span>
                   <span className="text-base font-bold text-amber-600 dark:text-amber-400">
                     {fmt(grandMaterialsTotal)}
@@ -4243,11 +4398,11 @@ const WorkOrderMaster: React.FC = () => {
                 </div>
                 <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3">
                   <span className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                    <Receipt size={11} className="text-primary" />
-                    GST (from HSN)
+                    <Receipt size={11} className="text-violet-500" />
+                    HSN GST
                   </span>
                   <span className="text-base font-bold text-violet-600 dark:text-violet-400">
-                    {fmt(grandMaterialsGST)}
+                    {fmt(grandHsnGst)}
                   </span>
                 </div>
                 <div className="flex items-center justify-between sm:justify-center sm:flex-col sm:items-start gap-1 px-4 sm:px-6 py-3 bg-muted/20">
@@ -4260,39 +4415,6 @@ const WorkOrderMaster: React.FC = () => {
                   </span>
                 </div>
               </div>
-              {form.gstApplicable && gstAmount > 0 && (
-                <div className="border-t border-border/50 px-4 sm:px-6 py-2 flex flex-wrap gap-4 text-xs text-muted-foreground">
-                  <span>
-                    Subtotal:{" "}
-                    <strong className="text-foreground">
-                      {fmt(grandSubtotal)}
-                    </strong>
-                  </span>
-                  {form.gstType === "cgst_sgst" ? (
-                    <>
-                      <span>
-                        CGST ({(form.gstRate / 2).toFixed(2)}%):{" "}
-                        <strong className="text-foreground">
-                          {fmt(gstAmount / 2)}
-                        </strong>
-                      </span>
-                      <span>
-                        SGST ({(form.gstRate / 2).toFixed(2)}%):{" "}
-                        <strong className="text-foreground">
-                          {fmt(gstAmount / 2)}
-                        </strong>
-                      </span>
-                    </>
-                  ) : (
-                    <span>
-                      IGST ({form.gstRate}%):{" "}
-                      <strong className="text-foreground">
-                        {fmt(gstAmount)}
-                      </strong>
-                    </span>
-                  )}
-                </div>
-              )}
             </div>
           </div>
 
