@@ -929,14 +929,23 @@ router.post("/:id/save-full", async (req, res) => {
           )
           .input("GrandTotal", sql.Decimal(18, 4), act.GrandTotal || null)
           .input("Remarks", sql.NVarChar, act.Remarks || null)
+          .input("HsnCode", sql.NVarChar(50), act.HsnCode || null)
+          .input(
+            "HsnGstRate",
+            sql.Decimal(5, 2),
+            act.HsnGstRate != null ? Number(act.HsnGstRate) : null,
+          )
+          .input("HsnGstType", sql.NVarChar(20), act.HsnGstType || null)
           .input("CreatedAt", sql.DateTime2, new Date()).query(`
             INSERT INTO dbo.WorkOrderActivities
               (WorkOrderHeaderId, DocNo, ActivityGroupId, ActivityId, UOMId,
-               Rate, Area, LabourAmount, MaterialAmount, GrandTotal, Remarks, CreatedAt)
+               Rate, Area, LabourAmount, MaterialAmount, GrandTotal, Remarks,
+               HsnCode, HsnGstRate, HsnGstType, CreatedAt)
             OUTPUT INSERTED.Id
             VALUES
               (@WorkOrderHeaderId, @DocNo, @ActivityGroupId, @ActivityId, @UOMId,
-               @Rate, @Area, @LabourAmount, @MaterialAmount, @GrandTotal, @Remarks, @CreatedAt)
+               @Rate, @Area, @LabourAmount, @MaterialAmount, @GrandTotal, @Remarks,
+               @HsnCode, @HsnGstRate, @HsnGstType, @CreatedAt)
           `);
         activityDbId = r.recordset[0].Id;
       } else {
@@ -955,11 +964,22 @@ router.post("/:id/save-full", async (req, res) => {
             act.MaterialAmount || null,
           )
           .input("GrandTotal", sql.Decimal(18, 4), act.GrandTotal || null)
-          .input("Remarks", sql.NVarChar, act.Remarks || null).query(`
+          .input("Remarks", sql.NVarChar, act.Remarks || null)
+          .input("HsnCode", sql.NVarChar(50), act.HsnCode || null)
+          .input(
+            "HsnGstRate",
+            sql.Decimal(5, 2),
+            act.HsnGstRate != null ? Number(act.HsnGstRate) : null,
+          )
+          .input("HsnGstType", sql.NVarChar(20), act.HsnGstType || null)
+          .input("UpdatedAt", sql.DateTime2, new Date())
+          .input("UpdatedBy", sql.NVarChar(100), req.user?.name || null).query(`
             UPDATE dbo.WorkOrderActivities SET
               ActivityGroupId=@ActivityGroupId, ActivityId=@ActivityId, UOMId=@UOMId,
               Rate=@Rate, Area=@Area, LabourAmount=@LabourAmount,
-              MaterialAmount=@MaterialAmount, GrandTotal=@GrandTotal, Remarks=@Remarks
+              MaterialAmount=@MaterialAmount, GrandTotal=@GrandTotal, Remarks=@Remarks,
+              HsnCode=@HsnCode, HsnGstRate=@HsnGstRate, HsnGstType=@HsnGstType,
+              UpdatedAt=@UpdatedAt, UpdatedBy=@UpdatedBy
             WHERE Id=@Id
           `);
       }
