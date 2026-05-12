@@ -5,7 +5,11 @@ import React, {
   useCallback,
   useRef,
 } from "react";
-import { createPortal } from "react-dom";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   Plus,
@@ -785,156 +789,161 @@ const MaterialBreakdownModal: React.FC<{
   );
 };
 
-// ─── HSN Dropdown (Portal) ────────────────────────────────────────────────────
-// Renders the dropdown via a portal so it escapes any overflow:hidden ancestor.
+// ─── HSN Popover ──────────────────────────────────────────────────────────────
+// Uses Radix Popover (built-in portal) — no manual position math needed.
 
-const HsnDropdown: React.FC<{
+const HsnPopover: React.FC<{
   activity: Activity;
-  filteredHsn: {
+  hsnRecords: {
     code: string;
     shortDesc: string;
     igstRate: number;
     cgstRate: number;
     sgstRate: number;
   }[];
-  hsnSearch: string;
-  setHsnSearch: (v: string) => void;
-  hsnOpen: boolean;
-  setHsnOpen: (v: boolean) => void;
   onUpdate: (patch: Partial<Activity>) => void;
-}> = ({
-  activity,
-  filteredHsn,
-  hsnSearch,
-  setHsnSearch,
-  hsnOpen,
-  setHsnOpen,
-  onUpdate,
-}) => {
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const [pos, setPos] = useState({ top: 0, left: 0 });
+  /** compact = small trigger pill for desktop table cell; full-width for mobile */
+  variant?: "compact" | "full";
+}> = ({ activity, hsnRecords, onUpdate, variant = "compact" }) => {
+  const [hsnOpen, setHsnOpen] = useState(false);
+  const [hsnSearch, setHsnSearch] = useState("");
 
-  useEffect(() => {
-    if (hsnOpen && btnRef.current) {
-      const rect = btnRef.current.getBoundingClientRect();
-      setPos({
-        top: rect.bottom + 4,
-        left: Math.max(4, rect.right - 288),
-      });
-    }
-  }, [hsnOpen]);
+  const filteredHsn = hsnRecords.filter(
+    (h) =>
+      h.code.toLowerCase().includes(hsnSearch.toLowerCase()) ||
+      h.shortDesc.toLowerCase().includes(hsnSearch.toLowerCase()),
+  );
+
+  const hasHsn = Boolean(activity.hsnCode);
+
+  const triggerClass =
+    variant === "full"
+      ? `w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border text-xs font-medium transition-colors ${
+          hasHsn
+            ? "border-violet-300 dark:border-violet-700 bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-300"
+            : "border-border bg-background text-muted-foreground hover:border-violet-300 hover:text-foreground"
+        }`
+      : `w-full flex items-center gap-1 px-2 py-1.5 rounded-md border text-xs font-medium transition-colors ${
+          hasHsn
+            ? "border-violet-300 dark:border-violet-700 bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-300"
+            : "border-border bg-background text-muted-foreground hover:border-violet-300 hover:text-foreground"
+        }`;
 
   return (
-    <div>
-      <button
-        ref={btnRef}
-        type="button"
-        onClick={() => setHsnOpen(!hsnOpen)}
-        className={`w-full flex items-center gap-1 px-2 py-1.5 rounded-md border text-xs font-medium transition-colors
-          ${
-            activity.hsnCode
-              ? "border-violet-300 dark:border-violet-700 bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-300"
-              : "border-border bg-background text-muted-foreground hover:border-violet-300 hover:text-foreground"
-          }`}
-      >
-        <Receipt size={11} className="shrink-0" />
-        <span className="truncate text-[11px]">
-          {activity.hsnCode || "HSN"}
-        </span>
-      </button>
+    <Popover
+      open={hsnOpen}
+      onOpenChange={(open) => {
+        setHsnOpen(open);
+        if (!open) setHsnSearch("");
+      }}
+    >
+      <PopoverTrigger asChild>
+        <button type="button" className={triggerClass}>
+          <Receipt size={variant === "full" ? 12 : 11} className="shrink-0" />
+          <span className="truncate text-[11px]">
+            {variant === "full"
+              ? hasHsn
+                ? `HSN: ${activity.hsnCode} (${activity.hsnGstRate}%)`
+                : "Add HSN / GST"
+              : activity.hsnCode || "HSN"}
+          </span>
+        </button>
+      </PopoverTrigger>
 
-      {hsnOpen &&
-        createPortal(
-          <>
-            <div
-              className="fixed inset-0 z-[9998]"
-              onClick={() => setHsnOpen(false)}
-            />
-            <div
-              className="fixed z-[9999] w-72 rounded-xl border border-border bg-card shadow-2xl overflow-hidden"
-              style={{ top: pos.top, left: pos.left }}
+      <PopoverContent
+        align="end"
+        sideOffset={6}
+        className="w-72 p-0 rounded-xl overflow-hidden"
+        onOpenAutoFocus={(e) => e.preventDefault()}
+      >
+        {/* Header */}
+        <div className="px-3 py-2 border-b border-border flex items-center justify-between">
+          <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
+            Select HSN Code
+          </p>
+          <button
+            type="button"
+            onClick={() => setHsnOpen(false)}
+            className="text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <X size={13} />
+          </button>
+        </div>
+
+        {/* Search */}
+        <div className="px-3 py-2 border-b border-border">
+          <input
+            autoFocus
+            value={hsnSearch}
+            onChange={(e) => setHsnSearch(e.target.value)}
+            placeholder="Search code or description…"
+            className="w-full text-xs rounded-md border border-border px-2.5 py-1.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+          />
+        </div>
+
+        {/* List */}
+        <div className="max-h-56 overflow-y-auto divide-y divide-border/50">
+          {hasHsn && (
+            <button
+              type="button"
+              onClick={() => {
+                onUpdate({
+                  hsnCode: "",
+                  hsnGstRate: 0,
+                  hsnGstType: "cgst_sgst",
+                });
+                setHsnOpen(false);
+              }}
+              className="w-full text-left px-3 py-2 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 transition"
             >
-              <div className="px-3 py-2 border-b border-border flex items-center justify-between">
-                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                  Select HSN Code
-                </p>
+              ✕ Remove HSN
+            </button>
+          )}
+          {filteredHsn.length === 0 ? (
+            <p className="px-3 py-6 text-xs text-center text-muted-foreground">
+              No HSN records found
+            </p>
+          ) : (
+            filteredHsn.map((h) => {
+              const gstRate = h.cgstRate + h.sgstRate || h.igstRate;
+              const gstType: WOGSTType =
+                h.cgstRate > 0 || h.sgstRate > 0 ? "cgst_sgst" : "igst";
+              return (
                 <button
-                  onClick={() => setHsnOpen(false)}
-                  className="text-muted-foreground hover:text-foreground"
+                  key={h.code}
+                  type="button"
+                  onClick={() => {
+                    onUpdate({
+                      hsnCode: h.code,
+                      hsnGstRate: gstRate,
+                      hsnGstType: gstType,
+                    });
+                    setHsnOpen(false);
+                  }}
+                  className={`w-full text-left px-3 py-2.5 flex items-center justify-between gap-2 hover:bg-muted/40 transition text-xs ${
+                    activity.hsnCode === h.code
+                      ? "bg-violet-50 dark:bg-violet-950/20"
+                      : ""
+                  }`}
                 >
-                  <X size={13} />
+                  <span>
+                    <span className="font-mono font-semibold text-foreground">
+                      {h.code}
+                    </span>
+                    <span className="text-muted-foreground ml-1.5">
+                      {h.shortDesc}
+                    </span>
+                  </span>
+                  <span className="shrink-0 font-semibold text-violet-600 dark:text-violet-400">
+                    {gstRate}%
+                  </span>
                 </button>
-              </div>
-              <div className="px-3 py-2 border-b border-border">
-                <input
-                  autoFocus
-                  value={hsnSearch}
-                  onChange={(e) => setHsnSearch(e.target.value)}
-                  placeholder="Search code or description…"
-                  className="w-full text-xs rounded-md border border-border px-2.5 py-1.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
-                />
-              </div>
-              <div className="max-h-56 overflow-y-auto divide-y divide-border/50">
-                {activity.hsnCode && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onUpdate({
-                        hsnCode: "",
-                        hsnGstRate: 0,
-                        hsnGstType: "cgst_sgst",
-                      });
-                      setHsnOpen(false);
-                    }}
-                    className="w-full text-left px-3 py-2 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 transition"
-                  >
-                    ✕ Remove HSN
-                  </button>
-                )}
-                {filteredHsn.length === 0 ? (
-                  <p className="px-3 py-6 text-xs text-center text-muted-foreground">
-                    No HSN records found
-                  </p>
-                ) : (
-                  filteredHsn.map((h) => {
-                    const gstRate = h.cgstRate + h.sgstRate || h.igstRate;
-                    const gstType: WOGSTType =
-                      h.cgstRate > 0 || h.sgstRate > 0 ? "cgst_sgst" : "igst";
-                    return (
-                      <button
-                        key={h.code}
-                        type="button"
-                        onClick={() => {
-                          onUpdate({
-                            hsnCode: h.code,
-                            hsnGstRate: gstRate,
-                            hsnGstType: gstType,
-                          });
-                          setHsnOpen(false);
-                        }}
-                        className={`w-full text-left px-3 py-2.5 flex items-center justify-between gap-2 hover:bg-muted/40 transition text-xs ${activity.hsnCode === h.code ? "bg-violet-50 dark:bg-violet-950/20" : ""}`}
-                      >
-                        <span>
-                          <span className="font-mono font-semibold text-foreground">
-                            {h.code}
-                          </span>
-                          <span className="text-muted-foreground ml-1.5">
-                            {h.shortDesc}
-                          </span>
-                        </span>
-                        <span className="shrink-0 font-semibold text-violet-600 dark:text-violet-400">
-                          {gstRate}%
-                        </span>
-                      </button>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-          </>,
-          document.body,
-        )}
-    </div>
+              );
+            })
+          )}
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 };
 
@@ -975,14 +984,6 @@ const ActivityRow: React.FC<{
 }) => {
   const safeOptions = ensureArray<ActivityOption>(activityOptions);
   const safeUomOptions = ensureArray<DropdownOption>(uomOptions);
-  const [hsnOpen, setHsnOpen] = useState(false);
-  const [hsnSearch, setHsnSearch] = useState("");
-
-  const filteredHsn = hsnRecords.filter(
-    (h) =>
-      h.code.toLowerCase().includes(hsnSearch.toLowerCase()) ||
-      h.shortDesc.toLowerCase().includes(hsnSearch.toLowerCase()),
-  );
 
   const labourTotal = activity.ratePerUnit * activity.area;
   const materialsTotal = activity.materials.reduce(
@@ -1148,106 +1149,12 @@ const ActivityRow: React.FC<{
           </div>
         )}
         {/* Mobile HSN button */}
-        <div className="relative">
-          <button
-            type="button"
-            onClick={() => {
-              setHsnOpen((o) => !o);
-              setHsnSearch("");
-            }}
-            className={`w-full flex items-center gap-1.5 px-2.5 py-1.5 rounded-md border text-xs font-medium transition-colors
-              ${
-                activity.hsnCode
-                  ? "border-violet-300 dark:border-violet-700 bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-300"
-                  : "border-border bg-background text-muted-foreground hover:border-violet-300 hover:text-foreground"
-              }`}
-          >
-            <Receipt size={12} />
-            {activity.hsnCode
-              ? `HSN: ${activity.hsnCode} (${activity.hsnGstRate}%)`
-              : "Add HSN / GST"}
-          </button>
-          {hsnOpen && (
-            <div className="absolute left-0 top-full mt-1 z-30 w-72 rounded-xl border border-border bg-card shadow-xl overflow-hidden">
-              <div className="px-3 py-2 border-b border-border flex items-center justify-between">
-                <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wider">
-                  Select HSN Code
-                </p>
-                <button
-                  onClick={() => setHsnOpen(false)}
-                  className="text-muted-foreground hover:text-foreground"
-                >
-                  <X size={13} />
-                </button>
-              </div>
-              <div className="px-3 py-2 border-b border-border">
-                <input
-                  autoFocus
-                  value={hsnSearch}
-                  onChange={(e) => setHsnSearch(e.target.value)}
-                  placeholder="Search code or description…"
-                  className="w-full text-xs rounded-md border border-border px-2.5 py-1.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
-                />
-              </div>
-              <div className="max-h-52 overflow-y-auto divide-y divide-border/50">
-                {activity.hsnCode && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onUpdate({
-                        hsnCode: "",
-                        hsnGstRate: 0,
-                        hsnGstType: "cgst_sgst",
-                      });
-                      setHsnOpen(false);
-                    }}
-                    className="w-full text-left px-3 py-2 text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 transition"
-                  >
-                    Remove HSN
-                  </button>
-                )}
-                {filteredHsn.length === 0 ? (
-                  <p className="px-3 py-4 text-xs text-center text-muted-foreground">
-                    No HSN records found
-                  </p>
-                ) : (
-                  filteredHsn.map((h) => {
-                    const gstRate = h.cgstRate + h.sgstRate || h.igstRate;
-                    const gstType: WOGSTType =
-                      h.cgstRate > 0 || h.sgstRate > 0 ? "cgst_sgst" : "igst";
-                    return (
-                      <button
-                        key={h.code}
-                        type="button"
-                        onClick={() => {
-                          onUpdate({
-                            hsnCode: h.code,
-                            hsnGstRate: gstRate,
-                            hsnGstType: gstType,
-                          });
-                          setHsnOpen(false);
-                        }}
-                        className={`w-full text-left px-3 py-2 flex items-center justify-between gap-2 hover:bg-muted/40 transition text-xs ${activity.hsnCode === h.code ? "bg-violet-50 dark:bg-violet-950/20" : ""}`}
-                      >
-                        <span>
-                          <span className="font-mono font-semibold text-foreground">
-                            {h.code}
-                          </span>
-                          <span className="text-muted-foreground ml-1.5">
-                            {h.shortDesc}
-                          </span>
-                        </span>
-                        <span className="shrink-0 font-semibold text-violet-600 dark:text-violet-400">
-                          {gstRate}%
-                        </span>
-                      </button>
-                    );
-                  })
-                )}
-              </div>
-            </div>
-          )}
-        </div>
+        <HsnPopover
+          activity={activity}
+          hsnRecords={hsnRecords}
+          onUpdate={onUpdate}
+          variant="full"
+        />
         <MaterialBreakdownModal
           activity={activity}
           uomOptions={uomOptions}
@@ -1298,14 +1205,11 @@ const ActivityRow: React.FC<{
             onUpdateMaterials={(mats) => onUpdate({ materials: mats })}
           />
           {/* Desktop HSN button */}
-          <HsnDropdown
+          <HsnPopover
             activity={activity}
-            filteredHsn={filteredHsn}
-            hsnSearch={hsnSearch}
-            setHsnSearch={setHsnSearch}
-            hsnOpen={hsnOpen}
-            setHsnOpen={setHsnOpen}
+            hsnRecords={hsnRecords}
             onUpdate={onUpdate}
+            variant="compact"
           />
           <div className="text-right">
             <span
