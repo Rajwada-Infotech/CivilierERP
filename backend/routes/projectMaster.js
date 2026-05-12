@@ -10,10 +10,13 @@ router.use(authMiddleware);
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 
 // ── GET all projects ──────────────────────────────────────────────────────────
-router.get("/", cache("project-master", 300), async (req, res) => {
-  try {
-    const pool = getPool();
-    const result = await pool.request().query(`
+router.get(
+  "/",
+  cache("project-master", 300, { shared: true }),
+  async (req, res) => {
+    try {
+      const pool = getPool();
+      const result = await pool.request().query(`
       SELECT
         id                    AS Id,
         business_identity     AS Code,
@@ -45,11 +48,12 @@ router.get("/", cache("project-master", 300), async (req, res) => {
       WHERE business_type = 'P'
       ORDER BY name
     `);
-    res.json(result.recordset);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+      res.json(result.recordset);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
 // ── GET /company/:id — fetch compliance fields from linked Company ─────────────
 router.get("/company/:id", async (req, res) => {

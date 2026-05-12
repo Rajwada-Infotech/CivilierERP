@@ -17,12 +17,18 @@ const {
  * Usage:
  *   router.get("/", cache("grns", 300), async (req, res) => { ... })
  *
+ * Options:
+ *   shared: true  — omits userId from the cache key. Use for master-data
+ *                   routes whose response is identical for all users
+ *                   (enterprises, company-master, project-master, item lists, etc.).
+ *                   One warm entry serves every user instead of one per user.
+ *
  * Behaviour when Redis is unavailable:
  *   - All cache operations fail silently and return null/undefined.
  *   - getDynamicTtl() catches its own errors and returns the fallback TTL.
  *   - The route handler always runs — Redis being down never produces a 500.
  */
-function cache(namespace, ttl = 300) {
+function cache(namespace, ttl = 300, { shared = false } = {}) {
   return async (req, res, next) => {
     try {
       const routeScope = JSON.stringify({
@@ -30,13 +36,16 @@ function cache(namespace, ttl = 300) {
         params: req.params || {},
         query: req.query || {},
       });
-      const userId = req.user?.userId || "anon";
+
+      // shared = true  → one entry for all users (master data)
+      // shared = false → scoped per user (user-specific lists, dashboards)
+      const scopeId = shared ? "shared" : req.user?.userId || "anon";
 
       // getCacheVersion returns 0 (safe fallback) when Redis is down
       const version = await getCacheVersion(namespace);
 
-      const key = `cache:${namespace}:v${version}:${userId}:${routeScope}`;
-      const baseKey = `cache:${namespace}:${userId}:${routeScope}`;
+      const key = `cache:${namespace}:v${version}:${scopeId}:${routeScope}`;
+      const baseKey = `cache:${namespace}:${scopeId}:${routeScope}`;
       const staleKey = `cache:stale:${baseKey}`;
       const lockKey = `cachelock:${key}`;
 
@@ -57,8 +66,6 @@ function cache(namespace, ttl = 300) {
       }
 
       // ─── STAMPEDE PROTECTION ─────────────────────────────────────────────────
-      // redisLock returns null when Redis is down, which is treated the same as
-      // "lock acquired" — we just skip the stale path and serve fresh.
       const lockAcquired = await redisLock(lockKey, 30);
 
       if (lockAcquired === null) {
@@ -67,7 +74,7 @@ function cache(namespace, ttl = 300) {
       }
 
       if (!lockAcquired) {
-        // Another process is already refreshing — try stale first
+        // Another process is already refreshing — serve stale if available
         const staleCached = await redisGet(staleKey);
 
         if (staleCached) {
@@ -83,7 +90,6 @@ function cache(namespace, ttl = 300) {
           return res.json(data);
         }
 
-        // No stale either — ask client to retry briefly
         res.setHeader("Retry-After", "5");
         return res
           .status(503)
@@ -97,7 +103,6 @@ function cache(namespace, ttl = 300) {
         try {
           const jsonStr = JSON.stringify(data);
 
-          // getDynamicTtl is fully guarded — it never throws
           const dynamicTtl =
             res.statusCode >= 500 ? 30 : await getDynamicTtl(ttl);
           const finalTtl = dynamicTtl || ttl;
@@ -116,8 +121,6 @@ function cache(namespace, ttl = 300) {
           res.setHeader("X-Cache", "MISS");
           res.setHeader("X-Cache-TTL", `${finalTtl}s`);
         } catch (err) {
-          // Cache write failed (Redis down, serialisation error, etc.)
-          // Log and continue — the response still goes out to the client.
           console.error("[cache] write error:", err.message);
         }
 
@@ -126,7 +129,6 @@ function cache(namespace, ttl = 300) {
 
       next();
     } catch (err) {
-      // The cache layer must never break the route
       console.error("[cache] middleware error:", err.message);
       next();
     }
@@ -134,9 +136,6 @@ function cache(namespace, ttl = 300) {
 }
 
 // ─── DYNAMIC TTL ─────────────────────────────────────────────────────────────
-// Previously this could throw when Redis was unavailable, crashing any route
-// that used the cache() middleware (e.g. financeDashboard).
-// Now it always returns a safe number.
 async function getDynamicTtl(fallback = 300) {
   try {
     const metrics = await getSystemMetrics();

@@ -5,10 +5,13 @@ const router = express.Router();
 const { getPool, sql } = require("../db");
 
 // GET all
-router.get("/", cache("enterprises", 300), async (req, res) => {
-  try {
-    const pool = getPool();
-    const result = await pool.request().query(`
+router.get(
+  "/",
+  cache("enterprises", 300, { shared: true }),
+  async (req, res) => {
+    try {
+      const pool = getPool();
+      const result = await pool.request().query(`
       SELECT
         id, name, short_name, business_identity, entity_type,
         b_sub_identity_type, belongs_to,
@@ -24,11 +27,12 @@ router.get("/", cache("enterprises", 300), async (req, res) => {
       WHERE business_type = 'E' AND discontinue = 0
       ORDER BY name
     `);
-    res.json(result.recordset);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+      res.json(result.recordset);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
 // ADD
 router.post("/", async (req, res) => {
