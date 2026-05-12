@@ -4,12 +4,13 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const allowRoles = require("../middleware/role");
 const { bumpCacheVersion } = require("../redis");
+const { cache } = require("../middleware/cache");
 
 router.use(authMiddleware);
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 
 // ── GET all projects ──────────────────────────────────────────────────────────
-router.get("/", async (req, res) => {
+router.get("/", cache("project-master", 300), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -56,8 +57,7 @@ router.get("/company/:id", async (req, res) => {
     const pool = getPool();
     const result = await pool
       .request()
-      .input("id", sql.Int, parseInt(req.params.id))
-      .query(`
+      .input("id", sql.Int, parseInt(req.params.id)).query(`
         SELECT
           id                  AS Id,
           name                AS Name,
@@ -84,33 +84,44 @@ router.post("/", adminOnly, async (req, res) => {
     const pool = getPool();
     await pool
       .request()
-      .input("name",                sql.NVarChar(255),     f.name || null)
-      .input("short_name",          sql.NVarChar(100),     f.shortName || null)
-      .input("business_identity",   sql.NVarChar(100),     f.code || null)
-      .input("business_type",       sql.NVarChar(10),      "P")
-      .input("entity_type",         sql.NVarChar(50),      f.type || null)
-      .input("description",         sql.NVarChar(sql.MAX), f.description || null)
-      .input("address",             sql.NVarChar(sql.MAX), f.addressLine1 || null)
-      .input("address_line2",       sql.NVarChar(500),     f.addressLine2 || null)
-      .input("address_line3",       sql.NVarChar(500),     f.addressLine3 || null)
-      .input("pincode",             sql.NVarChar(20),      f.zipCode || null)
-      .input("latitude",            sql.Decimal(10, 7),    f.latitude  ? parseFloat(f.latitude)  : null)
-      .input("longitude",           sql.Decimal(10, 7),    f.longitude ? parseFloat(f.longitude) : null)
-      .input("currency",            sql.NVarChar(10),      f.currency || "INR")
-      .input("status",              sql.NVarChar(50),      f.status || "Planning")
-      .input("rera_no",             sql.NVarChar(100),     f.priority || null)
-      .input("start_date",          sql.Date,              f.startDate || null)
-      .input("end_date",            sql.Date,              f.endDate || null)
-      .input("team_size",           sql.Int,               f.teamSize ? parseInt(f.teamSize) : null)
-      .input("pan",                 sql.NVarChar(20),      f.remarks || null)
-      .input("logo",                sql.NVarChar(sql.MAX), f.projectImage || null)
-      .input("belongs_to",          sql.NVarChar(255),     f.enterpriseName || null)
-      .input("b_sub_identity_type", sql.NVarChar(255),     f.companyName || null)
-      .input("jv_enabled",          sql.Bit,               f.jvEnabled ? 1 : 0)
-      .input("jv_company_name",     sql.NVarChar(255),     f.jvEnabled && f.jvCompanyName ? f.jvCompanyName : null)
-      .input("discontinue",         sql.Bit,               f.isActive ? 0 : 1)
-      .input("date_of_entry",       sql.Date,              new Date())
-      .query(`
+      .input("name", sql.NVarChar(255), f.name || null)
+      .input("short_name", sql.NVarChar(100), f.shortName || null)
+      .input("business_identity", sql.NVarChar(100), f.code || null)
+      .input("business_type", sql.NVarChar(10), "P")
+      .input("entity_type", sql.NVarChar(50), f.type || null)
+      .input("description", sql.NVarChar(sql.MAX), f.description || null)
+      .input("address", sql.NVarChar(sql.MAX), f.addressLine1 || null)
+      .input("address_line2", sql.NVarChar(500), f.addressLine2 || null)
+      .input("address_line3", sql.NVarChar(500), f.addressLine3 || null)
+      .input("pincode", sql.NVarChar(20), f.zipCode || null)
+      .input(
+        "latitude",
+        sql.Decimal(10, 7),
+        f.latitude ? parseFloat(f.latitude) : null,
+      )
+      .input(
+        "longitude",
+        sql.Decimal(10, 7),
+        f.longitude ? parseFloat(f.longitude) : null,
+      )
+      .input("currency", sql.NVarChar(10), f.currency || "INR")
+      .input("status", sql.NVarChar(50), f.status || "Planning")
+      .input("rera_no", sql.NVarChar(100), f.priority || null)
+      .input("start_date", sql.Date, f.startDate || null)
+      .input("end_date", sql.Date, f.endDate || null)
+      .input("team_size", sql.Int, f.teamSize ? parseInt(f.teamSize) : null)
+      .input("pan", sql.NVarChar(20), f.remarks || null)
+      .input("logo", sql.NVarChar(sql.MAX), f.projectImage || null)
+      .input("belongs_to", sql.NVarChar(255), f.enterpriseName || null)
+      .input("b_sub_identity_type", sql.NVarChar(255), f.companyName || null)
+      .input("jv_enabled", sql.Bit, f.jvEnabled ? 1 : 0)
+      .input(
+        "jv_company_name",
+        sql.NVarChar(255),
+        f.jvEnabled && f.jvCompanyName ? f.jvCompanyName : null,
+      )
+      .input("discontinue", sql.Bit, f.isActive ? 0 : 1)
+      .input("date_of_entry", sql.Date, new Date()).query(`
         INSERT INTO dbo.enterprise (
           name, short_name, business_identity, business_type, entity_type, description,
           address, address_line2, address_line3, pincode, latitude, longitude,
@@ -126,6 +137,7 @@ router.post("/", adminOnly, async (req, res) => {
         )
       `);
     await bumpCacheVersion("enterprises");
+    await bumpCacheVersion("project-master");
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -139,32 +151,43 @@ router.put("/:id", adminOnly, async (req, res) => {
     const pool = getPool();
     await pool
       .request()
-      .input("id",                  sql.Int,               parseInt(req.params.id))
-      .input("name",                sql.NVarChar(255),     f.name || null)
-      .input("short_name",          sql.NVarChar(100),     f.shortName || null)
-      .input("business_identity",   sql.NVarChar(100),     f.code || null)
-      .input("entity_type",         sql.NVarChar(50),      f.type || null)
-      .input("description",         sql.NVarChar(sql.MAX), f.description || null)
-      .input("address",             sql.NVarChar(sql.MAX), f.addressLine1 || null)
-      .input("address_line2",       sql.NVarChar(500),     f.addressLine2 || null)
-      .input("address_line3",       sql.NVarChar(500),     f.addressLine3 || null)
-      .input("pincode",             sql.NVarChar(20),      f.zipCode || null)
-      .input("latitude",            sql.Decimal(10, 7),    f.latitude  ? parseFloat(f.latitude)  : null)
-      .input("longitude",           sql.Decimal(10, 7),    f.longitude ? parseFloat(f.longitude) : null)
-      .input("currency",            sql.NVarChar(10),      f.currency || "INR")
-      .input("status",              sql.NVarChar(50),      f.status || "Planning")
-      .input("rera_no",             sql.NVarChar(100),     f.priority || null)
-      .input("start_date",          sql.Date,              f.startDate || null)
-      .input("end_date",            sql.Date,              f.endDate || null)
-      .input("team_size",           sql.Int,               f.teamSize ? parseInt(f.teamSize) : null)
-      .input("pan",                 sql.NVarChar(20),      f.remarks || null)
-      .input("logo",                sql.NVarChar(sql.MAX), f.projectImage || null)
-      .input("belongs_to",          sql.NVarChar(255),     f.enterpriseName || null)
-      .input("b_sub_identity_type", sql.NVarChar(255),     f.companyName || null)
-      .input("jv_enabled",          sql.Bit,               f.jvEnabled ? 1 : 0)
-      .input("jv_company_name",     sql.NVarChar(255),     f.jvEnabled && f.jvCompanyName ? f.jvCompanyName : null)
-      .input("discontinue",         sql.Bit,               f.isActive ? 0 : 1)
-      .query(`
+      .input("id", sql.Int, parseInt(req.params.id))
+      .input("name", sql.NVarChar(255), f.name || null)
+      .input("short_name", sql.NVarChar(100), f.shortName || null)
+      .input("business_identity", sql.NVarChar(100), f.code || null)
+      .input("entity_type", sql.NVarChar(50), f.type || null)
+      .input("description", sql.NVarChar(sql.MAX), f.description || null)
+      .input("address", sql.NVarChar(sql.MAX), f.addressLine1 || null)
+      .input("address_line2", sql.NVarChar(500), f.addressLine2 || null)
+      .input("address_line3", sql.NVarChar(500), f.addressLine3 || null)
+      .input("pincode", sql.NVarChar(20), f.zipCode || null)
+      .input(
+        "latitude",
+        sql.Decimal(10, 7),
+        f.latitude ? parseFloat(f.latitude) : null,
+      )
+      .input(
+        "longitude",
+        sql.Decimal(10, 7),
+        f.longitude ? parseFloat(f.longitude) : null,
+      )
+      .input("currency", sql.NVarChar(10), f.currency || "INR")
+      .input("status", sql.NVarChar(50), f.status || "Planning")
+      .input("rera_no", sql.NVarChar(100), f.priority || null)
+      .input("start_date", sql.Date, f.startDate || null)
+      .input("end_date", sql.Date, f.endDate || null)
+      .input("team_size", sql.Int, f.teamSize ? parseInt(f.teamSize) : null)
+      .input("pan", sql.NVarChar(20), f.remarks || null)
+      .input("logo", sql.NVarChar(sql.MAX), f.projectImage || null)
+      .input("belongs_to", sql.NVarChar(255), f.enterpriseName || null)
+      .input("b_sub_identity_type", sql.NVarChar(255), f.companyName || null)
+      .input("jv_enabled", sql.Bit, f.jvEnabled ? 1 : 0)
+      .input(
+        "jv_company_name",
+        sql.NVarChar(255),
+        f.jvEnabled && f.jvCompanyName ? f.jvCompanyName : null,
+      )
+      .input("discontinue", sql.Bit, f.isActive ? 0 : 1).query(`
         UPDATE dbo.enterprise SET
           name=@name, short_name=@short_name, business_identity=@business_identity,
           entity_type=@entity_type, description=@description,
@@ -178,6 +201,7 @@ router.put("/:id", adminOnly, async (req, res) => {
         WHERE id=@id AND business_type='P'
       `);
     await bumpCacheVersion("enterprises");
+    await bumpCacheVersion("project-master");
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -195,6 +219,7 @@ router.delete("/:id", adminOnly, async (req, res) => {
         "UPDATE dbo.enterprise SET discontinue=1 WHERE id=@id AND business_type='P'",
       );
     await bumpCacheVersion("enterprises");
+    await bumpCacheVersion("project-master");
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });

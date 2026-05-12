@@ -8,11 +8,22 @@ const { getPool, sql } = require("../db");
 router.get("/", cache("enterprises", 300), async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool
-      .request()
-      .query(
-        "SELECT * FROM dbo.enterprise WHERE business_type = 'E' ORDER BY name",
-      );
+    const result = await pool.request().query(`
+      SELECT
+        id, name, short_name, business_identity, entity_type,
+        b_sub_identity_type, belongs_to,
+        address, address_line2, city, state, country, pincode,
+        phone_number, email, website, logo,
+        pan, tan, cin, gst_type, gst_issue_date, trade_license,
+        currency, fiscal_year_start,
+        authorized_capital, paid_up_capital,
+        start_date, date_of_entry,
+        CASE WHEN discontinue = 1 THEN 0 ELSE 1 END AS IsActive,
+        discontinue
+      FROM dbo.enterprise
+      WHERE business_type = 'E' AND discontinue = 0
+      ORDER BY name
+    `);
     res.json(result.recordset);
   } catch (err) {
     res.status(500).json({ error: err.message });

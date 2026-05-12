@@ -4,12 +4,13 @@ const { getPool, sql } = require("../db");
 const authMiddleware = require("../middleware/auth");
 const allowRoles = require("../middleware/role");
 const { bumpCacheVersion } = require("../redis");
+const { cache } = require("../middleware/cache");
 
 router.use(authMiddleware);
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 
 // GET all — reads from enterprise where business_type = 'C'
-router.get("/", async (req, res) => {
+router.get("/", cache("company-master", 300), async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -132,6 +133,7 @@ router.post("/", adminOnly, async (req, res) => {
         )
       `);
     await bumpCacheVersion("enterprises");
+    await bumpCacheVersion("company-master");
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -208,6 +210,7 @@ router.put("/:id", adminOnly, async (req, res) => {
         WHERE id=@id AND business_type='C'
       `);
     await bumpCacheVersion("enterprises");
+    await bumpCacheVersion("company-master");
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -225,6 +228,7 @@ router.delete("/:id", adminOnly, async (req, res) => {
         "UPDATE dbo.enterprise SET discontinue=1 WHERE id=@id AND business_type='C'",
       );
     await bumpCacheVersion("enterprises");
+    await bumpCacheVersion("company-master");
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
