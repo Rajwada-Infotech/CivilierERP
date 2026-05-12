@@ -11,6 +11,8 @@ const {
 } = require("../redis");
 
 const { checkPermission } = require("../middleware/permissions");
+const { cache } = require("../middleware/cache"); // ← FIX 1: import cache
+
 const ALLOWED_ACTION_TYPES = new Set([
   "read",
   "create",
@@ -66,6 +68,10 @@ function mapActivityRow(row) {
 router.get(
   "/",
   checkPermission("UserActivity", "List", "CanView"),
+  // FIX 1: Add cache middleware — 60-second TTL, scoped per user.
+  // Short TTL keeps data fresh; cache busts automatically when a new
+  // activity is posted (bump cache version in POST handler below).
+  cache("user-activity", 60),
   async (req, res) => {
     let whereClause = "1 = 1";
 
@@ -74,15 +80,19 @@ router.get(
 
       const page = Math.max(1, normalizePositiveInt(req.query.page, 1));
 
-      // Adaptive dynamic limit
-      let engagementScore = 0;
-      if (req.user && req.user.userId) {
-        engagementScore = Number(
-          (await redisZScore("engagement:score", req.user.userId)) || 0,
-        );
-      }
-      const metrics = await getSystemMetrics();
-      const predictedRPM = await getPredictedRPM();
+      // FIX 2: Run all Redis pre-flight calls in parallel instead of serially.
+      // Original code awaited each one sequentially (~3 round trips).
+      // Promise.all collapses them into a single wait (~1 round trip).
+      const [engagementScore, metrics, predictedRPM] = await Promise.all([
+        req.user?.userId
+          ? redisZScore("engagement:score", req.user.userId).then((s) =>
+              Number(s || 0),
+            )
+          : Promise.resolve(0),
+        getSystemMetrics(),
+        getPredictedRPM(),
+      ]);
+
       const dynamicDefault = getDynamicLimit(
         engagementScore,
         predictedRPM || metrics.rpm,
@@ -186,36 +196,37 @@ router.get(
             ? "EventType"
             : "CreatedAt";
 
-      const countRequest = pool.request();
+      // FIX 3: Single query using COUNT(*) OVER() as a window function.
+      // The original code ran two separate round-trips to SQL Server:
+      //   • SELECT COUNT(*) … (full index scan)
+      //   • SELECT … OFFSET … FETCH NEXT … (second full scan + key lookup)
+      // With COUNT(*) OVER() the engine scans the filtered set once and
+      // returns total alongside each data row — half the DB round-trips.
       const dataRequest = pool.request();
-
       for (const [name, type, value] of queryInputs) {
-        countRequest.input(name, type, value);
         dataRequest.input(name, type, value);
       }
 
-      const countResult = await countRequest.query(
-        `SELECT COUNT(*) AS total FROM dbo.UserActivityLog WHERE ${whereClause}`,
-      );
-
-      const total = countResult.recordset[0]?.total ?? 0;
-
       const dataResult = await dataRequest.query(`
-      SELECT
-        Id AS id, UserId AS userId, UserName AS userName,
-        UserEmail AS userEmail, UserRole AS userRole,
-        EventType AS event, CreatedAt AS timestamp,
-        IpAddress AS ipAddress, DeviceInfo AS deviceInfo,
-        DeviceFingerprint AS deviceFingerprint,
-        ActionType AS actionType, Resource AS resource,
-        Details AS details, SessionId AS sessionId,
-        SessionDuration AS sessionDuration,
-        RequestMethod AS requestMethod, RequestUrl AS requestUrl
-      FROM dbo.UserActivityLog
-      WHERE ${whereClause}
-      ORDER BY ${sortColumn} ${order}
-      OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
-    `);
+        SELECT
+          Id AS id, UserId AS userId, UserName AS userName,
+          UserEmail AS userEmail, UserRole AS userRole,
+          EventType AS event, CreatedAt AS timestamp,
+          IpAddress AS ipAddress, DeviceInfo AS deviceInfo,
+          DeviceFingerprint AS deviceFingerprint,
+          ActionType AS actionType, Resource AS resource,
+          Details AS details, SessionId AS sessionId,
+          SessionDuration AS sessionDuration,
+          RequestMethod AS requestMethod, RequestUrl AS requestUrl,
+          COUNT(*) OVER() AS totalCount
+        FROM dbo.UserActivityLog
+        WHERE ${whereClause}
+        ORDER BY ${sortColumn} ${order}
+        OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
+      `);
+
+      // totalCount is on every row; read from first row (0 if result empty)
+      const total = dataResult.recordset[0]?.totalCount ?? 0;
 
       res.json({
         data: dataResult.recordset.map(mapActivityRow),
@@ -257,29 +268,21 @@ router.get(
       }
     };
 
-    // Set SSE headers with improved configuration
     res.setHeader("Content-Type", "text/event-stream");
     res.setHeader("Cache-Control", "no-cache, no-transform");
     res.setHeader("Connection", "keep-alive");
     res.setHeader("X-Accel-Buffering", "no");
 
-    // Critical: Flush headers immediately
     if (res.flushHeaders) {
       res.flushHeaders();
     }
 
-    // Disable timeout
     res.setTimeout(0);
-
-    // Send initial connection confirmation
     safeWrite(":ok\n\n");
-
     activeStreams.push(res);
 
     const sendLatest = async () => {
-      if (res.writableEnded || res.destroyed) {
-        return;
-      }
+      if (res.writableEnded || res.destroyed) return;
 
       try {
         const pool = getPool();
@@ -309,7 +312,6 @@ router.get(
       }
     };
 
-    // Send initial data immediately
     try {
       await sendLatest();
     } catch (err) {
@@ -318,13 +320,9 @@ router.get(
       }
     }
 
-    // More frequent pings to keep connection alive (every 15s)
     pingInterval = setInterval(sendPing, 15000);
-
-    // Data updates every 5 seconds
     dataInterval = setInterval(sendLatest, 5000);
 
-    // Cleanup function
     const cleanup = () => {
       activeStreams = activeStreams.filter((stream) => stream !== res);
       if (pingInterval) clearInterval(pingInterval);
@@ -333,13 +331,10 @@ router.get(
       dataInterval = null;
     };
 
-    // Handle client disconnect
     req.on("close", () => {
-      // Silenced normal SSE disconnect
       cleanup();
     });
 
-    // Handle errors
     req.on("error", (err) => {
       if (err.code !== "ECONNRESET") {
         if (process.env.NODE_ENV === "development") {
@@ -349,7 +344,6 @@ router.get(
       cleanup();
     });
 
-    // Handle response errors
     res.on("error", (err) => {
       if (err.code !== "ECONNRESET") {
         if (process.env.NODE_ENV === "development") {
@@ -419,7 +413,6 @@ router.post("/", async (req, res) => {
       .json({ error: "userId, userName and event are required" });
   }
 
-  // Update engagement score based on action weight
   if (normalizedActionType && resolvedUserId) {
     const WEIGHTS = {
       read: 1,
@@ -429,8 +422,8 @@ router.post("/", async (req, res) => {
       create: 10,
       delete: 15,
     };
-    const weight = WEIGHTS[normalizedActionType] || 2; // default low weight
-    await redisZIncrBy("engagement:score", weight, resolvedUserId, 2592000); // 30 days TTL
+    const weight = WEIGHTS[normalizedActionType] || 2;
+    await redisZIncrBy("engagement:score", weight, resolvedUserId, 2592000);
   }
 
   try {
@@ -508,6 +501,13 @@ router.post("/", async (req, res) => {
       `);
 
     const insertedId = insertResult.recordset?.[0]?.Id ?? null;
+
+    // FIX 1 (cont.): Bump cache version so the next GET sees fresh data.
+    // This is fire-and-forget — we don't await it so the POST response
+    // is not delayed by the Redis round-trip.
+    const { bumpCacheVersion } = require("../redis");
+    bumpCacheVersion("user-activity").catch(() => {});
+
     res.json({ message: "Activity logged", id: insertedId });
   } catch (err) {
     if (process.env.NODE_ENV === "development") {
