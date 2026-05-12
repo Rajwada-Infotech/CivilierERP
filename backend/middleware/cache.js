@@ -1,6 +1,7 @@
 const {
   redisGet,
   redisSet,
+  redisDel,
   compress,
   decompress,
   redisLock,
@@ -11,113 +12,248 @@ const {
   getPredictedRPM,
 } = require("../redis");
 
+// ─── IN-PROCESS VERSION CACHE ─────────────────────────────────────────────────
+// Avoids a Redis GET for the version number on every request.
+// Re-fetches from Redis at most every VERSION_TTL_MS.
+const VERSION_TTL_MS = 2000;
+
+const localVersionCache = (() => {
+  const store = new Map();
+
+  async function get(ns) {
+    const entry = store.get(ns);
+    if (entry && Date.now() - entry.fetchedAt < VERSION_TTL_MS) {
+      return entry.version;
+    }
+    const version = await getCacheVersion(ns);
+    store.set(ns, { version, fetchedAt: Date.now() });
+    return version;
+  }
+
+  function invalidate(ns) {
+    store.delete(ns);
+  }
+
+  return { get, invalidate };
+})();
+
+// ─── REDIS HEALTH CIRCUIT BREAKER ─────────────────────────────────────────────
+// When Redis is slow or down, every request was paying up to commandTimeout
+// (2000 ms) waiting for Redis operations to time out before safeExec returned
+// null. This made Redis problems cascade into every API endpoint appearing slow.
+//
+// The circuit breaker tracks consecutive Redis failures. After OPEN_THRESHOLD
+// failures it stops attempting Redis calls for OPEN_DURATION_MS, returning null
+// immediately so route handlers run at full DB speed while Redis recovers.
+
+const CIRCUIT = {
+  state: "closed", // "closed" | "open" | "half-open"
+  failures: 0,
+  lastFailure: 0,
+  OPEN_THRESHOLD: 3,
+  OPEN_DURATION_MS: 10_000,
+};
+
+function circuitIsOpen() {
+  if (CIRCUIT.state === "closed") return false;
+  if (CIRCUIT.state === "open") {
+    if (Date.now() - CIRCUIT.lastFailure > CIRCUIT.OPEN_DURATION_MS) {
+      CIRCUIT.state = "half-open";
+      return false;
+    }
+    return true;
+  }
+  return false; // half-open: allow one probe
+}
+
+function circuitSuccess() {
+  CIRCUIT.failures = 0;
+  CIRCUIT.state = "closed";
+}
+
+function circuitFailure() {
+  CIRCUIT.failures++;
+  CIRCUIT.lastFailure = Date.now();
+  if (CIRCUIT.failures >= CIRCUIT.OPEN_THRESHOLD) {
+    CIRCUIT.state = "open";
+  }
+}
+
+async function redisOp(fn, fallback = null) {
+  if (circuitIsOpen()) return fallback;
+  try {
+    const result = await fn();
+    circuitSuccess();
+    return result;
+  } catch {
+    circuitFailure();
+    return fallback;
+  }
+}
+
+// ─── DYNAMIC TTL — refreshed in background every 10 s ────────────────────────
+// Previously computed inside res.json on every cache miss, firing up to 8 Redis
+// commands after the DB query but still blocking the response. Now pre-computed
+// asynchronously and served from memory.
+let _cachedDynamicTtl = 300;
+let _dynamicTtlLastRefreshed = 0;
+const DYNAMIC_TTL_REFRESH_MS = 10_000;
+
+async function getCachedDynamicTtl(fallback = 300) {
+  const now = Date.now();
+  if (now - _dynamicTtlLastRefreshed < DYNAMIC_TTL_REFRESH_MS) {
+    return _cachedDynamicTtl;
+  }
+  if (_dynamicTtlLastRefreshed === 0) {
+    _cachedDynamicTtl = await computeDynamicTtl(fallback);
+    _dynamicTtlLastRefreshed = Date.now();
+  } else {
+    computeDynamicTtl(fallback)
+      .then((ttl) => {
+        _cachedDynamicTtl = ttl;
+        _dynamicTtlLastRefreshed = Date.now();
+      })
+      .catch(() => {});
+  }
+  return _cachedDynamicTtl;
+}
+
+async function computeDynamicTtl(fallback = 300) {
+  try {
+    const [metrics, predictedRPM] = await Promise.all([
+      getSystemMetrics(),
+      getPredictedRPM(),
+    ]);
+    const rpm = predictedRPM || metrics.rpm;
+    let ttl = rpm > 10_000 ? 120 : rpm > 5_000 ? 180 : 300;
+    if (metrics.memoryUsage > 0.8) ttl = Math.floor(ttl * 0.5);
+    return Math.max(ttl, 60);
+  } catch {
+    return fallback;
+  }
+}
+
 /**
  * Cache middleware for GET routes.
  *
  * Usage:
  *   router.get("/", cache("grns", 300), async (req, res) => { ... })
  *
- * Behaviour when Redis is unavailable:
- *   - All cache operations fail silently and return null/undefined.
- *   - getDynamicTtl() catches its own errors and returns the fallback TTL.
- *   - The route handler always runs — Redis being down never produces a 500.
+ * Options:
+ *   shared: true  — one cache entry for all users (master data routes).
+ *
+ * Adds req.timing stages when req.timing is present:
+ *   cache.version_check  cache.lookup  cache.lock  cache.write
  */
-function cache(namespace, ttl = 300) {
+function cache(namespace, ttl = 300, { shared = false } = {}) {
   return async (req, res, next) => {
     try {
+      // Fast-exit: Redis is down, skip all cache logic
+      if (circuitIsOpen()) {
+        res.setHeader("X-Cache", "BYPASS");
+        return next();
+      }
+
       const routeScope = JSON.stringify({
         path: `${req.baseUrl || ""}${req.path || ""}`,
         params: req.params || {},
         query: req.query || {},
       });
-      const userId = req.user?.userId || "anon";
 
-      // getCacheVersion returns 0 (safe fallback) when Redis is down
-      const version = await getCacheVersion(namespace);
+      const scopeId = shared ? "shared" : req.user?.userId || "anon";
 
-      const key = `cache:${namespace}:v${version}:${userId}:${routeScope}`;
-      const baseKey = `cache:${namespace}:${userId}:${routeScope}`;
+      // Version check — served from memory, rarely touches Redis
+      const vStart = req.timing?.startStage();
+      const version = await redisOp(() => localVersionCache.get(namespace), 0);
+      if (vStart) req.timing.mark("cache.version_check", vStart);
+
+      const key = `cache:${namespace}:v${version}:${scopeId}:${routeScope}`;
+      const baseKey = `cache:${namespace}:${scopeId}:${routeScope}`;
       const staleKey = `cache:stale:${baseKey}`;
       const lockKey = `cachelock:${key}`;
 
-      // ─── CACHE HIT ───────────────────────────────────────────────────────────
-      const cached = await redisGet(key); // returns null when Redis is down
+      // Cache lookup
+      const lookupStart = req.timing?.startStage();
+      const cached = await redisOp(() => redisGet(key));
+      if (lookupStart) req.timing.mark("cache.lookup", lookupStart);
 
       if (cached) {
         let data;
         try {
-          data = decompress(cached) || JSON.parse(cached);
+          data = (await decompress(cached)) ?? JSON.parse(cached);
         } catch {
           data = JSON.parse(cached);
         }
-
         res.setHeader("X-Cache", "HIT");
-        await incrGlobalCacheHit();
+        incrGlobalCacheHit().catch(() => {}); // never block a hit
         return res.json(data);
       }
 
-      // ─── STAMPEDE PROTECTION ─────────────────────────────────────────────────
-      // redisLock returns null when Redis is down, which is treated the same as
-      // "lock acquired" — we just skip the stale path and serve fresh.
-      const lockAcquired = await redisLock(lockKey, 30);
+      // Stampede protection
+      const lockStart = req.timing?.startStage();
+      const lockAcquired = await redisOp(() => redisLock(lockKey, 30));
+      if (lockStart) req.timing.mark("cache.lock", lockStart);
 
       if (lockAcquired === null) {
-        // Redis is down — skip straight to the route handler
+        // Redis failed — bypass to DB
+        res.setHeader("X-Cache", "BYPASS");
         return next();
       }
 
       if (!lockAcquired) {
-        // Another process is already refreshing — try stale first
-        const staleCached = await redisGet(staleKey);
-
+        // Another process is refreshing — try stale, then fall through to DB
+        // instead of returning 503 (better UX: user still gets data)
+        const staleCached = await redisOp(() => redisGet(staleKey));
         if (staleCached) {
           let data;
           try {
-            data = decompress(staleCached) || JSON.parse(staleCached);
+            data = (await decompress(staleCached)) ?? JSON.parse(staleCached);
           } catch {
             data = JSON.parse(staleCached);
           }
-
           res.setHeader("X-Cache", "STALE");
-          await incrGlobalCacheHit();
+          incrGlobalCacheHit().catch(() => {});
           return res.json(data);
         }
-
-        // No stale either — ask client to retry briefly
-        res.setHeader("Retry-After", "5");
-        return res
-          .status(503)
-          .json({ error: "Cache busy, retry in 5 seconds" });
+        // No stale — fall through to DB rather than 503
+        res.setHeader("X-Cache", "MISS-FALLTHROUGH");
+        return next();
       }
 
-      // ─── CACHE MISS — intercept res.json to populate cache on the way out ───
+      // Cache miss — intercept res.json to populate on the way out
+      // Also instrument the DB query time so it appears in timing stages
+      const dbStart = req.timing?.startStage();
       const originalJson = res.json.bind(res);
 
       res.json = async (data) => {
         try {
+          if (dbStart) req.timing.mark("db.query", dbStart);
+          const writeStart = req.timing?.startStage();
           const jsonStr = JSON.stringify(data);
+          const finalTtl =
+            res.statusCode >= 500
+              ? 30
+              : (await getCachedDynamicTtl(ttl)) || ttl;
 
-          // getDynamicTtl is fully guarded — it never throws
-          const dynamicTtl =
-            res.statusCode >= 500 ? 30 : await getDynamicTtl(ttl);
-          const finalTtl = dynamicTtl || ttl;
-
-          await incrGlobalCacheMiss();
+          incrGlobalCacheMiss().catch(() => {});
 
           let valueToStore = jsonStr;
           if (jsonStr.length > 1024) {
-            const compressed = compress(data);
+            const compressed = await compress(data);
             if (compressed) valueToStore = compressed;
           }
 
-          await redisSet(key, valueToStore, finalTtl);
-          await redisSet(staleKey, valueToStore, finalTtl * 2);
+          // Write main + stale keys concurrently, then release the lock
+          await Promise.all([
+            redisOp(() => redisSet(key, valueToStore, finalTtl)),
+            redisOp(() => redisSet(staleKey, valueToStore, finalTtl * 2)),
+            redisOp(() => redisDel(lockKey)), // release lock immediately — don't make others wait 30s
+          ]);
 
+          if (writeStart) req.timing.mark("cache.write", writeStart);
           res.setHeader("X-Cache", "MISS");
           res.setHeader("X-Cache-TTL", `${finalTtl}s`);
         } catch (err) {
-          // Cache write failed (Redis down, serialisation error, etc.)
-          // Log and continue — the response still goes out to the client.
           console.error("[cache] write error:", err.message);
         }
 
@@ -126,28 +262,10 @@ function cache(namespace, ttl = 300) {
 
       next();
     } catch (err) {
-      // The cache layer must never break the route
       console.error("[cache] middleware error:", err.message);
       next();
     }
   };
 }
 
-// ─── DYNAMIC TTL ─────────────────────────────────────────────────────────────
-// Previously this could throw when Redis was unavailable, crashing any route
-// that used the cache() middleware (e.g. financeDashboard).
-// Now it always returns a safe number.
-async function getDynamicTtl(fallback = 300) {
-  try {
-    const metrics = await getSystemMetrics();
-    const predictedRPM = await getPredictedRPM();
-    const rpm = predictedRPM || metrics.rpm;
-    let ttl = rpm > 10000 ? 120 : rpm > 5000 ? 180 : 300;
-    if (metrics.memoryUsage > 0.8) ttl = Math.floor(ttl * 0.5);
-    return Math.max(ttl, 60);
-  } catch {
-    return fallback;
-  }
-}
-
-module.exports = { cache };
+module.exports = { cache, localVersionCache };

@@ -225,26 +225,29 @@ router.get("/meta/items", async (req, res) => {
 //  WORK ORDER HEADER
 // =============================================
 
-router.get("/", cache("work-orders", 300), async (req, res) => {
-  try {
-    const pool = getPool();
-    const page = Math.max(parseInt(req.query.page) || 1, 1);
-    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
-    const offset = (page - 1) * limit;
+router.get(
+  "/",
+  cache("work-orders", 300, { shared: true }),
+  async (req, res) => {
+    try {
+      const pool = getPool();
+      const page = Math.max(parseInt(req.query.page) || 1, 1);
+      const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+      const offset = (page - 1) * limit;
 
-    const countResult = await pool.request().query(`
+      const countResult = await pool.request().query(`
       SELECT COUNT(DISTINCT h.Id) AS total FROM dbo.WorkOrderHeader h
       LEFT JOIN dbo.enterprise        ec  ON ec.id       = h.CompanyId
       LEFT JOIN dbo.enterprise        ep  ON ep.id       = h.ProjectId
       LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = h.ContractorId
       LEFT JOIN dbo.WorkOrderActivities a  ON a.WorkOrderHeaderId = h.Id
     `);
-    const total = parseInt(countResult.recordset[0].total);
+      const total = parseInt(countResult.recordset[0].total);
 
-    const result = await pool
-      .request()
-      .input("offset", sql.Int, offset)
-      .input("limit", sql.Int, limit).query(`
+      const result = await pool
+        .request()
+        .input("offset", sql.Int, offset)
+        .input("limit", sql.Int, limit).query(`
         SELECT h.Id, h.DocumentNumber, h.DocumentDate, h.TotalAmount, h.Status,
           h.CreatedAt, h.UpdatedAt,
           ec.name AS CompanyName, h.CompanyId,
@@ -269,29 +272,33 @@ router.get("/", cache("work-orders", 300), async (req, res) => {
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `);
 
-    const data = result.recordset.map((r) => ({
-      ...r,
-      GST: serializeGST(r.GST),
-    }));
-    res.json({
-      data,
-      page,
-      limit,
-      total,
-      totalPages: Math.ceil(total / limit),
-    });
-  } catch (err) {
-    console.error("[GET /work-orders]", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
+      const data = result.recordset.map((r) => ({
+        ...r,
+        GST: serializeGST(r.GST),
+      }));
+      res.json({
+        data,
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      });
+    } catch (err) {
+      console.error("[GET /work-orders]", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
-router.get("/:id", cache("work-orders", 300), async (req, res) => {
-  try {
-    const pool = getPool();
-    const headerResult = await pool
-      .request()
-      .input("Id", sql.Int, req.params.id).query(`
+router.get(
+  "/:id",
+  cache("work-orders", 300, { shared: true }),
+  async (req, res) => {
+    try {
+      const pool = getPool();
+      const headerResult = await pool
+        .request()
+        .input("Id", sql.Int, req.params.id).query(`
         SELECT h.*, ec.name AS CompanyName, ep.name AS ProjectName, ahm.LHeadName AS ContractorName
         FROM dbo.WorkOrderHeader h
         LEFT JOIN dbo.enterprise        ec  ON ec.id       = h.CompanyId
@@ -299,12 +306,12 @@ router.get("/:id", cache("work-orders", 300), async (req, res) => {
         LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = h.ContractorId
         WHERE h.Id = @Id
       `);
-    if (!headerResult.recordset.length)
-      return res.status(404).json({ error: "Work order not found" });
+      if (!headerResult.recordset.length)
+        return res.status(404).json({ error: "Work order not found" });
 
-    const activitiesResult = await pool
-      .request()
-      .input("WorkOrderHeaderId", sql.Int, req.params.id).query(`
+      const activitiesResult = await pool
+        .request()
+        .input("WorkOrderHeaderId", sql.Int, req.params.id).query(`
         SELECT a.*, ag.activity_name AS ActivityGroupName,
           act.activity_name AS ActivityName, uom.UOMName
         FROM dbo.WorkOrderActivities a
@@ -314,9 +321,9 @@ router.get("/:id", cache("work-orders", 300), async (req, res) => {
         WHERE a.WorkOrderHeaderId = @WorkOrderHeaderId ORDER BY a.Id
       `);
 
-    const materialsResult = await pool
-      .request()
-      .input("WorkOrderHeaderId", sql.Int, req.params.id).query(`
+      const materialsResult = await pool
+        .request()
+        .input("WorkOrderHeaderId", sql.Int, req.params.id).query(`
         SELECT m.*, img.M_Name AS ItemName, uom.UOMName,
           CAST(m.ItemId AS NVARCHAR(36)) AS ItemIdStr,
           ISNULL(m.GSTRate, 0) AS GSTRate
@@ -328,24 +335,25 @@ router.get("/:id", cache("work-orders", 300), async (req, res) => {
         ORDER BY m.WorkOrderActivityId, m.Id
       `);
 
-    const materialsMap = {};
-    for (const mat of materialsResult.recordset) {
-      const key = mat.WorkOrderActivityId;
-      if (!materialsMap[key]) materialsMap[key] = [];
-      materialsMap[key].push(mat);
-    }
-    const activities = activitiesResult.recordset.map((a) => ({
-      ...a,
-      materials: materialsMap[a.Id] || [],
-    }));
+      const materialsMap = {};
+      for (const mat of materialsResult.recordset) {
+        const key = mat.WorkOrderActivityId;
+        if (!materialsMap[key]) materialsMap[key] = [];
+        materialsMap[key].push(mat);
+      }
+      const activities = activitiesResult.recordset.map((a) => ({
+        ...a,
+        materials: materialsMap[a.Id] || [],
+      }));
 
-    const hdr = headerResult.recordset[0];
-    res.json({ ...hdr, GST: serializeGST(hdr.GST), activities });
-  } catch (err) {
-    console.error("[GET /work-orders/:id]", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
+      const hdr = headerResult.recordset[0];
+      res.json({ ...hdr, GST: serializeGST(hdr.GST), activities });
+    } catch (err) {
+      console.error("[GET /work-orders/:id]", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
 router.post("/", async (req, res) => {
   const {
@@ -532,12 +540,15 @@ router.delete("/:id", async (req, res) => {
 //  ACTIVITIES
 // =============================================
 
-router.get("/:id/activities", cache("work-orders", 300), async (req, res) => {
-  try {
-    const pool = getPool();
-    const result = await pool
-      .request()
-      .input("WorkOrderHeaderId", sql.Int, req.params.id).query(`
+router.get(
+  "/:id/activities",
+  cache("work-orders", 300, { shared: true }),
+  async (req, res) => {
+    try {
+      const pool = getPool();
+      const result = await pool
+        .request()
+        .input("WorkOrderHeaderId", sql.Int, req.params.id).query(`
         SELECT a.*, ag.activity_name AS ActivityGroupName,
           act.activity_name AS ActivityName, uom.UOMName,
           COUNT(m.Id) AS MaterialCount,
@@ -554,12 +565,13 @@ router.get("/:id/activities", cache("work-orders", 300), async (req, res) => {
           ag.activity_name, act.activity_name, uom.UOMName
         ORDER BY a.Id
       `);
-    res.json(result.recordset);
-  } catch (err) {
-    console.error("[GET /:id/activities]", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
+      res.json(result.recordset);
+    } catch (err) {
+      console.error("[GET /:id/activities]", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
 router.post("/:id/activities", async (req, res) => {
   const {
@@ -682,7 +694,7 @@ router.delete("/:id/activities/:activityId", async (req, res) => {
 
 router.get(
   "/:id/activities/:activityId/materials",
-  cache("work-orders", 300),
+  cache("work-orders", 300, { shared: true }),
   async (req, res) => {
     try {
       const pool = getPool();
@@ -713,12 +725,10 @@ router.post("/:id/activities/:activityId/materials", async (req, res) => {
 
   // ItemId must be a non-empty UUID string
   if (!ItemId || typeof ItemId !== "string" || ItemId.trim() === "") {
-    return res
-      .status(400)
-      .json({
-        error:
-          "ItemId is required and must be a valid UUID from Item_Master_Group",
-      });
+    return res.status(400).json({
+      error:
+        "ItemId is required and must be a valid UUID from Item_Master_Group",
+    });
   }
 
   try {

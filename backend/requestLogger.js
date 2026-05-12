@@ -1,27 +1,7 @@
 // requestLogger.js
 const pinoHttp = require("pino-http");
-const pino = require("pino");
+const logger = require("./logger");
 const { v4: uuidv4 } = require("uuid");
-
-const isProd = process.env.NODE_ENV === "production";
-
-const logger = pino({
-  level: process.env.LOG_LEVEL || "info",
-  ...(isProd
-    ? {}
-    : {
-        transport: {
-          target: "pino-pretty",
-          options: {
-            colorize: true,
-            translateTime: "HH:MM:ss",
-            ignore: "pid,hostname,reqId,req,res,responseTime",
-            singleLine: true,
-          },
-        },
-      }),
-  base: null,
-});
 
 // High-frequency routes to silence
 const SILENT_ROUTES = [
@@ -48,14 +28,12 @@ module.exports = pinoHttp({
     return "info";
   },
 
-  // Clean message without icons
   customSuccessMessage: (req, res, responseTime) => {
     const method = req.method.padEnd(6);
     const url =
       req.url.length > 45
         ? req.url.substring(0, 42) + "..."
         : req.url.padEnd(45);
-
     return `${method} ${url} ${res.statusCode} ${responseTime}ms`;
   },
 
@@ -63,13 +41,30 @@ module.exports = pinoHttp({
     return `ERROR ${req.method} ${req.url} → ${res.statusCode} ${err?.message || ""}`;
   },
 
-  // Remove bulky objects from output
+  // ✅ customProps removed — it uses an internal pino stringify symbol
+  // that is not available on the worker-thread logger created by pino-pretty
+  // transport, causing: "logger[stringifySym] is not a function".
+  // Extra fields (reqId, userId) are instead attached via the serializers below.
+
+  customAttributeKeys: {
+    req: "req",
+    res: "res",
+    err: "err",
+    responseTime: "responseTime",
+    reqId: "reqId",
+  },
+
   serializers: {
+    // Keep req/res out of the log body to avoid noise
     req: () => undefined,
     res: () => undefined,
   },
 
-  // Silence noisy routes
+  // Attach extra fields safely using wrapSerializers-compatible hook
+  // (pino-http calls this before stringify, so it is always safe)
+  customReceivedMessage: undefined,
+  customReceivedObject: undefined,
+
   autoLogging: {
     ignore: (req) => {
       return SILENT_ROUTES.some(

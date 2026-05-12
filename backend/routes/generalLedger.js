@@ -10,12 +10,14 @@ async function getAccountHeadColumnMeta() {
   if (!accountHeadColumnMetaPromise) {
     accountHeadColumnMetaPromise = getPool()
       .request()
-      .query(`
+      .query(
+        `
         SELECT COLUMN_NAME, IS_NULLABLE
         FROM INFORMATION_SCHEMA.COLUMNS
         WHERE TABLE_SCHEMA = 'dbo'
           AND TABLE_NAME = 'AccountHeadMaster'
-      `)
+      `,
+      )
       .then((result) => {
         const meta = new Map();
         result.recordset.forEach((row) => {
@@ -34,7 +36,8 @@ async function getAccountHeadColumnMeta() {
 
 const hasColumn = (meta, columnName) => meta.has(columnName.toLowerCase());
 
-const getColumnMeta = (meta, columnName) => meta.get(columnName.toLowerCase()) || null;
+const getColumnMeta = (meta, columnName) =>
+  meta.get(columnName.toLowerCase()) || null;
 
 const requireUserName = (req, res) => {
   const email = req.user?.name;
@@ -90,9 +93,28 @@ router.get("/", cache("general-ledger", 300), async (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
     const offset = (page - 1) * limit;
 
-    const request = pool.request();
+    let whereClause = "WHERE lh.LHeadType = 'GL'";
 
-    let baseQuery = `
+    const request = pool.request();
+    request.input("offset", sql.Int, offset);
+    request.input("limit", sql.Int, limit);
+
+    if (req.query.search) {
+      whereClause +=
+        " AND (lh.LHeadName LIKE @search OR lh.LHeadCode LIKE @search)";
+      request.input("search", sql.NVarChar(200), `%${req.query.search}%`);
+    }
+
+    if (req.query.groupId) {
+      whereClause += " AND lh.LBelongsTo = @groupId";
+      request.input("groupId", sql.Int, parseInt(req.query.groupId, 10));
+    }
+
+    // Use COUNT(*) OVER() to avoid executing the same Request object twice
+    // (mssql Request instances are single-use — a second .query() call corrupts
+    // the internal column stream and throws an unhandled 'error' event that
+    // crashes the process).
+    const result = await request.query(`
       SELECT
         lh.LHeadId,
         lh.LHeadName,
@@ -103,45 +125,27 @@ router.get("/", cache("general-ledger", 300), async (req, res) => {
         lh.isEdited,
         ag.Name        AS GroupName,
         ag.ParentGroupId,
-        parent.Name    AS ParentGroupName
+        parent.Name    AS ParentGroupName,
+        COUNT(*) OVER() AS TotalCount
       FROM dbo.AccountHeadMaster lh
       LEFT JOIN dbo.AccountGroup ag
              ON ag.AGId     = lh.LBelongsTo
       LEFT JOIN dbo.AccountGroup parent
              ON parent.AGId = ag.ParentGroupId
-      WHERE lh.LHeadType = 'GL'
-    `;
+      ${whereClause}
+      ORDER BY lh.LHeadName
+      OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+    `);
 
-    let countQuery = "SELECT COUNT(*) AS total FROM dbo.AccountHeadMaster lh WHERE lh.LHeadType = 'GL'";
-
-    let whereClause = "";
-
-    if (req.query.search) {
-      whereClause += " AND (lh.LHeadName LIKE @search OR lh.LHeadCode LIKE @search)";
-      request.input("search", sql.NVarChar(200), `%${req.query.search}%`);
-    }
-
-    if (req.query.groupId) {
-      whereClause += " AND lh.LBelongsTo = @groupId";
-      request.input("groupId", sql.Int, parseInt(req.query.groupId, 10));
-    }
-
-    const fullCountQuery = countQuery + whereClause;
-    const countResult = await request.query(fullCountQuery);
-    const total = parseInt(countResult.recordset[0].total);
-
-    const paginatedQuery = baseQuery + whereClause + ` ORDER BY lh.LHeadName OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY`;
-    request.input('offset', sql.Int, offset);
-    request.input('limit', sql.Int, limit);
-
-    const result = await request.query(paginatedQuery);
+    const total =
+      result.recordset.length > 0 ? Number(result.recordset[0].TotalCount) : 0;
 
     res.json({
       data: result.recordset,
       page,
       limit,
       total,
-      totalPages: Math.ceil(total / limit)
+      totalPages: Math.ceil(total / limit),
     });
   } catch (err) {
     console.error("GL GET ALL ERROR:", err.message);
