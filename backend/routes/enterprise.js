@@ -16,10 +16,9 @@ router.get(
         id, name, short_name, business_identity, entity_type,
         b_sub_identity_type, belongs_to,
         address, address_line2, city, state, country, pincode,
-        phone_number, email, website, logo,
+        phone_number, email, website,
         pan, tan, cin, gst_type, gst_issue_date, trade_license,
         currency, fiscal_year_start,
-        authorized_capital, paid_up_capital,
         start_date, date_of_entry,
         CASE WHEN discontinue = 1 THEN 0 ELSE 1 END AS IsActive,
         discontinue

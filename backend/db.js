@@ -11,11 +11,16 @@ const config = {
     encrypt: false,
     trustServerCertificate: true,
     enableArithAbort: true,
+    // FIX: increase TDS packet size (default 4096) for large result sets
+    // over LAN. Larger packets = fewer round-trips for the same data.
+    // 32768 is the maximum SQL Server supports.
+    packetSize: 32768,
   },
   pool: {
-    max: 10,
-    min: 0,
+    max: 20, // FIX: was 10 — with LAN latency, 10 connections saturate fast
+    min: 2, // keep 2 warm connections so cold starts don't queue
     idleTimeoutMillis: 30000,
+    acquireTimeoutMillis: 10000, // fail fast if pool exhausted
   },
   connectionTimeout: 30000,
   requestTimeout: 30000,
@@ -32,14 +37,15 @@ async function connectDB() {
   } catch (err) {
     logger.error(
       { event: "DB_CONNECTION_FAILED", err },
-      "Database connection failed"
+      "Database connection failed",
     );
     throw err;
   }
 }
 
 function getPool() {
-  if (!pool) throw new Error("DB pool not initialized. Call connectDB() first.");
+  if (!pool)
+    throw new Error("DB pool not initialized. Call connectDB() first.");
   return pool;
 }
 
@@ -69,7 +75,10 @@ async function isDbReady() {
     await pool.request().query("SELECT 1 AS ok");
     return true;
   } catch (err) {
-    logger.warn({ event: "DB_HEALTH_CHECK_FAILED", err }, "Database readiness check failed");
+    logger.warn(
+      { event: "DB_HEALTH_CHECK_FAILED", err },
+      "Database readiness check failed",
+    );
     return false;
   }
 }
