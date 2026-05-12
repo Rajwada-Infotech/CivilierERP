@@ -1619,6 +1619,17 @@ const WorkOrderDetailPanel: React.FC<{
             </>
           ) : (
             <>
+              <ApprovalActions
+                status={detail.Status}
+                recordId={workOrderId}
+                endpoint="/api/work-orders"
+                submitOnly
+                onSuccess={() => {
+                  setDetail((prev) =>
+                    prev ? { ...prev, Status: "Pending" } : prev,
+                  );
+                }}
+              />
               <button
                 onClick={() => onEdit(workOrderId)}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-primary/30 text-primary text-xs font-medium hover:bg-primary/5 dark:hover:bg-primary/10 transition-colors"
@@ -2338,7 +2349,7 @@ const WorkOrdersList: React.FC<{
       {/* Table */}
       <div className="rounded-xl border border-border bg-card overflow-hidden">
         {/* Desktop table header */}
-        <div className="hidden sm:grid grid-cols-[1fr_1fr_1fr_100px_90px_100px_80px_56px] gap-3 px-4 py-3 bg-muted/30 border-b border-border">
+        <div className="hidden sm:grid grid-cols-[1fr_1fr_1fr_100px_90px_100px_80px_120px] gap-3 px-4 py-3 bg-muted/30 border-b border-border">
           {[
             "Document No.",
             "Company",
@@ -2347,7 +2358,7 @@ const WorkOrdersList: React.FC<{
             "Activities",
             "Amount",
             "Status",
-            "Action",
+            "Actions",
           ].map((h) => (
             <div
               key={h}
@@ -2362,7 +2373,7 @@ const WorkOrdersList: React.FC<{
           <div className="divide-y divide-border">
             {[1, 2, 3, 4, 5].map((i) => (
               <div key={i} className="px-4 py-4 animate-pulse">
-                <div className="grid grid-cols-[1fr_1fr_1fr_100px_90px_100px_80px_56px] gap-3">
+                <div className="grid grid-cols-[1fr_1fr_1fr_100px_90px_100px_80px_120px] gap-3">
                   {[1, 2, 3, 4, 5, 6, 7, 8].map((j) => (
                     <div key={j} className="h-4 bg-muted rounded" />
                   ))}
@@ -2447,19 +2458,28 @@ const WorkOrdersList: React.FC<{
                         <span className="text-sm font-bold text-foreground">
                           {fmt(wo.TotalAmount || 0)}
                         </span>
-                        <button
-                          onClick={() => onViewDetail(wo.Id)}
-                          className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-medium hover:bg-primary/20 transition-colors"
-                        >
-                          <Eye size={11} />
-                          View
-                        </button>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            onClick={() => onViewDetail(wo.Id)}
+                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-primary/10 text-primary text-xs font-medium hover:bg-primary/20 transition-colors"
+                          >
+                            <Eye size={11} />
+                            View
+                          </button>
+                          <ApprovalActions
+                            status={wo.Status || "Draft"}
+                            recordId={wo.Id}
+                            endpoint="/api/work-orders"
+                            submitOnly
+                            onSuccess={() => load()}
+                          />
+                        </div>
                       </div>
                     </div>
                   </div>
 
                   {/* Desktop row */}
-                  <div className="hidden sm:grid grid-cols-[1fr_1fr_1fr_100px_90px_100px_80px_56px] gap-3 items-center px-4 py-3.5 hover:bg-muted/20 transition-colors group">
+                  <div className="hidden sm:grid grid-cols-[1fr_1fr_1fr_100px_90px_100px_80px_120px] gap-3 items-center px-4 py-3.5 hover:bg-muted/20 transition-colors group">
                     <div>
                       <p className="text-sm font-mono font-semibold text-primary">
                         {wo.DocumentNumber}
@@ -2510,7 +2530,7 @@ const WorkOrdersList: React.FC<{
                         {wo.Status || "Draft"}
                       </span>
                     </div>
-                    <div>
+                    <div className="flex items-center gap-1.5">
                       <button
                         onClick={() => onViewDetail(wo.Id)}
                         title="View details"
@@ -2518,6 +2538,13 @@ const WorkOrdersList: React.FC<{
                       >
                         <Eye size={14} />
                       </button>
+                      <ApprovalActions
+                        status={wo.Status || "Draft"}
+                        recordId={wo.Id}
+                        endpoint="/api/work-orders"
+                        submitOnly
+                        onSuccess={() => load()}
+                      />
                     </div>
                   </div>
                 </div>
@@ -2736,6 +2763,9 @@ const WorkOrderEditPanel: React.FC<{
                   unit: a.UOMName || "",
                   ratePerUnit: a.Rate || 0,
                   area: a.Area || 0,
+                  hsnCode: a.HsnCode || "",
+                  hsnGstRate: a.HsnGstRate ? Number(a.HsnGstRate) : 0,
+                  hsnGstType: (a.HsnGstType as WOGSTType) || "cgst_sgst",
                   materials: ensureArray<WorkOrderMaterialDetail>(
                     a.materials,
                   ).map((m) => {
@@ -2750,7 +2780,7 @@ const WorkOrderEditPanel: React.FC<{
                       uomId: m.UOMId ? Number(m.UOMId) : null,
                       unit: m.UOMName || "",
                       price: m.Rate || 0,
-                      gstRate: 0,
+                      gstRate: Number(m.GSTRate) || 0,
                     };
                   }),
                 };
@@ -2848,6 +2878,9 @@ const WorkOrderEditPanel: React.FC<{
                 0,
               ) || null,
           Remarks: null,
+          HsnCode: a.hsnCode || null,
+          HsnGstRate: a.hsnGstRate || null,
+          HsnGstType: a.hsnGstType || null,
           UpdatedBy: userId,
           materials: a.materials
             .filter((m) => m.itemId && m.itemId.trim() !== "")
@@ -3673,6 +3706,9 @@ const WorkOrderMaster: React.FC = () => {
             MaterialAmount: materialAmt || null,
             GrandTotal: labourAmt + materialAmt || null,
             Remarks: null,
+            HsnCode: a.hsnCode || null,
+            HsnGstRate: a.hsnGstRate || null,
+            HsnGstType: a.hsnGstType || null,
             materials: a.materials
               .filter((m) => m.itemId && m.itemId.trim() !== "")
               .map((m) => ({
