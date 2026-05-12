@@ -1,27 +1,9 @@
 // requestLogger.js
 const pinoHttp = require("pino-http");
-const pino = require("pino");
+const logger = require("./logger");
 const { v4: uuidv4 } = require("uuid");
 
 const isProd = process.env.NODE_ENV === "production";
-
-const logger = pino({
-  level: process.env.LOG_LEVEL || "info",
-  ...(isProd
-    ? {}
-    : {
-        transport: {
-          target: "pino-pretty",
-          options: {
-            colorize: true,
-            translateTime: "HH:MM:ss",
-            ignore: "pid,hostname,reqId,req,res,responseTime",
-            singleLine: true,
-          },
-        },
-      }),
-  base: null,
-});
 
 // High-frequency routes to silence
 const SILENT_ROUTES = [
@@ -48,7 +30,6 @@ module.exports = pinoHttp({
     return "info";
   },
 
-  // Clean message without icons
   customSuccessMessage: (req, res, responseTime) => {
     const method = req.method.padEnd(6);
     const url =
@@ -63,13 +44,26 @@ module.exports = pinoHttp({
     return `ERROR ${req.method} ${req.url} → ${res.statusCode} ${err?.message || ""}`;
   },
 
-  // Remove bulky objects from output
+  customProps: (req, res) => ({
+    reqId: req.id,
+    route: req.url,
+    method: req.method,
+    userId: req.user?.userId || req.user?.id,
+  }),
+
+  customAttributeKeys: {
+    req: "req",
+    res: "res",
+    err: "err",
+    responseTime: "responseTime",
+    reqId: "reqId",
+  },
+
   serializers: {
     req: () => undefined,
     res: () => undefined,
   },
 
-  // Silence noisy routes
   autoLogging: {
     ignore: (req) => {
       return SILENT_ROUTES.some(

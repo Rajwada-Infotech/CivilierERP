@@ -1,7 +1,8 @@
 const express = require("express");
 const router = express.Router();
-const { getPool, sql } = require("../db");
+const { getPool, getPoolStats, sql } = require("../db");
 const bcrypt = require("bcrypt");
+const logger = require("../logger");
 
 const SALT_ROUNDS = 12;
 
@@ -33,12 +34,23 @@ function isSelfOrAdmin(req) {
 
 // ── GET profile ──────────────────────────────────────────────────────────────
 router.get("/:id/profile", async (req, res) => {
-  if (!isSelfOrAdmin(req)) return res.status(403).json({ error: "Forbidden" });
+  const routeStart = req.timing?.startStage();
+
+  const accessStart = req.timing?.startStage();
+  if (!isSelfOrAdmin(req)) {
+    if (accessStart) req.timing.mark("profile.access_check", accessStart);
+    return res.status(403).json({ error: "Forbidden" });
+  }
+  if (accessStart) req.timing.mark("profile.access_check", accessStart);
 
   try {
+    const poolStart = req.timing?.startStage();
     const pool = getPool();
-    const result = await pool.request().input("id", sql.Int, req.params.id)
-      .query(`
+    if (poolStart) req.timing.mark("profile.db_pool_get", poolStart);
+
+    const queryStart = req.timing?.startStage();
+    const poolStatsBefore = getPoolStats(pool);
+    const query = `
         SELECT
           u.id,
           u.name,
@@ -51,13 +63,41 @@ router.get("/:id/profile", async (req, res) => {
         FROM dbo.users u
         LEFT JOIN dbo.Role r ON u.RoleId = r.RId
         WHERE u.id = @id
-      `);
+      `;
+    const result = await pool.request().input("id", sql.Int, req.params.id)
+      .query(query);
+    const queryDurationMs = queryStart
+      ? req.timing.mark("profile.db_query", queryStart, {
+          queryHash: "userProfile.profileById.v1",
+          rows: result.recordset.length,
+          poolBefore: poolStatsBefore,
+          poolAfter: getPoolStats(pool),
+        })
+      : null;
+
+    if (queryDurationMs && queryDurationMs > 1000) {
+      logger.warn(
+        {
+          event: "PROFILE_QUERY_SLOW",
+          requestId: req.id,
+          userId: req.user?.userId || req.user?.id,
+          requestedUserId: req.params.id,
+          durationMs: queryDurationMs,
+          rows: result.recordset.length,
+          poolBefore: poolStatsBefore,
+          poolAfter: getPoolStats(pool),
+          queryHash: "userProfile.profileById.v1",
+        },
+        "Slow profile query",
+      );
+    }
 
     if (!result.recordset.length)
       return res.status(404).json({ error: "User not found" });
 
     const row = result.recordset[0];
-    res.json({
+    const serializeStart = req.timing?.startStage();
+    const payload = {
       id: row.id,
       name: row.name,
       email: row.email,
@@ -67,9 +107,21 @@ router.get("/:id/profile", async (req, res) => {
       created_datetime: row.created_datetime,
       discontinue: !!row.discontinue,
       avatar_url: row.avatar_url || null,
-    });
+    };
+    if (serializeStart) req.timing.mark("profile.serialize", serializeStart);
+    if (routeStart) req.timing.mark("profile.total", routeStart);
+
+    res.json(payload);
   } catch (err) {
-    console.error("GET /user-profile/:id/profile error:", err);
+    logger.error(
+      {
+        event: "PROFILE_GET_ERROR",
+        requestId: req.id,
+        err,
+        requestedUserId: req.params.id,
+      },
+      "GET /user-profile/:id/profile error",
+    );
     res.status(500).json({ error: err.message });
   }
 });
