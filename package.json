@@ -11,8 +11,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "dev:backend": "cd backend && nodemon server.js",
-    "dev:all": "concurrently \"vite\" \"cd backend && nodemon server.js\""
+    "dev:backend": "npm --prefix backend run dev",
+    "dev:all": "concurrently \"vite\" \"npm --prefix backend run dev\""
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
