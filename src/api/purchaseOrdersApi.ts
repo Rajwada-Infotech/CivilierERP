@@ -172,15 +172,20 @@ export const getPurchaseOrders = (
   const { page = 1, limit = 10 } = query;
   return fetchWithAuth(`/purchase-orders?page=${page}&limit=${limit}`)
     .then((r) => handleResponse<POListResponse>(r))
-    .then(
-      (r: any): POListResponse => ({
-        data: Array.isArray(r.data) ? r.data : Array.isArray(r) ? r : [],
+    .then((r: any): POListResponse => {
+      const data = Array.isArray(r.data) ? r.data : Array.isArray(r) ? r : null;
+      if (!data)
+        throw new Error(
+          r?.error ?? r?.message ?? "Unexpected response from server",
+        );
+      return {
+        data,
         page: Number(r.page ?? 1),
         limit: Number(r.limit ?? limit),
         total: Number(r.total ?? 0),
         totalPages: Number(r.totalPages ?? 1),
-      }),
-    );
+      };
+    });
 };
 
 export const getPurchaseOrderById = (

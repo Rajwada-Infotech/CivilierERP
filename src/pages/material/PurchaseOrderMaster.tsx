@@ -369,7 +369,7 @@ const PurchaseOrderMaster: React.FC = () => {
   // ── Normalise data ────────────────────────────────────────────────────────
   const suppliers = useMemo(
     () =>
-      (suppliersRaw as any[]).map((s) => ({
+      ensureArray<any>(suppliersRaw).map((s) => ({
         id: String(s.LHeadId),
         name: s.LHeadName ?? "",
       })),
@@ -378,7 +378,7 @@ const PurchaseOrderMaster: React.FC = () => {
 
   const companies = useMemo(
     () =>
-      (companiesRaw as any[]).map((c) => ({
+      ensureArray<any>(companiesRaw).map((c) => ({
         id: String(c.id),
         name: c.label ?? "",
       })),
@@ -387,7 +387,7 @@ const PurchaseOrderMaster: React.FC = () => {
 
   const allProjects = useMemo(
     () =>
-      (projectsRaw as any[]).map((p) => ({
+      ensureArray<any>(projectsRaw).map((p) => ({
         id: String(p.id),
         name: p.label ?? "",
       })),
@@ -396,7 +396,7 @@ const PurchaseOrderMaster: React.FC = () => {
 
   const uoms = useMemo(
     () =>
-      (uomsRaw as any[])
+      ensureArray<any>(uomsRaw)
         .filter((u) => u.IsActive !== false && u.IsActive !== 0)
         .map((u) => ({
           id: Number(u.Id),
@@ -409,7 +409,7 @@ const PurchaseOrderMaster: React.FC = () => {
 
   const items = useMemo(
     () =>
-      (itemsRaw as DbItem[]).map((i) => ({
+      ensureArray<DbItem>(itemsRaw).map((i) => ({
         id: i.M_Id,
         name: i.M_Name,
         description: i.M_Description ?? "",

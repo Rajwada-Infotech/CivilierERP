@@ -201,20 +201,28 @@ router.get(
       const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
       const offset = (page - 1) * limit;
 
+      const sourceWOId = req.query.sourceWOId
+        ? parseInt(req.query.sourceWOId, 10)
+        : null;
+
       const countResult = await pool
-        .request()\
-        .query("SELECT COUNT(*) AS total FROM dbo.PurchaseOrders" +
-          (req.query.sourceWOId ? " WHERE SourceWOId = " + parseInt(req.query.sourceWOId, 10) : ""));
+        .request()
+        .input("sourceWOId", sql.Int, sourceWOId)
+        .query(
+          sourceWOId
+            ? "SELECT COUNT(*) AS total FROM dbo.PurchaseOrders WHERE SourceWOId = @sourceWOId"
+            : "SELECT COUNT(*) AS total FROM dbo.PurchaseOrders",
+        );
 
       const total = parseInt(countResult.recordset[0].total);
 
-      const sourceWOId = req.query.sourceWOId ? parseInt(req.query.sourceWOId, 10) : null;
       const result = await pool
         .request()
         .input("offset", sql.Int, offset)
-        .input("limit", sql.Int, limit).query(`
+        .input("limit", sql.Int, limit)
+        .input("sourceWOId", sql.Int, sourceWOId).query(`
         ${PO_SELECT}
-        ${sourceWOId ? `WHERE po.SourceWOId = ${sourceWOId}` : ""}
+        ${sourceWOId ? "WHERE po.SourceWOId = @sourceWOId" : ""}
         ORDER BY po.PurchaseOrderID DESC
         OFFSET @offset ROWS
         FETCH NEXT @limit ROWS ONLY
@@ -377,7 +385,11 @@ router.post("/", async (req, res) => {
       .input("POItems", sql.NVarChar(sql.MAX), poItemsJson)
       .input("Discount", sql.NVarChar(sql.MAX), discountJson)
       .input("GST", sql.NVarChar(sql.MAX), gstJson)
-      .input("SourceWOId", sql.Int, SourceWOId ? parseInt(SourceWOId, 10) : null)
+      .input(
+        "SourceWOId",
+        sql.Int,
+        SourceWOId ? parseInt(SourceWOId, 10) : null,
+      )
       .input("SourceWODocNo", sql.NVarChar(100), SourceWODocNo || null).query(`
         INSERT INTO dbo.PurchaseOrders (
           PurchaseOrderNo, PODate, ExpectedDeliveryDate, SupplierID, CompanyId,
