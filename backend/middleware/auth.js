@@ -30,7 +30,9 @@ module.exports = async (req, res, next) => {
       });
     }
     if (isBlacklisted) {
-      return res.status(401).json({ error: "Token has been invalidated. Please log in again." });
+      return res
+        .status(401)
+        .json({ error: "Token has been invalidated. Please log in again." });
     }
 
     const jwtStart = req.timing?.startStage();
@@ -39,12 +41,11 @@ module.exports = async (req, res, next) => {
     req.user = decoded;
     req.token = token;
 
-    // Track active user (server.js already has post-auth middleware, but reinforce)
-    try {
-      const activeUserStart = req.timing?.startStage();
-      await pfaddActiveUser(decoded.userId);
-      if (activeUserStart) req.timing.mark("auth.redis_active_user", activeUserStart);
-    } catch {}
+    // Track active user — fire-and-forget so it never blocks the request.
+    // FIX: was awaited, causing 10-30 ms delay on EVERY request because
+    // pfaddActiveUser issued two serial Redis commands (PFADD + EXPIRE)
+    // before next() could fire. Telemetry must never hold up responses.
+    pfaddActiveUser(decoded.userId).catch(() => {});
 
     if (authStart) {
       const durationMs = req.timing.mark("auth.total", authStart);
