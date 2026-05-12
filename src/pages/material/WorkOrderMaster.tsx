@@ -62,6 +62,7 @@ import {
   fetchCompanies,
   fetchProjects,
   fetchContractors,
+  fetchSuppliers,
   fetchActivityGroups,
   fetchActivities,
   fetchItems,
@@ -162,6 +163,7 @@ interface WorkOrderForm {
   docNumber: string;
   docDate: string;
   contractorId: string;
+  supplierId: string;
   remarks: string;
   termsAndConditions: string;
 }
@@ -198,6 +200,7 @@ interface WorkOrderListItem {
   CompanyName: string;
   ProjectName: string;
   ContractorName: string;
+  SupplierName: string;
   ActivityCount: number;
   Remarks?: string;
 }
@@ -213,6 +216,8 @@ interface WorkOrderDetail {
   CompanyName: string;
   ProjectName: string;
   ContractorName: string;
+  SupplierName: string;
+  SupplierId?: number;
   Remarks?: string;
   TermsAndConditions?: string;
   CreatedBy?: string;
@@ -281,6 +286,7 @@ const EMPTY_FORM = (): WorkOrderForm => ({
   docNumber: generateDocNumber(),
   docDate: new Date().toISOString().slice(0, 10),
   contractorId: "",
+  supplierId: "",
   remarks: "",
   termsAndConditions: "",
 });
@@ -1689,6 +1695,11 @@ const WorkOrderDetailPanel: React.FC<{
                 value: detail.ContractorName,
               },
               {
+                label: "Supplier",
+                icon: <User size={11} />,
+                value: detail.SupplierName,
+              },
+              {
                 label: "Document Date",
                 icon: <Calendar size={11} />,
                 value: detail.DocumentDate
@@ -1748,71 +1759,6 @@ const WorkOrderDetailPanel: React.FC<{
                   {detail.TermsAndConditions}
                 </p>
               </div>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* ── Flow Status ─────────────────────────────────────────────────────── */}
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
-        <div className="px-4 sm:px-5 py-3 border-b border-border flex items-center gap-2">
-          <Link2 size={14} className="text-primary shrink-0" />
-          <h2 className="text-sm font-semibold text-foreground">Flow Status</h2>
-        </div>
-        <div className="p-4 sm:p-5 flex flex-wrap gap-3">
-          {/* Step 1: Expense Booking */}
-          <div
-            className={`flex-1 min-w-[140px] rounded-lg border px-3 py-2.5 ${
-              (chainStatus?.expenseCount ?? 0) > 0
-                ? "border-green-300 dark:border-green-700 bg-green-50 dark:bg-green-950/30"
-                : "border-border bg-muted/30"
-            }`}
-          >
-            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">
-              Expense Booking
-            </p>
-            {(chainStatus?.expenseCount ?? 0) > 0 ? (
-              <>
-                <p className="text-xs font-semibold text-green-700 dark:text-green-400">
-                  ✓ Booked ({chainStatus!.expenseCount})
-                </p>
-                {chainStatus?.latestExpenseDocNo && (
-                  <p className="text-[10px] text-muted-foreground font-mono mt-0.5">
-                    {chainStatus.latestExpenseDocNo}
-                  </p>
-                )}
-              </>
-            ) : (
-              <p className="text-xs text-muted-foreground">Not booked yet</p>
-            )}
-          </div>
-
-          {/* Step 2: Payment */}
-          <div
-            className={`flex-1 min-w-[140px] rounded-lg border px-3 py-2.5 ${
-              chainStatus?.isPaid
-                ? "border-blue-300 dark:border-blue-700 bg-blue-50 dark:bg-blue-950/30"
-                : "border-border bg-muted/30"
-            }`}
-          >
-            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-0.5">
-              Payment
-            </p>
-            {chainStatus?.isPaid ? (
-              <>
-                <p className="text-xs font-semibold text-blue-700 dark:text-blue-400">
-                  ✓ Paid ({chainStatus.paymentCount})
-                </p>
-                {chainStatus.latestPaymentAmount != null && (
-                  <p className="text-[10px] text-muted-foreground mt-0.5">
-                    ₹{chainStatus.latestPaymentAmount.toLocaleString("en-IN")}
-                  </p>
-                )}
-              </>
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                {(chainStatus?.expenseCount ?? 0) > 0 ? "Pending payment" : "—"}
-              </p>
             )}
           </div>
         </div>
@@ -2019,17 +1965,22 @@ const WorkOrderDetailPanel: React.FC<{
                               <>
                                 <button
                                   onClick={() => toggleMaterials(act.Id)}
-                                  className="w-full flex items-center gap-2 px-4 py-2 bg-muted/5 border-t border-border/40 text-xs text-muted-foreground hover:bg-muted/20 transition-colors"
+                                  className="w-full flex items-center gap-2 px-4 py-2 bg-muted/10 border-t border-border/40 text-xs text-muted-foreground hover:bg-muted/30 transition-colors"
                                 >
                                   <Package
                                     size={11}
-                                    className="text-amber-500 shrink-0"
+                                    className="text-orange-500 shrink-0"
                                   />
                                   <span className="font-medium">
                                     {act.materials.length} Material
                                     {act.materials.length !== 1 ? "s" : ""}
                                   </span>
-                                  <span className="ml-auto font-semibold text-amber-600 dark:text-amber-400">
+                                  {detail.SupplierName && (
+                                    <span className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[10px] font-semibold">
+                                      {detail.SupplierName}
+                                    </span>
+                                  )}
+                                  <span className="ml-auto font-semibold text-orange-500 dark:text-orange-400">
                                     {fmt(act.MaterialAmount || 0)}
                                   </span>
                                   {matExpanded ? (
@@ -2040,9 +1991,9 @@ const WorkOrderDetailPanel: React.FC<{
                                 </button>
 
                                 {matExpanded && (
-                                  <div className="border-t border-border/40 bg-amber-50/30 dark:bg-amber-950/10">
+                                  <div className="border-t border-border/40 bg-muted/20 dark:bg-muted/10">
                                     {/* Desktop material header */}
-                                    <div className="hidden sm:grid grid-cols-[1fr_80px_80px_80px_120px] gap-2 px-6 py-1.5 border-b border-border/30">
+                                    <div className="hidden sm:grid grid-cols-[1fr_80px_80px_80px_120px] gap-2 px-6 py-1.5 border-b border-border/30 bg-muted/30">
                                       {[
                                         "Item Name",
                                         "Ratio",
@@ -2052,7 +2003,7 @@ const WorkOrderDetailPanel: React.FC<{
                                       ].map((h) => (
                                         <div
                                           key={h}
-                                          className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground/70"
+                                          className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground"
                                         >
                                           {h}
                                         </div>
@@ -2086,12 +2037,12 @@ const WorkOrderDetailPanel: React.FC<{
                                           {/* Desktop material */}
                                           <div className="hidden sm:grid grid-cols-[1fr_80px_80px_80px_120px] gap-2 items-center px-6 py-2 border-b border-border/20 last:border-0">
                                             <span className="text-xs font-medium text-foreground flex items-center gap-1.5">
-                                              <span className="w-4 h-4 rounded flex items-center justify-center bg-amber-100 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 text-[10px] font-bold shrink-0">
+                                              <span className="w-4 h-4 rounded flex items-center justify-center bg-primary/10 text-primary text-[10px] font-bold shrink-0">
                                                 {matIdx + 1}
                                               </span>
                                               {mat.ItemName || "—"}
                                             </span>
-                                            <span className="text-xs text-muted-foreground">
+                                            <span className="text-xs text-muted-foreground font-mono">
                                               {mat.Quantity != null
                                                 ? `${mat.Quantity} × ${act.Area}`
                                                 : "—"}
@@ -2099,10 +2050,10 @@ const WorkOrderDetailPanel: React.FC<{
                                             <span className="text-xs text-muted-foreground">
                                               {mat.UOMName || "—"}
                                             </span>
-                                            <span className="text-xs text-muted-foreground">
+                                            <span className="text-xs text-muted-foreground font-mono">
                                               {mat.Rate ? `₹${mat.Rate}` : "—"}
                                             </span>
-                                            <span className="text-xs font-semibold text-amber-600 dark:text-amber-400">
+                                            <span className="text-xs font-semibold text-orange-500 dark:text-orange-400">
                                               {lineTotal > 0
                                                 ? fmt(lineTotal)
                                                 : "—"}
@@ -2112,11 +2063,11 @@ const WorkOrderDetailPanel: React.FC<{
                                       );
                                     })}
                                     {/* Material subtotal */}
-                                    <div className="flex items-center justify-between px-6 py-2 bg-amber-50/50 dark:bg-amber-950/20 border-t border-amber-200/50 dark:border-amber-800/30">
-                                      <span className="text-xs font-semibold text-muted-foreground">
+                                    <div className="flex items-center justify-between px-6 py-2 bg-muted/40 border-t border-border/50">
+                                      <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                                         Materials Subtotal
                                       </span>
-                                      <span className="text-xs font-bold text-amber-600 dark:text-amber-400">
+                                      <span className="text-sm font-bold text-orange-500 dark:text-orange-400">
                                         {fmt(act.MaterialAmount || 0)}
                                       </span>
                                     </div>
@@ -2637,6 +2588,7 @@ const WorkOrderEditPanel: React.FC<{
   const [companies, setCompanies] = useState<DropdownOption[]>([]);
   const [projects, setProjects] = useState<DropdownOption[]>([]);
   const [contractors, setContractors] = useState<DropdownOption[]>([]);
+  const [suppliers, setSuppliers] = useState<DropdownOption[]>([]);
   const [activityGroupOptions, setActivityGroupOptions] = useState<
     DropdownOption[]
   >([]);
@@ -2657,30 +2609,41 @@ const WorkOrderEditPanel: React.FC<{
       setLoadingDropdowns(true);
       setDropdownError(null);
       try {
-        const [comp, proj, cont, grps, acts, uomsRaw, detail, items, tcRaw] =
-          await Promise.all([
-            fetchCompanies(),
-            fetchProjects(),
-            fetchContractors(),
-            fetchActivityGroups(),
-            fetchActivities(),
-            fetchWithAuth("/api/uom-master").then((r) =>
-              r.ok
-                ? r.json().then((rows: any[]) =>
-                    rows
-                      .filter((u) => u.IsActive !== false)
-                      .map((u) => ({
-                        id: u.Id,
-                        name: u.UOMName,
-                        uomCode: u.UOMCode,
-                      })),
-                  )
-                : [],
-            ),
-            getWorkOrder(workOrderId),
-            fetchItems(),
-            getTCRecords().catch(() => []),
-          ]);
+        const [
+          comp,
+          proj,
+          cont,
+          supp,
+          grps,
+          acts,
+          uomsRaw,
+          detail,
+          items,
+          tcRaw,
+        ] = await Promise.all([
+          fetchCompanies(),
+          fetchProjects(),
+          fetchContractors(),
+          fetchSuppliers(),
+          fetchActivityGroups(),
+          fetchActivities(),
+          fetchWithAuth("/api/uom-master").then((r) =>
+            r.ok
+              ? r.json().then((rows: any[]) =>
+                  rows
+                    .filter((u) => u.IsActive !== false)
+                    .map((u) => ({
+                      id: u.Id,
+                      name: u.UOMName,
+                      uomCode: u.UOMCode,
+                    })),
+                )
+              : [],
+          ),
+          getWorkOrder(workOrderId),
+          fetchItems(),
+          getTCRecords().catch(() => []),
+        ]);
         const parsedTCs: TCRecord[] = (Array.isArray(tcRaw) ? tcRaw : [])
           .filter((t: any) => t.isActive !== false)
           .map((t: any) => ({
@@ -2692,6 +2655,7 @@ const WorkOrderEditPanel: React.FC<{
         setCompanies(ensureArray<DropdownOption>(comp));
         setProjects(ensureArray<DropdownOption>(proj));
         setContractors(ensureArray<DropdownOption>(cont));
+        setSuppliers(ensureArray<DropdownOption>(supp));
         setActivityGroupOptions(ensureArray<DropdownOption>(grps));
         const rawActs = ensureArray<ActivityOption>(acts);
         setActivityOptions(
@@ -2710,12 +2674,17 @@ const WorkOrderEditPanel: React.FC<{
         const compList = ensureArray<DropdownOption>(comp);
         const projList = ensureArray<DropdownOption>(proj);
         const contList = ensureArray<DropdownOption>(cont);
+        const suppList = ensureArray<DropdownOption>(supp);
         const compId =
           compList.find((c) => c.name === detail.CompanyName)?.id ?? "";
         const projId =
           projList.find((p) => p.name === detail.ProjectName)?.id ?? "";
         const contId =
           contList.find((c) => c.name === detail.ContractorName)?.id ?? "";
+        const suppId =
+          suppList.find((s) => s.name === detail.SupplierName)?.id ??
+          detail.SupplierId ??
+          "";
 
         setFormState({
           companyId: compId ? String(compId) : "",
@@ -2725,6 +2694,7 @@ const WorkOrderEditPanel: React.FC<{
             ? detail.DocumentDate.slice(0, 10)
             : new Date().toISOString().slice(0, 10),
           contractorId: contId ? String(contId) : "",
+          supplierId: suppId ? String(suppId) : "",
           remarks: detail.Remarks || "",
           termsAndConditions: detail.TermsAndConditions || "",
         });
@@ -2904,6 +2874,7 @@ const WorkOrderEditPanel: React.FC<{
           DocumentNumber: form.docNumber,
           DocumentDate: form.docDate,
           ContractorId: parseInt(form.contractorId),
+          SupplierId: form.supplierId ? parseInt(form.supplierId) : undefined,
           TotalAmount: grandTotal,
           Remarks: form.remarks || null,
           TermsAndConditions:
@@ -3143,6 +3114,22 @@ const WorkOrderEditPanel: React.FC<{
               )}
               {errors.contractorId && (
                 <p className="text-xs text-red-500 mt-1">Required</p>
+              )}
+            </div>
+            <div>
+              <FieldLabel>
+                <span className="flex items-center gap-1.5">
+                  <User size={11} />
+                  Supplier
+                </span>
+              </FieldLabel>
+              {renderSelect(
+                "supplierId",
+                form.supplierId,
+                (v) => setField("supplierId", v),
+                suppliers,
+                "Select supplier",
+                false,
               )}
             </div>
             <div>
@@ -3499,6 +3486,7 @@ const WorkOrderMaster: React.FC = () => {
   const [companies, setCompanies] = useState<DropdownOption[]>([]);
   const [projects, setProjects] = useState<DropdownOption[]>([]);
   const [contractors, setContractors] = useState<DropdownOption[]>([]);
+  const [suppliers, setSuppliers] = useState<DropdownOption[]>([]);
   const [activityGroupOptions, setActivityGroupOptions] = useState<
     DropdownOption[]
   >([]);
@@ -3517,11 +3505,12 @@ const WorkOrderMaster: React.FC = () => {
       setLoadingDropdowns(true);
       setDropdownError(null);
       try {
-        const [comp, proj, cont, grps, acts, uomsRaw, tcRaw] =
+        const [comp, proj, cont, supp, grps, acts, uomsRaw, tcRaw] =
           await Promise.all([
             fetchCompanies(),
             fetchProjects(),
             fetchContractors(),
+            fetchSuppliers(),
             fetchActivityGroups(),
             fetchActivities(),
             fetchWithAuth("/api/uom-master").then((r) =>
@@ -3550,6 +3539,7 @@ const WorkOrderMaster: React.FC = () => {
         setCompanies(ensureArray<DropdownOption>(comp));
         setProjects(ensureArray<DropdownOption>(proj));
         setContractors(ensureArray<DropdownOption>(cont));
+        setSuppliers(ensureArray<DropdownOption>(supp));
         setActivityGroupOptions(ensureArray<DropdownOption>(grps));
         setUomOptions(ensureArray<DropdownOption>(uomsRaw));
         const rawActs = ensureArray<ActivityOption>(acts);
@@ -3571,6 +3561,7 @@ const WorkOrderMaster: React.FC = () => {
         setCompanies([]);
         setProjects([]);
         setContractors([]);
+        setSuppliers([]);
         setActivityGroupOptions([]);
         setActivityOptions([]);
         setUomOptions([]);
@@ -3675,6 +3666,7 @@ const WorkOrderMaster: React.FC = () => {
         DocumentNumber: form.docNumber,
         DocumentDate: form.docDate,
         ContractorId: parseInt(form.contractorId),
+        SupplierId: form.supplierId ? parseInt(form.supplierId) : null,
         TotalAmount: grandTotal,
         Remarks: form.remarks || null,
         TermsAndConditions:
@@ -3730,6 +3722,7 @@ const WorkOrderMaster: React.FC = () => {
           DocumentNumber: confirmedDocNumber,
           DocumentDate: form.docDate,
           ContractorId: parseInt(form.contractorId),
+          SupplierId: form.supplierId ? parseInt(form.supplierId) : undefined,
           TotalAmount: grandTotal,
           Remarks: form.remarks || null,
           TermsAndConditions:
@@ -4122,6 +4115,22 @@ const WorkOrderMaster: React.FC = () => {
                   )}
                   {errors.contractorId && (
                     <p className="text-xs text-red-500 mt-1">Required</p>
+                  )}
+                </div>
+                <div>
+                  <FieldLabel>
+                    <span className="flex items-center gap-1.5">
+                      <User size={11} />
+                      Supplier
+                    </span>
+                  </FieldLabel>
+                  {renderSelect(
+                    "supplierId",
+                    form.supplierId,
+                    (v) => setField("supplierId", v),
+                    suppliers,
+                    "Select supplier",
+                    false,
                   )}
                 </div>
                 <div>

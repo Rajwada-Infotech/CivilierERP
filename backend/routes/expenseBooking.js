@@ -267,9 +267,13 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
             WHEN t.Prefix IS NOT NULL THEN t.Prefix
             ELSE NULL
           END AS DocTypeName,
+          ec.name  AS ECompanyName,
+          ep.name  AS EProjectDisplayName,
           COUNT(*) OVER() AS _total
         FROM dbo.ExpenseBooking eb
-        LEFT JOIN dbo.TypeOfDoc t ON eb.EDocTypeId = t.TypeOfDocId
+        LEFT JOIN dbo.TypeOfDoc t  ON t.TypeOfDocId = eb.EDocTypeId
+        LEFT JOIN dbo.enterprise ec ON ec.id = eb.ECompanyId
+        LEFT JOIN dbo.enterprise ep ON ep.id = TRY_CAST(eb.EProjectName AS INT)
         ORDER BY eb.Eid DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `);
@@ -307,10 +311,12 @@ router.get("/:id", async (req, res) => {
                  WHEN t.Prefix IS NOT NULL THEN t.Prefix
             ELSE NULL
           END AS DocTypeName,
-          e.name AS ECompanyName
+          ec.name AS ECompanyName,
+               ep.name AS EProjectDisplayName
         FROM dbo.ExpenseBooking eb
-        LEFT JOIN dbo.TypeOfDoc t ON eb.EDocTypeId = t.TypeOfDocId
-        LEFT JOIN dbo.enterprise e ON e.id = eb.ECompanyId
+        LEFT JOIN dbo.TypeOfDoc  t  ON t.TypeOfDocId = eb.EDocTypeId
+        LEFT JOIN dbo.enterprise ec ON ec.id = eb.ECompanyId
+        LEFT JOIN dbo.enterprise ep ON ep.id = TRY_CAST(eb.EProjectName AS INT)
         WHERE eb.Eid = @Eid
       `);
     if (!result.recordset.length)
