@@ -189,41 +189,45 @@ const mapRow = (po) => ({
 });
 
 // ── GET /  (List with Pagination) ────────────────────────────────────────────
-router.get("/", cache("purchase-orders", 300), async (req, res) => {
-  try {
-    const pool = getPool();
-    const page = Math.max(parseInt(req.query.page) || 1, 1);
-    const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
-    const offset = (page - 1) * limit;
+router.get(
+  "/",
+  cache("purchase-orders", 300, { shared: true }),
+  async (req, res) => {
+    try {
+      const pool = getPool();
+      const page = Math.max(parseInt(req.query.page) || 1, 1);
+      const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
+      const offset = (page - 1) * limit;
 
-    const countResult = await pool
-      .request()
-      .query("SELECT COUNT(*) AS total FROM dbo.PurchaseOrders");
+      const countResult = await pool
+        .request()
+        .query("SELECT COUNT(*) AS total FROM dbo.PurchaseOrders");
 
-    const total = parseInt(countResult.recordset[0].total);
+      const total = parseInt(countResult.recordset[0].total);
 
-    const result = await pool
-      .request()
-      .input("offset", sql.Int, offset)
-      .input("limit", sql.Int, limit).query(`
+      const result = await pool
+        .request()
+        .input("offset", sql.Int, offset)
+        .input("limit", sql.Int, limit).query(`
         ${PO_SELECT}
         ORDER BY po.PurchaseOrderID DESC
         OFFSET @offset ROWS
         FETCH NEXT @limit ROWS ONLY
       `);
 
-    res.json({
-      data: result.recordset.map(mapRow),
-      page,
-      limit,
-      total,
-      totalPages: Math.ceil(total / limit),
-    });
-  } catch (err) {
-    console.error("GET PurchaseOrders error:", err);
-    res.status(500).json({ error: err.message });
-  }
-});
+      res.json({
+        data: result.recordset.map(mapRow),
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      });
+    } catch (err) {
+      console.error("GET PurchaseOrders error:", err);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
 // ── GET /:id ──────────────────────────────────────────────────────────────────
 router.get("/:id", async (req, res) => {

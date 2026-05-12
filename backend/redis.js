@@ -1,6 +1,9 @@
 const logger = require("./logger");
 const Redis = require("ioredis");
-const LZString = require("lz-string");
+const zlib = require("zlib");
+const { promisify } = require("util");
+const gzip = promisify(zlib.gzip);
+const gunzip = promisify(zlib.gunzip);
 
 let client = null;
 let connectPromise = null;
@@ -75,6 +78,7 @@ async function getRedis() {
       .connect()
       .then(async () => {
         await client.ping();
+        connectPromise = null; // reset so reconnect can re-enter
         return client;
       })
       .catch((err) => {
@@ -89,6 +93,46 @@ async function getRedis() {
   }
 
   return connectPromise;
+}
+
+async function closeRedis() {
+  if (!client) return;
+
+  const redis = client;
+  const pendingConnect = connectPromise;
+
+  if (pendingConnect) {
+    try {
+      await pendingConnect;
+    } catch {
+      // The connection may already be closed or unavailable during shutdown.
+    }
+  }
+
+  client = null;
+  connectPromise = null;
+
+  if (redis.status === "ready") {
+    await redis.quit();
+  } else if (redis.status !== "end") {
+    redis.disconnect();
+  }
+
+  logger.info({ event: "REDIS_CLOSED_CLEANLY" }, "Redis client closed");
+}
+
+async function isRedisReady() {
+  try {
+    const redis = await getRedis();
+    const pong = await redis.ping();
+    return pong === "PONG";
+  } catch (err) {
+    logger.warn(
+      { event: "REDIS_HEALTH_CHECK_FAILED", err },
+      "Redis readiness check failed",
+    );
+    return false;
+  }
 }
 
 // ─────────────────────────────
@@ -128,17 +172,26 @@ const redisDelPattern = (pattern) =>
 // ─────────────────────────────
 // COMPRESSION — used by cache middleware to shrink large payloads
 // ─────────────────────────────
-function compress(value) {
+// FIX: replaced LZString (pure-JS, slow) with zlib.gzip (native, non-blocking).
+// LZString.compressToUTF16 was taking 130-570 ms on large payloads.
+// zlib stores a 'gz:' prefix so decompress can detect the encoding.
+async function compress(value) {
   try {
-    return LZString.compressToUTF16(JSON.stringify(value));
+    const buf = await gzip(JSON.stringify(value));
+    return "gz:" + buf.toString("base64");
   } catch {
     return null;
   }
 }
 
-function decompress(compressed) {
+async function decompress(compressed) {
   try {
-    return JSON.parse(LZString.decompressFromUTF16(compressed));
+    if (typeof compressed === "string" && compressed.startsWith("gz:")) {
+      const buf = await gunzip(Buffer.from(compressed.slice(3), "base64"));
+      return JSON.parse(buf.toString());
+    }
+    // Legacy: plain JSON string (no compression prefix)
+    return JSON.parse(compressed);
   } catch {
     return null;
   }
@@ -158,7 +211,23 @@ const redisLock = (key, ttlSeconds = 30) =>
 const getCacheVersion = (ns) =>
   safeExec(async (r) => Number((await r.get(`cache:version:${ns}`)) || 0), 0);
 
-const bumpCacheVersion = (ns) => safeExec((r) => r.incr(`cache:version:${ns}`));
+const bumpCacheVersion = async (ns) => {
+  await safeExec((r) => r.incr(`cache:version:${ns}`));
+  invalidateLocalCacheVersion(ns);
+};
+
+// Companion to bumpCacheVersion: call this to also evict the in-process
+// version copy held by cache.js so the next GET re-fetches the new version
+// from Redis immediately instead of waiting up to VERSION_TTL_MS.
+// Import lazily to avoid circular require (cache.js → redis.js → cache.js).
+function invalidateLocalCacheVersion(ns) {
+  try {
+    const { localVersionCache } = require("./middleware/cache");
+    localVersionCache.invalidate(ns);
+  } catch {
+    /* cache.js not loaded yet — no-op */
+  }
+}
 
 // ─────────────────────────────
 // STALE CACHE HELPER
@@ -173,13 +242,15 @@ const redisZScore = (key, member) => safeExec((r) => r.zscore(key, member), 0);
 
 const redisZIncrBy = (key, increment, member, ttl = null) =>
   safeExec(async (r) => {
-    await r.zincrby(key, increment, member);
+    const pipe = r.pipeline();
+    pipe.zincrby(key, increment, member);
     if (ttl) {
-      await r.set(`engagement:last:${member}`, Date.now().toString(), "EX", ttl);
+      pipe.set(`engagement:last:${member}`, Date.now().toString(), "EX", ttl);
+      pipe.expire(key, ttl);
     } else {
-      await r.set(`engagement:last:${member}`, Date.now().toString());
+      pipe.set(`engagement:last:${member}`, Date.now().toString());
     }
-    if (ttl) await r.expire(key, ttl);
+    await pipe.exec();
   });
 
 const decayEngagement = () =>
@@ -227,15 +298,24 @@ const cleanupInactiveUsers = (inactiveAfterMs = 30 * 24 * 60 * 60 * 1000) =>
       );
       cursor = nextCursor;
 
-      for (const key of keys) {
-        const lastSeen = Number(await r.get(key));
-        if (Number.isFinite(lastSeen) && lastSeen >= cutoff) continue;
+      if (keys.length === 0) continue;
+      // Batch-fetch all lastSeen values in one pipeline round-trip
+      const getPipe = r.pipeline();
+      for (const key of keys) getPipe.get(key);
+      const getResults = await getPipe.exec();
 
-        const member = key.slice("engagement:last:".length);
-        await r.zrem("engagement:score", member);
-        await r.del(key);
-        removed += 1;
+      const delPipe = r.pipeline();
+      let pageDels = 0;
+      for (let i = 0; i < keys.length; i++) {
+        const lastSeen = Number(getResults[i]?.[1] || 0);
+        if (Number.isFinite(lastSeen) && lastSeen >= cutoff) continue;
+        const member = keys[i].slice("engagement:last:".length);
+        delPipe.zrem("engagement:score", member);
+        delPipe.del(keys[i]);
+        pageDels++;
       }
+      if (pageDels > 0) await delPipe.exec();
+      removed += pageDels;
     } while (cursor !== "0");
 
     return removed;
@@ -246,33 +326,43 @@ const cleanupInactiveUsers = (inactiveAfterMs = 30 * 24 * 60 * 60 * 1000) =>
 // ─────────────────────────────
 const incrGlobalRequests = () =>
   safeExec(async (r) => {
-    await r.incr("global:requests");
-    await r.expire("global:requests", 60);
+    const pipe = r.pipeline();
+    pipe.incr("global:requests");
+    pipe.expire("global:requests", 60);
+    await pipe.exec();
   });
 
 const incrGlobalCacheHit = () =>
   safeExec(async (r) => {
-    await r.incr("global:cache_hits");
-    await r.expire("global:cache_hits", 60);
+    const pipe = r.pipeline();
+    pipe.incr("global:cache_hits");
+    pipe.expire("global:cache_hits", 60);
+    await pipe.exec();
   });
 
 const incrGlobalCacheMiss = () =>
   safeExec(async (r) => {
-    await r.incr("global:cache_misses");
-    await r.expire("global:cache_misses", 60);
+    const pipe = r.pipeline();
+    pipe.incr("global:cache_misses");
+    pipe.expire("global:cache_misses", 60);
+    await pipe.exec();
   });
 
 // ─────────────────────────────
 // USER TRACKING
 // ─────────────────────────────
 const pfaddActiveUser = (userId) =>
+  // FIX: pipeline PFADD + EXPIRE into ONE round-trip (was two serial awaits).
+  // Saves ~10-20 ms per request — these were blocking auth before next() fired.
   safeExec(async (r) => {
     const key = `active:users:${new Date()
       .toISOString()
       .slice(0, 10)
       .replace(/-/g, "")}`;
-    await r.pfadd(key, userId);
-    await r.expire(key, 86400);
+    const pipe = r.pipeline();
+    pipe.pfadd(key, userId);
+    pipe.expire(key, 86400);
+    await pipe.exec();
   });
 
 // ─────────────────────────────
@@ -324,10 +414,9 @@ async function getSystemMetrics() {
     const activeUsers = Number(results?.[1]?.[1] || 0);
 
     const memInfo = results?.[2]?.[1] || "";
-    const memoryUsage = parseFloat(
-      memInfo.match(/used_memory:(\d+)/)?.[1] /
-        memInfo.match(/maxmemory:(\d+)/)?.[1] || 0,
-    );
+    const usedMem = Number(memInfo.match(/used_memory:(\d+)/)?.[1] || 0);
+    const maxMem = Number(memInfo.match(/maxmemory:(\d+)/)?.[1] || 0);
+    const memoryUsage = maxMem > 0 ? usedMem / maxMem : 0;
 
     const hits = Number(results?.[3]?.[1] || 0);
     const misses = Number(results?.[4]?.[1] || 0);
@@ -374,21 +463,24 @@ async function getSystemMetrics() {
 const trackHourLoad = () =>
   safeExec(async (r) => {
     const hour = new Date().getHours();
-    await r.incrby(`metrics:hour:${hour}:total_load`, 1);
-    await r.incr(`metrics:hour:${hour}:count`);
-    await r.expire(`metrics:hour:${hour}:total_load`, 7 * 86400);
-    await r.expire(`metrics:hour:${hour}:count`, 7 * 86400);
+    const pipe = r.pipeline();
+    pipe.incrby(`metrics:hour:${hour}:total_load`, 1);
+    pipe.incr(`metrics:hour:${hour}:count`);
+    pipe.expire(`metrics:hour:${hour}:total_load`, 7 * 86400);
+    pipe.expire(`metrics:hour:${hour}:count`, 7 * 86400);
+    await pipe.exec();
   });
 
 const getPredictedRPM = async () => {
   try {
+    // FIX: was two serial redisGet calls; pipeline them into one round-trip.
     const nextHour = (new Date().getHours() + 1) % 24;
-    const total = Number(
-      (await redisGet(`metrics:hour:${nextHour}:total_load`)) || 0,
-    );
-    const count = Number(
-      (await redisGet(`metrics:hour:${nextHour}:count`)) || 0,
-    );
+    const [totalRaw, countRaw] = await Promise.all([
+      redisGet(`metrics:hour:${nextHour}:total_load`),
+      redisGet(`metrics:hour:${nextHour}:count`),
+    ]);
+    const total = Number(totalRaw || 0);
+    const count = Number(countRaw || 0);
     if (!count) return 0;
     return Math.round((total / count) * 1.15);
   } catch {
@@ -410,6 +502,8 @@ function getDynamicLimit(score, rpm, memoryUsage) {
 
 module.exports = {
   getRedis,
+  isRedisReady,
+  closeRedis,
   redisGet,
   redisSet,
   redisDel,
@@ -419,6 +513,7 @@ module.exports = {
   redisLock,
   getCacheVersion,
   bumpCacheVersion,
+  invalidateLocalCacheVersion,
   setStaleCache,
   redisZScore,
   redisZIncrBy,

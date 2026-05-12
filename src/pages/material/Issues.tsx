@@ -729,18 +729,16 @@ export default function Issues() {
                   value={header.companyId}
                   onValueChange={(v) => setH("companyId", v)}
                 >
-                  <SelectTrigger className="h-9">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Building2
-                        size={13}
-                        className="text-muted-foreground shrink-0"
-                      />
-                      <SelectValue
-                        placeholder={
-                          loadingCompanies ? "Loading…" : "Select company"
-                        }
-                      />
-                    </div>
+                  <SelectTrigger className="h-9 gap-2">
+                    <Building2
+                      size={13}
+                      className="text-muted-foreground shrink-0"
+                    />
+                    <SelectValue
+                      placeholder={
+                        loadingCompanies ? "Loading…" : "Select company"
+                      }
+                    />
                   </SelectTrigger>
                   <SelectContent>
                     {(companies as any[]).map((c) => (
@@ -757,18 +755,16 @@ export default function Issues() {
                   value={header.projectId}
                   onValueChange={(v) => setH("projectId", v)}
                 >
-                  <SelectTrigger className="h-9">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <FolderOpen
-                        size={13}
-                        className="text-muted-foreground shrink-0"
-                      />
-                      <SelectValue
-                        placeholder={
-                          loadingProjects ? "Loading…" : "Select project"
-                        }
-                      />
-                    </div>
+                  <SelectTrigger className="h-9 gap-2">
+                    <FolderOpen
+                      size={13}
+                      className="text-muted-foreground shrink-0"
+                    />
+                    <SelectValue
+                      placeholder={
+                        loadingProjects ? "Loading…" : "Select project"
+                      }
+                    />
                   </SelectTrigger>
                   <SelectContent>
                     {(projects as any[]).map((p) => (
@@ -785,18 +781,16 @@ export default function Issues() {
                   value={header.finYearId}
                   onValueChange={(v) => setH("finYearId", v)}
                 >
-                  <SelectTrigger className="h-9">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <Calendar
-                        size={13}
-                        className="text-muted-foreground shrink-0"
-                      />
-                      <SelectValue
-                        placeholder={
-                          loadingFinYears ? "Loading…" : "Select fin year"
-                        }
-                      />
-                    </div>
+                  <SelectTrigger className="h-9 gap-2">
+                    <Calendar
+                      size={13}
+                      className="text-muted-foreground shrink-0"
+                    />
+                    <SelectValue
+                      placeholder={
+                        loadingFinYears ? "Loading…" : "Select fin year"
+                      }
+                    />
                   </SelectTrigger>
                   <SelectContent>
                     {(finYears as any[]).map((fy) => (
