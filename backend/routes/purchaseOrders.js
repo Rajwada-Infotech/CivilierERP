@@ -172,6 +172,8 @@ const PO_SELECT = `
     po.POItems,
     po.Discount,
     po.GST,
+    po.SourceWOId,
+    po.SourceWODocNo,
     td.Prefix             AS DocTypePrefix,
     td.Description        AS DocTypeDescription
   FROM dbo.PurchaseOrders po
@@ -200,16 +202,19 @@ router.get(
       const offset = (page - 1) * limit;
 
       const countResult = await pool
-        .request()
-        .query("SELECT COUNT(*) AS total FROM dbo.PurchaseOrders");
+        .request()\
+        .query("SELECT COUNT(*) AS total FROM dbo.PurchaseOrders" +
+          (req.query.sourceWOId ? " WHERE SourceWOId = " + parseInt(req.query.sourceWOId, 10) : ""));
 
       const total = parseInt(countResult.recordset[0].total);
 
+      const sourceWOId = req.query.sourceWOId ? parseInt(req.query.sourceWOId, 10) : null;
       const result = await pool
         .request()
         .input("offset", sql.Int, offset)
         .input("limit", sql.Int, limit).query(`
         ${PO_SELECT}
+        ${sourceWOId ? `WHERE po.SourceWOId = ${sourceWOId}` : ""}
         ORDER BY po.PurchaseOrderID DESC
         OFFSET @offset ROWS
         FETCH NEXT @limit ROWS ONLY
@@ -288,6 +293,8 @@ router.post("/", async (req, res) => {
     POItems,
     Discount,
     GST,
+    SourceWOId,
+    SourceWODocNo,
   } = req.body;
 
   const poItemsArray = Array.isArray(POItems)
@@ -369,14 +376,17 @@ router.post("/", async (req, res) => {
       .input("CreatedAt", sql.DateTime2, new Date())
       .input("POItems", sql.NVarChar(sql.MAX), poItemsJson)
       .input("Discount", sql.NVarChar(sql.MAX), discountJson)
-      .input("GST", sql.NVarChar(sql.MAX), gstJson).query(`
+      .input("GST", sql.NVarChar(sql.MAX), gstJson)
+      .input("SourceWOId", sql.Int, SourceWOId ? parseInt(SourceWOId, 10) : null)
+      .input("SourceWODocNo", sql.NVarChar(100), SourceWODocNo || null).query(`
         INSERT INTO dbo.PurchaseOrders (
           PurchaseOrderNo, PODate, ExpectedDeliveryDate, SupplierID, CompanyId,
           ProjectId, ItemDescription, Quantity, Unit, Rate,
           SubtotalAmount, TotalAmount,
           HsnCode, GstType, GstRate,
           PaymentTerms, Status, Remarks, DocTypeId, DocNo,
-          CreatedBy, CreatedAt, POItems, Discount, GST
+          CreatedBy, CreatedAt, POItems, Discount, GST,
+          SourceWOId, SourceWODocNo
         )
         OUTPUT INSERTED.PurchaseOrderID
         VALUES (
@@ -385,7 +395,8 @@ router.post("/", async (req, res) => {
           @SubtotalAmount, @TotalAmount,
           @HsnCode, @GstType, @GstRate,
           @PaymentTerms, @Status, @Remarks, @DocTypeId, @DocNo,
-          @CreatedBy, @CreatedAt, @POItems, @Discount, @GST
+          @CreatedBy, @CreatedAt, @POItems, @Discount, @GST,
+          @SourceWOId, @SourceWODocNo
         )
       `);
 
