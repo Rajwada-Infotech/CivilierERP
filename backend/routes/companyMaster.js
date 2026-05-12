@@ -10,10 +10,13 @@ router.use(authMiddleware);
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 
 // GET all — reads from enterprise where business_type = 'C'
-router.get("/", cache("company-master", 300), async (req, res) => {
-  try {
-    const pool = getPool();
-    const result = await pool.request().query(`
+router.get(
+  "/",
+  cache("company-master", 300, { shared: true }),
+  async (req, res) => {
+    try {
+      const pool = getPool();
+      const result = await pool.request().query(`
       SELECT
         id                        AS Id,
         business_identity         AS Code,
@@ -55,11 +58,12 @@ router.get("/", cache("company-master", 300), async (req, res) => {
       WHERE business_type = 'C'
       ORDER BY name
     `);
-    res.json(result.recordset);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
+      res.json(result.recordset);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
 // POST — inserts into enterprise with business_type = 'C'
 router.post("/", adminOnly, async (req, res) => {
