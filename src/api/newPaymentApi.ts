@@ -11,13 +11,33 @@ async function parseError(res: Response, fallback: string) {
   }
 }
 
-export const getPayments = async (page = 1, limit = 20, supplier = "", company = "") => {
+export const getPayments = async (
+  page = 1,
+  limit = 20,
+  supplier = "",
+  company = "",
+  project = "",
+  finYear = "",
+  docNumber = "",
+  docDate = "",
+  date = "",
+  dueDate = "",
+  remarks = ""
+) => {
   const params = new URLSearchParams({
     page: String(page),
     limit: String(limit),
   });
   if (supplier) params.set("supplier", supplier);
-  if (company) params.set("company", company);
+  if (company)  params.set("company",  company);
+  if (project)  params.set("project",  project);
+  if (finYear)  params.set("finYear",  finYear);
+  if (docNumber) params.set("docNumber", docNumber);
+  if (docDate) params.set("docDate", docDate);
+  if (date) params.set("date", date);
+  if (dueDate) params.set("dueDate", dueDate);
+  if (remarks) params.set("remarks", remarks);
+
   const res = await fetchWithAuth(`${BASE_URL}?${params.toString()}`);
   if (!res.ok)
     throw new Error(await parseError(res, `GET failed: ${res.status}`));

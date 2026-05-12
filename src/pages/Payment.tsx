@@ -1344,6 +1344,11 @@ const Payment: React.FC = () => {
   const [page, setPage] = useState(1);
   const [supplierFilter, setSupplierFilter] = useState("");
   const [companyFilter, setCompanyFilter] = useState("");
+  const [projectFilter, setProjectFilter] = useState("");
+  const [finYearFilter, setFinYearFilter] = useState("");
+  const [docNumberFilter, setDocNumberFilter] = useState("");
+  const [docDateFilter, setDocDateFilter] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
   const PAGE_SIZE = 20;
 
   const [view, setView] = useState<"list" | "form">("list");
@@ -1359,8 +1364,8 @@ const Payment: React.FC = () => {
   // ── Queries ────────────────────────────────────────────────────────────────
 
   const { data: dbData, isLoading, refetch: refetchPayments } = useQuery({
-    queryKey: ["payments", page, supplierFilter, companyFilter],
-    queryFn: () => getPayments(page, PAGE_SIZE, supplierFilter, companyFilter),
+    queryKey: ["payments", page, supplierFilter, companyFilter, projectFilter, finYearFilter, docNumberFilter, docDateFilter],
+    queryFn: () => getPayments(page, PAGE_SIZE, supplierFilter, companyFilter, projectFilter, finYearFilter, docNumberFilter, docDateFilter),
     staleTime: 0,
   });
 
@@ -1376,6 +1381,20 @@ const Payment: React.FC = () => {
 
   // Companies fetched with business_type=C from enterprise table
   const companyOptions = enterprises;
+
+  const dbItems: DbPayment[] = Array.isArray(dbData?.data) ? dbData.data : [];
+  const totalPages: number = dbData?.totalPages ?? 1;
+  const totalRecords: number = dbData?.total ?? 0;
+  const records: PaymentRecord[] = dbItems.map(dbToRecord);
+
+  // Derive unique project names and fin-years from all loaded records for filter dropdowns
+  const projectOptions: string[] = Array.from(
+    new Set(dbItems.map((p) => p.PProject).filter((v): v is string => !!v && v.trim() !== ""))
+  ).sort();
+
+  // Generate financial year options: current year ± 3, formatted as "YYYY"
+  const currentYear = new Date().getFullYear();
+  const finYearOptions: number[] = Array.from({ length: 7 }, (_, i) => currentYear - 3 + i);
 
   // Fetch full detail (name + logo + address) for the selected company — used in PDF export
   const { data: selectedCompanyDetail = null } = useQuery<CompanyDetail | null>(
@@ -1393,11 +1412,6 @@ const Payment: React.FC = () => {
     queryKey: ["expense-options-payment"],
     queryFn: fetchExpenseOptions,
   });
-
-  const dbItems: DbPayment[] = Array.isArray(dbData?.data) ? dbData.data : [];
-  const totalPages: number = dbData?.totalPages ?? 1;
-  const totalRecords: number = dbData?.total ?? 0;
-  const records: PaymentRecord[] = dbItems.map(dbToRecord);
 
   // ── Stats ──────────────────────────────────────────────────────────────────
 
@@ -2342,95 +2356,219 @@ const Payment: React.FC = () => {
         {/* ══════════════════════════════════════════════════════════════════ */}
         {view === "list" && (
           <>
-            {/* ── Supplier + Company filter bar ── */}
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="relative flex-1 max-w-xs">
-                <Search
-                  size={13}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                />
-                <input
-                  type="text"
-                  placeholder="Search DocNo, payment, expense…"
-                  value={supplierFilter}
-                  onChange={(e) => {
-                    setSupplierFilter(e.target.value);
-                    setPage(1);
-                  }}
-                  className="w-full pl-8 pr-8 py-1.5 rounded-lg border border-border bg-background text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/40"
-                />
-                {supplierFilter && (
+            {/* ── Filter Panel ── */}
+            {(() => {
+              const hasActiveFilters = !!(companyFilter || projectFilter || finYearFilter || docNumberFilter || docDateFilter || supplierFilter);
+              const clearAll = () => {
+                setCompanyFilter(""); setProjectFilter(""); setFinYearFilter("");
+                setDocNumberFilter(""); setDocDateFilter(""); setSupplierFilter("");
+                setPage(1);
+              };
+              return (
+                <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+                  {/* Header / toggle */}
                   <button
-                    onClick={() => {
-                      setSupplierFilter("");
-                      setPage(1);
-                    }}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                    type="button"
+                    onClick={() => setShowFilters(v => !v)}
+                    className="w-full flex items-center justify-between gap-3 px-4 py-3 hover:bg-muted/30 transition-colors"
                   >
-                    <X size={12} />
-                  </button>
-                )}
-              </div>
-
-              {/* Company filter */}
-              <div className="relative">
-                <Building2
-                  size={13}
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                />
-                <select
-                  value={companyFilter}
-                  onChange={(e) => {
-                    setCompanyFilter(e.target.value);
-                    setPage(1);
-                  }}
-                  className="appearance-none pl-8 pr-8 py-1.5 rounded-lg border border-border bg-background text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-primary/40 min-w-[160px]"
-                >
-                  <option value="">All Companies</option>
-                  {companyOptions.map((c) => (
-                    <option key={c.id} value={String(c.id)}>
-                      {c.label}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown
-                  size={11}
-                  className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-                />
-              </div>
-
-              {/* Active filter chips */}
-              {(supplierFilter || companyFilter) && (
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  {supplierFilter && (
-                    <span className="text-xs text-muted-foreground">
-                      "{supplierFilter}"
-                    </span>
-                  )}
-                  {companyFilter &&
-                    (() => {
-                      const co = companyOptions.find(
-                        (c) => String(c.id) === companyFilter,
-                      );
-                      return (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-heading bg-primary/10 text-primary border border-primary/20">
-                          <Building2 size={10} />
-                          {co?.label || companyFilter}
-                          <button
-                            onClick={() => {
-                              setCompanyFilter("");
-                              setPage(1);
-                            }}
-                            className="ml-0.5 text-primary/60 hover:text-destructive transition-colors"
-                          >
-                            <X size={10} />
-                          </button>
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center justify-center w-5 h-5 rounded bg-primary/10">
+                        <Search size={11} className="text-primary" />
+                      </div>
+                      <span className="text-xs font-heading font-semibold text-foreground uppercase tracking-wider">Filters</span>
+                      {hasActiveFilters && (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-heading font-semibold bg-primary text-primary-foreground">
+                          {[companyFilter, projectFilter, finYearFilter, docNumberFilter, docDateFilter, supplierFilter].filter(Boolean).length} active
                         </span>
-                      );
-                    })()}
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {hasActiveFilters && (
+                        <span
+                          role="button"
+                          onClick={(e) => { e.stopPropagation(); clearAll(); }}
+                          className="text-[11px] text-destructive/70 hover:text-destructive font-heading transition-colors cursor-pointer"
+                        >
+                          Clear all
+                        </span>
+                      )}
+                      <ChevronDown size={13} className={`text-muted-foreground transition-transform duration-200 ${showFilters ? "rotate-180" : ""}`} />
+                    </div>
+                  </button>
+
+                  {/* Collapsible grid */}
+                  {showFilters && (
+                    <div className="border-t border-border px-4 py-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-4">
+
+                        {/* 1. Company */}
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                            <Building2 size={10} /> Company
+                          </label>
+                          <div className="relative">
+                            <select
+                              value={companyFilter}
+                              onChange={(e) => { setCompanyFilter(e.target.value); setPage(1); }}
+                              className="w-full appearance-none pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                            >
+                              <option value="">All Companies</option>
+                              {companyOptions.map((c) => <option key={c.id} value={String(c.id)}>{c.label}</option>)}
+                            </select>
+                            <ChevronDown size={11} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                          </div>
+                        </div>
+
+                        {/* 2. Project */}
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                            <FolderKanban size={10} /> Project
+                          </label>
+                          <div className="relative">
+                            <select
+                              value={projectFilter}
+                              onChange={(e) => { setProjectFilter(e.target.value); setPage(1); }}
+                              className="w-full appearance-none pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                            >
+                              <option value="">All Projects</option>
+                              {projectOptions.map((p) => <option key={p} value={p}>{p}</option>)}
+                            </select>
+                            <ChevronDown size={11} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                          </div>
+                        </div>
+
+                        {/* 3. Fin Year */}
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                            <CalendarDays size={10} /> Fin Year
+                          </label>
+                          <div className="relative">
+                            <select
+                              value={finYearFilter}
+                              onChange={(e) => { setFinYearFilter(e.target.value); setPage(1); }}
+                              className="w-full appearance-none pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                            >
+                              <option value="">All Fin Years</option>
+                              {finYearOptions.map((y) => <option key={y} value={String(y)}>{y}–{y + 1}</option>)}
+                            </select>
+                            <ChevronDown size={11} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                          </div>
+                        </div>
+
+                        {/* 4. Document Number */}
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                            <Hash size={10} /> Document Number
+                          </label>
+                          <div className="relative">
+                            <input
+                              type="text"
+                              placeholder="e.g. PAY-2024-001"
+                              value={docNumberFilter}
+                              onChange={(e) => { setDocNumberFilter(e.target.value); setPage(1); }}
+                              className="w-full pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary"
+                            />
+                            {docNumberFilter && (
+                              <button onClick={() => { setDocNumberFilter(""); setPage(1); }} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                                <X size={11} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* 5. Document Date */}
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                            <FileText size={10} /> Document Date
+                          </label>
+                          <div className="relative">
+                            <input
+                              type="date"
+                              value={docDateFilter}
+                              onChange={(e) => { setDocDateFilter(e.target.value); setPage(1); }}
+                              className="w-full pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                            />
+                            {docDateFilter && (
+                              <button onClick={() => { setDocDateFilter(""); setPage(1); }} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                                <X size={11} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* 6. Supplier / Contractor */}
+                        <div className="space-y-1.5">
+                          <label className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
+                            <Truck size={10} /> Supplier / Contractor
+                          </label>
+                          <div className="relative">
+                            <input
+                              type="text"
+                              placeholder="Search name…"
+                              value={supplierFilter}
+                              onChange={(e) => { setSupplierFilter(e.target.value); setPage(1); }}
+                              className="w-full pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary"
+                            />
+                            {supplierFilter && (
+                              <button onClick={() => { setSupplierFilter(""); setPage(1); }} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                                <X size={11} />
+                              </button>
+                            )}
+                          </div>
+                        </div>
+
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Active filter chips — always visible when filters set */}
+                  {hasActiveFilters && (
+                    <div className="flex flex-wrap gap-1.5 px-4 pb-3 border-t border-border/50 pt-2.5">
+                      {companyFilter && (() => {
+                        const co = companyOptions.find((c) => String(c.id) === companyFilter);
+                        return (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading bg-primary/10 text-primary border border-primary/20">
+                            <Building2 size={9} />{co?.label || companyFilter}
+                            <button onClick={() => { setCompanyFilter(""); setPage(1); }} className="ml-0.5 hover:text-destructive"><X size={9} /></button>
+                          </span>
+                        );
+                      })()}
+                      {projectFilter && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading bg-violet-500/10 text-violet-600 border border-violet-500/20">
+                          <FolderKanban size={9} />{projectFilter}
+                          <button onClick={() => { setProjectFilter(""); setPage(1); }} className="ml-0.5 hover:text-destructive"><X size={9} /></button>
+                        </span>
+                      )}
+                      {finYearFilter && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading bg-amber-500/10 text-amber-600 border border-amber-500/20">
+                          <CalendarDays size={9} />FY {finYearFilter}–{parseInt(finYearFilter) + 1}
+                          <button onClick={() => { setFinYearFilter(""); setPage(1); }} className="ml-0.5 hover:text-destructive"><X size={9} /></button>
+                        </span>
+                      )}
+                      {docNumberFilter && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
+                          <Hash size={9} />{docNumberFilter}
+                          <button onClick={() => { setDocNumberFilter(""); setPage(1); }} className="ml-0.5 hover:text-destructive"><X size={9} /></button>
+                        </span>
+                      )}
+                      {docDateFilter && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading bg-cyan-500/10 text-cyan-600 border border-cyan-500/20">
+                          <FileText size={9} />Date: {docDateFilter}
+                          <button onClick={() => { setDocDateFilter(""); setPage(1); }} className="ml-0.5 hover:text-destructive"><X size={9} /></button>
+                        </span>
+                      )}
+                      {supplierFilter && (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading bg-teal-500/10 text-teal-600 border border-teal-500/20">
+                          <Truck size={9} />{supplierFilter}
+                          <button onClick={() => { setSupplierFilter(""); setPage(1); }} className="ml-0.5 hover:text-destructive"><X size={9} /></button>
+                        </span>
+                      )}
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
+              );
+            })()}
 
             {isLoading && (
               <div className="text-center py-16 text-muted-foreground text-sm">
