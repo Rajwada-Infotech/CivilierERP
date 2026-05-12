@@ -227,16 +227,14 @@ router.put("/:id", adminOnly, async (req, res) => {
   }
 });
 
-// ── DELETE — soft delete ──────────────────────────────────────────────────────
+// ── DELETE — hard delete ──────────────────────────────────────────────────────
 router.delete("/:id", adminOnly, async (req, res) => {
   try {
     const pool = getPool();
     await pool
       .request()
       .input("id", sql.Int, parseInt(req.params.id))
-      .query(
-        "UPDATE dbo.enterprise SET discontinue=1 WHERE id=@id AND business_type='P'",
-      );
+      .query("DELETE FROM dbo.enterprise WHERE id=@id AND business_type='P'");
     await bumpCacheVersion("enterprises");
     await bumpCacheVersion("project-master");
     res.json({ success: true });
