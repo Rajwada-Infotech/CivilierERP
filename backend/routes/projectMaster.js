@@ -16,35 +16,42 @@ router.get(
       const pool = getPool();
       const result = await pool.request().query(`
       SELECT
-        id                    AS Id,
-        business_identity     AS Code,
-        name                  AS Name,
-        short_name            AS ShortName,
-        entity_type           AS Type,
-        description           AS Description,
-        address               AS AddressLine1,
-        address_line2         AS AddressLine2,
-        address_line3         AS AddressLine3,
-        pincode               AS ZipCode,
-        latitude              AS Latitude,
-        longitude             AS Longitude,
-        currency              AS Currency,
-        status                AS Status,
-        rera_no               AS Priority,
-        start_date            AS StartDate,
-        end_date              AS EndDate,
-        team_size             AS TeamSize,
-        pan                   AS Remarks,
-        CASE WHEN discontinue = 1 THEN 0 ELSE 1 END AS IsActive,
-        logo                  AS ProjectImage,
-        belongs_to,
-        b_sub_identity_type,
-        ISNULL(jv_enabled, 0) AS JvEnabled,
-        jv_company_name       AS JvCompanyName,
-        date_of_entry         AS CreatedAt
-      FROM dbo.enterprise
-      WHERE business_type = 'P'
-      ORDER BY name
+        p.id                    AS Id,
+        p.business_identity     AS Code,
+        p.name                  AS Name,
+        p.short_name            AS ShortName,
+        p.entity_type           AS Type,
+        p.description           AS Description,
+        p.address               AS AddressLine1,
+        p.address_line2         AS AddressLine2,
+        p.address_line3         AS AddressLine3,
+        p.pincode               AS ZipCode,
+        p.latitude              AS Latitude,
+        p.longitude             AS Longitude,
+        p.currency              AS Currency,
+        p.status                AS Status,
+        p.rera_no               AS Priority,
+        p.start_date            AS StartDate,
+        p.end_date              AS EndDate,
+        p.team_size             AS TeamSize,
+        p.pan                   AS Remarks,
+        CASE WHEN p.discontinue = 1 THEN 0 ELSE 1 END AS IsActive,
+        p.logo                  AS ProjectImage,
+        -- enterprise FK
+        p.enterprise_id         AS EnterpriseId,
+        e.name                  AS EnterpriseName,
+        -- company FK
+        p.company_id            AS CompanyId,
+        c.name                  AS CompanyName,
+        -- jv
+        ISNULL(p.jv_enabled, 0) AS JvEnabled,
+        p.jv_company_name       AS JvCompanyName,
+        p.date_of_entry         AS CreatedAt
+      FROM dbo.enterprise p
+      LEFT JOIN dbo.enterprise e ON e.id = p.enterprise_id
+      LEFT JOIN dbo.enterprise c ON c.id = p.company_id
+      WHERE p.business_type = 'P'
+      ORDER BY p.name
     `);
       res.json(result.recordset);
     } catch (err) {
@@ -114,8 +121,13 @@ router.post("/", adminOnly, async (req, res) => {
       .input("team_size", sql.Int, f.teamSize ? parseInt(f.teamSize) : null)
       .input("pan", sql.NVarChar(20), f.remarks || null)
       .input("logo", sql.NVarChar(sql.MAX), f.projectImage || null)
-      .input("belongs_to", sql.NVarChar(255), f.enterpriseName || null)
-      .input("b_sub_identity_type", sql.NVarChar(255), f.companyName || null)
+      // ── proper FK ids (replaces the old string-based belongs_to / b_sub_identity_type) ──
+      .input(
+        "enterprise_id",
+        sql.Int,
+        f.enterpriseId ? parseInt(f.enterpriseId) : null,
+      )
+      .input("company_id", sql.Int, f.companyId ? parseInt(f.companyId) : null)
       .input("jv_enabled", sql.Bit, f.jvEnabled ? 1 : 0)
       .input(
         "jv_company_name",
@@ -128,13 +140,13 @@ router.post("/", adminOnly, async (req, res) => {
           name, short_name, business_identity, business_type, entity_type, description,
           address, address_line2, address_line3, pincode, latitude, longitude,
           currency, status, rera_no, start_date, end_date, team_size, pan,
-          logo, belongs_to, b_sub_identity_type,
+          logo, enterprise_id, company_id,
           jv_enabled, jv_company_name, discontinue, date_of_entry
         ) VALUES (
           @name, @short_name, @business_identity, @business_type, @entity_type, @description,
           @address, @address_line2, @address_line3, @pincode, @latitude, @longitude,
           @currency, @status, @rera_no, @start_date, @end_date, @team_size, @pan,
-          @logo, @belongs_to, @b_sub_identity_type,
+          @logo, @enterprise_id, @company_id,
           @jv_enabled, @jv_company_name, @discontinue, @date_of_entry
         )
       `);
@@ -181,8 +193,13 @@ router.put("/:id", adminOnly, async (req, res) => {
       .input("team_size", sql.Int, f.teamSize ? parseInt(f.teamSize) : null)
       .input("pan", sql.NVarChar(20), f.remarks || null)
       .input("logo", sql.NVarChar(sql.MAX), f.projectImage || null)
-      .input("belongs_to", sql.NVarChar(255), f.enterpriseName || null)
-      .input("b_sub_identity_type", sql.NVarChar(255), f.companyName || null)
+      // ── proper FK ids ──
+      .input(
+        "enterprise_id",
+        sql.Int,
+        f.enterpriseId ? parseInt(f.enterpriseId) : null,
+      )
+      .input("company_id", sql.Int, f.companyId ? parseInt(f.companyId) : null)
       .input("jv_enabled", sql.Bit, f.jvEnabled ? 1 : 0)
       .input(
         "jv_company_name",
@@ -197,7 +214,7 @@ router.put("/:id", adminOnly, async (req, res) => {
           pincode=@pincode, latitude=@latitude, longitude=@longitude,
           currency=@currency, status=@status, rera_no=@rera_no,
           start_date=@start_date, end_date=@end_date, team_size=@team_size, pan=@pan,
-          logo=@logo, belongs_to=@belongs_to, b_sub_identity_type=@b_sub_identity_type,
+          logo=@logo, enterprise_id=@enterprise_id, company_id=@company_id,
           jv_enabled=@jv_enabled, jv_company_name=@jv_company_name,
           discontinue=@discontinue
         WHERE id=@id AND business_type='P'
