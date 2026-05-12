@@ -1,6 +1,7 @@
 const {
   redisGet,
   redisSet,
+  redisDel,
   compress,
   decompress,
   redisLock,
@@ -179,7 +180,7 @@ function cache(namespace, ttl = 300, { shared = false } = {}) {
       if (cached) {
         let data;
         try {
-          data = decompress(cached) || JSON.parse(cached);
+          data = (await decompress(cached)) ?? JSON.parse(cached);
         } catch {
           data = JSON.parse(cached);
         }
@@ -206,7 +207,7 @@ function cache(namespace, ttl = 300, { shared = false } = {}) {
         if (staleCached) {
           let data;
           try {
-            data = decompress(staleCached) || JSON.parse(staleCached);
+            data = (await decompress(staleCached)) ?? JSON.parse(staleCached);
           } catch {
             data = JSON.parse(staleCached);
           }
@@ -220,10 +221,13 @@ function cache(namespace, ttl = 300, { shared = false } = {}) {
       }
 
       // Cache miss — intercept res.json to populate on the way out
+      // Also instrument the DB query time so it appears in timing stages
+      const dbStart = req.timing?.startStage();
       const originalJson = res.json.bind(res);
 
       res.json = async (data) => {
         try {
+          if (dbStart) req.timing.mark("db.query", dbStart);
           const writeStart = req.timing?.startStage();
           const jsonStr = JSON.stringify(data);
           const finalTtl =
@@ -235,14 +239,15 @@ function cache(namespace, ttl = 300, { shared = false } = {}) {
 
           let valueToStore = jsonStr;
           if (jsonStr.length > 1024) {
-            const compressed = compress(data);
+            const compressed = await compress(data);
             if (compressed) valueToStore = compressed;
           }
 
-          // Write main + stale keys concurrently
+          // Write main + stale keys concurrently, then release the lock
           await Promise.all([
             redisOp(() => redisSet(key, valueToStore, finalTtl)),
             redisOp(() => redisSet(staleKey, valueToStore, finalTtl * 2)),
+            redisOp(() => redisDel(lockKey)), // release lock immediately — don't make others wait 30s
           ]);
 
           if (writeStart) req.timing.mark("cache.write", writeStart);
