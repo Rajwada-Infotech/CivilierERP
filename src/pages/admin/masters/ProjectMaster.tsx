@@ -34,9 +34,10 @@ interface Project {
   name: string;
   shortName: string;
   type: string;
-  enterpriseName: string;
-  companyName: string;
+  enterpriseId: string; // id stored, name resolved via JOIN for display
+  enterpriseName: string; // display-only, from GET join
   companyId: string;
+  companyName: string; // display-only, from GET join
   // address
   addressLine1: string;
   addressLine2: string;
@@ -103,7 +104,7 @@ const PROJECT_TYPES = [
   "Research",
   "Maintenance",
 ];
-const STATUSES   = ["Planning", "Active", "On Hold", "Completed", "Cancelled"];
+const STATUSES = ["Planning", "Active", "On Hold", "Completed", "Cancelled"];
 const PRIORITIES = ["Low", "Medium", "High", "Critical"];
 const CURRENCIES = ["INR", "USD", "EUR", "GBP", "AED"];
 
@@ -112,9 +113,10 @@ const emptyProject: Project = {
   name: "",
   shortName: "",
   type: "Construction",
+  enterpriseId: "",
   enterpriseName: "",
-  companyName: "",
   companyId: "",
+  companyName: "",
   addressLine1: "",
   addressLine2: "",
   addressLine3: "",
@@ -142,38 +144,39 @@ const emptyProject: Project = {
 
 function rowToForm(row: any): Project {
   return {
-    Id:            row.Id,
-    code:          row.Code          ?? "",
-    name:          row.Name          ?? "",
-    shortName:     row.ShortName     ?? "",
-    type:          row.Type          ?? "Construction",
-    enterpriseName: row.belongs_to   ?? "",
-    companyName:   row.b_sub_identity_type ?? "",
-    companyId:     String(row.CompanyId ?? ""),
-    addressLine1:  row.AddressLine1  ?? "",
-    addressLine2:  row.AddressLine2  ?? "",
-    addressLine3:  row.AddressLine3  ?? "",
-    zipCode:       row.ZipCode       ?? "",
-    latitude:      row.Latitude  != null ? String(row.Latitude)  : "",
-    longitude:     row.Longitude != null ? String(row.Longitude) : "",
+    Id: row.Id,
+    code: row.Code ?? "",
+    name: row.Name ?? "",
+    shortName: row.ShortName ?? "",
+    type: row.Type ?? "Construction",
+    enterpriseId: row.EnterpriseId != null ? String(row.EnterpriseId) : "",
+    enterpriseName: row.EnterpriseName ?? "",
+    companyId: row.CompanyId != null ? String(row.CompanyId) : "",
+    companyName: row.CompanyName ?? "",
+    addressLine1: row.AddressLine1 ?? "",
+    addressLine2: row.AddressLine2 ?? "",
+    addressLine3: row.AddressLine3 ?? "",
+    zipCode: row.ZipCode ?? "",
+    latitude: row.Latitude != null ? String(row.Latitude) : "",
+    longitude: row.Longitude != null ? String(row.Longitude) : "",
     // compliance — display-only when editing; refetched on company change
-    gst:           "",
-    gstDate:       "",
-    pan:           "",
-    tan:           "",
+    gst: "",
+    gstDate: "",
+    pan: "",
+    tan: "",
     tradeLicenseNo: "",
-    jvEnabled:     !!row.JvEnabled,
+    jvEnabled: !!row.JvEnabled,
     jvCompanyName: row.JvCompanyName ?? "",
-    teamSize:      row.TeamSize != null ? String(row.TeamSize) : "",
-    startDate:     row.StartDate ? row.StartDate.slice(0, 10) : "",
-    endDate:       row.EndDate   ? row.EndDate.slice(0, 10)   : "",
-    currency:      row.Currency  ?? "INR",
-    status:        row.Status    ?? "Planning",
-    priority:      row.Priority  ?? "Medium",
-    description:   row.Description ?? "",
-    remarks:       row.Remarks      ?? "",
-    isActive:      row.IsActive !== 0,
-    projectImage:  row.ProjectImage || null,
+    teamSize: row.TeamSize != null ? String(row.TeamSize) : "",
+    startDate: row.StartDate ? row.StartDate.slice(0, 10) : "",
+    endDate: row.EndDate ? row.EndDate.slice(0, 10) : "",
+    currency: row.Currency ?? "INR",
+    status: row.Status ?? "Planning",
+    priority: row.Priority ?? "Medium",
+    description: row.Description ?? "",
+    remarks: row.Remarks ?? "",
+    isActive: row.IsActive !== 0,
+    projectImage: row.ProjectImage || null,
   };
 }
 
@@ -186,8 +189,8 @@ function ProjectViewModal({
   onClose: () => void;
 }) {
   const STATUS_COLORS: Record<string, string> = {
-    Active:    "bg-emerald-500/10 text-emerald-600",
-    Planning:  "bg-blue-500/10 text-blue-600",
+    Active: "bg-emerald-500/10 text-emerald-600",
+    Planning: "bg-blue-500/10 text-blue-600",
     "On Hold": "bg-amber-500/10 text-amber-600",
     Completed: "bg-purple-500/10 text-purple-600",
     Cancelled: "bg-muted text-muted-foreground",
@@ -203,10 +206,17 @@ function ProjectViewModal({
       </div>
     ) : null;
 
-  const Section = ({ title, icon }: { title: string; icon?: React.ReactNode }) => (
+  const Section = ({
+    title,
+    icon,
+  }: {
+    title: string;
+    icon?: React.ReactNode;
+  }) => (
     <div className="col-span-full pt-2">
       <p className="text-xs font-heading font-semibold text-muted-foreground uppercase tracking-widest border-b border-border pb-1 mb-2 flex items-center gap-1.5">
-        {icon}{title}
+        {icon}
+        {title}
       </p>
     </div>
   );
@@ -275,24 +285,24 @@ function ProjectViewModal({
         <div className="overflow-y-auto p-5 flex-1">
           <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-4">
             <Section title="General" />
-            <Row label="Short Name"  value={project.shortName} />
-            <Row label="Type"        value={project.type} />
-            <Row label="Enterprise"  value={project.enterpriseName} />
-            <Row label="Company"     value={project.companyName} />
+            <Row label="Short Name" value={project.shortName} />
+            <Row label="Type" value={project.type} />
+            <Row label="Enterprise" value={project.enterpriseName} />
+            <Row label="Company" value={project.companyName} />
             <Row label="Description" value={project.description} />
-            <Row label="Remarks"     value={project.remarks} />
+            <Row label="Remarks" value={project.remarks} />
 
             <Section title="Location & Address" icon={<MapPin size={11} />} />
             <div className="col-span-full">
               <Row label="Address" value={fullAddress || undefined} />
             </div>
-            <Row label="Latitude"  value={project.latitude} />
+            <Row label="Latitude" value={project.latitude} />
             <Row label="Longitude" value={project.longitude} />
 
             <Section title="Timeline" />
             <Row label="Start Date" value={project.startDate} />
-            <Row label="End Date"   value={project.endDate} />
-            <Row label="Team Size"  value={project.teamSize} />
+            <Row label="End Date" value={project.endDate} />
+            <Row label="Team Size" value={project.teamSize} />
 
             <Section title="Financial" />
             <Row label="Currency" value={project.currency} />
@@ -300,7 +310,10 @@ function ProjectViewModal({
             {project.jvEnabled && (
               <>
                 <Section title="Joint Venture" icon={<Users size={11} />} />
-                <Row label="JV Partner / Company" value={project.jvCompanyName} />
+                <Row
+                  label="JV Partner / Company"
+                  value={project.jvCompanyName}
+                />
               </>
             )}
           </div>
@@ -354,9 +367,10 @@ function buildProjectColumns(
       id: "belongs_to_combined",
       header: "Enterprise / Company",
       cell: ({ row }) => {
-        const enterprise = row.original.belongs_to || "";
-        const company    = row.original.b_sub_identity_type || "";
-        const display    = [enterprise, company].filter(Boolean).join(" / ") || "—";
+        const enterprise = row.original.EnterpriseName || "";
+        const company = row.original.CompanyName || "";
+        const display =
+          [enterprise, company].filter(Boolean).join(" / ") || "—";
         return (
           <span className="text-xs text-muted-foreground max-w-[160px] truncate block">
             {display}
@@ -368,7 +382,9 @@ function buildProjectColumns(
       accessorKey: "Type",
       header: "Type",
       cell: ({ getValue }) => (
-        <span className="text-xs text-muted-foreground">{getValue() as string}</span>
+        <span className="text-xs text-muted-foreground">
+          {getValue() as string}
+        </span>
       ),
     },
     {
@@ -445,14 +461,16 @@ function buildProjectColumns(
 // ── Main Component ─────────────────────────────────────────────────────────────
 export default function ProjectMaster() {
   const qc = useQueryClient();
-  const [form, setForm]               = useState<Project>(emptyProject);
-  const [editId, setEditId]           = useState<number | null>(null);
-  const [showForm, setShowForm]       = useState(false);
-  const [viewTarget, setViewTarget]   = useState<Project | null>(null);
-  const [search, setSearch]           = useState("");
-  const [activeTab, setActiveTab]     = useState<"general" | "location" | "compliance" | "timeline" | "financial">("general");
+  const [form, setForm] = useState<Project>(emptyProject);
+  const [editId, setEditId] = useState<number | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [viewTarget, setViewTarget] = useState<Project | null>(null);
+  const [search, setSearch] = useState("");
+  const [activeTab, setActiveTab] = useState<
+    "general" | "location" | "compliance" | "timeline" | "financial"
+  >("general");
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
-  const [imagePreview, setImagePreview]   = useState<string>("");
+  const [imagePreview, setImagePreview] = useState<string>("");
   const [complianceLoading, setComplianceLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -478,32 +496,43 @@ export default function ProjectMaster() {
       const res = await fetchWithAuth("/api/company-master");
       if (!res.ok) throw new Error("Failed to load companies");
       const data = await res.json();
-      return Array.isArray(data) ? data.filter((c: any) => c.IsActive !== 0) : [];
+      return Array.isArray(data)
+        ? data.filter((c: any) => c.IsActive !== 0)
+        : [];
     },
     staleTime: 5 * 60 * 1000,
   });
 
   // Auto-fetch compliance fields when company selection changes
-  const handleCompanyChange = async (companyId: string, companyName: string) => {
+  const handleCompanyChange = async (
+    companyId: string,
+    companyName: string,
+  ) => {
     setForm((p) => ({
       ...p,
       companyId,
       companyName,
       // reset compliance while fetching
-      gst: "", gstDate: "", pan: "", tan: "", tradeLicenseNo: "",
+      gst: "",
+      gstDate: "",
+      pan: "",
+      tan: "",
+      tradeLicenseNo: "",
     }));
     if (!companyId) return;
     setComplianceLoading(true);
     try {
-      const res = await fetchWithAuth(`/api/project-master/company/${companyId}`);
+      const res = await fetchWithAuth(
+        `/api/project-master/company/${companyId}`,
+      );
       if (!res.ok) throw new Error();
       const d = await res.json();
       setForm((p) => ({
         ...p,
-        gst:            d.GST            ?? "",
-        gstDate:        d.GSTDate ? d.GSTDate.slice(0, 10) : "",
-        pan:            d.PAN            ?? "",
-        tan:            d.TAN            ?? "",
+        gst: d.GST ?? "",
+        gstDate: d.GSTDate ? d.GSTDate.slice(0, 10) : "",
+        pan: d.PAN ?? "",
+        tan: d.TAN ?? "",
         tradeLicenseNo: d.TradeLicenseNo ?? "",
       }));
     } catch {
@@ -516,32 +545,32 @@ export default function ProjectMaster() {
   const saveMutation = useMutation({
     mutationFn: async () => {
       const payload: Record<string, any> = {
-        code:          form.code,
-        name:          form.name,
-        shortName:     form.shortName,
-        type:          form.type,
-        enterpriseName: form.enterpriseName || null,
-        companyName:   form.companyName || null,
+        code: form.code,
+        name: form.name,
+        shortName: form.shortName,
+        type: form.type,
+        enterpriseId: form.enterpriseId ? parseInt(form.enterpriseId) : null,
+        companyId: form.companyId ? parseInt(form.companyId) : null,
         // address
-        addressLine1:  form.addressLine1 || null,
-        addressLine2:  form.addressLine2 || null,
-        addressLine3:  form.addressLine3 || null,
-        zipCode:       form.zipCode      || null,
-        latitude:      form.latitude     || null,
-        longitude:     form.longitude    || null,
+        addressLine1: form.addressLine1 || null,
+        addressLine2: form.addressLine2 || null,
+        addressLine3: form.addressLine3 || null,
+        zipCode: form.zipCode || null,
+        latitude: form.latitude || null,
+        longitude: form.longitude || null,
         // jv
-        jvEnabled:     form.jvEnabled,
+        jvEnabled: form.jvEnabled,
         jvCompanyName: form.jvEnabled ? form.jvCompanyName || null : null,
         // rest
-        teamSize:      form.teamSize,
-        startDate:     form.startDate || null,
-        endDate:       form.endDate   || null,
-        currency:      form.currency,
-        status:        form.status,
-        priority:      form.priority,
-        description:   form.description,
-        remarks:       form.remarks,
-        isActive:      form.isActive,
+        teamSize: form.teamSize,
+        startDate: form.startDate || null,
+        endDate: form.endDate || null,
+        currency: form.currency,
+        status: form.status,
+        priority: form.priority,
+        description: form.description,
+        remarks: form.remarks,
+        isActive: form.isActive,
       };
 
       if (form.projectImage instanceof File) {
@@ -558,7 +587,11 @@ export default function ProjectMaster() {
       return editId ? updateProject(editId, payload) : createProject(payload);
     },
     onSuccess: () => {
-      toast.success(editId ? "Project updated successfully" : "Project created successfully");
+      toast.success(
+        editId
+          ? "Project updated successfully"
+          : "Project created successfully",
+      );
       qc.invalidateQueries({ queryKey: ["project-master"] });
       qc.invalidateQueries({ queryKey: ["enterprises"] });
       resetForm();
@@ -588,8 +621,10 @@ export default function ProjectMaster() {
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    if (!file.type.startsWith("image/")) return toast.error("Please select an image file");
-    if (file.size > 5 * 1024 * 1024) return toast.error("Image must be under 5 MB");
+    if (!file.type.startsWith("image/"))
+      return toast.error("Please select an image file");
+    if (file.size > 5 * 1024 * 1024)
+      return toast.error("Image must be under 5 MB");
     const reader = new FileReader();
     reader.onload = () => {
       setImagePreview(reader.result as string);
@@ -636,7 +671,13 @@ export default function ProjectMaster() {
   );
 
   // Reusable text input
-  const fi = (label: string, key: keyof Project, type = "text", ph = "", readOnly = false) => (
+  const fi = (
+    label: string,
+    key: keyof Project,
+    type = "text",
+    ph = "",
+    readOnly = false,
+  ) => (
     <div key={key}>
       <label className="block text-xs font-medium text-muted-foreground mb-1">
         {label}
@@ -673,7 +714,13 @@ export default function ProjectMaster() {
     </div>
   );
 
-  const TABS = ["general", "location", "compliance", "timeline", "financial"] as const;
+  const TABS = [
+    "general",
+    "location",
+    "compliance",
+    "timeline",
+    "financial",
+  ] as const;
 
   return (
     <>
@@ -725,7 +772,10 @@ export default function ProjectMaster() {
             </div>
             {isLoading ? (
               <div className="flex justify-center py-16">
-                <Loader2 size={24} className="animate-spin text-muted-foreground" />
+                <Loader2
+                  size={24}
+                  className="animate-spin text-muted-foreground"
+                />
               </div>
             ) : (
               <div className="overflow-x-auto">
@@ -818,7 +868,10 @@ export default function ProjectMaster() {
                         </div>
                       ) : (
                         <div className="w-16 h-16 rounded-xl border-2 border-dashed border-border bg-muted/20 flex items-center justify-center">
-                          <FolderKanban size={20} className="text-muted-foreground/40" />
+                          <FolderKanban
+                            size={20}
+                            className="text-muted-foreground/40"
+                          />
                         </div>
                       )}
                       <div>
@@ -837,7 +890,9 @@ export default function ProjectMaster() {
                           <Upload size={13} />
                           {imagePreview ? "Change Image" : "Upload Image"}
                         </label>
-                        <p className="text-xs text-muted-foreground mt-1">PNG, JPG • Max 5 MB</p>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          PNG, JPG • Max 5 MB
+                        </p>
                       </div>
                     </div>
                   </div>
@@ -853,17 +908,28 @@ export default function ProjectMaster() {
                       Enterprise
                     </label>
                     <select
-                      value={form.enterpriseName}
-                      onChange={(e) =>
-                        setForm((p) => ({ ...p, enterpriseName: e.target.value }))
-                      }
+                      value={form.enterpriseId}
+                      onChange={(e) => {
+                        const selected = enterprises.find(
+                          (en: any) =>
+                            String(en.id ?? en.Id) === e.target.value,
+                        );
+                        setForm((p) => ({
+                          ...p,
+                          enterpriseId: e.target.value,
+                          enterpriseName: selected
+                            ? (selected.name ?? selected.Name ?? "")
+                            : "",
+                        }));
+                      }}
                       className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
                     >
                       <option value="">— Select Enterprise —</option>
                       {enterprises.map((e: any) => {
                         const name = e.name ?? e.Name ?? "";
+                        const id = String(e.id ?? e.Id);
                         return (
-                          <option key={String(e.id ?? e.Id)} value={name}>
+                          <option key={id} value={id}>
                             {name}
                           </option>
                         );
@@ -884,7 +950,9 @@ export default function ProjectMaster() {
                         );
                         handleCompanyChange(
                           e.target.value,
-                          selected ? (selected.Name ?? selected.name ?? "") : "",
+                          selected
+                            ? (selected.Name ?? selected.name ?? "")
+                            : "",
                         );
                       }}
                       className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
@@ -892,7 +960,7 @@ export default function ProjectMaster() {
                       <option value="">— Select Company —</option>
                       {companies.map((c: any) => {
                         const name = c.Name ?? c.name ?? "";
-                        const id   = String(c.Id ?? c.id ?? "");
+                        const id = String(c.Id ?? c.id ?? "");
                         return (
                           <option key={id} value={id}>
                             {name}
@@ -916,15 +984,26 @@ export default function ProjectMaster() {
                   {/* Active toggle */}
                   <div className="flex items-center gap-3 pt-5 col-span-full">
                     <button
-                      onClick={() => setForm((p) => ({ ...p, isActive: !p.isActive }))}
+                      onClick={() =>
+                        setForm((p) => ({ ...p, isActive: !p.isActive }))
+                      }
                       className="flex items-center gap-2 text-sm"
                     >
                       {form.isActive ? (
                         <ToggleRight size={24} className="text-emerald-500" />
                       ) : (
-                        <ToggleLeft size={24} className="text-muted-foreground" />
+                        <ToggleLeft
+                          size={24}
+                          className="text-muted-foreground"
+                        />
                       )}
-                      <span className={form.isActive ? "text-emerald-600" : "text-muted-foreground"}>
+                      <span
+                        className={
+                          form.isActive
+                            ? "text-emerald-600"
+                            : "text-muted-foreground"
+                        }
+                      >
                         {form.isActive ? "Active" : "Inactive"}
                       </span>
                     </button>
@@ -946,9 +1025,18 @@ export default function ProjectMaster() {
                         {form.jvEnabled ? (
                           <ToggleRight size={24} className="text-violet-500" />
                         ) : (
-                          <ToggleLeft size={24} className="text-muted-foreground" />
+                          <ToggleLeft
+                            size={24}
+                            className="text-muted-foreground"
+                          />
                         )}
-                        <span className={form.jvEnabled ? "text-violet-600 font-medium" : "text-muted-foreground"}>
+                        <span
+                          className={
+                            form.jvEnabled
+                              ? "text-violet-600 font-medium"
+                              : "text-muted-foreground"
+                          }
+                        >
                           Joint Venture (JV)
                         </span>
                       </button>
@@ -968,7 +1056,10 @@ export default function ProjectMaster() {
                           type="text"
                           value={form.jvCompanyName}
                           onChange={(e) =>
-                            setForm((p) => ({ ...p, jvCompanyName: e.target.value }))
+                            setForm((p) => ({
+                              ...p,
+                              jvCompanyName: e.target.value,
+                            }))
                           }
                           placeholder="Enter JV partner or company name"
                           className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-500 transition-all"
@@ -977,8 +1068,12 @@ export default function ProjectMaster() {
                     )}
                   </div>
 
-                  <div className="col-span-full">{fi("Description", "description")}</div>
-                  <div className="col-span-full">{fi("Remarks", "remarks")}</div>
+                  <div className="col-span-full">
+                    {fi("Description", "description")}
+                  </div>
+                  <div className="col-span-full">
+                    {fi("Remarks", "remarks")}
+                  </div>
                 </div>
               )}
 
@@ -987,20 +1082,36 @@ export default function ProjectMaster() {
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                   <div className="col-span-full">
                     <p className="text-xs text-muted-foreground mb-3">
-                      Enter the project's structured address and optional GPS coordinates.
+                      Enter the project's structured address and optional GPS
+                      coordinates.
                     </p>
                   </div>
                   <div className="col-span-full md:col-span-2">
-                    {fi("Address Line 1", "addressLine1", "text", "Street / Building / Plot")}
+                    {fi(
+                      "Address Line 1",
+                      "addressLine1",
+                      "text",
+                      "Street / Building / Plot",
+                    )}
                   </div>
                   <div className="col-span-full md:col-span-2">
-                    {fi("Address Line 2", "addressLine2", "text", "Area / Locality")}
+                    {fi(
+                      "Address Line 2",
+                      "addressLine2",
+                      "text",
+                      "Area / Locality",
+                    )}
                   </div>
                   <div className="col-span-full md:col-span-2">
-                    {fi("Address Line 3", "addressLine3", "text", "City / District")}
+                    {fi(
+                      "Address Line 3",
+                      "addressLine3",
+                      "text",
+                      "City / District",
+                    )}
                   </div>
                   {fi("ZIP Code", "zipCode", "text", "e.g. 400001")}
-                  {fi("Latitude",  "latitude",  "text", "e.g. 19.0760")}
+                  {fi("Latitude", "latitude", "text", "e.g. 19.0760")}
                   {fi("Longitude", "longitude", "text", "e.g. 72.8777")}
                 </div>
               )}
@@ -1009,30 +1120,43 @@ export default function ProjectMaster() {
               {activeTab === "compliance" && (
                 <div className="space-y-4">
                   <div className="flex items-start gap-3 p-3 rounded-lg bg-blue-500/5 border border-blue-500/20">
-                    <Shield size={15} className="text-blue-500 mt-0.5 shrink-0" />
+                    <Shield
+                      size={15}
+                      className="text-blue-500 mt-0.5 shrink-0"
+                    />
                     <p className="text-xs text-muted-foreground">
                       These fields are automatically fetched from the linked{" "}
-                      <strong>Company Master</strong> when you select a company on the
-                      General tab. They are <em>read-only</em> here — update them in
-                      Company Master to reflect changes.
+                      <strong>Company Master</strong> when you select a company
+                      on the General tab. They are <em>read-only</em> here —
+                      update them in Company Master to reflect changes.
                     </p>
                   </div>
 
                   {!form.companyId ? (
                     <div className="py-10 text-center text-sm text-muted-foreground">
-                      Select a Company on the <strong>General</strong> tab to auto-populate compliance data.
+                      Select a Company on the <strong>General</strong> tab to
+                      auto-populate compliance data.
                     </div>
                   ) : complianceLoading ? (
                     <div className="py-10 flex justify-center">
-                      <Loader2 size={20} className="animate-spin text-muted-foreground" />
+                      <Loader2
+                        size={20}
+                        className="animate-spin text-muted-foreground"
+                      />
                     </div>
                   ) : (
                     <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-                      {fi("GST Number",           "gst",            "text", "", true)}
-                      {fi("GST Registration Date", "gstDate",        "date", "", true)}
-                      {fi("PAN Number",            "pan",            "text", "", true)}
-                      {fi("TAN Number",            "tan",            "text", "", true)}
-                      {fi("Trade License Number",  "tradeLicenseNo", "text", "", true)}
+                      {fi("GST Number", "gst", "text", "", true)}
+                      {fi("GST Registration Date", "gstDate", "date", "", true)}
+                      {fi("PAN Number", "pan", "text", "", true)}
+                      {fi("TAN Number", "tan", "text", "", true)}
+                      {fi(
+                        "Trade License Number",
+                        "tradeLicenseNo",
+                        "text",
+                        "",
+                        true,
+                      )}
                     </div>
                   )}
                 </div>
@@ -1042,8 +1166,8 @@ export default function ProjectMaster() {
               {activeTab === "timeline" && (
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                   {fi("Start Date", "startDate", "date")}
-                  {fi("End Date",   "endDate",   "date")}
-                  {se("Status",   "status",   STATUSES)}
+                  {fi("End Date", "endDate", "date")}
+                  {se("Status", "status", STATUSES)}
                   {se("Priority", "priority", PRIORITIES)}
                   {fi("Team Size", "teamSize", "number")}
                 </div>
@@ -1091,7 +1215,9 @@ export default function ProjectMaster() {
         {deleteConfirm !== null && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
             <div className="bg-card border border-border rounded-xl p-6 w-80">
-              <p className="font-semibold text-foreground">Deactivate this project?</p>
+              <p className="font-semibold text-foreground">
+                Deactivate this project?
+              </p>
               <p className="text-sm text-muted-foreground mt-1">
                 The project will be deactivated and hidden from all dropdowns.
               </p>
