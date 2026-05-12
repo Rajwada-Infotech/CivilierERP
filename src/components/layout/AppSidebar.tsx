@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import { useModule } from "@/contexts/ModuleContext";
 import { useReminders } from "@/hooks/useReminders";
+import { useAppVersion } from "@/hooks/useAppVersion";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSidebarState } from "./AppLayout";
 import {
@@ -99,7 +100,7 @@ interface NavItem {
 
 // ── Finance module sidebar ──────────────────────────────────────────────────
 const buildFinanceNavItems = (overdueCount: number): NavItem[] => [
-  { label: "Proceeding", icon: BarChart3, path: "/finance" },
+  { label: "Dashboard", icon: BarChart3, path: "/finance" },
   {
     label: "Transaction",
     icon: Landmark,
@@ -130,7 +131,7 @@ const buildFinanceNavItems = (overdueCount: number): NavItem[] => [
 
 // ── Follow-Up module sidebar ─────────────────────────────────────────────────
 const buildFollowupNavItems = (): NavItem[] => [
-  { label: "Proceeding", icon: BarChart3, path: "/followup" },
+  { label: "Follow-Up Dashboard", icon: BarChart3, path: "/followup" },
   {
     label: "Sales",
     icon: Users,
@@ -193,7 +194,7 @@ const buildFollowupNavItems = (): NavItem[] => [
 
 // ── Material module sidebar ──────────────────────────────────────────────────
 const buildMaterialNavItems = (): NavItem[] => [
-  { label: "Proceeding", icon: BarChart3, path: "/material" },
+  { label: "Dashboard", icon: BarChart3, path: "/material" },
   {
     label: "Transaction",
     icon: Receipt,
@@ -216,7 +217,7 @@ const buildMaterialNavItems = (): NavItem[] => [
 
 // ── Admin sidebar ──────────────────────────────────────────────────────────
 const buildAdminNavItems = (pendingCount: number): NavItem[] => [
-  { label: "Proceeding", icon: BarChart3, path: "/admin" },
+  { label: "Transaction", icon: BarChart3, path: "/admin" },
   {
     label: "Enterprise",
     icon: Building2,
@@ -367,9 +368,9 @@ const NavButton = ({
   return (
     <button
       onClick={() => item.path && navigate(item.path)}
-      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-[15px] font-medium transition-colors ${
+      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
         isActive
-          ? "bg-primary/15 text-primary font-semibold"
+          ? "bg-primary/15 text-primary font-medium"
           : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
       } ${collapsed ? "justify-center" : ""}`}
       title={collapsed ? item.label : undefined}
@@ -420,9 +421,9 @@ const NavGroup = ({
     <div>
       <button
         onClick={handleClick}
-        className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-[15px] font-medium transition-colors ${
+        className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
           hasActiveChild
-            ? "bg-primary/10 text-primary font-semibold"
+            ? "bg-primary/10 text-primary"
             : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
         }`}
       >
@@ -440,7 +441,7 @@ const NavGroup = ({
             <button
               key={child.path}
               onClick={() => navigate(child.path)}
-              className={`w-full flex justify-between items-center text-[13px] px-2 py-1.5 rounded-md transition-colors ${
+              className={`w-full flex justify-between items-center text-xs px-2 py-1.5 rounded-md transition-colors ${
                 location.pathname === child.path
                   ? "bg-primary/15 text-primary font-medium"
                   : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
@@ -459,7 +460,7 @@ const NavGroup = ({
             <div key={section.label}>
               <button
                 onClick={() => toggleSection(section.label)}
-                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-[13px] text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent"
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent"
               >
                 <section.icon size={13} />
                 <span className="flex-1 text-left truncate font-medium">
@@ -477,7 +478,7 @@ const NavGroup = ({
                     <button
                       key={child.path}
                       onClick={() => navigate(child.path)}
-                      className={`w-full text-[13px] px-2 py-1.5 rounded-md ${
+                      className={`w-full text-xs px-2 py-1.5 rounded-md ${
                         location.pathname === child.path
                           ? "bg-primary/15 text-primary font-medium"
                           : "text-sidebar-foreground/70 hover:bg-sidebar-accent"
@@ -621,6 +622,7 @@ export const AppSidebar = () => {
   };
 
   const ModuleIcon = getModuleIcon();
+  const { version } = useAppVersion();
 
   return (
     <aside
@@ -662,7 +664,7 @@ export const AppSidebar = () => {
       <div className="p-2 border-t border-sidebar-border space-y-2">
         {!collapsed ? (
           <div
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-semibold border ${getModuleColor()}`}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold border ${getModuleColor()}`}
           >
             <ModuleIcon size={13} />
             <span>{getModuleLabel()}</span>
@@ -679,6 +681,12 @@ export const AppSidebar = () => {
         >
           {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
         </button>
+
+        {!collapsed && (
+          <div className="px-3 pb-1 text-[10px] text-muted-foreground/50 text-center select-none">
+            v{version}
+          </div>
+        )}
       </div>
     </aside>
   );
