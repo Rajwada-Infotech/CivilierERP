@@ -2338,7 +2338,7 @@ const WorkOrdersList: React.FC<{
       {/* Table */}
       <div className="rounded-xl border border-border bg-card overflow-hidden">
         {/* Desktop table header */}
-        <div className="hidden sm:grid grid-cols-[1fr_1fr_1fr_100px_90px_100px_80px] gap-3 px-4 py-3 bg-muted/30 border-b border-border">
+        <div className="hidden sm:grid grid-cols-[1fr_1fr_1fr_100px_90px_100px_80px_56px] gap-3 px-4 py-3 bg-muted/30 border-b border-border">
           {[
             "Document No.",
             "Company",
@@ -2347,6 +2347,7 @@ const WorkOrdersList: React.FC<{
             "Activities",
             "Amount",
             "Status",
+            "Action",
           ].map((h) => (
             <div
               key={h}
@@ -2361,8 +2362,8 @@ const WorkOrdersList: React.FC<{
           <div className="divide-y divide-border">
             {[1, 2, 3, 4, 5].map((i) => (
               <div key={i} className="px-4 py-4 animate-pulse">
-                <div className="grid grid-cols-[1fr_1fr_1fr_100px_90px_100px_80px] gap-3">
-                  {[1, 2, 3, 4, 5, 6, 7].map((j) => (
+                <div className="grid grid-cols-[1fr_1fr_1fr_100px_90px_100px_80px_56px] gap-3">
+                  {[1, 2, 3, 4, 5, 6, 7, 8].map((j) => (
                     <div key={j} className="h-4 bg-muted rounded" />
                   ))}
                 </div>
@@ -2458,12 +2459,9 @@ const WorkOrdersList: React.FC<{
                   </div>
 
                   {/* Desktop row */}
-                  <div
-                    className="hidden sm:grid grid-cols-[1fr_1fr_1fr_100px_90px_100px_80px] gap-3 items-center px-4 py-3.5 hover:bg-muted/20 transition-colors cursor-pointer group"
-                    onClick={() => onViewDetail(wo.Id)}
-                  >
+                  <div className="hidden sm:grid grid-cols-[1fr_1fr_1fr_100px_90px_100px_80px_56px] gap-3 items-center px-4 py-3.5 hover:bg-muted/20 transition-colors group">
                     <div>
-                      <p className="text-sm font-mono font-semibold text-primary group-hover:underline">
+                      <p className="text-sm font-mono font-semibold text-primary">
                         {wo.DocumentNumber}
                       </p>
                       <p className="text-[10px] text-muted-foreground mt-0.5 font-mono">
@@ -2511,6 +2509,15 @@ const WorkOrdersList: React.FC<{
                         {statusCfg.icon}
                         {wo.Status || "Draft"}
                       </span>
+                    </div>
+                    <div>
+                      <button
+                        onClick={() => onViewDetail(wo.Id)}
+                        title="View details"
+                        className="w-8 h-8 flex items-center justify-center rounded-lg border border-border text-muted-foreground hover:border-primary/40 hover:text-primary hover:bg-primary/5 transition-colors"
+                      >
+                        <Eye size={14} />
+                      </button>
                     </div>
                   </div>
                 </div>
