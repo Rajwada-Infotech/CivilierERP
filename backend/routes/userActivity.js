@@ -2,10 +2,17 @@ const express = require("express");
 const router = express.Router();
 const logger = require("../logger");
 const { getPool, sql } = require("../db");
-const authMiddleware = require("../middleware/auth");
-const { redisZScore, redisZIncrBy, getSystemMetrics, getPredictedRPM, getDynamicLimit } = require("../redis");
+const {
+  redisZScore,
+  redisZIncrBy,
+  getSystemMetrics,
+  getPredictedRPM,
+  getDynamicLimit,
+} = require("../redis");
 
 const { checkPermission } = require("../middleware/permissions");
+const { cache } = require("../middleware/cache"); // ← FIX 1: import cache
+
 const ALLOWED_ACTION_TYPES = new Set([
   "read",
   "create",
@@ -58,301 +65,320 @@ function mapActivityRow(row) {
 }
 
 // GET paginated activity logs
-router.get("/", authMiddleware, checkPermission("UserActivity", "List", "CanView"), async (req, res) => {
-  let whereClause = "1 = 1";
-
-  try {
-    const pool = getPool();
-
-    const page = Math.max(1, normalizePositiveInt(req.query.page, 1));
-    
-    // Adaptive dynamic limit
-    let engagementScore = 0;
-    if (req.user && req.user.userId) {
-      engagementScore = Number(await redisZScore('engagement:score', req.user.userId) || 0);
-    }
-    const metrics = await getSystemMetrics();
-    const predictedRPM = await getPredictedRPM();
-    const dynamicDefault = getDynamicLimit(engagementScore, predictedRPM || metrics.rpm, metrics.memoryUsage);
-    const limit = Math.min(normalizePositiveInt(req.query.limit, dynamicDefault), 1000);
-    const offset = (page - 1) * limit;
-
-    const search = (req.query.search || "").trim().toLowerCase();
-    const eventFilter = req.query.event || "";
-    const roleFilter = req.query.role || "";
-    const sortField = req.query.sort || "timestamp";
-    const order = req.query.order === "asc" ? "ASC" : "DESC";
-
-    let computedDateFrom = req.query.dateFrom;
-    let computedDateTo = req.query.dateTo;
-    const period = req.query.period;
-
-    if (period) {
-      const now = new Date();
-      now.setHours(0, 0, 0, 0);
-      const tomorrow = new Date(now);
-      tomorrow.setDate(tomorrow.getDate() + 1);
-
-      if (period === "today") {
-        computedDateFrom = now.toISOString().slice(0, 10);
-        computedDateTo = tomorrow.toISOString().slice(0, 10);
-      } else if (period === "yesterday") {
-        const yesterday = new Date(now);
-        yesterday.setDate(yesterday.getDate() - 1);
-        computedDateFrom = yesterday.toISOString().slice(0, 10);
-        computedDateTo = now.toISOString().slice(0, 10);
-      } else if (period === "this-week") {
-        const weekStart = new Date(now);
-        weekStart.setDate(now.getDate() - now.getDay());
-        computedDateFrom = weekStart.toISOString().slice(0, 10);
-        computedDateTo = tomorrow.toISOString().slice(0, 10);
-      } else if (period === "this-month") {
-        const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-        computedDateFrom = monthStart.toISOString().slice(0, 10);
-        computedDateTo = tomorrow.toISOString().slice(0, 10);
-      } else if (period === "last-month") {
-        const lmStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-        const lmEnd = new Date(now.getFullYear(), now.getMonth(), 0);
-        computedDateFrom = lmStart.toISOString().slice(0, 10);
-        computedDateTo = new Date(lmEnd.getTime() + 86400000)
-          .toISOString()
-          .slice(0, 10);
-      } else if (period === "this-year") {
-        const yearStart = new Date(now.getFullYear(), 0, 1);
-        computedDateFrom = yearStart.toISOString().slice(0, 10);
-        computedDateTo = tomorrow.toISOString().slice(0, 10);
-      }
-    }
-
-    const whereConditions = ["1 = 1"];
-    const queryInputs = [];
-
-    if (search) {
-      whereConditions.push(
-        "(LOWER(UserName) LIKE @searchTerm OR LOWER(UserEmail) LIKE @searchTerm OR LOWER(IpAddress) LIKE @searchTerm OR LOWER(DeviceInfo) LIKE @searchTerm)",
-      );
-      queryInputs.push(["searchTerm", sql.NVarChar, `%${search}%`]);
-    }
-
-    if (eventFilter) {
-      whereConditions.push("EventType = @eventFilter");
-      queryInputs.push(["eventFilter", sql.NVarChar(20), eventFilter]);
-    }
-
-    if (roleFilter) {
-      whereConditions.push("UserRole = @roleFilter");
-      queryInputs.push(["roleFilter", sql.NVarChar(50), roleFilter]);
-    }
-
-    if (computedDateFrom) {
-      whereConditions.push("CreatedAt >= @dateFrom");
-      queryInputs.push(["dateFrom", sql.DateTime2, new Date(computedDateFrom)]);
-    }
-
-    if (computedDateTo) {
-      const dateToObj = new Date(computedDateTo);
-      dateToObj.setHours(23, 59, 59, 999);
-      whereConditions.push("CreatedAt <= @dateTo");
-      queryInputs.push(["dateTo", sql.DateTime2, dateToObj]);
-    }
-
-    whereClause = whereConditions.join(" AND ");
-
-    const sortColumn =
-      sortField === "userName"
-        ? "UserName"
-        : sortField === "event"
-          ? "EventType"
-          : "CreatedAt";
-
-    const countRequest = pool.request();
-    const dataRequest = pool.request();
-
-    for (const [name, type, value] of queryInputs) {
-      countRequest.input(name, type, value);
-      dataRequest.input(name, type, value);
-    }
-
-    const countResult = await countRequest.query(
-      `SELECT COUNT(*) AS total FROM dbo.UserActivityLog WHERE ${whereClause}`,
-    );
-
-    const total = countResult.recordset[0]?.total ?? 0;
-
-    const dataResult = await dataRequest.query(`
-      SELECT
-        Id AS id, UserId AS userId, UserName AS userName,
-        UserEmail AS userEmail, UserRole AS userRole,
-        EventType AS event, CreatedAt AS timestamp,
-        IpAddress AS ipAddress, DeviceInfo AS deviceInfo,
-        DeviceFingerprint AS deviceFingerprint,
-        ActionType AS actionType, Resource AS resource,
-        Details AS details, SessionId AS sessionId,
-        SessionDuration AS sessionDuration,
-        RequestMethod AS requestMethod, RequestUrl AS requestUrl
-      FROM dbo.UserActivityLog
-      WHERE ${whereClause}
-      ORDER BY ${sortColumn} ${order}
-      OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
-    `);
-
-    res.json({
-      data: dataResult.recordset.map(mapActivityRow),
-      total,
-      page,
-      limit,
-      pages: Math.ceil(total / limit),
-    });
-  } catch (err) {
-    if (process.env.NODE_ENV === "development") {
-      console.error("UserActivity error:", err.message);
-    }
-    res.status(500).json({
-      error: "Failed to fetch activity logs",
-      details:
-        process.env.NODE_ENV === "development" ? err.message : "Internal error",
-    });
-  }
-});
-
-// SSE stream - IMPROVED FOR VERCEL
-router.get("/stream", authMiddleware, checkPermission("UserActivity", "List", "CanView"), async (req, res) => {
-  let pingInterval;
-  let dataInterval;
-
-  const safeWrite = (payload) => {
-    if (res.writableEnded || res.destroyed) return;
-    try {
-      res.write(payload);
-    } catch (err) {
-      logger.error({ err, requestId: req.id }, "SSE write failed");
-      cleanup();
-    }
-  };
-
-  // Set SSE headers with improved configuration
-  res.setHeader("Content-Type", "text/event-stream");
-  res.setHeader("Cache-Control", "no-cache, no-transform");
-  res.setHeader("Connection", "keep-alive");
-  res.setHeader("X-Accel-Buffering", "no");
-
-  // Critical: Flush headers immediately
-  if (res.flushHeaders) {
-    res.flushHeaders();
-  }
-
-  // Disable timeout
-  res.setTimeout(0);
-
-  // Send initial connection confirmation
-  safeWrite(":ok\n\n");
-
-  activeStreams.push(res);
-
-  const sendLatest = async () => {
-    if (res.writableEnded || res.destroyed) {
-      return;
-    }
+router.get(
+  "/",
+  checkPermission("UserActivity", "List", "CanView"),
+  // FIX 1: Add cache middleware — 60-second TTL, scoped per user.
+  // Short TTL keeps data fresh; cache busts automatically when a new
+  // activity is posted (bump cache version in POST handler below).
+  cache("user-activity", 60),
+  async (req, res) => {
+    let whereClause = "1 = 1";
 
     try {
       const pool = getPool();
-      const result = await pool
-        .request()
-        .query(
-          "SELECT TOP 25 * FROM dbo.UserActivityLog ORDER BY CreatedAt DESC",
-        );
 
-      if (!res.writableEnded && !res.destroyed) {
-        safeWrite(
-          `data: ${JSON.stringify(result.recordset.map(mapActivityRow))}\n\n`,
-        );
+      const page = Math.max(1, normalizePositiveInt(req.query.page, 1));
+
+      // FIX 2: Run all Redis pre-flight calls in parallel instead of serially.
+      // Original code awaited each one sequentially (~3 round trips).
+      // Promise.all collapses them into a single wait (~1 round trip).
+      const [engagementScore, metrics, predictedRPM] = await Promise.all([
+        req.user?.userId
+          ? redisZScore("engagement:score", req.user.userId).then((s) =>
+              Number(s || 0),
+            )
+          : Promise.resolve(0),
+        getSystemMetrics(),
+        getPredictedRPM(),
+      ]);
+
+      const dynamicDefault = getDynamicLimit(
+        engagementScore,
+        predictedRPM || metrics.rpm,
+        metrics.memoryUsage,
+      );
+      const limit = Math.min(
+        normalizePositiveInt(req.query.limit, dynamicDefault),
+        1000,
+      );
+      const offset = (page - 1) * limit;
+
+      const search = (req.query.search || "").trim().toLowerCase();
+      const eventFilter = req.query.event || "";
+      const roleFilter = req.query.role || "";
+      const sortField = req.query.sort || "timestamp";
+      const order = req.query.order === "asc" ? "ASC" : "DESC";
+
+      let computedDateFrom = req.query.dateFrom;
+      let computedDateTo = req.query.dateTo;
+      const period = req.query.period;
+
+      if (period) {
+        const now = new Date();
+        now.setHours(0, 0, 0, 0);
+        const tomorrow = new Date(now);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+
+        if (period === "today") {
+          computedDateFrom = now.toISOString().slice(0, 10);
+          computedDateTo = tomorrow.toISOString().slice(0, 10);
+        } else if (period === "yesterday") {
+          const yesterday = new Date(now);
+          yesterday.setDate(yesterday.getDate() - 1);
+          computedDateFrom = yesterday.toISOString().slice(0, 10);
+          computedDateTo = now.toISOString().slice(0, 10);
+        } else if (period === "this-week") {
+          const weekStart = new Date(now);
+          weekStart.setDate(now.getDate() - now.getDay());
+          computedDateFrom = weekStart.toISOString().slice(0, 10);
+          computedDateTo = tomorrow.toISOString().slice(0, 10);
+        } else if (period === "this-month") {
+          const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+          computedDateFrom = monthStart.toISOString().slice(0, 10);
+          computedDateTo = tomorrow.toISOString().slice(0, 10);
+        } else if (period === "last-month") {
+          const lmStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+          const lmEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+          computedDateFrom = lmStart.toISOString().slice(0, 10);
+          computedDateTo = new Date(lmEnd.getTime() + 86400000)
+            .toISOString()
+            .slice(0, 10);
+        } else if (period === "this-year") {
+          const yearStart = new Date(now.getFullYear(), 0, 1);
+          computedDateFrom = yearStart.toISOString().slice(0, 10);
+          computedDateTo = tomorrow.toISOString().slice(0, 10);
+        }
       }
-    } catch (err) {
-      logger.error({ err, requestId: req.id }, "SSE data error");
-    }
-  };
 
-  const sendPing = () => {
-    if (res.writableEnded || res.destroyed) return;
+      const whereConditions = ["1 = 1"];
+      const queryInputs = [];
+
+      if (search) {
+        whereConditions.push(
+          "(LOWER(UserName) LIKE @searchTerm OR LOWER(UserEmail) LIKE @searchTerm OR LOWER(IpAddress) LIKE @searchTerm OR LOWER(DeviceInfo) LIKE @searchTerm)",
+        );
+        queryInputs.push(["searchTerm", sql.NVarChar, `%${search}%`]);
+      }
+
+      if (eventFilter) {
+        whereConditions.push("EventType = @eventFilter");
+        queryInputs.push(["eventFilter", sql.NVarChar(20), eventFilter]);
+      }
+
+      if (roleFilter) {
+        whereConditions.push("UserRole = @roleFilter");
+        queryInputs.push(["roleFilter", sql.NVarChar(50), roleFilter]);
+      }
+
+      if (computedDateFrom) {
+        whereConditions.push("CreatedAt >= @dateFrom");
+        queryInputs.push([
+          "dateFrom",
+          sql.DateTime2,
+          new Date(computedDateFrom),
+        ]);
+      }
+
+      if (computedDateTo) {
+        const dateToObj = new Date(computedDateTo);
+        dateToObj.setHours(23, 59, 59, 999);
+        whereConditions.push("CreatedAt <= @dateTo");
+        queryInputs.push(["dateTo", sql.DateTime2, dateToObj]);
+      }
+
+      whereClause = whereConditions.join(" AND ");
+
+      const sortColumn =
+        sortField === "userName"
+          ? "UserName"
+          : sortField === "event"
+            ? "EventType"
+            : "CreatedAt";
+
+      // FIX 3: Single query using COUNT(*) OVER() as a window function.
+      // The original code ran two separate round-trips to SQL Server:
+      //   • SELECT COUNT(*) … (full index scan)
+      //   • SELECT … OFFSET … FETCH NEXT … (second full scan + key lookup)
+      // With COUNT(*) OVER() the engine scans the filtered set once and
+      // returns total alongside each data row — half the DB round-trips.
+      const dataRequest = pool.request();
+      for (const [name, type, value] of queryInputs) {
+        dataRequest.input(name, type, value);
+      }
+
+      const dataResult = await dataRequest.query(`
+        SELECT
+          Id AS id, UserId AS userId, UserName AS userName,
+          UserEmail AS userEmail, UserRole AS userRole,
+          EventType AS event, CreatedAt AS timestamp,
+          IpAddress AS ipAddress, DeviceInfo AS deviceInfo,
+          DeviceFingerprint AS deviceFingerprint,
+          ActionType AS actionType, Resource AS resource,
+          Details AS details, SessionId AS sessionId,
+          SessionDuration AS sessionDuration,
+          RequestMethod AS requestMethod, RequestUrl AS requestUrl,
+          COUNT(*) OVER() AS totalCount
+        FROM dbo.UserActivityLog
+        WHERE ${whereClause}
+        ORDER BY ${sortColumn} ${order}
+        OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
+      `);
+
+      // totalCount is on every row; read from first row (0 if result empty)
+      const total = dataResult.recordset[0]?.totalCount ?? 0;
+
+      res.json({
+        data: dataResult.recordset.map(mapActivityRow),
+        total,
+        page,
+        limit,
+        pages: Math.ceil(total / limit),
+      });
+    } catch (err) {
+      if (process.env.NODE_ENV === "development") {
+        console.error("UserActivity error:", err.message);
+      }
+      res.status(500).json({
+        error: "Failed to fetch activity logs",
+        details:
+          process.env.NODE_ENV === "development"
+            ? err.message
+            : "Internal error",
+      });
+    }
+  },
+);
+
+// SSE stream - IMPROVED FOR VERCEL
+router.get(
+  "/stream",
+  checkPermission("UserActivity", "List", "CanView"),
+  async (req, res) => {
+    let pingInterval;
+    let dataInterval;
+
+    const safeWrite = (payload) => {
+      if (res.writableEnded || res.destroyed) return;
+      try {
+        res.write(payload);
+      } catch (err) {
+        logger.error({ err, requestId: req.id }, "SSE write failed");
+        cleanup();
+      }
+    };
+
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache, no-transform");
+    res.setHeader("Connection", "keep-alive");
+    res.setHeader("X-Accel-Buffering", "no");
+
+    if (res.flushHeaders) {
+      res.flushHeaders();
+    }
+
+    res.setTimeout(0);
+    safeWrite(":ok\n\n");
+    activeStreams.push(res);
+
+    const sendLatest = async () => {
+      if (res.writableEnded || res.destroyed) return;
+
+      try {
+        const pool = getPool();
+        const result = await pool
+          .request()
+          .query(
+            "SELECT TOP 25 * FROM dbo.UserActivityLog ORDER BY CreatedAt DESC",
+          );
+
+        if (!res.writableEnded && !res.destroyed) {
+          safeWrite(
+            `data: ${JSON.stringify(result.recordset.map(mapActivityRow))}\n\n`,
+          );
+        }
+      } catch (err) {
+        logger.error({ err, requestId: req.id }, "SSE data error");
+      }
+    };
+
+    const sendPing = () => {
+      if (res.writableEnded || res.destroyed) return;
+      try {
+        res.write(":ping\n\n");
+      } catch (err) {
+        logger.error({ err, requestId: req.id }, "SSE ping failed");
+        cleanup();
+      }
+    };
+
     try {
-      res.write(":ping\n\n");
+      await sendLatest();
     } catch (err) {
-      logger.error({ err, requestId: req.id }, "SSE ping failed");
+      if (process.env.NODE_ENV === "development") {
+        console.error("SSE initial send error:", err.message);
+      }
+    }
+
+    pingInterval = setInterval(sendPing, 15000);
+    dataInterval = setInterval(sendLatest, 5000);
+
+    const cleanup = () => {
+      activeStreams = activeStreams.filter((stream) => stream !== res);
+      if (pingInterval) clearInterval(pingInterval);
+      if (dataInterval) clearInterval(dataInterval);
+      pingInterval = null;
+      dataInterval = null;
+    };
+
+    req.on("close", () => {
       cleanup();
-    }
-  };
+    });
 
-  // Send initial data immediately
-  try {
-    await sendLatest();
-  } catch (err) {
-    if (process.env.NODE_ENV === "development") {
-      console.error("SSE initial send error:", err.message);
-    }
-  }
-
-  // More frequent pings to keep connection alive (every 15s)
-  pingInterval = setInterval(sendPing, 15000);
-
-  // Data updates every 5 seconds
-  dataInterval = setInterval(sendLatest, 5000);
-
-  // Cleanup function
-  const cleanup = () => {
-    activeStreams = activeStreams.filter((stream) => stream !== res);
-    if (pingInterval) clearInterval(pingInterval);
-    if (dataInterval) clearInterval(dataInterval);
-    pingInterval = null;
-    dataInterval = null;
-  };
-
-  // Handle client disconnect
-  req.on("close", () => {
-    // Silenced normal SSE disconnect
-    cleanup();
-  });
-
-  // Handle errors
-  req.on("error", (err) => {
-    if (err.code !== "ECONNRESET") {
-      if (process.env.NODE_ENV === "development") {
-        console.error("SSE request error:", err.message);
+    req.on("error", (err) => {
+      if (err.code !== "ECONNRESET") {
+        if (process.env.NODE_ENV === "development") {
+          console.error("SSE request error:", err.message);
+        }
       }
-    }
-    cleanup();
-  });
+      cleanup();
+    });
 
-  // Handle response errors
-  res.on("error", (err) => {
-    if (err.code !== "ECONNRESET") {
-      if (process.env.NODE_ENV === "development") {
-        console.error("SSE response error:", err.message);
+    res.on("error", (err) => {
+      if (err.code !== "ECONNRESET") {
+        if (process.env.NODE_ENV === "development") {
+          console.error("SSE response error:", err.message);
+        }
       }
-    }
-    cleanup();
-  });
-});
+      cleanup();
+    });
+  },
+);
 
 // Session timeline
-router.get("/session/:sessionId", authMiddleware, checkPermission("UserActivity", "List", "CanView"), async (req, res) => {
-  try {
-    const pool = getPool();
+router.get(
+  "/session/:sessionId",
+  checkPermission("UserActivity", "List", "CanView"),
+  async (req, res) => {
+    try {
+      const pool = getPool();
 
-    const result = await pool
-      .request()
-      .input("sessionId", sql.NVarChar(50), req.params.sessionId)
-      .query(
-        "SELECT * FROM dbo.UserActivityLog WHERE SessionId = @sessionId ORDER BY CreatedAt ASC",
-      );
+      const result = await pool
+        .request()
+        .input("sessionId", sql.NVarChar(50), req.params.sessionId)
+        .query(
+          "SELECT * FROM dbo.UserActivityLog WHERE SessionId = @sessionId ORDER BY CreatedAt ASC",
+        );
 
-    res.json(result.recordset.map(mapActivityRow));
-  } catch (err) {
-    if (process.env.NODE_ENV === "development") {
-      console.error("Session error:", err.message);
+      res.json(result.recordset.map(mapActivityRow));
+    } catch (err) {
+      if (process.env.NODE_ENV === "development") {
+        console.error("Session error:", err.message);
+      }
+      res.status(500).json({ error: "Failed to fetch session activity" });
     }
-    res.status(500).json({ error: "Failed to fetch session activity" });
-  }
-});
+  },
+);
 
 // POST activity
 router.post("/", async (req, res) => {
@@ -387,18 +413,17 @@ router.post("/", async (req, res) => {
       .json({ error: "userId, userName and event are required" });
   }
 
-  // Update engagement score based on action weight
   if (normalizedActionType && resolvedUserId) {
     const WEIGHTS = {
       read: 1,
-      'settings_change': 3,
+      settings_change: 3,
       export: 5,
       update: 8,
       create: 10,
-      delete: 15
+      delete: 15,
     };
-    const weight = WEIGHTS[normalizedActionType] || 2; // default low weight
-    await redisZIncrBy('engagement:score', weight, resolvedUserId, 2592000); // 30 days TTL
+    const weight = WEIGHTS[normalizedActionType] || 2;
+    await redisZIncrBy("engagement:score", weight, resolvedUserId, 2592000);
   }
 
   try {
@@ -476,6 +501,13 @@ router.post("/", async (req, res) => {
       `);
 
     const insertedId = insertResult.recordset?.[0]?.Id ?? null;
+
+    // FIX 1 (cont.): Bump cache version so the next GET sees fresh data.
+    // This is fire-and-forget — we don't await it so the POST response
+    // is not delayed by the Redis round-trip.
+    const { bumpCacheVersion } = require("../redis");
+    bumpCacheVersion("user-activity").catch(() => {});
+
     res.json({ message: "Activity logged", id: insertedId });
   } catch (err) {
     if (process.env.NODE_ENV === "development") {

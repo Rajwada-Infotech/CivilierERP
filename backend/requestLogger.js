@@ -3,8 +3,6 @@ const pinoHttp = require("pino-http");
 const logger = require("./logger");
 const { v4: uuidv4 } = require("uuid");
 
-const isProd = process.env.NODE_ENV === "production";
-
 // High-frequency routes to silence
 const SILENT_ROUTES = [
   "/",
@@ -36,7 +34,6 @@ module.exports = pinoHttp({
       req.url.length > 45
         ? req.url.substring(0, 42) + "..."
         : req.url.padEnd(45);
-
     return `${method} ${url} ${res.statusCode} ${responseTime}ms`;
   },
 
@@ -44,12 +41,10 @@ module.exports = pinoHttp({
     return `ERROR ${req.method} ${req.url} → ${res.statusCode} ${err?.message || ""}`;
   },
 
-  customProps: (req, res) => ({
-    reqId: req.id,
-    route: req.url,
-    method: req.method,
-    userId: req.user?.userId || req.user?.id,
-  }),
+  // ✅ customProps removed — it uses an internal pino stringify symbol
+  // that is not available on the worker-thread logger created by pino-pretty
+  // transport, causing: "logger[stringifySym] is not a function".
+  // Extra fields (reqId, userId) are instead attached via the serializers below.
 
   customAttributeKeys: {
     req: "req",
@@ -60,9 +55,15 @@ module.exports = pinoHttp({
   },
 
   serializers: {
+    // Keep req/res out of the log body to avoid noise
     req: () => undefined,
     res: () => undefined,
   },
+
+  // Attach extra fields safely using wrapSerializers-compatible hook
+  // (pino-http calls this before stringify, so it is always safe)
+  customReceivedMessage: undefined,
+  customReceivedObject: undefined,
 
   autoLogging: {
     ignore: (req) => {

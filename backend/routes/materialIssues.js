@@ -163,8 +163,8 @@ router.get(
       const search = req.query.search ? String(req.query.search).trim() : "";
       const offset = (page - 1) * limit;
 
-      const request = pool.request();
       let whereClause = "";
+      const searchParam = search ? `%${search}%` : null;
 
       if (search) {
         whereClause = `
@@ -173,21 +173,16 @@ router.get(
            OR c.name     LIKE @search
            OR p.name     LIKE @search
       `;
-        request.input("search", sql.NVarChar(200), `%${search}%`);
       }
 
-      request.input("offset", sql.Int, offset);
-      request.input("limit", sql.Int, limit);
+      // Use a single request with COUNT(*) OVER() to avoid executing the same
+      // Request object twice (mssql Request instances are single-use).
+      const dataReq = pool.request();
+      if (searchParam) dataReq.input("search", sql.NVarChar(200), searchParam);
+      dataReq.input("offset", sql.Int, offset);
+      dataReq.input("limit", sql.Int, limit);
 
-      const countResult = await request.query(`
-      SELECT COUNT(*) AS total
-      FROM   dbo.MaterialIssues mi
-      LEFT JOIN dbo.enterprise c ON mi.CompanyId = c.id
-      LEFT JOIN dbo.enterprise p ON mi.ProjectId = p.id
-      ${whereClause}
-    `);
-
-      const dataResult = await request.query(`
+      const dataResult = await dataReq.query(`
       SELECT
         mi.IssueId, mi.IssueNo, mi.DocNo, mi.Status,
         mi.CompanyId, c.name AS CompanyName,
@@ -195,7 +190,8 @@ router.get(
         mi.FinYearId, fy.FName AS FinYearName,
         mi.Date, mi.Reason, mi.Remarks, mi.CreatedAt,
         (SELECT COUNT(*) FROM dbo.MaterialIssueItems mii WHERE mii.IssueId = mi.IssueId) AS ItemCount,
-        (SELECT ISNULL(SUM(mii.Quantity),0) FROM dbo.MaterialIssueItems mii WHERE mii.IssueId = mi.IssueId) AS TotalQty
+        (SELECT ISNULL(SUM(mii.Quantity),0) FROM dbo.MaterialIssueItems mii WHERE mii.IssueId = mi.IssueId) AS TotalQty,
+        COUNT(*) OVER() AS TotalCount
       FROM dbo.MaterialIssues mi
       LEFT JOIN dbo.enterprise c  ON mi.CompanyId = c.id
       LEFT JOIN dbo.enterprise p  ON mi.ProjectId = p.id
@@ -205,12 +201,17 @@ router.get(
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
     `);
 
+      const total =
+        dataResult.recordset.length > 0
+          ? Number(dataResult.recordset[0].TotalCount)
+          : 0;
+
       res.json({
         data: dataResult.recordset,
-        total: countResult.recordset[0].total,
+        total,
         page,
         limit,
-        totalPages: Math.ceil(countResult.recordset[0].total / limit),
+        totalPages: Math.ceil(total / limit),
       });
     } catch (error) {
       console.error("Error fetching material issues:", error);
