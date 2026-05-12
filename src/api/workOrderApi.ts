@@ -126,6 +126,21 @@ export const fetchContractors = async (): Promise<
   }
 };
 
+// Suppliers: AccountHeadMaster WHERE LHeadType = 'S'
+export const fetchSuppliers = async (): Promise<
+  { id: number; name: string }[]
+> => {
+  try {
+    const res = await fetchWithAuth("/api/account-head/options?type=S");
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = safeArray<{ id: number; label: string }>(await res.json());
+    return data.map((r) => ({ id: r.id, name: r.label ?? "" }));
+  } catch (err) {
+    console.error("[workOrderApi] fetchSuppliers failed:", err);
+    return [];
+  }
+};
+
 // Uses /api/activity-master directly (same source as ActivityMaster page)
 // Filters client-side to avoid stale/duplicate meta routes.
 const _fetchAllActivities = async () => {
@@ -260,6 +275,7 @@ export interface WorkOrderFullPayload {
     DocumentNumber?: string;
     DocumentDate?: string;
     ContractorId?: number;
+    SupplierId?: number;
     TotalAmount?: number;
     Remarks?: string;
     TermsAndConditions?: string;

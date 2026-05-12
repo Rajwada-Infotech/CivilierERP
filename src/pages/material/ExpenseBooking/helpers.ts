@@ -224,6 +224,14 @@ export function dbToRecord(row: any): ExpenseRecord {
   const rawId = row.Eid ?? row.EId ?? row.eid ?? row.EID ?? row.id;
   const id = rawId == null || rawId === "" ? "" : String(rawId);
 
+  // EProjectName stores the enterprise ID for the project site (e.g. "42").
+  // The backend JOINs enterprise on EProjectName=id and returns EProjectDisplayName.
+  const projectEnterpriseId = row.EProjectName
+    ? parseInt(row.EProjectName, 10)
+    : null;
+  const projectEnterpriseIdValid =
+    projectEnterpriseId && Number.isFinite(projectEnterpriseId);
+
   return {
     id: String(id),
     bookingName: row.EName ?? "",
@@ -233,9 +241,11 @@ export function dbToRecord(row: any): ExpenseRecord {
     dueDate: row.EReminder ? row.EReminder.slice(0, 10) : "",
     financialYear: "",
     companyId: row.ECompanyId ? parseInt(row.ECompanyId, 10) : null,
+    companyName: row.ECompanyName ?? "",
     poId: null,
-    supplier: row.EProjectName || "",
-    projectSite: row.EProjectName || "",
+    supplier: row.EName || "",
+    projectSite: projectEnterpriseIdValid ? String(projectEnterpriseId) : "",
+    projectName: row.EProjectDisplayName || "",
     materialCategory: row.EDocumentType ?? "",
     invoiceReference: row.EDocNo ?? "",
     basicAmount: parseFloat(row.EAmount) || 0,
@@ -267,7 +277,8 @@ export function recordToDb(
 ) {
   return {
     EName: form.bookingName || null,
-    EProjectName: form.supplier || form.projectSite || null,
+    // projectSite holds the enterprise ID string (e.g. "42") for the project site
+    EProjectName: form.projectSite || null,
     EDocumentType: form.materialCategory || null,
     EDocDate: form.bookingDate || null,
     /** Prevent NULL being sent to NOT NULL column */

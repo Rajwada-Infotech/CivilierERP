@@ -62,6 +62,7 @@ router.get(
           ISNULL(c.name, 'All Companies') AS CompanyName,
           ISNULL(p.name, 'All Projects')  AS ProjectName,
           t.FullPrefix,
+          t.links_to,
           t.CreatedAt,
           t.UpdatedAt
         FROM dbo.TypeOfDoc t
@@ -241,6 +242,7 @@ router.post(
       ProjectId,
       EntryTypeId,
       StartingDocNo,
+      links_to,
     } = req.body;
     if (!Prefix || !Description || !EntryTypeId)
       return res
@@ -262,11 +264,11 @@ router.post(
           StartingDocNo ? parseInt(StartingDocNo) : 1,
         )
         .input("CreatedBy", sql.NVarChar(100), req.user?.email || "system")
-        .query(`
+        .input("links_to", sql.NVarChar(500), links_to || null).query(`
           INSERT INTO dbo.TypeOfDoc
-            (Prefix, Description, CompanyId, ProjectId, EntryTypeId, StartingDocNo, CreatedBy)
+            (Prefix, Description, CompanyId, ProjectId, EntryTypeId, StartingDocNo, CreatedBy, links_to)
           VALUES
-            (@Prefix, @Description, @CompanyId, @ProjectId, @EntryTypeId, @StartingDocNo, @CreatedBy);
+            (@Prefix, @Description, @CompanyId, @ProjectId, @EntryTypeId, @StartingDocNo, @CreatedBy, @links_to);
         `);
       res.status(201).json({ message: "Document type created successfully" });
     } catch (err) {
@@ -291,6 +293,7 @@ router.put(
       EntryTypeId,
       IsActive,
       StartingDocNo,
+      links_to,
     } = req.body;
     try {
       const pool = getPool();
@@ -309,7 +312,7 @@ router.put(
           StartingDocNo ? parseInt(StartingDocNo) : 1,
         )
         .input("UpdatedBy", sql.NVarChar(100), req.user?.email || "system")
-        .query(`
+        .input("links_to", sql.NVarChar(500), links_to || null).query(`
           UPDATE dbo.TypeOfDoc SET
             Prefix        = @Prefix,
             Description   = @Description,
@@ -318,6 +321,7 @@ router.put(
             EntryTypeId   = @EntryTypeId,
             IsActive      = @IsActive,
             StartingDocNo = @StartingDocNo,
+            links_to      = @links_to,
             UpdatedBy     = @UpdatedBy,
             UpdatedAt     = SYSDATETIME()
           WHERE TypeOfDocId = @id;

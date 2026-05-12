@@ -10,9 +10,9 @@ export interface DbItem {
   M_Name: string;
   M_Description: string | null;
   M_Type: string | null;
-  M_BelongsTo: string | null;      // ← stores item group M_Id (UUID)
-  M_Group: string | null;          // ← stores item group Name (string)
-  M_code: string | null;           // ← stores short code
+  M_BelongsTo: string | null; // ← stores item group M_Id (UUID)
+  M_Group: string | null; // ← stores item group Name (string)
+  M_code: string | null; // ← stores short code
   M_IdentityCode: boolean;
   M_HSN: string | null;
   M_CGST: number | null;
@@ -22,8 +22,10 @@ export interface DbItem {
   M_CreatedBy: string | null;
   M_CreatedDate: string;
   M_ApprovedBy: string | null;
-  Parent_Id: string;               // ← stores item group M_Id (UUID)
+  Parent_Id: string; // ← stores item group M_Id (UUID)
   ParentGroupName: string | null;
+  default_supplier_id: number | null;
+  DefaultSupplierName: string | null;
 }
 
 export const getItems = async (): Promise<DbItem[]> => {

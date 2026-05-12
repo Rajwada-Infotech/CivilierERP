@@ -794,7 +794,9 @@ const PurchaseOrderMaster: React.FC = () => {
       Status: "Draft",
       Remarks: form.remarks || null,
       DocTypeId: docTypeId,
-      DocNo: backendNumbered ? null : form.poNumber || form.docNo || poDocNo || null,
+      DocNo: backendNumbered
+        ? null
+        : form.poNumber || form.docNo || poDocNo || null,
       finYear: selectedFinYear || null,
     };
   };
@@ -1283,75 +1285,6 @@ const PurchaseOrderMaster: React.FC = () => {
             Order Details
           </h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {/* PO Number */}
-            <div>
-              <FieldLabel required>PO Number</FieldLabel>
-              <input
-                value={form.poNumber}
-                onChange={(e) =>
-                  setField("poNumber", e.target.value.toUpperCase())
-                }
-                readOnly={
-                  isReadOnly ||
-                  (viewMode === "create" && !!(form.docTypeId ?? poDocTypeId))
-                }
-                className={`${inputCls} font-mono ${errors.poNumber ? "border-red-400" : ""} ${
-                  isReadOnly ||
-                  (viewMode === "create" && !!(form.docTypeId ?? poDocTypeId))
-                    ? "bg-muted/30 cursor-not-allowed"
-                    : ""
-                }`}
-                placeholder="Auto-generated"
-              />
-            </div>
-
-            {/* PO Date */}
-            <div>
-              <FieldLabel required>PO Date</FieldLabel>
-              <input
-                type="date"
-                value={form.poDate}
-                onChange={(e) => setField("poDate", e.target.value)}
-                readOnly={isReadOnly}
-                className={`${inputCls} ${errors.poDate ? "border-red-400" : ""} ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""}`}
-              />
-            </div>
-
-            {/* Expected Delivery */}
-            <div>
-              <FieldLabel>Expected Delivery</FieldLabel>
-              <input
-                type="date"
-                value={form.expectedDate}
-                onChange={(e) => setField("expectedDate", e.target.value)}
-                readOnly={isReadOnly}
-                className={`${inputCls} ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""}`}
-              />
-            </div>
-
-            {/* Supplier */}
-            <div>
-              <FieldLabel required>Supplier</FieldLabel>
-              {isReadOnly ? (
-                <div className={`${inputCls} bg-muted/30`}>
-                  {suppliers.find((s) => s.id === form.supplierId)?.name || "—"}
-                </div>
-              ) : (
-                <select
-                  value={form.supplierId}
-                  onChange={(e) => setField("supplierId", e.target.value)}
-                  className={`${selectCls} ${errors.supplierId ? "border-red-400" : ""}`}
-                >
-                  <option value="">— Select Supplier —</option>
-                  {suppliers.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-              )}
-            </div>
-
             {/* Company */}
             <div>
               <FieldLabel>Company Name</FieldLabel>
@@ -1397,6 +1330,75 @@ const PurchaseOrderMaster: React.FC = () => {
                   ))}
                 </select>
               )}
+            </div>
+
+            {/* Supplier */}
+            <div>
+              <FieldLabel required>Supplier</FieldLabel>
+              {isReadOnly ? (
+                <div className={`${inputCls} bg-muted/30`}>
+                  {suppliers.find((s) => s.id === form.supplierId)?.name || "—"}
+                </div>
+              ) : (
+                <select
+                  value={form.supplierId}
+                  onChange={(e) => setField("supplierId", e.target.value)}
+                  className={`${selectCls} ${errors.supplierId ? "border-red-400" : ""}`}
+                >
+                  <option value="">— Select Supplier —</option>
+                  {suppliers.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+
+            {/* PO Number */}
+            <div>
+              <FieldLabel required>PO Number</FieldLabel>
+              <input
+                value={form.poNumber}
+                onChange={(e) =>
+                  setField("poNumber", e.target.value.toUpperCase())
+                }
+                readOnly={
+                  isReadOnly ||
+                  (viewMode === "create" && !!(form.docTypeId ?? poDocTypeId))
+                }
+                className={`${inputCls} font-mono ${errors.poNumber ? "border-red-400" : ""} ${
+                  isReadOnly ||
+                  (viewMode === "create" && !!(form.docTypeId ?? poDocTypeId))
+                    ? "bg-muted/30 cursor-not-allowed"
+                    : ""
+                }`}
+                placeholder="Auto-generated"
+              />
+            </div>
+
+            {/* PO Date */}
+            <div>
+              <FieldLabel required>PO Date</FieldLabel>
+              <input
+                type="date"
+                value={form.poDate}
+                onChange={(e) => setField("poDate", e.target.value)}
+                readOnly={isReadOnly}
+                className={`${inputCls} ${errors.poDate ? "border-red-400" : ""} ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""}`}
+              />
+            </div>
+
+            {/* Expected Delivery */}
+            <div>
+              <FieldLabel>Expected Delivery</FieldLabel>
+              <input
+                type="date"
+                value={form.expectedDate}
+                onChange={(e) => setField("expectedDate", e.target.value)}
+                readOnly={isReadOnly}
+                className={`${inputCls} ${isReadOnly ? "bg-muted/30 cursor-not-allowed" : ""}`}
+              />
             </div>
           </div>
         </div>

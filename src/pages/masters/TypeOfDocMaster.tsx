@@ -49,7 +49,16 @@ interface DocType {
   FullPrefix: string;
   CompanyName: string;
   ProjectName: string;
+  links_to: string | null;
 }
+
+const LINK_OPTIONS = [
+  { value: "Work Order", label: "Work Order" },
+  { value: "GRN", label: "GRN" },
+  { value: "Expense Booking", label: "Expense Booking" },
+  { value: "Purchase Order", label: "Purchase Order" },
+  { value: "Debit Note", label: "Debit Note" },
+];
 
 const emptyForm = {
   Prefix: "",
@@ -58,6 +67,7 @@ const emptyForm = {
   ProjectId: "" as string | number,
   EntryTypeId: "",
   StartingDocNo: "1",
+  links_to: [] as string[],
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -85,14 +95,18 @@ function buildDocColumns(
       accessorKey: "EntryType",
       header: "Entry Type",
       cell: ({ getValue }) => (
-        <span className="text-sm font-medium text-foreground">{getValue() as string}</span>
+        <span className="text-sm font-medium text-foreground">
+          {getValue() as string}
+        </span>
       ),
     },
     {
       accessorKey: "FullPrefix",
       header: "Full Prefix",
       cell: ({ getValue }) => (
-        <span className="font-mono text-xs font-semibold text-primary">{getValue() as string}</span>
+        <span className="font-mono text-xs font-semibold text-primary">
+          {getValue() as string}
+        </span>
       ),
     },
     {
@@ -106,22 +120,49 @@ function buildDocColumns(
       accessorKey: "Description",
       header: "Description",
       cell: ({ getValue }) => (
-        <span className="text-sm text-muted-foreground">{getValue() as string}</span>
+        <span className="text-sm text-muted-foreground">
+          {getValue() as string}
+        </span>
       ),
     },
     {
       accessorKey: "CompanyName",
       header: "Company",
       cell: ({ getValue }) => (
-        <span className="text-xs text-muted-foreground">{(getValue() as string) || "All"}</span>
+        <span className="text-xs text-muted-foreground">
+          {(getValue() as string) || "All"}
+        </span>
       ),
     },
     {
       accessorKey: "ProjectName",
       header: "Project",
       cell: ({ getValue }) => (
-        <span className="text-xs text-muted-foreground">{(getValue() as string) || "All"}</span>
+        <span className="text-xs text-muted-foreground">
+          {(getValue() as string) || "All"}
+        </span>
       ),
+    },
+    {
+      accessorKey: "links_to",
+      header: "Links To",
+      cell: ({ getValue }) => {
+        const v = getValue() as string | null;
+        if (!v)
+          return <span className="text-muted-foreground/40 text-xs">—</span>;
+        return (
+          <div className="flex flex-wrap gap-1">
+            {v.split(",").map((l) => (
+              <span
+                key={l}
+                className="px-1.5 py-0.5 rounded text-[10px] bg-primary/10 text-primary font-medium"
+              >
+                {l.trim()}
+              </span>
+            ))}
+          </div>
+        );
+      },
     },
     {
       accessorKey: "IsActive",
@@ -129,7 +170,9 @@ function buildDocColumns(
       cell: ({ getValue }) => {
         const active = getValue() as boolean;
         return (
-          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${active ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}>
+          <span
+            className={`px-2 py-0.5 rounded-full text-xs font-medium ${active ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
+          >
             {active ? "Active" : "Inactive"}
           </span>
         );
@@ -257,6 +300,7 @@ const TypeOfDocMaster: React.FC = () => {
       CompanyId: form.CompanyId !== "" ? Number(form.CompanyId) : null,
       ProjectId: form.ProjectId !== "" ? Number(form.ProjectId) : null,
       StartingDocNo: parseInt(form.StartingDocNo) || 1,
+      links_to: form.links_to.length > 0 ? form.links_to.join(", ") : null,
     };
     if (editingId !== null)
       updateMutation.mutate({ id: editingId, data: payload });
@@ -271,6 +315,12 @@ const TypeOfDocMaster: React.FC = () => {
       ProjectId: item.ProjectId ?? "",
       EntryTypeId: item.EntryTypeId ?? "",
       StartingDocNo: String(item.StartingDocNo ?? 1),
+      links_to: item.links_to
+        ? item.links_to
+            .split(",")
+            .map((s) => s.trim())
+            .filter(Boolean)
+        : [],
     });
     setEditingId(item.TypeOfDocId);
     setDrawerOpen(true);
@@ -331,7 +381,11 @@ const TypeOfDocMaster: React.FC = () => {
             paginated={true}
             defaultPageSize={20}
             emptyMessage="No document types yet."
-            rowClassName={(row) => row.original.TypeOfDocId === editingId ? "bg-primary/5 border-l-2 border-l-primary" : ""}
+            rowClassName={(row) =>
+              row.original.TypeOfDocId === editingId
+                ? "bg-primary/5 border-l-2 border-l-primary"
+                : ""
+            }
           />
         )}
       </div>
@@ -491,6 +545,44 @@ const TypeOfDocMaster: React.FC = () => {
                   placeholder="Brief description for this document type"
                   required
                 />
+              </div>
+
+              {/* Links Allowed To */}
+              <div>
+                <label className="block text-xs font-heading font-medium text-muted-foreground mb-1.5 uppercase tracking-wide">
+                  Links Allowed To
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {LINK_OPTIONS.map((opt) => {
+                    const checked = form.links_to.includes(opt.value);
+                    return (
+                      <button
+                        key={opt.value}
+                        type="button"
+                        onClick={() =>
+                          setForm((prev) => ({
+                            ...prev,
+                            links_to: checked
+                              ? prev.links_to.filter((v) => v !== opt.value)
+                              : [...prev.links_to, opt.value],
+                          }))
+                        }
+                        className={`px-3 py-1.5 rounded-lg text-xs font-heading font-medium border transition-colors ${
+                          checked
+                            ? "bg-primary text-primary-foreground border-primary"
+                            : "bg-background text-muted-foreground border-border hover:border-primary hover:text-primary"
+                        }`}
+                      >
+                        {opt.label}
+                      </button>
+                    );
+                  })}
+                </div>
+                {form.links_to.length > 0 && (
+                  <p className="text-[11px] text-muted-foreground mt-1.5">
+                    Linked: {form.links_to.join(", ")}
+                  </p>
+                )}
               </div>
 
               {/* Actions */}

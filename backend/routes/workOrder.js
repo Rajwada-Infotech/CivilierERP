@@ -240,6 +240,7 @@ router.get(
       LEFT JOIN dbo.enterprise        ec  ON ec.id       = h.CompanyId
       LEFT JOIN dbo.enterprise        ep  ON ep.id       = h.ProjectId
       LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = h.ContractorId
+      LEFT JOIN dbo.AccountHeadMaster ams ON ams.LHeadId = h.SupplierId
       LEFT JOIN dbo.WorkOrderActivities a  ON a.WorkOrderHeaderId = h.Id
     `);
       const total = parseInt(countResult.recordset[0].total);
@@ -253,6 +254,7 @@ router.get(
           ec.name AS CompanyName, h.CompanyId,
           ep.name AS ProjectName, h.ProjectId,
           ahm.LHeadName AS ContractorName, h.ContractorId,
+          ams.LHeadName AS SupplierName, h.SupplierId,
           h.Remarks, h.TermsAndConditions, h.CreatedBy, h.UpdatedBy,
           h.DocTypeId, h.DocNo, h.GST,
           td.Prefix AS DocTypePrefix, td.Description AS DocTypeDescription,
@@ -261,13 +263,14 @@ router.get(
         LEFT JOIN dbo.enterprise        ec  ON ec.id       = h.CompanyId
         LEFT JOIN dbo.enterprise        ep  ON ep.id       = h.ProjectId
         LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = h.ContractorId
+        LEFT JOIN dbo.AccountHeadMaster ams ON ams.LHeadId = h.SupplierId
         LEFT JOIN dbo.WorkOrderActivities a  ON a.WorkOrderHeaderId = h.Id
         LEFT JOIN dbo.TypeOfDoc         td  ON td.TypeOfDocId = h.DocTypeId
         GROUP BY h.Id, h.DocumentNumber, h.DocumentDate, h.TotalAmount, h.Status,
           h.CreatedAt, h.UpdatedAt, h.CompanyId, h.ProjectId,
-          h.ContractorId, h.Remarks, h.TermsAndConditions,
+          h.ContractorId, h.SupplierId, h.Remarks, h.TermsAndConditions,
           h.CreatedBy, h.UpdatedBy, h.DocTypeId, h.DocNo, h.GST,
-          ec.name, ep.name, ahm.LHeadName, td.Prefix, td.Description
+          ec.name, ep.name, ahm.LHeadName, ams.LHeadName, td.Prefix, td.Description
         ORDER BY h.CreatedAt DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `);
@@ -299,11 +302,12 @@ router.get(
       const headerResult = await pool
         .request()
         .input("Id", sql.Int, req.params.id).query(`
-        SELECT h.*, ec.name AS CompanyName, ep.name AS ProjectName, ahm.LHeadName AS ContractorName
+        SELECT h.*, ec.name AS CompanyName, ep.name AS ProjectName, ahm.LHeadName AS ContractorName, ams.LHeadName AS SupplierName
         FROM dbo.WorkOrderHeader h
         LEFT JOIN dbo.enterprise        ec  ON ec.id       = h.CompanyId
         LEFT JOIN dbo.enterprise        ep  ON ep.id       = h.ProjectId
         LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = h.ContractorId
+        LEFT JOIN dbo.AccountHeadMaster ams ON ams.LHeadId = h.SupplierId
         WHERE h.Id = @Id
       `);
       if (!headerResult.recordset.length)
@@ -362,6 +366,7 @@ router.post("/", async (req, res) => {
     DocumentNumber,
     DocumentDate,
     ContractorId,
+    SupplierId,
     TotalAmount,
     Remarks,
     TermsAndConditions,
@@ -400,6 +405,7 @@ router.post("/", async (req, res) => {
       .input("DocumentNumber", sql.NVarChar(100), finalDocNo || null)
       .input("DocumentDate", sql.Date, DocumentDate || null)
       .input("ContractorId", sql.Int, ContractorId || null)
+      .input("SupplierId", sql.Int, SupplierId || null)
       .input("TotalAmount", sql.Decimal(18, 2), TotalAmount || 0)
       .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
       .input(
@@ -413,11 +419,11 @@ router.post("/", async (req, res) => {
       .input("CreatedAt", sql.DateTime, new Date())
       .input("GST", sql.NVarChar(sql.MAX), gstJson).query(`
         INSERT INTO dbo.WorkOrderHeader
-          (CompanyId, ProjectId, DocumentNumber, DocumentDate, ContractorId,
+          (CompanyId, ProjectId, DocumentNumber, DocumentDate, ContractorId, SupplierId,
            TotalAmount, Remarks, TermsAndConditions, DocTypeId, DocNo, CreatedBy, CreatedAt, GST)
         OUTPUT INSERTED.Id
         VALUES
-          (@CompanyId, @ProjectId, @DocumentNumber, @DocumentDate, @ContractorId,
+          (@CompanyId, @ProjectId, @DocumentNumber, @DocumentDate, @ContractorId, @SupplierId,
            @TotalAmount, @Remarks, @TermsAndConditions, @DocTypeId, @DocNo, @CreatedBy, @CreatedAt, @GST)
       `);
     const newId = result.recordset[0].Id;
@@ -458,6 +464,7 @@ router.put("/:id", async (req, res) => {
     DocumentNumber,
     DocumentDate,
     ContractorId,
+    SupplierId,
     TotalAmount,
     Remarks,
     TermsAndConditions,
@@ -480,6 +487,7 @@ router.put("/:id", async (req, res) => {
       .input("DocumentNumber", sql.NVarChar(100), DocumentNumber || null)
       .input("DocumentDate", sql.Date, DocumentDate || null)
       .input("ContractorId", sql.Int, ContractorId || null)
+      .input("SupplierId", sql.Int, SupplierId || null)
       .input("TotalAmount", sql.Decimal(18, 2), TotalAmount || 0)
       .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
       .input(
@@ -495,7 +503,7 @@ router.put("/:id", async (req, res) => {
         UPDATE dbo.WorkOrderHeader SET
           CompanyId=@CompanyId, ProjectId=@ProjectId,
           DocumentNumber=@DocumentNumber, DocumentDate=@DocumentDate,
-          ContractorId=@ContractorId, TotalAmount=@TotalAmount,
+          ContractorId=@ContractorId, SupplierId=@SupplierId, TotalAmount=@TotalAmount,
           Remarks=@Remarks, TermsAndConditions=@TermsAndConditions,
           DocTypeId=@DocTypeId, DocNo=@DocNo,
           UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt, GST=@GST
@@ -866,6 +874,7 @@ router.post("/:id/save-full", async (req, res) => {
       .input("DocumentNumber", sql.NVarChar(100), stableDocNo)
       .input("DocumentDate", sql.Date, header.DocumentDate || null)
       .input("ContractorId", sql.Int, header.ContractorId || null)
+      .input("SupplierId", sql.Int, header.SupplierId || null)
       .input("TotalAmount", sql.Decimal(18, 2), header.TotalAmount || 0)
       .input("Remarks", sql.NVarChar(sql.MAX), header.Remarks || null)
       .input(
@@ -893,7 +902,7 @@ router.post("/:id/save-full", async (req, res) => {
         UPDATE dbo.WorkOrderHeader SET
           CompanyId=@CompanyId, ProjectId=@ProjectId,
           DocumentNumber=@DocumentNumber, DocumentDate=@DocumentDate,
-          ContractorId=@ContractorId, TotalAmount=@TotalAmount,
+          ContractorId=@ContractorId, SupplierId=@SupplierId, TotalAmount=@TotalAmount,
           Remarks=@Remarks, TermsAndConditions=@TermsAndConditions,
           DocTypeId=@DocTypeId, DocNo=@DocNo,
           UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt, GST=@GST
