@@ -249,6 +249,8 @@ export interface MaterialPayload {
   Rate?: number;
   /** GST rate % auto-filled from HSN Master via the item */
   GSTRate?: number;
+  /** Supplier FK (AccountHeadMaster.LHeadId) for this material line */
+  SupplierIdPerLine?: number | null;
   Remarks?: string;
   CreatedBy?: number;
   UpdatedBy?: number;
@@ -304,6 +306,42 @@ export const saveFullWorkOrder = async (
       /* ignore */
     }
     throw new Error(err.error || `Save failed: ${res.status}`);
+  }
+  return res.json();
+};
+
+// ── Confirm WO → auto-create WO-POs ──────────────────────────────────────────
+
+export interface ConfirmWOResult {
+  message: string;
+  totalMaterialCost: number;
+  threshold: number;
+  thresholdMet: boolean;
+  woPOsCreated: number;
+  purchaseOrders: {
+    PurchaseOrderID: number;
+    PurchaseOrderNo: string;
+    SupplierName: string | null;
+  }[];
+}
+
+export const confirmWorkOrder = async (
+  id: number,
+  finYear?: string | null,
+): Promise<ConfirmWOResult> => {
+  const res = await fetchWithAuth(`${BASE_URL}/${id}/confirm`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ finYear: finYear ?? null }),
+  });
+  if (!res.ok) {
+    let err: Record<string, string> = {};
+    try {
+      err = await res.json();
+    } catch {
+      /* ignore */
+    }
+    throw new Error(err.error || `Confirm failed: ${res.status}`);
   }
   return res.json();
 };

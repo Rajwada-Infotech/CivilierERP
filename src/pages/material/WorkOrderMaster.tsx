@@ -59,6 +59,7 @@ import { useFinYear } from "@/contexts/FinYearContext";
 import {
   createWorkOrder,
   saveFullWorkOrder,
+  confirmWorkOrder,
   fetchCompanies,
   fetchProjects,
   fetchContractors,
@@ -127,6 +128,9 @@ interface MaterialItem {
   price: number;
   /** GST rate % auto-filled from HSN when item is selected */
   gstRate: number;
+  /** Supplier FK (AccountHeadMaster.LHeadId) for this material line */
+  supplierId: number | null;
+  supplierName: string;
 }
 
 // GST type for per-activity HSN selection
@@ -300,6 +304,8 @@ const EMPTY_MATERIAL = (): MaterialItem => ({
   unit: "",
   price: 0,
   gstRate: 0,
+  supplierId: null,
+  supplierName: "",
 });
 
 const EMPTY_ACTIVITY = (): Activity => ({
@@ -384,12 +390,14 @@ const MaterialBreakdownModal: React.FC<{
   uomOptions: DropdownOption[];
   itemOptions: ItemOption[];
   loadingItems: boolean;
+  suppliers: DropdownOption[];
   onUpdateMaterials: (materials: MaterialItem[]) => void;
 }> = ({
   activity,
   uomOptions,
   itemOptions,
   loadingItems,
+  suppliers,
   onUpdateMaterials,
 }) => {
   const [open, setOpen] = useState(false);
@@ -600,6 +608,38 @@ const MaterialBreakdownModal: React.FC<{
                             <X size={13} />
                           </button>
                         </div>
+                        {suppliers.length > 0 && (
+                          <div>
+                            <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
+                              Supplier
+                            </p>
+                            <select
+                              value={
+                                mat.supplierId !== null
+                                  ? String(mat.supplierId)
+                                  : ""
+                              }
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                const found = suppliers.find(
+                                  (s) => String(s.id) === v,
+                                );
+                                updateMaterial(idx, {
+                                  supplierId: v ? parseInt(v, 10) : null,
+                                  supplierName: found ? found.name : "",
+                                });
+                              }}
+                              className={`${cellSelect} w-full`}
+                            >
+                              <option value="">No supplier</option>
+                              {suppliers.map((s) => (
+                                <option key={s.id} value={String(s.id)}>
+                                  {s.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                        )}
                         <div className="grid grid-cols-3 gap-2">
                           <div>
                             <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wide mb-1">
@@ -965,6 +1005,7 @@ const ActivityRow: React.FC<{
   activityOptions: ActivityOption[];
   uomOptions: DropdownOption[];
   itemOptions: ItemOption[];
+  suppliers: DropdownOption[];
   loadingActivities: boolean;
   loadingItems: boolean;
   hsnRecords: {
@@ -984,6 +1025,7 @@ const ActivityRow: React.FC<{
   activityOptions,
   uomOptions,
   itemOptions,
+  suppliers,
   loadingActivities,
   loadingItems,
   hsnRecords,
@@ -1166,6 +1208,7 @@ const ActivityRow: React.FC<{
           uomOptions={uomOptions}
           itemOptions={itemOptions}
           loadingItems={loadingItems}
+          suppliers={suppliers}
           onUpdateMaterials={(mats) => onUpdate({ materials: mats })}
         />
       </div>
@@ -1208,6 +1251,7 @@ const ActivityRow: React.FC<{
             uomOptions={uomOptions}
             itemOptions={itemOptions}
             loadingItems={loadingItems}
+            suppliers={suppliers}
             onUpdateMaterials={(mats) => onUpdate({ materials: mats })}
           />
           {/* Desktop HSN button */}
@@ -1275,6 +1319,7 @@ const ActivityGroupCard: React.FC<{
   activityOptions: ActivityOption[];
   uomOptions: DropdownOption[];
   itemOptions: ItemOption[];
+  suppliers: DropdownOption[];
   loadingDropdowns: boolean;
   loadingItems: boolean;
   hsnRecords: {
@@ -1294,6 +1339,7 @@ const ActivityGroupCard: React.FC<{
   activityOptions,
   uomOptions,
   itemOptions,
+  suppliers,
   loadingDropdowns,
   loadingItems,
   hsnRecords,
@@ -1438,6 +1484,7 @@ const ActivityGroupCard: React.FC<{
               activityOptions={filteredActivities}
               uomOptions={uomOptions}
               itemOptions={itemOptions}
+              suppliers={suppliers}
               loadingActivities={loadingDropdowns}
               loadingItems={loadingItems}
               hsnRecords={hsnRecords}
@@ -2580,6 +2627,7 @@ const WorkOrderEditPanel: React.FC<{
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [confirming, setConfirming] = useState(false);
 
   const [form, setFormState] = useState<WorkOrderForm>(EMPTY_FORM());
   const [groups, setGroups] = useState<ActivityGroup[]>([EMPTY_GROUP()]);
@@ -2751,6 +2799,10 @@ const WorkOrderEditPanel: React.FC<{
                       unit: m.UOMName || "",
                       price: m.Rate || 0,
                       gstRate: Number(m.GSTRate) || 0,
+                      supplierId: m.SupplierIdPerLine
+                        ? Number(m.SupplierIdPerLine)
+                        : null,
+                      supplierName: m.SupplierNamePerLine || "",
                     };
                   }),
                 };
@@ -2819,6 +2871,35 @@ const WorkOrderEditPanel: React.FC<{
     return Object.keys(e).length === 0;
   };
 
+  const handleConfirm = async () => {
+    setConfirming(true);
+    try {
+      const result = await confirmWorkOrder(workOrderId, null);
+      if (result.thresholdMet && result.woPOsCreated > 0) {
+        const poNos = result.purchaseOrders
+          .map((p) => p.PurchaseOrderNo)
+          .join(", ");
+        toast.success(
+          `Work order confirmed! ${result.woPOsCreated} WO-PO${result.woPOsCreated > 1 ? "s" : ""} auto-created: ${poNos}`,
+          { duration: 6000 },
+        );
+      } else if (!result.thresholdMet) {
+        toast.info(
+          `Work order confirmed. Material cost (₹${result.totalMaterialCost.toLocaleString("en-IN")}) is below threshold — no WO-PO created.`,
+        );
+      } else {
+        toast.info(
+          "Work order confirmed. Configure WO-PO document type in System Settings to enable auto-PO.",
+        );
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error(msg || "Confirm failed.");
+    } finally {
+      setConfirming(false);
+    }
+  };
+
   const handleSave = async () => {
     if (!validate()) {
       toast.error("Please fill in all required fields.");
@@ -2862,6 +2943,7 @@ const WorkOrderEditPanel: React.FC<{
               Quantity: m.consumptionRatio || null,
               Rate: m.price || null,
               GSTRate: m.gstRate ?? 0,
+              SupplierIdPerLine: m.supplierId ?? null,
               Remarks: null,
               UpdatedBy: userId,
             })),
@@ -2981,6 +3063,23 @@ const WorkOrderEditPanel: React.FC<{
           >
             <X size={13} />
             Cancel
+          </button>
+          <button
+            onClick={() => void handleConfirm()}
+            disabled={confirming || saving}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg border border-emerald-500 text-emerald-600 dark:text-emerald-400 text-sm font-semibold hover:bg-emerald-50 dark:hover:bg-emerald-950/30 disabled:opacity-60 transition-colors"
+          >
+            {confirming ? (
+              <>
+                <span className="w-3.5 h-3.5 border-2 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" />
+                <span>Confirming…</span>
+              </>
+            ) : (
+              <>
+                <Check size={14} />
+                <span className="hidden sm:inline">Confirm WO</span>
+              </>
+            )}
           </button>
           <button
             onClick={handleSave}
@@ -3325,6 +3424,7 @@ const WorkOrderEditPanel: React.FC<{
               activityOptions={activityOptions}
               uomOptions={uomOptions}
               itemOptions={itemOptions}
+              suppliers={suppliers}
               loadingDropdowns={loadingDropdowns}
               loadingItems={loadingItems}
               hsnRecords={hsnRecords}
@@ -3381,6 +3481,23 @@ const WorkOrderEditPanel: React.FC<{
         >
           <X size={13} />
           Cancel
+        </button>
+        <button
+          onClick={() => void handleConfirm()}
+          disabled={confirming || saving}
+          className="flex items-center gap-2 px-4 py-2.5 rounded-lg border border-emerald-500 text-emerald-600 dark:text-emerald-400 text-sm font-semibold hover:bg-emerald-50 dark:hover:bg-emerald-950/30 disabled:opacity-60 transition-colors"
+        >
+          {confirming ? (
+            <>
+              <span className="w-4 h-4 border-2 border-emerald-500/30 border-t-emerald-500 rounded-full animate-spin" />
+              Confirming…
+            </>
+          ) : (
+            <>
+              <Check size={14} />
+              Confirm WO
+            </>
+          )}
         </button>
         <button
           onClick={handleSave}
@@ -3709,6 +3826,7 @@ const WorkOrderMaster: React.FC = () => {
                 Quantity: m.consumptionRatio || null,
                 Rate: m.price || null,
                 GSTRate: m.gstRate ?? 0,
+                SupplierIdPerLine: m.supplierId ?? null,
                 Remarks: null,
                 CreatedBy: userId,
               })),
@@ -4326,6 +4444,7 @@ const WorkOrderMaster: React.FC = () => {
                   activityOptions={activityOptions}
                   uomOptions={uomOptions}
                   itemOptions={itemOptions}
+                  suppliers={suppliers}
                   loadingDropdowns={loadingDropdowns}
                   loadingItems={loadingItems}
                   hsnRecords={hsnRecords}

@@ -330,11 +330,14 @@ router.get(
         .input("WorkOrderHeaderId", sql.Int, req.params.id).query(`
         SELECT m.*, img.M_Name AS ItemName, uom.UOMName,
           CAST(m.ItemId AS NVARCHAR(36)) AS ItemIdStr,
-          ISNULL(m.GSTRate, 0) AS GSTRate
+          ISNULL(m.GSTRate, 0) AS GSTRate,
+          m.SupplierIdPerLine,
+          sup.LHeadName AS SupplierNamePerLine
         FROM dbo.WorkOrderActivityMaterials m
         INNER JOIN dbo.WorkOrderActivities  a   ON a.Id    = m.WorkOrderActivityId
         LEFT  JOIN dbo.Item_Master_Group    img ON img.M_Id = m.ItemId
         LEFT  JOIN dbo.UOMMaster            uom ON uom.Id  = m.UOMId
+        LEFT  JOIN dbo.AccountHeadMaster    sup ON sup.LHeadId = m.SupplierIdPerLine
         WHERE a.WorkOrderHeaderId = @WorkOrderHeaderId
         ORDER BY m.WorkOrderActivityId, m.Id
       `);
@@ -710,10 +713,13 @@ router.get(
         .request()
         .input("WorkOrderActivityId", sql.Int, req.params.activityId).query(`
         SELECT m.*, img.M_Name AS ItemName, uom.UOMName,
-          CAST(m.ItemId AS NVARCHAR(36)) AS ItemIdStr
+          CAST(m.ItemId AS NVARCHAR(36)) AS ItemIdStr,
+          m.SupplierIdPerLine,
+          sup.LHeadName AS SupplierNamePerLine
         FROM dbo.WorkOrderActivityMaterials m
-        LEFT JOIN dbo.Item_Master_Group img ON img.M_Id = m.ItemId
-        LEFT JOIN dbo.UOMMaster         uom ON uom.Id   = m.UOMId
+        LEFT JOIN dbo.Item_Master_Group  img ON img.M_Id   = m.ItemId
+        LEFT JOIN dbo.UOMMaster          uom ON uom.Id     = m.UOMId
+        LEFT JOIN dbo.AccountHeadMaster  sup ON sup.LHeadId = m.SupplierIdPerLine
         WHERE m.WorkOrderActivityId = @WorkOrderActivityId ORDER BY m.Id
       `);
       res.json(result.recordset);
@@ -729,7 +735,8 @@ router.get(
  * DocNo is fetched from the WorkOrderHeader via the activity's WorkOrderHeaderId
  */
 router.post("/:id/activities/:activityId/materials", async (req, res) => {
-  const { ItemId, UOMId, Quantity, Rate, Remarks } = req.body;
+  const { ItemId, UOMId, Quantity, Rate, Remarks, SupplierIdPerLine } =
+    req.body;
 
   // ItemId must be a non-empty UUID string
   if (!ItemId || typeof ItemId !== "string" || ItemId.trim() === "") {
@@ -762,13 +769,18 @@ router.post("/:id/activities/:activityId/materials", async (req, res) => {
       .input("Rate", sql.Decimal(18, 2), Rate || null)
       .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
       .input("DocNo", sql.NVarChar(100), docNo)
+      .input(
+        "SupplierIdPerLine",
+        sql.Int,
+        SupplierIdPerLine ? parseInt(SupplierIdPerLine, 10) : null,
+      )
       .input("CreatedBy", sql.NVarChar(100), req.user?.name || null)
       .input("CreatedAt", sql.DateTime2, new Date()).query(`
         INSERT INTO dbo.WorkOrderActivityMaterials
-          (WorkOrderActivityId, ItemId, UOMId, Quantity, Rate, Remarks, DocNo, CreatedBy, CreatedAt)
+          (WorkOrderActivityId, ItemId, UOMId, Quantity, Rate, Remarks, DocNo, SupplierIdPerLine, CreatedBy, CreatedAt)
         OUTPUT INSERTED.Id
         VALUES
-          (@WorkOrderActivityId, @ItemId, @UOMId, @Quantity, @Rate, @Remarks, @DocNo, @CreatedBy, @CreatedAt)
+          (@WorkOrderActivityId, @ItemId, @UOMId, @Quantity, @Rate, @Remarks, @DocNo, @SupplierIdPerLine, @CreatedBy, @CreatedAt)
       `);
     await bumpCacheVersion("work-orders");
     res
@@ -783,7 +795,8 @@ router.post("/:id/activities/:activityId/materials", async (req, res) => {
 router.put(
   "/:id/activities/:activityId/materials/:materialId",
   async (req, res) => {
-    const { ItemId, UOMId, Quantity, Rate, Remarks } = req.body;
+    const { ItemId, UOMId, Quantity, Rate, Remarks, SupplierIdPerLine } =
+      req.body;
     try {
       const pool = getPool();
       await pool
@@ -794,11 +807,16 @@ router.put(
         .input("Quantity", sql.Decimal(18, 2), Quantity || null)
         .input("Rate", sql.Decimal(18, 2), Rate || null)
         .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
+        .input(
+          "SupplierIdPerLine",
+          sql.Int,
+          SupplierIdPerLine ? parseInt(SupplierIdPerLine, 10) : null,
+        )
         .input("UpdatedBy", sql.NVarChar(100), req.user?.name || null)
         .input("UpdatedAt", sql.DateTime2, new Date()).query(`
         UPDATE dbo.WorkOrderActivityMaterials SET
           ItemId=@ItemId, UOMId=@UOMId, Quantity=@Quantity,
-          Rate=@Rate, Remarks=@Remarks,
+          Rate=@Rate, Remarks=@Remarks, SupplierIdPerLine=@SupplierIdPerLine,
           UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt
         WHERE Id=@Id
       `);
@@ -1021,13 +1039,20 @@ router.post("/:id/save-full", async (req, res) => {
             )
             // ↓ DocNo FK — required by FK_WorkOrderActivityMaterials_DocNo
             .input("DocNo", sql.NVarChar(100), docNo)
+            .input(
+              "SupplierIdPerLine",
+              sql.Int,
+              mat.SupplierIdPerLine
+                ? parseInt(mat.SupplierIdPerLine, 10)
+                : null,
+            )
             .input("CreatedBy", sql.NVarChar(100), req.user?.name || null)
             .input("CreatedAt", sql.DateTime2, new Date()).query(`
               INSERT INTO dbo.WorkOrderActivityMaterials
-                (WorkOrderActivityId, ItemId, UOMId, Quantity, Rate, Remarks, GSTRate, DocNo, CreatedBy, CreatedAt)
+                (WorkOrderActivityId, ItemId, UOMId, Quantity, Rate, Remarks, GSTRate, DocNo, SupplierIdPerLine, CreatedBy, CreatedAt)
               OUTPUT INSERTED.Id
               VALUES
-                (@WorkOrderActivityId, @ItemId, @UOMId, @Quantity, @Rate, @Remarks, @GSTRate, @DocNo, @CreatedBy, @CreatedAt)
+                (@WorkOrderActivityId, @ItemId, @UOMId, @Quantity, @Rate, @Remarks, @GSTRate, @DocNo, @SupplierIdPerLine, @CreatedBy, @CreatedAt)
             `);
           materialDbId = r.recordset[0].Id;
         } else {
@@ -1044,11 +1069,19 @@ router.post("/:id/save-full", async (req, res) => {
               sql.Decimal(5, 2),
               mat.GSTRate != null ? Number(mat.GSTRate) : 0,
             )
+            .input(
+              "SupplierIdPerLine",
+              sql.Int,
+              mat.SupplierIdPerLine
+                ? parseInt(mat.SupplierIdPerLine, 10)
+                : null,
+            )
             .input("UpdatedBy", sql.NVarChar(100), req.user?.name || null)
             .input("UpdatedAt", sql.DateTime2, new Date()).query(`
               UPDATE dbo.WorkOrderActivityMaterials SET
                 ItemId=@ItemId, UOMId=@UOMId, Quantity=@Quantity,
                 Rate=@Rate, Remarks=@Remarks, GSTRate=@GSTRate,
+                SupplierIdPerLine=@SupplierIdPerLine,
                 UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt
               WHERE Id=@Id
             `);
@@ -1176,6 +1209,182 @@ router.put("/:id/reject", async (req, res) => {
     res
       .status(err.message.includes("not authorized") ? 403 : 400)
       .json({ error: err.message });
+  }
+});
+
+// ── Confirm Work Order & auto-create WO-POs ───────────────────────────────────
+//
+// Reads the WO-PO DocTypeId from SystemSettings key "wo_po_doc_type_id".
+// Reads the threshold from SystemSettings key "wo_po_threshold" (default 1000).
+// Groups qualifying materials by SupplierIdPerLine → one WO-PO per supplier.
+// Materials without a SupplierIdPerLine are grouped under supplierId = null
+// (they produce one combined WO-PO with no supplier set).
+//
+router.post("/:id/confirm", async (req, res) => {
+  const headerId = parseInt(req.params.id, 10);
+  const userEmail = requireUserName(req, res);
+  if (!userEmail) return;
+
+  try {
+    const pool = getPool();
+
+    // 1. Check WO exists and is in a confirmable state
+    const headerRow = await pool.request().input("Id", sql.Int, headerId)
+      .query(`
+      SELECT Id, DocumentNumber, DocNo, Status, CompanyId, ProjectId
+      FROM dbo.WorkOrderHeader WHERE Id = @Id
+    `);
+    if (!headerRow.recordset.length)
+      return res.status(404).json({ error: "Work order not found" });
+    const hdr = headerRow.recordset[0];
+    if (hdr.Status === "Approved")
+      return res.status(400).json({ error: "Work order is already approved" });
+
+    // 2. Read system settings
+    let threshold = 1000;
+    let woPODocTypeId = null;
+    try {
+      const settingsRow = await pool.request().query(`
+        SELECT [Key], [Value] FROM dbo.SystemSettings
+        WHERE [Key] IN ('wo_po_threshold', 'wo_po_doc_type_id')
+      `);
+      for (const row of settingsRow.recordset) {
+        if (row.Key === "wo_po_threshold")
+          threshold = parseFloat(row.Value) || 1000;
+        if (row.Key === "wo_po_doc_type_id")
+          woPODocTypeId = parseInt(row.Value, 10) || null;
+      }
+    } catch {
+      // SystemSettings may not exist yet; use defaults
+    }
+
+    // 3. Load all materials for this WO (with supplier + item info)
+    const matsRow = await pool.request().input("HeaderId", sql.Int, headerId)
+      .query(`
+      SELECT
+        m.Id, m.ItemId, img.M_Name AS ItemName, m.UOMId, uom.UOMName,
+        m.Quantity, m.Rate, m.GSTRate,
+        m.SupplierIdPerLine,
+        sup.LHeadName AS SupplierName
+      FROM dbo.WorkOrderActivityMaterials m
+      INNER JOIN dbo.WorkOrderActivities a   ON a.Id     = m.WorkOrderActivityId
+      LEFT  JOIN dbo.Item_Master_Group   img ON img.M_Id = m.ItemId
+      LEFT  JOIN dbo.UOMMaster           uom ON uom.Id   = m.UOMId
+      LEFT  JOIN dbo.AccountHeadMaster   sup ON sup.LHeadId = m.SupplierIdPerLine
+      WHERE a.WorkOrderHeaderId = @HeaderId
+        AND m.ItemId IS NOT NULL
+    `);
+
+    const materials = matsRow.recordset;
+
+    // 4. Calculate total material cost
+    const totalMaterialCost = materials.reduce((sum, m) => {
+      return sum + (parseFloat(m.Quantity) || 0) * (parseFloat(m.Rate) || 0);
+    }, 0);
+
+    const createdPOs = [];
+
+    // 5. Only auto-create WO-POs if threshold is met
+    if (totalMaterialCost >= threshold && woPODocTypeId) {
+      // Group by SupplierIdPerLine (null = no supplier)
+      const bySupplier = {};
+      for (const m of materials) {
+        const key =
+          m.SupplierIdPerLine != null
+            ? String(m.SupplierIdPerLine)
+            : "__none__";
+        if (!bySupplier[key])
+          bySupplier[key] = {
+            supplierId: m.SupplierIdPerLine,
+            supplierName: m.SupplierName,
+            lines: [],
+          };
+        bySupplier[key].lines.push(m);
+      }
+
+      for (const group of Object.values(bySupplier)) {
+        // Compute totals for this supplier group
+        const subtotal = group.lines.reduce(
+          (s, m) =>
+            s + (parseFloat(m.Quantity) || 0) * (parseFloat(m.Rate) || 0),
+          0,
+        );
+        const poItemsArr = group.lines.map((m, i) => ({
+          itemId: m.ItemId ? String(m.ItemId) : null,
+          itemDescription: m.ItemName || "",
+          quantity: parseFloat(m.Quantity) || 0,
+          unit: m.UOMName || "",
+          rate: parseFloat(m.Rate) || 0,
+          amount: (parseFloat(m.Quantity) || 0) * (parseFloat(m.Rate) || 0),
+          tax: parseFloat(m.GSTRate) || 0,
+        }));
+
+        // Lock a doc number for this WO-PO
+        const { finYear } = req.body;
+        const docNo = await lockNextDocNumber(pool, sql, {
+          docTypeId: woPODocTypeId,
+          finYear: finYear || null,
+          tableName: "PurchaseOrders",
+          issuedBy: userEmail,
+        });
+
+        const insertResult = await pool
+          .request()
+          .input("PONo", sql.NVarChar(100), docNo)
+          .input("PODate", sql.Date, new Date())
+          .input("SupplierID", sql.Int, group.supplierId || null)
+          .input("CompanyId", sql.Int, hdr.CompanyId || null)
+          .input("ProjectId", sql.Int, hdr.ProjectId || null)
+          .input("Subtotal", sql.Decimal(18, 2), subtotal)
+          .input("Total", sql.Decimal(18, 2), subtotal)
+          .input("Status", sql.NVarChar(50), "Draft")
+          .input("DocTypeId", sql.Int, woPODocTypeId)
+          .input("DocNo", sql.NVarChar(100), docNo)
+          .input("SourceWOId", sql.Int, headerId)
+          .input(
+            "SourceWODocNo",
+            sql.NVarChar(100),
+            hdr.DocNo || hdr.DocumentNumber || null,
+          )
+          .input("POItems", sql.NVarChar(sql.MAX), JSON.stringify(poItemsArr))
+          .input("CreatedBy", sql.NVarChar(100), userEmail)
+          .input("CreatedAt", sql.DateTime2, new Date()).query(`
+            INSERT INTO dbo.PurchaseOrders
+              (PurchaseOrderNo, PODate, SupplierID, CompanyId, ProjectId,
+               SubtotalAmount, TotalAmount, Status, DocTypeId, DocNo,
+               SourceWOId, SourceWODocNo, POItems, CreatedBy, CreatedAt)
+            OUTPUT INSERTED.PurchaseOrderID
+            VALUES
+              (@PONo, @PODate, @SupplierID, @CompanyId, @ProjectId,
+               @Subtotal, @Total, @Status, @DocTypeId, @DocNo,
+               @SourceWOId, @SourceWODocNo, @POItems, @CreatedBy, @CreatedAt)
+          `);
+
+        const newPOId = insertResult.recordset[0].PurchaseOrderID;
+        await backPatchRecordId(pool, sql, docNo, "PurchaseOrders", newPOId);
+        createdPOs.push({
+          PurchaseOrderID: newPOId,
+          PurchaseOrderNo: docNo,
+          SupplierName: group.supplierName || null,
+        });
+      }
+    }
+
+    // 6. Bump both caches
+    await bumpCacheVersion("work-orders");
+    await bumpCacheVersion("purchase-orders");
+
+    res.json({
+      message: "Work order confirmed",
+      totalMaterialCost,
+      threshold,
+      thresholdMet: totalMaterialCost >= threshold,
+      woPOsCreated: createdPOs.length,
+      purchaseOrders: createdPOs,
+    });
+  } catch (err) {
+    console.error("[POST /:id/confirm]", err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
