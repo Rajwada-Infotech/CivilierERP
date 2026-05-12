@@ -1,12 +1,10 @@
 const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
-const authMiddleware = require("../middleware/auth");
 const allowRoles = require("../middleware/role");
 const { bumpCacheVersion } = require("../redis");
 const { cache } = require("../middleware/cache");
 
-router.use(authMiddleware);
 const adminOnly = allowRoles("admin", "super_admin", "dba");
 
 // ── GET all projects ──────────────────────────────────────────────────────────
