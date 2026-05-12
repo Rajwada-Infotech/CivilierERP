@@ -127,6 +127,7 @@ const ALL_ROUTES = [
   { path: "/api/menu-types", file: "./routes/menuType" },
   { path: "/api/typeofdoc", file: "./routes/typeofdoc" },
   { path: "/api/boq", file: "./routes/boq" },
+  { path: "/api/app-version", file: "./routes/appVersion" },
 ];
 
 // ─── createApp ──────────────────────────────────────────────────────────────
@@ -338,27 +339,39 @@ function setupGracefulShutdown(server, worker) {
     if (shuttingDown) return;
     shuttingDown = true;
 
-    logger.warn({ event: "SHUTDOWN_START", signal }, "Graceful shutdown started");
+    logger.warn(
+      { event: "SHUTDOWN_START", signal },
+      "Graceful shutdown started",
+    );
 
-    const forceExitTimer = setTimeout(() => {
-      logger.fatal(
-        { event: "SHUTDOWN_FORCE_EXIT", signal },
-        "Graceful shutdown timed out",
-      );
-      process.exit(1);
-    }, Number(process.env.SHUTDOWN_TIMEOUT_MS || 10000));
+    const forceExitTimer = setTimeout(
+      () => {
+        logger.fatal(
+          { event: "SHUTDOWN_FORCE_EXIT", signal },
+          "Graceful shutdown timed out",
+        );
+        process.exit(1);
+      },
+      Number(process.env.SHUTDOWN_TIMEOUT_MS || 10000),
+    );
     forceExitTimer.unref();
 
     server.close(async (err) => {
       if (err) {
-        logger.error({ event: "HTTP_SERVER_CLOSE_ERROR", err }, "HTTP close failed");
+        logger.error(
+          { event: "HTTP_SERVER_CLOSE_ERROR", err },
+          "HTTP close failed",
+        );
       }
 
       try {
         worker?.stopWorker?.();
         await closeRedis();
         await closeDB();
-        logger.info({ event: "SHUTDOWN_DONE", signal }, "Graceful shutdown complete");
+        logger.info(
+          { event: "SHUTDOWN_DONE", signal },
+          "Graceful shutdown complete",
+        );
         process.exit(err ? 1 : 0);
       } catch (closeErr) {
         logger.error(
