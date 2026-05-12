@@ -602,7 +602,7 @@ export default function ProjectMaster() {
   const deleteMutation = useMutation({
     mutationFn: deleteProject,
     onSuccess: () => {
-      toast.success("Project deactivated successfully");
+      toast.success("Project deleted successfully");
       qc.invalidateQueries({ queryKey: ["project-master"] });
       qc.invalidateQueries({ queryKey: ["enterprises"] });
       setDeleteConfirm(null);
@@ -1216,10 +1216,10 @@ export default function ProjectMaster() {
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
             <div className="bg-card border border-border rounded-xl p-6 w-80">
               <p className="font-semibold text-foreground">
-                Deactivate this project?
+                Delete this project?
               </p>
               <p className="text-sm text-muted-foreground mt-1">
-                The project will be deactivated and hidden from all dropdowns.
+                This action is permanent and cannot be undone.
               </p>
               <div className="flex gap-3 mt-6">
                 <button
