@@ -15,6 +15,7 @@ import {
   ChevronRight,
   Search,
   Download,
+  Hash,
 } from "lucide-react";
 import {
   getActivities,
@@ -24,6 +25,7 @@ import {
   toPayload,
   type DbActivity,
 } from "@/api/activityMasterApi";
+import { getHsn } from "@/api/hsnApi";
 
 // ─── Status badge ─────────────────────────────────────────────────────────────
 const StatusBadge = ({ active }: { active: boolean }) => (
@@ -111,6 +113,12 @@ const GroupRow = ({
                 <span className="hidden md:block text-xs text-muted-foreground font-mono truncate max-w-[260px]">
                   {activity.short_description}
                 </span>
+                {activity.hsn_code && (
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[10px] font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20 shrink-0">
+                    <Hash size={9} />
+                    {activity.hsn_code}
+                  </span>
+                )}
                 <StatusBadge active={activity.is_active} />
               </div>
             ))
@@ -174,6 +182,21 @@ const ActivityMaster: React.FC = () => {
     refetchOnMount: true,
   });
 
+  // HSN master for the dropdown
+  const { data: hsnRaw = [] } = useQuery({
+    queryKey: ["hsn-master"],
+    queryFn: getHsn,
+  });
+
+  const hsnOptions: { code: string; desc: string }[] = Array.isArray(hsnRaw)
+    ? (hsnRaw as any[])
+        .map((h) => ({
+          code: String(h.HCode ?? ""),
+          desc: String(h.HShortDescription ?? h.HDescription ?? ""),
+        }))
+        .filter((h) => h.code !== "")
+    : [];
+
   const dbItems: DbActivity[] = Array.isArray(dbData) ? dbData : [];
   const groups = dbItems.filter((i) => i.activity_type === 0);
   const activityItems = dbItems.filter((i) => i.activity_type === 1);
@@ -197,6 +220,7 @@ const ActivityMaster: React.FC = () => {
       groupName: group?.activity_name || "",
       belongsTo: item.belongsTo ?? "",
       status: item.is_active,
+      hsnCode: item.hsn_code ?? "",
     };
   });
 
@@ -286,6 +310,48 @@ const ActivityMaster: React.FC = () => {
               options: groupOptions.map((o) => o.label),
             },
             {
+              name: "hsnCode",
+              label: "HSN Code",
+              type: "custom",
+              render: ({ value, onChange, formData }) => {
+                const isActivity = formData?.activityType === "Activity";
+                return (
+                  <div className="flex flex-col gap-1">
+                    <select
+                      value={(value as string) ?? ""}
+                      disabled={!isActivity}
+                      onChange={(e) => onChange(e.target.value)}
+                      className={`w-full text-sm rounded-lg border px-3 py-2.5 transition focus:outline-none focus:ring-2 focus:ring-primary/30 appearance-none
+                        ${
+                          !isActivity
+                            ? "border-border bg-muted/40 text-muted-foreground cursor-not-allowed opacity-60"
+                            : "border-border bg-background text-foreground"
+                        }`}
+                    >
+                      <option value="">
+                        {!isActivity
+                          ? "N/A — only for Activity type"
+                          : "Select HSN Code…"}
+                      </option>
+                      {isActivity &&
+                        hsnOptions.map((h) => (
+                          <option key={h.code} value={h.code}>
+                            {h.code}
+                            {h.desc ? ` — ${h.desc}` : ""}
+                          </option>
+                        ))}
+                    </select>
+                    {!isActivity && (
+                      <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+                        <Hash size={10} />
+                        HSN can only be linked to an Activity, not a Group
+                      </p>
+                    )}
+                  </div>
+                );
+              },
+            },
+            {
               name: "status",
               label: "Status",
               type: "toggle",
@@ -297,6 +363,7 @@ const ActivityMaster: React.FC = () => {
             { key: "shortDesc", label: "Short Desc", hideOnMobile: true },
             { key: "activityType", label: "Type" },
             { key: "groupName", label: "Group", hideOnMobile: true },
+            { key: "hsnCode", label: "HSN", hideOnMobile: true },
             { key: "status", label: "Status" },
           ]}
           initialData={mappedData}
