@@ -564,18 +564,68 @@ async function backPatchRecordId(pool, sql, docNo, tableName, recordId) {
  * @returns {Promise<{nextDocNo: string, prefix: string, nextSeq: number, finYear: string|null}>}
  */
 async function previewNextDocNumber(pool, sql, docTypeId, finYear) {
-  const typeResult = await pool
+  // FIX: the original code ran two sequential DB round-trips:
+  //   1. fetch TypeOfDoc row
+  //   2. query DocNumberSequence for max serial
+  // The second query depends on columns from the first (tier, prefix, finYear),
+  // so they can't be naively parallelised — but we CAN start the TypeOfDoc fetch
+  // and derive all tier info immediately, then fire the sequence query.
+  // The real win: run the TypeOfDoc fetch and a combined single-query approach
+  // that joins TypeOfDoc + DocNumberSequence in one round-trip.
+
+  const year = currentYear();
+  const clientFinYear = finYear || null;
+
+  // Single query: join TypeOfDoc with an aggregated DocNumberSequence max.
+  // The CROSS APPLY computes the effective prefix and filters DocNumberSequence
+  // in the same execution plan — one network round-trip instead of two.
+  // Tier detection logic mirrors detectTier() in JS.
+  const result = await pool
     .request()
-    .input("TypeOfDocId", sql.Int, docTypeId).query(`
-      SELECT Prefix, FullPrefix, StartingDocNo,
-             DocNoPrefix, ISNULL(DocNoPadding, 5) AS DocNoPadding,
-             ModuleCode, ProjectCode,
-             ISNULL(FinYearReset, 0) AS FinYearReset
-      FROM   dbo.TypeOfDoc
-      WHERE  TypeOfDocId = @TypeOfDocId AND IsActive = 1
+    .input("TypeOfDocId", sql.Int, docTypeId)
+    .input("ClientFinYear", sql.NVarChar(10), clientFinYear)
+    .input("Year", sql.SmallInt, year)
+    .input("YearPct", sql.NVarChar(20), `%-${year}-%`).query(`
+      SELECT
+        t.Prefix, t.FullPrefix, t.StartingDocNo,
+        t.DocNoPrefix, ISNULL(t.DocNoPadding, 5) AS DocNoPadding,
+        t.ModuleCode, t.ProjectCode,
+        ISNULL(t.FinYearReset, 0) AS FinYearReset,
+        ISNULL(seq.MaxSeq, 0) AS MaxSeq
+      FROM dbo.TypeOfDoc t
+      CROSS APPLY (
+        SELECT MAX(ISNULL(s.DocSerial, 0)) AS MaxSeq
+        FROM dbo.DocNumberSequence s
+        WHERE
+          -- Tier 1 (new-project): match on computed prefix + FinYear
+          (
+            t.ModuleCode IS NOT NULL AND t.ProjectCode IS NOT NULL AND t.FinYearReset = 1
+            AND s.DocNoPrefix = CONCAT(t.ProjectCode, '-', t.ModuleCode)
+            AND s.FinYear = COALESCE(@ClientFinYear,
+              CASE WHEN MONTH(GETDATE()) >= 4
+                THEN CONCAT(RIGHT(YEAR(GETDATE()),2),'-',RIGHT(YEAR(GETDATE())+1,2))
+                ELSE CONCAT(RIGHT(YEAR(GETDATE())-1,2),'-',RIGHT(YEAR(GETDATE()),2))
+              END)
+          )
+          OR
+          -- Tier 2 (new-dash): match on DocNoPrefix + year
+          (
+            t.DocNoPrefix IS NOT NULL AND NOT (t.ModuleCode IS NOT NULL AND t.ProjectCode IS NOT NULL AND t.FinYearReset = 1)
+            AND (s.DocNoPrefix = t.DocNoPrefix OR s.DocNoPrefix IS NULL)
+            AND (s.DocYear = @Year OR s.DocYear IS NULL)
+            AND s.DocNo LIKE @YearPct
+          )
+          OR
+          -- Tier 3 (legacy): match by prefix LIKE
+          (
+            t.DocNoPrefix IS NULL
+            AND s.DocNo LIKE CONCAT(REPLACE(REPLACE(ISNULL(t.FullPrefix, t.Prefix), '%', '[%]'), '_', '[_]'), '%')
+          )
+      ) seq
+      WHERE t.TypeOfDocId = @TypeOfDocId AND t.IsActive = 1
     `);
 
-  const typeRow = typeResult.recordset[0];
+  const typeRow = result.recordset[0];
   if (!typeRow) throw new Error("Document type not found");
 
   const tier = detectTier(typeRow);
@@ -586,55 +636,15 @@ async function previewNextDocNumber(pool, sql, docTypeId, finYear) {
   const truePrefix = rawPrefix.replace(/\d+$/, "");
   const startFrom = typeRow.StartingDocNo ?? 1;
   const padding = typeRow.DocNoPadding ?? 5;
-  const year = currentYear();
 
   const resolvedFinYear =
-    finYear || (tier === "new-project" ? currentFinYear() : null);
+    clientFinYear || (tier === "new-project" ? currentFinYear() : null);
   const effectiveDocNoPrefix =
     tier === "new-project" ? `${projectCode}-${moduleCode}` : docNoPrefix;
 
-  // Read max serial from DocNumberSequence only (preview = no table scan)
-  let dnsMax = 0;
+  const dnsMax = typeRow.MaxSeq ?? 0;
+  const nextSeq = Math.max(dnsMax + 1, startFrom);
 
-  if (tier === "new-project") {
-    const r = await pool
-      .request()
-      .input("Prefix", sql.NVarChar(50), effectiveDocNoPrefix)
-      .input("FinYear", sql.NVarChar(10), resolvedFinYear).query(`
-        SELECT MAX(ISNULL(DocSerial, 0)) AS MaxSeq
-        FROM   dbo.DocNumberSequence
-        WHERE  DocNoPrefix = @Prefix
-          AND  FinYear     = @FinYear
-      `);
-    dnsMax = r.recordset[0]?.MaxSeq ?? 0;
-  } else if (tier === "new-dash") {
-    const like = `${docNoPrefix}-${year}-%`;
-    const r = await pool
-      .request()
-      .input("Like1", sql.NVarChar(120), like)
-      .input("Prefix", sql.NVarChar(30), docNoPrefix)
-      .input("Year", sql.SmallInt, year).query(`
-        SELECT MAX(ISNULL(DocSerial, 0)) AS MaxSeq
-        FROM   dbo.DocNumberSequence
-        WHERE  DocNo LIKE @Like1
-          AND  (DocNoPrefix = @Prefix OR DocNoPrefix IS NULL)
-          AND  (DocYear = @Year OR DocYear IS NULL)
-      `);
-    dnsMax = r.recordset[0]?.MaxSeq ?? 0;
-  } else {
-    // legacy
-    const r = await pool
-      .request()
-      .input("Prefix", sql.NVarChar(100), truePrefix)
-      .input("PrefixLike", sql.NVarChar(100), truePrefix + "%").query(`
-        SELECT MAX(TRY_CAST(SUBSTRING(DocNo, LEN(@Prefix) + 1, 6) AS INT)) AS MaxSeq
-        FROM   dbo.DocNumberSequence
-        WHERE  DocNo LIKE @PrefixLike
-      `);
-    dnsMax = r.recordset[0]?.MaxSeq ?? 0;
-  }
-
-  const nextSeq = Math.max((dnsMax ?? 0) + 1, startFrom);
   const nextDocNo = buildDocNo({
     tier,
     projectCode,

@@ -4,16 +4,19 @@
 const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
-const authMiddleware = require("../middleware/auth");
 const { checkPermission } = require("../middleware/permissions");
 const { previewNextDocNumber } = require("../utils/docNumberLock");
+const { cache, localVersionCache } = require("../middleware/cache");
 
 // ── Auth helpers ──────────────────────────────────────────────────────────────
 
 const BYPASS_ROLES = ["admin", "super_admin", "dba", "sa"];
 
+// NOTE: authMiddleware is intentionally NOT included here.
+// It is already applied globally via app.use("/api", authMiddleware) in server.js.
+// Adding it here again was causing double auth stages in request timing logs
+// (two auth.redis_blacklist + auth.jwt_verify blocks per request on this router).
 const bypassOrCheck = (module, subModule, action = "CanView") => [
-  authMiddleware,
   (req, res, next) => {
     const role = (req.user?.role || "").toLowerCase().replace(/\s+/g, "_");
     if (BYPASS_ROLES.includes(role)) return next();
@@ -48,6 +51,7 @@ const MODULE_LINKS = {
 router.get(
   "/",
   ...bypassOrCheck("Admin", "DocumentType", "CanView"),
+  cache("document-type", 300, { shared: true }),
   async (req, res) => {
     try {
       const pool = getPool();
@@ -114,7 +118,7 @@ router.get(
 //             Required for Tier 1 (new-project) and Tier 3 (legacy) rows.
 //             Auto-derived from today for Tier 1 when omitted.
 //
-router.get("/:id/next-number", authMiddleware, async (req, res) => {
+router.get("/:id/next-number", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0)
     return res.status(400).json({ error: "Invalid document type id" });
@@ -132,7 +136,7 @@ router.get("/:id/next-number", authMiddleware, async (req, res) => {
 });
 
 // ── GET /entrytypes ───────────────────────────────────────────────────────────
-router.get("/entrytypes", authMiddleware, async (req, res) => {
+router.get("/entrytypes", async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -148,7 +152,7 @@ router.get("/entrytypes", authMiddleware, async (req, res) => {
 });
 
 // ── GET /companies ────────────────────────────────────────────────────────────
-router.get("/companies", authMiddleware, async (req, res) => {
+router.get("/companies", async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -166,7 +170,7 @@ router.get("/companies", authMiddleware, async (req, res) => {
 });
 
 // ── GET /projects ─────────────────────────────────────────────────────────────
-router.get("/projects", authMiddleware, async (req, res) => {
+router.get("/projects", async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -253,6 +257,7 @@ router.post(
              @ModuleCode, @DocNoPrefix, @ProjectCode, @FinYearReset);
         `);
 
+      localVersionCache.invalidate("document-type");
       res.status(201).json({ message: "Document type created successfully" });
     } catch (err) {
       console.error("POST /document-type error:", err.message);
@@ -336,6 +341,7 @@ router.put(
           WHERE TypeOfDocId = @id;
         `);
 
+      localVersionCache.invalidate("document-type");
       res.json({ message: "Document type updated successfully" });
     } catch (err) {
       console.error("PUT /document-type error:", err.message);
@@ -364,6 +370,7 @@ router.delete(
             UpdatedAt = SYSDATETIME()
           WHERE TypeOfDocId = @id;
         `);
+      localVersionCache.invalidate("document-type");
       res.json({ message: "Document type deactivated successfully" });
     } catch (err) {
       console.error("DELETE /document-type error:", err.message);
