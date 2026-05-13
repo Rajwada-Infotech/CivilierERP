@@ -119,6 +119,8 @@ interface ExpenseOption {
   partyName?: string;
   amount?: number;
   companyId?: number | null;
+  companyName?: string;
+  financialYear?: string;
   installmentNo?: number;
   refNumber?: string | null;
   dueDate?: string | null;
@@ -331,6 +333,31 @@ const fetchCompanyOptions = async (): Promise<
   const res = await fetchWithAuth("/api/enterprises/options?business_type=C");
   if (!res.ok) return [];
   return res.json();
+};
+
+const fetchProjectOptions = async (): Promise<string[]> => {
+  const res = await fetchWithAuth("/api/enterprises/options?business_type=P");
+  if (!res.ok) return [];
+  const data: { id: number; label: string }[] = await res.json();
+  return data.map((p) => p.label).sort();
+};
+
+const fetchFinYears = async (): Promise<string[]> => {
+  const res = await fetchWithAuth("/api/fin-year");
+  if (!res.ok) return [];
+  const data: { FId: number; FName: string | null }[] = await res.json();
+  return data
+    .filter((f) => f.FName)
+    .map((f) => f.FName as string)
+    .sort()
+    .reverse();
+};
+
+const fetchSupplierOptions = async (): Promise<string[]> => {
+  const res = await fetchWithAuth("/api/account-head/options?type=S");
+  if (!res.ok) return [];
+  const data: { id: number; label: string }[] = await res.json();
+  return data.map((s) => s.label).sort();
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -733,6 +760,131 @@ function PartyFilterCombobox({
     </div>
   );
 }
+// ─── FilterBar ────────────────────────────────────────────────────────────────
+
+type BookingFilters = { company: string; project: string; year: string; supplier: string };
+
+function FilterBar({
+  expenseOptions,
+  filters,
+  onChange,
+}: {
+  expenseOptions: ExpenseOption[];
+  filters: BookingFilters;
+  onChange: (key: keyof BookingFilters, value: string) => void;
+}) {
+  const [projects, setProjects] = React.useState<string[]>([]);
+  const [finYears, setFinYears] = React.useState<string[]>([]);
+  const [suppliers, setSuppliers] = React.useState<string[]>([]);
+
+  React.useEffect(() => {
+    fetchProjectOptions().then(setProjects).catch(() => {});
+    fetchFinYears().then(setFinYears).catch(() => {});
+    fetchSupplierOptions().then(setSuppliers).catch(() => {});
+  }, []);
+
+  // Company — derived from expenseOptions (already resolved per option)
+  const companies = React.useMemo(
+    () =>
+      Array.from(
+        new Set(
+          expenseOptions
+            .map((o) => o.companyName)
+            .filter((v): v is string => !!v && v.trim() !== ""),
+        ),
+      ).sort(),
+    [expenseOptions],
+  );
+
+  const activeCount = Object.values(filters).filter(Boolean).length;
+
+  const dropdowns: {
+    key: keyof BookingFilters;
+    label: string;
+    icon: React.ElementType;
+    items: string[];
+    placeholder: string;
+  }[] = [
+    { key: "company",  label: "Company",  icon: Building2,    items: companies, placeholder: "All companies" },
+    { key: "project",  label: "Project",  icon: FolderKanban, items: projects,  placeholder: "All projects" },
+    { key: "year",     label: "Year",     icon: CalendarDays, items: finYears,  placeholder: "All years" },
+    { key: "supplier", label: "Supplier", icon: FileText,     items: suppliers, placeholder: "All suppliers" },
+  ];
+
+  return (
+    <div className="rounded-xl border border-border bg-card/60 p-3 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <div className="flex items-center justify-center w-5 h-5 rounded bg-muted">
+            <Search size={11} className="text-muted-foreground" />
+          </div>
+          <span className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
+            Filter expense bookings
+          </span>
+          {activeCount > 0 && (
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-heading font-semibold bg-primary/15 text-primary border border-primary/20">
+              {activeCount} active
+            </span>
+          )}
+        </div>
+        {activeCount > 0 && (
+          <button
+            type="button"
+            onClick={() => {
+              onChange("company", "");
+              onChange("project", "");
+              onChange("year", "");
+              onChange("supplier", "");
+            }}
+            className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-destructive transition-colors"
+          >
+            <X size={10} /> Clear all
+          </button>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        {dropdowns.map(({ key, label, icon: Icon, items, placeholder }) => (
+          <div key={key} className="space-y-1">
+            <label className="flex items-center gap-1 text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+              <Icon size={9} /> {label}
+            </label>
+            <div className="relative">
+              <select
+                value={filters[key] || ""}
+                onChange={(e) => onChange(key, e.target.value)}
+                className="w-full appearance-none pl-2 pr-7 py-1.5 rounded-lg text-xs bg-background border border-border/70 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+              >
+                <option value="">{placeholder}</option>
+                {items.map((item) => (
+                  <option key={item} value={item}>{item}</option>
+                ))}
+              </select>
+              <ChevronDown size={11} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {activeCount > 0 && (
+        <div className="flex flex-wrap gap-1.5 pt-0.5">
+          {(Object.entries(filters) as [keyof BookingFilters, string][]).map(([key, val]) => {
+            if (!val) return null;
+            return (
+              <span key={key} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading font-semibold bg-primary/10 text-primary border border-primary/20">
+                {val}
+                <button type="button" onClick={() => onChange(key, "")} className="ml-0.5 text-primary/50 hover:text-destructive transition-colors">
+                  <X size={9} />
+                </button>
+              </span>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── ExpenseBookingPicker ─────────────────────────────────────────────────────
 
 function ExpenseBookingPicker({
@@ -1355,6 +1507,9 @@ const Payment: React.FC = () => {
   const [loadingExpense, setLoadingExpense] = useState(false);
   const [linkedGRNs, setLinkedGRNs] = useState<GRNRef[]>([]);
   const [supplierBookingFilter, setSupplierBookingFilter] = useState("");
+  const [bookingFilters, setBookingFilters] = useState<BookingFilters>({
+    company: "", project: "", year: "", supplier: "",
+  });
 
   // ── Queries ────────────────────────────────────────────────────────────────
 
@@ -1419,6 +1574,7 @@ const Payment: React.FC = () => {
     setForm(blankForm());
     setLinkedGRNs([]);
     setSupplierBookingFilter("");
+    setBookingFilters({ company: "", project: "", year: "", supplier: "" });
     setView("form");
   };
 
@@ -1431,6 +1587,7 @@ const Payment: React.FC = () => {
     setForm({ ...rest, expenseId: matchedOption?.id ?? "" });
     setLinkedGRNs([]);
     setSupplierBookingFilter("");
+    setBookingFilters({ company: "", project: "", year: "", supplier: "" });
     setView("form");
   };
 
@@ -1440,6 +1597,7 @@ const Payment: React.FC = () => {
     setForm(blankForm());
     setLinkedGRNs([]);
     setSupplierBookingFilter("");
+    setBookingFilters({ company: "", project: "", year: "", supplier: "" });
   };
 
   // ── Mode change — clear irrelevant fields ──────────────────────────────────
@@ -1881,47 +2039,28 @@ const Payment: React.FC = () => {
               <div className="space-y-3">
                 <SectionHeader icon={Link2} label="Expense Booking" />
 
-                {/* Supplier filter — only shown when no booking is linked yet */}
+                {/* Filter bar + picker — only shown before a booking is linked */}
                 {!form.expenseRef &&
                   (() => {
-                    // Derive unique party/expense names from EName field
-                    const partyNames = Array.from(
-                      new Set(
-                        expenseOptions
-                          .map((o) => o.supplierName)
-                          .filter((n): n is string => !!n && n.trim() !== ""),
-                      ),
-                    ).sort();
-
-                    const filteredBySupplier = supplierBookingFilter
-                      ? expenseOptions.filter(
-                          (o) => o.supplierName === supplierBookingFilter,
-                        )
-                      : expenseOptions;
+                    const filteredOptions = expenseOptions.filter((o) => {
+                      if (bookingFilters.company && (o.companyName ?? "") !== bookingFilters.company) return false;
+                      if (bookingFilters.project && (o.projectName ?? "") !== bookingFilters.project) return false;
+                      if (bookingFilters.year && (o.financialYear ?? "") !== bookingFilters.year) return false;
+                      if (bookingFilters.supplier && (o.supplierName ?? "") !== bookingFilters.supplier) return false;
+                      return true;
+                    });
 
                     return (
                       <div className="space-y-3">
-                        {/* Party / Name filter — custom combobox */}
-                        <PartyFilterCombobox
-                          partyNames={partyNames}
-                          value={supplierBookingFilter}
-                          onChange={(val) => {
-                            setSupplierBookingFilter(val);
-                            if (val && form.expenseId) {
-                              const match = expenseOptions.find(
-                                (o) =>
-                                  o.id === form.expenseId &&
-                                  o.supplierName === val,
-                              );
-                              if (!match) clearExpenseLink();
-                            }
-                          }}
+                        <FilterBar
                           expenseOptions={expenseOptions}
+                          filters={bookingFilters}
+                          onChange={(key, val) =>
+                            setBookingFilters((prev) => ({ ...prev, [key]: val }))
+                          }
                         />
-
-                        {/* Expense booking picker — filtered by party */}
                         <ExpenseBookingPicker
-                          options={filteredBySupplier}
+                          options={filteredOptions}
                           value={form.expenseId}
                           onChange={handleExpenseSelect}
                           loading={loadingExpense}
@@ -1970,7 +2109,10 @@ const Payment: React.FC = () => {
                           className="text-muted-foreground shrink-0"
                         />
                         <ReadOnlyField
-                          value={form.project}
+                          value={
+                            expenseOptions.find((o) => o.id === form.expenseId)
+                              ?.supplierName || ""
+                          }
                           placeholder="From expense booking"
                         />
                       </div>

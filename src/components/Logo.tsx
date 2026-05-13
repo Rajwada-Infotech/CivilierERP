@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from "react";
+import { useAppVersion } from "@/hooks/useAppVersion";
 
 // ─── Matrix version scramble ──────────────────────────────────────────────────
-const VERSION = "v2.1.4";
 const CHARS =
   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789@#$%&";
 const rand = () => CHARS[Math.floor(Math.random() * CHARS.length)];
@@ -43,6 +43,8 @@ function useMatrixVersion(target: string) {
   };
 
   useEffect(() => {
+    if (!target || target === "…") return;
+
     // Initial scramble on mount after a short delay
     const init = setTimeout(scramble, 800);
 
@@ -54,8 +56,9 @@ function useMatrixVersion(target: string) {
       if (frameRef.current) clearTimeout(frameRef.current);
       if (cycleRef.current) clearInterval(cycleRef.current);
     };
+    // Re-run when the version string changes (e.g. after API loads)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [target]);
 
   return display;
 }
@@ -77,7 +80,13 @@ export function LogoIcon({ size = 32 }: { size?: number }) {
 }
 
 export function LogoFull({ className }: { className?: string }) {
-  const matrixVersion = useMatrixVersion(VERSION);
+  const { version } = useAppVersion();
+
+  // Prefix "v" if the DB value doesn't already start with it
+  const versionLabel =
+    version === "…" ? "…" : version.startsWith("v") ? version : `v${version}`;
+
+  const matrixVersion = useMatrixVersion(versionLabel);
 
   return (
     <div className={`flex items-center gap-2 ${className || ""}`}>
@@ -88,7 +97,7 @@ export function LogoFull({ className }: { className?: string }) {
         </span>
         <span
           className="text-[10px] text-emerald-500/80 font-mono tracking-wider select-none tabular-nums"
-          aria-label={VERSION}
+          aria-label={versionLabel}
         >
           {matrixVersion}
         </span>

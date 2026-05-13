@@ -15,6 +15,12 @@ router.get("/", cache("item-master", 300), async (req, res) => {
     `);
     const hasUOM = colCheck.recordset[0].cnt > 0;
 
+    const dsCheck = await pool.request().query(`
+      SELECT COUNT(1) AS cnt FROM sys.columns
+      WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group') AND name = N'default_supplier_id'
+    `);
+    const hasDS = dsCheck.recordset[0].cnt > 0;
+
     const result = await pool.request().query(`
       SELECT
         item.M_Id,
@@ -37,9 +43,12 @@ router.get("/", cache("item-master", 300), async (req, res) => {
         item.M_ApprovedBy,
         item.ApprovedAt,
         item.Parent_Id,
-        grp.M_Name AS ParentGroupName
+        grp.M_Name AS ParentGroupName,
+        ${hasDS ? "item.default_supplier_id," : "NULL AS default_supplier_id,"}
+        ${hasDS ? "gl.LHeadName AS DefaultSupplierName" : "NULL AS DefaultSupplierName"}
       FROM dbo.Item_Master_Group item
       LEFT JOIN dbo.Item_Master_Group grp ON grp.M_Id = item.Parent_Id
+      ${hasDS ? "LEFT JOIN dbo.AccountHeadMaster gl ON gl.LHeadId = item.default_supplier_id" : ""}
       WHERE item.Parent_Id IS NOT NULL
          OR item.M_IdentityCode = 1
       ORDER BY grp.M_Name, item.M_Name
@@ -58,8 +67,7 @@ router.get("/by-group/:groupId", async (req, res) => {
     const pool = getPool();
     const result = await pool
       .request()
-      .input("Parent_Id", sql.UniqueIdentifier, groupId)
-      .query(`
+      .input("Parent_Id", sql.UniqueIdentifier, groupId).query(`
         SELECT
           M_Id, M_Name, M_Description, M_Type,
           M_BelongsTo, M_Group, M_code,
@@ -89,9 +97,7 @@ router.get("/:id", async (req, res) => {
     `);
     const hasUOM = colCheck.recordset[0].cnt > 0;
 
-    const result = await pool
-      .request()
-      .input("M_Id", sql.UniqueIdentifier, id)
+    const result = await pool.request().input("M_Id", sql.UniqueIdentifier, id)
       .query(`
         SELECT
           item.M_Id,
@@ -114,9 +120,12 @@ router.get("/:id", async (req, res) => {
           item.M_ApprovedBy,
           item.ApprovedAt,
           item.Parent_Id,
-          grp.M_Name AS ParentGroupName
+          grp.M_Name AS ParentGroupName,
+          item.default_supplier_id,
+          gl.LHeadName AS DefaultSupplierName
         FROM dbo.Item_Master_Group item
         LEFT JOIN dbo.Item_Master_Group grp ON grp.M_Id = item.Parent_Id
+        LEFT JOIN dbo.AccountHeadMaster gl ON gl.LHeadId = item.default_supplier_id
         WHERE item.M_Id = @M_Id
       `);
     if (!result.recordset.length)
@@ -134,20 +143,24 @@ router.post("/", async (req, res) => {
     M_Name,
     M_Description,
     M_Type,
-    M_BelongsTo,      // ← group M_Id (UUID)
-    M_Group,          // ← group Name (string)
-    M_code,           // ← short code
+    M_BelongsTo, // ← group M_Id (UUID)
+    M_Group, // ← group Name (string)
+    M_code, // ← short code
     M_IdentityCode,
     M_HSN,
     M_CGST,
     M_IGST,
     M_SGST,
     M_UOM,
-    Parent_Id,        // ← group M_Id (UUID)
+    Parent_Id, // ← group M_Id (UUID)
+    default_supplier_id,
   } = req.body;
 
   if (!M_Name) return res.status(400).json({ error: "M_Name is required" });
-  if (!Parent_Id) return res.status(400).json({ error: "Parent_Id (group) is required for items" });
+  if (!Parent_Id)
+    return res
+      .status(400)
+      .json({ error: "Parent_Id (group) is required for items" });
 
   try {
     const pool = getPool();
@@ -160,22 +173,34 @@ router.post("/", async (req, res) => {
 
     const req2 = pool
       .request()
-      .input("M_Name",         sql.NVarChar(200),    M_Name)
-      .input("M_Description",  sql.NVarChar(500),    M_Description || null)
-      .input("M_Type",         sql.NVarChar(50),     M_Type || null)
-      .input("M_BelongsTo",    sql.UniqueIdentifier, M_BelongsTo || null)  // ← UUID
-      .input("M_Group",        sql.NVarChar(200),    M_Group || null)      // ← Name
-      .input("M_code",         sql.NVarChar(20),     M_code || null)       // ← short code
-      .input("M_IdentityCode", sql.Bit,              M_IdentityCode ? 1 : 0)
-      .input("M_HSN",          sql.NVarChar(20),     M_HSN || null)
-      .input("M_CGST",         sql.Decimal(5, 2),    M_CGST ?? null)
-      .input("M_IGST",         sql.Decimal(5, 2),    M_IGST ?? null)
-      .input("M_SGST",         sql.Decimal(5, 2),    M_SGST ?? null)
-      .input("M_CreatedBy",    sql.Int,              req.user?.userId || null)
-      .input("M_CreatedDate",  sql.DateTime2(3),     new Date())
-      .input("Parent_Id",      sql.UniqueIdentifier, Parent_Id);           // ← UUID
+      .input("M_Name", sql.NVarChar(200), M_Name)
+      .input("M_Description", sql.NVarChar(500), M_Description || null)
+      .input("M_Type", sql.NVarChar(50), M_Type || null)
+      .input("M_BelongsTo", sql.UniqueIdentifier, M_BelongsTo || null) // ← UUID
+      .input("M_Group", sql.NVarChar(200), M_Group || null) // ← Name
+      .input("M_code", sql.NVarChar(20), M_code || null) // ← short code
+      .input("M_IdentityCode", sql.Bit, M_IdentityCode ? 1 : 0)
+      .input("M_HSN", sql.NVarChar(20), M_HSN || null)
+      .input("M_CGST", sql.Decimal(5, 2), M_CGST ?? null)
+      .input("M_IGST", sql.Decimal(5, 2), M_IGST ?? null)
+      .input("M_SGST", sql.Decimal(5, 2), M_SGST ?? null)
+      .input("M_CreatedBy", sql.Int, req.user?.userId || null)
+      .input("M_CreatedDate", sql.DateTime2(3), new Date())
+      .input("Parent_Id", sql.UniqueIdentifier, Parent_Id); // ← UUID
 
     if (hasUOM) req2.input("M_UOM", sql.NVarChar(20), M_UOM || null);
+
+    const dsCheck2 = await pool.request().query(`
+      SELECT COUNT(1) AS cnt FROM sys.columns
+      WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group') AND name = N'default_supplier_id'
+    `);
+    const hasDS2 = dsCheck2.recordset[0].cnt > 0;
+    if (hasDS2)
+      req2.input(
+        "default_supplier_id",
+        sql.Int,
+        default_supplier_id ? parseInt(default_supplier_id) : null,
+      );
 
     const result = await req2.query(`
       INSERT INTO dbo.Item_Master_Group (
@@ -185,6 +210,7 @@ router.post("/", async (req, res) => {
         M_IdentityCode,
         M_HSN, M_CGST, M_IGST, M_SGST,
         ${hasUOM ? "M_UOM," : ""}
+        ${hasDS2 ? "default_supplier_id," : ""}
         M_CreatedBy, M_CreatedDate, Parent_Id
       )
       OUTPUT INSERTED.M_Id
@@ -195,6 +221,7 @@ router.post("/", async (req, res) => {
         @M_IdentityCode,
         @M_HSN, @M_CGST, @M_IGST, @M_SGST,
         ${hasUOM ? "@M_UOM," : ""}
+        ${hasDS2 ? "@default_supplier_id," : ""}
         @M_CreatedBy, @M_CreatedDate, @Parent_Id
       )
     `);
@@ -219,9 +246,9 @@ router.put("/:id", async (req, res) => {
     M_Name,
     M_Description,
     M_Type,
-    M_BelongsTo,      // ← group M_Id (UUID)
-    M_Group,          // ← group Name (string)
-    M_code,           // ← short code
+    M_BelongsTo, // ← group M_Id (UUID)
+    M_Group, // ← group Name (string)
+    M_code, // ← short code
     M_IdentityCode,
     M_HSN,
     M_CGST,
@@ -229,7 +256,8 @@ router.put("/:id", async (req, res) => {
     M_SGST,
     M_UOM,
     M_ApprovedBy,
-    Parent_Id,        // ← group M_Id (UUID)
+    Parent_Id, // ← group M_Id (UUID)
+    default_supplier_id,
   } = req.body;
 
   if (!M_Name) return res.status(400).json({ error: "M_Name is required" });
@@ -245,24 +273,36 @@ router.put("/:id", async (req, res) => {
 
     const req2 = pool
       .request()
-      .input("M_Id",           sql.UniqueIdentifier, id)
-      .input("M_Name",         sql.NVarChar(200),    M_Name)
-      .input("M_Description",  sql.NVarChar(500),    M_Description || null)
-      .input("M_Type",         sql.NVarChar(50),     M_Type || null)
-      .input("M_BelongsTo",    sql.UniqueIdentifier, M_BelongsTo || null)  // ← UUID
-      .input("M_Group",        sql.NVarChar(200),    M_Group || null)      // ← Name
-      .input("M_code",         sql.NVarChar(20),     M_code || null)       // ← short code
-      .input("M_IdentityCode", sql.Bit,              M_IdentityCode ? 1 : 0)
-      .input("M_HSN",          sql.NVarChar(20),     M_HSN || null)
-      .input("M_CGST",         sql.Decimal(5, 2),    M_CGST ?? null)
-      .input("M_IGST",         sql.Decimal(5, 2),    M_IGST ?? null)
-      .input("M_SGST",         sql.Decimal(5, 2),    M_SGST ?? null)
-      .input("M_UpdatedBy",    sql.Int,              req.user?.userId || null)
-      .input("UpdatedAt",      sql.DateTime2(3),     new Date())
-      .input("M_ApprovedBy",   sql.Int,              M_ApprovedBy || null)
-      .input("Parent_Id",      sql.UniqueIdentifier, Parent_Id || null);   // ← UUID
+      .input("M_Id", sql.UniqueIdentifier, id)
+      .input("M_Name", sql.NVarChar(200), M_Name)
+      .input("M_Description", sql.NVarChar(500), M_Description || null)
+      .input("M_Type", sql.NVarChar(50), M_Type || null)
+      .input("M_BelongsTo", sql.UniqueIdentifier, M_BelongsTo || null) // ← UUID
+      .input("M_Group", sql.NVarChar(200), M_Group || null) // ← Name
+      .input("M_code", sql.NVarChar(20), M_code || null) // ← short code
+      .input("M_IdentityCode", sql.Bit, M_IdentityCode ? 1 : 0)
+      .input("M_HSN", sql.NVarChar(20), M_HSN || null)
+      .input("M_CGST", sql.Decimal(5, 2), M_CGST ?? null)
+      .input("M_IGST", sql.Decimal(5, 2), M_IGST ?? null)
+      .input("M_SGST", sql.Decimal(5, 2), M_SGST ?? null)
+      .input("M_UpdatedBy", sql.Int, req.user?.userId || null)
+      .input("UpdatedAt", sql.DateTime2(3), new Date())
+      .input("M_ApprovedBy", sql.Int, M_ApprovedBy || null)
+      .input("Parent_Id", sql.UniqueIdentifier, Parent_Id || null); // ← UUID
 
     if (hasUOM) req2.input("M_UOM", sql.NVarChar(20), M_UOM || null);
+
+    const dsPutCheck = await pool.request().query(`
+      SELECT COUNT(1) AS cnt FROM sys.columns
+      WHERE object_id = OBJECT_ID(N'dbo.Item_Master_Group') AND name = N'default_supplier_id'
+    `);
+    const hasDSPut = dsPutCheck.recordset[0].cnt > 0;
+    if (hasDSPut)
+      req2.input(
+        "default_supplier_id",
+        sql.Int,
+        default_supplier_id ? parseInt(default_supplier_id) : null,
+      );
 
     const result = await req2.query(`
       UPDATE dbo.Item_Master_Group SET
@@ -278,6 +318,7 @@ router.put("/:id", async (req, res) => {
         M_IGST         = @M_IGST,
         M_SGST         = @M_SGST,
         ${hasUOM ? "M_UOM = @M_UOM," : ""}
+        ${hasDSPut ? "default_supplier_id = @default_supplier_id," : ""}
         M_UpdatedBy    = @M_UpdatedBy,
         UpdatedAt      = @UpdatedAt,
         M_ApprovedBy   = @M_ApprovedBy,
