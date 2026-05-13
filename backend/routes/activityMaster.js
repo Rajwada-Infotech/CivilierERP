@@ -38,7 +38,8 @@ router.get("/", cache("activity-master", 300), async (req, res) => {
         approved_at,
         updated_by,
         updated_at,
-        belongsTo
+        belongsTo,
+        hsn_code
       FROM dbo.ActivityMaster
       ORDER BY id ASC
     `);
@@ -53,9 +54,7 @@ router.get("/", cache("activity-master", 300), async (req, res) => {
 router.get("/:id", async (req, res) => {
   try {
     const pool = getPool();
-    const result = await pool
-      .request()
-      .input("id", sql.Int, req.params.id)
+    const result = await pool.request().input("id", sql.Int, req.params.id)
       .query(`
         SELECT
           id,
@@ -70,7 +69,8 @@ router.get("/:id", async (req, res) => {
           approved_at,
           updated_by,
           updated_at,
-          belongsTo
+          belongsTo,
+          hsn_code
         FROM dbo.ActivityMaster
         WHERE id = @id
       `);
@@ -93,6 +93,7 @@ router.post("/", async (req, res) => {
     activity_type, // 0 = Group, 1 = Activity
     group_id,
     is_active,
+    hsn_code, // only for Activity (activity_type === 1)
   } = req.body;
 
   // ── Validation ───────────────────────────────────────────────────────────
@@ -106,10 +107,12 @@ router.post("/", async (req, res) => {
   }
 
   // ── belongsTo logic ───────────────────────────────────────────────────────
-  // activity_type === 0 (Group)    → group_id = NULL,  belongsTo = NULL
-  // activity_type === 1 (Activity) → group_id = INT,   belongsTo = String(group_id) → stored in nvarchar(200)
-  const resolvedGroupId   = activity_type === 1 ? (group_id  || null) : null;
-  const resolvedBelongsTo = activity_type === 1 ? (group_id  ? String(group_id) : null) : null;
+  // activity_type === 0 (Group)    → group_id = NULL,  belongsTo = NULL, hsn_code = NULL
+  // activity_type === 1 (Activity) → group_id = INT,   belongsTo = String(group_id), hsn_code = optional
+  const resolvedGroupId = activity_type === 1 ? group_id || null : null;
+  const resolvedBelongsTo =
+    activity_type === 1 ? (group_id ? String(group_id) : null) : null;
+  const resolvedHsnCode = activity_type === 1 ? hsn_code || null : null;
 
   try {
     const pool = getPool();
@@ -118,21 +121,22 @@ router.post("/", async (req, res) => {
 
     await pool
       .request()
-      .input("activity_name",     sql.NVarChar(255), activity_name.trim())
+      .input("activity_name", sql.NVarChar(255), activity_name.trim())
       .input("short_description", sql.NVarChar(255), short_description || null)
-      .input("activity_type",     sql.TinyInt,       activity_type)
-      .input("group_id",          sql.Int,           resolvedGroupId)          // INT column
-      .input("is_active",         sql.Bit,           is_active !== false ? 1 : 0)
-      .input("created_by",        sql.NVarChar(300), userEmail)                // nvarchar(300)
-      .input("created_datetime",  sql.DateTime2,     now)
-      .input("belongsTo",         sql.NVarChar(200), resolvedBelongsTo)        // nvarchar(200) — group id as string
+      .input("activity_type", sql.TinyInt, activity_type)
+      .input("group_id", sql.Int, resolvedGroupId) // INT column
+      .input("is_active", sql.Bit, is_active !== false ? 1 : 0)
+      .input("created_by", sql.NVarChar(300), userEmail) // nvarchar(300)
+      .input("created_datetime", sql.DateTime2, now)
+      .input("belongsTo", sql.NVarChar(200), resolvedBelongsTo) // nvarchar(200) — group id as string
+      .input("hsn_code", sql.NVarChar(50), resolvedHsnCode) // nvarchar(50) — null for Groups
       .query(`
         INSERT INTO dbo.ActivityMaster
           (activity_name, short_description, activity_type, group_id,
-           is_active, created_by, created_datetime, belongsTo)
+           is_active, created_by, created_datetime, belongsTo, hsn_code)
         VALUES
           (@activity_name, @short_description, @activity_type, @group_id,
-           @is_active, @created_by, @created_datetime, @belongsTo)
+           @is_active, @created_by, @created_datetime, @belongsTo, @hsn_code)
       `);
 
     await bumpCacheVersion("activity-master");
@@ -151,6 +155,7 @@ router.put("/:id", async (req, res) => {
     activity_type, // 0 = Group, 1 = Activity
     group_id,
     is_active,
+    hsn_code, // only for Activity (activity_type === 1)
   } = req.body;
 
   // ── Validation ───────────────────────────────────────────────────────────
@@ -164,10 +169,13 @@ router.put("/:id", async (req, res) => {
   }
 
   // ── belongsTo logic ───────────────────────────────────────────────────────
-  // activity_type === 0 (Group)    → group_id = NULL,  belongsTo = NULL
-  // activity_type === 1 (Activity) → group_id = INT,   belongsTo = String(group_id) → stored in nvarchar(200)
-  const resolvedGroupId   = activity_type === 1 ? (group_id ? group_id : null) : null;
-  const resolvedBelongsTo = activity_type === 1 ? (group_id ? String(group_id) : null) : null;
+  // activity_type === 0 (Group)    → group_id = NULL,  belongsTo = NULL, hsn_code = NULL
+  // activity_type === 1 (Activity) → group_id = INT,   belongsTo = String(group_id), hsn_code = optional
+  const resolvedGroupId =
+    activity_type === 1 ? (group_id ? group_id : null) : null;
+  const resolvedBelongsTo =
+    activity_type === 1 ? (group_id ? String(group_id) : null) : null;
+  const resolvedHsnCode = activity_type === 1 ? hsn_code || null : null;
 
   try {
     const pool = getPool();
@@ -176,15 +184,16 @@ router.put("/:id", async (req, res) => {
 
     const result = await pool
       .request()
-      .input("id",                sql.Int,           req.params.id)
-      .input("activity_name",     sql.NVarChar(255), activity_name.trim())
+      .input("id", sql.Int, req.params.id)
+      .input("activity_name", sql.NVarChar(255), activity_name.trim())
       .input("short_description", sql.NVarChar(255), short_description || null)
-      .input("activity_type",     sql.TinyInt,       activity_type)
-      .input("group_id",          sql.Int,           resolvedGroupId)          // INT column
-      .input("is_active",         sql.Bit,           is_active !== false ? 1 : 0)
-      .input("updated_by",        sql.NVarChar(300), userEmail)                // nvarchar(300)
-      .input("updated_at",        sql.DateTime2,     now)
-      .input("belongsTo",         sql.NVarChar(200), resolvedBelongsTo)        // nvarchar(200) — group id as string
+      .input("activity_type", sql.TinyInt, activity_type)
+      .input("group_id", sql.Int, resolvedGroupId) // INT column
+      .input("is_active", sql.Bit, is_active !== false ? 1 : 0)
+      .input("updated_by", sql.NVarChar(300), userEmail) // nvarchar(300)
+      .input("updated_at", sql.DateTime2, now)
+      .input("belongsTo", sql.NVarChar(200), resolvedBelongsTo) // nvarchar(200) — group id as string
+      .input("hsn_code", sql.NVarChar(50), resolvedHsnCode) // nvarchar(50) — null for Groups
       .query(`
         UPDATE dbo.ActivityMaster SET
           activity_name     = @activity_name,
@@ -194,7 +203,8 @@ router.put("/:id", async (req, res) => {
           is_active         = @is_active,
           updated_by        = @updated_by,
           updated_at        = @updated_at,
-          belongsTo         = @belongsTo
+          belongsTo         = @belongsTo,
+          hsn_code          = @hsn_code
         WHERE id = @id
       `);
 
@@ -218,10 +228,9 @@ router.patch("/:id/approve", async (req, res) => {
 
     const result = await pool
       .request()
-      .input("id",          sql.Int,           req.params.id)
-      .input("approved_by", sql.NVarChar(300), userEmail)                      // nvarchar(300)
-      .input("approved_at", sql.DateTime2,     now)
-      .query(`
+      .input("id", sql.Int, req.params.id)
+      .input("approved_by", sql.NVarChar(300), userEmail) // nvarchar(300)
+      .input("approved_at", sql.DateTime2, now).query(`
         UPDATE dbo.ActivityMaster SET
           approved_by = @approved_by,
           approved_at = @approved_at

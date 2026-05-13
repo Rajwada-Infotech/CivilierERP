@@ -190,6 +190,7 @@ interface ActivityOption {
   id: number;
   name: string;
   groupId?: number;
+  hsnCode?: string | null; // linked HSN from ActivityMaster
 }
 
 // ─── View types ───────────────────────────────────────────────────────────────
@@ -1048,9 +1049,27 @@ const ActivityRow: React.FC<{
 
   const handleActivityChange = (selectedId: string) => {
     const found = safeOptions.find((a) => String(a.id) === selectedId);
+    // Auto-fill HSN from the linked activity if present; leave existing HSN if none linked
+    const linkedHsn = found?.hsnCode ?? null;
+    const hsnRecord = linkedHsn
+      ? hsnRecords.find((h) => h.code === linkedHsn)
+      : null;
+    const linkedGstRate = hsnRecord
+      ? hsnRecord.cgstRate + hsnRecord.sgstRate || hsnRecord.igstRate
+      : 0;
+    const linkedGstType: WOGSTType =
+      hsnRecord && hsnRecord.cgstRate > 0 ? "cgst_sgst" : "igst";
     onUpdate({
       activityId: found ? found.id : null,
       name: found ? found.name : "",
+      // Only overwrite HSN if the activity has one linked; otherwise keep current
+      ...(linkedHsn
+        ? {
+            hsnCode: linkedHsn,
+            hsnGstRate: linkedGstRate,
+            hsnGstType: linkedGstType,
+          }
+        : {}),
     });
   };
 

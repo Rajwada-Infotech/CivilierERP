@@ -152,6 +152,7 @@ const _fetchAllActivities = async () => {
     activity_type: number | null;
     group_id: number | null;
     is_active: boolean | null;
+    hsn_code: string | null;
   }>(await res.json());
 };
 
@@ -171,7 +172,9 @@ export const fetchActivityGroups = async (): Promise<
 
 export const fetchActivities = async (
   groupId?: number,
-): Promise<{ id: number; name: string; groupId: number | null }[]> => {
+): Promise<
+  { id: number; name: string; groupId: number | null; hsnCode: string | null }[]
+> => {
   try {
     const all = await _fetchAllActivities();
     return all
@@ -181,7 +184,12 @@ export const fetchActivities = async (
           r.is_active !== false &&
           (groupId == null || r.group_id === groupId),
       )
-      .map((r) => ({ id: r.id, name: r.activity_name, groupId: r.group_id }));
+      .map((r) => ({
+        id: r.id,
+        name: r.activity_name,
+        groupId: r.group_id,
+        hsnCode: r.hsn_code ?? null,
+      }));
   } catch (err) {
     console.error("[workOrderApi] fetchActivities failed:", err);
     return [];

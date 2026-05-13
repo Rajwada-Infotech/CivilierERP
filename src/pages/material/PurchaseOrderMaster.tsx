@@ -4,6 +4,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { StatusBadge } from "@/components/StatusBadge";
 import { ApprovalActions } from "@/components/ApprovalActions";
+import { SendHorizonal } from "lucide-react";
 import { useFinYear } from "@/contexts/FinYearContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
@@ -326,6 +327,7 @@ const PurchaseOrderMaster: React.FC = () => {
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTCs, setSelectedTCs] = useState<TCRecord[]>([]);
   const [tcDropdownOpen, setTcDropdownOpen] = useState(false);
@@ -791,7 +793,10 @@ const PurchaseOrderMaster: React.FC = () => {
         selectedTCs.length > 0
           ? selectedTCs.map((tc) => `${tc.name}: ${tc.terms}`).join("\n\n")
           : form.paymentTerms || null,
-      Status: "Draft",
+      Status:
+        viewMode === "edit"
+          ? (listData.find((r) => r._id === editingId)?.status ?? "Draft")
+          : "Draft",
       Remarks: form.remarks || null,
       DocTypeId: docTypeId,
       DocNo: backendNumbered
@@ -854,6 +859,10 @@ const PurchaseOrderMaster: React.FC = () => {
     } catch (err: any) {
       toast.error(`Delete failed: ${err.message}`);
     }
+  };
+
+  const handleApprovalSuccess = async () => {
+    await queryClient.invalidateQueries({ queryKey: ["purchase-orders"] });
   };
 
   // ── Navigation ────────────────────────────────────────────────────────────
@@ -1094,6 +1103,13 @@ const PurchaseOrderMaster: React.FC = () => {
                       </td>
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-center gap-1">
+                          <ApprovalActions
+                            status={item.status}
+                            recordId={item._id}
+                            endpoint="/api/purchase-orders"
+                            submitOnly
+                            onSuccess={handleApprovalSuccess}
+                          />
                           <button
                             onClick={() => goToView(item)}
                             className="p-1.5 rounded-lg hover:bg-muted text-muted-foreground hover:text-foreground transition"
@@ -1216,6 +1232,37 @@ const PurchaseOrderMaster: React.FC = () => {
         )}
         {isReadOnly && (
           <div className="flex items-center gap-2">
+            <ApprovalActions
+              status={listData.find((r) => r._id === editingId)?.status ?? null}
+              recordId={editingId ?? ""}
+              endpoint="/api/purchase-orders"
+              onSuccess={async (action) => {
+                await handleApprovalSuccess();
+                // Refresh the in-form status display
+                const updated = dbItems.find(
+                  (d) => String(d.PurchaseOrderID) === editingId,
+                );
+                if (updated) {
+                  goToView({
+                    _id: String(updated.PurchaseOrderID ?? ""),
+                    poNumber: updated.PurchaseOrderNo ?? "",
+                    poDate: updated.PODate ?? "",
+                    supplierName: updated.SupplierName ?? "",
+                    companyName: updated.CompanyName ?? "",
+                    projectName: updated.ProjectName ?? "",
+                    totalAmount: Number(updated.TotalAmount ?? 0),
+                    status:
+                      action === "submit"
+                        ? "Pending"
+                        : action === "approve"
+                          ? "Approved"
+                          : "Rejected",
+                    docNo: updated.DocNo ?? "",
+                    remarks: updated.Remarks ?? "",
+                  });
+                }
+              }}
+            />
             <button
               onClick={handlePrint}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-border text-sm font-semibold text-foreground hover:bg-muted transition"
