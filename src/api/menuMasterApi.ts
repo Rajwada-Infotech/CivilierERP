@@ -1,9 +1,6 @@
-const BASE_URL = "/api/menu-master";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
-const getAuthHeaders = () => ({
-  "Content-Type": "application/json",
-  Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
-});
+const BASE_URL = "/api/menu-master";
 
 export interface MenuMaster {
   Id: number;
@@ -16,15 +13,17 @@ export interface MenuMaster {
 }
 
 export const getMenuMasters = async (): Promise<MenuMaster[]> => {
-  const res = await fetch(BASE_URL, { headers: getAuthHeaders() });
+  const res = await fetchWithAuth(BASE_URL);
   if (!res.ok) throw new Error(`GET failed: ${res.status}`);
   return res.json();
 };
 
-export const addMenuMaster = async (data: { Name: string; Description?: string }) => {
-  const res = await fetch(BASE_URL, {
+export const addMenuMaster = async (data: {
+  Name: string;
+  Description?: string;
+}) => {
+  const res = await fetchWithAuth(BASE_URL, {
     method: "POST",
-    headers: getAuthHeaders(),
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -36,11 +35,10 @@ export const addMenuMaster = async (data: { Name: string; Description?: string }
 
 export const updateMenuMaster = async (
   id: number,
-  data: { Name: string; Description?: string }
+  data: { Name: string; Description?: string },
 ) => {
-  const res = await fetch(`${BASE_URL}/${id}`, {
+  const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
     method: "PUT",
-    headers: getAuthHeaders(),
     body: JSON.stringify(data),
   });
   if (!res.ok) {
@@ -51,9 +49,8 @@ export const updateMenuMaster = async (
 };
 
 export const deleteMenuMaster = async (id: number) => {
-  const res = await fetch(`${BASE_URL}/${id}`, {
+  const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
     method: "DELETE",
-    headers: getAuthHeaders(),
   });
   if (!res.ok) {
     const err = await res.json();
