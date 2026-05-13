@@ -101,16 +101,19 @@ async function handleChainStatus(req, res) {
 }
 
 // ─── GET /options ─────────────────────────────────────────────────────────────
-router.get("/options", async (req, res) => {
-  try {
-    const pool = getPool();
-    const finYear = (req.query.finYear || "").toString().trim() || null;
+router.get(
+  "/options",
+  cache("expense-booking-options", 120),
+  async (req, res) => {
+    try {
+      const pool = getPool();
+      const finYear = (req.query.finYear || "").toString().trim() || null;
 
-    // Regular bookings: exclude EMI-enabled ones (they are paid via installments)
-    // and exclude any already linked to an active DebitNote
-    const bookingsResult = await pool
-      .request()
-      .input("FinYear", sql.NVarChar(20), finYear).query(`
+      // Regular bookings: exclude EMI-enabled ones (they are paid via installments)
+      // and exclude any already linked to an active DebitNote
+      const bookingsResult = await pool
+        .request()
+        .input("FinYear", sql.NVarChar(20), finYear).query(`
         SELECT
           eb.Eid                          AS id,
           eb.Eid                          AS value,
@@ -151,10 +154,10 @@ router.get("/options", async (req, res) => {
         ORDER BY eb.Eid DESC
       `);
 
-    // EMI installments: only show Pending ones
-    const emiResult = await pool
-      .request()
-      .input("FinYear", sql.NVarChar(20), finYear).query(`
+      // EMI installments: only show Pending ones
+      const emiResult = await pool
+        .request()
+        .input("FinYear", sql.NVarChar(20), finYear).query(`
         SELECT
           ei.Id                        AS id,
           ei.ExpenseBookingId          AS expenseBookingId,
@@ -200,49 +203,50 @@ router.get("/options", async (req, res) => {
         ORDER BY ei.ExpenseBookingId DESC, ei.InstallmentNo ASC
       `);
 
-    const bookingOptions = bookingsResult.recordset.map((r) => ({
-      id: String(r.id),
-      value: String(r.value),
-      label: r.label,
-      type: "booking",
-      expenseBookingId: r.id,
-      docNo: r.docNo,
-      projectName: r.projectName,
-      partyName: r.partyName || "",
-      supplierName: r.supplierName || "",
-      amount: parseFloat(r.amount) || 0,
-      companyId: r.companyId || null,
-      companyName: r.companyName || "",
-      financialYear: r.financialYear || "",
-    }));
+      const bookingOptions = bookingsResult.recordset.map((r) => ({
+        id: String(r.id),
+        value: String(r.value),
+        label: r.label,
+        type: "booking",
+        expenseBookingId: r.id,
+        docNo: r.docNo,
+        projectName: r.projectName,
+        partyName: r.partyName || "",
+        supplierName: r.supplierName || "",
+        amount: parseFloat(r.amount) || 0,
+        companyId: r.companyId || null,
+        companyName: r.companyName || "",
+        financialYear: r.financialYear || "",
+      }));
 
-    const emiOptions = emiResult.recordset.map((r) => ({
-      id: `emi-${r.expenseBookingId}-${r.installmentNo}`,
-      value: `emi-${r.expenseBookingId}-${r.installmentNo}`,
-      label: r.label,
-      type: "emi",
-      expenseBookingId: r.expenseBookingId,
-      installmentNo: r.installmentNo,
-      refNumber: r.refNumber,
-      dueDate: r.dueDate ? String(r.dueDate).slice(0, 10) : null,
-      docNo: r.refNumber || r.parentDocNo,
-      projectName: r.projectName,
-      partyName: r.partyName || "",
-      supplierName: r.supplierName || "",
-      amount: parseFloat(r.amount) || 0,
-      companyId: r.companyId || null,
-      companyName: r.companyName || "",
-      financialYear: r.financialYear || "",
-      status: r.status,
-      parentDocNo: r.parentDocNo,
-    }));
+      const emiOptions = emiResult.recordset.map((r) => ({
+        id: `emi-${r.expenseBookingId}-${r.installmentNo}`,
+        value: `emi-${r.expenseBookingId}-${r.installmentNo}`,
+        label: r.label,
+        type: "emi",
+        expenseBookingId: r.expenseBookingId,
+        installmentNo: r.installmentNo,
+        refNumber: r.refNumber,
+        dueDate: r.dueDate ? String(r.dueDate).slice(0, 10) : null,
+        docNo: r.refNumber || r.parentDocNo,
+        projectName: r.projectName,
+        partyName: r.partyName || "",
+        supplierName: r.supplierName || "",
+        amount: parseFloat(r.amount) || 0,
+        companyId: r.companyId || null,
+        companyName: r.companyName || "",
+        financialYear: r.financialYear || "",
+        status: r.status,
+        parentDocNo: r.parentDocNo,
+      }));
 
-    res.json([...bookingOptions, ...emiOptions]);
-  } catch (err) {
-    console.error("Options error:", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
+      res.json([...bookingOptions, ...emiOptions]);
+    } catch (err) {
+      console.error("Options error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
 // ─── GET all (paginated) ──────────────────────────────────────────────────────
 router.get("/", cache("expense-booking", 60), async (req, res) => {
@@ -693,6 +697,7 @@ router.post("/", async (req, res) => {
     }
 
     await bumpCacheVersion("expense-booking");
+    await bumpCacheVersion("expense-booking-options");
 
     res.status(201).json({
       message: "Expense booked successfully",
@@ -789,6 +794,7 @@ router.put("/:id/emi-schedule/:no/pay", async (req, res) => {
       );
 
     await bumpCacheVersion("expense-booking");
+    await bumpCacheVersion("expense-booking-options");
     res.json({ message: "Installment marked as paid" });
   } catch (err) {
     console.error("EMI pay error:", err.message);
@@ -1229,6 +1235,7 @@ router.delete("/:id", async (req, res) => {
       .query("DELETE FROM dbo.ExpenseBooking WHERE Eid = @Eid");
 
     await bumpCacheVersion("expense-booking");
+    await bumpCacheVersion("expense-booking-options");
     res.json({ message: "Expense deleted successfully" });
   } catch (err) {
     console.error("Delete error:", err.message);
@@ -1250,6 +1257,7 @@ router.put("/:id/submit", async (req, res) => {
       req.user?.role,
     );
     await bumpCacheVersion("expense-booking");
+    await bumpCacheVersion("expense-booking-options");
     res.json({ message: "Submitted for approval", ...result });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -1269,6 +1277,7 @@ router.put("/:id/approve", async (req, res) => {
       req.user?.role,
     );
     await bumpCacheVersion("expense-booking");
+    await bumpCacheVersion("expense-booking-options");
     res.json({ message: "Approved", ...result });
   } catch (err) {
     const status = err.message.includes("not authorized") ? 403 : 400;
@@ -1291,6 +1300,7 @@ router.put("/:id/reject", async (req, res) => {
       note || null,
     );
     await bumpCacheVersion("expense-booking");
+    await bumpCacheVersion("expense-booking-options");
     res.json({ message: "Rejected", ...result });
   } catch (err) {
     const status = err.message.includes("not authorized") ? 403 : 400;
