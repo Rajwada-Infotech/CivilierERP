@@ -52,7 +52,10 @@ import {
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { getBanks, type BankRecord } from "@/api/bankMasterApi";
 import { useFinYear } from "@/contexts/FinYearContext";
-import { fetchNextDocNumber } from "@/pages/material/ExpenseBooking/DocNumberPreview";
+import {
+  fetchDocTypes,
+  fetchNextDocNumber,
+} from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import { formatINR } from "@/utils/formatCurrency";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -187,8 +190,6 @@ function CustomerCombobox({
       .slice(0, 80);
   }, [customers, query]);
 
-  const selected = customers.find((c) => c.label === value);
-
   useEffect(() => {
     const h = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node))
@@ -315,7 +316,7 @@ export default function ReceivedPaymentPage() {
   >([]);
   const [banks, setBanks] = useState<BankRecord[]>([]);
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
-  // TypeOfDocId for the REC prefix — resolved once on mount
+  // TypeOfDocId for the RECP doc type — resolved once on mount via module filter
   const [recDocTypeId, setRecDocTypeId] = useState<number | null>(null);
 
   const finYearOptions = finYears.filter((fy) => fy.status === "Active");
@@ -361,18 +362,11 @@ export default function ReceivedPaymentPage() {
       )
       .catch(() => {});
 
-    // Resolve REC doc type ID once
-    fetchWithAuth("/api/document-type")
-      .then((r) => r.json())
-      .then((data: any[]) => {
-        if (!Array.isArray(data)) return;
-        const rec = data.find(
-          (d) =>
-            (d.Prefix === "REC" || d.FullPrefix === "REC") &&
-            (d.EntryType === "Received Payment" ||
-              d.Description?.toLowerCase().includes("received")),
-        );
-        if (rec) setRecDocTypeId(rec.TypeOfDocId);
+    // Resolve RECP doc type ID using the module= filter (Stage 3 backend)
+    // fetchDocTypes passes ?module=RECP → backend filters by links_to LIKE '%Received Payment%'
+    fetchDocTypes("RECP")
+      .then((data) => {
+        if (data.length > 0) setRecDocTypeId(data[0].TypeOfDocId);
       })
       .catch(() => {});
   }, []);
