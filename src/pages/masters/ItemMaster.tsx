@@ -43,6 +43,7 @@ interface Item {
   igst: number;
   belongsTo: string;
   uomCode: string;
+  defaultSupplierId: string;
 }
 
 function dbToItem(row: DbItem): Item {
@@ -58,6 +59,9 @@ function dbToItem(row: DbItem): Item {
     igst: row.M_IGST ?? 0,
     belongsTo: row.Parent_Id || "",
     uomCode: row.M_UOM || "",
+    defaultSupplierId: row.default_supplier_id
+      ? String(row.default_supplier_id)
+      : "",
   };
 }
 
@@ -76,6 +80,9 @@ function itemToPayload(form: Omit<Item, "_id">, groupName: string) {
     M_SGST: form.sgst || null,
     M_IGST: form.igst || null,
     M_UOM: form.uomCode || null,
+    default_supplier_id: form.defaultSupplierId
+      ? parseInt(form.defaultSupplierId)
+      : null,
   };
 }
 
@@ -90,6 +97,7 @@ const EMPTY_FORM: Omit<Item, "_id"> = {
   igst: 0,
   belongsTo: "",
   uomCode: "",
+  defaultSupplierId: "",
 };
 
 // ── Searchable HSN Dropdown ───────────────────────────────────────────────────
@@ -311,6 +319,30 @@ const ItemMaster: React.FC = () => {
         }))
     : [];
 
+  // Fetch supplier list from GeneralLedger (supplier type = 'C' creditor / supplier)
+  const { data: dbSuppliers = [] } = useQuery({
+    queryKey: ["suppliers-for-item-master"],
+    queryFn: async () => {
+      const res = await fetch("/api/general-ledger?type=supplier", {
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${localStorage.getItem("token") ?? ""}`,
+        },
+      });
+      if (!res.ok) return [];
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const supplierOptions = (Array.isArray(dbSuppliers) ? dbSuppliers : []).map(
+    (s: any) => ({
+      value: String(s.LHeadId ?? s.id ?? ""),
+      label: s.LHeadName ?? s.name ?? "",
+    }),
+  );
+
   const data: Item[] = (Array.isArray(dbItems) ? dbItems : []).map(dbToItem);
 
   // ── Local state ───────────────────────────────────────────────────────────
@@ -481,6 +513,20 @@ const ItemMaster: React.FC = () => {
       cell: ({ row }) => (
         <span className="font-mono text-sm">{row.original.uomCode || "-"}</span>
       ),
+    },
+    {
+      accessorKey: "defaultSupplierId",
+      header: "Default Supplier",
+      cell: ({ row }) => {
+        const sup = supplierOptions.find(
+          (s) => s.value === row.original.defaultSupplierId,
+        );
+        return (
+          <span className="text-sm text-muted-foreground">
+            {sup?.label || "-"}
+          </span>
+        );
+      },
     },
     {
       accessorKey: "hsnCode",
@@ -662,6 +708,21 @@ const ItemMaster: React.FC = () => {
               className={inputCls()}
               placeholder="Additional description (optional)"
             />
+          </Field>
+          {/* Default Supplier */}
+          <Field label="Default Supplier">
+            <select
+              value={form.defaultSupplierId}
+              onChange={(e) => set("defaultSupplierId", e.target.value)}
+              className={inputCls()}
+            >
+              <option value="">— No default supplier —</option>
+              {supplierOptions.map((s) => (
+                <option key={s.value} value={s.value}>
+                  {s.label}
+                </option>
+              ))}
+            </select>
           </Field>
         </div>
 
