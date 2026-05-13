@@ -1,5 +1,5 @@
 import axios from "axios";
-import { getToken } from "../utils/auth";
+import { getToken } from "../utils/tokenStorage";
 import { API_BASE_URL } from "@/lib/apiBase";
 
 // Use relative /api path — the Vite dev proxy forwards to localhost:5000
@@ -28,7 +28,7 @@ api.interceptors.response.use(
       window.location.href = "/login";
     }
     return Promise.reject(error);
-  }
+  },
 );
 
 export default api;

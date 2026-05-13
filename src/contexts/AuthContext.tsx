@@ -7,7 +7,7 @@ import React, {
   useMemo,
 } from "react";
 
-import { loginUser } from "../api/auth";
+import { loginUser } from "../api/authApi";
 import { getUsers } from "../api/userApi";
 
 import type {
