@@ -126,6 +126,7 @@ router.get("/options", async (req, res) => {
           ISNULL(eb.ENetAmount, ISNULL(eb.EAmount, 0)) AS amount,
           ISNULL(eb.ECompanyId, 0)        AS companyId,
           ISNULL(e.name, '')              AS companyName,
+          ISNULL(eb.EFinYear, '')         AS financialYear,
           eb.EEmiPayment                  AS emiEnabled,
           CONCAT(
             ISNULL(eb.EDocNo, CONCAT('Draft #', CAST(eb.Eid AS NVARCHAR))),
@@ -171,6 +172,7 @@ router.get("/options", async (req, res) => {
           )                            AS supplierName,
           eb.ECompanyId                AS companyId,
           ISNULL(e2.name, '')          AS companyName,
+          ISNULL(eb.EFinYear, '')      AS financialYear,
           eb.EDocNo                    AS parentDocNo,
           CONCAT(
             ISNULL(ei.RefNumber, CONCAT('EMI-', RIGHT('00' + CAST(ei.InstallmentNo AS VARCHAR), 2))),
@@ -211,6 +213,7 @@ router.get("/options", async (req, res) => {
       amount: parseFloat(r.amount) || 0,
       companyId: r.companyId || null,
       companyName: r.companyName || "",
+      financialYear: r.financialYear || "",
     }));
 
     const emiOptions = emiResult.recordset.map((r) => ({
@@ -229,6 +232,7 @@ router.get("/options", async (req, res) => {
       amount: parseFloat(r.amount) || 0,
       companyId: r.companyId || null,
       companyName: r.companyName || "",
+      financialYear: r.financialYear || "",
       status: r.status,
       parentDocNo: r.parentDocNo,
     }));
