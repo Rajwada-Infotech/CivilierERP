@@ -21,7 +21,7 @@ import type {
 import * as AuthUtils from "./auth.utils";
 
 // Re-exports
-export { PAGE_DEFINITIONS } from "@/constants/pageDefinitions";
+export { PAGE_DEFINITIONS } from "@/contexts/auth.utils";
 export type { PageKey, PageAction, PagePermission, AppUser };
 
 // ── TYPES ─────────────────────────────────────────────────────────────────────
