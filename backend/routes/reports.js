@@ -1,10 +1,8 @@
 const express = require("express");
 const router = express.Router();
 const { getPool } = require("../db");
-const { redisGet, redisSet } = require("../redis");
 const sql = require("mssql");
-
-const CACHE_TTL_SECONDS = 60;
+const { cache } = require("../middleware/cache");
 const toNumber = (value) => Number(value || 0);
 
 function buildDateWhere(
@@ -88,7 +86,7 @@ function buildLastSixMonths(paymentRows, expenseRows) {
   });
 }
 
-router.get("/", async (req, res) => {
+router.get("/", cache("reports", 60), async (req, res) => {
   try {
     const {
       companyId,

@@ -8,7 +8,7 @@
 
 const express = require("express");
 const logger = require("../logger");
-const { redisGet, redisSet, redisDel } = require("../redis");
+const { redisGet, redisSet, redisDel, redisDelPattern } = require("../redis");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 // Note: authMiddleware is NOT imported here — it is already applied globally
@@ -346,8 +346,10 @@ router.post("/", adminOnly, async (req, res) => {
       `);
 
     // 🔥 CLEAR CACHE
-    await redisDel(`tasks:${req.user.userId ?? req.user.id}:true`);
-    await redisDel(`tasks:${req.user.userId ?? req.user.id}:false`);
+    // BUG FIX: old keys were 'tasks:{userId}:true' and 'tasks:{userId}:false'
+    // but the actual GET key is 'tasks:{userId}:{isAdmin}:{moduleFilter}'.
+    // Using redisDelPattern to wipe all variants for this user in one call.
+    await redisDelPattern(`tasks:${req.user.userId ?? req.user.id}:*`);
 
     logger.info({ event: "TASK_CREATED", taskId: newId, createdBy, assignedTo, title }, "Task created");
     res.status(201).json(mapTask(newTask.recordset[0], []));
@@ -488,8 +490,10 @@ router.put("/:id", async (req, res) => {
       `);
 
     // 🔥 CLEAR CACHE
-    await redisDel(`tasks:${req.user.userId ?? req.user.id}:true`);
-    await redisDel(`tasks:${req.user.userId ?? req.user.id}:false`);
+    // BUG FIX: old keys were 'tasks:{userId}:true' and 'tasks:{userId}:false'
+    // but the actual GET key is 'tasks:{userId}:{isAdmin}:{moduleFilter}'.
+    // Using redisDelPattern to wipe all variants for this user in one call.
+    await redisDelPattern(`tasks:${req.user.userId ?? req.user.id}:*`);
 
     logger.info({ event: "TASK_UPDATED", taskId: id, updatedBy: userId }, "Task updated");
     res.json(
@@ -517,8 +521,10 @@ router.delete("/:id", adminOnly, async (req, res) => {
       return res.status(404).json({ error: "Task not found" });
     }
     // 🔥 CLEAR CACHE
-    await redisDel(`tasks:${req.user.userId ?? req.user.id}:true`);
-    await redisDel(`tasks:${req.user.userId ?? req.user.id}:false`);
+    // BUG FIX: old keys were 'tasks:{userId}:true' and 'tasks:{userId}:false'
+    // but the actual GET key is 'tasks:{userId}:{isAdmin}:{moduleFilter}'.
+    // Using redisDelPattern to wipe all variants for this user in one call.
+    await redisDelPattern(`tasks:${req.user.userId ?? req.user.id}:*`);
 
     logger.info({ event: "TASK_DELETED", taskId: id, deletedBy: req.user.userId ?? req.user.id }, "Task deleted");
     res.json({ success: true });
@@ -563,8 +569,10 @@ router.post("/:id/comments", async (req, res) => {
     const userName = userResult.recordset[0]?.name || "";
 
     // 🔥 CLEAR CACHE
-    await redisDel(`tasks:${req.user.userId ?? req.user.id}:true`);
-    await redisDel(`tasks:${req.user.userId ?? req.user.id}:false`);
+    // BUG FIX: old keys were 'tasks:{userId}:true' and 'tasks:{userId}:false'
+    // but the actual GET key is 'tasks:{userId}:{isAdmin}:{moduleFilter}'.
+    // Using redisDelPattern to wipe all variants for this user in one call.
+    await redisDelPattern(`tasks:${req.user.userId ?? req.user.id}:*`);
 
     logger.info({ event: "TASK_COMMENT_ADDED", taskId: id, commentId: inserted.Id, userId }, "Comment added to task");
     res.status(201).json(mapComment({ ...inserted, UserName: userName }));
