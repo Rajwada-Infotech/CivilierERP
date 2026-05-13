@@ -19,6 +19,13 @@ async function hasNewColumns(pool) {
   return _hasNewCols;
 }
 
+function extraSelectCols(newCols) {
+  return newCols
+    ? `, RPDocNo, RPFinYear, RPDocTypeId, RPCompanyId, RPProjectId,
+         RPCustomerName, RPDepositBankId, RPDepositBankName`
+    : "";
+}
+
 // ── GET / ──────────────────────────────────────────────────────────────────────
 router.get("/", async (req, res) => {
   try {
@@ -28,31 +35,32 @@ router.get("/", async (req, res) => {
     const pool = getPool();
     const newCols = await hasNewColumns(pool);
 
-    const extraSelect = newCols
-      ? `, RPDocNo, RPFinYear, RPDocTypeId, RPCompanyId, RPProjectId,
-           RPCustomerName, RPDepositBankId, RPDepositBankName`
-      : "";
+    // FIX: mark db.query start here — before the actual DB work —
+    // so the timing stage correctly measures only SQL time, not cache overhead.
+    const dbStart = req.timing?.startStage();
 
-    const countResult = await pool
-      .request()
-      .query(`SELECT COUNT(*) AS total FROM dbo.ReceivedPayment`);
+    const [countResult, result] = await Promise.all([
+      pool.request().query(`SELECT COUNT(*) AS total FROM dbo.ReceivedPayment`),
+      pool
+        .request()
+        .input("offset", sql.Int, offset)
+        .input("limit", sql.Int, limit).query(`
+          SELECT RPPaymentID, RPCompanyName, RPReceivedFrom, RPProjectName,
+            RPDocDate, RPMode, RPAmount, RPBankName, RPTransactionId, RPCheckNumber,
+            RPRemarks, RPIsEmi, RPEmiTotal, RPEmiMonths, RPEmiStartDate,
+            RPEmiSchedule, RPEmiPaying, RPStatus, RPCreatedBy, RPCreatedAt,
+            RPUpdatedBy, RPUpdatedAt, RPApprovedBy, RPApprovedAt,
+            RPRejectedBy, RPRejectedAt, RPRejectionNote
+            ${extraSelectCols(newCols)}
+          FROM dbo.ReceivedPayment
+          ORDER BY RPCreatedAt DESC
+          OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+        `),
+    ]);
+
+    if (dbStart) req.timing?.mark("db.query", dbStart);
+
     const total = countResult.recordset[0].total;
-
-    const result = await pool
-      .request()
-      .input("offset", sql.Int, offset)
-      .input("limit", sql.Int, limit).query(`
-        SELECT RPPaymentID, RPCompanyName, RPReceivedFrom, RPProjectName,
-          RPDocDate, RPMode, RPAmount, RPBankName, RPTransactionId, RPCheckNumber,
-          RPRemarks, RPIsEmi, RPEmiTotal, RPEmiMonths, RPEmiStartDate,
-          RPEmiSchedule, RPEmiPaying, RPStatus, RPCreatedBy, RPCreatedAt,
-          RPUpdatedBy, RPUpdatedAt, RPApprovedBy, RPApprovedAt,
-          RPRejectedBy, RPRejectedAt, RPRejectionNote
-          ${extraSelect}
-        FROM dbo.ReceivedPayment
-        ORDER BY RPCreatedAt DESC
-        OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
-      `);
     res.json({
       data: result.recordset,
       page,
@@ -62,6 +70,35 @@ router.get("/", async (req, res) => {
   } catch (err) {
     console.error("GET /received-payment error:", err);
     res.status(500).json({ error: "Failed to fetch received payments" });
+  }
+});
+
+// ── GET /:id ───────────────────────────────────────────────────────────────────
+router.get("/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const pool = getPool();
+    const newCols = await hasNewColumns(pool);
+
+    const result = await pool.request().input("id", sql.Int, id).query(`
+        SELECT RPPaymentID, RPCompanyName, RPReceivedFrom, RPProjectName,
+          RPDocDate, RPMode, RPAmount, RPBankName, RPTransactionId, RPCheckNumber,
+          RPRemarks, RPIsEmi, RPEmiTotal, RPEmiMonths, RPEmiStartDate,
+          RPEmiSchedule, RPEmiPaying, RPStatus, RPCreatedBy, RPCreatedAt,
+          RPUpdatedBy, RPUpdatedAt, RPApprovedBy, RPApprovedAt,
+          RPRejectedBy, RPRejectedAt, RPRejectionNote
+          ${extraSelectCols(newCols)}
+        FROM dbo.ReceivedPayment
+        WHERE RPPaymentID = @id
+      `);
+
+    if (result.recordset.length === 0)
+      return res.status(404).json({ error: "Payment not found" });
+
+    res.json(result.recordset[0]);
+  } catch (err) {
+    console.error("GET /received-payment/:id error:", err);
+    res.status(500).json({ error: "Failed to fetch received payment" });
   }
 });
 
@@ -311,7 +348,6 @@ router.delete("/:id", async (req, res) => {
 });
 
 // ── PATCH /:id/submit ─────────────────────────────────────────────────────────
-// Sets status = 'Pending' so it appears in the admin Approval Inbox
 router.patch("/:id/submit", async (req, res) => {
   try {
     const { id } = req.params;
@@ -348,7 +384,7 @@ router.patch("/:id/submit", async (req, res) => {
   }
 });
 
-// ── PUT /:id/approve (admin only — called from Approval Inbox) ───────────────
+// ── PUT /:id/approve ──────────────────────────────────────────────────────────
 router.put("/:id/approve", async (req, res) => {
   try {
     const { id } = req.params;
@@ -368,7 +404,7 @@ router.put("/:id/approve", async (req, res) => {
   }
 });
 
-// ── PUT /:id/reject (admin only — called from Approval Inbox) ────────────────
+// ── PUT /:id/reject ───────────────────────────────────────────────────────────
 router.put("/:id/reject", async (req, res) => {
   try {
     const { id } = req.params;

@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useMemo, useCallback } from "react";
+import React, {
+  useState,
+  useEffect,
+  useMemo,
+  useCallback,
+  useRef,
+} from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -42,6 +48,9 @@ import {
   ChevronsUpDown,
   Check,
   SendHorizontal,
+  Eye,
+  Printer,
+  X,
 } from "lucide-react";
 import {
   getReceivedPayments,
@@ -96,6 +105,15 @@ export type ReceivedPayment = {
 interface CustomerOption {
   id: number;
   label: string;
+}
+
+interface CompanyInfo {
+  id: number;
+  label: string;
+  logoUrl?: string;
+  email?: string;
+  phone?: string;
+  address?: string;
 }
 
 const PAYMENT_MODES: PaymentMode[] = [
@@ -282,6 +300,287 @@ function EmptyState() {
   );
 }
 
+// ─── View Dialog ──────────────────────────────────────────────────────────────
+
+function ViewPaymentDialog({
+  payment,
+  companyInfo,
+  onClose,
+}: {
+  payment: ReceivedPayment | null;
+  companyInfo?: CompanyInfo;
+  onClose: () => void;
+}) {
+  const printRef = useRef<HTMLDivElement>(null);
+
+  const handlePrint = () => {
+    if (!printRef.current) return;
+    const printWindow = window.open("", "_blank", "width=800,height=600");
+    if (!printWindow) return;
+
+    const logoHtml = companyInfo?.logoUrl
+      ? `<img src="${companyInfo.logoUrl}" style="height:56px;max-width:180px;object-fit:contain;" alt="Company Logo" />`
+      : `<div style="font-size:22px;font-weight:800;color:#1a1a1a;">${payment?.companyName ?? ""}</div>`;
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Payment Receipt – ${payment?.docNo ?? ""}</title>
+        <style>
+          * { box-sizing: border-box; margin: 0; padding: 0; }
+          body { font-family: 'Segoe UI', Arial, sans-serif; background: #fff; color: #1a1a1a; }
+          .page { max-width: 720px; margin: 32px auto; padding: 40px; border: 1px solid #e0e0e0; border-radius: 8px; }
+          .header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 32px; padding-bottom: 20px; border-bottom: 2px solid #f0f0f0; }
+          .company-info { display: flex; flex-direction: column; gap: 4px; }
+          .company-meta { font-size: 11px; color: #666; }
+          .receipt-title { text-align: right; }
+          .receipt-title h1 { font-size: 22px; font-weight: 800; color: #16a34a; letter-spacing: -0.5px; }
+          .receipt-title .doc-no { font-size: 13px; color: #555; margin-top: 4px; font-family: monospace; }
+          .badge { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+          .badge-approved { background: #dcfce7; color: #16a34a; }
+          .badge-draft { background: #fef9c3; color: #ca8a04; }
+          .badge-rejected { background: #fee2e2; color: #dc2626; }
+          .amount-box { background: linear-gradient(135deg, #f0fdf4, #dcfce7); border: 1.5px solid #86efac; border-radius: 10px; padding: 20px 24px; margin-bottom: 28px; display: flex; align-items: center; justify-content: space-between; }
+          .amount-label { font-size: 11px; text-transform: uppercase; letter-spacing: 1px; color: #16a34a; font-weight: 600; }
+          .amount-value { font-size: 28px; font-weight: 800; color: #15803d; }
+          .details-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 24px; margin-bottom: 24px; }
+          .detail-item { display: flex; flex-direction: column; gap: 3px; }
+          .detail-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.8px; color: #888; font-weight: 600; }
+          .detail-value { font-size: 13px; color: #1a1a1a; font-weight: 500; }
+          .remarks-box { background: #fafafa; border: 1px solid #e5e7eb; border-radius: 6px; padding: 12px 16px; margin-top: 8px; }
+          .footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid #f0f0f0; display: flex; justify-content: space-between; align-items: center; font-size: 10px; color: #aaa; }
+          @media print { body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+        </style>
+      </head>
+      <body>
+        <div class="page">
+          <div class="header">
+            <div class="company-info">
+              ${logoHtml}
+              ${companyInfo?.address ? `<div class="company-meta">${companyInfo.address}</div>` : ""}
+              ${companyInfo?.phone ? `<div class="company-meta">Ph: ${companyInfo.phone}</div>` : ""}
+              ${companyInfo?.email ? `<div class="company-meta">${companyInfo.email}</div>` : ""}
+            </div>
+            <div class="receipt-title">
+              <h1>PAYMENT RECEIPT</h1>
+              <div class="doc-no">${payment?.docNo ?? ""}</div>
+              <div style="margin-top:8px;">
+                <span class="badge badge-${(payment?.status ?? "draft").toLowerCase()}">${payment?.status ?? ""}</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="amount-box">
+            <div>
+              <div class="amount-label">Amount Received</div>
+              <div class="amount-value">+${fmt(payment?.amount ?? 0)}</div>
+            </div>
+            <div style="text-align:right;">
+              <div class="detail-label">Date</div>
+              <div style="font-size:15px;font-weight:600;">${payment?.docDate ? format(new Date(payment.docDate), "dd MMM yyyy") : "—"}</div>
+              <div style="margin-top:6px;"><span style="background:#e0f2fe;color:#0369a1;padding:2px 10px;border-radius:20px;font-size:11px;font-weight:600;">${payment?.mode ?? ""}</span></div>
+            </div>
+          </div>
+
+          <div class="details-grid">
+            <div class="detail-item">
+              <span class="detail-label">Received From</span>
+              <span class="detail-value">${payment?.customerName || payment?.receivedFrom || "—"}</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Financial Year</span>
+              <span class="detail-value">${payment?.finYear || "—"}</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Company</span>
+              <span class="detail-value">${payment?.companyName || "—"}</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Project</span>
+              <span class="detail-value">${payment?.projectName || "—"}</span>
+            </div>
+            <div class="detail-item">
+              <span class="detail-label">Deposit Bank</span>
+              <span class="detail-value">${payment?.depositBankName || "—"}</span>
+            </div>
+            ${payment?.bankName ? `<div class="detail-item"><span class="detail-label">Customer Bank</span><span class="detail-value">${payment.bankName}</span></div>` : ""}
+            ${payment?.transactionId ? `<div class="detail-item"><span class="detail-label">Transaction / UTR</span><span class="detail-value" style="font-family:monospace;">${payment.transactionId}</span></div>` : ""}
+            ${payment?.checkNumber ? `<div class="detail-item"><span class="detail-label">Cheque No.</span><span class="detail-value" style="font-family:monospace;">${payment.checkNumber}</span></div>` : ""}
+          </div>
+
+          ${payment?.remarks ? `<div class="detail-label" style="margin-bottom:6px;">Remarks</div><div class="remarks-box" style="font-size:13px;">${payment.remarks}</div>` : ""}
+
+          <div class="footer">
+            <span>Generated by CivilierERP</span>
+            <span>Printed on ${format(new Date(), "dd MMM yyyy, hh:mm a")}</span>
+          </div>
+        </div>
+        <script>window.onload = () => { window.print(); window.close(); }<\/script>
+      </body>
+      </html>
+    `);
+    printWindow.document.close();
+  };
+
+  if (!payment) return null;
+
+  const DetailRow = ({
+    label,
+    value,
+    mono,
+  }: {
+    label: string;
+    value?: string | null;
+    mono?: boolean;
+  }) => (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold">
+        {label}
+      </span>
+      <span
+        className={cn(
+          "text-sm text-foreground font-medium",
+          mono && "font-mono",
+        )}
+      >
+        {value || "—"}
+      </span>
+    </div>
+  );
+
+  return (
+    <Dialog open={!!payment} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto p-0">
+        {/* Header */}
+        <div className="px-6 pt-5 pb-4 border-b border-border bg-muted/20 flex items-start justify-between gap-4">
+          <div className="flex items-center gap-3">
+            {companyInfo?.logoUrl ? (
+              <img
+                src={companyInfo.logoUrl}
+                alt={payment.companyName}
+                className="h-10 w-auto max-w-[120px] object-contain rounded"
+              />
+            ) : (
+              <div className="h-10 w-10 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                <Building2 size={18} className="text-primary" />
+              </div>
+            )}
+            <div>
+              <p className="text-xs text-muted-foreground font-heading">
+                {payment.companyName}
+              </p>
+              <h2 className="font-heading font-bold text-base text-foreground">
+                {payment.docNo}
+              </h2>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={handlePrint}
+              className="h-8 gap-1.5 text-xs"
+            >
+              <Printer size={13} />
+              Print
+            </Button>
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-md text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            >
+              <X size={15} />
+            </button>
+          </div>
+        </div>
+
+        <div ref={printRef} className="px-6 py-5 space-y-5">
+          {/* Amount highlight */}
+          <div className="rounded-xl bg-emerald-500/8 border border-emerald-500/20 p-4 flex items-center justify-between">
+            <div>
+              <p className="text-xs text-emerald-600 font-heading font-semibold uppercase tracking-wider mb-1">
+                Amount Received
+              </p>
+              <p className="text-2xl font-heading font-bold text-emerald-600">
+                +{fmt(payment.amount)}
+              </p>
+            </div>
+            <div className="text-right">
+              <p className="text-xs text-muted-foreground mb-1">
+                {payment.docDate
+                  ? format(new Date(payment.docDate), "dd MMM yyyy")
+                  : "—"}
+              </p>
+              <span
+                className={`px-2 py-0.5 rounded-full text-xs font-heading ${
+                  payment.status === "Approved"
+                    ? "bg-green-500/15 text-green-600"
+                    : payment.status === "Rejected"
+                      ? "bg-red-500/15 text-red-600"
+                      : "bg-yellow-500/15 text-yellow-600"
+                }`}
+              >
+                {payment.status}
+              </span>
+              <div className="mt-1.5">
+                <span
+                  className={`flex items-center justify-end gap-1 px-2 py-0.5 rounded-full text-xs font-heading w-fit ml-auto ${modeColor[payment.mode]}`}
+                >
+                  {modeIcon(payment.mode)}
+                  {payment.mode}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Details grid */}
+          <div className="grid grid-cols-2 gap-x-6 gap-y-4">
+            <DetailRow
+              label="Received From"
+              value={payment.customerName || payment.receivedFrom}
+            />
+            <DetailRow label="Financial Year" value={payment.finYear} />
+            <DetailRow label="Company" value={payment.companyName} />
+            <DetailRow label="Project" value={payment.projectName} />
+            <DetailRow label="Deposit Bank" value={payment.depositBankName} />
+            {payment.bankName && (
+              <DetailRow label="Customer Bank" value={payment.bankName} />
+            )}
+            {payment.transactionId && (
+              <DetailRow
+                label="Transaction / UTR"
+                value={payment.transactionId}
+                mono
+              />
+            )}
+            {payment.checkNumber && (
+              <DetailRow label="Cheque No." value={payment.checkNumber} mono />
+            )}
+          </div>
+
+          {payment.remarks && (
+            <div>
+              <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-semibold mb-1.5">
+                Remarks
+              </p>
+              <div className="rounded-lg bg-muted/40 border border-border px-4 py-3 text-sm text-foreground">
+                {payment.remarks}
+              </div>
+            </div>
+          )}
+
+          <p className="text-[10px] text-muted-foreground text-right">
+            Created{" "}
+            {payment.createdAt
+              ? format(new Date(payment.createdAt), "dd MMM yyyy, hh:mm a")
+              : "—"}
+          </p>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function ReceivedPaymentPage() {
@@ -301,6 +600,10 @@ export default function ReceivedPaymentPage() {
   const [submitTarget, setSubmitTarget] = useState<ReceivedPayment | null>(
     null,
   );
+  // ── View state ────────────────────────────────────────────────────────────
+  const [viewPayment, setViewPayment] = useState<ReceivedPayment | null>(null);
+  const [companiesDetail, setCompaniesDetail] = useState<CompanyInfo[]>([]);
+
   const PAGE_SIZE = 20;
 
   // ── Form state ───────────────────────────────────────────────────────────────
@@ -316,7 +619,6 @@ export default function ReceivedPaymentPage() {
   >([]);
   const [banks, setBanks] = useState<BankRecord[]>([]);
   const [customers, setCustomers] = useState<CustomerOption[]>([]);
-  // TypeOfDocId for the RECP doc type — resolved once on mount via module filter
   const [recDocTypeId, setRecDocTypeId] = useState<number | null>(null);
 
   const finYearOptions = finYears.filter((fy) => fy.status === "Active");
@@ -325,17 +627,37 @@ export default function ReceivedPaymentPage() {
 
   // Load masters
   useEffect(() => {
-    // Companies: enterprise table WHERE business_type = 'C'
     fetchWithAuth("/api/enterprises/options?business_type=C")
       .then((r) => r.json())
       .then((data: any[]) => setCompanies(Array.isArray(data) ? data : []))
+      .catch(() => {});
+
+    // Also load full company details (for logos in view/print)
+    fetchWithAuth("/api/company-master")
+      .then((r) => r.json())
+      .then((data: any[]) => {
+        if (Array.isArray(data)) {
+          setCompaniesDetail(
+            data.map((c) => ({
+              id: c.Id,
+              label: c.Name,
+              logoUrl: c.LogoUrl || undefined,
+              email: c.Email || undefined,
+              phone: c.Phone || undefined,
+              address:
+                [c.RegisteredAddress, c.City, c.State, c.Country]
+                  .filter(Boolean)
+                  .join(", ") || undefined,
+            })),
+          );
+        }
+      })
       .catch(() => {});
 
     getBanks()
       .then((data) => setBanks(data.filter((b) => b.BStatus)))
       .catch(() => {});
 
-    // Projects: enterprise table WHERE business_type = 'P', with belongs_to for company filter
     fetchWithAuth("/api/enterprises/options?business_type=P")
       .then((r) => r.json())
       .then((data: any[]) =>
@@ -349,7 +671,6 @@ export default function ReceivedPaymentPage() {
       )
       .catch(() => {});
 
-    // Customers: AccountHeadMaster WHERE LHeadType = 'A'
     fetchWithAuth("/api/account-head/options?type=A")
       .then((r) => r.json())
       .then((data: any[]) =>
@@ -362,8 +683,6 @@ export default function ReceivedPaymentPage() {
       )
       .catch(() => {});
 
-    // Resolve RECP doc type ID using the module= filter (Stage 3 backend)
-    // fetchDocTypes passes ?module=RECP → backend filters by links_to LIKE '%Received Payment%'
     fetchDocTypes("RECP")
       .then((data) => {
         if (data.length > 0) setRecDocTypeId(data[0].TypeOfDocId);
@@ -371,7 +690,7 @@ export default function ReceivedPaymentPage() {
       .catch(() => {});
   }, []);
 
-  // ── Filtered banks: only those linked to selected company ───────────────────
+  // ── Filtered banks ───────────────────────────────────────────────────────────
   const selectedCompanyLabel =
     companies.find((c) => String(c.id) === form.companyId)?.label ?? "";
   const depositBanks = useMemo(() => {
@@ -381,8 +700,17 @@ export default function ReceivedPaymentPage() {
     );
   }, [banks, selectedCompanyLabel]);
 
-  // ── Projects — independent selection, show all ───────────────────────────────
   const filteredProjects = projects;
+
+  // ── Company info lookup for view dialog ─────────────────────────────────────
+  const getCompanyInfo = (
+    payment: ReceivedPayment,
+  ): CompanyInfo | undefined => {
+    if (payment.companyId) {
+      return companiesDetail.find((c) => c.id === payment.companyId);
+    }
+    return companiesDetail.find((c) => c.label === payment.companyName);
+  };
 
   // ── Doc number preview ───────────────────────────────────────────────────────
   const refreshDocNo = useCallback(
@@ -404,7 +732,6 @@ export default function ReceivedPaymentPage() {
     [],
   );
 
-  // Auto-refresh doc number when fin year or resolved doc type changes
   useEffect(() => {
     if (!editingId && recDocTypeId) {
       refreshDocNo(recDocTypeId, form.finYear || activeFinYear);
@@ -460,7 +787,6 @@ export default function ReceivedPaymentPage() {
   const setField = (key: keyof typeof EMPTY_FORM, value: string) =>
     setForm((f) => ({ ...f, [key]: value }));
 
-  // ── Open add dialog ───────────────────────────────────────────────────────────
   const openAdd = () => {
     setEditingId(null);
     setForm({ ...EMPTY_FORM, finYear: activeFinYear });
@@ -469,7 +795,6 @@ export default function ReceivedPaymentPage() {
     setIsOpen(true);
   };
 
-  // ── Open edit dialog ──────────────────────────────────────────────────────────
   const openEdit = (p: ReceivedPayment) => {
     setEditingId(p.id);
     setForm({
@@ -576,7 +901,7 @@ export default function ReceivedPaymentPage() {
       );
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || "Submit failed");
+        throw new Error((err as any).error || "Submit failed");
       }
       toast.success("Sent to Approval Inbox ✓");
       setSubmitTarget(null);
@@ -648,6 +973,115 @@ export default function ReceivedPaymentPage() {
 
   const needsBankRef = ["Check", "UPI", "NEFT", "RTGS", "Card"].includes(
     form.mode,
+  );
+
+  // ── Action buttons for a row ─────────────────────────────────────────────────
+  const RowActions = ({
+    p,
+    mobile = false,
+  }: {
+    p: ReceivedPayment;
+    mobile?: boolean;
+  }) => (
+    <div className={cn("flex items-center gap-1", mobile && "")}>
+      {/* Eye / View — always shown */}
+      <button
+        onClick={() => setViewPayment(p)}
+        title="View"
+        className="p-1.5 rounded-md text-muted-foreground/50 hover:text-sky-500 hover:bg-sky-500/10 transition-colors"
+      >
+        <Eye size={13} />
+      </button>
+      {/* Print — always shown */}
+      <button
+        onClick={() => {
+          // Open print immediately using the same logic as ViewPaymentDialog
+          const companyInfo = getCompanyInfo(p);
+          const logoHtml = companyInfo?.logoUrl
+            ? `<img src="${companyInfo.logoUrl}" style="height:56px;max-width:180px;object-fit:contain;" alt="Company Logo" />`
+            : `<div style="font-size:22px;font-weight:800;color:#1a1a1a;">${p.companyName}</div>`;
+          const printWindow = window.open("", "_blank", "width=800,height=600");
+          if (!printWindow) return;
+          printWindow.document.write(`
+            <!DOCTYPE html><html><head><title>Receipt – ${p.docNo}</title>
+            <style>
+              *{box-sizing:border-box;margin:0;padding:0;}
+              body{font-family:'Segoe UI',Arial,sans-serif;background:#fff;color:#1a1a1a;}
+              .page{max-width:720px;margin:32px auto;padding:40px;border:1px solid #e0e0e0;border-radius:8px;}
+              .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:32px;padding-bottom:20px;border-bottom:2px solid #f0f0f0;}
+              .company-meta{font-size:11px;color:#666;margin-top:3px;}
+              .receipt-title{text-align:right;}
+              .receipt-title h1{font-size:22px;font-weight:800;color:#16a34a;}
+              .receipt-title .doc-no{font-size:13px;color:#555;margin-top:4px;font-family:monospace;}
+              .badge{display:inline-block;padding:2px 10px;border-radius:20px;font-size:11px;font-weight:600;}
+              .badge-approved{background:#dcfce7;color:#16a34a;} .badge-draft{background:#fef9c3;color:#ca8a04;} .badge-rejected{background:#fee2e2;color:#dc2626;}
+              .amount-box{background:linear-gradient(135deg,#f0fdf4,#dcfce7);border:1.5px solid #86efac;border-radius:10px;padding:20px 24px;margin-bottom:28px;display:flex;align-items:center;justify-content:space-between;}
+              .amount-label{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:#16a34a;font-weight:600;}
+              .amount-value{font-size:28px;font-weight:800;color:#15803d;}
+              .details-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px 24px;margin-bottom:24px;}
+              .detail-item{display:flex;flex-direction:column;gap:3px;}
+              .detail-label{font-size:10px;text-transform:uppercase;letter-spacing:0.8px;color:#888;font-weight:600;}
+              .detail-value{font-size:13px;color:#1a1a1a;font-weight:500;}
+              .footer{margin-top:32px;padding-top:16px;border-top:1px solid #f0f0f0;display:flex;justify-content:space-between;align-items:center;font-size:10px;color:#aaa;}
+              @media print{body{-webkit-print-color-adjust:exact;print-color-adjust:exact;}}
+            </style></head><body>
+            <div class="page">
+              <div class="header">
+                <div>${logoHtml}${companyInfo?.address ? `<div class="company-meta">${companyInfo.address}</div>` : ""}${companyInfo?.phone ? `<div class="company-meta">Ph: ${companyInfo.phone}</div>` : ""}${companyInfo?.email ? `<div class="company-meta">${companyInfo.email}</div>` : ""}</div>
+                <div class="receipt-title"><h1>PAYMENT RECEIPT</h1><div class="doc-no">${p.docNo}</div><div style="margin-top:8px;"><span class="badge badge-${p.status.toLowerCase()}">${p.status}</span></div></div>
+              </div>
+              <div class="amount-box">
+                <div><div class="amount-label">Amount Received</div><div class="amount-value">+${fmt(p.amount)}</div></div>
+                <div style="text-align:right;"><div class="detail-label">Date</div><div style="font-size:15px;font-weight:600;">${p.docDate ? format(new Date(p.docDate), "dd MMM yyyy") : "—"}</div><div style="margin-top:6px;"><span style="background:#e0f2fe;color:#0369a1;padding:2px 10px;border-radius:20px;font-size:11px;font-weight:600;">${p.mode}</span></div></div>
+              </div>
+              <div class="details-grid">
+                <div class="detail-item"><span class="detail-label">Received From</span><span class="detail-value">${p.customerName || p.receivedFrom || "—"}</span></div>
+                <div class="detail-item"><span class="detail-label">Financial Year</span><span class="detail-value">${p.finYear || "—"}</span></div>
+                <div class="detail-item"><span class="detail-label">Company</span><span class="detail-value">${p.companyName || "—"}</span></div>
+                <div class="detail-item"><span class="detail-label">Project</span><span class="detail-value">${p.projectName || "—"}</span></div>
+                <div class="detail-item"><span class="detail-label">Deposit Bank</span><span class="detail-value">${p.depositBankName || "—"}</span></div>
+                ${p.transactionId ? `<div class="detail-item"><span class="detail-label">Transaction / UTR</span><span class="detail-value" style="font-family:monospace;">${p.transactionId}</span></div>` : ""}
+                ${p.checkNumber ? `<div class="detail-item"><span class="detail-label">Cheque No.</span><span class="detail-value" style="font-family:monospace;">${p.checkNumber}</span></div>` : ""}
+              </div>
+              ${p.remarks ? `<div class="detail-label" style="margin-bottom:6px;">Remarks</div><div style="background:#fafafa;border:1px solid #e5e7eb;border-radius:6px;padding:12px 16px;font-size:13px;">${p.remarks}</div>` : ""}
+              <div class="footer"><span>Generated by CivilierERP</span><span>Printed on ${format(new Date(), "dd MMM yyyy, hh:mm a")}</span></div>
+            </div>
+            <script>window.onload=()=>{window.print();window.close();}<\/script>
+            </body></html>
+          `);
+          printWindow.document.close();
+        }}
+        title="Print Receipt"
+        className="p-1.5 rounded-md text-muted-foreground/50 hover:text-violet-500 hover:bg-violet-500/10 transition-colors"
+      >
+        <Printer size={13} />
+      </button>
+      {p.status === "Draft" && (
+        <button
+          onClick={() => openEdit(p)}
+          title="Edit"
+          className="p-1.5 rounded-md text-muted-foreground/50 hover:text-blue-500 hover:bg-blue-500/10 transition-colors"
+        >
+          <Pencil size={13} />
+        </button>
+      )}
+      {p.status === "Draft" && (
+        <button
+          onClick={() => setSubmitTarget(p)}
+          title="Submit for Approval"
+          className="p-1.5 rounded-md text-muted-foreground/50 hover:text-primary hover:bg-primary/10 transition-colors"
+        >
+          <SendHorizontal size={13} />
+        </button>
+      )}
+      <button
+        onClick={() => deletePayment(p.id)}
+        title="Delete"
+        className="p-1.5 rounded-md text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-colors"
+      >
+        <Trash2 size={13} />
+      </button>
+    </div>
   );
 
   return (
@@ -797,8 +1231,22 @@ export default function ReceivedPaymentPage() {
                       <td className="px-4 py-3 text-muted-foreground text-xs">
                         {p.finYear || "—"}
                       </td>
-                      <td className="px-4 py-3 text-muted-foreground text-xs max-w-[110px] truncate">
-                        {p.companyName}
+                      <td className="px-4 py-3 text-xs max-w-[110px]">
+                        <div className="flex items-center gap-1.5 truncate">
+                          {(() => {
+                            const ci = getCompanyInfo(p);
+                            return ci?.logoUrl ? (
+                              <img
+                                src={ci.logoUrl}
+                                alt={p.companyName}
+                                className="h-4 w-auto max-w-[48px] object-contain rounded shrink-0"
+                              />
+                            ) : null;
+                          })()}
+                          <span className="text-muted-foreground truncate">
+                            {p.companyName}
+                          </span>
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-muted-foreground text-xs max-w-[110px] truncate">
                         {p.projectName}
@@ -834,33 +1282,7 @@ export default function ReceivedPaymentPage() {
                         </span>
                       </td>
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-1">
-                          {p.status === "Draft" && (
-                            <button
-                              onClick={() => openEdit(p)}
-                              title="Edit"
-                              className="p-1.5 rounded-md text-muted-foreground/50 hover:text-blue-500 hover:bg-blue-500/10 transition-colors"
-                            >
-                              <Pencil size={13} />
-                            </button>
-                          )}
-                          {p.status === "Draft" && (
-                            <button
-                              onClick={() => setSubmitTarget(p)}
-                              title="Submit for Approval"
-                              className="p-1.5 rounded-md text-muted-foreground/50 hover:text-primary hover:bg-primary/10 transition-colors"
-                            >
-                              <SendHorizontal size={13} />
-                            </button>
-                          )}
-                          <button
-                            onClick={() => deletePayment(p.id)}
-                            title="Delete"
-                            className="p-1.5 rounded-md text-muted-foreground/50 hover:text-destructive hover:bg-destructive/10 transition-colors"
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
+                        <RowActions p={p} />
                       </td>
                     </tr>
                   ))}
@@ -877,9 +1299,21 @@ export default function ReceivedPaymentPage() {
                       <p className="text-xs text-primary font-heading font-medium">
                         {p.docNo}
                       </p>
-                      <p className="text-[10px] text-muted-foreground">
-                        {p.companyName} · {p.finYear}
-                      </p>
+                      <div className="flex items-center gap-1.5 mt-0.5">
+                        {(() => {
+                          const ci = getCompanyInfo(p);
+                          return ci?.logoUrl ? (
+                            <img
+                              src={ci.logoUrl}
+                              alt={p.companyName}
+                              className="h-3 w-auto max-w-[36px] object-contain rounded"
+                            />
+                          ) : null;
+                        })()}
+                        <p className="text-[10px] text-muted-foreground">
+                          {p.companyName} · {p.finYear}
+                        </p>
+                      </div>
                       <p className="text-sm font-semibold text-foreground">
                         {p.customerName || p.receivedFrom}
                       </p>
@@ -912,31 +1346,7 @@ export default function ReceivedPaymentPage() {
                       {modeIcon(p.mode)}
                       {p.mode}
                     </span>
-                    <div className="flex items-center gap-1">
-                      {p.status === "Draft" && (
-                        <button
-                          onClick={() => openEdit(p)}
-                          className="p-1.5 text-muted-foreground/50 hover:text-blue-500"
-                        >
-                          <Pencil size={13} />
-                        </button>
-                      )}
-                      {p.status === "Draft" && (
-                        <button
-                          onClick={() => setSubmitTarget(p)}
-                          className="p-1.5 text-muted-foreground/50 hover:text-primary"
-                          title="Submit for Approval"
-                        >
-                          <SendHorizontal size={13} />
-                        </button>
-                      )}
-                      <button
-                        onClick={() => deletePayment(p.id)}
-                        className="p-1.5 text-muted-foreground/50 hover:text-destructive"
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
+                    <RowActions p={p} mobile />
                   </div>
                 </div>
               ))}
@@ -970,6 +1380,13 @@ export default function ReceivedPaymentPage() {
         </div>
       )}
 
+      {/* ── View Payment Dialog ──────────────────────────────────────────────── */}
+      <ViewPaymentDialog
+        payment={viewPayment}
+        companyInfo={viewPayment ? getCompanyInfo(viewPayment) : undefined}
+        onClose={() => setViewPayment(null)}
+      />
+
       {/* ── Add / Edit Dialog ────────────────────────────────────────────────── */}
       <Dialog
         open={isOpen}
@@ -996,9 +1413,7 @@ export default function ReceivedPaymentPage() {
           </DialogHeader>
 
           <div className="px-7 py-6">
-            {/* ── Two-column layout: form left, calendar right ── */}
             <div className="grid grid-cols-1 gap-8">
-              {/* LEFT — form fields */}
               <div className="space-y-5">
                 {/* Row 1: Company + Project */}
                 <div className="grid grid-cols-2 gap-4">
