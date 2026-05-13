@@ -4091,59 +4091,22 @@ const WorkOrderMaster: React.FC = () => {
             </div>
           )}
 
-          {/* Document Type & Number */}
-          <div className="rounded-xl border border-border bg-card mb-5 p-4 sm:p-5">
-            <div className="flex items-center gap-2 mb-3">
-              <Hash size={15} className="text-primary shrink-0" />
-              <h2 className="text-sm font-semibold text-foreground">
-                Document Type &amp; Number
-              </h2>
-            </div>
-            <div className="mb-3">
-              <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-1.5">
-                Fin Year
-              </label>
-              <select
-                value={selectedFinYear}
-                onChange={(e) => {
-                  const nextFinYear = e.target.value;
-                  setSelectedFinYear(nextFinYear);
-                  if (woDocTypeId)
-                    void refreshWoDocNumber(woDocTypeId, nextFinYear);
-                }}
-                className={selectCls}
-              >
-                <option value="">Select fin year...</option>
-                {finYearOptions.map((fy) => (
-                  <option key={fy.id} value={fy.year}>
-                    {fy.year}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <DocNumberPreview
-              module="WO"
-              finYear={selectedFinYear || undefined}
-              selectedDocTypeId={woDocTypeId}
-              preview={woDocNo}
-              refreshTrigger={docRefreshTrigger}
-              onSelect={applyWoDocNumber}
-            />
-          </div>
-
-          {/* Header card */}
+          {/* ── Unified Work Order Header Card ── */}
           <div className="rounded-xl border border-border bg-card mb-5">
             <div className="px-4 sm:px-5 py-3.5 border-b border-border flex items-center gap-2">
               <FileText size={15} className="text-primary shrink-0" />
               <h2 className="text-sm font-semibold text-foreground">
                 Work Order Details
               </h2>
-              <span className="ml-auto font-mono text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded shrink-0">
-                {form.docNumber}
-              </span>
+              {form.docNumber && (
+                <span className="ml-auto font-mono text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded shrink-0">
+                  {form.docNumber}
+                </span>
+              )}
             </div>
             <div className="p-4 sm:p-5">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-5 gap-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-5 gap-y-4 items-start">
+                {/* Row 1: Company | Project | Financial Year */}
                 <div>
                   <FieldLabel required>
                     <span className="flex items-center gap-1.5">
@@ -4185,6 +4148,53 @@ const WorkOrderMaster: React.FC = () => {
                 <div>
                   <FieldLabel>
                     <span className="flex items-center gap-1.5">
+                      <Calendar size={11} />
+                      Financial Year
+                    </span>
+                  </FieldLabel>
+                  {loadingDropdowns ? (
+                    <SelectSkeleton />
+                  ) : (
+                    <select
+                      value={selectedFinYear}
+                      onChange={(e) => {
+                        const nextFinYear = e.target.value;
+                        setSelectedFinYear(nextFinYear);
+                        if (woDocTypeId)
+                          void refreshWoDocNumber(woDocTypeId, nextFinYear);
+                      }}
+                      className={selectCls}
+                    >
+                      <option value="">Select financial year…</option>
+                      {finYearOptions.map((fy) => (
+                        <option key={fy.id} value={fy.year}>
+                          {fy.year}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </div>
+
+                {/* Row 2: Document Type | Doc Number | Doc Date */}
+                <div className="col-span-1">
+                  <FieldLabel>
+                    <span className="flex items-center gap-1.5">
+                      <Hash size={11} />
+                      Document Type
+                    </span>
+                  </FieldLabel>
+                  <DocNumberPreview
+                    module="WO"
+                    finYear={selectedFinYear || undefined}
+                    selectedDocTypeId={woDocTypeId}
+                    preview={woDocNo}
+                    refreshTrigger={docRefreshTrigger}
+                    onSelect={applyWoDocNumber}
+                  />
+                </div>
+                <div className="col-span-1">
+                  <FieldLabel>
+                    <span className="flex items-center gap-1.5">
                       <Hash size={11} />
                       Document Number
                     </span>
@@ -4197,12 +4207,13 @@ const WorkOrderMaster: React.FC = () => {
                       setWoDocNo(nextValue);
                     }}
                     className={`${inputCls} font-mono`}
+                    placeholder="Auto-generated…"
                   />
                   <p className="text-[11px] text-muted-foreground mt-1">
                     Auto-filled from document type, but still editable.
                   </p>
                 </div>
-                <div>
+                <div className="col-span-1">
                   <FieldLabel required>
                     <span className="flex items-center gap-1.5">
                       <Calendar size={11} />
@@ -4215,7 +4226,12 @@ const WorkOrderMaster: React.FC = () => {
                     onChange={(e) => setField("docDate", e.target.value)}
                     className={`${inputCls} ${errors.docDate ? "border-red-400" : ""}`}
                   />
+                  {errors.docDate && (
+                    <p className="text-xs text-red-500 mt-1">Required</p>
+                  )}
                 </div>
+
+                {/* Row 3: Contractor | Supplier | Total Amount */}
                 <div>
                   <FieldLabel required>
                     <span className="flex items-center gap-1.5">
@@ -4273,7 +4289,9 @@ const WorkOrderMaster: React.FC = () => {
                     Auto-calculated from activities
                   </p>
                 </div>
-                <div className="col-span-1 sm:col-span-2 lg:col-span-3">
+
+                {/* Row 4: Remarks (full width) */}
+                <div className="col-span-1 md:col-span-2 lg:col-span-3">
                   <FieldLabel>Remarks</FieldLabel>
                   <input
                     value={form.remarks}
@@ -4282,7 +4300,7 @@ const WorkOrderMaster: React.FC = () => {
                     className={inputCls}
                   />
                 </div>
-                <div className="col-span-1 sm:col-span-2 lg:col-span-3">
+                <div className="col-span-1 md:col-span-2 lg:col-span-3">
                   <FieldLabel>Terms &amp; Conditions</FieldLabel>
                   {/* T&C Picker from TCMaster */}
                   <div className="relative">

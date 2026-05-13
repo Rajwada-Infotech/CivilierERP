@@ -48,7 +48,7 @@ router.get("/", cache("item-master", 300), async (req, res) => {
         ${hasDS ? "gl.LHeadName AS DefaultSupplierName" : "NULL AS DefaultSupplierName"}
       FROM dbo.Item_Master_Group item
       LEFT JOIN dbo.Item_Master_Group grp ON grp.M_Id = item.Parent_Id
-      ${hasDS ? "LEFT JOIN dbo.GeneralLedger gl ON gl.LHeadId = item.default_supplier_id" : ""}
+      ${hasDS ? "LEFT JOIN dbo.AccountHeadMaster gl ON gl.LHeadId = item.default_supplier_id" : ""}
       WHERE item.Parent_Id IS NOT NULL
          OR item.M_IdentityCode = 1
       ORDER BY grp.M_Name, item.M_Name
@@ -125,7 +125,7 @@ router.get("/:id", async (req, res) => {
           gl.LHeadName AS DefaultSupplierName
         FROM dbo.Item_Master_Group item
         LEFT JOIN dbo.Item_Master_Group grp ON grp.M_Id = item.Parent_Id
-        LEFT JOIN dbo.GeneralLedger gl ON gl.LHeadId = item.default_supplier_id
+        LEFT JOIN dbo.AccountHeadMaster gl ON gl.LHeadId = item.default_supplier_id
         WHERE item.M_Id = @M_Id
       `);
     if (!result.recordset.length)
