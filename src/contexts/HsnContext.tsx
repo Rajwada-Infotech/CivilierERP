@@ -1,4 +1,11 @@
-import React, { createContext, useContext, useState, useCallback } from "react";
+import React, {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useEffect,
+} from "react";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
 export interface HsnRecord {
   code: string;
@@ -10,25 +17,12 @@ export interface HsnRecord {
   status: boolean;
 }
 
-// Seed data — mirrors HsnMaster initialData so both pages start in sync
-const INITIAL_HSN: HsnRecord[] = [
-  { code: "21069099", shortDesc: "Food Prep",       description: "Food preparations nes",                              igstRate: 0,  cgstRate: 4.5, sgstRate: 4.5, status: true },
-  { code: "25232990", shortDesc: "Cement",           description: "Cement (Portland, aluminous, slag)",                igstRate: 18, cgstRate: 0,   sgstRate: 0,   status: true },
-  { code: "72142090", shortDesc: "TMT Steel",        description: "Steel bars and rods - TMT bars",                   igstRate: 18, cgstRate: 0,   sgstRate: 0,   status: true },
-  { code: "73089099", shortDesc: "Steel Structures", description: "Structures and parts of structures of iron/steel", igstRate: 18, cgstRate: 0,   sgstRate: 0,   status: true },
-  { code: "84118100", shortDesc: "Gas Turbines",     description: "Gas turbines for construction equipment",          igstRate: 18, cgstRate: 0,   sgstRate: 0,   status: true },
-  { code: "84272000", shortDesc: "JCB Parts",        description: "Other lifts and skip hoists (JCB parts)",          igstRate: 18, cgstRate: 0,   sgstRate: 0,   status: true },
-  { code: "84314990", shortDesc: "Crane Parts",      description: "Parts of cranes, bulldozers, graders",             igstRate: 18, cgstRate: 0,   sgstRate: 0,   status: true },
-  { code: "84791000", shortDesc: "Road Roller",      description: "Machinery for public works (road rollers)",        igstRate: 18, cgstRate: 0,   sgstRate: 0,   status: true },
-  { code: "87089900", shortDesc: "Vehicle Parts",    description: "Parts for construction vehicles",                  igstRate: 18, cgstRate: 0,   sgstRate: 0,   status: true },
-  { code: "90158090", shortDesc: "Survey Equip",     description: "Surveying instruments for site survey",            igstRate: 18, cgstRate: 0,   sgstRate: 0,   status: true },
-];
-
 interface HsnContextType {
   hsnRecords: HsnRecord[];
   setHsnRecords: (records: HsnRecord[]) => void;
   /** Only active (status=true) records, shaped for the ItemMaster dropdown */
   activeHsnCodes: { code: string; description: string }[];
+  isLoading: boolean;
 }
 
 const HsnContext = createContext<HsnContextType | null>(null);
@@ -39,8 +33,32 @@ export const useHsn = (): HsnContextType => {
   return ctx;
 };
 
-export const HsnProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [hsnRecords, setHsnRecordsState] = useState<HsnRecord[]>(INITIAL_HSN);
+export const HsnProvider: React.FC<{ children: React.ReactNode }> = ({
+  children,
+}) => {
+  const [hsnRecords, setHsnRecordsState] = useState<HsnRecord[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    fetchWithAuth("/api/hsn")
+      .then((r) => r.json())
+      .then((data: any[]) => {
+        if (!Array.isArray(data)) return;
+        setHsnRecordsState(
+          data.map((item) => ({
+            code: item.HCode ?? "",
+            shortDesc: item.HShortDescription ?? "",
+            description: item.HDescription ?? "",
+            igstRate: Number(item.HIGST ?? 0),
+            cgstRate: Number(item.HCGST ?? 0),
+            sgstRate: Number(item.HSGST ?? 0),
+            status: item.HStatus !== false,
+          })),
+        );
+      })
+      .catch(() => {})
+      .finally(() => setIsLoading(false));
+  }, []);
 
   const setHsnRecords = useCallback((records: HsnRecord[]) => {
     setHsnRecordsState(records);
@@ -51,7 +69,9 @@ export const HsnProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     .map((h) => ({ code: h.code, description: h.shortDesc }));
 
   return (
-    <HsnContext.Provider value={{ hsnRecords, setHsnRecords, activeHsnCodes }}>
+    <HsnContext.Provider
+      value={{ hsnRecords, setHsnRecords, activeHsnCodes, isLoading }}
+    >
       {children}
     </HsnContext.Provider>
   );

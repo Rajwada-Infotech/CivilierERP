@@ -7,14 +7,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Dialog,
   DialogContent,
@@ -41,9 +33,6 @@ import {
   Trash2,
   Lock,
   Unlock,
-  CheckCircle2,
-  BarChart3,
-  Settings,
   UserCheck,
   RefreshCw,
   FileText,
@@ -51,8 +40,6 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/contexts/AuthContext";
 import { toast } from "sonner";
-
-const DEPARTMENTS = ["Finance", "Material", "Accounts", "HR", "Operations"];
 
 export default function AdminControlPanel() {
   const qc = useQueryClient();
@@ -67,7 +54,6 @@ export default function AdminControlPanel() {
     name: "",
     email: "",
     role: "user",
-    department: "Finance",
     password: "",
   });
   const [editForm, setEditForm] = useState<any>({});
@@ -90,13 +76,7 @@ export default function AdminControlPanel() {
       toast.success("User added");
       qc.invalidateQueries({ queryKey: ["admin-users"] });
       setAddOpen(false);
-      setAddForm({
-        name: "",
-        email: "",
-        role: "user",
-        department: "Finance",
-        password: "",
-      });
+      setAddForm({ name: "", email: "", role: "user", password: "" });
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -260,7 +240,6 @@ export default function AdminControlPanel() {
                   <TableRow className="text-xs">
                     <TableHead>Name</TableHead>
                     <TableHead>Email</TableHead>
-                    <TableHead>Department</TableHead>
                     <TableHead>Role</TableHead>
                     <TableHead>Permissions</TableHead>
                     <TableHead>Last Login</TableHead>
@@ -275,7 +254,6 @@ export default function AdminControlPanel() {
                       <TableCell className="text-muted-foreground">
                         {user.email}
                       </TableCell>
-                      <TableCell>{user.department}</TableCell>
                       <TableCell>
                         <Badge variant="outline" className="text-[10px]">
                           {user.role}
@@ -490,26 +468,6 @@ export default function AdminControlPanel() {
                 />
               </div>
             ))}
-            <div className="space-y-1">
-              <Label className="text-xs">Department</Label>
-              <Select
-                value={addForm.department}
-                onValueChange={(v) =>
-                  setAddForm((p) => ({ ...p, department: v }))
-                }
-              >
-                <SelectTrigger className="text-xs h-8">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {DEPARTMENTS.map((d) => (
-                    <SelectItem key={d} value={d}>
-                      {d}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
           </div>
           <DialogFooter>
             <Button
@@ -554,26 +512,6 @@ export default function AdminControlPanel() {
                 />
               </div>
             ))}
-            <div className="space-y-1">
-              <Label className="text-xs">Department</Label>
-              <Select
-                value={editForm.department}
-                onValueChange={(v) =>
-                  setEditForm((p: any) => ({ ...p, department: v }))
-                }
-              >
-                <SelectTrigger className="text-xs h-8">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {DEPARTMENTS.map((d) => (
-                    <SelectItem key={d} value={d}>
-                      {d}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
           </div>
           <DialogFooter>
             <Button
