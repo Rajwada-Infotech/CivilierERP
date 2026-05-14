@@ -8,12 +8,10 @@
 
 const express = require("express");
 const logger = require("../logger");
-const { redisGet, redisSet, redisDel, redisDelPattern } = require("../redis");
+const { bumpCacheVersion } = require("../redis");
+const { cache } = require("../middleware/cache");
 const router = express.Router();
 const { getPool, sql } = require("../db");
-// Note: authMiddleware is NOT imported here — it is already applied globally
-// at app.use("/api", authMiddleware) in server.js. Applying it again per-route
-// would double-decode the JWT and overwrite req.user, breaking role checks.
 const allowRoles = require("../middleware/role");
 
 const adminOnly = allowRoles("admin", "super_admin");
@@ -76,7 +74,11 @@ function mapComment(row) {
 
 // ─── GET /api/tasks ───────────────────────────────────────────────────────────
 // Admins see all tasks; regular users see only tasks assigned/created by them.
-router.get("/", async (req, res) => {
+// Uses the shared cache() middleware so the version-bump invalidation system
+// works correctly and the circuit-breaker protects against Redis downtime.
+// Previously used manual redisGet/redisSet which bypassed the circuit breaker
+// and caused up to 2000 ms hangs when Redis was cold/slow.
+router.get("/", cache("tasks", 60), async (req, res) => {
   let userId = null;
   try {
     userId = req.user.userId ?? req.user.id;
@@ -87,15 +89,6 @@ router.get("/", async (req, res) => {
       typeof req.query.module === "string" && req.query.module.trim()
         ? req.query.module.trim().toLowerCase()
         : "";
-
-    const cacheKey = `tasks:${userId}:${isAdmin}:${moduleFilter || "all"}`;
-
-    // ✅ 1. Check cache
-    const cached = await redisGet(cacheKey);
-    if (cached) {
-      logger.info({ event: "TASKS_CACHE_HIT", userId }, "Tasks served from cache");
-      return res.json(JSON.parse(cached));
-    }
 
     const pool = getPool();
 
@@ -158,9 +151,6 @@ router.get("/", async (req, res) => {
       mapTask(row, commentsByTask[row.Id] || []),
     );
 
-    // ✅ 2. Save to Redis (TTL = 60 sec)
-    await redisSet(cacheKey, JSON.stringify(tasks), 60);
-
     logger.info({ event: "TASKS_FETCHED", count: tasks.length, userId }, "Tasks fetched from DB");
 
     res.json(tasks);
@@ -171,8 +161,6 @@ router.get("/", async (req, res) => {
 });
 
 // ─── GET /api/tasks/reminders ─────────────────────────────────────────────────
-// Returns open/in_progress tasks that are overdue or due within 7 days.
-// Used by the bell notification in TopNavbar.
 router.get("/reminders", async (req, res) => {
   try {
     const pool = getPool();
@@ -216,7 +204,7 @@ router.get("/reminders", async (req, res) => {
 
       return {
         id: `task-${row.Id}`,
-        taskId: String(row.Id), // explicit numeric id for frontend navigation
+        taskId: String(row.Id),
         type: "task",
         title: row.Title,
         subtitle: `Assigned to ${row.AssignedToName || "Unknown"}`,
@@ -228,7 +216,7 @@ router.get("/reminders", async (req, res) => {
 
     res.json(items);
   } catch (err) {
-    logger.error({ event: "TASK_REMINDERS_FETCH_FAILED", err, userId }, "Failed to fetch task reminders");
+    logger.error({ event: "TASK_REMINDERS_FETCH_FAILED", err }, "Failed to fetch task reminders");
     res.status(500).json({ error: "Failed to fetch task reminders" });
   }
 });
@@ -263,7 +251,6 @@ router.get("/:id", async (req, res) => {
     const row = result.recordset[0];
     if (!row) return res.status(404).json({ error: "Task not found" });
 
-    // Access control: non-admins can only see their own tasks
     if (
       !isAdmin &&
       String(row.AssignedTo) !== String(userId) &&
@@ -336,7 +323,6 @@ router.post("/", adminOnly, async (req, res) => {
 
     const newId = result.recordset[0].Id;
 
-    // Return full task row
     const newTask = await pool.request().input("id", sql.Int, newId).query(`
         SELECT t.*, au.name AS AssignedToName, cu.name AS CreatedByName
         FROM dbo.Tasks t
@@ -345,11 +331,7 @@ router.post("/", adminOnly, async (req, res) => {
         WHERE t.Id = @id
       `);
 
-    // 🔥 CLEAR CACHE
-    // BUG FIX: old keys were 'tasks:{userId}:true' and 'tasks:{userId}:false'
-    // but the actual GET key is 'tasks:{userId}:{isAdmin}:{moduleFilter}'.
-    // Using redisDelPattern to wipe all variants for this user in one call.
-    await redisDelPattern(`tasks:${req.user.userId ?? req.user.id}:*`);
+    await bumpCacheVersion("tasks");
 
     logger.info({ event: "TASK_CREATED", taskId: newId, createdBy, assignedTo, title }, "Task created");
     res.status(201).json(mapTask(newTask.recordset[0], []));
@@ -400,7 +382,6 @@ router.put("/:id", async (req, res) => {
       reviewedBy,
     } = req.body;
 
-    // Build dynamic SET clause
     const updates = [];
     const request = pool.request().input("id", sql.Int, id);
 
@@ -438,7 +419,6 @@ router.put("/:id", async (req, res) => {
           request.input("reviewedBy", sql.Int, reviewedBy);
         }
       }
-      // Sent back for rework
       if (status === "in_progress" && row.Status === "closed") {
         updates.push("ReviewedBy = NULL");
         updates.push("ReviewedAt = NULL");
@@ -470,7 +450,6 @@ router.put("/:id", async (req, res) => {
       `UPDATE dbo.Tasks SET ${updates.join(", ")} WHERE Id = @id`,
     );
 
-    // Return updated task
     const updated = await pool.request().input("id", sql.Int, id).query(`
         SELECT t.*, au.name AS AssignedToName, cu.name AS CreatedByName, ru.name AS ReviewedByName
         FROM dbo.Tasks t
@@ -489,11 +468,7 @@ router.put("/:id", async (req, res) => {
         ORDER BY tc.CreatedAt ASC
       `);
 
-    // 🔥 CLEAR CACHE
-    // BUG FIX: old keys were 'tasks:{userId}:true' and 'tasks:{userId}:false'
-    // but the actual GET key is 'tasks:{userId}:{isAdmin}:{moduleFilter}'.
-    // Using redisDelPattern to wipe all variants for this user in one call.
-    await redisDelPattern(`tasks:${req.user.userId ?? req.user.id}:*`);
+    await bumpCacheVersion("tasks");
 
     logger.info({ event: "TASK_UPDATED", taskId: id, updatedBy: userId }, "Task updated");
     res.json(
@@ -520,16 +495,13 @@ router.delete("/:id", adminOnly, async (req, res) => {
     if (result.rowsAffected[0] === 0) {
       return res.status(404).json({ error: "Task not found" });
     }
-    // 🔥 CLEAR CACHE
-    // BUG FIX: old keys were 'tasks:{userId}:true' and 'tasks:{userId}:false'
-    // but the actual GET key is 'tasks:{userId}:{isAdmin}:{moduleFilter}'.
-    // Using redisDelPattern to wipe all variants for this user in one call.
-    await redisDelPattern(`tasks:${req.user.userId ?? req.user.id}:*`);
+
+    await bumpCacheVersion("tasks");
 
     logger.info({ event: "TASK_DELETED", taskId: id, deletedBy: req.user.userId ?? req.user.id }, "Task deleted");
     res.json({ success: true });
   } catch (err) {
-    logger.error({ event: "TASK_DELETE_FAILED", err, taskId: id, userId: req.user.userId ?? req.user.id }, "Failed to delete task");
+    logger.error({ event: "TASK_DELETE_FAILED", err, taskId: req.params.id }, "Failed to delete task");
     res.status(500).json({ error: "Failed to delete task" });
   }
 });
@@ -560,7 +532,6 @@ router.post("/:id/comments", async (req, res) => {
 
     const inserted = result.recordset[0];
 
-    // Get user name
     const userResult = await pool
       .request()
       .input("uid", sql.Int, userId)
@@ -568,16 +539,12 @@ router.post("/:id/comments", async (req, res) => {
 
     const userName = userResult.recordset[0]?.name || "";
 
-    // 🔥 CLEAR CACHE
-    // BUG FIX: old keys were 'tasks:{userId}:true' and 'tasks:{userId}:false'
-    // but the actual GET key is 'tasks:{userId}:{isAdmin}:{moduleFilter}'.
-    // Using redisDelPattern to wipe all variants for this user in one call.
-    await redisDelPattern(`tasks:${req.user.userId ?? req.user.id}:*`);
+    await bumpCacheVersion("tasks");
 
     logger.info({ event: "TASK_COMMENT_ADDED", taskId: id, commentId: inserted.Id, userId }, "Comment added to task");
     res.status(201).json(mapComment({ ...inserted, UserName: userName }));
   } catch (err) {
-    logger.error({ event: "TASK_COMMENT_FAILED", err, taskId: id, userId }, "Failed to add comment");
+    logger.error({ event: "TASK_COMMENT_FAILED", err, taskId: req.params.id }, "Failed to add comment");
     res.status(500).json({ error: "Failed to add comment" });
   }
 });

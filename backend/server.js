@@ -108,6 +108,7 @@ const ALL_ROUTES = [
   { path: "/api/finance-dashboard", file: "./routes/financeDashboard" },
   { path: "/api/material-dashboard", file: "./routes/materialDashboard" },
   { path: "/api/material-issues", file: "./routes/materialIssues" },
+  { path: "/api/material-requests", file: "./routes/materialRequests" },
   { path: "/api/admin-dashboard", file: "./routes/adminDashboard" },
   { path: "/api/user-activity", file: "./routes/userActivity" },
   { path: "/api/cheque-leaf", file: "./routes/chequeLeaf" },
