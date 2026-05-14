@@ -22,7 +22,6 @@ import {
   type ActivityBrowserContextType,
   type GroupedSession,
   type PaginatedActivity,
-  fetchIp,
   getStoredUser,
   normalizeEvent,
   EMPTY_ACTIVITY,
@@ -58,19 +57,11 @@ export const ActivityBrowserProvider: React.FC<{
   const currentPageRef = useRef(1);
   const currentFiltersRef = useRef<ActivityFilters>({});
   const dateFiltersRef = useRef<DateFilters>(dateFilters);
-  const cachedIp = useRef<string | null>(null);
   const fetchingRef = useRef(false);
 
   useEffect(() => {
     dateFiltersRef.current = dateFilters;
   }, [dateFilters]);
-
-  const getIp = useCallback(async () => {
-    if (cachedIp.current) return cachedIp.current;
-    const ip = await fetchIp();
-    cachedIp.current = ip;
-    return ip;
-  }, []);
 
   const fetchActivityCore = useCallback(
     async (page: number, filters: ActivityFilters, df: DateFilters) => {
@@ -180,7 +171,8 @@ export const ActivityBrowserProvider: React.FC<{
 
   const recordLogin = useCallback(
     async (user: { id: string; name: string; email: string; role: string }) => {
-      const ip = await getIp();
+      // IP is intentionally omitted: the backend resolves it from
+      // X-Forwarded-For and ignores any client-supplied value.
       const fingerprint = await getDeviceFingerprint();
       const deviceInfo = getDeviceInfo();
       const sessionId = crypto.randomUUID();
@@ -194,7 +186,6 @@ export const ActivityBrowserProvider: React.FC<{
         userRole: user.role,
         event: "login",
         timestamp: new Date().toISOString(),
-        ipAddress: ip,
         deviceInfo,
         deviceFingerprint: fingerprint,
         sessionId,
@@ -207,7 +198,7 @@ export const ActivityBrowserProvider: React.FC<{
         console.error("Login log failed:", err);
       }
     },
-    [getIp],
+    [],
   );
 
   const recordLogout = useCallback(
@@ -215,7 +206,8 @@ export const ActivityBrowserProvider: React.FC<{
       const sessionId = localStorage.getItem("currentSessionId");
       if (!sessionId) return;
 
-      const ip = await getIp();
+      // IP is intentionally omitted: the backend resolves it from
+      // X-Forwarded-For and ignores any client-supplied value.
       const deviceInfo = getDeviceInfo();
 
       const entry: SessionEvent = {
@@ -225,7 +217,6 @@ export const ActivityBrowserProvider: React.FC<{
         userRole: user.role,
         event: "logout",
         timestamp: new Date().toISOString(),
-        ipAddress: ip,
         deviceInfo,
         sessionId,
       };
@@ -239,7 +230,7 @@ export const ActivityBrowserProvider: React.FC<{
         localStorage.removeItem("currentSessionId");
       }
     },
-    [getIp],
+    [],
   );
 
   const recordAction = useCallback(
@@ -254,7 +245,8 @@ export const ActivityBrowserProvider: React.FC<{
       const user = getStoredUser();
       if (!sessionId || !user.id) return;
 
-      const ip = await getIp();
+      // IP is intentionally omitted: the backend resolves it from
+      // X-Forwarded-For and ignores any client-supplied value.
       const fingerprint = await getDeviceFingerprint();
       const deviceInfo = getDeviceInfo();
 
@@ -265,7 +257,6 @@ export const ActivityBrowserProvider: React.FC<{
         userRole: user.role || "",
         event: "action",
         timestamp: new Date().toISOString(),
-        ipAddress: ip,
         deviceInfo,
         deviceFingerprint: fingerprint,
         actionType: action.actionType,
@@ -283,7 +274,7 @@ export const ActivityBrowserProvider: React.FC<{
         console.error("Action log failed:", err);
       }
     },
-    [getIp],
+    [],
   );
 
   // ── GROUPING ───────────────────────────────────────────────────────────────

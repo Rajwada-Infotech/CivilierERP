@@ -128,17 +128,10 @@ export const useActivityBrowser = (): ActivityBrowserContextType => {
 
 // ── HELPERS (module-private) ──────────────────────────────────────────────────
 
-export async function fetchIp(): Promise<string> {
-  try {
-    const res = await fetch("https://api.ipify.org?format=json", {
-      signal: AbortSignal.timeout(3000),
-    });
-    const data = await res.json();
-    return data.ip ?? "Unavailable";
-  } catch {
-    return "Unavailable";
-  }
-}
+// IP resolution is intentionally omitted on the client side: the backend
+// derives the real IP from X-Forwarded-For / socket.remoteAddress and ignores
+// any client-supplied value. Fetching from ipify.org added ~100-300 ms of
+// latency on every login/action for zero benefit.
 
 export function getStoredUser() {
   try {
