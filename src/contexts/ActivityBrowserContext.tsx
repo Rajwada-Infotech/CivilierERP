@@ -176,7 +176,6 @@ export const ActivityBrowserProvider: React.FC<{
 }> = ({ children }) => {
   const [rawSessions, setRawSessions] = useState<SessionEvent[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  // Default to "this-week" so actions are visible without needing to change filters
   const [dateFilters, setDateFilters] = useState<DateFilters>({
     period: "this-week",
   });
@@ -184,15 +183,8 @@ export const ActivityBrowserProvider: React.FC<{
 
   const currentPageRef = useRef(1);
   const currentFiltersRef = useRef<ActivityFilters>({});
-  // Store dateFilters in a ref so SSE callback always reads current value
   const dateFiltersRef = useRef<DateFilters>(dateFilters);
-  const sseSourceRef = useRef<EventSource | null>(null);
-  const sseReconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
-  const sseRetryRef = useRef(0);
   const cachedIp = useRef<string | null>(null);
-  // Track if a fetch is in-flight to avoid SSE overwriting it
   const fetchingRef = useRef(false);
 
   // Keep dateFiltersRef in sync
@@ -208,7 +200,7 @@ export const ActivityBrowserProvider: React.FC<{
   }, []);
 
   // ── FETCH ──────────────────────────────────────────────────────────────────
-  // Use a ref-based fetch so SSE callback can call it without stale closures
+
   const fetchActivityCore = useCallback(
     async (page: number, filters: ActivityFilters, df: DateFilters) => {
       const token = localStorage.getItem("token");
@@ -222,7 +214,6 @@ export const ActivityBrowserProvider: React.FC<{
         fetchingRef.current = true;
         setIsLoading(true);
 
-        // Fetch a larger page so both sessions and actions are well-populated
         const result = await getUserActivityLogs({
           page,
           limit: 100,
@@ -289,58 +280,37 @@ export const ActivityBrowserProvider: React.FC<{
     setDateFilters({ period: "this-week" });
   };
 
-  // ── SSE ────────────────────────────────────────────────────────────────────
-  // SSE only triggers a refresh — it never directly sets rawSessions
-  // (which was overwriting the filtered fetch with unfiltered latest-25 rows)
+  // ── SOCKET.IO REAL-TIME ────────────────────────────────────────────────────
+  // On each `activity:new` event, prepend the new row to rawSessions
+  // (optimistic local update) and trigger a background re-fetch to keep
+  // totals / pagination counts in sync.
   useEffect(() => {
     let isMounted = true;
 
-    const connect = () => {
-      const token = localStorage.getItem("token");
-      if (!token || sseSourceRef.current || !isMounted) return;
+    const handleNewActivity = (event: SessionEvent) => {
+      if (!isMounted) return;
 
-      sseSourceRef.current = subscribeToActivityStream(
-        () => {
-          sseRetryRef.current = 0;
-          if (!fetchingRef.current) {
-            void fetchActivityCore(
-              currentPageRef.current,
-              currentFiltersRef.current,
-              dateFiltersRef.current,
-            );
-          }
-        },
-        () => {
-          sseSourceRef.current?.close();
-          sseSourceRef.current = null;
+      // Optimistically prepend to the visible list
+      setRawSessions((prev) => [normalizeEvent(event, -1), ...prev]);
 
-          if (sseReconnectTimerRef.current || !isMounted) return;
-
-          const delay = Math.min(30_000, 3_000 * 2 ** sseRetryRef.current);
-          sseRetryRef.current += 1;
-
-          sseReconnectTimerRef.current = setTimeout(() => {
-            sseReconnectTimerRef.current = null;
-            if (document.visibilityState === "visible") {
-              connect();
-            }
-          }, delay);
-        },
-      );
+      // Background re-fetch to keep total count & pagination accurate,
+      // but only if no fetch is already in flight
+      if (!fetchingRef.current) {
+        void fetchActivityCore(
+          currentPageRef.current,
+          currentFiltersRef.current,
+          dateFiltersRef.current,
+        );
+      }
     };
 
-    connect();
-    document.addEventListener("visibilitychange", connect);
+    const unsubscribe = subscribeToActivityStream(handleNewActivity);
 
     return () => {
       isMounted = false;
-      document.removeEventListener("visibilitychange", connect);
-      if (sseReconnectTimerRef.current) {
-        clearTimeout(sseReconnectTimerRef.current);
-      }
-      sseSourceRef.current?.close();
+      unsubscribe();
     };
-    // fetchActivityCore is stable (no deps) — safe to use here without re-running
+    // fetchActivityCore is stable — safe to omit from deps
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -501,7 +471,6 @@ export const ActivityBrowserProvider: React.FC<{
           new Date(event.timestamp).getTime() -
           new Date(group.loginTime).getTime();
       } else {
-        // event === "action"
         group.actions.push(event);
       }
     });

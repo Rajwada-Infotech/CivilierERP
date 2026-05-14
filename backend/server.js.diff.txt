@@ -1,0 +1,27 @@
+# ── server.js changes (surgical diff) ──────────────────────────────────────
+#
+# 1. Add `http` require at top (after the existing `require` block)
+# 2. Add `initSocket` require
+# 3. Replace `app.listen(…)` with http.createServer + initSocket
+#
+# Apply these three hunks to backend/server.js
+
+# ── HUNK 1 — add after:  const { safeLoadRoutes, printRoutesSummary } = require("./utils/loadRoutes");
++const http = require("http");
++const { initSocket } = require("./socket");
+
+# ── HUNK 2 — replace:
+-    const server = app.listen(PORT, () => {
+-      printBanner(PORT);
+-      logger.info(`[START] Server ready on port ${PORT}`);
+-    });
++    const httpServer = http.createServer(app);
++    initSocket(httpServer);
++
++    const server = httpServer.listen(PORT, () => {
++      printBanner(PORT);
++      logger.info(`[START] Server ready on port ${PORT}`);
++    });
+
+# That's it — nothing else changes in server.js.
+# setupGracefulShutdown already receives `server` and calls server.close(), so shutdown works unchanged.
