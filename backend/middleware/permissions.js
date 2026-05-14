@@ -33,8 +33,7 @@ const permissionCache = (() => {
       .request()
       .input("RoleId", sql.Int, roleId)
       .input("Module", sql.VarChar, module)
-      .input("SubModule", sql.VarChar, subModule)
-      .query(`
+      .input("SubModule", sql.VarChar, subModule).query(`
         SELECT CanView, CanAdd, CanEdit, CanDelete
         FROM RoleRights
         WHERE RoleId = @RoleId
@@ -62,17 +61,35 @@ const permissionCache = (() => {
   return { get, invalidateRole, invalidateAll };
 })();
 
+// Roles that always have full access — no RoleRights row needed.
+const SUPERUSER_ROLES = new Set(["super_admin", "sa", "dba", "admin"]);
+
 const checkPermission = (module, subModule, action = "CanView") => {
   return async (req, res, next) => {
     try {
       const roleId = req.user?.roleId;
+      const role = req.user?.role;
 
       if (!roleId) {
-        return res.status(401).json({ error: "Invalid token - missing roleId" });
+        return res
+          .status(401)
+          .json({ error: "Invalid token - missing roleId" });
       }
 
+      // super_admin / dba / admin bypass RoleRights entirely — they always
+      // have full access. Without this, the Activity Browser (and any other
+      // checkPermission-gated route) returns 403 for privileged users who
+      // don't have an explicit RoleRights row, silently emptying the page.
+      if (SUPERUSER_ROLES.has(role)) return next();
+
       if (process.env.DEBUG === "true") {
-        console.log("CHECK PERMISSION:", { roleId, module, subModule, action });
+        console.log("CHECK PERMISSION:", {
+          roleId,
+          role,
+          module,
+          subModule,
+          action,
+        });
       }
 
       const permission = await permissionCache.get(roleId, module, subModule);
@@ -84,7 +101,9 @@ const checkPermission = (module, subModule, action = "CanView") => {
 
       if (Number(permission[action]) !== 1) {
         console.log("[DENIED] Action not allowed:", action);
-        return res.status(403).json({ error: "Access denied (action blocked)" });
+        return res
+          .status(403)
+          .json({ error: "Access denied (action blocked)" });
       }
 
       next();
