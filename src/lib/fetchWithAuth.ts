@@ -11,15 +11,29 @@ export class ApiError extends Error {
   }
 }
 
-// Dedup key in sessionStorage â€” survives Vite HMR module re-evaluation
+// Extended options understood by fetchWithAuth itself.
+// All standard RequestInit fields are still forwarded to fetch().
+export interface FetchWithAuthOptions extends RequestInit {
+  // When true, the request must not trigger activity logging on the server
+  // or the client. Used by the activity-log read routes to prevent infinite
+  // self-logging loops. fetchWithAuth forwards an X-Skip-Activity-Log header
+  // so future server-side middleware can also honour the flag.
+  skipActivityLog?: boolean;
+}
+
+// Dedup key in sessionStorage — survives Vite HMR module re-evaluation
 // (unlike a plain `let`), is cleared when the tab closes, and is not
 // shared across tabs.
 const REDIRECTING_KEY = "__auth_redirecting";
 
 export async function fetchWithAuth(
   url: string,
-  options: RequestInit = {},
+  options: FetchWithAuthOptions = {},
 ): Promise<Response> {
+  // Pull out our custom flag before spreading into fetch() — fetch does not
+  // accept unknown options and would silently drop it, so we strip it here.
+  const { skipActivityLog, ...fetchOptions } = options;
+
   const token =
     typeof window !== "undefined" ? localStorage.getItem("token") : null;
 
@@ -35,11 +49,13 @@ export async function fetchWithAuth(
 
   try {
     response = await fetch(apiUrl(url), {
-      ...options,
+      ...fetchOptions,
       headers: {
         "Content-Type": "application/json",
-        ...(options.headers || {}),
+        ...(fetchOptions.headers || {}),
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        // Forward the skip flag as a header so server middleware can honour it.
+        ...(skipActivityLog ? { "X-Skip-Activity-Log": "1" } : {}),
       },
     });
   } catch (err: unknown) {
@@ -68,7 +84,7 @@ export async function fetchWithAuth(
       localStorage.removeItem("user");
       window.location.href = "/login";
     }
-    // Never throw â€” return a hanging promise so every concurrent caller is
+    // Never throw — return a hanging promise so every concurrent caller is
     // silently abandoned. Throwing here causes the 401 storm: callers catch,
     // set state, React re-renders, contexts remount, new requests fire.
     return new Promise<Response>(() => {}); // caller abandoned; navigation takes over
@@ -84,5 +100,3 @@ export async function fetchWithAuth(
 
   return response;
 }
-
-

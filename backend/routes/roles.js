@@ -284,6 +284,14 @@ router.post("/:roleId/rights", authMiddleware, async (req, res) => {
     }
 
     await transaction.commit();
+
+    // Invalidate in-process permission cache for this role so the change
+    // is effective immediately without waiting for the 5-minute TTL.
+    try {
+      const { permissionCache } = require("../middleware/permissions");
+      permissionCache.invalidateRole(roleId);
+    } catch { /* permissions module not loaded yet — no-op */ }
+
     return res.json({ success: true });
   } catch (err) {
     console.error("SAVE RIGHTS ERROR:", err);
