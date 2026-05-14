@@ -1735,10 +1735,31 @@ const Payment: React.FC = () => {
   const {
     data: dbData,
     isLoading,
+    isError,
+    error,
     refetch: refetchPayments,
   } = useQuery({
-    queryKey: ["payments", page, supplierFilter, companyFilter],
-    queryFn: () => getPayments(page, PAGE_SIZE, supplierFilter, companyFilter),
+    queryKey: [
+      "payments",
+      page,
+      supplierFilter,
+      companyFilter,
+      projectFilter,
+      finYearFilter,
+      docNumberFilter,
+      docDateFilter,
+    ],
+    queryFn: () =>
+      getPayments(
+        page,
+        PAGE_SIZE,
+        supplierFilter,
+        companyFilter,
+        projectFilter,
+        finYearFilter,
+        docNumberFilter,
+        docDateFilter,
+      ),
     staleTime: 0,
   });
 
@@ -2956,7 +2977,13 @@ const Payment: React.FC = () => {
               </div>
             )}
 
-            {!isLoading && (
+            {isError && (
+              <div className="text-center py-16 text-destructive text-sm">
+                Failed to load payments. Please log in and try again.
+              </div>
+            )}
+
+            {!isLoading && !isError && (
               <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
                 {/* Mobile cards */}
                 <div className="sm:hidden divide-y divide-border">
