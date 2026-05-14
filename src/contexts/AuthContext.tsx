@@ -191,6 +191,15 @@ export const AuthProvider = ({
 
       setCurrentUser(userWithInitials);
 
+      // Fire-and-forget: log the login event to UserActivityLog.
+      // Must run after setCurrentUser so the token is in localStorage.
+      recordLogin?.({
+        id: String(data.user.id),
+        name: data.user.name,
+        email: data.user.email,
+        role: data.user.role,
+      }).catch(() => {});
+
       return { success: true, role: data.user.role };
     } catch (err: any) {
       return {
