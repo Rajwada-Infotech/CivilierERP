@@ -22,6 +22,8 @@ const {
 
 const { ipKeyGenerator } = require("express-rate-limit");
 const { safeLoadRoutes, printRoutesSummary } = require("./utils/loadRoutes");
+const http = require("http");
+const { initSocket } = require("./socket");
 
 const {
   getRedis,
@@ -318,7 +320,10 @@ async function startServer() {
 
     const PORT = process.env.PORT || 5000;
 
-    const server = app.listen(PORT, () => {
+    const httpServer = http.createServer(app);
+    initSocket(httpServer);
+
+    const server = httpServer.listen(PORT, () => {
       printBanner(PORT);
       logger.info(`[START] Server ready on port ${PORT}`);
     });
