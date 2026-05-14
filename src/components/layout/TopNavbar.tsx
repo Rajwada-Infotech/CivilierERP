@@ -178,12 +178,6 @@ const materialSetupItems = [
   },
   { icon: Hash, label: "HSN", path: "/masters/hsn", color: "text-pink-400" },
   {
-    icon: Activity,
-    label: "Activity",
-    path: "/masters/activity",
-    color: "text-green-400",
-  },
-  {
     icon: BillingIcon,
     label: "Billing",
     path: "/masters/billing-terms",
@@ -226,40 +220,10 @@ const followupSetupItems = [
 
 const engineeringSetupItems = [
   {
-    icon: Wrench,
-    label: "Work Orders",
-    path: "/engineering/work-orders",
-    color: "text-orange-500",
-  },
-  {
-    icon: ClipboardList,
-    label: "Projects",
-    path: "/engineering/projects",
-    color: "text-amber-500",
-  },
-  {
-    icon: Package,
-    label: "Equipment",
-    path: "/engineering/equipment",
-    color: "text-yellow-600",
-  },
-  {
     icon: Activity,
-    label: "Site Activity",
-    path: "/engineering/site-activity",
-    color: "text-red-500",
-  },
-  {
-    icon: FileText,
-    label: "Drawings",
-    path: "/engineering/drawings",
-    color: "text-cyan-600",
-  },
-  {
-    icon: Users,
-    label: "Contractors",
-    path: "/engineering/contractors",
-    color: "text-teal-500",
+    label: "Activity",
+    path: "/masters/activity",
+    color: "text-green-400",
   },
 ];
 

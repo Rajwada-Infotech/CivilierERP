@@ -45,6 +45,7 @@ const MODULE_LINKS = {
   PAY: ["Payment"],
   RECP: ["Received Payment"],
   DN: ["Debit Note"],
+  WD: ["Work Done"],
 };
 
 // ── GET / — list all doc types, optionally filtered by ?module= ───────────────

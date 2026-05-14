@@ -502,12 +502,6 @@ export const MobileNav: React.FC = () => {
     },
     { icon: Hash, label: "HSN", path: "/masters/hsn", color: "text-pink-400" },
     {
-      icon: Activity,
-      label: "Activity",
-      path: "/masters/activity",
-      color: "text-green-400",
-    },
-    {
       icon: BillingIcon,
       label: "Billing",
       path: "/masters/billing-terms",
@@ -548,34 +542,10 @@ export const MobileNav: React.FC = () => {
   ];
   const engineeringSetupItems = [
     {
-      icon: HardHat,
-      label: "Work Order",
-      path: "/engineering/work-order",
-      color: "text-orange-500",
-    },
-    {
-      icon: FileText,
-      label: "BOQ",
-      path: "/engineering/boq",
-      color: "text-amber-500",
-    },
-    {
-      icon: Wrench,
-      label: "Work Done",
-      path: "/engineering/work-done",
-      color: "text-yellow-600",
-    },
-    {
-      icon: FileText,
-      label: "Drawings",
-      path: "/engineering/drawings",
-      color: "text-cyan-600",
-    },
-    {
-      icon: Users,
-      label: "Contractors",
-      path: "/masters/contractor",
-      color: "text-teal-500",
+      icon: Activity,
+      label: "Activity",
+      path: "/masters/activity",
+      color: "text-green-400",
     },
   ];
 
