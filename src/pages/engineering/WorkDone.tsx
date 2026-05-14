@@ -107,7 +107,9 @@ function SummaryCard({
       </div>
       <div>
         <p className="text-xs text-muted-foreground">{label}</p>
-        <p className="text-sm font-heading font-bold text-foreground">{value}</p>
+        <p className="text-sm font-heading font-bold text-foreground">
+          {value}
+        </p>
       </div>
     </div>
   );
@@ -396,17 +398,28 @@ export default function WorkDone() {
   const [editRecord, setEditRecord] = useState<WorkDoneEntry | null>(null);
   const [statusFilter, setStatusFilter] = useState("all");
 
-  const { data: entries = [], isLoading, refetch, isFetching } = useQuery<WorkDoneEntry[]>({
+  const {
+    data: entries = [],
+    isLoading,
+    refetch,
+    isFetching,
+  } = useQuery<WorkDoneEntry[]>({
     queryKey: ["engineering-work-done"],
     queryFn: () =>
-      fetchWithAuth("/api/engineering/work-done").then((r) => r.json()),
+      fetchWithAuth("/api/engineering/work-done").then(async (r) => {
+        const json = await r.json();
+        return Array.isArray(json) ? json : (json.data ?? []);
+      }),
     staleTime: 60 * 1000,
   });
 
   const { data: workOrders = [] } = useQuery<WorkOrderRef[]>({
     queryKey: ["work-orders-ref"],
     queryFn: () =>
-      fetchWithAuth("/api/work-orders?ref=true").then((r) => r.json()),
+      fetchWithAuth("/api/work-orders?ref=true").then(async (r) => {
+        const json = await r.json();
+        return Array.isArray(json) ? json : (json.data ?? []);
+      }),
     staleTime: 5 * 60 * 1000,
   });
 
@@ -424,77 +437,92 @@ export default function WorkDone() {
 
   const COLUMNS: ColumnDef<WorkDoneEntry>[] = [
     {
-      key: "DocNo",
+      id: "DocNo",
+      accessorKey: "DocNo",
       header: "Doc No",
-      render: (v: string) => (
+      cell: ({ getValue }) => (
         <span className="font-mono text-[11px] text-primary font-medium">
-          {v || "—"}
+          {(getValue() as string) || "—"}
         </span>
       ),
     },
     {
-      key: "WorkOrderNo",
+      id: "WorkOrderNo",
+      accessorKey: "WorkOrderNo",
       header: "Work Order",
-      render: (v: string) => (
-        <span className="text-xs text-muted-foreground">{v || "—"}</span>
+      cell: ({ getValue }) => (
+        <span className="text-xs text-muted-foreground">
+          {(getValue() as string) || "—"}
+        </span>
       ),
     },
     {
-      key: "ContractorName",
+      id: "ContractorName",
+      accessorKey: "ContractorName",
       header: "Contractor",
-      render: (v: string) => (
-        <span className="text-xs font-medium">{v || "—"}</span>
+      cell: ({ getValue }) => (
+        <span className="text-xs font-medium">
+          {(getValue() as string) || "—"}
+        </span>
       ),
     },
     {
-      key: "DescriptionOfWork",
+      id: "DescriptionOfWork",
+      accessorKey: "DescriptionOfWork",
       header: "Description",
-      render: (v: string) => (
-        <span
-          className="text-xs text-muted-foreground max-w-[160px] truncate block"
-          title={v}
-        >
-          {v || "—"}
-        </span>
-      ),
+      cell: ({ getValue }) => {
+        const v = getValue() as string;
+        return (
+          <span
+            className="text-xs text-muted-foreground max-w-[160px] truncate block"
+            title={v}
+          >
+            {v || "—"}
+          </span>
+        );
+      },
     },
     {
-      key: "PeriodFrom",
+      id: "Period",
+      accessorKey: "PeriodFrom",
       header: "Period",
-      render: (_: string, row: WorkDoneEntry) => (
+      cell: ({ row }) => (
         <span className="text-xs">
-          {fmtDate(row.PeriodFrom)} – {fmtDate(row.PeriodTo)}
+          {fmtDate(row.original.PeriodFrom)} – {fmtDate(row.original.PeriodTo)}
         </span>
       ),
     },
     {
-      key: "GrossAmount",
+      id: "GrossAmount",
+      accessorKey: "GrossAmount",
       header: "Gross",
-      render: (v: number) => (
-        <span className="text-xs">{fmt(v)}</span>
+      cell: ({ getValue }) => (
+        <span className="text-xs">{fmt(getValue() as number)}</span>
       ),
     },
     {
-      key: "CertifiedAmount",
+      id: "CertifiedAmount",
+      accessorKey: "CertifiedAmount",
       header: "Certified",
-      render: (v: number) => (
+      cell: ({ getValue }) => (
         <span className="text-xs font-semibold text-emerald-600">
-          {fmt(v)}
+          {fmt(getValue() as number)}
         </span>
       ),
     },
     {
-      key: "Status",
+      id: "Status",
+      accessorKey: "Status",
       header: "Status",
-      render: (v: string) => <StatusBadge status={v} />,
+      cell: ({ getValue }) => <StatusBadge status={getValue() as string} />,
     },
     {
-      key: "ID",
-      header: "",
-      render: (_: number, row: WorkDoneEntry) => (
+      id: "actions",
+      header: "Actions",
+      cell: ({ row }) => (
         <button
           onClick={() => {
-            setEditRecord(row);
+            setEditRecord(row.original);
             setShowForm(true);
           }}
           className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 px-2 py-1 rounded hover:bg-muted transition-colors"
@@ -607,7 +635,7 @@ export default function WorkDone() {
         <DataTable
           data={filtered}
           columns={COLUMNS}
-          isLoading={isLoading}
+          loading={isLoading}
           searchable
           paginated
           emptyMessage="No work done entries found."

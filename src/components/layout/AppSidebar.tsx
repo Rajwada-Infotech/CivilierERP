@@ -202,6 +202,7 @@ const buildMaterialNavItems = (): NavItem[] => [
     label: "Transaction",
     icon: Receipt,
     children: [
+      { label: "Material Request", path: "/material/material-request" },
       { label: "Purchase Order", path: "/material/purchase-order" },
       { label: "GRN", path: "/material/grn" },
       { label: "Issues", path: "/material/issues" },

@@ -205,6 +205,9 @@ const FollowupLog = lazy(() => import("./pages/followup/FollowupLog"));
 const AmendmentMenu = lazy(() => import("./pages/material/AmendmentMenu"));
 const Amendments = lazy(() => import("./pages/material/Amendments"));
 const Issues = lazy(() => import("./pages/material/Issues"));
+const MaterialRequestPage = lazy(
+  () => import("./pages/material/MaterialRequest"),
+);
 const RemindersManager = lazy(() => import("./pages/dba/RemindersManager"));
 
 const PaymentLogs = lazy(() => import("./pages/dba/PaymentLogs"));
@@ -623,6 +626,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <AmendmentMenu />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/material/material-request"
+        element={
+          <ProtectedRoute>
+            <MaterialRequestPage />
           </ProtectedRoute>
         }
       />
