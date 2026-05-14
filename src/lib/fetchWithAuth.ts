@@ -1,4 +1,4 @@
-import { apiUrl } from "./apiBase";
+﻿import { apiUrl } from "./apiBase";
 import { toast } from "sonner";
 
 // Exported so callers can distinguish auth/permission errors from network errors.
@@ -11,7 +11,7 @@ export class ApiError extends Error {
   }
 }
 
-// Dedup key in sessionStorage — survives Vite HMR module re-evaluation
+// Dedup key in sessionStorage â€” survives Vite HMR module re-evaluation
 // (unlike a plain `let`), is cleared when the tab closes, and is not
 // shared across tabs.
 const REDIRECTING_KEY = "__auth_redirecting";
@@ -68,7 +68,7 @@ export async function fetchWithAuth(
       localStorage.removeItem("user");
       window.location.href = "/login";
     }
-    // Never throw — return a hanging promise so every concurrent caller is
+    // Never throw â€” return a hanging promise so every concurrent caller is
     // silently abandoned. Throwing here causes the 401 storm: callers catch,
     // set state, React re-renders, contexts remount, new requests fire.
     return new Promise<Response>(() => {}); // caller abandoned; navigation takes over
@@ -84,3 +84,5 @@ export async function fetchWithAuth(
 
   return response;
 }
+
+

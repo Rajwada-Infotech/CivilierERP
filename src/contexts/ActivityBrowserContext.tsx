@@ -281,11 +281,10 @@ export const ActivityBrowserProvider: React.FC<{
   };
 
   // ── SOCKET.IO REAL-TIME ────────────────────────────────────────────────────
-  // On each `activity:new` event, prepend the new row to rawSessions
-  // (optimistic local update) and trigger a background re-fetch to keep
-  // totals / pagination counts in sync.
+  // Subscribe only when a token exists (backend socket requires JWT).
   useEffect(() => {
     let isMounted = true;
+    let unsubscribe: (() => void) | undefined;
 
     const handleNewActivity = (event: SessionEvent) => {
       if (!isMounted) return;
@@ -304,11 +303,29 @@ export const ActivityBrowserProvider: React.FC<{
       }
     };
 
-    const unsubscribe = subscribeToActivityStream(handleNewActivity);
+    const trySubscribe = () => {
+      const token = localStorage.getItem("token");
+      if (!token) return;
+
+      // Avoid creating multiple subscriptions
+      if (unsubscribe) return;
+
+      unsubscribe = subscribeToActivityStream(handleNewActivity);
+    };
+
+    trySubscribe();
+
+    // Token can be set after mount (login). Poll briefly to avoid plumbing
+    // auth state through this provider.
+    const intervalId = window.setInterval(() => {
+      if (!isMounted) return;
+      trySubscribe();
+    }, 500);
 
     return () => {
       isMounted = false;
-      unsubscribe();
+      window.clearInterval(intervalId);
+      if (unsubscribe) unsubscribe();
     };
     // fetchActivityCore is stable — safe to omit from deps
     // eslint-disable-next-line react-hooks/exhaustive-deps
