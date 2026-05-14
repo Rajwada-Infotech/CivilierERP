@@ -42,7 +42,11 @@ export async function fetchWithAuth(
     typeof window !== "undefined" &&
     sessionStorage.getItem(REDIRECTING_KEY)
   ) {
-    return new Promise<Response>(() => {}); // intentionally never resolves
+    if (token) {
+      sessionStorage.removeItem(REDIRECTING_KEY);
+    } else {
+      throw new ApiError("Authentication redirect in progress.", 401);
+    }
   }
 
   let response: Response;
@@ -84,10 +88,7 @@ export async function fetchWithAuth(
       localStorage.removeItem("user");
       window.location.href = "/login";
     }
-    // Never throw — return a hanging promise so every concurrent caller is
-    // silently abandoned. Throwing here causes the 401 storm: callers catch,
-    // set state, React re-renders, contexts remount, new requests fire.
-    return new Promise<Response>(() => {}); // caller abandoned; navigation takes over
+    throw new ApiError("Session expired. Please login again.", response.status);
   }
 
   if (response.status === 403) {

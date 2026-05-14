@@ -19,6 +19,14 @@ export default defineConfig(({ mode }) => ({
         timeout: 0,
         proxyTimeout: 0,
       },
+      // Ensure socket.io traffic also reaches the backend (port 5000).
+      // Critical: ws: true for WebSocket upgrade.
+      "/socket.io": {
+        target: "http://localhost:5000",
+        changeOrigin: true,
+        ws: true,
+        secure: false,
+      },
     },
   },
   plugins: [react()],
