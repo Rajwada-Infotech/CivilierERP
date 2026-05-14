@@ -1,52 +1,73 @@
 import React, { useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { StatusBadge } from "@/components/StatusBadge";
+import { useFinYear } from "@/contexts/FinYearContext";
+import {
+  fetchCompanies,
+  fetchProjects,
+  fetchSuppliers,
+} from "@/api/workOrderApi";
+import { DocNumberPreview } from "@/pages/material/ExpenseBooking/DocNumberPreview";
 import {
   Hammer,
   Plus,
   RefreshCw,
-  Search,
-  Filter,
   FileText,
-  ChevronDown,
-  X,
-  Eye,
+  PenSquare,
   CheckCircle2,
   Clock,
-  AlertCircle,
-  Building2,
-  HardHat,
-  Calendar,
   IndianRupee,
+  Building2,
+  Layers,
+  Calendar,
+  Hash,
+  User,
+  ArrowLeft,
+  Save,
+  RotateCcw,
 } from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+
+// ─── Style constants ──────────────────────────────────────────────────────────
+const inputCls =
+  "w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/30 transition";
+
+const selectCls =
+  "w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 transition appearance-none";
+
+const FieldLabel: React.FC<{
+  children: React.ReactNode;
+  required?: boolean;
+}> = ({ children, required }) => (
+  <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-1.5">
+    {children}
+    {required && <span className="text-red-500 ml-0.5">*</span>}
+  </label>
+);
+
+const SelectSkeleton: React.FC = () => (
+  <div className="w-full h-10 rounded-lg border border-border bg-muted/30 animate-pulse" />
+);
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface WorkDoneEntry {
   ID: number;
   DocNo: string;
-  WorkOrderNo: string;
-  WorkOrderID: number;
-  ContractorName: string;
+  DocTypeId: number | null;
+  DocDate: string;
+  CompanyId: number | null;
+  CompanyName: string;
+  ProjectId: number | null;
   ProjectName: string;
+  FinYear: string;
+  SupplierId: number | null;
+  SupplierName: string;
+  WorkOrderID: number;
+  WorkOrderNo: string;
+  ContractorName: string;
   PeriodFrom: string;
   PeriodTo: string;
   DescriptionOfWork: string;
@@ -62,11 +83,9 @@ interface WorkDoneEntry {
   CreatedBy: string;
 }
 
-interface WorkOrderRef {
-  ID: number;
-  DocNo: string;
-  ContractorName: string;
-  ProjectName: string;
+interface DropdownOption {
+  id: number;
+  name: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -115,9 +134,16 @@ function SummaryCard({
   );
 }
 
-// ─── Form dialog ──────────────────────────────────────────────────────────────
+// ─── Form state ───────────────────────────────────────────────────────────────
 interface FormState {
-  WorkOrderID: string;
+  companyId: string;
+  projectId: string;
+  finYear: string;
+  docTypeId: number | null;
+  docNo: string;
+  docDate: string;
+  supplierId: string;
+  remarks: string;
   PeriodFrom: string;
   PeriodTo: string;
   DescriptionOfWork: string;
@@ -125,12 +151,18 @@ interface FormState {
   Unit: string;
   RatePerUnit: string;
   Deductions: string;
-  Remarks: string;
   Status: string;
 }
 
-const EMPTY_FORM: FormState = {
-  WorkOrderID: "",
+const EMPTY_FORM = (activeFinYear?: string): FormState => ({
+  companyId: "",
+  projectId: "",
+  finYear: activeFinYear ?? "",
+  docTypeId: null,
+  docNo: "",
+  docDate: new Date().toISOString().slice(0, 10),
+  supplierId: "",
+  remarks: "",
   PeriodFrom: "",
   PeriodTo: "",
   DescriptionOfWork: "",
@@ -138,20 +170,28 @@ const EMPTY_FORM: FormState = {
   Unit: "",
   RatePerUnit: "",
   Deductions: "0",
-  Remarks: "",
   Status: "Draft",
-};
+});
 
-function WorkDoneFormDialog({
-  open,
-  onClose,
+// ─── Form ─────────────────────────────────────────────────────────────────────
+function WorkDoneForm({
   record,
-  workOrders,
+  onClose,
+  companies,
+  projects,
+  suppliers,
+  finYearOptions,
+  loadingDropdowns,
+  activeFinYear,
 }: {
-  open: boolean;
+  record: WorkDoneEntry | null;
   onClose: () => void;
-  record?: WorkDoneEntry | null;
-  workOrders: WorkOrderRef[];
+  companies: DropdownOption[];
+  projects: DropdownOption[];
+  suppliers: DropdownOption[];
+  finYearOptions: { id: string; year: string }[];
+  loadingDropdowns: boolean;
+  activeFinYear: string;
 }) {
   const qc = useQueryClient();
   const isEdit = !!record;
@@ -159,7 +199,16 @@ function WorkDoneFormDialog({
   const [form, setForm] = useState<FormState>(
     record
       ? {
-          WorkOrderID: String(record.WorkOrderID ?? ""),
+          companyId: String(record.CompanyId ?? ""),
+          projectId: String(record.ProjectId ?? ""),
+          finYear: record.FinYear ?? activeFinYear,
+          docTypeId: record.DocTypeId ?? null,
+          docNo: record.DocNo ?? "",
+          docDate:
+            record.DocDate?.slice(0, 10) ??
+            new Date().toISOString().slice(0, 10),
+          supplierId: String(record.SupplierId ?? ""),
+          remarks: record.Remarks ?? "",
           PeriodFrom: record.PeriodFrom?.slice(0, 10) ?? "",
           PeriodTo: record.PeriodTo?.slice(0, 10) ?? "",
           DescriptionOfWork: record.DescriptionOfWork ?? "",
@@ -167,36 +216,61 @@ function WorkDoneFormDialog({
           Unit: record.Unit ?? "",
           RatePerUnit: String(record.RatePerUnit ?? ""),
           Deductions: String(record.Deductions ?? "0"),
-          Remarks: record.Remarks ?? "",
           Status: record.Status ?? "Draft",
         }
-      : EMPTY_FORM,
+      : EMPTY_FORM(activeFinYear),
   );
 
-  const set = (k: keyof FormState) => (v: string) =>
-    setForm((prev) => ({ ...prev, [k]: v }));
+  const [errors, setErrors] = useState<Record<string, boolean>>({});
+  const [docRefreshTrigger, setDocRefreshTrigger] = useState(0);
+
+  const setField = useCallback(
+    <K extends keyof FormState>(k: K, v: FormState[K]) =>
+      setForm((prev) => ({ ...prev, [k]: v })),
+    [],
+  );
 
   const gross =
     (parseFloat(form.QuantityDone) || 0) * (parseFloat(form.RatePerUnit) || 0);
   const certified = gross - (parseFloat(form.Deductions) || 0);
 
+  const validate = () => {
+    const e: Record<string, boolean> = {};
+    if (!form.companyId) e.companyId = true;
+    if (!form.projectId) e.projectId = true;
+    if (!form.docDate) e.docDate = true;
+    if (!form.DescriptionOfWork.trim()) e.DescriptionOfWork = true;
+    setErrors(e);
+    return Object.keys(e).length === 0;
+  };
+
   const saveMutation = useMutation({
     mutationFn: async () => {
       const payload = {
-        ...form,
-        WorkOrderID: parseInt(form.WorkOrderID),
+        CompanyId: parseInt(form.companyId) || null,
+        ProjectId: parseInt(form.projectId) || null,
+        FinYear: form.finYear,
+        DocTypeId: form.docTypeId,
+        DocNo: form.docNo,
+        DocDate: form.docDate,
+        SupplierId: parseInt(form.supplierId) || null,
+        Remarks: form.remarks,
+        PeriodFrom: form.PeriodFrom,
+        PeriodTo: form.PeriodTo,
+        DescriptionOfWork: form.DescriptionOfWork,
         QuantityDone: parseFloat(form.QuantityDone) || 0,
+        Unit: form.Unit,
         RatePerUnit: parseFloat(form.RatePerUnit) || 0,
         Deductions: parseFloat(form.Deductions) || 0,
         GrossAmount: gross,
         CertifiedAmount: certified,
+        Status: form.Status,
       };
       const url = isEdit
         ? `/api/engineering/work-done/${record!.ID}`
         : "/api/engineering/work-done";
-      const method = isEdit ? "PUT" : "POST";
       const res = await fetchWithAuth(url, {
-        method,
+        method: isEdit ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
@@ -206,198 +280,391 @@ function WorkDoneFormDialog({
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["engineering-work-done"] });
       qc.invalidateQueries({ queryKey: ["engineering-dashboard"] });
+      toast.success(isEdit ? "Work Done updated" : "Work Done entry created");
       onClose();
     },
+    onError: (err: any) => toast.error(err.message || "Save failed"),
   });
 
+  const handleSave = () => {
+    if (!validate()) return;
+    saveMutation.mutate();
+  };
+
+  const handleReset = () => {
+    setForm(EMPTY_FORM(activeFinYear));
+    setErrors({});
+    setDocRefreshTrigger((n) => n + 1);
+  };
+
+  const renderSelect = (
+    value: string,
+    onChange: (v: string) => void,
+    options: DropdownOption[],
+    placeholder: string,
+    hasError = false,
+  ) => {
+    if (loadingDropdowns) return <SelectSkeleton />;
+    return (
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className={`${selectCls} ${hasError ? "border-red-400" : ""}`}
+      >
+        <option value="">{placeholder}</option>
+        {options.map((o) => (
+          <option key={o.id} value={String(o.id)}>
+            {o.name}
+          </option>
+        ))}
+      </select>
+    );
+  };
+
   return (
-    <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 font-heading">
-            <Hammer size={16} className="text-orange-600" />
-            {isEdit ? "Edit Work Done" : "New Work Done Entry"}
-          </DialogTitle>
-        </DialogHeader>
+    <div className="space-y-6">
+      {/* ── Document Header ── */}
+      <div className="rounded-xl border border-border bg-card overflow-hidden">
+        <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border bg-muted/30">
+          <Hash size={14} className="text-violet-500" />
+          <span className="text-sm font-heading font-semibold text-foreground">
+            Document Header
+          </span>
+        </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 py-2">
-          {/* Work Order */}
-          <div className="sm:col-span-2">
-            <label className="text-xs font-medium text-muted-foreground mb-1 block">
-              Work Order *
-            </label>
-            <Select value={form.WorkOrderID} onValueChange={set("WorkOrderID")}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select work order…" />
-              </SelectTrigger>
-              <SelectContent>
-                {workOrders.map((wo) => (
-                  <SelectItem key={wo.ID} value={String(wo.ID)}>
-                    {wo.DocNo} — {wo.ContractorName}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Period */}
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1 block">
-              Period From *
-            </label>
-            <Input
-              type="date"
-              value={form.PeriodFrom}
-              onChange={(e) => set("PeriodFrom")(e.target.value)}
-            />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1 block">
-              Period To *
-            </label>
-            <Input
-              type="date"
-              value={form.PeriodTo}
-              onChange={(e) => set("PeriodTo")(e.target.value)}
-            />
-          </div>
-
-          {/* Description */}
-          <div className="sm:col-span-2">
-            <label className="text-xs font-medium text-muted-foreground mb-1 block">
-              Description of Work *
-            </label>
-            <textarea
-              className="w-full min-h-[80px] rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-              value={form.DescriptionOfWork}
-              onChange={(e) => set("DescriptionOfWork")(e.target.value)}
-              placeholder="Describe the work completed…"
-            />
-          </div>
-
-          {/* Qty / Unit / Rate */}
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1 block">
-              Quantity Done *
-            </label>
-            <Input
-              type="number"
-              value={form.QuantityDone}
-              onChange={(e) => set("QuantityDone")(e.target.value)}
-              placeholder="0"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1 block">
-              Unit
-            </label>
-            <Input
-              value={form.Unit}
-              onChange={(e) => set("Unit")(e.target.value)}
-              placeholder="e.g. sqm, rmt, nos…"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1 block">
-              Rate per Unit (₹) *
-            </label>
-            <Input
-              type="number"
-              value={form.RatePerUnit}
-              onChange={(e) => set("RatePerUnit")(e.target.value)}
-              placeholder="0.00"
-            />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1 block">
-              Deductions (₹)
-            </label>
-            <Input
-              type="number"
-              value={form.Deductions}
-              onChange={(e) => set("Deductions")(e.target.value)}
-              placeholder="0.00"
-            />
-          </div>
-
-          {/* Auto-computed */}
-          <div className="sm:col-span-2 rounded-lg bg-orange-500/5 border border-orange-500/20 p-4 grid grid-cols-2 gap-4">
+        <div className="p-5 space-y-5">
+          {/* Row 1: Company | Project | Financial Year */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
             <div>
-              <p className="text-xs text-muted-foreground">Gross Amount</p>
-              <p className="text-base font-heading font-bold text-foreground">
+              <FieldLabel required>
+                <span className="flex items-center gap-1.5">
+                  <Building2 size={11} />
+                  Company
+                </span>
+              </FieldLabel>
+              {renderSelect(
+                form.companyId,
+                (v) => setField("companyId", v),
+                companies,
+                "Select company…",
+                errors.companyId,
+              )}
+              {errors.companyId && (
+                <p className="text-xs text-red-500 mt-1">Required</p>
+              )}
+            </div>
+
+            <div>
+              <FieldLabel required>
+                <span className="flex items-center gap-1.5">
+                  <Layers size={11} />
+                  Project
+                </span>
+              </FieldLabel>
+              {renderSelect(
+                form.projectId,
+                (v) => setField("projectId", v),
+                projects,
+                "Select project…",
+                errors.projectId,
+              )}
+              {errors.projectId && (
+                <p className="text-xs text-red-500 mt-1">Required</p>
+              )}
+            </div>
+
+            <div>
+              <FieldLabel>
+                <span className="flex items-center gap-1.5">
+                  <Calendar size={11} />
+                  Financial Year
+                </span>
+              </FieldLabel>
+              {loadingDropdowns ? (
+                <SelectSkeleton />
+              ) : (
+                <select
+                  value={form.finYear}
+                  onChange={(e) => {
+                    setField("finYear", e.target.value);
+                    setDocRefreshTrigger((n) => n + 1);
+                  }}
+                  className={selectCls}
+                >
+                  <option value="">Select financial year…</option>
+                  {finYearOptions.map((fy) => (
+                    <option key={fy.id} value={fy.year}>
+                      {fy.year}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          </div>
+
+          {/* Row 2: Document Name | Date | Supplier */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+            <div>
+              <FieldLabel>
+                <span className="flex items-center gap-1.5">
+                  <Hash size={11} />
+                  Document Name
+                </span>
+              </FieldLabel>
+              <DocNumberPreview
+                module="WD"
+                finYear={form.finYear || undefined}
+                selectedDocTypeId={form.docTypeId}
+                preview={form.docNo}
+                refreshTrigger={docRefreshTrigger}
+                onSelect={(id, preview) => {
+                  setField("docTypeId", id);
+                  setField("docNo", preview);
+                }}
+              />
+            </div>
+
+            <div>
+              <FieldLabel required>
+                <span className="flex items-center gap-1.5">
+                  <Calendar size={11} />
+                  Date
+                </span>
+              </FieldLabel>
+              <input
+                type="date"
+                value={form.docDate}
+                onChange={(e) => setField("docDate", e.target.value)}
+                className={`${inputCls} ${errors.docDate ? "border-red-400" : ""}`}
+              />
+              {errors.docDate && (
+                <p className="text-xs text-red-500 mt-1">Required</p>
+              )}
+            </div>
+
+            <div>
+              <FieldLabel>
+                <span className="flex items-center gap-1.5">
+                  <User size={11} />
+                  Supplier
+                </span>
+              </FieldLabel>
+              {renderSelect(
+                form.supplierId,
+                (v) => setField("supplierId", v),
+                suppliers,
+                "Select supplier…",
+              )}
+            </div>
+          </div>
+
+          {/* Row 3: Remarks full width */}
+          <div>
+            <FieldLabel>Remarks</FieldLabel>
+            <textarea
+              value={form.remarks}
+              onChange={(e) => setField("remarks", e.target.value)}
+              placeholder="Optional remarks…"
+              rows={2}
+              className="w-full text-sm rounded-lg border border-border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/30 transition resize-none"
+            />
+          </div>
+        </div>
+      </div>
+
+      {/* ── Work Details ── */}
+      <div className="rounded-xl border border-border bg-card overflow-hidden">
+        <div className="flex items-center gap-2 px-5 py-3.5 border-b border-border bg-muted/30">
+          <Hammer size={14} className="text-orange-500" />
+          <span className="text-sm font-heading font-semibold text-foreground">
+            Work Details
+          </span>
+        </div>
+
+        <div className="p-5 space-y-5">
+          {/* Row 1: Period From | Period To | Status */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+            <div>
+              <FieldLabel>Period From</FieldLabel>
+              <input
+                type="date"
+                value={form.PeriodFrom}
+                onChange={(e) => setField("PeriodFrom", e.target.value)}
+                className={inputCls}
+              />
+            </div>
+            <div>
+              <FieldLabel>Period To</FieldLabel>
+              <input
+                type="date"
+                value={form.PeriodTo}
+                onChange={(e) => setField("PeriodTo", e.target.value)}
+                className={inputCls}
+              />
+            </div>
+            <div>
+              <FieldLabel>Status</FieldLabel>
+              <select
+                value={form.Status}
+                onChange={(e) => setField("Status", e.target.value)}
+                className={selectCls}
+              >
+                {["Draft", "Pending", "Approved", "Rejected"].map((s) => (
+                  <option key={s} value={s}>
+                    {s}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Row 2: Description full width */}
+          <div>
+            <FieldLabel required>Description of Work</FieldLabel>
+            <textarea
+              value={form.DescriptionOfWork}
+              onChange={(e) => setField("DescriptionOfWork", e.target.value)}
+              placeholder="Describe the work completed…"
+              rows={3}
+              className={`w-full text-sm rounded-lg border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/40 focus:outline-none focus:ring-2 focus:ring-primary/30 transition resize-none ${
+                errors.DescriptionOfWork ? "border-red-400" : "border-border"
+              }`}
+            />
+            {errors.DescriptionOfWork && (
+              <p className="text-xs text-red-500 mt-1">Required</p>
+            )}
+          </div>
+
+          {/* Row 3: Qty | Unit | Rate | Deductions */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-5">
+            <div>
+              <FieldLabel>Quantity Done</FieldLabel>
+              <input
+                type="number"
+                value={form.QuantityDone}
+                onChange={(e) => setField("QuantityDone", e.target.value)}
+                placeholder="0"
+                className={inputCls}
+              />
+            </div>
+            <div>
+              <FieldLabel>Unit</FieldLabel>
+              <input
+                value={form.Unit}
+                onChange={(e) => setField("Unit", e.target.value)}
+                placeholder="sqm, rmt, nos…"
+                className={inputCls}
+              />
+            </div>
+            <div>
+              <FieldLabel>Rate per Unit (₹)</FieldLabel>
+              <input
+                type="number"
+                value={form.RatePerUnit}
+                onChange={(e) => setField("RatePerUnit", e.target.value)}
+                placeholder="0.00"
+                className={inputCls}
+              />
+            </div>
+            <div>
+              <FieldLabel>Deductions (₹)</FieldLabel>
+              <input
+                type="number"
+                value={form.Deductions}
+                onChange={(e) => setField("Deductions", e.target.value)}
+                placeholder="0.00"
+                className={inputCls}
+              />
+            </div>
+          </div>
+
+          {/* Row 4: Computed totals */}
+          <div className="rounded-xl bg-violet-500/5 border border-violet-500/20 p-4 grid grid-cols-2 gap-4">
+            <div>
+              <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                Gross Amount
+              </p>
+              <p className="text-lg font-heading font-bold text-foreground mt-0.5">
                 {fmt(gross)}
               </p>
             </div>
             <div>
-              <p className="text-xs text-muted-foreground">Certified Amount</p>
-              <p className="text-base font-heading font-bold text-emerald-600">
+              <p className="text-xs text-muted-foreground uppercase tracking-wide">
+                Certified Amount
+              </p>
+              <p className="text-lg font-heading font-bold text-emerald-600 mt-0.5">
                 {fmt(certified)}
               </p>
             </div>
           </div>
-
-          {/* Status */}
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1 block">
-              Status
-            </label>
-            <Select value={form.Status} onValueChange={set("Status")}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {["Draft", "Pending", "Approved", "Rejected"].map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {s}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Remarks */}
-          <div>
-            <label className="text-xs font-medium text-muted-foreground mb-1 block">
-              Remarks
-            </label>
-            <Input
-              value={form.Remarks}
-              onChange={(e) => set("Remarks")(e.target.value)}
-              placeholder="Optional remarks…"
-            />
-          </div>
         </div>
+      </div>
 
-        <DialogFooter className="gap-2">
-          <Button variant="outline" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button
-            onClick={() => saveMutation.mutate()}
-            disabled={
-              saveMutation.isPending ||
-              !form.WorkOrderID ||
-              !form.PeriodFrom ||
-              !form.PeriodTo ||
-              !form.DescriptionOfWork
-            }
-            className="bg-orange-600 hover:bg-orange-700 text-white"
-          >
-            {saveMutation.isPending ? "Saving…" : isEdit ? "Update" : "Save"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      {/* Action bar */}
+      <div className="flex items-center justify-between pt-1">
+        <button
+          onClick={handleReset}
+          disabled={saveMutation.isPending}
+          className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground border border-border rounded-lg px-4 py-2 hover:bg-muted transition-colors"
+        >
+          <RotateCcw size={13} />
+          Reset
+        </button>
+        <button
+          onClick={handleSave}
+          disabled={saveMutation.isPending}
+          className="flex items-center gap-1.5 text-sm bg-violet-600 hover:bg-violet-700 text-white rounded-lg px-5 py-2 font-medium transition-colors disabled:opacity-60"
+        >
+          <Save size={13} />
+          {saveMutation.isPending
+            ? "Saving…"
+            : isEdit
+              ? "Update Work Done"
+              : "Save Work Done"}
+        </button>
+      </div>
+    </div>
   );
 }
 
 // ─── Main page ────────────────────────────────────────────────────────────────
 export default function WorkDone() {
-  const qc = useQueryClient();
-  const [showForm, setShowForm] = useState(false);
+  const { finYears } = useFinYear();
+  const [view, setView] = useState<"list" | "form">("list");
   const [editRecord, setEditRecord] = useState<WorkDoneEntry | null>(null);
   const [statusFilter, setStatusFilter] = useState("all");
 
+  const activeFinYear =
+    finYears.find((fy) => fy.status === "Active")?.year ?? "";
+
+  const finYearOptions = finYears.map((fy) => ({
+    id: String(fy.id),
+    year: fy.year,
+  }));
+
+  // ── Dropdown queries ─────────────────────────────────────────────────────────
+  const { data: companies = [], isLoading: loadingCompanies } = useQuery({
+    queryKey: ["companies-wd"],
+    queryFn: fetchCompanies,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const { data: projects = [], isLoading: loadingProjects } = useQuery({
+    queryKey: ["projects-wd"],
+    queryFn: fetchProjects,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const { data: suppliers = [], isLoading: loadingSuppliers } = useQuery({
+    queryKey: ["suppliers-wd"],
+    queryFn: fetchSuppliers,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const loadingDropdowns =
+    loadingCompanies || loadingProjects || loadingSuppliers;
+
+  // ── List query ───────────────────────────────────────────────────────────────
   const {
     data: entries = [],
     isLoading,
@@ -413,16 +680,6 @@ export default function WorkDone() {
     staleTime: 60 * 1000,
   });
 
-  const { data: workOrders = [] } = useQuery<WorkOrderRef[]>({
-    queryKey: ["work-orders-ref"],
-    queryFn: () =>
-      fetchWithAuth("/api/work-orders?ref=true").then(async (r) => {
-        const json = await r.json();
-        return Array.isArray(json) ? json : (json.data ?? []);
-      }),
-    staleTime: 5 * 60 * 1000,
-  });
-
   const filtered =
     statusFilter === "all"
       ? entries
@@ -435,6 +692,22 @@ export default function WorkDone() {
   const pendingCount = entries.filter((e) => e.Status === "Pending").length;
   const approvedCount = entries.filter((e) => e.Status === "Approved").length;
 
+  const openNew = () => {
+    setEditRecord(null);
+    setView("form");
+  };
+
+  const openEdit = (r: WorkDoneEntry) => {
+    setEditRecord(r);
+    setView("form");
+  };
+
+  const closeForm = () => {
+    setView("list");
+    setEditRecord(null);
+  };
+
+  // ── Columns ──────────────────────────────────────────────────────────────────
   const COLUMNS: ColumnDef<WorkDoneEntry>[] = [
     {
       id: "DocNo",
@@ -447,9 +720,25 @@ export default function WorkDone() {
       ),
     },
     {
-      id: "WorkOrderNo",
-      accessorKey: "WorkOrderNo",
-      header: "Work Order",
+      id: "CompanyName",
+      accessorKey: "CompanyName",
+      header: "Company",
+      cell: ({ getValue }) => (
+        <span className="text-xs">{(getValue() as string) || "—"}</span>
+      ),
+    },
+    {
+      id: "ProjectName",
+      accessorKey: "ProjectName",
+      header: "Project",
+      cell: ({ getValue }) => (
+        <span className="text-xs">{(getValue() as string) || "—"}</span>
+      ),
+    },
+    {
+      id: "SupplierName",
+      accessorKey: "SupplierName",
+      header: "Supplier",
       cell: ({ getValue }) => (
         <span className="text-xs text-muted-foreground">
           {(getValue() as string) || "—"}
@@ -457,13 +746,11 @@ export default function WorkDone() {
       ),
     },
     {
-      id: "ContractorName",
-      accessorKey: "ContractorName",
-      header: "Contractor",
+      id: "DocDate",
+      accessorKey: "DocDate",
+      header: "Date",
       cell: ({ getValue }) => (
-        <span className="text-xs font-medium">
-          {(getValue() as string) || "—"}
-        </span>
+        <span className="text-xs">{fmtDate(getValue() as string)}</span>
       ),
     },
     {
@@ -483,24 +770,6 @@ export default function WorkDone() {
       },
     },
     {
-      id: "Period",
-      accessorKey: "PeriodFrom",
-      header: "Period",
-      cell: ({ row }) => (
-        <span className="text-xs">
-          {fmtDate(row.original.PeriodFrom)} – {fmtDate(row.original.PeriodTo)}
-        </span>
-      ),
-    },
-    {
-      id: "GrossAmount",
-      accessorKey: "GrossAmount",
-      header: "Gross",
-      cell: ({ getValue }) => (
-        <span className="text-xs">{fmt(getValue() as number)}</span>
-      ),
-    },
-    {
       id: "CertifiedAmount",
       accessorKey: "CertifiedAmount",
       header: "Certified",
@@ -518,26 +787,19 @@ export default function WorkDone() {
     },
     {
       id: "actions",
-      header: "Actions",
+      header: "",
       cell: ({ row }) => (
         <button
-          onClick={() => {
-            setEditRecord(row.original);
-            setShowForm(true);
-          }}
+          onClick={() => openEdit(row.original)}
           className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 px-2 py-1 rounded hover:bg-muted transition-colors"
         >
-          <Eye size={11} /> View
+          <PenSquare size={11} /> Edit
         </button>
       ),
     },
   ];
 
-  const openNew = () => {
-    setEditRecord(null);
-    setShowForm(true);
-  };
-
+  // ─── Render ───────────────────────────────────────────────────────────────
   return (
     <div className="p-6 space-y-5 max-w-[1600px] mx-auto">
       {/* Header */}
@@ -550,108 +812,129 @@ export default function WorkDone() {
             ]}
           />
           <div className="flex items-center gap-3 mt-1">
+            {view === "form" && (
+              <button
+                onClick={closeForm}
+                className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+              >
+                <ArrowLeft size={16} />
+              </button>
+            )}
             <div className="p-2 rounded-lg bg-orange-500/10">
               <Hammer size={18} className="text-orange-600" />
             </div>
             <div>
               <h1 className="text-xl font-heading font-bold text-foreground">
-                Work Done
+                {view === "form"
+                  ? editRecord
+                    ? `Edit — ${editRecord.DocNo || "Work Done"}`
+                    : "New Work Done Entry"
+                  : "Work Done"}
               </h1>
               <p className="text-xs text-muted-foreground">
-                Record and certify contractor work completion
+                {view === "form"
+                  ? "Fill in the document details and work information"
+                  : "Record and certify contractor work completion"}
               </p>
             </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
-          <button
-            onClick={() => refetch()}
-            disabled={isFetching}
-            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-1.5 hover:bg-muted transition-colors"
-          >
-            <RefreshCw size={12} className={isFetching ? "animate-spin" : ""} />
-          </button>
-          <Button
-            onClick={openNew}
-            className="bg-orange-600 hover:bg-orange-700 text-white text-xs h-8 px-3 flex items-center gap-1.5"
-          >
-            <Plus size={13} /> New Entry
-          </Button>
-        </div>
+        {view === "list" && (
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => refetch()}
+              disabled={isFetching}
+              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-1.5 hover:bg-muted transition-colors"
+            >
+              <RefreshCw
+                size={12}
+                className={isFetching ? "animate-spin" : ""}
+              />
+            </button>
+            <button
+              onClick={openNew}
+              className="flex items-center gap-1.5 text-sm bg-violet-600 hover:bg-violet-700 text-white rounded-lg px-4 py-2 font-medium transition-colors"
+            >
+              <Plus size={14} /> New Entry
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Summary strip */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <SummaryCard
-          label="Total Entries"
-          value={String(entries.length)}
-          icon={FileText}
-          iconColor="text-orange-600"
-          iconBg="bg-orange-500/10"
-        />
-        <SummaryCard
-          label="Certified Amount"
-          value={fmt(totalCertified)}
-          icon={IndianRupee}
-          iconColor="text-emerald-600"
-          iconBg="bg-emerald-500/10"
-        />
-        <SummaryCard
-          label="Pending Approval"
-          value={String(pendingCount)}
-          icon={Clock}
-          iconColor="text-amber-600"
-          iconBg="bg-amber-500/10"
-        />
-        <SummaryCard
-          label="Approved"
-          value={String(approvedCount)}
-          icon={CheckCircle2}
-          iconColor="text-blue-600"
-          iconBg="bg-blue-500/10"
-        />
-      </div>
+      {view === "list" ? (
+        <>
+          {/* Summary strip */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <SummaryCard
+              label="Total Entries"
+              value={String(entries.length)}
+              icon={FileText}
+              iconColor="text-orange-600"
+              iconBg="bg-orange-500/10"
+            />
+            <SummaryCard
+              label="Certified Amount"
+              value={fmt(totalCertified)}
+              icon={IndianRupee}
+              iconColor="text-emerald-600"
+              iconBg="bg-emerald-500/10"
+            />
+            <SummaryCard
+              label="Pending Approval"
+              value={String(pendingCount)}
+              icon={Clock}
+              iconColor="text-amber-600"
+              iconBg="bg-amber-500/10"
+            />
+            <SummaryCard
+              label="Approved"
+              value={String(approvedCount)}
+              icon={CheckCircle2}
+              iconColor="text-blue-600"
+              iconBg="bg-blue-500/10"
+            />
+          </div>
 
-      {/* Filter bar */}
-      <div className="flex items-center gap-2 flex-wrap">
-        {["all", "Draft", "Pending", "Approved", "Rejected"].map((s) => (
-          <button
-            key={s}
-            onClick={() => setStatusFilter(s)}
-            className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
-              statusFilter === s
-                ? "bg-orange-600 text-white border-orange-600"
-                : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"
-            }`}
-          >
-            {s === "all" ? "All" : s}
-          </button>
-        ))}
-      </div>
+          {/* Filter pills */}
+          <div className="flex items-center gap-2 flex-wrap">
+            {["all", "Draft", "Pending", "Approved", "Rejected"].map((s) => (
+              <button
+                key={s}
+                onClick={() => setStatusFilter(s)}
+                className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${
+                  statusFilter === s
+                    ? "bg-violet-600 text-white border-violet-600"
+                    : "border-border text-muted-foreground hover:text-foreground hover:bg-muted"
+                }`}
+              >
+                {s === "all" ? "All" : s}
+              </button>
+            ))}
+          </div>
 
-      {/* Table */}
-      <div className="rounded-xl border border-border bg-card overflow-hidden">
-        <DataTable
-          data={filtered}
-          columns={COLUMNS}
-          loading={isLoading}
-          searchable
-          paginated
-          emptyMessage="No work done entries found."
-        />
-      </div>
-
-      {/* Form Dialog */}
-      {showForm && (
-        <WorkDoneFormDialog
-          open={showForm}
-          onClose={() => {
-            setShowForm(false);
-            setEditRecord(null);
-          }}
+          {/* Table */}
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <DataTable
+              data={filtered}
+              columns={COLUMNS}
+              loading={isLoading}
+              searchable
+              paginated
+              emptyMessage="No work done entries found."
+            />
+          </div>
+        </>
+      ) : (
+        <WorkDoneForm
           record={editRecord}
-          workOrders={workOrders}
+          onClose={closeForm}
+          companies={companies}
+          projects={projects}
+          suppliers={suppliers}
+          finYearOptions={finYearOptions}
+          loadingDropdowns={loadingDropdowns}
+          activeFinYear={activeFinYear}
         />
       )}
     </div>
