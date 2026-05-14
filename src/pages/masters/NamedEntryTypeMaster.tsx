@@ -193,18 +193,15 @@ const NamedEntryTypeMaster: React.FC = () => {
   });
 
   // Fetch Menu Master entries (for Entry Type dropdown)
-  const { data: menuMasterData = [] } = useQuery({
+  const { data: menuMasterData = [], isLoading: isMenuLoading } = useQuery({
     queryKey: ["menuMaster"],
     queryFn: getMenuMasters,
     staleTime: 5 * 60 * 1000,
-    retry: false,
-    throwOnError: false,
   });
 
   const dbItems: DbEntryType[] = Array.isArray(dbData) ? dbData : [];
 
   // projectsData: [{ id: number, name: string }]
-  // We keep a lookup map so we can resolve id ↔ name
   const projectMap = useMemo(() => {
     const m = new Map<number, string>();
     if (Array.isArray(projectsData)) {
@@ -215,7 +212,6 @@ const NamedEntryTypeMaster: React.FC = () => {
     return m;
   }, [projectsData]);
 
-  // Options shown in the dropdown — stored value is the numeric id as string
   const projectOptions = useMemo(() => {
     if (!Array.isArray(projectsData) || projectsData.length === 0) return [];
     return projectsData
@@ -224,23 +220,12 @@ const NamedEntryTypeMaster: React.FC = () => {
       .sort((a, b) => a.label.localeCompare(b.label));
   }, [projectsData]);
 
-  // Dynamic entry type options from Menu Master
+  // Entry type options come exclusively from Menu Master — no hardcoded fallback.
+  // If Menu Master is empty, the dropdown will be empty and the user must add
+  // entries via the Menu Master page first.
   const entryTypeOptions = useMemo(() => {
-    const fallback = [
-      "Received",
-      "Invoice",
-      "Payment",
-      "BOQ",
-      "Purchase Order",
-      "Work Order",
-      "GRN",
-    ];
-    if (!Array.isArray(menuMasterData) || menuMasterData.length === 0)
-      return fallback;
-    const options = menuMasterData
-      .map((m: any) => m?.Name)
-      .filter(Boolean) as string[];
-    return options.length > 0 ? options : fallback;
+    if (!Array.isArray(menuMasterData)) return [];
+    return menuMasterData.map((m: any) => m?.Name).filter(Boolean) as string[];
   }, [menuMasterData]);
 
   const mappedData = useMemo(() => {
@@ -248,7 +233,7 @@ const NamedEntryTypeMaster: React.FC = () => {
       _id: String(item.E_Id || ""),
       project_id: String(item.project_id ?? ""), // FK stored/sent to backend
       projectName: item.Epname || "", // resolved at read time via JOIN
-      entryType: item.EntryType || "Payment",
+      entryType: item.EntryType || "",
       prefix: item.Eprefix || "",
       prefixMode: "auto" as const,
       status: true,
@@ -264,7 +249,7 @@ const NamedEntryTypeMaster: React.FC = () => {
     const project_id = Number(record.project_id); // FK — what we persist
     const projectName =
       (record.projectName as string) || projectMap.get(project_id) || "";
-    const entryType = (record.entryType as string) || "Payment";
+    const entryType = (record.entryType as string) || "";
     const prefixGroup = record.prefixGroup as PrefixGroupValue | undefined;
 
     const mode = prefixGroup?.mode ?? "auto";
@@ -283,7 +268,7 @@ const NamedEntryTypeMaster: React.FC = () => {
 
   // ── Handlers ──────────────────────────────────────────────────────────────
   const handleDataEvent = async (event: DataChangeEvent) => {
-    console.log("Event:", event.action, "ID:", event.id); // For debugging
+    console.log("Event:", event.action, "ID:", event.id);
     try {
       if (event.action === "add") {
         await addEntryType(toPayload(event.record));
@@ -314,7 +299,6 @@ const NamedEntryTypeMaster: React.FC = () => {
     projectNameRef.current = projectName;
     entryTypeRef.current = entryType;
 
-    // Keep projectName in sync so the prefix renderer can read it
     if (form.projectName !== projectName) {
       updateForm({ projectName });
     }
@@ -334,7 +318,7 @@ const NamedEntryTypeMaster: React.FC = () => {
     const project_id = Number(formData.project_id);
     const projectName =
       projectMap.get(project_id) || (formData.projectName as string) || "";
-    const entryType = (formData.entryType as string) || "Payment";
+    const entryType = (formData.entryType as string) || "";
     const prefixGroup = formData.prefixGroup as PrefixGroupValue | undefined;
 
     const mode = prefixGroup?.mode ?? "auto";
@@ -355,7 +339,7 @@ const NamedEntryTypeMaster: React.FC = () => {
     };
   };
 
-  if (isEntryTypesLoading || isProjectsLoading) {
+  if (isEntryTypesLoading || isProjectsLoading || isMenuLoading) {
     return (
       <div className="p-8 flex flex-col items-center justify-center min-h-[400px] text-muted-foreground">
         <div className="animate-spin h-8 w-8 border-4 border-primary border-t-transparent rounded-full mb-4" />
@@ -391,6 +375,14 @@ const NamedEntryTypeMaster: React.FC = () => {
         Named Entry Type Master
       </h1>
 
+      {entryTypeOptions.length === 0 && (
+        <div className="mb-4 px-4 py-3 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400 text-sm font-heading">
+          No entry types found in Menu Master. Add entries via{" "}
+          <strong>Admin → Menu Master</strong> before creating named entry
+          types.
+        </div>
+      )}
+
       <MasterPage
         title="Named Entry Type"
         fields={[
@@ -399,7 +391,7 @@ const NamedEntryTypeMaster: React.FC = () => {
             label: "Project",
             type: "select",
             required: true,
-            optionsProvider: () => projectOptions, // { value: id, label: name }[]
+            optionsProvider: () => projectOptions,
             placeholder: "Select a project",
           },
           {
@@ -408,6 +400,10 @@ const NamedEntryTypeMaster: React.FC = () => {
             type: "select",
             required: true,
             options: entryTypeOptions,
+            placeholder:
+              entryTypeOptions.length === 0
+                ? "No entry types — add via Menu Master"
+                : "Select entry type",
           },
           {
             name: "prefixGroup",
@@ -437,10 +433,11 @@ const NamedEntryTypeMaster: React.FC = () => {
         exportConfig={{
           title: "Named Entry Type Master",
           filename: "named-entry-type-master",
-          columns: [            { header: "Project",    accessor: "projectName" },
+          columns: [
+            { header: "Project", accessor: "projectName" },
             { header: "Entry Type", accessor: "entryType" },
-            { header: "Prefix",     accessor: "prefix" },
-            { header: "Status",     accessor: "status" },
+            { header: "Prefix", accessor: "prefix" },
+            { header: "Status", accessor: "status" },
           ],
         }}
       />

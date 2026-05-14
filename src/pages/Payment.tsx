@@ -46,6 +46,7 @@ import {
   AlertTriangle,
   Search,
   Eye,
+  Printer,
 } from "lucide-react";
 import type { ExportColumn } from "@/lib/export";
 
@@ -119,6 +120,8 @@ interface ExpenseOption {
   partyName?: string;
   amount?: number;
   companyId?: number | null;
+  companyName?: string;
+  financialYear?: string;
   installmentNo?: number;
   refNumber?: string | null;
   dueDate?: string | null;
@@ -331,6 +334,31 @@ const fetchCompanyOptions = async (): Promise<
   const res = await fetchWithAuth("/api/enterprises/options?business_type=C");
   if (!res.ok) return [];
   return res.json();
+};
+
+const fetchProjectOptions = async (): Promise<string[]> => {
+  const res = await fetchWithAuth("/api/enterprises/options?business_type=P");
+  if (!res.ok) return [];
+  const data: { id: number; label: string }[] = await res.json();
+  return data.map((p) => p.label).sort();
+};
+
+const fetchFinYears = async (): Promise<string[]> => {
+  const res = await fetchWithAuth("/api/fin-year");
+  if (!res.ok) return [];
+  const data: { FId: number; FName: string | null }[] = await res.json();
+  return data
+    .filter((f) => f.FName)
+    .map((f) => f.FName as string)
+    .sort()
+    .reverse();
+};
+
+const fetchSupplierOptions = async (): Promise<string[]> => {
+  const res = await fetchWithAuth("/api/account-head/options?type=S");
+  if (!res.ok) return [];
+  const data: { id: number; label: string }[] = await res.json();
+  return data.map((s) => s.label).sort();
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -733,6 +761,180 @@ function PartyFilterCombobox({
     </div>
   );
 }
+// ─── FilterBar ────────────────────────────────────────────────────────────────
+
+type BookingFilters = {
+  company: string;
+  project: string;
+  year: string;
+  supplier: string;
+};
+
+function FilterBar({
+  expenseOptions,
+  filters,
+  onChange,
+}: {
+  expenseOptions: ExpenseOption[];
+  filters: BookingFilters;
+  onChange: (key: keyof BookingFilters, value: string) => void;
+}) {
+  const [projects, setProjects] = React.useState<string[]>([]);
+  const [finYears, setFinYears] = React.useState<string[]>([]);
+  const [suppliers, setSuppliers] = React.useState<string[]>([]);
+
+  React.useEffect(() => {
+    fetchProjectOptions()
+      .then(setProjects)
+      .catch(() => {});
+    fetchFinYears()
+      .then(setFinYears)
+      .catch(() => {});
+    fetchSupplierOptions()
+      .then(setSuppliers)
+      .catch(() => {});
+  }, []);
+
+  // Company — derived from expenseOptions (already resolved per option)
+  const companies = React.useMemo(
+    () =>
+      Array.from(
+        new Set(
+          expenseOptions
+            .map((o) => o.companyName)
+            .filter((v): v is string => !!v && v.trim() !== ""),
+        ),
+      ).sort(),
+    [expenseOptions],
+  );
+
+  const activeCount = Object.values(filters).filter(Boolean).length;
+
+  const dropdowns: {
+    key: keyof BookingFilters;
+    label: string;
+    icon: React.ElementType;
+    items: string[];
+    placeholder: string;
+  }[] = [
+    {
+      key: "company",
+      label: "Company",
+      icon: Building2,
+      items: companies,
+      placeholder: "All companies",
+    },
+    {
+      key: "project",
+      label: "Project",
+      icon: FolderKanban,
+      items: projects,
+      placeholder: "All projects",
+    },
+    {
+      key: "year",
+      label: "Year",
+      icon: CalendarDays,
+      items: finYears,
+      placeholder: "All years",
+    },
+    {
+      key: "supplier",
+      label: "Supplier",
+      icon: FileText,
+      items: suppliers,
+      placeholder: "All suppliers",
+    },
+  ];
+
+  return (
+    <div className="rounded-xl border border-border bg-card/60 p-3 space-y-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <div className="flex items-center justify-center w-5 h-5 rounded bg-muted">
+            <Search size={11} className="text-muted-foreground" />
+          </div>
+          <span className="text-[11px] font-heading uppercase tracking-wider text-muted-foreground">
+            Filter expense bookings
+          </span>
+          {activeCount > 0 && (
+            <span className="px-1.5 py-0.5 rounded-full text-[10px] font-heading font-semibold bg-primary/15 text-primary border border-primary/20">
+              {activeCount} active
+            </span>
+          )}
+        </div>
+        {activeCount > 0 && (
+          <button
+            type="button"
+            onClick={() => {
+              onChange("company", "");
+              onChange("project", "");
+              onChange("year", "");
+              onChange("supplier", "");
+            }}
+            className="flex items-center gap-1 text-[11px] text-muted-foreground hover:text-destructive transition-colors"
+          >
+            <X size={10} /> Clear all
+          </button>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+        {dropdowns.map(({ key, label, icon: Icon, items, placeholder }) => (
+          <div key={key} className="space-y-1">
+            <label className="flex items-center gap-1 text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+              <Icon size={9} /> {label}
+            </label>
+            <div className="relative">
+              <select
+                value={filters[key] || ""}
+                onChange={(e) => onChange(key, e.target.value)}
+                className="w-full appearance-none pl-2 pr-7 py-1.5 rounded-lg text-xs bg-background border border-border/70 text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30"
+              >
+                <option value="">{placeholder}</option>
+                {items.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown
+                size={11}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {activeCount > 0 && (
+        <div className="flex flex-wrap gap-1.5 pt-0.5">
+          {(Object.entries(filters) as [keyof BookingFilters, string][]).map(
+            ([key, val]) => {
+              if (!val) return null;
+              return (
+                <span
+                  key={key}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading font-semibold bg-primary/10 text-primary border border-primary/20"
+                >
+                  {val}
+                  <button
+                    type="button"
+                    onClick={() => onChange(key, "")}
+                    className="ml-0.5 text-primary/50 hover:text-destructive transition-colors"
+                  >
+                    <X size={9} />
+                  </button>
+                </span>
+              );
+            },
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── ExpenseBookingPicker ─────────────────────────────────────────────────────
 
 function ExpenseBookingPicker({
@@ -1357,15 +1559,186 @@ const Payment: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [viewingRec, setViewingRec] = useState<PaymentRecord | null>(null);
+  const [viewingCompanyDetail, setViewingCompanyDetail] =
+    useState<CompanyDetail | null>(null);
+
+  // Open the detail modal and eagerly fetch the company logo
+  const openViewRec = async (rec: PaymentRecord) => {
+    setViewingRec(rec);
+    setViewingCompanyDetail(null);
+    const matched = companyOptions.find(
+      (c) => c.label === rec.company || String(c.id) === rec.company,
+    );
+    if (matched) {
+      try {
+        const detail = await getCompanyById(Number(matched.id));
+        setViewingCompanyDetail(detail);
+      } catch {
+        /* logo not critical */
+      }
+    }
+  };
+
+  // Print/PDF payment voucher
+  const handlePrintPayment = (
+    rec: PaymentRecord,
+    companyDetail: CompanyDetail | null,
+  ) => {
+    const logoHtml = companyDetail?.logo
+      ? `<img src="${companyDetail.logo}" alt="Logo" style="height:60px;max-width:180px;object-fit:contain;" />`
+      : `<span style="font-size:18px;font-weight:800;color:#4f46e5;">${companyDetail?.name ?? rec.company ?? "—"}</span>`;
+
+    const companyAddress = [
+      companyDetail?.address,
+      companyDetail?.city,
+      companyDetail?.state,
+    ]
+      .filter(Boolean)
+      .join(", ");
+
+    const statusColor: Record<string, string> = {
+      Draft: "#64748b",
+      Pending: "#d97706",
+      Approved: "#059669",
+      Rejected: "#dc2626",
+    };
+    const sColor = statusColor[rec.status] ?? "#64748b";
+
+    const modeColor: Record<string, string> = {
+      Cheque: "#4f46e5",
+      "Post-Dated Cheque": "#7c3aed",
+      NEFT: "#0891b2",
+      UPI: "#059669",
+      RTGS: "#d97706",
+      IMPS: "#ea580c",
+      Cash: "#16a34a",
+    };
+    const mColor = modeColor[rec.mode] ?? "#4f46e5";
+
+    const field = (label: string, value: string | null | undefined) =>
+      value
+        ? `<tr>
+            <td style="padding:7px 12px;font-size:11px;color:#6b7280;font-weight:600;text-transform:uppercase;letter-spacing:.06em;white-space:nowrap;width:140px;">${label}</td>
+            <td style="padding:7px 12px;font-size:13px;font-weight:500;color:#111827;">${value}</td>
+           </tr>`
+        : "";
+
+    const rows = [
+      field("Payment Ref", rec.docNo || "—"),
+      field("Payment Name", rec.paymentName),
+      field("Amount", formatINR(rec.amount ?? 0)),
+      field("Date", rec.date || "—"),
+      field("Mode", rec.mode || "—"),
+      field("Company", rec.company || "—"),
+      field("Project", rec.project || "—"),
+      field("Project Site", rec.projectSite || null),
+      field("Expense Ref", rec.expenseRef || null),
+      field("Parent Doc", rec.parentDocNo || null),
+      field("Bank", rec.bankName || null),
+      field("Cheque No.", rec.chequeNo ? `#${rec.chequeNo}` : null),
+      field("Cheque Date", rec.chequeDate || null),
+      field("Cheque Lot", rec.chequeLotNumber || null),
+      field("NEFT Ref.", rec.neftNumber || null),
+      field("UPI Txn ID", rec.upiTransactionId || null),
+      field("RTGS Ref.", rec.rtgsReference || null),
+      field("IMPS Ref.", rec.impsReference || null),
+    ].join("");
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Payment Voucher — ${rec.docNo || rec.paymentName}</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #fff; color: #111827; padding: 36px; font-size: 13px; }
+    table { border-collapse: collapse; }
+    tr:nth-child(even) { background: #f9fafb; }
+    @media print { body { padding: 16px; } button { display: none !important; } }
+  </style>
+</head>
+<body>
+  <!-- Header -->
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;padding-bottom:18px;border-bottom:2px solid #4f46e5;margin-bottom:24px;">
+    <div>
+      ${logoHtml}
+      ${companyAddress ? `<div style="margin-top:6px;font-size:11px;color:#6b7280;">${companyAddress}</div>` : ""}
+      ${companyDetail?.email ? `<div style="font-size:11px;color:#6b7280;">${companyDetail.email}</div>` : ""}
+    </div>
+    <div style="text-align:right;">
+      <div style="font-size:22px;font-weight:800;color:#4f46e5;letter-spacing:-0.5px;">PAYMENT VOUCHER</div>
+      <div style="font-size:14px;font-weight:700;font-family:monospace;color:#111827;margin-top:4px;">${rec.docNo || "—"}</div>
+      <div style="margin-top:8px;display:flex;gap:8px;justify-content:flex-end;align-items:center;">
+        <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;background:${sColor}18;color:${sColor};border:1px solid ${sColor}40;">
+          ${rec.status}
+        </span>
+        <span style="display:inline-flex;align-items:center;gap:5px;padding:3px 10px;border-radius:999px;font-size:11px;font-weight:700;background:${mColor}18;color:${mColor};border:1px solid ${mColor}40;">
+          ${rec.mode}
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Amount highlight -->
+  <div style="margin-bottom:24px;padding:16px 20px;background:linear-gradient(135deg,#4f46e510,#7c3aed10);border-radius:12px;border:1px solid #4f46e520;display:flex;align-items:center;justify-content:space-between;">
+    <div>
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#6b7280;margin-bottom:2px;">Payment Amount</div>
+      <div style="font-size:28px;font-weight:800;color:#4f46e5;font-family:monospace;">${formatINR(rec.amount ?? 0)}</div>
+    </div>
+    <div style="text-align:right;">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;color:#6b7280;margin-bottom:2px;">Payment Date</div>
+      <div style="font-size:16px;font-weight:700;color:#111827;">${rec.date || "—"}</div>
+    </div>
+  </div>
+
+  <!-- Details table -->
+  <div style="border:1px solid #e5e7eb;border-radius:10px;overflow:hidden;">
+    <table style="width:100%;">
+      <tbody>${rows}</tbody>
+    </table>
+  </div>
+
+  <!-- Footer -->
+  <div style="margin-top:36px;padding-top:12px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;font-size:11px;color:#9ca3af;">
+    <span>Generated by CivilierERP</span>
+    <span>Printed: ${new Date().toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" })}</span>
+  </div>
+</body>
+</html>`;
+
+    const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+    const blobUrl = URL.createObjectURL(blob);
+    const win = window.open(blobUrl, "_blank", "width=860,height=720");
+    if (!win) {
+      URL.revokeObjectURL(blobUrl);
+      toast.error("Pop-up blocked — please allow pop-ups.");
+      return;
+    }
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 60_000);
+    win.onload = () => {
+      win.focus();
+      win.print();
+    };
+  };
   const [loadingExpense, setLoadingExpense] = useState(false);
   const [linkedGRNs, setLinkedGRNs] = useState<GRNRef[]>([]);
   const [supplierBookingFilter, setSupplierBookingFilter] = useState("");
+  const [bookingFilters, setBookingFilters] = useState<BookingFilters>({
+    company: "",
+    project: "",
+    year: "",
+    supplier: "",
+  });
 
   // ── Queries ────────────────────────────────────────────────────────────────
 
-  const { data: dbData, isLoading, refetch: refetchPayments } = useQuery({
-    queryKey: ["payments", page, supplierFilter, companyFilter, projectFilter, finYearFilter, docNumberFilter, docDateFilter],
-    queryFn: () => getPayments(page, PAGE_SIZE, supplierFilter, companyFilter, projectFilter, finYearFilter, docNumberFilter, docDateFilter),
+  const {
+    data: dbData,
+    isLoading,
+    refetch: refetchPayments,
+  } = useQuery({
+    queryKey: ["payments", page, supplierFilter, companyFilter],
+    queryFn: () => getPayments(page, PAGE_SIZE, supplierFilter, companyFilter),
     staleTime: 0,
   });
 
@@ -1433,6 +1806,7 @@ const Payment: React.FC = () => {
     setForm(blankForm());
     setLinkedGRNs([]);
     setSupplierBookingFilter("");
+    setBookingFilters({ company: "", project: "", year: "", supplier: "" });
     setView("form");
   };
 
@@ -1445,6 +1819,7 @@ const Payment: React.FC = () => {
     setForm({ ...rest, expenseId: matchedOption?.id ?? "" });
     setLinkedGRNs([]);
     setSupplierBookingFilter("");
+    setBookingFilters({ company: "", project: "", year: "", supplier: "" });
     setView("form");
   };
 
@@ -1454,6 +1829,7 @@ const Payment: React.FC = () => {
     setForm(blankForm());
     setLinkedGRNs([]);
     setSupplierBookingFilter("");
+    setBookingFilters({ company: "", project: "", year: "", supplier: "" });
   };
 
   // ── Mode change — clear irrelevant fields ──────────────────────────────────
@@ -1895,47 +2271,47 @@ const Payment: React.FC = () => {
               <div className="space-y-3">
                 <SectionHeader icon={Link2} label="Expense Booking" />
 
-                {/* Supplier filter — only shown when no booking is linked yet */}
+                {/* Filter bar + picker — only shown before a booking is linked */}
                 {!form.expenseRef &&
                   (() => {
-                    // Derive unique party/expense names from EName field
-                    const partyNames = Array.from(
-                      new Set(
-                        expenseOptions
-                          .map((o) => o.supplierName)
-                          .filter((n): n is string => !!n && n.trim() !== ""),
-                      ),
-                    ).sort();
-
-                    const filteredBySupplier = supplierBookingFilter
-                      ? expenseOptions.filter(
-                          (o) => o.supplierName === supplierBookingFilter,
-                        )
-                      : expenseOptions;
+                    const filteredOptions = expenseOptions.filter((o) => {
+                      if (
+                        bookingFilters.company &&
+                        (o.companyName ?? "") !== bookingFilters.company
+                      )
+                        return false;
+                      if (
+                        bookingFilters.project &&
+                        (o.projectName ?? "") !== bookingFilters.project
+                      )
+                        return false;
+                      if (
+                        bookingFilters.year &&
+                        (o.financialYear ?? "") !== bookingFilters.year
+                      )
+                        return false;
+                      if (
+                        bookingFilters.supplier &&
+                        (o.supplierName ?? "") !== bookingFilters.supplier
+                      )
+                        return false;
+                      return true;
+                    });
 
                     return (
                       <div className="space-y-3">
-                        {/* Party / Name filter — custom combobox */}
-                        <PartyFilterCombobox
-                          partyNames={partyNames}
-                          value={supplierBookingFilter}
-                          onChange={(val) => {
-                            setSupplierBookingFilter(val);
-                            if (val && form.expenseId) {
-                              const match = expenseOptions.find(
-                                (o) =>
-                                  o.id === form.expenseId &&
-                                  o.supplierName === val,
-                              );
-                              if (!match) clearExpenseLink();
-                            }
-                          }}
+                        <FilterBar
                           expenseOptions={expenseOptions}
+                          filters={bookingFilters}
+                          onChange={(key, val) =>
+                            setBookingFilters((prev) => ({
+                              ...prev,
+                              [key]: val,
+                            }))
+                          }
                         />
-
-                        {/* Expense booking picker — filtered by party */}
                         <ExpenseBookingPicker
-                          options={filteredBySupplier}
+                          options={filteredOptions}
                           value={form.expenseId}
                           onChange={handleExpenseSelect}
                           loading={loadingExpense}
@@ -1984,7 +2360,10 @@ const Payment: React.FC = () => {
                           className="text-muted-foreground shrink-0"
                         />
                         <ReadOnlyField
-                          value={form.project}
+                          value={
+                            expenseOptions.find((o) => o.id === form.expenseId)
+                              ?.supplierName || ""
+                          }
                           placeholder="From expense booking"
                         />
                       </div>
@@ -2636,7 +3015,7 @@ const Payment: React.FC = () => {
                             }}
                           />
                           <button
-                            onClick={() => setViewingRec(rec)}
+                            onClick={() => openViewRec(rec)}
                             title="View details"
                             className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
                           >
@@ -2813,7 +3192,7 @@ const Payment: React.FC = () => {
                                 }}
                               />
                               <button
-                                onClick={() => setViewingRec(rec)}
+                                onClick={() => openViewRec(rec)}
                                 title="View details"
                                 className="p-1.5 rounded-md border border-border text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
                               >
@@ -2996,6 +3375,14 @@ const Payment: React.FC = () => {
 
             {/* Footer */}
             <div className="flex justify-end gap-2 px-5 py-3 border-t border-border bg-muted/20">
+              <button
+                onClick={() =>
+                  handlePrintPayment(viewingRec, viewingCompanyDetail)
+                }
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-foreground hover:bg-muted transition-colors"
+              >
+                <Printer size={12} /> Print / PDF
+              </button>
               <button
                 onClick={() => {
                   setViewingRec(null);
