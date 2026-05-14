@@ -133,8 +133,6 @@ export const logUserActivity = async (
 ): Promise<{ message: string }> => {
   const token = localStorage.getItem("token");
 
-  // Use native fetch to avoid circular dependency with fetchWithAuth
-  // fetchWithAuth imports this function, so we can't import it back
   const response = await fetch("/api/user-activity", {
     method: "POST",
     headers: {
@@ -154,33 +152,35 @@ export const logUserActivity = async (
   return response.json();
 };
 
-// ==================== SSE ====================
+// ==================== SOCKET.IO REAL-TIME =====================
+//
+// Replaces the old SSE subscribeToActivityStream.
+// The Activity Browser context uses this to receive live activity:new events.
+//
+// Returns an unsubscribe function — call it in useEffect cleanup.
 
-export const subscribeToActivityStream = (
-  onMessage: (data: SessionEvent[]) => void,
-  onError?: (error: Event) => void,
-): EventSource => {
-  const token = localStorage.getItem("token");
+export function subscribeToActivityStream(
+  onEvent: (event: SessionEvent) => void,
+  onConnect?: () => void,
+  onDisconnect?: (reason: string) => void,
+): () => void {
+  // Lazy-import to avoid pulling socket.io-client into every bundle chunk
+  // that imports userActivityApi.
+  import("@/lib/socket").then(({ connectSocket }) => {
+    const socket = connectSocket();
 
-  const url = token
-    ? `/api/user-activity/stream?token=${encodeURIComponent(token)}`
-    : "/api/user-activity/stream";
-
-  const source = new EventSource(url);
-
-  source.onmessage = (event) => {
-    const data = JSON.parse(event.data) as SessionEvent[];
-    onMessage(data);
-  };
-
-  source.addEventListener("ping", () => {
-    console.log("SSE ping received");
+    socket.on("activity:new", onEvent);
+    if (onConnect) socket.on("connect", onConnect);
+    if (onDisconnect) socket.on("disconnect", onDisconnect);
   });
 
-  source.onerror = (err: Event) => {
-    console.error("SSE connection error:", err);
-    onError?.(err);
+  return () => {
+    import("@/lib/socket").then(({ getSocket }) => {
+      const socket = getSocket();
+      if (!socket) return;
+      socket.off("activity:new", onEvent);
+      if (onConnect) socket.off("connect", onConnect);
+      if (onDisconnect) socket.off("disconnect", onDisconnect);
+    });
   };
-
-  return source;
-};
+}
