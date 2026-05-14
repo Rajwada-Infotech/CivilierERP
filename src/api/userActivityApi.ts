@@ -158,29 +158,40 @@ export const logUserActivity = async (
 // The Activity Browser context uses this to receive live activity:new events.
 //
 // Returns an unsubscribe function — call it in useEffect cleanup.
+//
+// Design note: we import socket.ts synchronously at the top of the module
+// (via a top-level import below) so the socket ref captured inside
+// subscribeToActivityStream is available immediately and the cleanup
+// function can call socket.off() without a second dynamic import whose
+// Promise might resolve after the component has already unmounted.
+
+import {
+  connectSocket,
+  getSocket,
+  disconnectSocket as _disconnectSocket,
+} from "@/lib/socket";
+
+export { _disconnectSocket as disconnectSocket };
 
 export function subscribeToActivityStream(
   onEvent: (event: SessionEvent) => void,
   onConnect?: () => void,
   onDisconnect?: (reason: string) => void,
 ): () => void {
-  // Lazy-import to avoid pulling socket.io-client into every bundle chunk
-  // that imports userActivityApi.
-  import("@/lib/socket").then(({ connectSocket }) => {
-    const socket = connectSocket();
+  // connectSocket() is idempotent — returns the existing socket if already
+  // connected, so calling it here is safe even when called multiple times.
+  const socket = connectSocket();
 
-    socket.on("activity:new", onEvent);
-    if (onConnect) socket.on("connect", onConnect);
-    if (onDisconnect) socket.on("disconnect", onDisconnect);
-  });
+  socket.on("activity:new", onEvent);
+  if (onConnect) socket.on("connect", onConnect);
+  if (onDisconnect) socket.on("disconnect", onDisconnect);
 
+  // Capture the exact socket instance so the cleanup always targets the right
+  // object — even if connectSocket() later returns a different instance after
+  // a logout/reconnect cycle.
   return () => {
-    import("@/lib/socket").then(({ getSocket }) => {
-      const socket = getSocket();
-      if (!socket) return;
-      socket.off("activity:new", onEvent);
-      if (onConnect) socket.off("connect", onConnect);
-      if (onDisconnect) socket.off("disconnect", onDisconnect);
-    });
+    socket.off("activity:new", onEvent);
+    if (onConnect) socket.off("connect", onConnect);
+    if (onDisconnect) socket.off("disconnect", onDisconnect);
   };
 }

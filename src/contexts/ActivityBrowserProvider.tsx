@@ -1,6 +1,5 @@
+// ActivityBrowserProvider.tsx — only exports a component (React Fast Refresh safe)
 import React, {
-  createContext,
-  useContext,
   useState,
   useCallback,
   useEffect,
@@ -18,32 +17,15 @@ import {
 
 import { getDeviceFingerprint, getDeviceInfo } from "@/utils/deviceFingerprint";
 
-// ── TYPES ─────────────────────────────────────────────────────────────────────
-
-export interface GroupedSession {
-  sessionId: string;
-  userId: string;
-  userName: string;
-  userEmail: string;
-  userRole: string;
-  deviceFingerprint: string;
-  deviceInfo: string;
-  ipAddress: string;
-  loginTime: string;
-  logoutTime?: string;
-  durationMs?: number;
-  actions: SessionEvent[];
-  loginEvent: SessionEvent;
-  logoutEvent?: SessionEvent;
-}
-
-export interface PaginatedActivity {
-  data: SessionEvent[];
-  total: number;
-  page: number;
-  limit: number;
-  pages: number;
-}
+import {
+  ActivityBrowserContext,
+  type ActivityBrowserContextType,
+  type GroupedSession,
+  type PaginatedActivity,
+  getStoredUser,
+  normalizeEvent,
+  EMPTY_ACTIVITY,
+} from "./ActivityBrowserContext";
 
 interface ActivityFilters {
   search?: string;
@@ -62,114 +44,6 @@ interface DateFilters {
     | "this-year";
 }
 
-export interface ActivityBrowserContextType {
-  rawSessions: SessionEvent[];
-  groupedSessions: GroupedSession[];
-  isLoading: boolean;
-  dateFilters: DateFilters;
-  setDateFilters: React.Dispatch<React.SetStateAction<DateFilters>>;
-  clearDateFilters: () => void;
-  activity: PaginatedActivity;
-  setPage: (page: number) => void;
-  setFilters: (filters: ActivityFilters) => void;
-  recordLogin: (user: {
-    id: string;
-    name: string;
-    email: string;
-    role: string;
-  }) => Promise<void>;
-  recordLogout: (user: {
-    id: string;
-    name: string;
-    email: string;
-    role: string;
-  }) => Promise<void>;
-  recordAction: (action: {
-    method: string;
-    url: string;
-    actionType: ActivityActionType;
-    resource: string;
-    details?: string;
-  }) => Promise<void>;
-  clearAll: () => void;
-  refresh: () => void;
-}
-
-// ── CONTEXT ───────────────────────────────────────────────────────────────────
-
-export const ActivityBrowserContext =
-  createContext<ActivityBrowserContextType | null>(null);
-
-const NOOP_CONTEXT: ActivityBrowserContextType = {
-  rawSessions: [],
-  groupedSessions: [],
-  isLoading: false,
-  dateFilters: {},
-  setDateFilters: () => {},
-  clearDateFilters: () => {},
-  activity: { data: [], total: 0, page: 1, limit: 50, pages: 0 },
-  setPage: () => {},
-  setFilters: () => {},
-  recordLogin: async () => {},
-  recordLogout: async () => {},
-  recordAction: async () => {},
-  clearAll: () => {},
-  refresh: () => {},
-};
-
-// ── HOOK ──────────────────────────────────────────────────────────────────────
-// Separated from ActivityBrowserProvider.tsx so each file only exports one
-// kind of thing (hook vs component). Vite Fast Refresh requires this.
-
-export const useActivityBrowser = (): ActivityBrowserContextType => {
-  const ctx = useContext(ActivityBrowserContext);
-  return ctx ?? NOOP_CONTEXT;
-};
-
-// ── HELPERS (module-private) ──────────────────────────────────────────────────
-
-// IP resolution is intentionally omitted on the client side: the backend
-// derives the real IP from X-Forwarded-For / socket.remoteAddress and ignores
-// any client-supplied value. Fetching from ipify.org added ~100-300 ms of
-// latency on every login/action for zero benefit.
-
-export function getStoredUser() {
-  try {
-    return JSON.parse(localStorage.getItem("user") || "{}");
-  } catch {
-    return {};
-  }
-}
-
-export function normalizeEvent(
-  event: SessionEvent,
-  index: number,
-): SessionEvent {
-  return {
-    ...event,
-    id:
-      event.id ||
-      `${event.event}-${event.sessionId || "no-session"}-${event.timestamp}-${index}`,
-    ipAddress: event.ipAddress || "Unavailable",
-    deviceInfo: event.deviceInfo || "Unknown device",
-    deviceFingerprint: event.deviceFingerprint || "Unknown",
-    details: event.details || "",
-    resource: event.resource || "",
-    requestMethod: event.requestMethod || "",
-    requestUrl: event.requestUrl || "",
-  };
-}
-
-export const EMPTY_ACTIVITY: PaginatedActivity = {
-  data: [],
-  total: 0,
-  page: 1,
-  limit: 50,
-  pages: 0,
-};
-
-// ── PROVIDER ──────────────────────────────────────────────────────────────────
-
 export const ActivityBrowserProvider: React.FC<{
   children: React.ReactNode;
 }> = ({ children }) => {
@@ -185,12 +59,9 @@ export const ActivityBrowserProvider: React.FC<{
   const dateFiltersRef = useRef<DateFilters>(dateFilters);
   const fetchingRef = useRef(false);
 
-  // Keep dateFiltersRef in sync
   useEffect(() => {
     dateFiltersRef.current = dateFilters;
   }, [dateFilters]);
-
-  // ── FETCH ──────────────────────────────────────────────────────────────────
 
   const fetchActivityCore = useCallback(
     async (page: number, filters: ActivityFilters, df: DateFilters) => {
@@ -235,7 +106,6 @@ export const ActivityBrowserProvider: React.FC<{
     [fetchActivityCore],
   );
 
-  // Re-fetch whenever dateFilters change
   useEffect(() => {
     void fetchActivityCore(
       currentPageRef.current,
@@ -254,13 +124,15 @@ export const ActivityBrowserProvider: React.FC<{
     [fetchActivity],
   );
 
-  const refresh = useCallback(() => {
-    return fetchActivityCore(
-      currentPageRef.current,
-      currentFiltersRef.current,
-      dateFiltersRef.current,
-    );
-  }, [fetchActivityCore]);
+  const refresh = useCallback(
+    () =>
+      fetchActivityCore(
+        currentPageRef.current,
+        currentFiltersRef.current,
+        dateFiltersRef.current,
+      ),
+    [fetchActivityCore],
+  );
 
   const clearAll = () => {
     setRawSessions([]);
@@ -272,19 +144,12 @@ export const ActivityBrowserProvider: React.FC<{
   };
 
   // ── SOCKET.IO REAL-TIME ────────────────────────────────────────────────────
-  // Subscribe only when a token exists (backend socket requires JWT).
   useEffect(() => {
     let isMounted = true;
-    let unsubscribe: (() => void) | undefined;
 
     const handleNewActivity = (event: SessionEvent) => {
       if (!isMounted) return;
-
-      // Optimistically prepend to the visible list
       setRawSessions((prev) => [normalizeEvent(event, -1), ...prev]);
-
-      // Background re-fetch to keep total count & pagination accurate,
-      // but only if no fetch is already in flight
       if (!fetchingRef.current) {
         void fetchActivityCore(
           currentPageRef.current,
@@ -294,31 +159,11 @@ export const ActivityBrowserProvider: React.FC<{
       }
     };
 
-    const trySubscribe = () => {
-      const token = localStorage.getItem("token");
-      if (!token) return;
-
-      // Avoid creating multiple subscriptions
-      if (unsubscribe) return;
-
-      unsubscribe = subscribeToActivityStream(handleNewActivity);
-    };
-
-    trySubscribe();
-
-    // Token can be set after mount (login). Poll briefly to avoid plumbing
-    // auth state through this provider.
-    const intervalId = window.setInterval(() => {
-      if (!isMounted) return;
-      trySubscribe();
-    }, 500);
-
+    const unsubscribe = subscribeToActivityStream(handleNewActivity);
     return () => {
       isMounted = false;
-      window.clearInterval(intervalId);
-      if (unsubscribe) unsubscribe();
+      unsubscribe();
     };
-    // fetchActivityCore is stable — safe to omit from deps
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -326,6 +171,8 @@ export const ActivityBrowserProvider: React.FC<{
 
   const recordLogin = useCallback(
     async (user: { id: string; name: string; email: string; role: string }) => {
+      // IP is intentionally omitted: the backend resolves it from
+      // X-Forwarded-For and ignores any client-supplied value.
       const fingerprint = await getDeviceFingerprint();
       const deviceInfo = getDeviceInfo();
       const sessionId = crypto.randomUUID();
@@ -339,14 +186,12 @@ export const ActivityBrowserProvider: React.FC<{
         userRole: user.role,
         event: "login",
         timestamp: new Date().toISOString(),
-        ipAddress: "Unavailable",
         deviceInfo,
         deviceFingerprint: fingerprint,
         sessionId,
       };
 
       setRawSessions((prev) => [normalizeEvent(entry, 0), ...prev]);
-
       try {
         await logUserActivity(entry);
       } catch (err) {
@@ -361,6 +206,8 @@ export const ActivityBrowserProvider: React.FC<{
       const sessionId = localStorage.getItem("currentSessionId");
       if (!sessionId) return;
 
+      // IP is intentionally omitted: the backend resolves it from
+      // X-Forwarded-For and ignores any client-supplied value.
       const deviceInfo = getDeviceInfo();
 
       const entry: SessionEvent = {
@@ -370,13 +217,11 @@ export const ActivityBrowserProvider: React.FC<{
         userRole: user.role,
         event: "logout",
         timestamp: new Date().toISOString(),
-        ipAddress: "Unavailable",
         deviceInfo,
         sessionId,
       };
 
       setRawSessions((prev) => [normalizeEvent(entry, 0), ...prev]);
-
       try {
         await logUserActivity(entry);
       } catch (err) {
@@ -400,6 +245,8 @@ export const ActivityBrowserProvider: React.FC<{
       const user = getStoredUser();
       if (!sessionId || !user.id) return;
 
+      // IP is intentionally omitted: the backend resolves it from
+      // X-Forwarded-For and ignores any client-supplied value.
       const fingerprint = await getDeviceFingerprint();
       const deviceInfo = getDeviceInfo();
 
@@ -410,7 +257,6 @@ export const ActivityBrowserProvider: React.FC<{
         userRole: user.role || "",
         event: "action",
         timestamp: new Date().toISOString(),
-        ipAddress: "Unavailable",
         deviceInfo,
         deviceFingerprint: fingerprint,
         actionType: action.actionType,
@@ -422,7 +268,6 @@ export const ActivityBrowserProvider: React.FC<{
       };
 
       setRawSessions((prev) => [normalizeEvent(entry, 0), ...prev]);
-
       try {
         await logUserActivity(entry);
       } catch (err) {

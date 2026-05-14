@@ -30,10 +30,8 @@ import { RecordsProvider } from "./contexts/RecordsContext";
 import { TdsProvider } from "./contexts/TdsContext";
 import { DebitNoteProvider } from "./contexts/DebitNoteContext";
 import { BillingTermsProvider } from "./contexts/BillingTermsContext";
-import {
-  ActivityBrowserProvider,
-  useActivityBrowser,
-} from "./contexts/ActivityBrowserContext";
+import { useActivityBrowser } from "./contexts/ActivityBrowserContext";
+import { ActivityBrowserProvider } from "./contexts/ActivityBrowserProvider";
 
 // Query Client
 import { queryClient } from "./lib/queryClient";
@@ -117,7 +115,9 @@ const MaterialDashboard = lazy(
 const MaterialExpenseBookingMaster = lazy(
   () => import("./pages/material/MaterialExpenseBooking"),
 );
-const WorkOrderMaster = lazy(() => import("./pages/material/WorkOrderMaster"));
+const WorkOrderMaster = lazy(
+  () => import("./pages/engineering/WorkOrderMaster"),
+);
 const PurchaseOrderMaster = lazy(
   () => import("./pages/material/PurchaseOrderMaster"),
 );
@@ -146,7 +146,7 @@ const InventoryMaster = lazy(() => import("./pages/material/InventoryMaster"));
 const EnterpriseMasterPage = lazy(
   () => import("./pages/admin/masters/EnterpriseMaster"),
 );
-const BOQ = lazy(() => import("./pages/material/BOQ"));
+const BOQ = lazy(() => import("./pages/engineering/BOQ"));
 
 // Admin Pages
 const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
@@ -205,9 +205,18 @@ const FollowupLog = lazy(() => import("./pages/followup/FollowupLog"));
 const AmendmentMenu = lazy(() => import("./pages/material/AmendmentMenu"));
 const Amendments = lazy(() => import("./pages/material/Amendments"));
 const Issues = lazy(() => import("./pages/material/Issues"));
+const MaterialRequestPage = lazy(
+  () => import("./pages/material/MaterialRequest"),
+);
 const RemindersManager = lazy(() => import("./pages/dba/RemindersManager"));
 
 const PaymentLogs = lazy(() => import("./pages/dba/PaymentLogs"));
+
+// Engineering Pages
+const EngineeringDashboard = lazy(
+  () => import("./pages/engineering/EngineeringDashboard"),
+);
+const WorkDone = lazy(() => import("./pages/engineering/WorkDone"));
 
 // ─── Auth Guard ───────────────────────────────────────────────────────────────
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -621,6 +630,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/material/material-request"
+        element={
+          <ProtectedRoute>
+            <MaterialRequestPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/material/issues"
         element={
           <ProtectedRoute>
@@ -649,6 +666,41 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <InventoryMaster />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* ENGINEERING */}
+      <Route
+        path="/engineering"
+        element={
+          <ProtectedRoute>
+            <EngineeringDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/engineering/work-done"
+        element={
+          <ProtectedRoute>
+            <WorkDone />
+          </ProtectedRoute>
+        }
+      />
+      {/* Engineering-namespaced aliases so the module stays on Engineering */}
+      <Route
+        path="/engineering/work-order"
+        element={
+          <ProtectedRoute>
+            <WorkOrderMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/engineering/boq"
+        element={
+          <ProtectedRoute>
+            <BOQ />
           </ProtectedRoute>
         }
       />
