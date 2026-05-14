@@ -19,6 +19,7 @@ import type {
 } from "./types";
 
 import * as AuthUtils from "./auth.utils";
+import { connectSocket, disconnectSocket } from "@/lib/socket";
 
 // Re-exports
 export { PAGE_DEFINITIONS } from "@/contexts/auth.utils";
@@ -189,7 +190,21 @@ export const AuthProvider = ({
       localStorage.setItem("token", data.token);
       localStorage.setItem("user", JSON.stringify(userWithInitials));
 
+      // Connect the socket with the freshly-issued token so it authenticates
+      // immediately rather than waiting for the lazy connectSocket() call inside
+      // subscribeToActivityStream (which would use the token from mount time).
+      connectSocket();
+
       setCurrentUser(userWithInitials);
+
+      // Fire-and-forget: log the login event to UserActivityLog.
+      // Must run after setCurrentUser so the token is in localStorage.
+      recordLogin?.({
+        id: String(data.user.id),
+        name: data.user.name,
+        email: data.user.email,
+        role: data.user.role,
+      }).catch(() => {});
 
       return { success: true, role: data.user.role };
     } catch (err: any) {
@@ -224,6 +239,9 @@ export const AuthProvider = ({
     localStorage.removeItem("user");
     localStorage.removeItem("currentSessionId");
     localStorage.removeItem("activeModule");
+    // Tear down the socket *after* clearing the token so no further
+    // authenticated requests can be made over the old connection.
+    disconnectSocket();
     setCurrentUser(null);
     setUsers([]);
   }, [currentUser, onLogoutSuccess, recordLogout]);

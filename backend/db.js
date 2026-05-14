@@ -2,6 +2,14 @@ const logger = require("./logger");
 require("./config/env").loadEnv();
 const sql = require("mssql");
 
+// POOL_BURST: number of connections to pre-open at startup.
+// On page load the app fires ~12-15 concurrent queries. Each connection beyond
+// pool.min that hasn't been opened yet costs a full TDS handshake (~1-3 s over
+// LAN), which is why every cold db.query was 1000-7000 ms even for trivial
+// SELECT * queries. Setting min=15 and warming all 15 connections at startup
+// means the pool is fully pre-heated before the first request arrives.
+const POOL_BURST = 15;
+
 const config = {
   user: process.env.DB_USER,
   password: process.env.DB_PASSWORD,
@@ -11,16 +19,13 @@ const config = {
     encrypt: false,
     trustServerCertificate: true,
     enableArithAbort: true,
-    // FIX: increase TDS packet size (default 4096) for large result sets
-    // over LAN. Larger packets = fewer round-trips for the same data.
-    // 32768 is the maximum SQL Server supports.
     packetSize: 32768,
   },
   pool: {
-    max: 20, // FIX: was 10 — with LAN latency, 10 connections saturate fast
-    min: 2, // keep 2 warm connections so cold starts don't queue
-    idleTimeoutMillis: 30000,
-    acquireTimeoutMillis: 10000, // fail fast if pool exhausted
+    max: 20,
+    min: POOL_BURST, // keep POOL_BURST connections alive at all times
+    idleTimeoutMillis: 60000, // raised: don't tear down connections after 30 s
+    acquireTimeoutMillis: 10000,
   },
   connectionTimeout: 30000,
   requestTimeout: 30000,
@@ -33,6 +38,14 @@ async function connectDB() {
   try {
     pool = await sql.connect(config);
     logger.info({ event: "DB_CONNECTED" }, "Database connected");
+
+    // Pre-warm the pool: fire POOL_BURST parallel no-op queries so the pool
+    // opens all min connections before the first real request arrives.
+    // Without this, node-mssql opens connections lazily — each cold open on
+    // an already-busy pool costs a TDS handshake (~1-3 s), which is why
+    // every cold db.query was 1000-7000 ms even for trivial SELECTs.
+    await warmupPool(pool);
+
     return pool;
   } catch (err) {
     logger.error(
@@ -40,6 +53,30 @@ async function connectDB() {
       "Database connection failed",
     );
     throw err;
+  }
+}
+
+async function warmupPool(p) {
+  try {
+    logger.info(
+      { event: "DB_WARMUP_START", connections: POOL_BURST },
+      "Pre-warming connection pool",
+    );
+    await Promise.all(
+      Array.from({ length: POOL_BURST }, () =>
+        p
+          .request()
+          .query("SELECT 1 AS warmup")
+          .catch(() => {}),
+      ),
+    );
+    logger.info({ event: "DB_WARMUP_DONE" }, "Connection pool pre-warmed");
+  } catch {
+    // warmup failure is non-fatal — server still starts
+    logger.warn(
+      { event: "DB_WARMUP_FAILED" },
+      "Pool warmup failed — connections will open lazily",
+    );
   }
 }
 
