@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const logger = require("../logger");
+const crypto = require("crypto");
 const { getPool, sql } = require("../db");
 const {
   redisZScore,
@@ -337,8 +338,11 @@ router.post("/", async (req, res) => {
     const resolvedDeviceInfo =
       serverUA || normalizeNullableString(rest.deviceInfo, 255) || "unknown";
 
+    const activityId = crypto.randomUUID();
+
     const insertResult = await pool
       .request()
+      .input("id", sql.NVarChar(50), activityId)
       .input("userId", sql.NVarChar(50), resolvedUserId)
       .input("userName", sql.NVarChar(100), resolvedUserName)
       .input("userEmail", sql.NVarChar(100), resolvedUserEmail)
@@ -384,6 +388,7 @@ router.post("/", async (req, res) => {
       )
       .input("createdAt", sql.DateTime2, new Date()).query(`
         INSERT INTO dbo.UserActivityLog (
+          Id,
           UserId, UserName, UserEmail, UserRole, EventType,
           IpAddress, DeviceInfo, DeviceFingerprint,
           ActionType, Resource, Details,
@@ -392,6 +397,7 @@ router.post("/", async (req, res) => {
         )
         OUTPUT INSERTED.Id
         VALUES (
+          @id,
           @userId, @userName, @userEmail, @userRole, @event,
           @ipAddress, @deviceInfo, @deviceFingerprint,
           @actionType, @resource, @details,

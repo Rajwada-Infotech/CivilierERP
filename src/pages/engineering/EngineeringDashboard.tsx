@@ -400,7 +400,7 @@ export default function EngineeringDashboard() {
             iconColor="text-orange-600"
             iconBg="bg-orange-500/10"
             trend="up"
-            onClick={() => navigate("/material/work-order")}
+            onClick={() => navigate("/engineering/work-order")}
           />
           <StatCard
             label="BOQ Value"
@@ -409,7 +409,7 @@ export default function EngineeringDashboard() {
             icon={ClipboardList}
             iconColor="text-blue-600"
             iconBg="bg-blue-500/10"
-            onClick={() => navigate("/material/boq")}
+            onClick={() => navigate("/engineering/boq")}
           />
           <StatCard
             label="Work Done (Certified)"
@@ -484,7 +484,7 @@ export default function EngineeringDashboard() {
                 title="Recent Work Orders"
                 sub="Last 6 WOs"
                 action="View all"
-                onAction={() => navigate("/material/work-order")}
+                onAction={() => navigate("/engineering/work-order")}
               />
             </div>
             {isLoading ? (
@@ -509,7 +509,7 @@ export default function EngineeringDashboard() {
                 title="Recent BOQ"
                 sub="Last 6 Bills of Quantities"
                 action="View all"
-                onAction={() => navigate("/material/boq")}
+                onAction={() => navigate("/engineering/boq")}
               />
             </div>
             {isLoading ? (
@@ -560,7 +560,7 @@ export default function EngineeringDashboard() {
               <SectionHeader
                 icon={HardHat}
                 title="WO Status Breakdown"
-                onAction={() => navigate("/material/work-order")}
+                onAction={() => navigate("/engineering/work-order")}
               />
               {isLoading ? (
                 <div className="space-y-2 animate-pulse">
@@ -606,14 +606,14 @@ export default function EngineeringDashboard() {
               {
                 label: "Work Order",
                 icon: HardHat,
-                path: "/material/work-order",
+                path: "/engineering/work-order",
                 color: "text-orange-600",
                 bg: "bg-orange-500/10",
               },
               {
                 label: "BOQ",
                 icon: ClipboardList,
-                path: "/material/boq",
+                path: "/engineering/boq",
                 color: "text-blue-600",
                 bg: "bg-blue-500/10",
               },
