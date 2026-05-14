@@ -1,4 +1,6 @@
 import { fetchWithAuth } from "../lib/fetchWithAuth";
+import { z } from "zod";
+import { BaseTransactionSchema, PaymentPayloadSchema } from "../schemas/transaction.schema";
 
 const BASE_URL = "/api/new-payment";
 
@@ -10,6 +12,28 @@ async function parseError(res: Response, fallback: string) {
     return fallback;
   }
 }
+
+export type TransactionStatus =
+  | "DRAFT"
+  | "PENDING"
+  | "APPROVED"
+  | "REJECTED"
+  | "CANCELLED"
+  | "COMPLETED";
+
+export const WORKFLOW_TRANSITIONS: Record<TransactionStatus, TransactionStatus[]> = {
+  DRAFT: ["PENDING"],
+  PENDING: ["APPROVED", "REJECTED"],
+  APPROVED: ["COMPLETED", "CANCELLED"],
+  REJECTED: ["DRAFT"], // Sent back for correction
+  CANCELLED: [],
+  COMPLETED: [],
+};
+
+// Reusable base transaction model for all standardized entries
+export type BaseTransaction = z.infer<typeof BaseTransactionSchema>;
+
+export type PaymentPayload = z.infer<typeof PaymentPayloadSchema>;
 
 export const getPayments = async (
   page = 1,
@@ -44,7 +68,7 @@ export const getPayments = async (
   return res.json();
 };
 
-export const addPayment = async (data: Record<string, unknown>) => {
+export const addPayment = async (data: PaymentPayload) => {
   const res = await fetchWithAuth(BASE_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -55,8 +79,8 @@ export const addPayment = async (data: Record<string, unknown>) => {
 };
 
 export const updatePayment = async (
-  id: string,
-  data: Record<string, unknown>,
+  id: string | number,
+  data: Partial<PaymentPayload>,
 ) => {
   const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
     method: "PUT",
@@ -67,7 +91,7 @@ export const updatePayment = async (
   return res.json();
 };
 
-export const deletePayment = async (id: string) => {
+export const deletePayment = async (id: string | number) => {
   const res = await fetchWithAuth(`${BASE_URL}/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error(await parseError(res, "DELETE failed"));
   return res.json();
