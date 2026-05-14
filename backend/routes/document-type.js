@@ -1,14 +1,22 @@
-// backend/routes/document-type.js  (adds /api/document-type/:id/next-number)
+// backend/routes/document-type.js
+"use strict";
+
 const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
-const authMiddleware = require("../middleware/auth");
 const { checkPermission } = require("../middleware/permissions");
 const { previewNextDocNumber } = require("../utils/docNumberLock");
+const { cache, localVersionCache } = require("../middleware/cache");
+
+// ── Auth helpers ──────────────────────────────────────────────────────────────
 
 const BYPASS_ROLES = ["admin", "super_admin", "dba", "sa"];
+
+// NOTE: authMiddleware is intentionally NOT included here.
+// It is already applied globally via app.use("/api", authMiddleware) in server.js.
+// Adding it here again was causing double auth stages in request timing logs
+// (two auth.redis_blacklist + auth.jwt_verify blocks per request on this router).
 const bypassOrCheck = (module, subModule, action = "CanView") => [
-  authMiddleware,
   (req, res, next) => {
     const role = (req.user?.role || "").toLowerCase().replace(/\s+/g, "_");
     if (BYPASS_ROLES.includes(role)) return next();
@@ -16,34 +24,50 @@ const bypassOrCheck = (module, subModule, action = "CanView") => [
   },
 ];
 
-// ── Module → EntryType keyword map ───────────────────────────────────────────
-// Maps ?module= query param to SQL LIKE patterns applied to et.EntryType
-const MODULE_KEYWORDS = {
-  PO: ["purchase order", "purchase"],
-  WO: ["work order"],
-  GRN: ["goods receipt", "grn", "goods received"],
-  BOQ: ["boq", "bill of quantities", "bill of quantity", "quantity"],
+// ── Module → links_to filter map ─────────────────────────────────────────────
+//
+// Maps the ?module= query param to LIKE patterns matched against
+// TypeOfDoc.links_to (the canonical source of truth after migration 046).
+//
+// Each value in the array produces an OR clause:
+//   t.links_to LIKE '%Work Order%' OR t.links_to LIKE '%Work Order PO%'
+//
+// Keep values consistent with the LINK_OPTIONS labels in TypeOfDocMaster.tsx.
+//
+const MODULE_LINKS = {
+  WO: ["Work Order"],
+  WO_PO: ["Work Order PO"],
+  PO: ["Purchase Order"],
+  GRN: ["GRN"],
+  BOQ: ["BOQ"],
+  EB: ["Expense Booking"],
+  MIS: ["Material Issue"],
+  PAY: ["Payment"],
+  RECP: ["Received Payment"],
+  DN: ["Debit Note"],
 };
 
-// ── GET / — list all (or filtered by ?module=PO|WO|GRN) ──────────────────────
+// ── GET / — list all doc types, optionally filtered by ?module= ───────────────
 router.get(
   "/",
   ...bypassOrCheck("Admin", "DocumentType", "CanView"),
+  cache("document-type", 300, { shared: true }),
   async (req, res) => {
     try {
       const pool = getPool();
       const module = (req.query.module || "").toString().toUpperCase().trim();
-      const keywords = MODULE_KEYWORDS[module];
+      const tags = MODULE_LINKS[module]; // array of link labels, or undefined
 
-      // Build WHERE clause: if a module is specified, filter by EntryType name
-      let entryTypeWhere = "";
       const request = pool.request();
-      if (keywords && keywords.length > 0) {
-        const conditions = keywords.map((kw, i) => {
-          request.input(`kw${i}`, sql.NVarChar(100), `%${kw}%`);
-          return `et.EntryType LIKE @kw${i}`;
+      let linksWhere = "";
+
+      if (tags && tags.length > 0) {
+        // Filter: links_to must contain at least one of the tag strings
+        const conditions = tags.map((tag, i) => {
+          request.input(`tag${i}`, sql.NVarChar(100), `%${tag}%`);
+          return `t.links_to LIKE @tag${i}`;
         });
-        entryTypeWhere = `AND (${conditions.join(" OR ")})`;
+        linksWhere = `AND (${conditions.join(" OR ")})`;
       }
 
       const result = await request.query(`
@@ -56,123 +80,55 @@ router.get(
           t.EntryTypeId,
           t.IsActive,
           t.StartingDocNo,
+          t.FullPrefix,
+          t.links_to,
+          t.DocNoPrefix,
+          t.ModuleCode,
+          t.ProjectCode,
+          t.FinYearReset,
+          t.CreatedAt,
+          t.UpdatedAt,
           et.EntryType,
           et.Eprefix,
           et.EDOC_N,
-          ISNULL(c.name, 'All Companies') AS CompanyName,
-          ISNULL(p.name, 'All Projects')  AS ProjectName,
-          t.FullPrefix,
-          t.CreatedAt,
-          t.UpdatedAt
+          ISNULL(c.name,  'All Companies') AS CompanyName,
+          ISNULL(p.name,  'All Projects')  AS ProjectName,
+          ISNULL(p.short_name, '')         AS ProjectShortName
         FROM dbo.TypeOfDoc t
-        LEFT JOIN dbo.Entry_Type    et ON t.EntryTypeId = et.E_Id
-        LEFT JOIN dbo.enterprise c  ON t.CompanyId = c.id AND c.business_type = 'C'
-        LEFT JOIN dbo.enterprise p  ON t.ProjectId = p.id AND p.business_type = 'P'
+        LEFT JOIN dbo.Entry_Type et ON t.EntryTypeId  = et.E_Id
+        LEFT JOIN dbo.enterprise c  ON t.CompanyId    = c.id AND c.business_type = 'C'
+        LEFT JOIN dbo.enterprise p  ON t.ProjectId    = p.id AND p.business_type = 'P'
         WHERE t.IsActive = 1
-        ${entryTypeWhere}
+        ${linksWhere}
         ORDER BY et.EntryType, t.Prefix;
       `);
+
       res.json(result.recordset);
     } catch (err) {
+      console.error("GET /document-type error:", err.message);
       res.status(500).json({ error: "Failed to fetch document types" });
     }
   },
 );
 
-// ── GET /:id/next-number — preview the next doc number (read-only, no lock) ───
-// Called by the DocNumberPreview component and DocSelectorPanel in the frontend.
-// Updates in real-time when finYear changes.
+// ── GET /:id/next-number — preview next doc number (read-only, no lock) ───────
+//
 // Query params:
-//   finYear  — e.g. "2024-25"  appended as suffix: PREFIX/000500/2024-25
-router.get("/:id/next-number", authMiddleware, async (req, res) => {
+//   finYear — financial year string, e.g. "26-27"
+//             Required for Tier 1 (new-project) and Tier 3 (legacy) rows.
+//             Auto-derived from today for Tier 1 when omitted.
+//
+router.get("/:id/next-number", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0)
     return res.status(400).json({ error: "Invalid document type id" });
 
-  // Fin year from query string (e.g. "2024-25")
-  const finYear = (req.query.finYear || "").toString().trim();
+  const finYear = (req.query.finYear || "").toString().trim() || null;
 
   try {
     const pool = getPool();
     const preview = await previewNextDocNumber(pool, sql, id, finYear);
-    return res.json({
-      ...preview,
-      finYear: finYear || null,
-    });
-
-    // Fetch the doc type config
-    const typeResult = await pool.request().input("TypeOfDocId", sql.Int, id)
-      .query(`
-        SELECT t.Prefix, t.FullPrefix, t.StartingDocNo,
-               et.EDOC_N
-        FROM dbo.TypeOfDoc t
-        LEFT JOIN dbo.Entry_Type et ON t.EntryTypeId = et.E_Id
-        WHERE t.TypeOfDocId = @TypeOfDocId AND t.IsActive = 1
-      `);
-
-    const typeRow = typeResult.recordset[0];
-    if (!typeRow)
-      return res.status(404).json({ error: "Document type not found" });
-
-    const rawPrefix = typeRow.FullPrefix ?? typeRow.Prefix ?? "";
-    const startFrom = typeRow.StartingDocNo ?? 1;
-
-    // Strip trailing digits so "CI/OTH/000001" → "CI/OTH/"
-    const truePrefix = rawPrefix.replace(/\d+$/, "");
-
-    // ── Strategy: max sequence number across ALL fin years (global counter) ──
-    // The fin year is only a cosmetic suffix — the counter never resets per year.
-    // This matches exactly what lockNextDocNumber does when it issues numbers.
-
-    // Max already locked in DocNumberSequence (all fin years, same prefix).
-    // DocNo has a global unique constraint, so do not filter by TypeOfDocId here.
-    const maxDNSResult = await pool
-      .request()
-      .input("Prefix", sql.NVarChar(100), truePrefix)
-      .input("PrefixLike", sql.NVarChar(100), truePrefix + "%").query(`
-        SELECT MAX(
-          TRY_CAST(
-            SUBSTRING(DocNo, LEN(@Prefix) + 1, 6) AS INT
-          )
-        ) AS MaxSeq
-        FROM dbo.DocNumberSequence
-        WHERE DocNo LIKE @PrefixLike
-      `);
-
-    // Max already committed in ExpenseBooking (all fin years, same prefix)
-    const maxEBResult = await pool
-      .request()
-      .input("EDocTypeId", sql.Int, id)
-      .input("Prefix2", sql.NVarChar(100), truePrefix)
-      .input("PrefixLike2", sql.NVarChar(100), truePrefix + "%").query(`
-        SELECT MAX(
-          TRY_CAST(
-            SUBSTRING(EDocNo, LEN(@Prefix2) + 1, 6) AS INT
-          )
-        ) AS MaxSeq
-        FROM dbo.ExpenseBooking
-        WHERE EDocTypeId = @EDocTypeId
-          AND EDocNo LIKE @PrefixLike2
-      `);
-
-    const seqFromDNS = maxDNSResult.recordset[0]?.MaxSeq ?? null;
-    const seqFromEB = maxEBResult.recordset[0]?.MaxSeq ?? null;
-    const globalMax = Math.max(seqFromDNS ?? 0, seqFromEB ?? 0);
-
-    const nextSeq = Math.max(globalMax + 1, startFrom);
-    const paddedSeq = String(nextSeq).padStart(6, "0");
-
-    // Final format: CI/OTH/000002/2025-26  (or  CI/OTH/000002  without finYear)
-    const nextDocNo = finYear
-      ? `${truePrefix}${paddedSeq}/${finYear}`
-      : `${truePrefix}${paddedSeq}`;
-
-    res.json({
-      nextDocNo,
-      prefix: truePrefix,
-      nextSeq,
-      finYear: finYear || null,
-    });
+    return res.json(preview);
   } catch (err) {
     console.error("next-number error:", err.message);
     res.status(500).json({ error: err.message });
@@ -180,22 +136,23 @@ router.get("/:id/next-number", authMiddleware, async (req, res) => {
 });
 
 // ── GET /entrytypes ───────────────────────────────────────────────────────────
-router.get("/entrytypes", authMiddleware, async (req, res) => {
+router.get("/entrytypes", async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
       SELECT E_Id AS EntryTypeId, EntryType, Eprefix, EDOC_N
-      FROM dbo.Entry_Type ORDER BY EntryType;
+      FROM dbo.Entry_Type
+      ORDER BY EntryType;
     `);
     res.json(result.recordset);
   } catch (err) {
+    console.error("GET /entrytypes error:", err.message);
     res.status(500).json({ error: "Failed to fetch entry types" });
   }
 });
 
 // ── GET /companies ────────────────────────────────────────────────────────────
-// Sources from enterprise table where business_type = 'C'
-router.get("/companies", authMiddleware, async (req, res) => {
+router.get("/companies", async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
@@ -207,17 +164,20 @@ router.get("/companies", authMiddleware, async (req, res) => {
     `);
     res.json(result.recordset);
   } catch (err) {
+    console.error("GET /companies error:", err.message);
     res.status(500).json({ error: "Failed to fetch companies" });
   }
 });
 
 // ── GET /projects ─────────────────────────────────────────────────────────────
-// Sources from enterprise table where business_type = 'P'
-router.get("/projects", authMiddleware, async (req, res) => {
+router.get("/projects", async (req, res) => {
   try {
     const pool = getPool();
     const result = await pool.request().query(`
-      SELECT id AS ProjectId, name AS ProjectName, NULL AS ProjectCode
+      SELECT
+        id         AS ProjectId,
+        name       AS ProjectName,
+        short_name AS ProjectCode
       FROM dbo.enterprise
       WHERE business_type = 'P'
         AND (discontinue IS NULL OR discontinue = 0)
@@ -225,11 +185,12 @@ router.get("/projects", authMiddleware, async (req, res) => {
     `);
     res.json(result.recordset);
   } catch (err) {
+    console.error("GET /projects error:", err.message);
     res.status(500).json({ error: "Failed to fetch projects" });
   }
 });
 
-// ── POST / ────────────────────────────────────────────────────────────────────
+// ── POST / — create a new TypeOfDoc record ────────────────────────────────────
 router.post(
   "/",
   ...bypassOrCheck("Admin", "DocumentType", "CanAdd"),
@@ -241,7 +202,12 @@ router.post(
       ProjectId,
       EntryTypeId,
       StartingDocNo,
+      links_to,
+      ModuleCode,
+      DocNoPrefix,
+      FinYearReset,
     } = req.body;
+
     if (!Prefix || !Description || !EntryTypeId)
       return res
         .status(400)
@@ -249,6 +215,20 @@ router.post(
 
     try {
       const pool = getPool();
+
+      // If a ProjectId is supplied, resolve the project's short_name so it
+      // can be snapshot-stored as ProjectCode on the TypeOfDoc row.
+      let resolvedProjectCode = null;
+      if (ProjectId) {
+        const pcRes = await pool
+          .request()
+          .input("ProjectId", sql.Int, ProjectId).query(`
+            SELECT short_name FROM dbo.enterprise
+            WHERE id = @ProjectId AND business_type = 'P'
+          `);
+        resolvedProjectCode = pcRes.recordset[0]?.short_name ?? null;
+      }
+
       await pool
         .request()
         .input("Prefix", sql.NVarChar(30), Prefix.toUpperCase().trim())
@@ -262,14 +242,25 @@ router.post(
           StartingDocNo ? parseInt(StartingDocNo) : 1,
         )
         .input("CreatedBy", sql.NVarChar(100), req.user?.email || "system")
-        .query(`
+        .input("links_to", sql.NVarChar(500), links_to || null)
+        .input("ModuleCode", sql.NVarChar(20), ModuleCode || null)
+        .input("DocNoPrefix", sql.NVarChar(50), DocNoPrefix || null)
+        .input("ProjectCode", sql.NVarChar(20), resolvedProjectCode)
+        .input("FinYearReset", sql.Bit, FinYearReset !== false ? 1 : 0).query(`
           INSERT INTO dbo.TypeOfDoc
-            (Prefix, Description, CompanyId, ProjectId, EntryTypeId, StartingDocNo, CreatedBy)
+            (Prefix, Description, CompanyId, ProjectId, EntryTypeId,
+             StartingDocNo, CreatedBy, links_to,
+             ModuleCode, DocNoPrefix, ProjectCode, FinYearReset)
           VALUES
-            (@Prefix, @Description, @CompanyId, @ProjectId, @EntryTypeId, @StartingDocNo, @CreatedBy);
+            (@Prefix, @Description, @CompanyId, @ProjectId, @EntryTypeId,
+             @StartingDocNo, @CreatedBy, @links_to,
+             @ModuleCode, @DocNoPrefix, @ProjectCode, @FinYearReset);
         `);
+
+      localVersionCache.invalidate("document-type");
       res.status(201).json({ message: "Document type created successfully" });
     } catch (err) {
+      console.error("POST /document-type error:", err.message);
       res
         .status(500)
         .json({ error: err.message || "Failed to create document type" });
@@ -277,7 +268,7 @@ router.post(
   },
 );
 
-// ── PUT /:id ──────────────────────────────────────────────────────────────────
+// ── PUT /:id — update an existing TypeOfDoc record ───────────────────────────
 router.put(
   "/:id",
   ...bypassOrCheck("Admin", "DocumentType", "CanEdit"),
@@ -291,9 +282,27 @@ router.put(
       EntryTypeId,
       IsActive,
       StartingDocNo,
+      links_to,
+      ModuleCode,
+      DocNoPrefix,
+      FinYearReset,
     } = req.body;
+
     try {
       const pool = getPool();
+
+      // Re-resolve ProjectCode whenever ProjectId changes
+      let resolvedProjectCode = null;
+      if (ProjectId) {
+        const pcRes = await pool
+          .request()
+          .input("ProjectId", sql.Int, ProjectId).query(`
+            SELECT short_name FROM dbo.enterprise
+            WHERE id = @ProjectId AND business_type = 'P'
+          `);
+        resolvedProjectCode = pcRes.recordset[0]?.short_name ?? null;
+      }
+
       await pool
         .request()
         .input("id", sql.Int, id)
@@ -309,7 +318,11 @@ router.put(
           StartingDocNo ? parseInt(StartingDocNo) : 1,
         )
         .input("UpdatedBy", sql.NVarChar(100), req.user?.email || "system")
-        .query(`
+        .input("links_to", sql.NVarChar(500), links_to || null)
+        .input("ModuleCode", sql.NVarChar(20), ModuleCode || null)
+        .input("DocNoPrefix", sql.NVarChar(50), DocNoPrefix || null)
+        .input("ProjectCode", sql.NVarChar(20), resolvedProjectCode)
+        .input("FinYearReset", sql.Bit, FinYearReset !== false ? 1 : 0).query(`
           UPDATE dbo.TypeOfDoc SET
             Prefix        = @Prefix,
             Description   = @Description,
@@ -318,18 +331,28 @@ router.put(
             EntryTypeId   = @EntryTypeId,
             IsActive      = @IsActive,
             StartingDocNo = @StartingDocNo,
+            links_to      = @links_to,
+            ModuleCode    = @ModuleCode,
+            DocNoPrefix   = @DocNoPrefix,
+            ProjectCode   = @ProjectCode,
+            FinYearReset  = @FinYearReset,
             UpdatedBy     = @UpdatedBy,
             UpdatedAt     = SYSDATETIME()
           WHERE TypeOfDocId = @id;
         `);
+
+      localVersionCache.invalidate("document-type");
       res.json({ message: "Document type updated successfully" });
     } catch (err) {
-      res.status(500).json({ error: "Failed to update document type" });
+      console.error("PUT /document-type error:", err.message);
+      res
+        .status(500)
+        .json({ error: err.message || "Failed to update document type" });
     }
   },
 );
 
-// ── DELETE /:id — soft delete ─────────────────────────────────────────────────
+// ── DELETE /:id — soft delete (sets IsActive = 0) ─────────────────────────────
 router.delete(
   "/:id",
   ...bypassOrCheck("Admin", "DocumentType", "CanDelete"),
@@ -347,8 +370,10 @@ router.delete(
             UpdatedAt = SYSDATETIME()
           WHERE TypeOfDocId = @id;
         `);
+      localVersionCache.invalidate("document-type");
       res.json({ message: "Document type deactivated successfully" });
     } catch (err) {
+      console.error("DELETE /document-type error:", err.message);
       res.status(500).json({ error: "Failed to deactivate document type" });
     }
   },

@@ -74,7 +74,7 @@ router.get("/", async (req, res) => {
           ''                       AS RejectionNote,
           NULL                     AS LastModified
         FROM dbo.NewPayment
-        WHERE ISNULL(Status, 'Draft') = 'Pending'
+        WHERE Status = 'Pending'
       `);
     }
 
@@ -97,7 +97,7 @@ router.get("/", async (req, res) => {
           ISNULL(RPRejectionNote, '')           AS RejectionNote,
           RPUpdatedAt                           AS LastModified
         FROM dbo.ReceivedPayment
-        WHERE ISNULL(RPStatus, 'Draft') = 'Pending'
+        WHERE RPStatus = 'Pending'
       `);
     }
 
@@ -123,7 +123,7 @@ router.get("/", async (req, res) => {
           ISNULL(RejectionNote, '') AS RejectionNote,
           UpdatedAt                AS LastModified
         FROM dbo.GoodsReceiptNotes
-        WHERE ISNULL(Status,'Draft') = 'Pending'
+        WHERE Status = 'Pending'
       `);
     }
 
@@ -146,7 +146,7 @@ router.get("/", async (req, res) => {
           ''                       AS RejectionNote,
           EUpdatedAt               AS LastModified
         FROM dbo.ExpenseBooking
-        WHERE ISNULL(EStatus, 'Draft') = 'Pending'
+        WHERE EStatus = 'Pending'
       `);
     }
 
@@ -173,10 +173,10 @@ router.get("/count", async (req, res) => {
       SELECT
         (SELECT COUNT(*) FROM dbo.PurchaseOrders    WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.WorkOrderHeader    WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.NewPayment         WHERE ISNULL(Status,'Draft') = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.ReceivedPayment    WHERE ISNULL(RPStatus,'Draft') = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.GoodsReceiptNotes  WHERE ISNULL(Status,'Draft') = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.ExpenseBooking     WHERE ISNULL(EStatus,'Draft') = 'Pending')
+        (SELECT COUNT(*) FROM dbo.NewPayment         WHERE Status = 'Pending') +
+        (SELECT COUNT(*) FROM dbo.ReceivedPayment    WHERE RPStatus = 'Pending') +
+        (SELECT COUNT(*) FROM dbo.GoodsReceiptNotes  WHERE Status = 'Pending') +
+        (SELECT COUNT(*) FROM dbo.ExpenseBooking     WHERE EStatus = 'Pending')
       AS TotalPending
     `);
     res.json({ count: result.recordset[0].TotalPending ?? 0 });

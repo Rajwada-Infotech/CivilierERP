@@ -8,25 +8,27 @@ export interface DbActivity {
   id: number;
   activity_name: string;
   short_description: string | null;
-  activity_type: number | null;  // 0 = Group, 1 = Activity
-  group_id: number | null;       // INT in DB
+  activity_type: number | null; // 0 = Group, 1 = Activity
+  group_id: number | null; // INT in DB
   is_active: boolean;
-  created_by: string | null;     // nvarchar(300) — stores user email
+  created_by: string | null; // nvarchar(300) — stores user email
   created_datetime: string | null;
-  approved_by: string | null;    // nvarchar(300) — stores user email
+  approved_by: string | null; // nvarchar(300) — stores user email
   approved_at: string | null;
-  updated_by: string | null;     // nvarchar(300) — stores user email
+  updated_by: string | null; // nvarchar(300) — stores user email
   updated_at: string | null;
-  belongsTo: string | null;      // nvarchar(200) — stores group_id as string, NULL for Groups
+  belongsTo: string | null; // nvarchar(200) — stores group_id as string, NULL for Groups
+  hsn_code: string | null; // nvarchar(50) — linked HSN code, only for Activities
 }
 
 export interface ActivityPayload {
   activity_name: string | null;
   short_description: string | null;
-  activity_type: number;         // 0 = Group, 1 = Activity
-  group_id: number | null;       // INT — NULL for Groups, group's id for Activities
+  activity_type: number; // 0 = Group, 1 = Activity
+  group_id: number | null; // INT — NULL for Groups, group's id for Activities
   is_active: boolean;
-  belongsTo: string | null;      // nvarchar(200) — NULL for Groups, String(group_id) for Activities
+  belongsTo: string | null; // nvarchar(200) — NULL for Groups, String(group_id) for Activities
+  hsn_code: string | null; // nvarchar(50) — NULL for Groups, optional for Activities
 }
 
 export interface ApiResponse {
@@ -38,7 +40,7 @@ export interface ApiResponse {
 
 export const toPayload = (
   r: Record<string, unknown>,
-  groupOptions: { value: string; label: string }[]
+  groupOptions: { value: string; label: string }[],
 ): ActivityPayload => {
   const isGroup = r.activityType === "Group";
 
@@ -48,12 +50,13 @@ export const toPayload = (
   const groupId = matched ? Number(matched.value) : null;
 
   return {
-    activity_name:     (r.activityName as string) || null,
+    activity_name: (r.activityName as string) || null,
     short_description: (r.shortDesc as string) || null,
-    activity_type:     isGroup ? 0 : 1,
-    group_id:          isGroup ? null : groupId,              // NULL for Group, INT for Activity
-    is_active:         r.status !== false,
-    belongsTo:         isGroup ? null : (groupId ? String(groupId) : null), // NULL for Group, "id" string for Activity
+    activity_type: isGroup ? 0 : 1,
+    group_id: isGroup ? null : groupId, // NULL for Group, INT for Activity
+    is_active: r.status !== false,
+    belongsTo: isGroup ? null : groupId ? String(groupId) : null, // NULL for Group, "id" string for Activity
+    hsn_code: isGroup ? null : (r.hsnCode as string) || null, // NULL for Group, optional for Activity
   };
 };
 
@@ -65,7 +68,9 @@ export const getActivities = async (): Promise<DbActivity[]> => {
   return res.json();
 };
 
-export const addActivity = async (data: ActivityPayload): Promise<ApiResponse> => {
+export const addActivity = async (
+  data: ActivityPayload,
+): Promise<ApiResponse> => {
   const res = await fetchWithAuth(BASE, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -77,7 +82,7 @@ export const addActivity = async (data: ActivityPayload): Promise<ApiResponse> =
 
 export const updateActivity = async (
   id: string | number,
-  data: ActivityPayload
+  data: ActivityPayload,
 ): Promise<ApiResponse> => {
   const res = await fetchWithAuth(`${BASE}/${id}`, {
     method: "PUT",
@@ -88,7 +93,9 @@ export const updateActivity = async (
   return res.json();
 };
 
-export const deleteActivity = async (id: string | number): Promise<ApiResponse> => {
+export const deleteActivity = async (
+  id: string | number,
+): Promise<ApiResponse> => {
   const res = await fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error(`Failed to delete activity: ${res.statusText}`);
   return res.json();
