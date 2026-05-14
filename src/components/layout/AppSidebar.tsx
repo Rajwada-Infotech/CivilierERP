@@ -36,6 +36,9 @@ import {
   Megaphone,
   BellRing,
   FileEdit,
+  Wrench,
+  Hammer,
+  MapPin,
 } from "lucide-react";
 
 // ── Approval pending count (polls every 60 s) ────────────────────────────────
@@ -199,10 +202,8 @@ const buildMaterialNavItems = (): NavItem[] => [
     label: "Transaction",
     icon: Receipt,
     children: [
-      { label: "Work Order", path: "/material/work-order" },
       { label: "Purchase Order", path: "/material/purchase-order" },
       { label: "GRN", path: "/material/grn" },
-      { label: "BOQ", path: "/material/boq" },
       { label: "Issues", path: "/material/issues" },
       { label: "Expense Booking", path: "/material/expense-booking" },
     ],
@@ -215,7 +216,20 @@ const buildMaterialNavItems = (): NavItem[] => [
   { label: "Amendment Menu", icon: FileEdit, path: "/material/amendment-menu" },
 ];
 
-// ── Admin sidebar ──────────────────────────────────────────────────────────
+// ── Engineering module sidebar ───────────────────────────────────────────────
+const buildEngineeringNavItems = (): NavItem[] => [
+  { label: "Dashboard", icon: BarChart3, path: "/engineering" },
+  {
+    label: "Transaction",
+    icon: Receipt,
+    children: [
+      { label: "Work Order", path: "/engineering/work-order" },
+      { label: "BOQ", path: "/engineering/boq" },
+      { label: "Work Done", path: "/engineering/work-done" },
+    ],
+  },
+];
+
 const buildAdminNavItems = (pendingCount: number): NavItem[] => [
   { label: "Transaction", icon: BarChart3, path: "/admin" },
   {
@@ -530,6 +544,8 @@ export const AppSidebar = () => {
     switch (activeModule) {
       case "admin":
         return buildAdminNavItems(pendingApprovalCount);
+      case "engineering":
+        return buildEngineeringNavItems();
       case "material":
         return buildMaterialNavItems();
       case "finance":
@@ -562,6 +578,13 @@ export const AppSidebar = () => {
     !isUserProfilePage &&
     activeModule === "finance";
 
+  const isEngineering =
+    !isAdminPage &&
+    !isSuperAdminPage &&
+    !isDbaPage &&
+    !isUserProfilePage &&
+    activeModule === "engineering";
+
   const isMaterial =
     !isAdminPage &&
     !isSuperAdminPage &&
@@ -580,6 +603,7 @@ export const AppSidebar = () => {
     if (isAdminModule || isAdmin) return "Admin";
     if (isFinance) return "Finance";
     if (isMaterial) return "Material";
+    if (isEngineering) return "Engineering";
     if (activeModule === "followup") return "Follow-Up";
     return "No module";
   };
@@ -596,6 +620,8 @@ export const AppSidebar = () => {
     if (isFinance) return "bg-primary/10 text-primary border-primary/20";
     if (isMaterial)
       return "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
+    if (isEngineering)
+      return "bg-orange-500/10 text-orange-500 border-orange-500/20";
     if (activeModule === "followup")
       return "bg-indigo-500/10 text-indigo-500 border-indigo-500/20";
     return "bg-muted text-muted-foreground border-border";
@@ -607,6 +633,7 @@ export const AppSidebar = () => {
     if (isAdminModule || isAdmin) return "bg-blue-500";
     if (isFinance) return "bg-primary";
     if (isMaterial) return "bg-emerald-500";
+    if (isEngineering) return "bg-orange-500";
     return "bg-muted-foreground/40";
   };
 
@@ -617,6 +644,7 @@ export const AppSidebar = () => {
     if (isAdminModule || isAdmin) return ShieldCheck;
     if (isFinance) return Landmark;
     if (isMaterial) return Package;
+    if (isEngineering) return Wrench;
     if (activeModule === "followup") return Calendar;
     return Landmark;
   };

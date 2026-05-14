@@ -7,13 +7,20 @@ import React, {
 } from "react";
 import { useLocation } from "react-router-dom";
 
-type Module = "finance" | "material" | "followup" | "admin" | null;
+type Module =
+  | "finance"
+  | "material"
+  | "followup"
+  | "engineering"
+  | "admin"
+  | null;
 
 // Single source of truth for module dashboard routes
 export const MODULE_DASHBOARD_ROUTES: Record<NonNullable<Module>, string> = {
   finance: "/finance",
   material: "/material",
   followup: "/followup",
+  engineering: "/engineering",
   admin: "/admin/dashboard",
 };
 
@@ -48,9 +55,11 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
         ? "📦 Material"
         : activeModule === "followup"
           ? "📅 Follow-Up"
-          : activeModule === "admin"
-            ? "🔧 Admin"
-            : "No Module Selected";
+          : activeModule === "engineering"
+            ? "⚙️ Engineering"
+            : activeModule === "admin"
+              ? "🔧 Admin"
+              : "No Module Selected";
 
   const setActiveModule = useCallback((m: Module) => {
     setActiveModuleState(m);
@@ -85,7 +94,13 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
   useEffect(() => {
     const stored = localStorage.getItem("activeModule") as Module | null;
     const pathname = location.pathname;
-    const valid: Module[] = ["finance", "material", "followup", "admin"];
+    const valid: Module[] = [
+      "finance",
+      "material",
+      "followup",
+      "engineering",
+      "admin",
+    ];
 
     if (pathname.startsWith("/admin") || pathname.startsWith("/users")) {
       setActiveModuleState("admin");
@@ -96,6 +111,9 @@ export const ModuleProvider: React.FC<{ children: React.ReactNode }> = ({
     } else if (pathname.startsWith("/material")) {
       setActiveModuleState("material");
       localStorage.setItem("activeModule", "material");
+    } else if (pathname.startsWith("/engineering")) {
+      setActiveModuleState("engineering");
+      localStorage.setItem("activeModule", "engineering");
     } else if (pathname.startsWith("/finance") || pathname === "/finance") {
       setActiveModuleState("finance");
       localStorage.setItem("activeModule", "finance");
