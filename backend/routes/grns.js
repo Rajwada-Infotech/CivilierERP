@@ -175,14 +175,6 @@ router.get("/", cache("grns", 300), async (req, res) => {
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 500);
     const offset = (page - 1) * limit;
 
-    const countResult = await pool.request().query(`
-      SELECT COUNT(*) AS total
-      FROM GoodsReceiptNotes grn
-      LEFT JOIN dbo.AccountHeadMaster s ON grn.SupplierID = s.LHeadId
-      LEFT JOIN PurchaseOrders p ON grn.POID = p.PurchaseOrderID
-    `);
-    const total = parseInt(countResult.recordset[0].total);
-
     const result = await pool
       .request()
       .input("offset", sql.Int, offset)
@@ -199,10 +191,12 @@ router.get("/", cache("grns", 300), async (req, res) => {
         grn.CreatedDate,
         grn.DocTypeId,
         grn.DocNo,
+        grn.TotalAmount,
         s.LHeadName AS SupplierName,
         p.PurchaseOrderNo AS PONumber,
         td.Prefix AS DocTypePrefix,
-        td.Description AS DocTypeDescription
+        td.Description AS DocTypeDescription,
+        COUNT(*) OVER() AS _total
       FROM GoodsReceiptNotes grn
       LEFT JOIN dbo.AccountHeadMaster s ON grn.SupplierID = s.LHeadId
       LEFT JOIN PurchaseOrders p ON grn.POID = p.PurchaseOrderID
@@ -211,8 +205,10 @@ router.get("/", cache("grns", 300), async (req, res) => {
       OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
     `);
 
+    const total = result.recordset[0]?._total ?? 0;
+
     res.json({
-      data: result.recordset.map(normaliseGRNRow),
+      data: result.recordset.map(r => { const { _total, ...rest } = r; return normaliseGRNRow(rest); }),
       page,
       limit,
       total,

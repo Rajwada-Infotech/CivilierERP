@@ -1,63 +1,122 @@
 /**
- * Device Fingerprinting Utility - Privacy-friendly device identification
- * Generates unique ID from browser characteristics (NOT MAC address)
+ * Device Fingerprinting Utility
+ * Generates a stable device ID from browser characteristics.
+ * NOTE: MAC addresses are NOT accessible from browser JS (browser security sandbox).
+ * This fingerprint uses available signals: UA, screen, timezone, hardware concurrency, etc.
  */
 
-export async function getDeviceFingerprint(): Promise<string> {
-  const cacheKey = 'deviceFingerprint_v1';
-  
-  // Return cached value if available
-  if (localStorage.getItem(cacheKey)) {
-    return localStorage.getItem(cacheKey)!;
-  }
+export interface DeviceProfile {
+  fingerprint: string;
+  os: string;
+  browser: string;
+  browserVersion: string;
+  isMobile: boolean;
+  screen: string;
+  colorDepth: number;
+  timezone: string;
+  language: string;
+  cpuCores: number;
+  deviceMemoryGB: number | null;
+  platform: string;
+  touchSupport: boolean;
+}
 
-  // Collect device characteristics
+export async function getDeviceFingerprint(): Promise<string> {
+  const cacheKey = "deviceFingerprint_v2";
+  const cached = localStorage.getItem(cacheKey);
+  if (cached) return cached;
+
   const characteristics = {
     userAgent: navigator.userAgent,
     language: navigator.language,
+    languages: navigator.languages?.join(",") ?? "",
     platform: navigator.platform,
     screen: `${screen.width}x${screen.height}`,
+    availScreen: `${screen.availWidth}x${screen.availHeight}`,
     colorDepth: screen.colorDepth,
+    pixelRatio: window.devicePixelRatio || 1,
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    timezoneOffset: new Date().getTimezoneOffset(),
     cpuCores: navigator.hardwareConcurrency || 0,
     memory: (navigator as any).deviceMemory || 0,
+    touchPoints: navigator.maxTouchPoints || 0,
+    cookieEnabled: navigator.cookieEnabled,
+    doNotTrack: navigator.doNotTrack,
   };
 
-  // Simple hash function
   const encoder = new TextEncoder();
   const data = encoder.encode(JSON.stringify(characteristics));
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
-  const hash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-
-  // Cache and return first 32 chars
+  const hash = hashArray.map((b) => b.toString(16).padStart(2, "0")).join("");
   const fingerprint = hash.substring(0, 32);
+
   localStorage.setItem(cacheKey, fingerprint);
-  
   return fingerprint;
 }
 
+function parseBrowser(ua: string): { browser: string; version: string } {
+  const patterns: [RegExp, string][] = [
+    [/Edg\/([0-9.]+)/, "Edge"],
+    [/OPR\/([0-9.]+)/, "Opera"],
+    [/Chrome\/([0-9.]+)/, "Chrome"],
+    [/Firefox\/([0-9.]+)/, "Firefox"],
+    [/Version\/([0-9.]+).*Safari/, "Safari"],
+    [/MSIE ([0-9.]+)/, "IE"],
+    [/Trident.*rv:([0-9.]+)/, "IE"],
+  ];
+  for (const [re, name] of patterns) {
+    const m = ua.match(re);
+    if (m) return { browser: name, version: m[1].split(".")[0] };
+  }
+  return { browser: "Unknown", version: "" };
+}
+
+function parseOS(ua: string): string {
+  if (/Windows NT 10/.test(ua)) return "Windows 10/11";
+  if (/Windows NT 6.3/.test(ua)) return "Windows 8.1";
+  if (/Windows NT 6.1/.test(ua)) return "Windows 7";
+  if (/Windows/.test(ua)) return "Windows";
+  if (/iPhone OS ([0-9_]+)/.test(ua))
+    return `iOS ${ua.match(/iPhone OS ([0-9_]+)/)?.[1]?.replace(/_/g, ".") ?? ""}`;
+  if (/iPad/.test(ua)) return "iPadOS";
+  if (/Android ([0-9.]+)/.test(ua))
+    return `Android ${ua.match(/Android ([0-9.]+)/)?.[1] ?? ""}`;
+  if (/Mac OS X ([0-9_]+)/.test(ua))
+    return `macOS ${ua.match(/Mac OS X ([0-9_]+)/)?.[1]?.replace(/_/g, ".") ?? ""}`;
+  if (/Linux/.test(ua)) return "Linux";
+  if (/CrOS/.test(ua)) return "ChromeOS";
+  return "Unknown OS";
+}
+
+/** Returns full raw User-Agent string — the server stores this and parses it server-side too */
 export function getDeviceInfo(): string {
-  const ua = navigator.userAgent;
-  let os = 'Unknown';
-  let browser = 'Unknown';
+  return navigator.userAgent;
+}
 
-  if (ua.includes('Windows')) os = 'Windows';
-  else if (ua.includes('Mac')) os = 'macOS'; 
-  else if (ua.includes('Linux')) os = 'Linux';
-  else if (ua.includes('Android')) os = 'Android';
-  else if (ua.includes('iPhone') || ua.includes('iPad')) os = 'iOS';
-
-  if (ua.includes('Chrome')) browser = 'Chrome';
-  else if (ua.includes('Firefox')) browser = 'Firefox';
-  else if (ua.includes('Safari')) browser = 'Safari';
-  else if (ua.includes('Edge')) browser = 'Edge';
-
+export function parseDeviceInfo(ua: string = ""): DeviceProfile {
+  const { browser, version } = parseBrowser(ua);
+  const os = parseOS(ua);
   const isMobile = /Mobile|Android|iPhone|iPad/i.test(ua);
-  return `${isMobile ? 'Mobile' : 'Desktop'} • ${browser} • ${os}`;
+
+  return {
+    fingerprint: "",
+    os,
+    browser,
+    browserVersion: version,
+    isMobile,
+    screen: `${screen.width}×${screen.height}`,
+    colorDepth: screen.colorDepth,
+    timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    language: navigator.language,
+    cpuCores: navigator.hardwareConcurrency || 0,
+    deviceMemoryGB: (navigator as any).deviceMemory ?? null,
+    platform: navigator.platform,
+    touchSupport: navigator.maxTouchPoints > 0,
+  };
 }
 
 export function clearFingerprintCache(): void {
-  localStorage.removeItem('deviceFingerprint_v1');
+  localStorage.removeItem("deviceFingerprint_v1");
+  localStorage.removeItem("deviceFingerprint_v2");
 }
-

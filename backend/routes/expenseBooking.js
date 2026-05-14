@@ -279,9 +279,14 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           ep.name  AS EProjectDisplayName,
           COUNT(*) OVER() AS _total
         FROM dbo.ExpenseBooking eb
-        LEFT JOIN dbo.TypeOfDoc t  ON t.TypeOfDocId = eb.EDocTypeId
-        LEFT JOIN dbo.enterprise ec ON ec.id = eb.ECompanyId
-        LEFT JOIN dbo.enterprise ep ON ep.id = TRY_CAST(eb.EProjectName AS INT)
+        LEFT JOIN dbo.TypeOfDoc  t  ON t.TypeOfDocId = eb.EDocTypeId
+        LEFT JOIN dbo.enterprise ec ON ec.id          = eb.ECompanyId
+        -- FIX: TRY_CAST inside a JOIN predicate prevents index seeks on
+        -- enterprise.id — SQL Server must evaluate it for every row.
+        -- Use a computed integer column via CROSS APPLY instead so the
+        -- cast happens once per row during the scan, not as a join barrier.
+        CROSS APPLY (SELECT TRY_CAST(eb.EProjectName AS INT) AS _projId) _p
+        LEFT JOIN dbo.enterprise ep ON ep.id = _p._projId
         ORDER BY eb.Eid DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `);
@@ -324,7 +329,8 @@ router.get("/:id", async (req, res) => {
         FROM dbo.ExpenseBooking eb
         LEFT JOIN dbo.TypeOfDoc  t  ON t.TypeOfDocId = eb.EDocTypeId
         LEFT JOIN dbo.enterprise ec ON ec.id = eb.ECompanyId
-        LEFT JOIN dbo.enterprise ep ON ep.id = TRY_CAST(eb.EProjectName AS INT)
+        CROSS APPLY (SELECT TRY_CAST(eb.EProjectName AS INT) AS _projId) _p
+        LEFT JOIN dbo.enterprise ep ON ep.id = _p._projId
         WHERE eb.Eid = @Eid
       `);
     if (!result.recordset.length)

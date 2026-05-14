@@ -133,8 +133,6 @@ export const logUserActivity = async (
 ): Promise<{ message: string }> => {
   const token = localStorage.getItem("token");
 
-  // Use native fetch to avoid circular dependency with fetchWithAuth
-  // fetchWithAuth imports this function, so we can't import it back
   const response = await fetch("/api/user-activity", {
     method: "POST",
     headers: {
@@ -154,33 +152,46 @@ export const logUserActivity = async (
   return response.json();
 };
 
-// ==================== SSE ====================
+// ==================== SOCKET.IO REAL-TIME =====================
+//
+// Replaces the old SSE subscribeToActivityStream.
+// The Activity Browser context uses this to receive live activity:new events.
+//
+// Returns an unsubscribe function — call it in useEffect cleanup.
+//
+// Design note: we import socket.ts synchronously at the top of the module
+// (via a top-level import below) so the socket ref captured inside
+// subscribeToActivityStream is available immediately and the cleanup
+// function can call socket.off() without a second dynamic import whose
+// Promise might resolve after the component has already unmounted.
 
-export const subscribeToActivityStream = (
-  onMessage: (data: SessionEvent[]) => void,
-  onError?: (error: Event) => void,
-): EventSource => {
-  const token = localStorage.getItem("token");
+import {
+  connectSocket,
+  getSocket,
+  disconnectSocket as _disconnectSocket,
+} from "@/lib/socket";
 
-  const url = token
-    ? `/api/user-activity/stream?token=${encodeURIComponent(token)}`
-    : "/api/user-activity/stream";
+export { _disconnectSocket as disconnectSocket };
 
-  const source = new EventSource(url);
+export function subscribeToActivityStream(
+  onEvent: (event: SessionEvent) => void,
+  onConnect?: () => void,
+  onDisconnect?: (reason: string) => void,
+): () => void {
+  // connectSocket() is idempotent — returns the existing socket if already
+  // connected, so calling it here is safe even when called multiple times.
+  const socket = connectSocket();
 
-  source.onmessage = (event) => {
-    const data = JSON.parse(event.data) as SessionEvent[];
-    onMessage(data);
+  socket.on("activity:new", onEvent);
+  if (onConnect) socket.on("connect", onConnect);
+  if (onDisconnect) socket.on("disconnect", onDisconnect);
+
+  // Capture the exact socket instance so the cleanup always targets the right
+  // object — even if connectSocket() later returns a different instance after
+  // a logout/reconnect cycle.
+  return () => {
+    socket.off("activity:new", onEvent);
+    if (onConnect) socket.off("connect", onConnect);
+    if (onDisconnect) socket.off("disconnect", onDisconnect);
   };
-
-  source.addEventListener("ping", () => {
-    console.log("SSE ping received");
-  });
-
-  source.onerror = (err: Event) => {
-    console.error("SSE connection error:", err);
-    onError?.(err);
-  };
-
-  return source;
-};
+}

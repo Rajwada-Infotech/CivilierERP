@@ -1,9 +1,17 @@
 const express = require("express");
 const router = express.Router();
 const { getPool } = require("../db");
+const { redisGet, redisSet } = require("../redis");
 
 router.get("/", async (req, res) => {
   try {
+    const CACHE_KEY = "material_dashboard";
+    const CACHE_TTL = 60;
+    try {
+      const cached = await redisGet(CACHE_KEY);
+      if (cached) return res.json(JSON.parse(cached));
+    } catch (_) {}
+
     const pool = getPool();
 
     const safeQuery = async (sql) => {
@@ -205,7 +213,7 @@ router.get("/", async (req, res) => {
     const st = stockStats?.recordset[0] ?? {};
     const um = uomStats?.recordset[0] ?? {};
 
-    res.json({
+    const responseObj = {
       items: {
         count: it.ItemCount ?? 0,
         groupCount: it.GroupCount ?? 0,
@@ -252,7 +260,11 @@ router.get("/", async (req, res) => {
       poStatusBreakdown: poStatusBreakdown?.recordset ?? [],
       woStatusBreakdown: woStatusBreakdown?.recordset ?? [],
       topItems: topItems?.recordset ?? [],
-    });
+    };
+
+    try { await redisSet(CACHE_KEY, JSON.stringify(responseObj), CACHE_TTL); } catch (_) {}
+
+    res.json(responseObj);
   } catch (err) {
     console.error("MATERIAL DASHBOARD FATAL ERROR:", err.message);
     res.status(500).json({ error: err.message });
