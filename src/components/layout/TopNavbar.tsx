@@ -37,6 +37,7 @@ import {
   Database,
   TrendingUp,
   ClipboardList,
+  Wrench,
 } from "lucide-react";
 import { BillingIcon } from "@/components/icons/BillingIcon";
 import { ADMIN_PATHS } from "@/constants/pageDefinitions";
@@ -220,6 +221,45 @@ const followupSetupItems = [
     label: "Pending Tasks",
     path: "/followup/follow-ups/tasks",
     color: "text-purple-500",
+  },
+];
+
+const engineeringSetupItems = [
+  {
+    icon: Wrench,
+    label: "Work Orders",
+    path: "/engineering/work-orders",
+    color: "text-orange-500",
+  },
+  {
+    icon: ClipboardList,
+    label: "Projects",
+    path: "/engineering/projects",
+    color: "text-amber-500",
+  },
+  {
+    icon: Package,
+    label: "Equipment",
+    path: "/engineering/equipment",
+    color: "text-yellow-600",
+  },
+  {
+    icon: Activity,
+    label: "Site Activity",
+    path: "/engineering/site-activity",
+    color: "text-red-500",
+  },
+  {
+    icon: FileText,
+    label: "Drawings",
+    path: "/engineering/drawings",
+    color: "text-cyan-600",
+  },
+  {
+    icon: Users,
+    label: "Contractors",
+    path: "/engineering/contractors",
+    color: "text-teal-500",
   },
 ];
 
@@ -472,6 +512,13 @@ export const TopNavbar = () => {
         color: "bg-indigo-500/10 text-indigo-600 border-indigo-200/60",
         available: true,
       };
+    if (activeModule === "engineering")
+      return {
+        items: engineeringSetupItems,
+        label: "Engineering",
+        color: "bg-orange-500/10 text-orange-600 border-orange-200/60",
+        available: true,
+      };
     if (activeModule === "finance")
       return {
         items: financeSetupItems,
@@ -666,6 +713,14 @@ export const TopNavbar = () => {
                   route: MODULE_DASHBOARD_ROUTES.followup,
                   color: "text-indigo-500",
                 },
+                {
+                  id: "engineering",
+                  name: "Engineering",
+                  icon: Wrench,
+                  desc: "Projects, work orders & site",
+                  route: MODULE_DASHBOARD_ROUTES.engineering,
+                  color: "text-orange-500",
+                },
               ].map((m) => (
                 <button
                   key={m.id}
@@ -696,7 +751,7 @@ export const TopNavbar = () => {
                   </div>
                   {activeModule === m.id && !isAdminPage && (
                     <span
-                      className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${m.id === "finance" ? "bg-primary" : m.id === "material" ? "bg-emerald-500" : "bg-indigo-500"}`}
+                      className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${m.id === "finance" ? "bg-primary" : m.id === "material" ? "bg-emerald-500" : m.id === "engineering" ? "bg-orange-500" : "bg-indigo-500"}`}
                     />
                   )}
                 </button>

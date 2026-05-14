@@ -1,15 +1,8 @@
-import React, { useState, useEffect, useCallback } from "react";
-import { useQuery } from "@tanstack/react-query";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { SummaryCards } from "@/components/reports/SummaryCards";
-import { IncomeVsExpenseChart } from "@/components/reports/IncomeVsExpenseChart";
-import { ExpenseByCategoryChart } from "@/components/reports/ExpenseByCategoryChart";
-import { CashFlowChart } from "@/components/reports/CashFlowChart";
-import { TopPartiesTable } from "@/components/reports/TopPartiesTable";
-import { ExportMenu } from "@/components/ExportMenu";
+import { exportToCsv } from "@/lib/export";
 import type { ExportColumn } from "@/lib/export";
-import { getCompanyById } from "@/api/enterpriseApi";
 import {
   Building2,
   Calendar,
@@ -20,50 +13,36 @@ import {
   X,
   TrendingUp,
   BarChart3,
-  SlidersHorizontal,
+  CreditCard,
+  ShoppingCart,
+  Package,
+  ArrowDownToLine,
+  Layers,
+  Landmark,
+  BookOpen,
+  ClipboardList,
+  FileBarChart2,
+  Users,
+  Clock,
+  GitPullRequest,
+  Banknote,
+  Wrench,
+  Receipt,
+  Store,
+  Download,
+  ChevronLeft,
+  AlertCircle,
+  Loader2,
+  FileText,
+  ArrowUpDown,
+  ChevronRight,
+  IndianRupee,
+  Boxes,
+  Settings2,
 } from "lucide-react";
 
-interface ReportsSummary {
-  totalIncome: number;
-  totalExpenses: number;
-  netProfit: number;
-  transactionCount: number;
-}
-interface MonthlyPoint {
-  month: string;
-  income: number;
-  expense: number;
-}
-interface CategoryPoint {
-  name: string;
-  value: number;
-  color: string;
-}
-interface CashFlowPoint {
-  month: string;
-  balance: number;
-}
-interface TopParty {
-  name: string;
-  txns: number;
-  total: number;
-}
-interface ReportsData {
-  summary: ReportsSummary;
-  filters: {
-    companyId: string | null;
-    mode: string | null;
-    dateFrom: string | null;
-    dateTo: string | null;
-    finYearLabel: string | null;
-  };
-  charts: {
-    monthly: MonthlyPoint[];
-    categories: CategoryPoint[];
-    cashFlow: CashFlowPoint[];
-  };
-  topParties: TopParty[];
-}
+// ── Types ─────────────────────────────────────────────────────────────────────
+
 interface CompanyOption {
   id: number;
   name: string;
@@ -73,89 +52,919 @@ interface FinYearOption {
   FName: string;
   FStartDate: string;
   FEndDate: string;
-  FStatus: string;
 }
 type DateMode = "single" | "range";
-type FinYearGranularity = "year" | "month" | "day";
 
-const fmt = (n: number) =>
-  "Rs." +
-  new Intl.NumberFormat("en-IN", {
-    maximumFractionDigits: 0,
-  }).format(n);
+interface FilterState {
+  companyId: string;
+  finYearId: string;
+  dateMode: DateMode;
+  singleDate: string;
+  rangeFrom: string;
+  rangeTo: string;
+}
 
-const FilterChip: React.FC<{ label: string; onRemove: () => void }> = ({
-  label,
-  onRemove,
+interface ActiveFilter {
+  label: string;
+  clear: () => void;
+}
+
+interface ReportDef {
+  id: string;
+  label: string;
+  description: string;
+  icon: React.ElementType;
+  color: string;
+  apiPath: string;
+  columns: ExportColumn[];
+  defaultParams?: Record<string, string>;
+}
+
+interface ModuleSection {
+  id: string;
+  label: string;
+  description: string;
+  icon: React.ElementType;
+  accent: string;
+  reportIds: string[];
+}
+
+const fmt = (n: number | undefined | null) =>
+  n == null
+    ? "—"
+    : "₹" +
+      new Intl.NumberFormat("en-IN", { maximumFractionDigits: 0 }).format(
+        Number(n),
+      );
+
+// ── All report definitions ────────────────────────────────────────────────────
+
+const ALL_REPORTS: ReportDef[] = [
+  {
+    id: "payment-register",
+    label: "Payment Register",
+    description: "Outward payments with mode & amount",
+    icon: Banknote,
+    color: "#6366f1",
+    apiPath: "/api/new-payment",
+    columns: [
+      { header: "Doc No", accessor: "PaymentNo" },
+      {
+        header: "Date",
+        accessor: (r) =>
+          r.PaymentDate ? String(r.PaymentDate).slice(0, 10) : "—",
+      },
+      { header: "Party", accessor: "PartyName" },
+      { header: "Mode", accessor: "PaymentMode" },
+      { header: "Amount", accessor: (r) => fmt(r.Amount as number) },
+      { header: "Bank", accessor: "BankName" },
+      { header: "Status", accessor: "Status" },
+    ],
+  },
+  {
+    id: "received-payment",
+    label: "Received Payment",
+    description: "Inward payments received from clients",
+    icon: TrendingUp,
+    color: "#06d6a0",
+    apiPath: "/api/received-payment",
+    columns: [
+      { header: "Doc No", accessor: "RPDocNo" },
+      {
+        header: "Date",
+        accessor: (r) => (r.RPDocDate ? String(r.RPDocDate).slice(0, 10) : "—"),
+      },
+      { header: "Received From", accessor: "RPReceivedFrom" },
+      { header: "Project", accessor: "RPProjectName" },
+      { header: "Amount", accessor: (r) => fmt(r.RPAmount as number) },
+      { header: "Mode", accessor: "RPMode" },
+      { header: "Status", accessor: "RPStatus" },
+    ],
+  },
+  {
+    id: "emi-register",
+    label: "EMI Register",
+    description: "EMI schedules across received payments",
+    icon: CreditCard,
+    color: "#8b5cf6",
+    apiPath: "/api/received-payment",
+    defaultParams: { isEmi: "1" },
+    columns: [
+      { header: "Doc No", accessor: "RPDocNo" },
+      {
+        header: "Date",
+        accessor: (r) => (r.RPDocDate ? String(r.RPDocDate).slice(0, 10) : "—"),
+      },
+      { header: "Received From", accessor: "RPReceivedFrom" },
+      { header: "EMI Total", accessor: (r) => fmt(r.RPEmiTotal as number) },
+      { header: "EMI Months", accessor: "RPEmiMonths" },
+      { header: "Mode", accessor: "RPMode" },
+      { header: "Status", accessor: "RPStatus" },
+    ],
+  },
+  {
+    id: "pending-payment",
+    label: "Pending Payments",
+    description: "Payments awaiting approval or disbursement",
+    icon: Clock,
+    color: "#f43f5e",
+    apiPath: "/api/new-payment",
+    defaultParams: { status: "pending" },
+    columns: [
+      { header: "Doc No", accessor: "PaymentNo" },
+      {
+        header: "Date",
+        accessor: (r) =>
+          r.PaymentDate ? String(r.PaymentDate).slice(0, 10) : "—",
+      },
+      { header: "Party", accessor: "PartyName" },
+      { header: "Amount", accessor: (r) => fmt(r.Amount as number) },
+      { header: "Mode", accessor: "PaymentMode" },
+      { header: "Status", accessor: "Status" },
+    ],
+  },
+  {
+    id: "bank-report",
+    label: "Bank Report",
+    description: "Bank reconciliation statement summary",
+    icon: Landmark,
+    color: "#0ea5e9",
+    apiPath: "/api/brs",
+    columns: [
+      {
+        header: "Date",
+        accessor: (r) =>
+          r.TransactionDate ? String(r.TransactionDate).slice(0, 10) : "—",
+      },
+      { header: "Bank", accessor: "BankName" },
+      { header: "Narration", accessor: "Narration" },
+      { header: "Debit", accessor: (r) => fmt(r.Debit as number) },
+      { header: "Credit", accessor: (r) => fmt(r.Credit as number) },
+      { header: "Balance", accessor: (r) => fmt(r.Balance as number) },
+    ],
+  },
+  {
+    id: "brs-report",
+    label: "BRS Report",
+    description: "Full bank reconciliation statement",
+    icon: ArrowUpDown,
+    color: "#14b8a6",
+    apiPath: "/api/brs",
+    columns: [
+      { header: "Voucher No", accessor: "VoucherNo" },
+      {
+        header: "Date",
+        accessor: (r) =>
+          r.TransactionDate ? String(r.TransactionDate).slice(0, 10) : "—",
+      },
+      { header: "Bank", accessor: "BankName" },
+      { header: "Particulars", accessor: "Narration" },
+      { header: "Debit", accessor: (r) => fmt(r.Debit as number) },
+      { header: "Credit", accessor: (r) => fmt(r.Credit as number) },
+      { header: "Cleared", accessor: (r) => (r.IsCleared ? "Yes" : "No") },
+    ],
+  },
+  {
+    id: "ledger-report",
+    label: "Ledger Report",
+    description: "General ledger entries by account head",
+    icon: BookOpen,
+    color: "#64748b",
+    apiPath: "/api/general-ledger",
+    columns: [
+      { header: "Account", accessor: "AccountName" },
+      { header: "Account Code", accessor: "AccountCode" },
+      { header: "Type", accessor: "LHeadType" },
+      {
+        header: "Opening Balance",
+        accessor: (r) => fmt(r.OpeningBalance as number),
+      },
+      { header: "Debit", accessor: (r) => fmt(r.TotalDebit as number) },
+      { header: "Credit", accessor: (r) => fmt(r.TotalCredit as number) },
+    ],
+  },
+  {
+    id: "po-register",
+    label: "PO Register",
+    description: "All purchase orders with vendor & value",
+    icon: ShoppingCart,
+    color: "#f59e0b",
+    apiPath: "/api/purchase-orders",
+    columns: [
+      { header: "PO No", accessor: "PONo" },
+      {
+        header: "Date",
+        accessor: (r) => (r.PODate ? String(r.PODate).slice(0, 10) : "—"),
+      },
+      { header: "Vendor", accessor: "VendorName" },
+      { header: "Project", accessor: "ProjectName" },
+      { header: "Amount", accessor: (r) => fmt(r.TotalAmount as number) },
+      { header: "Status", accessor: "Status" },
+    ],
+  },
+  {
+    id: "grn-register",
+    label: "GRN Register",
+    description: "Goods received notes with item details",
+    icon: Package,
+    color: "#10b981",
+    apiPath: "/api/grns",
+    columns: [
+      { header: "GRN No", accessor: "GRNNo" },
+      {
+        header: "Date",
+        accessor: (r) => (r.GRNDate ? String(r.GRNDate).slice(0, 10) : "—"),
+      },
+      { header: "Supplier", accessor: "SupplierName" },
+      { header: "PO Ref", accessor: "PONo" },
+      { header: "Total Qty", accessor: "TotalQty" },
+      { header: "Total Value", accessor: (r) => fmt(r.TotalValue as number) },
+    ],
+  },
+  {
+    id: "issue-register",
+    label: "Issue Register",
+    description: "Material issues to sites and projects",
+    icon: ArrowDownToLine,
+    color: "#ef4444",
+    apiPath: "/api/material-issues",
+    columns: [
+      { header: "Issue No", accessor: "IssueNo" },
+      {
+        header: "Date",
+        accessor: (r) => (r.IssueDate ? String(r.IssueDate).slice(0, 10) : "—"),
+      },
+      { header: "Project", accessor: "ProjectName" },
+      { header: "Item", accessor: "ItemName" },
+      { header: "Qty", accessor: "Quantity" },
+      { header: "UOM", accessor: "UOM" },
+      { header: "Issued By", accessor: "IssuedBy" },
+    ],
+  },
+  {
+    id: "stock-summary",
+    label: "Stock Summary",
+    description: "Current stock levels across all items",
+    icon: Layers,
+    color: "#06b6d4",
+    apiPath: "/api/stock-ledger",
+    columns: [
+      { header: "Item", accessor: "ItemName" },
+      { header: "Item Code", accessor: "ItemCode" },
+      { header: "Opening", accessor: "OpeningQty" },
+      { header: "Received", accessor: "ReceivedQty" },
+      { header: "Issued", accessor: "IssuedQty" },
+      { header: "Closing", accessor: "ClosingQty" },
+      { header: "UOM", accessor: "UOM" },
+    ],
+  },
+  {
+    id: "work-order-register",
+    label: "Work Order Register",
+    description: "All work orders with contractor & value",
+    icon: Wrench,
+    color: "#f97316",
+    apiPath: "/api/work-orders",
+    columns: [
+      { header: "WO No", accessor: "WONo" },
+      {
+        header: "Date",
+        accessor: (r) => (r.WODate ? String(r.WODate).slice(0, 10) : "—"),
+      },
+      { header: "Contractor", accessor: "ContractorName" },
+      { header: "Project", accessor: "ProjectName" },
+      { header: "Value", accessor: (r) => fmt(r.TotalValue as number) },
+      { header: "Status", accessor: "Status" },
+    ],
+  },
+  {
+    id: "boq-register",
+    label: "BOQ Register",
+    description: "Bill of quantities with item-wise breakdown",
+    icon: FileBarChart2,
+    color: "#84cc16",
+    apiPath: "/api/boq",
+    columns: [
+      { header: "BOQ No", accessor: "BOQNo" },
+      { header: "Project", accessor: "ProjectName" },
+      { header: "Item", accessor: "ItemDescription" },
+      { header: "Qty", accessor: "Quantity" },
+      { header: "Rate", accessor: (r) => fmt(r.Rate as number) },
+      { header: "Total", accessor: (r) => fmt(r.TotalAmount as number) },
+    ],
+  },
+  {
+    id: "work-done",
+    label: "Work Done",
+    description: "Completed work orders and progress summary",
+    icon: ClipboardList,
+    color: "#22c55e",
+    apiPath: "/api/work-orders",
+    defaultParams: { status: "completed" },
+    columns: [
+      { header: "WO No", accessor: "WONo" },
+      { header: "Contractor", accessor: "ContractorName" },
+      { header: "Project", accessor: "ProjectName" },
+      {
+        header: "Completed",
+        accessor: (r) =>
+          r.CompletedDate ? String(r.CompletedDate).slice(0, 10) : "—",
+      },
+      { header: "Value", accessor: (r) => fmt(r.TotalValue as number) },
+      { header: "Status", accessor: "Status" },
+    ],
+  },
+  {
+    id: "invoice-register",
+    label: "Invoice Register",
+    description: "Service & item invoices across all projects",
+    icon: Receipt,
+    color: "#ec4899",
+    apiPath: "/api/expense-booking",
+    columns: [
+      { header: "Invoice No", accessor: "EDocNo" },
+      {
+        header: "Date",
+        accessor: (r) => (r.EDate ? String(r.EDate).slice(0, 10) : "—"),
+      },
+      { header: "Party", accessor: "EPartyName" },
+      { header: "Project", accessor: "EProjectName" },
+      { header: "Amount", accessor: (r) => fmt(r.EAmount as number) },
+      { header: "GST", accessor: (r) => fmt(r.EGST as number) },
+      { header: "Total", accessor: (r) => fmt(r.ETotalAmount as number) },
+      { header: "Status", accessor: "EStatus" },
+    ],
+  },
+  {
+    id: "supplier-report",
+    label: "Supplier Report",
+    description: "Vendor-wise purchase and payment summary",
+    icon: Store,
+    color: "#78716c",
+    apiPath: "/api/enterprises",
+    defaultParams: { business_type: "S" },
+    columns: [
+      { header: "Supplier Name", accessor: "name" },
+      { header: "GST No", accessor: "gst_no" },
+      { header: "PAN", accessor: "pan_no" },
+      { header: "Contact", accessor: "contact_person" },
+      { header: "Phone", accessor: "phone" },
+      { header: "City", accessor: "city" },
+    ],
+  },
+  {
+    id: "pending-requests",
+    label: "Pending Requests",
+    description: "Approval inbox items awaiting action",
+    icon: GitPullRequest,
+    color: "#fb923c",
+    apiPath: "/api/approval-inbox",
+    columns: [
+      { header: "Doc No", accessor: "DocNo" },
+      { header: "Module", accessor: "ModuleName" },
+      { header: "Requested By", accessor: "RequestedBy" },
+      {
+        header: "Date",
+        accessor: (r) =>
+          r.RequestedAt ? String(r.RequestedAt).slice(0, 10) : "—",
+      },
+      { header: "Status", accessor: "Status" },
+      { header: "Amount", accessor: (r) => fmt(r.Amount as number) },
+    ],
+  },
+  {
+    id: "user-activity",
+    label: "User Activity",
+    description: "Login, access and audit trail logs",
+    icon: Users,
+    color: "#a855f7",
+    apiPath: "/api/user-activity",
+    defaultParams: { limit: "200" },
+    columns: [
+      { header: "User", accessor: "userName" },
+      { header: "Email", accessor: "userEmail" },
+      { header: "Role", accessor: "userRole" },
+      { header: "Event", accessor: "event" },
+      { header: "Action", accessor: "actionType" },
+      { header: "Resource", accessor: "resource" },
+      { header: "IP", accessor: "ipAddress" },
+      {
+        header: "Timestamp",
+        accessor: (r) =>
+          r.timestamp
+            ? String(r.timestamp).slice(0, 19).replace("T", " ")
+            : "—",
+      },
+    ],
+  },
+];
+
+const REPORT_MAP = new Map(ALL_REPORTS.map((r) => [r.id, r]));
+
+// ── Module sections ───────────────────────────────────────────────────────────
+
+const MODULE_SECTIONS: ModuleSection[] = [
+  {
+    id: "finance",
+    label: "Finance",
+    accent: "#6366f1",
+    description: "Payments, receipts, bank reconciliation & ledgers",
+    icon: IndianRupee,
+    reportIds: [
+      "payment-register",
+      "received-payment",
+      "emi-register",
+      "pending-payment",
+      "bank-report",
+      "brs-report",
+      "ledger-report",
+    ],
+  },
+  {
+    id: "material",
+    label: "Material",
+    accent: "#10b981",
+    description: "Purchase orders, GRN, stock, issues & work orders",
+    icon: Boxes,
+    reportIds: [
+      "po-register",
+      "grn-register",
+      "issue-register",
+      "stock-summary",
+      "work-order-register",
+      "boq-register",
+      "work-done",
+    ],
+  },
+  {
+    id: "admin",
+    label: "Admin",
+    accent: "#f59e0b",
+    description: "Invoices, suppliers, approval requests & user activity",
+    icon: Settings2,
+    reportIds: [
+      "invoice-register",
+      "supplier-report",
+      "pending-requests",
+      "user-activity",
+    ],
+  },
+];
+
+// ── Filter bar (inside expanded section) ─────────────────────────────────────
+
+const SectionFilters: React.FC<{
+  companies: CompanyOption[];
+  finYears: FinYearOption[];
+  filters: FilterState;
+  onChange: (patch: Partial<FilterState>) => void;
+  activeFilters: ActiveFilter[];
+  onClearAll: () => void;
+}> = ({
+  companies,
+  finYears,
+  filters,
+  onChange,
+  activeFilters,
+  onClearAll,
 }) => (
-  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-primary/15 text-primary border border-primary/20">
-    {label}
-    <button
-      onClick={onRemove}
-      className="hover:text-destructive transition-colors"
-    >
-      <X size={10} />
-    </button>
-  </span>
-);
+  <div className="rounded-xl border border-border bg-card/60 p-3 space-y-2.5">
+    <div className="flex flex-wrap items-end gap-2.5">
+      {/* Company */}
+      <div className="min-w-[160px] flex-1 max-w-[210px]">
+        <label className="block text-[10px] font-heading font-semibold text-muted-foreground uppercase tracking-wider mb-1">
+          Company
+        </label>
+        <div className="relative">
+          <Building2
+            size={11}
+            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+          />
+          <select
+            value={filters.companyId}
+            onChange={(e) => onChange({ companyId: e.target.value })}
+            className="w-full appearance-none pl-7 pr-6 py-2 rounded-lg border border-border bg-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
+          >
+            <option value="">All Companies</option>
+            {companies.map((c) => (
+              <option key={c.id} value={String(c.id)}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+          <ChevronDown
+            size={11}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+          />
+        </div>
+      </div>
 
-const StyledSelect: React.FC<{
-  value: string;
-  onChange: (v: string) => void;
-  placeholder: string;
-  options: { value: string; label: string }[];
-  icon?: React.ReactNode;
-  className?: string;
-}> = ({ value, onChange, placeholder, options, icon, className = "" }) => (
-  <div className={`relative ${className}`}>
-    {icon && (
-      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none z-10">
-        {icon}
-      </span>
+      {/* Fin Year */}
+      <div className="min-w-[140px] flex-1 max-w-[180px]">
+        <label className="block text-[10px] font-heading font-semibold text-muted-foreground uppercase tracking-wider mb-1">
+          Financial Year
+        </label>
+        <div className="relative">
+          <Calendar
+            size={11}
+            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+          />
+          <select
+            value={filters.finYearId}
+            onChange={(e) => onChange({ finYearId: e.target.value })}
+            className="w-full appearance-none pl-7 pr-6 py-2 rounded-lg border border-border bg-background text-foreground text-xs focus:outline-none focus:ring-2 focus:ring-primary/30 transition-all"
+          >
+            <option value="">All Years</option>
+            {finYears.map((f) => (
+              <option key={f.FId} value={String(f.FId)}>
+                {f.FName}
+              </option>
+            ))}
+          </select>
+          <ChevronDown
+            size={11}
+            className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+          />
+        </div>
+      </div>
+
+      {/* Date mode + inputs */}
+      <div className="flex items-end gap-2">
+        <div>
+          <label className="block text-[10px] font-heading font-semibold text-muted-foreground uppercase tracking-wider mb-1">
+            Date
+          </label>
+          <div className="flex rounded-lg border border-border overflow-hidden bg-muted/30 h-[34px]">
+            {(["single", "range"] as DateMode[]).map((m) => (
+              <button
+                key={m}
+                type="button"
+                onClick={() => onChange({ dateMode: m })}
+                className={`px-3 flex items-center gap-1 text-[11px] font-medium transition-all
+                  ${filters.dateMode === m ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+              >
+                {m === "single" ? (
+                  <Calendar size={10} />
+                ) : (
+                  <CalendarRange size={10} />
+                )}
+                {m === "single" ? "Day" : "Range"}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {filters.dateMode === "single" ? (
+          <input
+            type="date"
+            value={filters.singleDate}
+            onChange={(e) => onChange({ singleDate: e.target.value })}
+            disabled={!!filters.finYearId}
+            className="rounded-lg border border-border bg-background text-foreground text-xs px-2.5 py-2 h-[34px] focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-40 transition-all"
+          />
+        ) : (
+          <div className="flex gap-1.5 items-center">
+            <input
+              type="date"
+              value={filters.rangeFrom}
+              onChange={(e) => onChange({ rangeFrom: e.target.value })}
+              disabled={!!filters.finYearId}
+              className="rounded-lg border border-border bg-background text-foreground text-xs px-2.5 py-2 h-[34px] w-[130px] focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-40 transition-all"
+            />
+            <span className="text-[10px] text-muted-foreground">→</span>
+            <input
+              type="date"
+              value={filters.rangeTo}
+              onChange={(e) => onChange({ rangeTo: e.target.value })}
+              disabled={!!filters.finYearId}
+              className="rounded-lg border border-border bg-background text-foreground text-xs px-2.5 py-2 h-[34px] w-[130px] focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-40 transition-all"
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Clear */}
+      {activeFilters.length > 0 && (
+        <button
+          onClick={onClearAll}
+          className="flex items-center gap-1 px-2.5 py-2 h-[34px] rounded-lg border border-border text-xs text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-all"
+        >
+          <X size={11} /> Clear
+        </button>
+      )}
+    </div>
+
+    {/* Active chips */}
+    {activeFilters.length > 0 && (
+      <div className="flex flex-wrap items-center gap-1.5 pt-1.5 border-t border-border/40">
+        <span className="text-[10px] text-muted-foreground font-heading uppercase tracking-wider">
+          Active:
+        </span>
+        {activeFilters.map((f) => (
+          <span
+            key={f.label}
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-primary/10 text-primary border border-primary/20"
+          >
+            {f.label}
+            <button
+              onClick={f.clear}
+              className="hover:text-destructive transition-colors"
+            >
+              <X size={8} />
+            </button>
+          </span>
+        ))}
+      </div>
     )}
-    <select
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      className={`w-full appearance-none rounded-lg border border-border bg-card text-foreground text-sm py-2.5 pr-8 focus:outline-none focus:ring-2 focus:ring-primary/40 transition-all ${icon ? "pl-9" : "pl-3"}`}
-    >
-      <option value="">{placeholder}</option>
-      {options.map((o) => (
-        <option key={o.value} value={o.value}>
-          {o.label}
-        </option>
-      ))}
-    </select>
-    <ChevronDown
-      size={14}
-      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
-    />
   </div>
 );
 
-const Reports: React.FC = () => {
-  const [data, setData] = useState<ReportsData | null>(null);
+// ── Report data table ─────────────────────────────────────────────────────────
+
+const ReportTable: React.FC<{
+  report: ReportDef;
+  filters: FilterState;
+  onClose: () => void;
+}> = ({ report, filters, onClose }) => {
+  const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 20;
+
+  const buildParams = (): Record<string, string> => {
+    const f: Record<string, string> = {};
+    if (filters.companyId) f.companyId = filters.companyId;
+    if (filters.finYearId) f.finYearId = filters.finYearId;
+    else if (filters.dateMode === "single" && filters.singleDate)
+      f.dateFrom = filters.singleDate;
+    else if (
+      filters.dateMode === "range" &&
+      filters.rangeFrom &&
+      filters.rangeTo
+    ) {
+      f.dateFrom = filters.rangeFrom;
+      f.dateTo = filters.rangeTo;
+    }
+    return f;
+  };
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams({
+        ...report.defaultParams,
+        ...buildParams(),
+        limit: "500",
+      });
+      const res = await fetchWithAuth(`${report.apiPath}?${params}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      const data: Record<string, unknown>[] = Array.isArray(json)
+        ? json
+        : (json.data ?? json.records ?? []);
+      setRows(data);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed to load");
+    } finally {
+      setLoading(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    report.id,
+    filters.companyId,
+    filters.finYearId,
+    filters.singleDate,
+    filters.rangeFrom,
+    filters.rangeTo,
+  ]);
+
+  useEffect(() => {
+    load();
+    setPage(1);
+  }, [load]);
+
+  const totalPages = Math.ceil(rows.length / PAGE_SIZE);
+  const pageRows = rows.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const cell = (row: Record<string, unknown>, col: ExportColumn): string => {
+    if (typeof col.accessor === "function") return col.accessor(row) as string;
+    const v = row[col.accessor as string];
+    return v == null ? "—" : String(v);
+  };
+
+  return (
+    <div
+      className="rounded-xl border border-border bg-card overflow-hidden"
+      style={{ borderTopWidth: 2, borderTopColor: report.color }}
+    >
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/10">
+        <div className="flex items-center gap-2.5">
+          <button
+            onClick={onClose}
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <ChevronLeft size={13} /> Back
+          </button>
+          <span className="text-border">|</span>
+          <div
+            className="p-1.5 rounded-md"
+            style={{ background: `${report.color}18` }}
+          >
+            <report.icon size={13} style={{ color: report.color }} />
+          </div>
+          <span className="text-sm font-heading font-semibold text-foreground">
+            {report.label}
+          </span>
+          {!loading && !error && (
+            <span className="text-[10px] bg-muted text-muted-foreground px-2 py-0.5 rounded-full">
+              {rows.length} records
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={load}
+            disabled={loading}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-border text-xs text-muted-foreground hover:text-foreground transition-all disabled:opacity-50"
+          >
+            <RefreshCw size={11} className={loading ? "animate-spin" : ""} />{" "}
+            Refresh
+          </button>
+          <button
+            onClick={() => exportToCsv(rows, report.columns, report.id)}
+            disabled={loading || rows.length === 0}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg bg-primary text-primary-foreground text-xs font-medium hover:bg-primary/90 disabled:opacity-50 transition-all"
+          >
+            <Download size={11} /> Export CSV
+          </button>
+        </div>
+      </div>
+
+      {/* States */}
+      {loading && (
+        <div className="flex items-center justify-center py-12 gap-2 text-muted-foreground">
+          <Loader2 size={16} className="animate-spin" />
+          <span className="text-sm">Loading {report.label}…</span>
+        </div>
+      )}
+      {error && !loading && (
+        <div className="flex flex-col items-center justify-center py-10 gap-2 text-muted-foreground">
+          <AlertCircle size={16} className="text-destructive" />
+          <p className="text-sm text-destructive">{error}</p>
+          <button
+            onClick={load}
+            className="text-xs underline hover:text-foreground"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+      {!loading && !error && rows.length === 0 && (
+        <div className="flex flex-col items-center justify-center py-10 gap-2 text-muted-foreground">
+          <FileText size={16} />
+          <p className="text-sm">No records found</p>
+        </div>
+      )}
+
+      {/* Table */}
+      {!loading && !error && rows.length > 0 && (
+        <>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border bg-muted/30">
+                  <th className="px-4 py-2.5 text-left text-[10px] font-heading font-semibold text-muted-foreground uppercase tracking-wider w-8">
+                    #
+                  </th>
+                  {report.columns.map((col) => (
+                    <th
+                      key={col.header}
+                      className="px-4 py-2.5 text-left text-[10px] font-heading font-semibold text-muted-foreground uppercase tracking-wider whitespace-nowrap"
+                    >
+                      {col.header}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border/40">
+                {pageRows.map((row, i) => (
+                  <tr key={i} className="hover:bg-muted/20 transition-colors">
+                    <td className="px-4 py-2.5 text-xs text-muted-foreground">
+                      {(page - 1) * PAGE_SIZE + i + 1}
+                    </td>
+                    {report.columns.map((col) => (
+                      <td
+                        key={col.header}
+                        className="px-4 py-2.5 text-xs text-foreground whitespace-nowrap max-w-[200px] truncate"
+                      >
+                        {cell(row, col)}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between px-4 py-2.5 border-t border-border text-xs text-muted-foreground">
+              <span>
+                {(page - 1) * PAGE_SIZE + 1}–
+                {Math.min(page * PAGE_SIZE, rows.length)} of {rows.length}
+              </span>
+              <div className="flex items-center gap-1">
+                <button
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page === 1}
+                  className="px-2.5 py-1 rounded border border-border disabled:opacity-40 hover:bg-muted/40 transition-colors"
+                >
+                  Prev
+                </button>
+                <span className="px-2">
+                  {page}/{totalPages}
+                </span>
+                <button
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page === totalPages}
+                  className="px-2.5 py-1 rounded border border-border disabled:opacity-40 hover:bg-muted/40 transition-colors"
+                >
+                  Next
+                </button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+};
+
+// ── Report tile ───────────────────────────────────────────────────────────────
+
+const ReportTile: React.FC<{
+  report: ReportDef;
+  active: boolean;
+  onClick: () => void;
+}> = ({ report, active, onClick }) => (
+  <button
+    onClick={onClick}
+    className={`group flex items-center gap-3 px-3.5 py-3 rounded-xl border text-left transition-all duration-150 w-full
+      ${
+        active
+          ? "border-2 bg-card shadow-sm"
+          : "border-border/60 bg-card/50 hover:bg-card hover:border-border hover:shadow-sm"
+      }`}
+    style={
+      active
+        ? {
+            borderColor: report.color,
+            boxShadow: `0 2px 10px ${report.color}18`,
+          }
+        : {}
+    }
+  >
+    <div
+      className="shrink-0 p-2 rounded-lg transition-colors"
+      style={{ background: `${report.color}15` }}
+    >
+      <report.icon size={15} style={{ color: report.color }} />
+    </div>
+    <div className="min-w-0 flex-1">
+      <p className="text-xs font-heading font-semibold text-foreground truncate leading-tight">
+        {report.label}
+      </p>
+      <p className="text-[10px] text-muted-foreground truncate mt-0.5">
+        {report.description}
+      </p>
+    </div>
+    {active && (
+      <div
+        className="shrink-0 w-1.5 h-1.5 rounded-full"
+        style={{ background: report.color }}
+      />
+    )}
+  </button>
+);
+
+// ── Main page ─────────────────────────────────────────────────────────────────
+
+const Reports: React.FC = () => {
   const [companies, setCompanies] = useState<CompanyOption[]>([]);
   const [finYears, setFinYears] = useState<FinYearOption[]>([]);
-  const [companyId, setCompanyId] = useState("");
-  const [dateMode, setDateMode] = useState<DateMode>("single");
-  const [singleDate, setSingleDate] = useState("");
-  const [rangeFrom, setRangeFrom] = useState("");
-  const [rangeTo, setRangeTo] = useState("");
-  const [finYearId, setFinYearId] = useState("");
-  const [fyGranularity, setFyGranularity] =
-    useState<FinYearGranularity>("year");
-  const [fyMonth, setFyMonth] = useState("");
-  const [fyDay, setFyDay] = useState("");
-
-  // Fetch full company detail (name + logo) for export when a company is filtered
-  const { data: selectedCompanyDetail = null } = useQuery({
-    queryKey: ["company-detail-reports", companyId],
-    queryFn: () => (companyId ? getCompanyById(Number(companyId)) : Promise.resolve(null)),
-    enabled: !!companyId,
+  const [openSection, setOpenSection] = useState<string | null>(null);
+  const [activeReport, setActiveReport] = useState<string | null>(null);
+  const [filters, setFilters] = useState<FilterState>({
+    companyId: "",
+    finYearId: "",
+    dateMode: "single",
+    singleDate: "",
+    rangeFrom: "",
+    rangeTo: "",
   });
+
+  const panelRef = useRef<HTMLDivElement>(null);
+  const sectionRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
   useEffect(() => {
     fetchWithAuth("/api/reports/companies")
@@ -168,576 +977,239 @@ const Reports: React.FC = () => {
       .catch(() => {});
   }, []);
 
-  const buildParams = useCallback(() => {
-    const p = new URLSearchParams();
-    if (companyId) p.set("companyId", companyId);
-    if (finYearId) {
-      const fy = finYears.find((f) => String(f.FId) === finYearId);
-      if (fy) {
-        if (fyGranularity === "year") {
-          p.set("mode", "finYear");
-          p.set("finYearId", finYearId);
-        } else if (fyGranularity === "month" && fyMonth) {
-          const startYear = fy.FStartDate?.slice(0, 4) ?? "";
-          const yr =
-            fyMonth <= "03" ? String(parseInt(startYear) + 1) : startYear;
-          p.set("mode", "month");
-          p.set("dateFrom", `${yr}-${fyMonth}`);
-        } else if (fyGranularity === "day" && fyDay) {
-          p.set("mode", "day");
-          p.set("dateFrom", fyDay);
-        }
-      }
-    } else {
-      if (dateMode === "single" && singleDate) {
-        p.set("mode", "single");
-        p.set("dateFrom", singleDate);
-      } else if (dateMode === "range" && rangeFrom && rangeTo) {
-        p.set("mode", "range");
-        p.set("dateFrom", rangeFrom);
-        p.set("dateTo", rangeTo);
-      }
+  const patchFilters = (patch: Partial<FilterState>) =>
+    setFilters((prev) => ({ ...prev, ...patch }));
+
+  const clearFilters = () =>
+    setFilters({
+      companyId: "",
+      finYearId: "",
+      dateMode: "single",
+      singleDate: "",
+      rangeFrom: "",
+      rangeTo: "",
+    });
+
+  // Build active filter chips
+  const activeFilters: ActiveFilter[] = [];
+  if (filters.companyId) {
+    const c = companies.find((x) => String(x.id) === filters.companyId);
+    if (c)
+      activeFilters.push({
+        label: c.name,
+        clear: () => patchFilters({ companyId: "" }),
+      });
+  }
+  if (filters.finYearId) {
+    const fy = finYears.find((f) => String(f.FId) === filters.finYearId);
+    if (fy)
+      activeFilters.push({
+        label: fy.FName,
+        clear: () => patchFilters({ finYearId: "" }),
+      });
+  } else {
+    if (filters.singleDate)
+      activeFilters.push({
+        label: filters.singleDate,
+        clear: () => patchFilters({ singleDate: "" }),
+      });
+    if (filters.rangeFrom && filters.rangeTo)
+      activeFilters.push({
+        label: `${filters.rangeFrom} → ${filters.rangeTo}`,
+        clear: () => patchFilters({ rangeFrom: "", rangeTo: "" }),
+      });
+  }
+
+  const handleSectionClick = (id: string) => {
+    const opening = openSection !== id;
+    setOpenSection(opening ? id : null);
+    setActiveReport(null);
+    if (opening) {
+      setTimeout(
+        () =>
+          sectionRefs.current[id]?.scrollIntoView({
+            behavior: "smooth",
+            block: "nearest",
+          }),
+        80,
+      );
     }
-    return p.toString();
-  }, [
-    companyId,
-    dateMode,
-    singleDate,
-    rangeFrom,
-    rangeTo,
-    finYearId,
-    fyGranularity,
-    fyMonth,
-    fyDay,
-    finYears,
-  ]);
-
-  const loadData = useCallback(() => {
-    setLoading(true);
-    setError(null);
-    const qs = buildParams();
-    fetchWithAuth(`/api/reports${qs ? `?${qs}` : ""}`)
-      .then((r) => {
-        if (!r.ok) throw new Error("Failed to load reports");
-        return r.json();
-      })
-      .then(setData)
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-  }, [buildParams]);
-
-  useEffect(() => {
-    loadData();
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const clearAll = () => {
-    setCompanyId("");
-    setSingleDate("");
-    setRangeFrom("");
-    setRangeTo("");
-    setFinYearId("");
-    setFyGranularity("year");
-    setFyMonth("");
-    setFyDay("");
   };
 
-  const activeChips: { label: string; clear: () => void }[] = [];
-  if (companyId) {
-    const c = companies.find((x) => String(x.id) === companyId);
-    if (c) activeChips.push({ label: c.name, clear: () => setCompanyId("") });
-  }
-  if (finYearId) {
-    const fy = finYears.find((f) => String(f.FId) === finYearId);
-    if (fy) {
-      let label = fy.FName;
-      if (fyGranularity === "month" && fyMonth) label += ` · Month ${fyMonth}`;
-      if (fyGranularity === "day" && fyDay) label += ` · ${fyDay}`;
-      activeChips.push({
-        label,
-        clear: () => {
-          setFinYearId("");
-          setFyGranularity("year");
-          setFyMonth("");
-          setFyDay("");
-        },
-      });
-    }
-  } else {
-    if (dateMode === "single" && singleDate)
-      activeChips.push({ label: singleDate, clear: () => setSingleDate("") });
-    if (dateMode === "range" && rangeFrom && rangeTo)
-      activeChips.push({
-        label: `${rangeFrom} → ${rangeTo}`,
-        clear: () => {
-          setRangeFrom("");
-          setRangeTo("");
-        },
-      });
-  }
-
-  const selectedFY = finYears.find((f) => String(f.FId) === finYearId);
-
-  const TOP_PARTIES_COLUMNS: ExportColumn[] = [
-    { header: "Party Name", accessor: "name" },
-    { header: "Transactions", accessor: "txns" },
-    { header: "Total (Rs.)", accessor: (r) => fmt(Number(r.total)) },
-  ];
-
-  // ── Summary section: key metrics ──────────────────────────────────────────
-  const SUMMARY_COLUMNS: ExportColumn[] = [
-    { header: "Metric", accessor: "metric" },
-    { header: "Value", accessor: "value" },
-  ];
-  const summaryRows: Record<string, unknown>[] = data
-    ? [
-        { metric: "Total Income", value: fmt(data.summary.totalIncome) },
-        { metric: "Total Expenses", value: fmt(data.summary.totalExpenses) },
-        { metric: "Net Profit", value: fmt(data.summary.netProfit) },
-        { metric: "Total Transactions", value: String(data.summary.transactionCount) },
-      ]
-    : [];
-
-  // ── Monthly breakdown: proper columns ─────────────────────────────────────
-  const MONTHLY_COLUMNS: ExportColumn[] = [
-    { header: "Month", accessor: "month" },
-    { header: "Income (Rs.)", accessor: "income" },
-    { header: "Expense (Rs.)", accessor: "expense" },
-    { header: "Net (Rs.)", accessor: "net" },
-  ];
-  const monthlyRows: Record<string, unknown>[] = data
-    ? data.charts.monthly.map((m) => ({
-        month: m.month,
-        income: fmt(m.income),
-        expense: fmt(m.expense),
-        net: fmt(m.income - m.expense),
-      }))
-    : [];
-
-  // ── Top parties: formatted totals ─────────────────────────────────────────
-  const topPartiesRows: Record<string, unknown>[] = data
-    ? data.topParties.map((p) => ({ name: p.name, txns: p.txns, total: p.total }))
-    : [];
+  const handleTileClick = (reportId: string) => {
+    setActiveReport((prev) => (prev === reportId ? null : reportId));
+    setTimeout(
+      () =>
+        panelRef.current?.scrollIntoView({
+          behavior: "smooth",
+          block: "start",
+        }),
+      60,
+    );
+  };
 
   return (
     <div className="flex flex-col min-h-0">
       <Breadcrumbs items={["Dashboard", "Reports"]} />
 
-      {/* Header */}
-      <div className="flex items-center justify-between mb-5">
-        <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-primary/10 border border-primary/20">
-            <BarChart3 size={18} className="text-primary" />
-          </div>
-          <div>
-            <h1 className="text-xl font-heading font-bold text-foreground leading-tight">
-              Reports
-            </h1>
-            <p className="text-[11px] text-muted-foreground">
-              {activeChips.length > 0 ? "Filtered view" : "All-time overview"}
-            </p>
-          </div>
+      {/* Page header */}
+      <div className="flex items-center gap-3 mb-6">
+        <div className="p-2 rounded-lg bg-primary/10 border border-primary/20">
+          <BarChart3 size={18} className="text-primary" />
         </div>
-        <div className="flex items-center gap-2">
-          {data && (
-            <>
-              <ExportMenu
-                data={summaryRows}
-                columns={SUMMARY_COLUMNS}
-                title="Financial Summary"
-                filename="reports-summary"
-                subtitle={`Income: ${fmt(data.summary.totalIncome)} · Expenses: ${fmt(data.summary.totalExpenses)} · Net: ${fmt(data.summary.netProfit)}`}
-                companyName={selectedCompanyDetail?.name ?? undefined}
-                logoBase64={selectedCompanyDetail?.logo ?? undefined}
-              />
-              <ExportMenu
-                data={monthlyRows}
-                columns={MONTHLY_COLUMNS}
-                title="Monthly Breakdown"
-                filename="reports-monthly"
-                disabled={monthlyRows.length === 0}
-                companyName={selectedCompanyDetail?.name ?? undefined}
-                logoBase64={selectedCompanyDetail?.logo ?? undefined}
-              />
-            </>
-          )}
-          <button
-            onClick={() => setSidebarOpen((s) => !s)}
-            className={`flex items-center gap-1.5 px-3 py-2 rounded-lg border text-sm font-medium transition-all
-              ${sidebarOpen ? "bg-primary text-primary-foreground border-primary" : "bg-card text-foreground border-border hover:border-primary/40"}`}
-          >
-            <SlidersHorizontal size={14} />
-            <span className="hidden sm:inline">Filters</span>
-            {activeChips.length > 0 && (
-              <span className="flex items-center justify-center w-4 h-4 rounded-full bg-white/20 text-[10px] font-bold">
-                {activeChips.length}
-              </span>
-            )}
-          </button>
+        <div>
+          <h1 className="text-xl font-heading font-bold text-foreground leading-tight">
+            Reports
+          </h1>
+          <p className="text-[11px] text-muted-foreground">
+            {openSection
+              ? `${MODULE_SECTIONS.find((s) => s.id === openSection)?.label} · ${MODULE_SECTIONS.find((s) => s.id === openSection)?.reportIds.length} reports available`
+              : "Select a module to explore reports"}
+          </p>
         </div>
       </div>
 
-      {/* Top filter bar */}
-      <div className="rounded-xl border border-border bg-card px-4 py-3 mb-4 space-y-3">
-        <div className="flex flex-wrap items-end gap-3">
-          {/* Company */}
-          <div className="flex-1 min-w-[200px] max-w-[260px]">
-            <label className="block text-[10px] font-heading font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
-              Company
-            </label>
-            <StyledSelect
-              value={companyId}
-              onChange={setCompanyId}
-              placeholder="All Companies"
-              icon={<Building2 size={13} />}
-              options={companies.map((c) => ({
-                value: String(c.id),
-                label: c.name,
-              }))}
-            />
-          </div>
+      {/* Module sections */}
+      <div className="space-y-3">
+        {MODULE_SECTIONS.map((section) => {
+          const isOpen = openSection === section.id;
+          const reports = section.reportIds
+            .map((id) => REPORT_MAP.get(id))
+            .filter(Boolean) as ReportDef[];
+          const activeReportDef = activeReport
+            ? REPORT_MAP.get(activeReport)
+            : undefined;
+          const reportHere =
+            !!activeReport && section.reportIds.includes(activeReport);
 
-          {/* Date mode tabs */}
-          <div className="flex-1 min-w-[200px] max-w-[240px]">
-            <label className="block text-[10px] font-heading font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
-              Date Filter
-            </label>
-            <div className="flex rounded-lg border border-border overflow-hidden bg-muted/30">
-              {(["single", "range"] as DateMode[]).map((m) => (
-                <button
-                  key={m}
-                  onClick={() => setDateMode(m)}
-                  className={`flex-1 flex items-center justify-center gap-1.5 py-2.5 text-xs font-medium transition-all
-                    ${dateMode === m && !finYearId ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
-                >
-                  {m === "single" ? (
-                    <Calendar size={12} />
-                  ) : (
-                    <CalendarRange size={12} />
-                  )}
-                  {m === "single" ? "Single Day" : "Date Range"}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Date inputs */}
-          <div className="flex items-end gap-2 flex-1 min-w-[180px]">
-            {dateMode === "single" ? (
-              <div className="flex-1">
-                <label className="block text-[10px] font-heading font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
-                  Date
-                </label>
-                <input
-                  type="date"
-                  value={singleDate}
-                  onChange={(e) => setSingleDate(e.target.value)}
-                  disabled={!!finYearId}
-                  className="w-full rounded-lg border border-border bg-card text-foreground text-sm px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-primary/40 transition-all disabled:opacity-40"
-                />
-              </div>
-            ) : (
-              <>
-                <div className="flex-1">
-                  <label className="block text-[10px] font-heading font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
-                    From
-                  </label>
-                  <input
-                    type="date"
-                    value={rangeFrom}
-                    onChange={(e) => setRangeFrom(e.target.value)}
-                    disabled={!!finYearId}
-                    className="w-full rounded-lg border border-border bg-card text-foreground text-sm px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-primary/40 transition-all disabled:opacity-40"
-                  />
-                </div>
-                <div className="flex-1">
-                  <label className="block text-[10px] font-heading font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
-                    To
-                  </label>
-                  <input
-                    type="date"
-                    value={rangeTo}
-                    onChange={(e) => setRangeTo(e.target.value)}
-                    disabled={!!finYearId}
-                    className="w-full rounded-lg border border-border bg-card text-foreground text-sm px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-primary/40 transition-all disabled:opacity-40"
-                  />
-                </div>
-              </>
-            )}
-          </div>
-
-          {/* Apply / Reset */}
-          <div className="flex items-end gap-2 pb-0.5">
-            <button
-              onClick={loadData}
-              disabled={loading}
-              className="flex items-center gap-1.5 px-4 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-60 transition-all"
+          return (
+            <div
+              key={section.id}
+              ref={(el) => {
+                sectionRefs.current[section.id] = el;
+              }}
             >
-              <Filter size={13} /> Apply
-            </button>
-            {activeChips.length > 0 && (
+              {/* ── Module toggle ── */}
               <button
-                onClick={() => {
-                  clearAll();
-                  setTimeout(loadData, 0);
-                }}
-                className="flex items-center gap-1.5 px-3 py-2.5 rounded-lg border border-border text-sm text-muted-foreground hover:text-foreground hover:border-foreground/30 transition-all"
+                onClick={() => handleSectionClick(section.id)}
+                className={`group relative w-full flex items-center gap-4 px-5 py-4 rounded-2xl border text-left transition-all duration-200
+                  ${isOpen ? "border-2 bg-card shadow-md" : "border-border bg-card hover:shadow-sm hover:-translate-y-0.5"}`}
+                style={
+                  isOpen
+                    ? {
+                        borderColor: section.accent,
+                        boxShadow: `0 4px 20px ${section.accent}12`,
+                      }
+                    : {}
+                }
               >
-                <RefreshCw size={13} /> Reset
-              </button>
-            )}
-          </div>
-        </div>
+                {/* Accent bar */}
+                <div
+                  className="absolute left-0 top-4 bottom-4 w-[3px] rounded-r-full"
+                  style={{
+                    background: isOpen ? section.accent : `${section.accent}40`,
+                  }}
+                />
 
-        {/* Active chips */}
-        {activeChips.length > 0 && (
-          <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-border/50">
-            <span className="text-[10px] text-muted-foreground font-heading uppercase tracking-wider">
-              Active:
-            </span>
-            {activeChips.map((c) => (
-              <FilterChip
-                key={c.label}
-                label={c.label}
-                onRemove={() => {
-                  c.clear();
-                  setTimeout(loadData, 0);
-                }}
-              />
-            ))}
-          </div>
-        )}
-      </div>
+                {/* Icon */}
+                <div
+                  className="shrink-0 p-2.5 rounded-xl ml-1"
+                  style={{ background: `${section.accent}12` }}
+                >
+                  <section.icon size={20} style={{ color: section.accent }} />
+                </div>
 
-      {/* Content + Sidebar */}
-      <div className="flex gap-4 items-start">
-        {/* Charts */}
-        <div className="flex-1 min-w-0 space-y-5">
-          {loading && (
-            <div className="flex items-center justify-center py-24 text-muted-foreground">
-              <div className="flex flex-col items-center gap-3">
-                <RefreshCw size={24} className="animate-spin opacity-50" />
-                <span className="text-sm">Loading reports…</span>
-              </div>
-            </div>
-          )}
-          {error && !loading && (
-            <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-6 text-center">
-              <p className="text-destructive text-sm">{error}</p>
-              <button
-                onClick={loadData}
-                className="mt-3 text-xs text-muted-foreground hover:text-foreground underline"
-              >
-                Try again
+                {/* Label + description */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-0.5">
+                    <span className="text-sm font-heading font-bold text-foreground">
+                      {section.label}
+                    </span>
+                    <span
+                      className="text-[10px] font-semibold px-2 py-0.5 rounded-full border"
+                      style={{
+                        background: `${section.accent}10`,
+                        color: section.accent,
+                        borderColor: `${section.accent}30`,
+                      }}
+                    >
+                      {reports.length} reports
+                    </span>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {section.description}
+                  </p>
+                </div>
+
+                {/* Icon previews */}
+                <div className="hidden md:flex items-center gap-1.5 shrink-0">
+                  {reports.slice(0, 5).map((r) => (
+                    <div
+                      key={r.id}
+                      className="p-1.5 rounded-lg opacity-40 group-hover:opacity-70 transition-opacity"
+                      style={{ background: `${r.color}18` }}
+                    >
+                      <r.icon size={11} style={{ color: r.color }} />
+                    </div>
+                  ))}
+                  {reports.length > 5 && (
+                    <span className="text-[10px] text-muted-foreground">
+                      +{reports.length - 5}
+                    </span>
+                  )}
+                </div>
+
+                <ChevronRight
+                  size={15}
+                  className={`shrink-0 text-muted-foreground transition-transform duration-200 ${isOpen ? "rotate-90" : ""}`}
+                />
               </button>
-            </div>
-          )}
-          {!loading && !error && data && (
-            <>
-              <SummaryCards summary={data.summary} />
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-                <IncomeVsExpenseChart data={data.charts.monthly} />
-                <ExpenseByCategoryChart data={data.charts.categories} />
-              </div>
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-                <CashFlowChart data={data.charts.cashFlow} />
-                <div className="relative">
-                  <TopPartiesTable parties={data.topParties} />
-                  <div className="absolute top-4 right-4">
-                    <ExportMenu
-                      data={topPartiesRows}
-                      columns={TOP_PARTIES_COLUMNS}
-                      title="Top Parties by Volume"
-                      filename="top-parties"
-                      disabled={topPartiesRows.length === 0}
-                      companyName={selectedCompanyDetail?.name ?? undefined}
-                      logoBase64={selectedCompanyDetail?.logo ?? undefined}
+
+              {/* ── Expanded section ── */}
+              {isOpen && (
+                <div className="mt-2 rounded-2xl border border-border/60 bg-background/40 overflow-hidden">
+                  {/* Filters */}
+                  <div className="p-3 border-b border-border/50">
+                    <SectionFilters
+                      companies={companies}
+                      finYears={finYears}
+                      filters={filters}
+                      onChange={patchFilters}
+                      activeFilters={activeFilters}
+                      onClearAll={clearFilters}
                     />
                   </div>
-                </div>
-              </div>
-            </>
-          )}
-        </div>
 
-        {/* Sidebar */}
-        {sidebarOpen && (
-          <aside className="w-60 shrink-0 rounded-xl border border-border bg-card overflow-hidden sticky top-4">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border bg-muted/20">
-              <div className="flex items-center gap-2 text-xs font-heading font-semibold text-foreground uppercase tracking-wider">
-                <Filter size={12} /> Financial Year
-              </div>
-              {finYearId && (
-                <button
-                  onClick={() => {
-                    setFinYearId("");
-                    setFyGranularity("year");
-                    setFyMonth("");
-                    setFyDay("");
-                    setTimeout(loadData, 0);
-                  }}
-                  className="text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <X size={13} />
-                </button>
-              )}
-            </div>
-
-            <div className="p-4 space-y-4">
-              <StyledSelect
-                value={finYearId}
-                onChange={(v) => {
-                  setFinYearId(v);
-                  setFyGranularity("year");
-                  setFyMonth("");
-                  setFyDay("");
-                }}
-                placeholder="Financial Year"
-                options={finYears.map((f) => ({
-                  value: String(f.FId),
-                  label: f.FName,
-                }))}
-              />
-
-              {finYearId && (
-                <>
-                  <div>
-                    <p className="text-[10px] font-heading font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-                      View By
-                    </p>
-                    <div className="flex flex-col gap-1">
-                      {[
-                        {
-                          g: "year" as FinYearGranularity,
-                          icon: <TrendingUp size={12} />,
-                          label: "Full Year",
-                        },
-                        {
-                          g: "month" as FinYearGranularity,
-                          icon: <Calendar size={12} />,
-                          label: "Specific Month",
-                        },
-                        {
-                          g: "day" as FinYearGranularity,
-                          icon: <CalendarRange size={12} />,
-                          label: "Specific Day",
-                        },
-                      ].map(({ g, icon, label }) => (
-                        <button
-                          key={g}
-                          onClick={() => {
-                            setFyGranularity(g);
-                            setFyMonth("");
-                            setFyDay("");
-                          }}
-                          className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-all text-left
-                            ${
-                              fyGranularity === g
-                                ? "bg-primary/15 text-primary border border-primary/25"
-                                : "text-muted-foreground hover:text-foreground hover:bg-muted/50 border border-transparent"
-                            }`}
-                        >
-                          {icon} {label}
-                        </button>
+                  {/* Tiles */}
+                  <div className="p-3 space-y-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
+                      {reports.map((report) => (
+                        <ReportTile
+                          key={report.id}
+                          report={report}
+                          active={activeReport === report.id}
+                          onClick={() => handleTileClick(report.id)}
+                        />
                       ))}
                     </div>
-                  </div>
 
-                  {fyGranularity === "month" && (
-                    <div>
-                      <p className="text-[10px] font-heading font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-                        Month
-                      </p>
-                      <div className="grid grid-cols-3 gap-1">
-                        {[
-                          "Apr",
-                          "May",
-                          "Jun",
-                          "Jul",
-                          "Aug",
-                          "Sep",
-                          "Oct",
-                          "Nov",
-                          "Dec",
-                          "Jan",
-                          "Feb",
-                          "Mar",
-                        ].map((m, i) => {
-                          const mo = String(i < 9 ? i + 4 : i - 8).padStart(
-                            2,
-                            "0",
-                          );
-                          return (
-                            <button
-                              key={m}
-                              onClick={() => setFyMonth(mo)}
-                              className={`py-1.5 rounded text-[11px] font-medium transition-all
-                                ${fyMonth === mo ? "bg-primary text-primary-foreground" : "bg-muted/40 text-muted-foreground hover:bg-muted hover:text-foreground"}`}
-                            >
-                              {m}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
-
-                  {fyGranularity === "day" && selectedFY && (
-                    <div>
-                      <p className="text-[10px] font-heading font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-                        Day
-                      </p>
-                      <input
-                        type="date"
-                        value={fyDay}
-                        min={selectedFY.FStartDate?.slice(0, 10)}
-                        max={selectedFY.FEndDate?.slice(0, 10)}
-                        onChange={(e) => setFyDay(e.target.value)}
-                        className="w-full rounded-lg border border-border bg-background text-foreground text-sm px-3 py-2 focus:outline-none focus:ring-2 focus:ring-primary/40 transition-all"
-                      />
-                    </div>
-                  )}
-
-                  {selectedFY && (
-                    <div className="rounded-lg bg-muted/30 border border-border/60 p-3 space-y-1">
-                      <p className="text-[10px] text-muted-foreground font-heading uppercase tracking-wider">
-                        Period
-                      </p>
-                      <p className="text-xs text-foreground font-medium">
-                        {selectedFY.FStartDate?.slice(0, 10)} →{" "}
-                        {selectedFY.FEndDate?.slice(0, 10)}
-                      </p>
-                      {selectedFY.FStatus && (
-                        <span
-                          className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-medium ${selectedFY.FStatus === "Active" ? "bg-green-500/15 text-green-600 dark:text-green-400" : "bg-muted text-muted-foreground"}`}
-                        >
-                          {selectedFY.FStatus}
-                        </span>
+                    {/* Report table */}
+                    <div ref={reportHere ? panelRef : undefined}>
+                      {reportHere && activeReportDef && (
+                        <ReportTable
+                          key={activeReportDef.id}
+                          report={activeReportDef}
+                          filters={filters}
+                          onClose={() => setActiveReport(null)}
+                        />
                       )}
                     </div>
-                  )}
-
-                  <button
-                    onClick={loadData}
-                    disabled={
-                      loading ||
-                      (fyGranularity === "month" && !fyMonth) ||
-                      (fyGranularity === "day" && !fyDay)
-                    }
-                    className="w-full flex items-center justify-center gap-2 py-2.5 rounded-lg bg-primary text-primary-foreground text-sm font-medium hover:bg-primary/90 disabled:opacity-50 transition-all"
-                  >
-                    <Filter size={13} /> Apply Filter
-                  </button>
-                </>
-              )}
-
-              {!finYearId && (
-                <p className="text-[11px] text-muted-foreground text-center py-2">
-                  Select a financial year to filter by year, month, or day.
-                </p>
+                  </div>
+                </div>
               )}
             </div>
-          </aside>
-        )}
+          );
+        })}
       </div>
     </div>
   );

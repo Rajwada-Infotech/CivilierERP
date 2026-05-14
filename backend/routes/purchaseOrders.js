@@ -205,31 +205,24 @@ router.get(
         ? parseInt(req.query.sourceWOId, 10)
         : null;
 
-      const countResult = await pool
-        .request()
-        .input("sourceWOId", sql.Int, sourceWOId)
-        .query(
-          sourceWOId
-            ? "SELECT COUNT(*) AS total FROM dbo.PurchaseOrders WHERE SourceWOId = @sourceWOId"
-            : "SELECT COUNT(*) AS total FROM dbo.PurchaseOrders",
-        );
-
-      const total = parseInt(countResult.recordset[0].total);
-
       const result = await pool
         .request()
         .input("offset", sql.Int, offset)
         .input("limit", sql.Int, limit)
         .input("sourceWOId", sql.Int, sourceWOId).query(`
-        ${PO_SELECT}
-        ${sourceWOId ? "WHERE po.SourceWOId = @sourceWOId" : ""}
-        ORDER BY po.PurchaseOrderID DESC
+        SELECT *, COUNT(*) OVER() AS _total FROM (
+          ${PO_SELECT}
+          ${sourceWOId ? "WHERE po.SourceWOId = @sourceWOId" : ""}
+        ) _po
+        ORDER BY _po.PurchaseOrderID DESC
         OFFSET @offset ROWS
         FETCH NEXT @limit ROWS ONLY
       `);
 
+      const total = result.recordset[0]?._total ?? 0;
+
       res.json({
-        data: result.recordset.map(mapRow),
+        data: result.recordset.map(r => { const { _total, ...rest } = r; return mapRow(rest); }),
         page,
         limit,
         total,

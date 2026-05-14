@@ -235,16 +235,6 @@ router.get(
       const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
       const offset = (page - 1) * limit;
 
-      const countResult = await pool.request().query(`
-      SELECT COUNT(DISTINCT h.Id) AS total FROM dbo.WorkOrderHeader h
-      LEFT JOIN dbo.enterprise        ec  ON ec.id       = h.CompanyId
-      LEFT JOIN dbo.enterprise        ep  ON ep.id       = h.ProjectId
-      LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = h.ContractorId
-      LEFT JOIN dbo.AccountHeadMaster ams ON ams.LHeadId = h.SupplierId
-      LEFT JOIN dbo.WorkOrderActivities a  ON a.WorkOrderHeaderId = h.Id
-    `);
-      const total = parseInt(countResult.recordset[0].total);
-
       const result = await pool
         .request()
         .input("offset", sql.Int, offset)
@@ -258,7 +248,8 @@ router.get(
           h.Remarks, h.TermsAndConditions, h.CreatedBy, h.UpdatedBy,
           h.DocTypeId, h.DocNo, h.GST,
           td.Prefix AS DocTypePrefix, td.Description AS DocTypeDescription,
-          COUNT(DISTINCT a.Id) AS ActivityCount
+          COUNT(DISTINCT a.Id) AS ActivityCount,
+          COUNT(*) OVER() AS _total
         FROM dbo.WorkOrderHeader h
         LEFT JOIN dbo.enterprise        ec  ON ec.id       = h.CompanyId
         LEFT JOIN dbo.enterprise        ep  ON ep.id       = h.ProjectId
@@ -275,10 +266,11 @@ router.get(
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
       `);
 
-      const data = result.recordset.map((r) => ({
-        ...r,
-        GST: serializeGST(r.GST),
-      }));
+      const total = result.recordset[0]?._total ?? 0;
+      const data = result.recordset.map((r) => {
+        const { _total, ...rest } = r;
+        return { ...rest, GST: serializeGST(rest.GST) };
+      });
       res.json({
         data,
         page,

@@ -11,7 +11,18 @@ const {
 } = require("../redis");
 
 const { checkPermission } = require("../middleware/permissions");
-const { cache } = require("../middleware/cache"); // ← FIX 1: import cache
+const { cache } = require("../middleware/cache");
+
+// Socket.io — lazy-loaded so the route module works even before initSocket()
+// is called (e.g. during unit tests).  getIo() will throw only if it's
+// actually called without initSocket() having run first.
+let _getIo = null;
+function getIo() {
+  if (!_getIo) {
+    _getIo = require("../socket").getIo;
+  }
+  return _getIo();
+}
 
 const ALLOWED_ACTION_TYPES = new Set([
   "read",
@@ -40,8 +51,6 @@ function normalizeNullableInt(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-let activeStreams = [];
-
 function mapActivityRow(row) {
   return {
     id: String(row.id ?? row.Id ?? ""),
@@ -68,9 +77,6 @@ function mapActivityRow(row) {
 router.get(
   "/",
   checkPermission("UserActivity", "List", "CanView"),
-  // FIX 1: Add cache middleware — 60-second TTL, scoped per user.
-  // Short TTL keeps data fresh; cache busts automatically when a new
-  // activity is posted (bump cache version in POST handler below).
   cache("user-activity", 60),
   async (req, res) => {
     let whereClause = "1 = 1";
@@ -80,9 +86,6 @@ router.get(
 
       const page = Math.max(1, normalizePositiveInt(req.query.page, 1));
 
-      // FIX 2: Run all Redis pre-flight calls in parallel instead of serially.
-      // Original code awaited each one sequentially (~3 round trips).
-      // Promise.all collapses them into a single wait (~1 round trip).
       const [engagementScore, metrics, predictedRPM] = await Promise.all([
         req.user?.userId
           ? redisZScore("engagement:score", req.user.userId).then((s) =>
@@ -196,12 +199,6 @@ router.get(
             ? "EventType"
             : "CreatedAt";
 
-      // FIX 3: Single query using COUNT(*) OVER() as a window function.
-      // The original code ran two separate round-trips to SQL Server:
-      //   • SELECT COUNT(*) … (full index scan)
-      //   • SELECT … OFFSET … FETCH NEXT … (second full scan + key lookup)
-      // With COUNT(*) OVER() the engine scans the filtered set once and
-      // returns total alongside each data row — half the DB round-trips.
       const dataRequest = pool.request();
       for (const [name, type, value] of queryInputs) {
         dataRequest.input(name, type, value);
@@ -225,7 +222,6 @@ router.get(
         OFFSET ${offset} ROWS FETCH NEXT ${limit} ROWS ONLY
       `);
 
-      // totalCount is on every row; read from first row (0 if result empty)
       const total = dataResult.recordset[0]?.totalCount ?? 0;
 
       res.json({
@@ -247,111 +243,6 @@ router.get(
             : "Internal error",
       });
     }
-  },
-);
-
-// SSE stream - IMPROVED FOR VERCEL
-router.get(
-  "/stream",
-  checkPermission("UserActivity", "List", "CanView"),
-  async (req, res) => {
-    let pingInterval;
-    let dataInterval;
-
-    const safeWrite = (payload) => {
-      if (res.writableEnded || res.destroyed) return;
-      try {
-        res.write(payload);
-      } catch (err) {
-        logger.error({ err, requestId: req.id }, "SSE write failed");
-        cleanup();
-      }
-    };
-
-    res.setHeader("Content-Type", "text/event-stream");
-    res.setHeader("Cache-Control", "no-cache, no-transform");
-    res.setHeader("Connection", "keep-alive");
-    res.setHeader("X-Accel-Buffering", "no");
-
-    if (res.flushHeaders) {
-      res.flushHeaders();
-    }
-
-    res.setTimeout(0);
-    safeWrite(":ok\n\n");
-    activeStreams.push(res);
-
-    const sendLatest = async () => {
-      if (res.writableEnded || res.destroyed) return;
-
-      try {
-        const pool = getPool();
-        const result = await pool
-          .request()
-          .query(
-            "SELECT TOP 25 * FROM dbo.UserActivityLog ORDER BY CreatedAt DESC",
-          );
-
-        if (!res.writableEnded && !res.destroyed) {
-          safeWrite(
-            `data: ${JSON.stringify(result.recordset.map(mapActivityRow))}\n\n`,
-          );
-        }
-      } catch (err) {
-        logger.error({ err, requestId: req.id }, "SSE data error");
-      }
-    };
-
-    const sendPing = () => {
-      if (res.writableEnded || res.destroyed) return;
-      try {
-        res.write(":ping\n\n");
-      } catch (err) {
-        logger.error({ err, requestId: req.id }, "SSE ping failed");
-        cleanup();
-      }
-    };
-
-    try {
-      await sendLatest();
-    } catch (err) {
-      if (process.env.NODE_ENV === "development") {
-        console.error("SSE initial send error:", err.message);
-      }
-    }
-
-    pingInterval = setInterval(sendPing, 15000);
-    dataInterval = setInterval(sendLatest, 5000);
-
-    const cleanup = () => {
-      activeStreams = activeStreams.filter((stream) => stream !== res);
-      if (pingInterval) clearInterval(pingInterval);
-      if (dataInterval) clearInterval(dataInterval);
-      pingInterval = null;
-      dataInterval = null;
-    };
-
-    req.on("close", () => {
-      cleanup();
-    });
-
-    req.on("error", (err) => {
-      if (err.code !== "ECONNRESET") {
-        if (process.env.NODE_ENV === "development") {
-          console.error("SSE request error:", err.message);
-        }
-      }
-      cleanup();
-    });
-
-    res.on("error", (err) => {
-      if (err.code !== "ECONNRESET") {
-        if (process.env.NODE_ENV === "development") {
-          console.error("SSE response error:", err.message);
-        }
-      }
-      cleanup();
-    });
   },
 );
 
@@ -380,7 +271,7 @@ router.get(
   },
 );
 
-// POST activity
+// POST activity — logs to DB then broadcasts to activity-watchers room via socket.io
 router.post("/", async (req, res) => {
   const { userId, userName, userEmail, userRole, event, ...rest } =
     req.body || {};
@@ -429,6 +320,23 @@ router.post("/", async (req, res) => {
   try {
     const pool = getPool();
 
+    // Resolve the real client IP: trust X-Forwarded-For (set by proxies/load
+    // balancers) first, fall back to the socket remote address, then to the
+    // client-supplied value, and finally "unknown".
+    const serverIp =
+      (req.headers["x-forwarded-for"] || "").split(",")[0].trim() ||
+      req.socket?.remoteAddress ||
+      req.ip ||
+      null;
+    const resolvedIp =
+      serverIp || normalizeNullableString(rest.ipAddress, 50) || "unknown";
+
+    // Prefer the real User-Agent header over whatever the client sent in the
+    // body, since the body value is just a JS-parsed string anyway.
+    const serverUA = req.headers["user-agent"] || null;
+    const resolvedDeviceInfo =
+      serverUA || normalizeNullableString(rest.deviceInfo, 255) || "unknown";
+
     const insertResult = await pool
       .request()
       .input("userId", sql.NVarChar(50), resolvedUserId)
@@ -436,16 +344,8 @@ router.post("/", async (req, res) => {
       .input("userEmail", sql.NVarChar(100), resolvedUserEmail)
       .input("userRole", sql.NVarChar(50), resolvedUserRole)
       .input("event", sql.NVarChar(20), normalizedEvent)
-      .input(
-        "ipAddress",
-        sql.NVarChar(50),
-        normalizeNullableString(rest.ipAddress, 50) || "unknown",
-      )
-      .input(
-        "deviceInfo",
-        sql.NVarChar(255),
-        normalizeNullableString(rest.deviceInfo, 255) || "unknown",
-      )
+      .input("ipAddress", sql.NVarChar(50), resolvedIp)
+      .input("deviceInfo", sql.NVarChar(255), resolvedDeviceInfo.slice(0, 255))
       .input(
         "deviceFingerprint",
         sql.NVarChar(100),
@@ -502,11 +402,41 @@ router.post("/", async (req, res) => {
 
     const insertedId = insertResult.recordset?.[0]?.Id ?? null;
 
-    // FIX 1 (cont.): Bump cache version so the next GET sees fresh data.
-    // This is fire-and-forget — we don't await it so the POST response
-    // is not delayed by the Redis round-trip.
+    // Bump cache version (fire-and-forget)
     const { bumpCacheVersion } = require("../redis");
     bumpCacheVersion("user-activity").catch(() => {});
+
+    // ── Socket.io broadcast ───────────────────────────────────────────────
+    // Emit the new activity row to all admin/super_admin sockets so the
+    // Activity Browser updates in real-time without polling.
+    try {
+      const newEntry = {
+        id: String(insertedId ?? ""),
+        userId: resolvedUserId,
+        userName: resolvedUserName,
+        userEmail: resolvedUserEmail,
+        userRole: resolvedUserRole,
+        event: normalizedEvent,
+        timestamp: new Date().toISOString(),
+        ipAddress: resolvedIp,
+        deviceInfo: resolvedDeviceInfo.slice(0, 255),
+        deviceFingerprint: normalizeNullableString(rest.deviceFingerprint, 100),
+        actionType: normalizedActionType,
+        resource: normalizeNullableString(rest.resource, 200),
+        details: normalizeNullableString(rest.details),
+        sessionId: normalizeNullableString(rest.sessionId, 50),
+        sessionDuration: normalizeNullableInt(rest.sessionDuration),
+        requestMethod: normalizeNullableString(rest.requestMethod, 10),
+        requestUrl: normalizeNullableString(rest.requestUrl, 500),
+      };
+
+      getIo().to("activity-watchers").emit("activity:new", newEntry);
+    } catch (socketErr) {
+      // Never let a socket error fail the HTTP response
+      if (process.env.NODE_ENV === "development") {
+        console.warn("Socket emit skipped:", socketErr.message);
+      }
+    }
 
     res.json({ message: "Activity logged", id: insertedId });
   } catch (err) {

@@ -1,4 +1,10 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -357,7 +363,7 @@ const LineEditor: React.FC<LineEditorProps> = ({
     field: string,
     value: string,
     placeholder = "",
-    type = "text"
+    type = "text",
   ) => (
     <td className="p-2">
       {readOnly ? (
@@ -536,13 +542,13 @@ const defaultForm = (): FormState => ({
 
 const recordToForm = (r: BoqRecord): FormState => ({
   BoqNo: r.BoqNo ?? "",
-  BoqDate:     r.BoqDate?.slice(0, 10) ?? "",
-  CompanyId:   String(r.CompanyId ?? ""),
-  ProjectId:   String(r.ProjectId ?? ""),
+  BoqDate: r.BoqDate?.slice(0, 10) ?? "",
+  CompanyId: String(r.CompanyId ?? ""),
+  ProjectId: String(r.ProjectId ?? ""),
   Description: r.Description ?? "",
-  Remarks:     r.Remarks     ?? "",
-  DocTypeId:   String(r.DocTypeId ?? ""),
-  Status:      r.Status      ?? "Draft",
+  Remarks: r.Remarks ?? "",
+  DocTypeId: String(r.DocTypeId ?? ""),
+  Status: r.Status ?? "Draft",
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -656,37 +662,49 @@ const FormModal: React.FC<FormModalProps> = ({
   const hasErr = (k: string) => !!errors[k];
 
   return (
-    <div
-      className="fixed inset-0 z-[200] flex items-start justify-center bg-black/50 p-4 sm:p-8 overflow-y-auto"
-    >
+    <div className="fixed inset-0 z-[200] flex items-start justify-center bg-black/50 p-4 sm:p-8 overflow-y-auto">
       <Card className="w-full max-w-5xl my-auto animate-in fade-in slide-in-from-bottom-4 shadow-2xl">
         <CardHeader className="flex flex-row items-center justify-between border-b border-border pb-4 bg-muted/30">
           <div className="space-y-1">
             <CardTitle className="text-xl flex items-center gap-2">
-              {isEdit ? <Edit3 size={20} className="text-primary" /> : <FileText size={20} className="text-primary" />}
-              {isEdit ? `Edit BOQ — ${record!.BoqNo}` : "New Bill of Quantities"}
+              {isEdit ? (
+                <Edit3 size={20} className="text-primary" />
+              ) : (
+                <FileText size={20} className="text-primary" />
+              )}
+              {isEdit
+                ? `Edit BOQ — ${record!.BoqNo}`
+                : "New Bill of Quantities"}
             </CardTitle>
             <CardDescription>
-              {isEdit ? "Modify header, items and activities. Status must be Draft to edit." : "Fill in the header then add items and/or activities."}
+              {isEdit
+                ? "Modify header, items and activities. Status must be Draft to edit."
+                : "Fill in the header then add items and/or activities."}
             </CardDescription>
           </div>
-          <Button variant="ghost" size="icon" onClick={onClose}><X size={20} /></Button>
+          <Button variant="ghost" size="icon" onClick={onClose}>
+            <X size={20} />
+          </Button>
         </CardHeader>
 
         <CardContent className="p-6 overflow-y-auto max-h-[calc(100vh-200px)] space-y-6">
           <div className="space-y-4">
             <h3 className="text-xs uppercase tracking-widest font-heading font-semibold text-muted-foreground flex items-center gap-1.5 border-b pb-2">
-              <span className="w-5 h-5 rounded bg-primary/10 text-primary flex items-center justify-center">1</span>
+              <span className="w-5 h-5 rounded bg-primary/10 text-primary flex items-center justify-center">
+                1
+              </span>
               BOQ Header
             </h3>
-            
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
               <Field label="Document Type" required>
                 <Select
                   value={form.DocTypeId}
                   onValueChange={handleDocTypeChange}
                 >
-                  <SelectTrigger className={`h-10 ${hasErr("DocTypeId") ? "border-destructive" : ""}`}>
+                  <SelectTrigger
+                    className={`h-10 ${hasErr("DocTypeId") ? "border-destructive" : ""}`}
+                  >
                     <SelectValue placeholder="— Select Document Type —" />
                   </SelectTrigger>
                   <SelectContent className="z-[300]">
@@ -698,7 +716,9 @@ const FormModal: React.FC<FormModalProps> = ({
                   </SelectContent>
                 </Select>
                 {hasErr("DocTypeId") && (
-                  <span className="text-xs text-destructive mt-1">{errors.DocTypeId}</span>
+                  <span className="text-xs text-destructive mt-1">
+                    {errors.DocTypeId}
+                  </span>
                 )}
               </Field>
 
@@ -719,7 +739,9 @@ const FormModal: React.FC<FormModalProps> = ({
                   className={`h-10 ${hasErr("BoqDate") ? "border-destructive" : ""}`}
                 />
                 {hasErr("BoqDate") && (
-                  <span className="text-xs text-destructive mt-1">{errors.BoqDate}</span>
+                  <span className="text-xs text-destructive mt-1">
+                    {errors.BoqDate}
+                  </span>
                 )}
               </Field>
             </div>
@@ -730,7 +752,9 @@ const FormModal: React.FC<FormModalProps> = ({
                   value={form.CompanyId}
                   onValueChange={(val) => set("CompanyId", val)}
                 >
-                  <SelectTrigger className={`h-10 ${hasErr("CompanyId") ? "border-destructive" : ""}`}>
+                  <SelectTrigger
+                    className={`h-10 ${hasErr("CompanyId") ? "border-destructive" : ""}`}
+                  >
                     <SelectValue placeholder="— Select Company —" />
                   </SelectTrigger>
                   <SelectContent className="z-[300]">
@@ -742,7 +766,9 @@ const FormModal: React.FC<FormModalProps> = ({
                   </SelectContent>
                 </Select>
                 {hasErr("CompanyId") && (
-                  <span className="text-xs text-destructive mt-1">{errors.CompanyId}</span>
+                  <span className="text-xs text-destructive mt-1">
+                    {errors.CompanyId}
+                  </span>
                 )}
               </Field>
 
@@ -751,7 +777,9 @@ const FormModal: React.FC<FormModalProps> = ({
                   value={form.ProjectId}
                   onValueChange={(val) => set("ProjectId", val)}
                 >
-                  <SelectTrigger className={`h-10 ${hasErr("ProjectId") ? "border-destructive" : ""}`}>
+                  <SelectTrigger
+                    className={`h-10 ${hasErr("ProjectId") ? "border-destructive" : ""}`}
+                  >
                     <SelectValue placeholder="— Select Project —" />
                   </SelectTrigger>
                   <SelectContent className="z-[300]">
@@ -763,7 +791,9 @@ const FormModal: React.FC<FormModalProps> = ({
                   </SelectContent>
                 </Select>
                 {hasErr("ProjectId") && (
-                  <span className="text-xs text-destructive mt-1">{errors.ProjectId}</span>
+                  <span className="text-xs text-destructive mt-1">
+                    {errors.ProjectId}
+                  </span>
                 )}
               </Field>
             </div>
@@ -792,7 +822,9 @@ const FormModal: React.FC<FormModalProps> = ({
 
           <div className="space-y-4">
             <h3 className="text-xs uppercase tracking-widest font-heading font-semibold text-muted-foreground flex items-center gap-1.5 border-b pb-2">
-              <span className="w-5 h-5 rounded bg-primary/10 text-primary flex items-center justify-center">2</span>
+              <span className="w-5 h-5 rounded bg-primary/10 text-primary flex items-center justify-center">
+                2
+              </span>
               Items & Activities
             </h3>
 
@@ -807,15 +839,27 @@ const FormModal: React.FC<FormModalProps> = ({
                       : "text-muted-foreground hover:text-foreground"
                   }`}
                 >
-                  {t === "items" ? `📦 Items (${items.length})` : `⚙ Activities (${activities.length})`}
+                  {t === "items"
+                    ? `📦 Items (${items.length})`
+                    : `⚙ Activities (${activities.length})`}
                 </button>
               ))}
             </div>
 
             {lineTab === "items" ? (
-              <LineEditor mode="item" rows={items} uoms={uoms} onChange={setItems as any} />
+              <LineEditor
+                mode="item"
+                rows={items}
+                uoms={uoms}
+                onChange={setItems as any}
+              />
             ) : (
-              <LineEditor mode="activity" rows={activities} uoms={uoms} onChange={setActivities as any} />
+              <LineEditor
+                mode="activity"
+                rows={activities}
+                uoms={uoms}
+                onChange={setActivities as any}
+              />
             )}
           </div>
 
@@ -825,7 +869,8 @@ const FormModal: React.FC<FormModalProps> = ({
                 Grand Total (excl. tax)
               </div>
               <div className="text-xs opacity-70 mt-1">
-                Items: {fmt(itemsTotal)} &nbsp;+&nbsp; Activities: {fmt(activitiesTotal)}
+                Items: {fmt(itemsTotal)} &nbsp;+&nbsp; Activities:{" "}
+                {fmt(activitiesTotal)}
               </div>
             </div>
             <div className="text-2xl font-bold font-mono">
@@ -835,19 +880,15 @@ const FormModal: React.FC<FormModalProps> = ({
         </CardContent>
 
         <div className="p-4 border-t border-border flex justify-end gap-3 bg-muted/10 rounded-b-xl">
-          <Button
-            variant="outline"
-            onClick={onClose}
-            disabled={saving}
-          >
+          <Button variant="outline" onClick={onClose} disabled={saving}>
             Cancel
           </Button>
-          <Button
-            onClick={handleSave}
-            disabled={saving}
-            className="gap-2"
-          >
-            {saving ? <RefreshCw className="animate-spin" size={16} /> : <Save size={16} />}
+          <Button onClick={handleSave} disabled={saving} className="gap-2">
+            {saving ? (
+              <RefreshCw className="animate-spin" size={16} />
+            ) : (
+              <Save size={16} />
+            )}
             {isEdit ? "Update BOQ" : "Create BOQ"}
           </Button>
         </div>
@@ -925,34 +966,63 @@ const DetailModal: React.FC<DetailModalProps> = ({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-[200] flex items-start justify-center bg-black/50 p-4 sm:p-8 overflow-y-auto"
-    >
+    <div className="fixed inset-0 z-[200] flex items-start justify-center bg-black/50 p-4 sm:p-8 overflow-y-auto">
       <Card className="w-full max-w-5xl my-auto animate-in fade-in slide-in-from-bottom-4 shadow-2xl">
         <CardHeader className="flex flex-row items-center justify-between border-b border-border pb-4 bg-muted/30">
           <div className="flex items-center gap-4">
-            <CardTitle className="text-xl font-mono text-primary">{record.BoqNo || record.DocNo}</CardTitle>
+            <CardTitle className="text-xl font-mono text-primary">
+              {record.BoqNo || record.DocNo}
+            </CardTitle>
             <StatusBadge status={record.Status} />
           </div>
-          <Button variant="ghost" size="icon" onClick={onClose}><X size={20} /></Button>
+          <Button variant="ghost" size="icon" onClick={onClose}>
+            <X size={20} />
+          </Button>
         </CardHeader>
 
         <CardContent className="p-6 overflow-y-auto max-h-[calc(100vh-200px)] space-y-6">
           {record.Status !== "Draft" && (
-            <div className={`p-4 rounded-xl border flex items-center gap-3 ${
-              record.Status === "Pending" ? "bg-amber-500/10 border-amber-500/20 text-amber-700" :
-              record.Status === "Approved" ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700" :
-              "bg-red-500/10 border-red-500/20 text-red-700"
-            }`}>
+            <div
+              className={`p-4 rounded-xl border flex items-center gap-3 ${
+                record.Status === "Pending"
+                  ? "bg-amber-500/10 border-amber-500/20 text-amber-700"
+                  : record.Status === "Approved"
+                    ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700"
+                    : "bg-red-500/10 border-red-500/20 text-red-700"
+              }`}
+            >
               <span className="font-semibold text-sm flex-1">
-                {record.Status === "Pending" && "⏳ Awaiting approval — you can approve or reject below."}
-                {record.Status === "Approved" && `✓ Approved${record.ApprovedBy ? ` by ${record.ApprovedBy}` : ""}.`}
-                {record.Status === "Rejected" && `✕ Rejected${record.RejectedBy ? ` by ${record.RejectedBy}` : ""}${record.RejectionNote ? ` — ${record.RejectionNote}` : ""}.`}
+                {record.Status === "Pending" &&
+                  "⏳ Awaiting approval — you can approve or reject below."}
+                {record.Status === "Approved" &&
+                  `✓ Approved${record.ApprovedBy ? ` by ${record.ApprovedBy}` : ""}.`}
+                {record.Status === "Rejected" &&
+                  `✕ Rejected${record.RejectedBy ? ` by ${record.RejectedBy}` : ""}${record.RejectionNote ? ` — ${record.RejectionNote}` : ""}.`}
               </span>
               {record.Status === "Pending" && (
                 <div className="flex items-center gap-2">
-                  <Button size="sm" variant="outline" className="bg-emerald-50 text-emerald-600 hover:bg-emerald-100 hover:text-emerald-700 border-emerald-200" disabled={acting} onClick={() => doTransition("approve")}><CheckCircle2 size={14} className="mr-1.5" /> Approve</Button>
-                  <Button size="sm" variant="outline" className="bg-red-50 text-red-600 hover:bg-red-100 hover:text-red-700 border-red-200" disabled={acting} onClick={() => { const note = window.prompt("Rejection note (optional):") ?? ""; doTransition("reject", note); }}><XCircle size={14} className="mr-1.5" /> Reject</Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="bg-emerald-50 text-emerald-600 hover:bg-emerald-100 hover:text-emerald-700 border-emerald-200"
+                    disabled={acting}
+                    onClick={() => doTransition("approve")}
+                  >
+                    <CheckCircle2 size={14} className="mr-1.5" /> Approve
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="bg-red-50 text-red-600 hover:bg-red-100 hover:text-red-700 border-red-200"
+                    disabled={acting}
+                    onClick={() => {
+                      const note =
+                        window.prompt("Rejection note (optional):") ?? "";
+                      doTransition("reject", note);
+                    }}
+                  >
+                    <XCircle size={14} className="mr-1.5" /> Reject
+                  </Button>
                 </div>
               )}
             </div>
@@ -962,9 +1032,19 @@ const DetailModal: React.FC<DetailModalProps> = ({
             <DetailRow label="Company" value={record.CompanyName} />
             <DetailRow label="Project" value={record.ProjectName} />
             <DetailRow label="BOQ Date" value={fmtDate(record.BoqDate)} />
-            <DetailRow label="Document No" value={<span className="font-mono">{record.DocNo}</span>} />
+            <DetailRow
+              label="Document No"
+              value={<span className="font-mono">{record.DocNo}</span>}
+            />
             <DetailRow label="Created By" value={record.CreatedBy} />
-            <DetailRow label="Total Amount" value={<span className="font-mono text-primary font-bold">{fmt(record.TotalAmount)}</span>} />
+            <DetailRow
+              label="Total Amount"
+              value={
+                <span className="font-mono text-primary font-bold">
+                  {fmt(record.TotalAmount)}
+                </span>
+              }
+            />
           </div>
 
           {record.Description && (
@@ -1020,14 +1100,12 @@ const DetailModal: React.FC<DetailModalProps> = ({
             <Trash2 size={16} className="mr-1.5" /> Delete
           </Button>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={onClose}>Close</Button>
+            <Button variant="outline" onClick={onClose}>
+              Close
+            </Button>
             {record.Status === "Draft" && (
               <>
-                <Button
-                  variant="secondary"
-                  disabled={acting}
-                  onClick={onEdit}
-                >
+                <Button variant="secondary" disabled={acting} onClick={onEdit}>
                   <Edit3 size={16} className="mr-1.5" /> Edit
                 </Button>
                 <Button
@@ -1064,21 +1142,27 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
     accessorKey: "BoqDate",
     header: "Date",
     cell: ({ getValue }) => (
-      <span className="text-sm text-muted-foreground">{fmtDate(getValue() as string)}</span>
+      <span className="text-sm text-muted-foreground">
+        {fmtDate(getValue() as string)}
+      </span>
     ),
   },
   {
     accessorKey: "CompanyName",
     header: "Company",
     cell: ({ getValue }) => (
-      <span className="text-sm text-foreground">{String(getValue() || "—")}</span>
+      <span className="text-sm text-foreground">
+        {String(getValue() || "—")}
+      </span>
     ),
   },
   {
     accessorKey: "ProjectName",
     header: "Project",
     cell: ({ getValue }) => (
-      <span className="text-sm text-muted-foreground">{String(getValue() || "—")}</span>
+      <span className="text-sm text-muted-foreground">
+        {String(getValue() || "—")}
+      </span>
     ),
   },
   {
@@ -1091,7 +1175,9 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
   {
     accessorKey: "Status",
     header: "Status",
-    cell: ({ getValue }) => <StatusBadge status={(getValue() as string) || "Draft"} />,
+    cell: ({ getValue }) => (
+      <StatusBadge status={(getValue() as string) || "Draft"} />
+    ),
   },
 ];
 
@@ -1115,14 +1201,20 @@ export default function BOQ() {
   const activeFinYear =
     finYears.find((fy) => fy.status === "Active")?.year || undefined;
 
-  const { data: listData, isLoading: loading, refetch: loadList } = useQuery({
+  const {
+    data: listData,
+    isLoading: loading,
+    refetch: loadList,
+  } = useQuery({
     queryKey: ["boqs", page, search, filterStatus],
     queryFn: () => {
       const params = new URLSearchParams({
         page: String(page),
         limit: String(PAGE_LIMIT),
         ...(search ? { search } : {}),
-        ...(filterStatus && filterStatus !== "All" ? { status: filterStatus } : {}),
+        ...(filterStatus && filterStatus !== "All"
+          ? { status: filterStatus }
+          : {}),
       });
       return apiFetch(`/boq?${params}`);
     },
@@ -1132,9 +1224,9 @@ export default function BOQ() {
   const totalPages = listData?.totalPages ?? 1;
   const total = listData?.total ?? 0;
 
-  const totalValue    = rows.reduce((s, r) => s + (r.TotalAmount ?? 0), 0);
+  const totalValue = rows.reduce((s, r) => s + (r.TotalAmount ?? 0), 0);
   const countApproved = rows.filter((r) => r.Status === "Approved").length;
-  const countPending  = rows.filter((r) => r.Status === "Pending").length;
+  const countPending = rows.filter((r) => r.Status === "Pending").length;
 
   const loadMasterData = useCallback(async () => {
     try {
@@ -1168,21 +1260,21 @@ export default function BOQ() {
       const filteredDocData = Array.isArray(dts?.data)
         ? dts.data
         : Array.isArray(dts)
-        ? dts
-        : [];
+          ? dts
+          : [];
       if (filteredDocData.length === 0) {
         dts = await apiFetch("/document-type").catch((err) => {
           console.error("BOQ document type fallback failed:", err);
           return [];
         });
       }
-      
+
       // Companies
       const companyData = Array.isArray(cos?.data)
         ? cos.data
         : Array.isArray(cos)
-        ? cos
-        : [];
+          ? cos
+          : [];
 
       setCompanies(
         companyData.map((item: any, idx: number) => ({
@@ -1193,15 +1285,15 @@ export default function BOQ() {
             item.CompanyName ??
             item.EName ??
             "Unknown Company",
-        }))
+        })),
       );
 
       // Projects
       const projectData = Array.isArray(pros?.data)
         ? pros.data
         : Array.isArray(pros)
-        ? pros
-        : [];
+          ? pros
+          : [];
 
       setProjects(
         projectData.map((item: any, idx: number) => ({
@@ -1212,15 +1304,15 @@ export default function BOQ() {
             item.ProjectName ??
             item.EName ??
             "Unknown Project",
-        }))
+        })),
       );
 
       // Document Types
       const docData = Array.isArray(dts?.data)
         ? dts.data
         : Array.isArray(dts)
-        ? dts
-        : [];
+          ? dts
+          : [];
 
       setDocTypes(
         docData.map((item: any, idx: number) => ({
@@ -1228,21 +1320,21 @@ export default function BOQ() {
           code: String(item.code ?? item.Prefix ?? item.FullPrefix ?? ""),
           name: String(item.name ?? item.EntryType ?? ""),
           description: String(item.description ?? item.Description ?? ""),
-        }))
+        })),
       );
 
       // UOM
       const uomData = Array.isArray(uomRes?.data)
         ? uomRes.data
         : Array.isArray(uomRes)
-        ? uomRes
-        : [];
+          ? uomRes
+          : [];
 
       setUoms(
         uomData.map((item: any, idx: number) => ({
           Id: Number(item.Id ?? item.id ?? idx + 1),
           UOMName: item.UOMName ?? item.name ?? "",
-        }))
+        })),
       );
     } catch (err) {
       console.error("Master data load failed:", err);
@@ -1250,7 +1342,9 @@ export default function BOQ() {
     }
   }, []);
 
-  useEffect(() => { loadMasterData(); }, [loadMasterData]);
+  useEffect(() => {
+    loadMasterData();
+  }, [loadMasterData]);
 
   const onSearchChange = (val: string) => {
     setSearch(val);
@@ -1268,10 +1362,16 @@ export default function BOQ() {
       setViewRecord({
         ...full,
         BoqItems: Array.isArray(full.BoqItems) ? full.BoqItems : [],
-        BoqActivities: Array.isArray(full.BoqActivities) ? full.BoqActivities : [],
+        BoqActivities: Array.isArray(full.BoqActivities)
+          ? full.BoqActivities
+          : [],
       });
     } catch {
-      setViewRecord({ ...r, BoqItems: r.BoqItems ?? [], BoqActivities: r.BoqActivities ?? [] });
+      setViewRecord({
+        ...r,
+        BoqItems: r.BoqItems ?? [],
+        BoqActivities: r.BoqActivities ?? [],
+      });
     }
   };
 
@@ -1281,7 +1381,13 @@ export default function BOQ() {
     setShowForm(true);
   };
 
-  const statuses: string[] = ["All", "Draft", "Pending", "Approved", "Rejected"];
+  const statuses: string[] = [
+    "All",
+    "Draft",
+    "Pending",
+    "Approved",
+    "Rejected",
+  ];
 
   const enrichedColumns = [
     ...COLUMNS,
@@ -1290,25 +1396,41 @@ export default function BOQ() {
       header: "Actions",
       cell: ({ row }: any) => (
         <div className="flex items-center gap-1">
-          <Button variant="ghost" size="sm" onClick={() => openDetail(row.original)} className="h-8 w-8 p-0">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => openDetail(row.original)}
+            className="h-8 w-8 p-0"
+          >
             <Eye size={15} />
           </Button>
           {row.original.Status === "Draft" && (
-            <Button variant="ghost" size="sm" onClick={async () => {
-              const full = await apiFetch(`/boq/${row.original.BoqID}`).catch(() => row.original);
-              openEdit({ ...full, BoqItems: full.BoqItems ?? [], BoqActivities: full.BoqActivities ?? [] });
-            }} className="h-8 w-8 p-0 text-primary">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={async () => {
+                const full = await apiFetch(`/boq/${row.original.BoqID}`).catch(
+                  () => row.original,
+                );
+                openEdit({
+                  ...full,
+                  BoqItems: full.BoqItems ?? [],
+                  BoqActivities: full.BoqActivities ?? [],
+                });
+              }}
+              className="h-8 w-8 p-0 text-primary"
+            >
               <Edit3 size={15} />
             </Button>
           )}
         </div>
       ),
-    }
+    },
   ];
 
   return (
     <>
-      <Breadcrumbs items={["Dashboard", "Materials", "BOQ"]} />
+      <Breadcrumbs items={["Engineering", "BOQ"]} />
 
       <div className="space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
@@ -1318,11 +1440,15 @@ export default function BOQ() {
               Bill of Quantities
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              Manage material items and work activities with structured cost estimation
+              Manage material items and work activities with structured cost
+              estimation
             </p>
           </div>
           <Button
-            onClick={() => { setEditRecord(null); setShowForm(true); }}
+            onClick={() => {
+              setEditRecord(null);
+              setShowForm(true);
+            }}
             className="gap-2"
           >
             <Plus size={16} /> New BOQ
@@ -1332,18 +1458,33 @@ export default function BOQ() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           {[
             { label: "Total BOQs", value: total, accent: "border-t-blue-500" },
-            { label: "Portfolio Value", value: fmt(totalValue), accent: "border-t-emerald-500" },
-            { label: "Pending Approval", value: countPending, accent: "border-t-amber-500" },
-            { label: "Approved", value: countApproved, accent: "border-t-violet-500" },
+            {
+              label: "Portfolio Value",
+              value: fmt(totalValue),
+              accent: "border-t-emerald-500",
+            },
+            {
+              label: "Pending Approval",
+              value: countPending,
+              accent: "border-t-amber-500",
+            },
+            {
+              label: "Approved",
+              value: countApproved,
+              accent: "border-t-violet-500",
+            },
           ].map((s) => (
-            <Card key={s.label} className={`border-t-[3px] ${s.accent} shadow-sm`}>
+            <Card
+              key={s.label}
+              className={`border-t-[3px] ${s.accent} shadow-sm`}
+            >
               <CardContent className="p-4">
                 <div className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                {s.label}
-              </div>
+                  {s.label}
+                </div>
                 <div className="text-2xl font-bold mt-1 font-mono">
-                {s.value}
-              </div>
+                  {s.value}
+                </div>
               </CardContent>
             </Card>
           ))}
@@ -1352,7 +1493,10 @@ export default function BOQ() {
         <Card className="shadow-sm">
           <CardHeader className="p-4 border-b flex flex-col md:flex-row md:items-center gap-4">
             <div className="relative flex-1 max-w-sm">
-              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Search
+                size={14}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+              />
               <Input
                 value={search}
                 placeholder="Search BOQ No, company, project…"
@@ -1367,7 +1511,10 @@ export default function BOQ() {
                   variant={filterStatus === s ? "default" : "outline"}
                   size="sm"
                   className="h-8 rounded-full"
-                  onClick={() => { setFilterStatus(s); setPage(1); }}
+                  onClick={() => {
+                    setFilterStatus(s);
+                    setPage(1);
+                  }}
                 >
                   {s}
                 </Button>
@@ -1391,10 +1538,26 @@ export default function BOQ() {
                 />
                 {totalPages > 1 && (
                   <div className="flex items-center justify-between border-t p-4 text-sm">
-                    <span className="text-muted-foreground">Page {page} of {totalPages} ({total} records)</span>
+                    <span className="text-muted-foreground">
+                      Page {page} of {totalPages} ({total} records)
+                    </span>
                     <div className="flex gap-2">
-                      <Button variant="outline" size="sm" disabled={page === 1} onClick={() => setPage(p => p - 1)}>Prev</Button>
-                      <Button variant="outline" size="sm" disabled={page === totalPages} onClick={() => setPage(p => p + 1)}>Next</Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={page === 1}
+                        onClick={() => setPage((p) => p - 1)}
+                      >
+                        Prev
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={page === totalPages}
+                        onClick={() => setPage((p) => p + 1)}
+                      >
+                        Next
+                      </Button>
                     </div>
                   </div>
                 )}
@@ -1412,7 +1575,10 @@ export default function BOQ() {
           docTypes={docTypes}
           uoms={uoms}
           finYear={activeFinYear}
-          onClose={() => { setShowForm(false); setEditRecord(null); }}
+          onClose={() => {
+            setShowForm(false);
+            setEditRecord(null);
+          }}
           onSaved={refresh}
         />
       )}
@@ -1423,7 +1589,10 @@ export default function BOQ() {
           uoms={uoms}
           onClose={() => setViewRecord(null)}
           onEdit={() => openEdit(viewRecord)}
-          onRefresh={() => { setViewRecord(null); refresh(); }}
+          onRefresh={() => {
+            setViewRecord(null);
+            refresh();
+          }}
         />
       )}
     </>

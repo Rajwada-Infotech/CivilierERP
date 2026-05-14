@@ -22,6 +22,8 @@ const {
 
 const { ipKeyGenerator } = require("express-rate-limit");
 const { safeLoadRoutes, printRoutesSummary } = require("./utils/loadRoutes");
+const http = require("http");
+const { initSocket } = require("./socket");
 
 const {
   getRedis,
@@ -106,6 +108,7 @@ const ALL_ROUTES = [
   { path: "/api/finance-dashboard", file: "./routes/financeDashboard" },
   { path: "/api/material-dashboard", file: "./routes/materialDashboard" },
   { path: "/api/material-issues", file: "./routes/materialIssues" },
+  { path: "/api/material-requests", file: "./routes/materialRequests" },
   { path: "/api/admin-dashboard", file: "./routes/adminDashboard" },
   { path: "/api/user-activity", file: "./routes/userActivity" },
   { path: "/api/cheque-leaf", file: "./routes/chequeLeaf" },
@@ -318,7 +321,10 @@ async function startServer() {
 
     const PORT = process.env.PORT || 5000;
 
-    const server = app.listen(PORT, () => {
+    const httpServer = http.createServer(app);
+    initSocket(httpServer);
+
+    const server = httpServer.listen(PORT, () => {
       printBanner(PORT);
       logger.info(`[START] Server ready on port ${PORT}`);
     });
