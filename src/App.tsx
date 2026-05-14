@@ -115,7 +115,9 @@ const MaterialDashboard = lazy(
 const MaterialExpenseBookingMaster = lazy(
   () => import("./pages/material/MaterialExpenseBooking"),
 );
-const WorkOrderMaster = lazy(() => import("./pages/material/WorkOrderMaster"));
+const WorkOrderMaster = lazy(
+  () => import("./pages/engineering/WorkOrderMaster"),
+);
 const PurchaseOrderMaster = lazy(
   () => import("./pages/material/PurchaseOrderMaster"),
 );
@@ -144,7 +146,7 @@ const InventoryMaster = lazy(() => import("./pages/material/InventoryMaster"));
 const EnterpriseMasterPage = lazy(
   () => import("./pages/admin/masters/EnterpriseMaster"),
 );
-const BOQ = lazy(() => import("./pages/material/BOQ"));
+const BOQ = lazy(() => import("./pages/engineering/BOQ"));
 
 // Admin Pages
 const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
@@ -206,6 +208,12 @@ const Issues = lazy(() => import("./pages/material/Issues"));
 const RemindersManager = lazy(() => import("./pages/dba/RemindersManager"));
 
 const PaymentLogs = lazy(() => import("./pages/dba/PaymentLogs"));
+
+// Engineering Pages
+const EngineeringDashboard = lazy(
+  () => import("./pages/engineering/EngineeringDashboard"),
+);
+const WorkDone = lazy(() => import("./pages/engineering/WorkDone"));
 
 // ─── Auth Guard ───────────────────────────────────────────────────────────────
 function RequireAuth({ children }: { children: React.ReactNode }) {
@@ -647,6 +655,41 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <InventoryMaster />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* ENGINEERING */}
+      <Route
+        path="/engineering"
+        element={
+          <ProtectedRoute>
+            <EngineeringDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/engineering/work-done"
+        element={
+          <ProtectedRoute>
+            <WorkDone />
+          </ProtectedRoute>
+        }
+      />
+      {/* Engineering-namespaced aliases so the module stays on Engineering */}
+      <Route
+        path="/engineering/work-order"
+        element={
+          <ProtectedRoute>
+            <WorkOrderMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/engineering/boq"
+        element={
+          <ProtectedRoute>
+            <BOQ />
           </ProtectedRoute>
         }
       />

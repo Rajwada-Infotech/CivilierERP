@@ -41,6 +41,7 @@ import {
   CheckSquare,
   PackageMinus,
   ClipboardList,
+  Wrench,
 } from "lucide-react";
 
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
@@ -195,24 +196,14 @@ export const MobileNav: React.FC = () => {
             icon: Receipt,
             children: [
               {
-                label: "GRN",
-                path: "/material/grn",
-                icon: Package,
-              },
-              {
-                label: "Expense Booking",
-                path: "/material/expense-booking",
-                icon: Receipt,
-              },
-              {
-                label: "Work Order",
-                path: "/material/work-order",
-                icon: HardHat,
-              },
-              {
                 label: "Purchase Order",
                 path: "/material/purchase-order",
                 icon: FileText,
+              },
+              {
+                label: "GRN",
+                path: "/material/grn",
+                icon: Package,
               },
               {
                 label: "Issues",
@@ -220,9 +211,9 @@ export const MobileNav: React.FC = () => {
                 icon: PackageMinus,
               },
               {
-                label: "BOQ",
-                path: "/material/boq",
-                icon: FileText,
+                label: "Expense Booking",
+                path: "/material/expense-booking",
+                icon: Receipt,
               },
               {
                 label: "Amendment Menu",
@@ -390,6 +381,36 @@ export const MobileNav: React.FC = () => {
           },
         ];
 
+      case "engineering":
+        return [
+          {
+            label: "Dashboard",
+            icon: BarChart3,
+            path: "/engineering",
+          },
+          {
+            label: "Transaction",
+            icon: ClipboardList,
+            children: [
+              {
+                label: "Work Order",
+                path: "/engineering/work-order",
+                icon: HardHat,
+              },
+              {
+                label: "BOQ",
+                path: "/engineering/boq",
+                icon: FileText,
+              },
+              {
+                label: "Work Done",
+                path: "/engineering/work-done",
+                icon: Wrench,
+              },
+            ],
+          },
+        ];
+
       default:
         return [];
     }
@@ -525,6 +546,38 @@ export const MobileNav: React.FC = () => {
       color: "text-blue-400",
     },
   ];
+  const engineeringSetupItems = [
+    {
+      icon: HardHat,
+      label: "Work Order",
+      path: "/engineering/work-order",
+      color: "text-orange-500",
+    },
+    {
+      icon: FileText,
+      label: "BOQ",
+      path: "/engineering/boq",
+      color: "text-amber-500",
+    },
+    {
+      icon: Wrench,
+      label: "Work Done",
+      path: "/engineering/work-done",
+      color: "text-yellow-600",
+    },
+    {
+      icon: FileText,
+      label: "Drawings",
+      path: "/engineering/drawings",
+      color: "text-cyan-600",
+    },
+    {
+      icon: Users,
+      label: "Contractors",
+      path: "/masters/contractor",
+      color: "text-teal-500",
+    },
+  ];
 
   const getSetupConfig = () => {
     if (isAdminPage)
@@ -544,6 +597,15 @@ export const MobileNav: React.FC = () => {
         accent: "text-emerald-500",
         bg: "bg-emerald-500/10",
         border: "border-emerald-400/40",
+      };
+    if (activeModule === "engineering")
+      return {
+        items: engineeringSetupItems,
+        label: "Engineering",
+        available: true,
+        accent: "text-orange-500",
+        bg: "bg-orange-500/10",
+        border: "border-orange-400/40",
       };
     if (activeModule === "finance")
       return {
@@ -730,6 +792,20 @@ export const MobileNav: React.FC = () => {
                       onClick: () => {
                         setActiveModule("followup");
                         navigate(MODULE_DASHBOARD_ROUTES.followup);
+                        setOpen(false);
+                      },
+                    },
+                    {
+                      label: "Engineering",
+                      module: "engineering",
+                      active: activeModule === "engineering" && !isAdminPage,
+                      icon: Wrench,
+                      activeClass:
+                        "bg-orange-500/10 border-orange-500/40 text-orange-600",
+                      dotClass: "bg-orange-500",
+                      onClick: () => {
+                        setActiveModule("engineering");
+                        navigate(MODULE_DASHBOARD_ROUTES.engineering);
                         setOpen(false);
                       },
                     },
