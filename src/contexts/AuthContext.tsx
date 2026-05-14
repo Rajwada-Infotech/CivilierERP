@@ -187,6 +187,7 @@ export const AuthProvider = ({
         isActive: true,
       };
 
+      sessionStorage.removeItem("__auth_redirecting");
       localStorage.setItem("token", data.token);
       localStorage.setItem("user", JSON.stringify(userWithInitials));
 
@@ -239,6 +240,7 @@ export const AuthProvider = ({
     localStorage.removeItem("user");
     localStorage.removeItem("currentSessionId");
     localStorage.removeItem("activeModule");
+    sessionStorage.removeItem("__auth_redirecting");
     // Tear down the socket *after* clearing the token so no further
     // authenticated requests can be made over the old connection.
     disconnectSocket();

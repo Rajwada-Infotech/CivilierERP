@@ -18,6 +18,8 @@ const MODULE_MAP = {
     status: "Status",
   },
   "work-orders": { table: "dbo.WorkOrderHeader", pk: "Id", status: "Status" },
+  boq: { table: "dbo.BOQ", pk: "BoqID", status: "Status" },
+  "work-done": { table: "dbo.EngineeringWorkDone", pk: "ID", status: "Status" },
   grn: { table: "dbo.GRN", pk: "GRNId", status: "GRNStatus" },
   payments: { table: "dbo.NewPayment", pk: "PPaymentID", status: "Status" },
 };

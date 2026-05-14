@@ -107,6 +107,7 @@ const ALL_ROUTES = [
   { path: "/api/reports", file: "./routes/reports" },
   { path: "/api/finance-dashboard", file: "./routes/financeDashboard" },
   { path: "/api/material-dashboard", file: "./routes/materialDashboard" },
+  { path: "/api/engineering", file: "./routes/engineering" },
   { path: "/api/material-issues", file: "./routes/materialIssues" },
   { path: "/api/material-requests", file: "./routes/materialRequests" },
   { path: "/api/admin-dashboard", file: "./routes/adminDashboard" },

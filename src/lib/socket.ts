@@ -32,6 +32,11 @@ export function connectSocket(): Socket {
   if (socket?.connected) return socket;
 
   const token = localStorage.getItem("token");
+  if (!token) {
+    // No JWT => don't start socket connection (prevents connect_error spam)
+    return socket as Socket;
+  }
+
   const origin = resolveSocketOrigin();
 
   socket = io(origin, {
