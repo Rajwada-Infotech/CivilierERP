@@ -35,6 +35,29 @@ export interface FinanceDashboardData {
   recentPOs: RecentPO[];
 }
 
+interface FinanceDashboardApiData {
+  payments?: FinanceDashboardData["payments"];
+  purchaseOrders?: FinanceDashboardData["purchaseOrders"];
+  grns?: FinanceDashboardData["grns"];
+  cheques?: FinanceDashboardData["cheques"];
+  parties?: FinanceDashboardData["parties"];
+  recentPayments?: RecentPayment[];
+  recentPOs?: RecentPO[];
+  paymentsMade?: {
+    totalCount: number;
+    todayCount: number;
+    totalAmount: number;
+    todayAmount: number;
+  };
+  receivedPayments?: {
+    totalCount: number;
+    todayCount: number;
+    totalAmount: number;
+    todayAmount: number;
+  };
+  recentPaymentsMade?: RecentPayment[];
+}
+
 export interface RecentPayment {
   PPaymentID: number;
   PPaymentName: string;
@@ -137,11 +160,47 @@ async function safeFetch<T>(url: string): Promise<{ data: T | null; error: strin
   }
 }
 
+function normalizeFinanceDashboard(
+  raw: FinanceDashboardApiData | null,
+): FinanceDashboardData | null {
+  if (!raw) return null;
+
+  return {
+    payments: raw.payments ?? {
+      totalCount: raw.paymentsMade?.totalCount ?? 0,
+      todayCount: raw.paymentsMade?.todayCount ?? 0,
+      totalAmount: raw.paymentsMade?.totalAmount ?? 0,
+      todayAmount: raw.paymentsMade?.todayAmount ?? 0,
+    },
+    purchaseOrders: raw.purchaseOrders ?? {
+      totalCount: 0,
+      openCount: 0,
+      totalValue: 0,
+      openValue: 0,
+    },
+    grns: raw.grns ?? {
+      totalCount: 0,
+      thisMonthCount: 0,
+    },
+    cheques: raw.cheques ?? {
+      totalCount: 0,
+      pendingCount: 0,
+    },
+    parties: raw.parties ?? {
+      supplierCount: 0,
+      customerCount: 0,
+      activeGLCount: 0,
+    },
+    recentPayments: raw.recentPayments ?? raw.recentPaymentsMade ?? [],
+    recentPOs: raw.recentPOs ?? [],
+  };
+}
+
 // ─── Main fetcher ─────────────────────────────────────────────────────────────
 
 export async function fetchHomeDashboard(isAdmin: boolean): Promise<HomeDashboardData> {
   const baseRequests = [
-    safeFetch<FinanceDashboardData>("/api/finance-dashboard"),
+    safeFetch<FinanceDashboardApiData>("/api/finance-dashboard"),
     safeFetch<MaterialDashboardData>("/api/material-dashboard"),
     safeFetch<ApprovalInboxItem[]>("/api/approval-inbox"),
     safeFetch<{ data: TaskSummary[] }>("/api/tasks?limit=5&sort=dueDate&order=asc"),
@@ -164,7 +223,7 @@ export async function fetchHomeDashboard(isAdmin: boolean): Promise<HomeDashboar
   if (adminRes.error)    errors.admin    = adminRes.error;
 
   return {
-    finance:          financeRes.data,
+    finance:          normalizeFinanceDashboard(financeRes.data),
     material:         materialRes.data,
     admin:            adminRes.data,
     pendingApprovals: Array.isArray(approvalRes.data) ? approvalRes.data : [],

@@ -2,13 +2,21 @@ import { fetchWithAuth } from "../lib/fetchWithAuth.ts";
 
 const BASE_URL = "/api/fin-year";
 
+export interface FinYearPayload {
+  fy_label: string;
+  start_date: string;
+  end_date: string;
+  is_active?: boolean;
+  is_locked?: boolean;
+}
+
 export const getFinYears = async () => {
   const res = await fetchWithAuth(BASE_URL);
   if (!res.ok) throw new Error(`GET failed: ${res.status}`);
   return res.json();
 };
 
-export const addFinYear = async (data: Record<string, unknown>) => {
+export const addFinYear = async (data: FinYearPayload) => {
   const res = await fetchWithAuth(BASE_URL, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -22,8 +30,8 @@ export const addFinYear = async (data: Record<string, unknown>) => {
 };
 
 export const updateFinYear = async (
-  id: string,
-  data: Record<string, unknown>,
+  id: string | number,
+  data: Partial<FinYearPayload>,
 ) => {
   const res = await fetchWithAuth(`${BASE_URL}/${id}`, {
     method: "PUT",
@@ -37,7 +45,7 @@ export const updateFinYear = async (
   return res.json();
 };
 
-export const deleteFinYear = async (id: string) => {
+export const deleteFinYear = async (id: string | number) => {
   const res = await fetchWithAuth(`${BASE_URL}/${id}`, { method: "DELETE" });
   if (!res.ok) {
     const err = await res.json();

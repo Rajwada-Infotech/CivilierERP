@@ -12,7 +12,7 @@
  * Tracking table: dbo.__Migrations  (created automatically on first run)
  */
 
-require("./config/env");          // loads backend/.env via dotenv
+require("./config/env").loadEnv(); // loads backend/.env via dotenv
 const path  = require("path");
 const fs    = require("fs");
 const { Umzug, memoryStorage } = require("umzug");
