@@ -320,6 +320,23 @@ router.post("/", async (req, res) => {
   try {
     const pool = getPool();
 
+    // Resolve the real client IP: trust X-Forwarded-For (set by proxies/load
+    // balancers) first, fall back to the socket remote address, then to the
+    // client-supplied value, and finally "unknown".
+    const serverIp =
+      (req.headers["x-forwarded-for"] || "").split(",")[0].trim() ||
+      req.socket?.remoteAddress ||
+      req.ip ||
+      null;
+    const resolvedIp =
+      serverIp || normalizeNullableString(rest.ipAddress, 50) || "unknown";
+
+    // Prefer the real User-Agent header over whatever the client sent in the
+    // body, since the body value is just a JS-parsed string anyway.
+    const serverUA = req.headers["user-agent"] || null;
+    const resolvedDeviceInfo =
+      serverUA || normalizeNullableString(rest.deviceInfo, 255) || "unknown";
+
     const insertResult = await pool
       .request()
       .input("userId", sql.NVarChar(50), resolvedUserId)
@@ -327,16 +344,8 @@ router.post("/", async (req, res) => {
       .input("userEmail", sql.NVarChar(100), resolvedUserEmail)
       .input("userRole", sql.NVarChar(50), resolvedUserRole)
       .input("event", sql.NVarChar(20), normalizedEvent)
-      .input(
-        "ipAddress",
-        sql.NVarChar(50),
-        normalizeNullableString(rest.ipAddress, 50) || "unknown",
-      )
-      .input(
-        "deviceInfo",
-        sql.NVarChar(255),
-        normalizeNullableString(rest.deviceInfo, 255) || "unknown",
-      )
+      .input("ipAddress", sql.NVarChar(50), resolvedIp)
+      .input("deviceInfo", sql.NVarChar(255), resolvedDeviceInfo.slice(0, 255))
       .input(
         "deviceFingerprint",
         sql.NVarChar(100),
@@ -409,8 +418,8 @@ router.post("/", async (req, res) => {
         userRole: resolvedUserRole,
         event: normalizedEvent,
         timestamp: new Date().toISOString(),
-        ipAddress: normalizeNullableString(rest.ipAddress, 50) || "unknown",
-        deviceInfo: normalizeNullableString(rest.deviceInfo, 255) || "unknown",
+        ipAddress: resolvedIp,
+        deviceInfo: resolvedDeviceInfo.slice(0, 255),
         deviceFingerprint: normalizeNullableString(rest.deviceFingerprint, 100),
         actionType: normalizedActionType,
         resource: normalizeNullableString(rest.resource, 200),
