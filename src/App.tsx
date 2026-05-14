@@ -30,10 +30,8 @@ import { RecordsProvider } from "./contexts/RecordsContext";
 import { TdsProvider } from "./contexts/TdsContext";
 import { DebitNoteProvider } from "./contexts/DebitNoteContext";
 import { BillingTermsProvider } from "./contexts/BillingTermsContext";
-import {
-  ActivityBrowserProvider,
-  useActivityBrowser,
-} from "./contexts/ActivityBrowserContext";
+import { useActivityBrowser } from "./contexts/ActivityBrowserContext";
+import { ActivityBrowserProvider } from "./contexts/ActivityBrowserProvider";
 
 // Query Client
 import { queryClient } from "./lib/queryClient";
