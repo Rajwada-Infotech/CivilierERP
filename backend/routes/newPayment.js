@@ -26,8 +26,15 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 100);
     const offset = (page - 1) * limit;
-    const search = req.query.supplier ? req.query.supplier.trim() : "";
-    const companyId = req.query.company ? req.query.company.trim() : "";
+    const search    = req.query.supplier ? req.query.supplier.trim() : "";
+    const companyId = req.query.company  ? req.query.company.trim()  : "";
+    const project   = req.query.project  ? req.query.project.trim()  : "";
+    const finYear   = req.query.finYear  ? req.query.finYear.trim()  : "";
+    const docNumber = req.query.docNumber ? req.query.docNumber.trim() : "";
+    const docDate   = req.query.docDate   ? req.query.docDate.trim() : "";
+    const dateParam = req.query.date      ? req.query.date.trim() : "";
+    const dueDate   = req.query.dueDate   ? req.query.dueDate.trim() : "";
+    const remarks   = req.query.remarks   ? req.query.remarks.trim() : "";
 
     const conditions = [];
     if (search) {
@@ -38,16 +45,29 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
           OR PCompany LIKE @search
           OR PBankName LIKE @search)`);
     }
-    if (companyId) {
-      conditions.push(`PCompany = @companyId`);
-    }
+    if (companyId) conditions.push(`PCompany = @companyId`);
+    if (project)   conditions.push(`PProject LIKE @project`);
+    if (finYear)   conditions.push(`DocYear  = @finYear`);
+    if (docNumber) conditions.push(`DocNo LIKE @docNumber`);
+    if (docDate)   conditions.push(`CAST(PCreatedAt AS DATE) = @docDate`);
+    if (dateParam) conditions.push(`PDate = @dateParam`);
+    if (dueDate)   conditions.push(`PChequeDate = @dueDate`);
+    if (remarks)   conditions.push(`(PPaymentName LIKE @remarks OR PExpenseRef LIKE @remarks)`);
+
     const whereClause = conditions.length
       ? `WHERE ${conditions.join(" AND ")}`
       : "";
 
     const request = pool.request();
-    if (search) request.input("search", sql.NVarChar(200), `%${search}%`);
-    if (companyId) request.input("companyId", sql.NVarChar(50), companyId);
+    if (search)    request.input("search",    sql.NVarChar(200), `%${search}%`);
+    if (companyId) request.input("companyId", sql.NVarChar(50),  companyId);
+    if (project)   request.input("project",   sql.NVarChar(200), `%${project}%`);
+    if (finYear)   request.input("finYear",   sql.SmallInt,      parseInt(finYear));
+    if (docNumber) request.input("docNumber", sql.NVarChar(100), `%${docNumber}%`);
+    if (docDate)   request.input("docDate",   sql.Date,          docDate);
+    if (dateParam) request.input("dateParam", sql.Date,          dateParam);
+    if (dueDate)   request.input("dueDate",   sql.Date,          dueDate);
+    if (remarks)   request.input("remarks",   sql.NVarChar(200), `%${remarks}%`);
 
     const countResult = await request.query(
       `SELECT COUNT(*) AS total FROM dbo.NewPayment ${whereClause}`,
@@ -57,9 +77,16 @@ router.get("/", cache("new-payment", 300), async (req, res) => {
     const dataRequest = pool
       .request()
       .input("offset", sql.Int, offset)
-      .input("limit", sql.Int, limit);
-    if (search) dataRequest.input("search", sql.NVarChar(200), `%${search}%`);
-    if (companyId) dataRequest.input("companyId", sql.NVarChar(50), companyId);
+      .input("limit",  sql.Int, limit);
+    if (search)    dataRequest.input("search",    sql.NVarChar(200), `%${search}%`);
+    if (companyId) dataRequest.input("companyId", sql.NVarChar(50),  companyId);
+    if (project)   dataRequest.input("project",   sql.NVarChar(200), `%${project}%`);
+    if (finYear)   dataRequest.input("finYear",   sql.SmallInt,      parseInt(finYear));
+    if (docNumber) dataRequest.input("docNumber", sql.NVarChar(100), `%${docNumber}%`);
+    if (docDate)   dataRequest.input("docDate",   sql.Date,          docDate);
+    if (dateParam) dataRequest.input("dateParam", sql.Date,          dateParam);
+    if (dueDate)   dataRequest.input("dueDate",   sql.Date,          dueDate);
+    if (remarks)   dataRequest.input("remarks",   sql.NVarChar(200), `%${remarks}%`);
 
     const result = await dataRequest.query(`
       SELECT * FROM dbo.NewPayment
