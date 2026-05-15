@@ -5,6 +5,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { StatusBadge } from "@/components/StatusBadge";
+import { ApprovalActions } from "@/components/ApprovalActions";
 import { useFinYear } from "@/contexts/FinYearContext";
 import {
   fetchCompanies,
@@ -1030,12 +1031,20 @@ export default function WorkDone() {
       id: "actions",
       header: "",
       cell: ({ row }) => (
-        <button
-          onClick={() => openEdit(row.original)}
-          className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 px-2 py-1 rounded hover:bg-muted transition-colors"
-        >
-          <PenSquare size={11} /> Edit
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => openEdit(row.original)}
+            className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 px-2 py-1 rounded hover:bg-muted transition-colors"
+          >
+            <PenSquare size={11} /> Edit
+          </button>
+          <ApprovalActions
+            status={row.original.Status}
+            recordId={row.original.ID}
+            endpoint="/api/engineering/work-done"
+            onSuccess={() => refetch()}
+          />
+        </div>
       ),
     },
   ];
