@@ -684,9 +684,7 @@ function WorkDoneForm({
                           {a.LabourAmount != null ? fmt(a.LabourAmount) : "—"}
                         </td>
                         <td className="px-3 py-2 text-right text-amber-600">
-                          {a.MaterialAmount != null
-                            ? fmt(a.MaterialAmount)
-                            : "—"}
+                          {a.MaterialAmount != null ? fmt(a.MaterialAmount) : "—"}
                         </td>
                         <td className="px-3 py-2 text-right font-semibold text-foreground">
                           {a.GrandTotal != null ? fmt(a.GrandTotal) : "—"}
@@ -1032,12 +1030,14 @@ export default function WorkDone() {
       header: "",
       cell: ({ row }) => (
         <div className="flex items-center gap-1">
-          <button
-            onClick={() => openEdit(row.original)}
-            className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 px-2 py-1 rounded hover:bg-muted transition-colors"
-          >
-            <PenSquare size={11} /> Edit
-          </button>
+          {row.original.Status !== "Pending" && (
+            <button
+              onClick={() => openEdit(row.original)}
+              className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 px-2 py-1 rounded hover:bg-muted transition-colors"
+            >
+              <PenSquare size={11} /> Edit
+            </button>
+          )}
           <ApprovalActions
             status={row.original.Status}
             recordId={row.original.ID}

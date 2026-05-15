@@ -99,6 +99,15 @@ const MODULE_CONFIG: Record<
     apiEndpoint: "/api/received-payment",
     label: "Received Payments",
   },
+
+  // Engineering → Work Done approval
+  "work-done": {
+    icon: Hammer,
+    color: "text-emerald-500 bg-emerald-500/10",
+    navPath: "/engineering/work-done",
+    apiEndpoint: "/api/engineering/work-done",
+    label: "Work Done",
+  },
 };
 
 const ALL_MODULES = Object.keys(MODULE_CONFIG);
@@ -183,7 +192,9 @@ const InboxRow: React.FC<{
       {/* Module icon + label */}
       <div className="flex items-center gap-3 min-w-[160px]">
         <div
-          className={`p-2 rounded-lg shrink-0 ${cfg?.color ?? "bg-muted text-muted-foreground"}`}
+          className={`p-2 rounded-lg shrink-0 ${
+            cfg?.color ?? "bg-muted text-muted-foreground"
+          }`}
         >
           <Icon size={14} />
         </div>
@@ -249,8 +260,6 @@ const InboxRow: React.FC<{
           recordId={item.RecordId}
           endpoint={cfg?.apiEndpoint ?? `/api/${item.Module}`}
           onSuccess={(action) => {
-            // Immediately hide this row for approve/reject — the inbox only
-            // shows Pending items so it will be gone after refetch anyway.
             if (action === "approve" || action === "reject") {
               onOptimisticUpdate(item.RecordId, item.Module);
             }
@@ -288,9 +297,6 @@ const ApprovalInbox: React.FC = () => {
     refetchInterval: 60_000,
   });
 
-  // Optimistically removed keys — keyed "Module-RecordId".
-  // When approve/reject fires we immediately hide the row so the user sees
-  // instant feedback, then the background refetch reconciles the real data.
   const [removedKeys, setRemovedKeys] = useState<Set<string>>(new Set());
 
   const handleOptimisticUpdate = (recordId: string, module: string) => {
@@ -299,11 +305,9 @@ const ApprovalInbox: React.FC = () => {
 
   const handleActionDone = () => {
     queryClient.invalidateQueries({ queryKey: ["approval-inbox"] });
-    // Invalidate payment list so Payment page reflects approve/reject immediately
     queryClient.invalidateQueries({ queryKey: ["payments"], exact: false });
   };
 
-  // Unfiltered counts for tab badges
   const { data: allItems = [] } = useQuery({
     queryKey: ["approval-inbox", null],
     queryFn: () => fetchInbox(),
@@ -339,7 +343,10 @@ const ApprovalInbox: React.FC = () => {
           disabled={isRefetching}
           className="flex items-center gap-1.5 px-3 py-2 rounded-lg border border-border text-xs text-muted-foreground hover:bg-muted transition-colors disabled:opacity-50"
         >
-          <RefreshCw size={13} className={isRefetching ? "animate-spin" : ""} />
+          <RefreshCw
+            size={13}
+            className={isRefetching ? "animate-spin" : ""}
+          />
           <span className="hidden sm:inline">Refresh</span>
         </button>
       </div>
@@ -447,8 +454,7 @@ const ApprovalInbox: React.FC = () => {
 
             <div className="px-4 py-2.5 border-t border-border bg-muted/20">
               <p className="text-[11px] text-muted-foreground">
-                {items.length} record{items.length !== 1 ? "s" : ""} pending
-                approval
+                {items.length} record{items.length !== 1 ? "s" : ""} pending approval
                 {activeModule &&
                   ` in ${MODULE_CONFIG[activeModule]?.label ?? activeModule}`}
               </p>
