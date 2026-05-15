@@ -7,7 +7,8 @@ export type ReminderType =
   | "work_order"
   | "tds"
   | "grn"
-  | "emi_installment";
+  | "emi_installment"
+  | "material_request";
 
 export interface ReminderItem {
   id: string | number;
@@ -91,6 +92,29 @@ async function fetchEmiReminders(): Promise<ReminderItem[]> {
   }
 }
 
+async function fetchMaterialRequestReminders(): Promise<ReminderItem[]> {
+  try {
+    const res = await fetchWithAuth("/api/material-requests?limit=200");
+    if (!res.ok) return [];
+    const raw = await res.json();
+    const list: any[] = Array.isArray(raw) ? raw : (raw.data ?? []);
+
+    return list
+      .filter((r) => r.Status === "Pending" || r.Status === "pending")
+      .map((r) => ({
+        id: `mr-${r.MRId}`,
+        type: "material_request" as ReminderType,
+        title: `MR #${r.DocNo || r.MRId}`,
+        subtitle: `${r.ProjectName || r.CompanyName || "Material Request"} · ${r.Priority || "Normal"} priority`,
+        dueDate: r.RequiredByDate || r.RequestDate,
+        urgency: classifyUrgency(r.RequiredByDate || r.RequestDate),
+        path: "/material/material-request",
+      }));
+  } catch {
+    return [];
+  }
+}
+
 export async function fetchAllReminders(): Promise<ReminderItem[]> {
   const [poRes, grnRes, chequeRes, tdsRes, woRes] = await Promise.allSettled([
     fetchWithAuth("/api/purchase-orders"),
@@ -138,7 +162,7 @@ export async function fetchAllReminders(): Promise<ReminderItem[]> {
     }
   };
 
-  const [, emiItems] = await Promise.all([
+  const [, emiItems, mrItems] = await Promise.all([
     Promise.all([
       process(
         poRes,
@@ -153,9 +177,11 @@ export async function fetchAllReminders(): Promise<ReminderItem[]> {
       process(woRes, "work_order", "Id", "WO", "/material/work-order"),
     ]),
     fetchEmiReminders(),
+    fetchMaterialRequestReminders(),
   ]);
 
   items.push(...emiItems);
+  items.push(...mrItems);
 
   return items.sort((a, b) => {
     const order = { overdue: 0, today: 1, soon: 2, upcoming: 3 };
