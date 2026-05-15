@@ -14,20 +14,60 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   RefreshCw,
-  TrendingUp,
   AlertCircle,
   ClipboardList,
-  Layers,
   Wrench,
   Building2,
-  Users,
-  MapPin,
   CheckCircle2,
   Clock,
   Hammer,
   Ruler,
   Package,
 } from "lucide-react";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface StatusRow {
+  Status: string;
+  Count: number;
+  TotalValue?: number;
+}
+
+interface RecentWO {
+  Id: number;
+  DocNo: string;
+  ContractorName: string;
+  Status: string;
+  TotalAmount: number;
+}
+
+interface RecentBOQ {
+  BoqID: number;
+  DocNo: string;
+  ProjectName: string;
+  Status: string;
+  TotalValue: number;
+}
+
+interface RecentWorkDone {
+  ID: number;
+  DocNo: string;
+  WorkOrderNo: string;
+  Status: string;
+  CertifiedAmount: number;
+}
+
+interface EngineeringDashboardData {
+  workOrders: { total: number; open: number; thisMonth: number; totalValue: number };
+  boq:        { total: number; approved: number; totalValue: number };
+  workDone:   { total: number; pending: number; certifiedAmount: number };
+  projects:   { total: number; active: number };
+  recentWOs:              RecentWO[];
+  recentBOQs:             RecentBOQ[];
+  recentWorkDone:         RecentWorkDone[];
+  woStatusBreakdown:      StatusRow[];
+  workDoneStatusBreakdown: StatusRow[];
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const fmt = (n: number) =>
@@ -242,87 +282,87 @@ function StatusBreakdown({
 // ─── Table column defs ────────────────────────────────────────────────────────
 const WO_DASH_COLS: ColumnDef<any>[] = [
   {
-    key: "DocNo",
+    accessorKey: "DocNo",
     header: "Doc No",
-    render: (v: string) => (
-      <span className="font-mono text-[11px] text-primary">{v || "—"}</span>
+    cell: ({ getValue }) => (
+      <span className="font-mono text-[11px] text-primary">{getValue<string>() || "—"}</span>
     ),
   },
   {
-    key: "ContractorName",
+    accessorKey: "ContractorName",
     header: "Contractor",
-    render: (v: string) => (
-      <span className="text-xs truncate max-w-[120px] block">{v || "—"}</span>
+    cell: ({ getValue }) => (
+      <span className="text-xs truncate max-w-[120px] block">{getValue<string>() || "—"}</span>
     ),
   },
   {
-    key: "Status",
+    accessorKey: "Status",
     header: "Status",
-    render: (v: string) => <StatusBadge status={v} />,
+    cell: ({ getValue }) => <StatusBadge status={getValue<string>()} />,
   },
   {
-    key: "TotalAmount",
+    accessorKey: "TotalAmount",
     header: "Amount",
-    render: (v: number) => (
-      <span className="text-xs font-medium">{fmt(v)}</span>
+    cell: ({ getValue }) => (
+      <span className="text-xs font-medium">{fmt(getValue<number>())}</span>
     ),
   },
 ];
 
 const BOQ_DASH_COLS: ColumnDef<any>[] = [
   {
-    key: "DocNo",
+    accessorKey: "DocNo",
     header: "Doc No",
-    render: (v: string) => (
-      <span className="font-mono text-[11px] text-primary">{v || "—"}</span>
+    cell: ({ getValue }) => (
+      <span className="font-mono text-[11px] text-primary">{getValue<string>() || "—"}</span>
     ),
   },
   {
-    key: "ProjectName",
+    accessorKey: "ProjectName",
     header: "Project",
-    render: (v: string) => (
-      <span className="text-xs truncate max-w-[120px] block">{v || "—"}</span>
+    cell: ({ getValue }) => (
+      <span className="text-xs truncate max-w-[120px] block">{getValue<string>() || "—"}</span>
     ),
   },
   {
-    key: "Status",
+    accessorKey: "Status",
     header: "Status",
-    render: (v: string) => <StatusBadge status={v} />,
+    cell: ({ getValue }) => <StatusBadge status={getValue<string>()} />,
   },
   {
-    key: "TotalValue",
+    accessorKey: "TotalValue",
     header: "Value",
-    render: (v: number) => (
-      <span className="text-xs font-medium">{fmt(v)}</span>
+    cell: ({ getValue }) => (
+      <span className="text-xs font-medium">{fmt(getValue<number>())}</span>
     ),
   },
 ];
 
 const WORKDONE_DASH_COLS: ColumnDef<any>[] = [
   {
-    key: "DocNo",
+    accessorKey: "DocNo",
     header: "Doc No",
-    render: (v: string) => (
-      <span className="font-mono text-[11px] text-primary">{v || "—"}</span>
+    cell: ({ getValue }) => (
+      <span className="font-mono text-[11px] text-primary">{getValue<string>() || "—"}</span>
     ),
   },
   {
-    key: "WorkOrderNo",
+    accessorKey: "WorkOrderNo",
     header: "WO Ref",
-    render: (v: string) => (
-      <span className="text-xs text-muted-foreground">{v || "—"}</span>
+    cell: ({ getValue }) => (
+      <span className="text-xs text-muted-foreground">{getValue<string>() || "—"}</span>
     ),
   },
   {
-    key: "Status",
+    accessorKey: "Status",
     header: "Status",
-    render: (v: string) => <StatusBadge status={v} />,
+    cell: ({ getValue }) => <StatusBadge status={getValue<string>()} />,
   },
   {
-    key: "CertifiedAmount",
+    accessorKey: "CertifiedAmount",
     header: "Certified",
-    render: (v: number) => (
-      <span className="text-xs font-medium">{fmt(v)}</span>
+    cell: ({ getValue }) => (
+      <span className="text-xs font-medium">{fmt(getValue<number>())}</span>
     ),
   },
 ];
@@ -331,7 +371,7 @@ const WORKDONE_DASH_COLS: ColumnDef<any>[] = [
 export default function EngineeringDashboard() {
   const navigate = useNavigate();
 
-  const { data, isLoading, refetch, isFetching } = useQuery({
+  const { data, isLoading, refetch, isFetching } = useQuery<EngineeringDashboardData>({
     queryKey: ["engineering-dashboard"],
     queryFn: () =>
       fetchWithAuth("/api/engineering/dashboard").then((r) => r.json()),
@@ -361,7 +401,7 @@ export default function EngineeringDashboard() {
         <div className="flex items-center justify-between">
           <div>
             <Breadcrumbs
-              items={[{ label: "Engineering", href: "/engineering" }]}
+              items={[{ label: "Engineering", path: "/engineering" }]}
             />
             <div className="flex items-center gap-3 mt-1">
               <div className="p-2 rounded-lg bg-orange-500/10">
