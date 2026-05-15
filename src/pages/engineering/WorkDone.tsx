@@ -666,7 +666,9 @@ function WorkDoneForm({
                     {woActivities.map((a, i) => (
                       <tr
                         key={a.Id}
-                        className={`border-b border-border/50 ${i % 2 === 0 ? "" : "bg-muted/10"}`}
+                        className={`border-b border-border/50 ${
+                          i % 2 === 0 ? "" : "bg-muted/10"
+                        }`}
                       >
                         <td className="px-3 py-2 text-muted-foreground">
                           {a.ActivityGroupName || "—"}
@@ -1159,6 +1161,7 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
             recordId={row.original.ID}
             endpoint="/api/engineering/work-done"
             onSuccess={() => refetch()}
+            submitOnly={true}
           />
         </div>
       ),
@@ -1173,7 +1176,7 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
         <div>
           <Breadcrumbs
             items={[
-              { label: "Engineering", href: "/engineering" },
+              { label: "Engineering", path: "/engineering" },
               { label: "Work Done" },
             ]}
           />
