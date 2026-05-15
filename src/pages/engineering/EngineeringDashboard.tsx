@@ -14,60 +14,20 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   RefreshCw,
+  TrendingUp,
   AlertCircle,
   ClipboardList,
+  Layers,
   Wrench,
   Building2,
+  Users,
+  MapPin,
   CheckCircle2,
   Clock,
   Hammer,
   Ruler,
   Package,
 } from "lucide-react";
-
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface StatusRow {
-  Status: string;
-  Count: number;
-  TotalValue?: number;
-}
-
-interface RecentWO {
-  Id: number;
-  DocNo: string;
-  ContractorName: string;
-  Status: string;
-  TotalAmount: number;
-}
-
-interface RecentBOQ {
-  BoqID: number;
-  DocNo: string;
-  ProjectName: string;
-  Status: string;
-  TotalValue: number;
-}
-
-interface RecentWorkDone {
-  ID: number;
-  DocNo: string;
-  WorkOrderNo: string;
-  Status: string;
-  CertifiedAmount: number;
-}
-
-interface EngineeringDashboardData {
-  workOrders: { total: number; open: number; thisMonth: number; totalValue: number };
-  boq:        { total: number; approved: number; totalValue: number };
-  workDone:   { total: number; pending: number; certifiedAmount: number };
-  projects:   { total: number; active: number };
-  recentWOs:              RecentWO[];
-  recentBOQs:             RecentBOQ[];
-  recentWorkDone:         RecentWorkDone[];
-  woStatusBreakdown:      StatusRow[];
-  workDoneStatusBreakdown: StatusRow[];
-}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const fmt = (n: number) =>
@@ -201,9 +161,7 @@ function SectionHeader({
           <p className="text-sm font-heading font-semibold text-foreground">
             {title}
           </p>
-          {sub && (
-            <p className="text-[10px] text-muted-foreground">{sub}</p>
-          )}
+          {sub && <p className="text-[10px] text-muted-foreground">{sub}</p>}
         </div>
       </div>
       {action && onAction && (
@@ -229,7 +187,13 @@ function EmptyState({ label }: { label: string }) {
 }
 
 // ─── Table Skeleton ───────────────────────────────────────────────────────────
-function TableSkeleton({ rows = 4, cols = 4 }: { rows?: number; cols?: number }) {
+function TableSkeleton({
+  rows = 4,
+  cols = 4,
+}: {
+  rows?: number;
+  cols?: number;
+}) {
   return (
     <div className="p-4 space-y-2 animate-pulse">
       {Array.from({ length: rows }).map((_, i) => (
@@ -252,14 +216,13 @@ function StatusBreakdown({
   label: string;
 }) {
   if (!data?.length)
-    return (
-      <p className="text-xs text-muted-foreground py-2">No {label} yet</p>
-    );
+    return <p className="text-xs text-muted-foreground py-2">No {label} yet</p>;
   const total = data.reduce((s, r) => s + Number(r.Count), 0);
   return (
     <div className="space-y-2 mt-3">
       {data.map((row) => {
-        const pct = total > 0 ? Math.round((Number(row.Count) / total) * 100) : 0;
+        const pct =
+          total > 0 ? Math.round((Number(row.Count) / total) * 100) : 0;
         return (
           <div key={row.Status}>
             <div className="flex justify-between text-[10px] text-muted-foreground mb-0.5">
@@ -282,87 +245,87 @@ function StatusBreakdown({
 // ─── Table column defs ────────────────────────────────────────────────────────
 const WO_DASH_COLS: ColumnDef<any>[] = [
   {
-    accessorKey: "DocNo",
+    key: "DocNo",
     header: "Doc No",
-    cell: ({ getValue }) => (
-      <span className="font-mono text-[11px] text-primary">{getValue<string>() || "—"}</span>
+    render: (v: string) => (
+      <span className="font-mono text-[11px] text-primary">{v || "—"}</span>
     ),
   },
   {
-    accessorKey: "ContractorName",
+    key: "ContractorName",
     header: "Contractor",
-    cell: ({ getValue }) => (
-      <span className="text-xs truncate max-w-[120px] block">{getValue<string>() || "—"}</span>
+    render: (v: string) => (
+      <span className="text-xs truncate max-w-[120px] block">{v || "—"}</span>
     ),
   },
   {
-    accessorKey: "Status",
+    key: "Status",
     header: "Status",
-    cell: ({ getValue }) => <StatusBadge status={getValue<string>()} />,
+    render: (v: string) => <StatusBadge status={v} />,
   },
   {
-    accessorKey: "TotalAmount",
+    key: "TotalAmount",
     header: "Amount",
-    cell: ({ getValue }) => (
-      <span className="text-xs font-medium">{fmt(getValue<number>())}</span>
+    render: (v: number) => (
+      <span className="text-xs font-medium">{fmt(v)}</span>
     ),
   },
 ];
 
 const BOQ_DASH_COLS: ColumnDef<any>[] = [
   {
-    accessorKey: "DocNo",
+    key: "DocNo",
     header: "Doc No",
-    cell: ({ getValue }) => (
-      <span className="font-mono text-[11px] text-primary">{getValue<string>() || "—"}</span>
+    render: (v: string) => (
+      <span className="font-mono text-[11px] text-primary">{v || "—"}</span>
     ),
   },
   {
-    accessorKey: "ProjectName",
+    key: "ProjectName",
     header: "Project",
-    cell: ({ getValue }) => (
-      <span className="text-xs truncate max-w-[120px] block">{getValue<string>() || "—"}</span>
+    render: (v: string) => (
+      <span className="text-xs truncate max-w-[120px] block">{v || "—"}</span>
     ),
   },
   {
-    accessorKey: "Status",
+    key: "Status",
     header: "Status",
-    cell: ({ getValue }) => <StatusBadge status={getValue<string>()} />,
+    render: (v: string) => <StatusBadge status={v} />,
   },
   {
-    accessorKey: "TotalValue",
+    key: "TotalValue",
     header: "Value",
-    cell: ({ getValue }) => (
-      <span className="text-xs font-medium">{fmt(getValue<number>())}</span>
+    render: (v: number) => (
+      <span className="text-xs font-medium">{fmt(v)}</span>
     ),
   },
 ];
 
 const WORKDONE_DASH_COLS: ColumnDef<any>[] = [
   {
-    accessorKey: "DocNo",
+    key: "DocNo",
     header: "Doc No",
-    cell: ({ getValue }) => (
-      <span className="font-mono text-[11px] text-primary">{getValue<string>() || "—"}</span>
+    render: (v: string) => (
+      <span className="font-mono text-[11px] text-primary">{v || "—"}</span>
     ),
   },
   {
-    accessorKey: "WorkOrderNo",
+    key: "WorkOrderNo",
     header: "WO Ref",
-    cell: ({ getValue }) => (
-      <span className="text-xs text-muted-foreground">{getValue<string>() || "—"}</span>
+    render: (v: string) => (
+      <span className="text-xs text-muted-foreground">{v || "—"}</span>
     ),
   },
   {
-    accessorKey: "Status",
+    key: "Status",
     header: "Status",
-    cell: ({ getValue }) => <StatusBadge status={getValue<string>()} />,
+    render: (v: string) => <StatusBadge status={v} />,
   },
   {
-    accessorKey: "CertifiedAmount",
+    key: "CertifiedAmount",
     header: "Certified",
-    cell: ({ getValue }) => (
-      <span className="text-xs font-medium">{fmt(getValue<number>())}</span>
+    render: (v: number) => (
+      <span className="text-xs font-medium">{fmt(v)}</span>
     ),
   },
 ];
@@ -371,7 +334,7 @@ const WORKDONE_DASH_COLS: ColumnDef<any>[] = [
 export default function EngineeringDashboard() {
   const navigate = useNavigate();
 
-  const { data, isLoading, refetch, isFetching } = useQuery<EngineeringDashboardData>({
+  const { data, isLoading, refetch, isFetching } = useQuery({
     queryKey: ["engineering-dashboard"],
     queryFn: () =>
       fetchWithAuth("/api/engineering/dashboard").then((r) => r.json()),
@@ -401,7 +364,7 @@ export default function EngineeringDashboard() {
         <div className="flex items-center justify-between">
           <div>
             <Breadcrumbs
-              items={[{ label: "Engineering", path: "/engineering" }]}
+              items={[{ label: "Engineering", href: "/engineering" }]}
             />
             <div className="flex items-center gap-3 mt-1">
               <div className="p-2 rounded-lg bg-orange-500/10">
@@ -422,10 +385,7 @@ export default function EngineeringDashboard() {
             disabled={isFetching}
             className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-1.5 hover:bg-muted transition-colors"
           >
-            <RefreshCw
-              size={13}
-              className={isFetching ? "animate-spin" : ""}
-            />
+            <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
             Refresh
           </button>
         </div>
@@ -641,7 +601,7 @@ export default function EngineeringDashboard() {
         {/* Quick Actions */}
         <div className="rounded-xl border border-border bg-card p-5">
           <SectionHeader icon={BarChart3} title="Quick Actions" />
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3 mt-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-3">
             {[
               {
                 label: "Work Order",
@@ -663,27 +623,6 @@ export default function EngineeringDashboard() {
                 path: "/engineering/work-done",
                 color: "text-emerald-600",
                 bg: "bg-emerald-500/10",
-              },
-              {
-                label: "Purchase Order",
-                icon: ShoppingCart,
-                path: "/material/purchase-order",
-                color: "text-amber-600",
-                bg: "bg-amber-500/10",
-              },
-              {
-                label: "GRN",
-                icon: Package,
-                path: "/material/grn",
-                color: "text-purple-600",
-                bg: "bg-purple-500/10",
-              },
-              {
-                label: "Drawings",
-                icon: Ruler,
-                path: "/engineering/drawings",
-                color: "text-slate-600",
-                bg: "bg-slate-500/10",
               },
             ].map(({ label, icon: Icon, path, color, bg }) => (
               <button
