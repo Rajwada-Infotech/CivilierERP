@@ -3,16 +3,11 @@
     /* Core */
     "target": "ES2022",
     "module": "ESNext",
-    "moduleResolution": "node",
-    // ignoreDeprecations is not supported in the local TypeScript version
-    "ignoreDeprecations": "5.0",
-
-
+    "moduleResolution": "bundler",
 
     /* Paths */
-    "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"],
+      "@/*": ["./src/*"]
     },
 
     /* Frontend */
@@ -23,13 +18,13 @@
     "types": ["node", "vitest/globals"],
     "resolveJsonModule": true,
 
-    /* Emit (needed for Node users) */
-    "noEmit": false,
-    "outDir": "./backend/dist",
+    /* Emit — Vite handles bundling; tsc is type-check only */
+    "noEmit": true,
 
     /* Interop */
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
+    "allowImportingTsExtensions": true,
 
     /* Relaxed rules */
     "strict": false,
@@ -39,10 +34,10 @@
     "skipLibCheck": true,
 
     /* Misc */
-    "allowJs": true,
+    "allowJs": true
   },
 
   "include": ["src", "backend/**/*.ts", "backend/utils/loadRoutes.js"],
 
-  "exclude": ["node_modules", "backend/dist"],
+  "exclude": ["node_modules", "backend/dist"]
 }
