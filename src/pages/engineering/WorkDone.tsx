@@ -960,10 +960,21 @@ export default function WorkDone() {
     const win = window.open("", "_blank", "width=900,height=700");
     if (!win) return;
     const fmtN = (n: number) =>
-      new Intl.NumberFormat("en-IN", { style: "currency", currency: "INR", maximumFractionDigits: 0 }).format(n ?? 0);
+      new Intl.NumberFormat("en-IN", {
+        style: "currency",
+        currency: "INR",
+        maximumFractionDigits: 0,
+      }).format(n ?? 0);
     const fmtD = (d: string | null) =>
-      d ? new Date(d).toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
-    win.document.write(`<!DOCTYPE html><html><head><title>Work Done — ${r.DocNo || r.ID}</title>
+      d
+        ? new Date(d).toLocaleDateString("en-IN", {
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+          })
+        : "—";
+    win.document
+      .write(`<!DOCTYPE html><html><head><title>Work Done — ${r.DocNo || r.ID}</title>
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; color: #1a1a2e; background: #fff; padding: 32px; }
@@ -1050,7 +1061,9 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
 </body></html>`);
     win.document.close();
     win.focus();
-    setTimeout(() => { win.print(); }, 400);
+    setTimeout(() => {
+      win.print();
+    }, 400);
   };
 
   // ── Columns ──────────────────────────────────────────────────────────────────
@@ -1307,7 +1320,6 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
           activeFinYear={activeFinYear}
         />
       )}
-    </div>
 
       {/* ── View Modal ── */}
       {viewRecord && (
@@ -1326,8 +1338,12 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
                   <Hammer size={15} className="text-orange-600" />
                 </div>
                 <div>
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide font-semibold">Work Done</p>
-                  <p className="text-sm font-heading font-bold text-foreground font-mono">{viewRecord.DocNo || `#${viewRecord.ID}`}</p>
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide font-semibold">
+                    Work Done
+                  </p>
+                  <p className="text-sm font-heading font-bold text-foreground font-mono">
+                    {viewRecord.DocNo || `#${viewRecord.ID}`}
+                  </p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
@@ -1338,7 +1354,10 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
                 >
                   <Printer size={12} /> Print
                 </button>
-                <button onClick={() => setViewRecord(null)} className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground">
+                <button
+                  onClick={() => setViewRecord(null)}
+                  className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+                >
                   <X size={16} />
                 </button>
               </div>
@@ -1349,17 +1368,26 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
               {/* Status badge */}
               <div className="flex items-center justify-between">
                 <span className="text-xs text-muted-foreground">Status</span>
-                <span className={`px-3 py-1 rounded-full text-xs font-bold border ${
-                  viewRecord.Status === "Approved" ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800"
-                  : viewRecord.Status === "Pending" ? "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800"
-                  : viewRecord.Status === "Rejected" ? "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-400 dark:border-red-800"
-                  : "bg-muted text-muted-foreground border-border"
-                }`}>{viewRecord.Status || "Draft"}</span>
+                <span
+                  className={`px-3 py-1 rounded-full text-xs font-bold border ${
+                    viewRecord.Status === "Approved"
+                      ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800"
+                      : viewRecord.Status === "Pending"
+                        ? "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800"
+                        : viewRecord.Status === "Rejected"
+                          ? "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-400 dark:border-red-800"
+                          : "bg-muted text-muted-foreground border-border"
+                  }`}
+                >
+                  {viewRecord.Status || "Draft"}
+                </span>
               </div>
 
               {/* Project info */}
               <div className="rounded-xl border border-border overflow-hidden">
-                <div className="px-4 py-2.5 bg-muted/30 border-b border-border text-xs font-semibold text-muted-foreground uppercase tracking-wide">Project Information</div>
+                <div className="px-4 py-2.5 bg-muted/30 border-b border-border text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  Project Information
+                </div>
                 <div className="p-4 grid grid-cols-2 gap-4">
                   {[
                     ["Company", viewRecord.CompanyName],
@@ -1367,11 +1395,18 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
                     ["Financial Year", viewRecord.FinYear],
                     ["Document Date", fmtDate(viewRecord.DocDate)],
                     ["Work Order", viewRecord.WorkOrderNo],
-                    ["Contractor", viewRecord.ContractorName || viewRecord.SupplierName],
+                    [
+                      "Contractor",
+                      viewRecord.ContractorName || viewRecord.SupplierName,
+                    ],
                   ].map(([label, value]) => (
                     <div key={label}>
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold mb-0.5">{label}</p>
-                      <p className="text-sm text-foreground font-medium">{value || "—"}</p>
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold mb-0.5">
+                        {label}
+                      </p>
+                      <p className="text-sm text-foreground font-medium">
+                        {value || "—"}
+                      </p>
                     </div>
                   ))}
                 </div>
@@ -1379,7 +1414,9 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
 
               {/* Work period */}
               <div className="rounded-xl border border-border overflow-hidden">
-                <div className="px-4 py-2.5 bg-muted/30 border-b border-border text-xs font-semibold text-muted-foreground uppercase tracking-wide">Work Period & Measurement</div>
+                <div className="px-4 py-2.5 bg-muted/30 border-b border-border text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  Work Period & Measurement
+                </div>
                 <div className="p-4 grid grid-cols-3 gap-4">
                   {[
                     ["Period From", fmtDate(viewRecord.PeriodFrom)],
@@ -1389,34 +1426,52 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
                     ["Rate Per Unit", fmt(viewRecord.RatePerUnit)],
                   ].map(([label, value]) => (
                     <div key={label}>
-                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold mb-0.5">{label}</p>
-                      <p className="text-sm text-foreground font-medium">{value || "—"}</p>
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold mb-0.5">
+                        {label}
+                      </p>
+                      <p className="text-sm text-foreground font-medium">
+                        {value || "—"}
+                      </p>
                     </div>
                   ))}
                 </div>
                 {viewRecord.DescriptionOfWork && (
                   <div className="px-4 pb-4">
-                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold mb-1.5">Description of Work</p>
-                    <p className="text-sm text-foreground bg-muted/30 rounded-lg px-3 py-2.5 leading-relaxed">{viewRecord.DescriptionOfWork}</p>
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold mb-1.5">
+                      Description of Work
+                    </p>
+                    <p className="text-sm text-foreground bg-muted/30 rounded-lg px-3 py-2.5 leading-relaxed">
+                      {viewRecord.DescriptionOfWork}
+                    </p>
                   </div>
                 )}
               </div>
 
               {/* Amount summary */}
               <div className="rounded-xl border border-violet-500/20 bg-violet-500/5 overflow-hidden">
-                <div className="px-4 py-2.5 border-b border-violet-500/20 text-xs font-semibold text-violet-600 dark:text-violet-400 uppercase tracking-wide">Amount Summary</div>
+                <div className="px-4 py-2.5 border-b border-violet-500/20 text-xs font-semibold text-violet-600 dark:text-violet-400 uppercase tracking-wide">
+                  Amount Summary
+                </div>
                 <div className="p-4 space-y-2">
                   <div className="flex justify-between items-center text-sm">
                     <span className="text-muted-foreground">Gross Amount</span>
-                    <span className="font-mono font-semibold text-foreground">{fmt(viewRecord.GrossAmount)}</span>
+                    <span className="font-mono font-semibold text-foreground">
+                      {fmt(viewRecord.GrossAmount)}
+                    </span>
                   </div>
                   <div className="flex justify-between items-center text-sm">
                     <span className="text-muted-foreground">Deductions</span>
-                    <span className="font-mono font-semibold text-red-500">− {fmt(viewRecord.Deductions)}</span>
+                    <span className="font-mono font-semibold text-red-500">
+                      − {fmt(viewRecord.Deductions)}
+                    </span>
                   </div>
                   <div className="flex justify-between items-center pt-2 border-t border-violet-500/20">
-                    <span className="font-semibold text-foreground text-sm">Certified Amount</span>
-                    <span className="font-mono font-bold text-emerald-600 text-base">{fmt(viewRecord.CertifiedAmount)}</span>
+                    <span className="font-semibold text-foreground text-sm">
+                      Certified Amount
+                    </span>
+                    <span className="font-mono font-bold text-emerald-600 text-base">
+                      {fmt(viewRecord.CertifiedAmount)}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -1424,8 +1479,12 @@ ${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div
               {/* Remarks */}
               {viewRecord.Remarks && (
                 <div>
-                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold mb-1.5">Remarks</p>
-                  <p className="text-sm text-foreground bg-muted/30 rounded-lg px-3 py-2.5">{viewRecord.Remarks}</p>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold mb-1.5">
+                    Remarks
+                  </p>
+                  <p className="text-sm text-foreground bg-muted/30 rounded-lg px-3 py-2.5">
+                    {viewRecord.Remarks}
+                  </p>
                 </div>
               )}
 
