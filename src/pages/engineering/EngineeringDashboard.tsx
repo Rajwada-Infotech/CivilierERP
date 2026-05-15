@@ -245,87 +245,99 @@ function StatusBreakdown({
 // ─── Table column defs ────────────────────────────────────────────────────────
 const WO_DASH_COLS: ColumnDef<any>[] = [
   {
-    key: "DocNo",
+    id: "DocNo",
+    accessorKey: "DocNo",
     header: "Doc No",
-    render: (v: string) => (
-      <span className="font-mono text-[11px] text-primary">{v || "—"}</span>
+    cell: ({ getValue }) => (
+      <span className="font-mono text-[11px] text-primary">{(getValue() as string) || "—"}</span>
     ),
   },
   {
-    key: "ContractorName",
+    id: "ContractorName",
+    accessorKey: "ContractorName",
     header: "Contractor",
-    render: (v: string) => (
-      <span className="text-xs truncate max-w-[120px] block">{v || "—"}</span>
+    cell: ({ getValue }) => (
+      <span className="text-xs truncate max-w-[120px] block">{(getValue() as string) || "—"}</span>
     ),
   },
   {
-    key: "Status",
+    id: "Status",
+    accessorKey: "Status",
     header: "Status",
-    render: (v: string) => <StatusBadge status={v} />,
+    cell: ({ getValue }) => <StatusBadge status={getValue() as string} />,
   },
   {
-    key: "TotalAmount",
+    id: "TotalAmount",
+    accessorKey: "TotalAmount",
     header: "Amount",
-    render: (v: number) => (
-      <span className="text-xs font-medium">{fmt(v)}</span>
+    cell: ({ getValue }) => (
+      <span className="text-xs font-medium">{fmt(getValue() as number)}</span>
     ),
   },
 ];
 
 const BOQ_DASH_COLS: ColumnDef<any>[] = [
   {
-    key: "DocNo",
+    id: "DocNo",
+    accessorKey: "DocNo",
     header: "Doc No",
-    render: (v: string) => (
-      <span className="font-mono text-[11px] text-primary">{v || "—"}</span>
+    cell: ({ getValue }) => (
+      <span className="font-mono text-[11px] text-primary">{(getValue() as string) || "—"}</span>
     ),
   },
   {
-    key: "ProjectName",
+    id: "ProjectName",
+    accessorKey: "ProjectName",
     header: "Project",
-    render: (v: string) => (
-      <span className="text-xs truncate max-w-[120px] block">{v || "—"}</span>
+    cell: ({ getValue }) => (
+      <span className="text-xs truncate max-w-[120px] block">{(getValue() as string) || "—"}</span>
     ),
   },
   {
-    key: "Status",
+    id: "Status",
+    accessorKey: "Status",
     header: "Status",
-    render: (v: string) => <StatusBadge status={v} />,
+    cell: ({ getValue }) => <StatusBadge status={getValue() as string} />,
   },
   {
-    key: "TotalValue",
+    id: "TotalValue",
+    accessorKey: "TotalValue",
     header: "Value",
-    render: (v: number) => (
-      <span className="text-xs font-medium">{fmt(v)}</span>
+    cell: ({ getValue }) => (
+      <span className="text-xs font-medium">{fmt(getValue() as number)}</span>
     ),
   },
 ];
 
 const WORKDONE_DASH_COLS: ColumnDef<any>[] = [
   {
-    key: "DocNo",
+    id: "DocNo",
+    accessorKey: "DocNo",
     header: "Doc No",
-    render: (v: string) => (
-      <span className="font-mono text-[11px] text-primary">{v || "—"}</span>
+    cell: ({ getValue }) => (
+      <span className="font-mono text-[11px] text-primary">{(getValue() as string) || "—"}</span>
     ),
   },
   {
-    key: "WorkOrderNo",
+    id: "WorkOrderNo",
+    accessorKey: "WorkOrderNo",
     header: "WO Ref",
-    render: (v: string) => (
-      <span className="text-xs text-muted-foreground">{v || "—"}</span>
+    cell: ({ getValue }) => (
+      <span className="text-xs text-muted-foreground">{(getValue() as string) || "—"}</span>
     ),
   },
   {
-    key: "Status",
+    id: "Status",
+    accessorKey: "Status",
     header: "Status",
-    render: (v: string) => <StatusBadge status={v} />,
+    cell: ({ getValue }) => <StatusBadge status={getValue() as string} />,
   },
   {
-    key: "CertifiedAmount",
+    id: "CertifiedAmount",
+    accessorKey: "CertifiedAmount",
     header: "Certified",
-    render: (v: number) => (
-      <span className="text-xs font-medium">{fmt(v)}</span>
+    cell: ({ getValue }) => (
+      <span className="text-xs font-medium">{fmt(getValue() as number)}</span>
     ),
   },
 ];
@@ -364,7 +376,7 @@ export default function EngineeringDashboard() {
         <div className="flex items-center justify-between">
           <div>
             <Breadcrumbs
-              items={[{ label: "Engineering", href: "/engineering" }]}
+              items={[{ label: "Engineering", path: "/engineering" }]}
             />
             <div className="flex items-center gap-3 mt-1">
               <div className="p-2 rounded-lg bg-orange-500/10">
