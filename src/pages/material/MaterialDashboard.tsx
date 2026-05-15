@@ -20,6 +20,8 @@ import {
   AlertCircle,
   ClipboardList,
   Ruler,
+  PackageCheck,
+  Send,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -54,9 +56,24 @@ interface DashboardData {
     uniqueItems: number;
   };
   uom: { total: number };
+  materialIssues: {
+    total: number;
+    thisMonth: number;
+    today: number;
+    totalQty: number;
+  };
+  materialRequests: {
+    total: number;
+    pending: number;
+    approved: number;
+    draft: number;
+    thisMonth: number;
+  };
   recentGRNs: any[];
   recentPOs: any[];
   recentExpenses: any[];
+  recentIssues: any[];
+  recentRequests: any[];
   poStatusBreakdown: { Status: string; Count: number; TotalValue: number }[];
   topItems: {
     ItemID: string;
@@ -381,6 +398,109 @@ const EXP_DASH_COLS = makeRecentCols(
   "Pending",
 );
 
+// Issues columns (no amount — qty-based)
+const ISSUE_DASH_COLS: ColumnDef<any, unknown>[] = [
+  {
+    accessorKey: "DocNo",
+    header: "Doc No",
+    cell: ({ row }: any) => (
+      <span className="font-mono text-xs font-medium text-primary">
+        {row.original.DocNo || `#${row.original.IssueId}`}
+      </span>
+    ),
+  },
+  {
+    accessorKey: "ProjectName",
+    header: "Project",
+    cell: ({ getValue }: any) => (
+      <span className="text-xs text-muted-foreground max-w-[110px] truncate block">
+        {(getValue() as string) || "—"}
+      </span>
+    ),
+  },
+  {
+    accessorKey: "IssueDate",
+    header: "Date",
+    cell: ({ getValue }: any) => (
+      <span className="text-xs text-muted-foreground">
+        {fmtDate(getValue() as string)}
+      </span>
+    ),
+  },
+  {
+    accessorKey: "ItemCount",
+    header: "Items",
+    cell: ({ getValue }: any) => (
+      <span className="text-xs font-medium">{getValue() as number}</span>
+    ),
+  },
+  {
+    accessorKey: "Status",
+    header: "Status",
+    cell: ({ getValue }: any) => (
+      <StatusBadge status={(getValue() as string) || "Draft"} />
+    ),
+  },
+];
+
+// Request columns
+const REQUEST_DASH_COLS: ColumnDef<any, unknown>[] = [
+  {
+    accessorKey: "DocNo",
+    header: "Doc No",
+    cell: ({ row }: any) => (
+      <span className="font-mono text-xs font-medium text-primary">
+        {row.original.DocNo || `#${row.original.MRId}`}
+      </span>
+    ),
+  },
+  {
+    accessorKey: "ProjectName",
+    header: "Project",
+    cell: ({ getValue }: any) => (
+      <span className="text-xs text-muted-foreground max-w-[100px] truncate block">
+        {(getValue() as string) || "—"}
+      </span>
+    ),
+  },
+  {
+    accessorKey: "RequestDate",
+    header: "Date",
+    cell: ({ getValue }: any) => (
+      <span className="text-xs text-muted-foreground">
+        {fmtDate(getValue() as string)}
+      </span>
+    ),
+  },
+  {
+    accessorKey: "Priority",
+    header: "Priority",
+    cell: ({ getValue }: any) => {
+      const p = getValue() as string;
+      const cls =
+        p === "High" || p === "Urgent"
+          ? "bg-red-500/10 text-red-600 border-red-400/20"
+          : p === "Normal"
+            ? "bg-blue-500/10 text-blue-600 border-blue-400/20"
+            : "bg-muted text-muted-foreground border-border";
+      return (
+        <span
+          className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border ${cls}`}
+        >
+          {p || "Normal"}
+        </span>
+      );
+    },
+  },
+  {
+    accessorKey: "Status",
+    header: "Status",
+    cell: ({ getValue }: any) => (
+      <StatusBadge status={(getValue() as string) || "Draft"} />
+    ),
+  },
+];
+
 export default function MaterialDashboard() {
   const navigate = useNavigate();
 
@@ -426,9 +546,24 @@ export default function MaterialDashboard() {
             uniqueItems: 0,
           },
           uom: raw.uom ?? { total: 0 },
+          materialIssues: raw.materialIssues ?? {
+            total: 0,
+            thisMonth: 0,
+            today: 0,
+            totalQty: 0,
+          },
+          materialRequests: raw.materialRequests ?? {
+            total: 0,
+            pending: 0,
+            approved: 0,
+            draft: 0,
+            thisMonth: 0,
+          },
           recentGRNs: raw.recentGRNs ?? [],
           recentPOs: raw.recentPOs ?? [],
           recentExpenses: raw.recentExpenses ?? [],
+          recentIssues: raw.recentIssues ?? [],
+          recentRequests: raw.recentRequests ?? [],
           poStatusBreakdown: raw.poStatusBreakdown ?? [],
           topItems: raw.topItems ?? [],
         } as DashboardData;
@@ -500,6 +635,29 @@ export default function MaterialDashboard() {
               ? ("up" as const)
               : ("down" as const),
         },
+        {
+          label: "Material Issues",
+          value: fmtNum(data.materialIssues.thisMonth),
+          sub: `${data.materialIssues.today} today · ${fmtNum(data.materialIssues.total)} total`,
+          icon: PackageCheck,
+          iconColor: "text-orange-600",
+          iconBg: "bg-orange-500/10",
+          trend: "neutral" as const,
+          onClick: () => navigate("/material/issues"),
+        },
+        {
+          label: "Pending Requests",
+          value: fmtNum(data.materialRequests.pending),
+          sub: `${data.materialRequests.thisMonth} this month · ${data.materialRequests.total} total`,
+          icon: Send,
+          iconColor: "text-indigo-600",
+          iconBg: "bg-indigo-500/10",
+          trend:
+            data.materialRequests.pending > 0
+              ? ("down" as const)
+              : ("neutral" as const),
+          onClick: () => navigate("/material/material-request"),
+        },
       ]
     : [];
 
@@ -515,7 +673,8 @@ export default function MaterialDashboard() {
               Material Overview
             </h1>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Real-time data from GRNs, Purchase Orders, Expenses &amp; Stock
+              Real-time data from GRNs, Purchase Orders, Issues, Requests,
+              Expenses &amp; Stock
             </p>
           </div>
           <button
@@ -538,9 +697,9 @@ export default function MaterialDashboard() {
         )}
 
         {/* Stat Cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-4">
           {isLoading
-            ? Array.from({ length: 5 }).map((_, i) => <StatSkeleton key={i} />)
+            ? Array.from({ length: 7 }).map((_, i) => <StatSkeleton key={i} />)
             : statCards.map((s) => <StatCard key={s.label} {...s} />)}
         </div>
 
@@ -664,8 +823,63 @@ export default function MaterialDashboard() {
           )}
         </div>
 
-        {/* PO Status Breakdown + Top Items */}
+        {/* Recent Issues + Recent Requests */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Recent Material Issues */}
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="p-4 border-b border-border">
+              <SectionHeader
+                icon={PackageCheck}
+                title="Recent Material Issues"
+                sub="Last 6 issues"
+                action="View all"
+                onAction={() => navigate("/material/issues")}
+              />
+            </div>
+            {isLoading ? (
+              <TableSkeleton rows={4} cols={4} />
+            ) : !data?.recentIssues.length ? (
+              <EmptyState label="No material issues yet" />
+            ) : (
+              <DataTable
+                data={data.recentIssues}
+                columns={ISSUE_DASH_COLS}
+                searchable={false}
+                paginated={false}
+                emptyMessage="No recent issues."
+              />
+            )}
+          </div>
+
+          {/* Recent Material Requests */}
+          <div className="rounded-xl border border-border bg-card overflow-hidden">
+            <div className="p-4 border-b border-border">
+              <SectionHeader
+                icon={Send}
+                title="Recent Material Requests"
+                sub="Last 6 requests"
+                action="View all"
+                onAction={() => navigate("/material/material-request")}
+              />
+            </div>
+            {isLoading ? (
+              <TableSkeleton rows={4} cols={4} />
+            ) : !data?.recentRequests.length ? (
+              <EmptyState label="No material requests yet" />
+            ) : (
+              <DataTable
+                data={data.recentRequests}
+                columns={REQUEST_DASH_COLS}
+                searchable={false}
+                paginated={false}
+                emptyMessage="No recent requests."
+              />
+            )}
+          </div>
+        </div>
+
+        {/* PO Status Breakdown + Material Requests Breakdown + Top Items */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* PO Status Breakdown */}
           <div className="rounded-xl border border-border bg-card p-5">
             <SectionHeader
@@ -685,6 +899,68 @@ export default function MaterialDashboard() {
                 label="purchase orders"
               />
             )}
+          </div>
+
+          {/* Material Requests Breakdown */}
+          <div className="rounded-xl border border-border bg-card p-5">
+            <SectionHeader
+              icon={Send}
+              title="Material Requests"
+              sub="by status"
+              onAction={() => navigate("/material/material-request")}
+            />
+            {isLoading ? (
+              <div className="space-y-2 animate-pulse">
+                {Array.from({ length: 3 }).map((_, i) => (
+                  <div key={i} className="h-5 bg-muted rounded" />
+                ))}
+              </div>
+            ) : data ? (
+              <div className="space-y-2">
+                {[
+                  {
+                    label: "Pending",
+                    count: data.materialRequests.pending,
+                    color: "bg-amber-500",
+                  },
+                  {
+                    label: "Approved",
+                    count: data.materialRequests.approved,
+                    color: "bg-emerald-500",
+                  },
+                  {
+                    label: "Draft",
+                    count: data.materialRequests.draft,
+                    color: "bg-slate-400",
+                  },
+                ].map(({ label, count, color }) => {
+                  const total = data.materialRequests.total || 1;
+                  const pct = Math.round((count / total) * 100);
+                  return (
+                    <div key={label} className="space-y-0.5">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="text-foreground font-medium">
+                          {label}
+                        </span>
+                        <span className="text-muted-foreground">
+                          {count} · {pct}%
+                        </span>
+                      </div>
+                      <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+                        <div
+                          className={`h-full rounded-full ${color} transition-all duration-500`}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+                <p className="text-xs text-muted-foreground pt-1">
+                  {data.materialRequests.thisMonth} this month ·{" "}
+                  {data.materialRequests.total} total
+                </p>
+              </div>
+            ) : null}
           </div>
 
           {/* Top Items */}
@@ -735,7 +1011,7 @@ export default function MaterialDashboard() {
         {/* Quick Actions */}
         <div className="rounded-xl border border-border bg-card p-5">
           <SectionHeader icon={BarChart3} title="Quick Actions" />
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
             {[
               {
                 label: "New GRN",
@@ -750,6 +1026,20 @@ export default function MaterialDashboard() {
                 path: "/material/purchase-order",
                 color: "text-amber-600",
                 bg: "bg-amber-500/10",
+              },
+              {
+                label: "Issues",
+                icon: PackageCheck,
+                path: "/material/issues",
+                color: "text-orange-600",
+                bg: "bg-orange-500/10",
+              },
+              {
+                label: "Material Request",
+                icon: Send,
+                path: "/material/material-request",
+                color: "text-indigo-600",
+                bg: "bg-indigo-500/10",
               },
               {
                 label: "Expense Booking",
