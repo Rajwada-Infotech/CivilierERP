@@ -11,7 +11,7 @@ const {
   backPatchRecordId,
 } = require("../utils/docNumberLock");
 
-const WORK_DONE_TABLE = "EngineeringWorkDone";
+const WORK_DONE_TABLE = "WorkDone";
 const WORK_DONE_CACHE = "engineering-work-done";
 
 const tableExists = {
@@ -56,7 +56,7 @@ const ensureWorkDoneTable = async (pool, res) => {
   if (await hasTable(pool, WORK_DONE_TABLE)) return true;
   res.status(500).json({
     error:
-      "dbo.EngineeringWorkDone is missing. Run backend/migrations/052-create-engineering-work-done.sql in SSMS.",
+      "dbo.WorkDone is missing. Run backend/migrations/052-create-work-done.sql in SSMS.",
   });
   return false;
 };
@@ -92,7 +92,7 @@ const selectWorkDoneSql = `
     wd.CreatedBy,
     wd.UpdatedAt,
     wd.UpdatedBy
-  FROM dbo.EngineeringWorkDone wd
+  FROM dbo.WorkDone wd
   LEFT JOIN dbo.enterprise co ON co.id = wd.CompanyId
   LEFT JOIN dbo.enterprise pr ON pr.id = wd.ProjectId
   LEFT JOIN dbo.AccountHeadMaster sup ON sup.LHeadId = wd.SupplierId
@@ -185,7 +185,7 @@ router.get(
               COUNT(1) AS total,
               SUM(CASE WHEN Status = 'Pending' THEN 1 ELSE 0 END) AS pending,
               ISNULL(SUM(CertifiedAmount), 0) AS certifiedAmount
-            FROM dbo.EngineeringWorkDone
+            FROM dbo.WorkDone
           `)
           : Promise.resolve({ recordset: [{}] }),
         hasWorkDone
@@ -196,7 +196,7 @@ router.get(
               COALESCE(woh.DocNo, woh.DocumentNumber) AS WorkOrderNo,
               wd.Status,
               wd.CertifiedAmount
-            FROM dbo.EngineeringWorkDone wd
+            FROM dbo.WorkDone wd
             LEFT JOIN dbo.WorkOrderHeader woh ON woh.Id = wd.WorkOrderID
             ORDER BY ISNULL(wd.UpdatedAt, wd.CreatedAt) DESC
           `)
@@ -204,7 +204,7 @@ router.get(
         hasWorkDone
           ? pool.request().query(`
             SELECT ISNULL(Status, 'Draft') AS Status, COUNT(1) AS Count, ISNULL(SUM(CertifiedAmount), 0) AS TotalValue
-            FROM dbo.EngineeringWorkDone
+            FROM dbo.WorkDone
             GROUP BY ISNULL(Status, 'Draft')
           `)
           : Promise.resolve({ recordset: [] }),
@@ -274,7 +274,7 @@ router.get("/work-done", cache(WORK_DONE_CACHE, 120), async (req, res) => {
           ORDER BY ISNULL(wd.UpdatedAt, wd.CreatedAt) DESC
           OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
         `),
-      pool.request().query(`SELECT COUNT(1) AS total FROM dbo.EngineeringWorkDone`),
+      pool.request().query(`SELECT COUNT(1) AS total FROM dbo.WorkDone`),
     ]);
 
     res.json({
@@ -368,7 +368,7 @@ router.post("/work-done", async (req, res) => {
       .input("Status",             sql.NVarChar(50),      body.Status || "Draft")
       .input("Remarks",            sql.NVarChar(sql.MAX), body.Remarks || null)
       .input("CreatedBy",          sql.NVarChar(100),     userEmail).query(`
-        INSERT INTO dbo.EngineeringWorkDone
+        INSERT INTO dbo.WorkDone
           (DocNo, DocTypeId, DocDate, CompanyId, ProjectId, FinYear, SupplierId,
            WorkOrderID, PeriodFrom, PeriodTo, DescriptionOfWork, QuantityDone,
            Unit, RatePerUnit, GrossAmount, Deductions, CertifiedAmount, Status,
@@ -446,7 +446,7 @@ router.put("/work-done/:id", async (req, res) => {
       .input("Status",             sql.NVarChar(50),      body.Status || "Draft")
       .input("Remarks",            sql.NVarChar(sql.MAX), body.Remarks || null)
       .input("UpdatedBy",          sql.NVarChar(100),     userEmail).query(`
-        UPDATE dbo.EngineeringWorkDone SET
+        UPDATE dbo.WorkDone SET
           DocNo = @DocNo,
           DocTypeId = @DocTypeId,
           DocDate = @DocDate,
@@ -502,7 +502,7 @@ router.delete("/work-done/:id", async (req, res) => {
       .input("ID",        sql.Int,          req.params.id)
       .input("DeletedBy", sql.NVarChar(100), userEmail)
       .query(`
-        UPDATE dbo.EngineeringWorkDone
+        UPDATE dbo.WorkDone
         SET Status    = 'Deleted',
             UpdatedBy = @DeletedBy,
             UpdatedAt = SYSDATETIME()
