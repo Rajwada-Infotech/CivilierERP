@@ -9,7 +9,6 @@ import {
   Package,
   Truck,
   FileText,
-  HardHat,
   ShoppingCart,
   Receipt,
   Layers,
@@ -41,12 +40,6 @@ interface DashboardData {
     totalValue: number;
     openValue: number;
   };
-  workOrders: {
-    total: number;
-    open: number;
-    thisMonth: number;
-    totalValue: number;
-  };
   expenses: {
     total: number;
     pending: number;
@@ -63,10 +56,8 @@ interface DashboardData {
   uom: { total: number };
   recentGRNs: any[];
   recentPOs: any[];
-  recentWOs: any[];
   recentExpenses: any[];
   poStatusBreakdown: { Status: string; Count: number; TotalValue: number }[];
-  woStatusBreakdown: { Status: string; Count: number; TotalValue: number }[];
   topItems: {
     ItemID: string;
     ItemName: string;
@@ -380,14 +371,6 @@ const PO_DASH_COLS = makeRecentCols(
   "TotalAmount",
   "Status",
 );
-const WO_DASH_COLS = makeRecentCols(
-  "DocumentNumber",
-  "Id",
-  "ProjectName",
-  "DocumentDate",
-  "TotalAmount",
-  "Status",
-);
 const EXP_DASH_COLS = makeRecentCols(
   "EDocNo",
   "Eid",
@@ -429,12 +412,6 @@ export default function MaterialDashboard() {
             totalValue: 0,
             openValue: 0,
           },
-          workOrders: raw.workOrders ?? {
-            total: 0,
-            open: 0,
-            thisMonth: 0,
-            totalValue: 0,
-          },
           expenses: raw.expenses ?? {
             total: 0,
             pending: 0,
@@ -451,10 +428,8 @@ export default function MaterialDashboard() {
           uom: raw.uom ?? { total: 0 },
           recentGRNs: raw.recentGRNs ?? [],
           recentPOs: raw.recentPOs ?? [],
-          recentWOs: raw.recentWOs ?? [],
           recentExpenses: raw.recentExpenses ?? [],
           poStatusBreakdown: raw.poStatusBreakdown ?? [],
-          woStatusBreakdown: raw.woStatusBreakdown ?? [],
           topItems: raw.topItems ?? [],
         } as DashboardData;
       },
@@ -475,7 +450,7 @@ export default function MaterialDashboard() {
           iconColor: "text-emerald-600",
           iconBg: "bg-emerald-500/10",
           trend: "neutral" as const,
-          onClick: () => navigate("/masters/items"), // Correct route
+          onClick: () => navigate("/masters/items"),
         },
         {
           label: "GRNs This Month",
@@ -499,16 +474,6 @@ export default function MaterialDashboard() {
               ? ("down" as const)
               : ("neutral" as const),
           onClick: () => navigate("/material/purchase-order"),
-        },
-        {
-          label: "Work Orders",
-          value: fmtNum(data.workOrders.total),
-          sub: `${data.workOrders.open} open · ${fmt(data.workOrders.totalValue)}`,
-          icon: HardHat,
-          iconColor: "text-purple-600",
-          iconBg: "bg-purple-500/10",
-          trend: "neutral" as const,
-          onClick: () => navigate("/material/work-order"),
         },
         {
           label: "Pending Expenses",
@@ -550,8 +515,7 @@ export default function MaterialDashboard() {
               Material Overview
             </h1>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Real-time data from GRNs, Purchase Orders, Work Orders, Expenses &
-              Stock
+              Real-time data from GRNs, Purchase Orders, Expenses &amp; Stock
             </p>
           </div>
           <button
@@ -574,15 +538,15 @@ export default function MaterialDashboard() {
         )}
 
         {/* Stat Cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-4">
           {isLoading
-            ? Array.from({ length: 6 }).map((_, i) => <StatSkeleton key={i} />)
+            ? Array.from({ length: 5 }).map((_, i) => <StatSkeleton key={i} />)
             : statCards.map((s) => <StatCard key={s.label} {...s} />)}
         </div>
 
         {/* Summary Strip */}
         {data && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {[
               {
                 label: "Total GRN Value",
@@ -595,12 +559,6 @@ export default function MaterialDashboard() {
                 value: fmt(data.purchaseOrders.totalValue),
                 icon: FileText,
                 color: "text-blue-600",
-              },
-              {
-                label: "Total WO Value",
-                value: fmt(data.workOrders.totalValue),
-                icon: HardHat,
-                color: "text-purple-600",
               },
               {
                 label: "Total Expense Amount",
@@ -680,63 +638,34 @@ export default function MaterialDashboard() {
           </div>
         </div>
 
-        {/* Recent Work Orders + Recent Expenses */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Recent Work Orders */}
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="p-4 border-b border-border">
-              <SectionHeader
-                icon={HardHat}
-                title="Recent Work Orders"
-                sub="Last 6 WOs"
-                action="View all"
-                onAction={() => navigate("/material/work-order")}
-              />
-            </div>
-            {isLoading ? (
-              <TableSkeleton rows={4} cols={4} />
-            ) : !data?.recentWOs.length ? (
-              <EmptyState label="No work orders yet" />
-            ) : (
-              <DataTable
-                data={data.recentWOs}
-                columns={WO_DASH_COLS}
-                searchable={false}
-                paginated={false}
-                emptyMessage="No recent Work Orders."
-              />
-            )}
+        {/* Recent Expense Bookings */}
+        <div className="rounded-xl border border-border bg-card overflow-hidden">
+          <div className="p-4 border-b border-border">
+            <SectionHeader
+              icon={Receipt}
+              title="Recent Expense Bookings"
+              sub="Last 6 entries"
+              action="View all"
+              onAction={() => navigate("/material/expense-booking")}
+            />
           </div>
-
-          {/* Recent Expense Bookings */}
-          <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="p-4 border-b border-border">
-              <SectionHeader
-                icon={Receipt}
-                title="Recent Expense Bookings"
-                sub="Last 6 entries"
-                action="View all"
-                onAction={() => navigate("/material/expense-booking")}
-              />
-            </div>
-            {isLoading ? (
-              <TableSkeleton rows={4} cols={4} />
-            ) : !data?.recentExpenses.length ? (
-              <EmptyState label="No expense bookings yet" />
-            ) : (
-              <DataTable
-                data={data.recentExpenses}
-                columns={EXP_DASH_COLS}
-                searchable={false}
-                paginated={false}
-                emptyMessage="No recent Expenses."
-              />
-            )}
-          </div>
+          {isLoading ? (
+            <TableSkeleton rows={4} cols={4} />
+          ) : !data?.recentExpenses.length ? (
+            <EmptyState label="No expense bookings yet" />
+          ) : (
+            <DataTable
+              data={data.recentExpenses}
+              columns={EXP_DASH_COLS}
+              searchable={false}
+              paginated={false}
+              emptyMessage="No recent Expenses."
+            />
+          )}
         </div>
 
-        {/* Status Breakdowns + Top Items */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* PO Status Breakdown + Top Items */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* PO Status Breakdown */}
           <div className="rounded-xl border border-border bg-card p-5">
             <SectionHeader
@@ -754,27 +683,6 @@ export default function MaterialDashboard() {
               <StatusBreakdown
                 data={data?.poStatusBreakdown ?? []}
                 label="purchase orders"
-              />
-            )}
-          </div>
-
-          {/* WO Status Breakdown */}
-          <div className="rounded-xl border border-border bg-card p-5">
-            <SectionHeader
-              icon={HardHat}
-              title="WO Status Breakdown"
-              onAction={() => navigate("/material/work-order")}
-            />
-            {isLoading ? (
-              <div className="space-y-2 animate-pulse">
-                {Array.from({ length: 4 }).map((_, i) => (
-                  <div key={i} className="h-5 bg-muted rounded" />
-                ))}
-              </div>
-            ) : (
-              <StatusBreakdown
-                data={data?.woStatusBreakdown ?? []}
-                label="work orders"
               />
             )}
           </div>
@@ -824,7 +732,7 @@ export default function MaterialDashboard() {
           </div>
         </div>
 
-        {/* Quick Actions (without Amendments) */}
+        {/* Quick Actions */}
         <div className="rounded-xl border border-border bg-card p-5">
           <SectionHeader icon={BarChart3} title="Quick Actions" />
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-3">
@@ -842,13 +750,6 @@ export default function MaterialDashboard() {
                 path: "/material/purchase-order",
                 color: "text-amber-600",
                 bg: "bg-amber-500/10",
-              },
-              {
-                label: "Work Order",
-                icon: HardHat,
-                path: "/material/work-order",
-                color: "text-purple-600",
-                bg: "bg-purple-500/10",
               },
               {
                 label: "Expense Booking",

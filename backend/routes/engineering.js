@@ -23,7 +23,11 @@ const tableExists = {
 const requireUserEmail = (req, res) => {
   const email = req.user?.email;
   if (!email) {
-    res.status(401).json({ error: "User email missing from session. Cannot audit this action." });
+    res
+      .status(401)
+      .json({
+        error: "User email missing from session. Cannot audit this action.",
+      });
     return null;
   }
   return email;
@@ -42,8 +46,9 @@ const toNumber = (value) => {
 const hasTable = async (pool, tableName) => {
   // Return cached result if already checked this process lifetime
   if (tableExists[tableName] !== null) return tableExists[tableName];
-  const result = await pool.request().input("tableName", sql.NVarChar(128), tableName)
-    .query(`
+  const result = await pool
+    .request()
+    .input("tableName", sql.NVarChar(128), tableName).query(`
       SELECT COUNT(1) AS cnt
       FROM sys.tables
       WHERE object_id = OBJECT_ID(N'dbo.' + @tableName)
@@ -251,7 +256,11 @@ router.get(
       });
     } catch (err) {
       console.error("[engineering-dashboard]", err);
-      res.status(500).json({ error: "Failed to load engineering dashboard. Please try again." });
+      res
+        .status(500)
+        .json({
+          error: "Failed to load engineering dashboard. Please try again.",
+        });
     }
   },
 );
@@ -261,24 +270,49 @@ router.get("/work-done", cache(WORK_DONE_CACHE, 120), async (req, res) => {
     const pool = getPool();
     if (!(await ensureWorkDoneTable(pool, res))) return;
 
-    const page  = Math.max(1, parseInt(req.query.page  || "1",  10));
-    const limit = Math.min(200, Math.max(1, parseInt(req.query.limit || "100", 10)));
+    const page = Math.max(1, parseInt(req.query.page || "1", 10));
+    const limit = Math.min(
+      500,
+      Math.max(1, parseInt(req.query.limit || "100", 10)),
+    );
     const offset = (page - 1) * limit;
 
+    // Optional status filter (e.g. ?status=Approved for expense booking picker)
+    const statusFilter = req.query.status
+      ? String(req.query.status).trim()
+      : null;
+    const whereClause = statusFilter
+      ? `WHERE ISNULL(wd.Status, 'Draft') = @statusFilter`
+      : "";
+    const countWhere = statusFilter
+      ? `WHERE ISNULL(Status, 'Draft') = @statusFilter`
+      : "";
+
+    const dataReq = pool
+      .request()
+      .input("limit", sql.Int, limit)
+      .input("offset", sql.Int, offset);
+    if (statusFilter)
+      dataReq.input("statusFilter", sql.NVarChar(50), statusFilter);
+
+    const countReq = pool.request();
+    if (statusFilter)
+      countReq.input("statusFilter", sql.NVarChar(50), statusFilter);
+
     const [dataResult, countResult] = await Promise.all([
-      pool.request()
-        .input("limit",  sql.Int, limit)
-        .input("offset", sql.Int, offset)
-        .query(`
-          ${selectWorkDoneSql}
-          ORDER BY ISNULL(wd.UpdatedAt, wd.CreatedAt) DESC
-          OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
-        `),
-      pool.request().query(`SELECT COUNT(1) AS total FROM dbo.EngineeringWorkDone`),
+      dataReq.query(`
+        ${selectWorkDoneSql}
+        ${whereClause}
+        ORDER BY ISNULL(wd.UpdatedAt, wd.CreatedAt) DESC
+        OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
+      `),
+      countReq.query(
+        `SELECT COUNT(1) AS total FROM dbo.EngineeringWorkDone ${countWhere}`,
+      ),
     ]);
 
     res.json({
-      data:  dataResult.recordset,
+      data: dataResult.recordset,
       total: countResult.recordset[0].total,
       page,
       limit,
@@ -324,14 +358,20 @@ router.post("/work-done", async (req, res) => {
     const docTypeId = toIntOrNull(body.DocTypeId);
 
     if (!docTypeId && !body.DocNo) {
-      return res.status(400).json({ error: "Either DocTypeId or DocNo is required." });
+      return res
+        .status(400)
+        .json({ error: "Either DocTypeId or DocNo is required." });
     }
 
-    const quantity   = toNumber(body.QuantityDone);
-    const rate       = toNumber(body.RatePerUnit);
+    const quantity = toNumber(body.QuantityDone);
+    const rate = toNumber(body.RatePerUnit);
     const deductions = toNumber(body.Deductions);
-    const gross      = body.GrossAmount    != null ? toNumber(body.GrossAmount)    : quantity * rate;
-    const certified  = body.CertifiedAmount != null ? toNumber(body.CertifiedAmount) : gross - deductions;
+    const gross =
+      body.GrossAmount != null ? toNumber(body.GrossAmount) : quantity * rate;
+    const certified =
+      body.CertifiedAmount != null
+        ? toNumber(body.CertifiedAmount)
+        : gross - deductions;
 
     transaction = pool.transaction();
     await transaction.begin();
@@ -340,34 +380,38 @@ router.post("/work-done", async (req, res) => {
     if (docTypeId) {
       finalDocNo = await lockNextDocNumber(pool, sql, {
         docTypeId,
-        finYear:   body.FinYear || null,
+        finYear: body.FinYear || null,
         tableName: WORK_DONE_TABLE,
-        issuedBy:  userEmail,
+        issuedBy: userEmail,
       });
     }
 
     const result = await transaction
       .request()
-      .input("DocNo",              sql.NVarChar(100),     finalDocNo)
-      .input("DocTypeId",          sql.Int,               docTypeId)
-      .input("DocDate",            sql.Date,              body.DocDate || null)
-      .input("CompanyId",          sql.Int,               toIntOrNull(body.CompanyId))
-      .input("ProjectId",          sql.Int,               toIntOrNull(body.ProjectId))
-      .input("FinYear",            sql.NVarChar(20),      body.FinYear || null)
-      .input("SupplierId",         sql.Int,               toIntOrNull(body.SupplierId))
-      .input("WorkOrderID",        sql.Int,               toIntOrNull(body.WorkOrderID))
-      .input("PeriodFrom",         sql.Date,              body.PeriodFrom || null)
-      .input("PeriodTo",           sql.Date,              body.PeriodTo   || null)
-      .input("DescriptionOfWork",  sql.NVarChar(sql.MAX), body.DescriptionOfWork || null)
-      .input("QuantityDone",       sql.Decimal(18, 4),    quantity)
-      .input("Unit",               sql.NVarChar(50),      body.Unit || null)
-      .input("RatePerUnit",        sql.Decimal(18, 4),    rate)
-      .input("GrossAmount",        sql.Decimal(18, 2),    gross)
-      .input("Deductions",         sql.Decimal(18, 2),    deductions)
-      .input("CertifiedAmount",    sql.Decimal(18, 2),    certified)
-      .input("Status",             sql.NVarChar(50),      body.Status || "Draft")
-      .input("Remarks",            sql.NVarChar(sql.MAX), body.Remarks || null)
-      .input("CreatedBy",          sql.NVarChar(100),     userEmail).query(`
+      .input("DocNo", sql.NVarChar(100), finalDocNo)
+      .input("DocTypeId", sql.Int, docTypeId)
+      .input("DocDate", sql.Date, body.DocDate || null)
+      .input("CompanyId", sql.Int, toIntOrNull(body.CompanyId))
+      .input("ProjectId", sql.Int, toIntOrNull(body.ProjectId))
+      .input("FinYear", sql.NVarChar(20), body.FinYear || null)
+      .input("SupplierId", sql.Int, toIntOrNull(body.SupplierId))
+      .input("WorkOrderID", sql.Int, toIntOrNull(body.WorkOrderID))
+      .input("PeriodFrom", sql.Date, body.PeriodFrom || null)
+      .input("PeriodTo", sql.Date, body.PeriodTo || null)
+      .input(
+        "DescriptionOfWork",
+        sql.NVarChar(sql.MAX),
+        body.DescriptionOfWork || null,
+      )
+      .input("QuantityDone", sql.Decimal(18, 4), quantity)
+      .input("Unit", sql.NVarChar(50), body.Unit || null)
+      .input("RatePerUnit", sql.Decimal(18, 4), rate)
+      .input("GrossAmount", sql.Decimal(18, 2), gross)
+      .input("Deductions", sql.Decimal(18, 2), deductions)
+      .input("CertifiedAmount", sql.Decimal(18, 2), certified)
+      .input("Status", sql.NVarChar(50), body.Status || "Draft")
+      .input("Remarks", sql.NVarChar(sql.MAX), body.Remarks || null)
+      .input("CreatedBy", sql.NVarChar(100), userEmail).query(`
         INSERT INTO dbo.EngineeringWorkDone
           (DocNo, DocTypeId, DocDate, CompanyId, ProjectId, FinYear, SupplierId,
            WorkOrderID, PeriodFrom, PeriodTo, DescriptionOfWork, QuantityDone,
@@ -396,7 +440,9 @@ router.post("/work-done", async (req, res) => {
       DocNo: finalDocNo,
     });
   } catch (err) {
-    try { if (transaction) await transaction.rollback(); } catch (_) {}
+    try {
+      if (transaction) await transaction.rollback();
+    } catch (_) {}
     console.error("[POST /engineering/work-done]", err);
     res.status(500).json({ error: "Failed to create work done entry." });
   }
@@ -417,35 +463,43 @@ router.put("/work-done/:id", async (req, res) => {
     if (!(await ensureWorkDoneTable(pool, res))) return;
 
     const body = req.body || {};
-    const quantity   = toNumber(body.QuantityDone);
-    const rate       = toNumber(body.RatePerUnit);
+    const quantity = toNumber(body.QuantityDone);
+    const rate = toNumber(body.RatePerUnit);
     const deductions = toNumber(body.Deductions);
-    const gross      = body.GrossAmount    != null ? toNumber(body.GrossAmount)    : quantity * rate;
-    const certified  = body.CertifiedAmount != null ? toNumber(body.CertifiedAmount) : gross - deductions;
+    const gross =
+      body.GrossAmount != null ? toNumber(body.GrossAmount) : quantity * rate;
+    const certified =
+      body.CertifiedAmount != null
+        ? toNumber(body.CertifiedAmount)
+        : gross - deductions;
 
     const result = await pool
       .request()
-      .input("ID",                 sql.Int,               req.params.id)
-      .input("DocNo",              sql.NVarChar(100),     body.DocNo || null)
-      .input("DocTypeId",          sql.Int,               toIntOrNull(body.DocTypeId))
-      .input("DocDate",            sql.Date,              body.DocDate || null)
-      .input("CompanyId",          sql.Int,               toIntOrNull(body.CompanyId))
-      .input("ProjectId",          sql.Int,               toIntOrNull(body.ProjectId))
-      .input("FinYear",            sql.NVarChar(20),      body.FinYear || null)
-      .input("SupplierId",         sql.Int,               toIntOrNull(body.SupplierId))
-      .input("WorkOrderID",        sql.Int,               toIntOrNull(body.WorkOrderID))
-      .input("PeriodFrom",         sql.Date,              body.PeriodFrom || null)
-      .input("PeriodTo",           sql.Date,              body.PeriodTo   || null)
-      .input("DescriptionOfWork",  sql.NVarChar(sql.MAX), body.DescriptionOfWork || null)
-      .input("QuantityDone",       sql.Decimal(18, 4),    quantity)
-      .input("Unit",               sql.NVarChar(50),      body.Unit || null)
-      .input("RatePerUnit",        sql.Decimal(18, 4),    rate)
-      .input("GrossAmount",        sql.Decimal(18, 2),    gross)
-      .input("Deductions",         sql.Decimal(18, 2),    deductions)
-      .input("CertifiedAmount",    sql.Decimal(18, 2),    certified)
-      .input("Status",             sql.NVarChar(50),      body.Status || "Draft")
-      .input("Remarks",            sql.NVarChar(sql.MAX), body.Remarks || null)
-      .input("UpdatedBy",          sql.NVarChar(100),     userEmail).query(`
+      .input("ID", sql.Int, req.params.id)
+      .input("DocNo", sql.NVarChar(100), body.DocNo || null)
+      .input("DocTypeId", sql.Int, toIntOrNull(body.DocTypeId))
+      .input("DocDate", sql.Date, body.DocDate || null)
+      .input("CompanyId", sql.Int, toIntOrNull(body.CompanyId))
+      .input("ProjectId", sql.Int, toIntOrNull(body.ProjectId))
+      .input("FinYear", sql.NVarChar(20), body.FinYear || null)
+      .input("SupplierId", sql.Int, toIntOrNull(body.SupplierId))
+      .input("WorkOrderID", sql.Int, toIntOrNull(body.WorkOrderID))
+      .input("PeriodFrom", sql.Date, body.PeriodFrom || null)
+      .input("PeriodTo", sql.Date, body.PeriodTo || null)
+      .input(
+        "DescriptionOfWork",
+        sql.NVarChar(sql.MAX),
+        body.DescriptionOfWork || null,
+      )
+      .input("QuantityDone", sql.Decimal(18, 4), quantity)
+      .input("Unit", sql.NVarChar(50), body.Unit || null)
+      .input("RatePerUnit", sql.Decimal(18, 4), rate)
+      .input("GrossAmount", sql.Decimal(18, 2), gross)
+      .input("Deductions", sql.Decimal(18, 2), deductions)
+      .input("CertifiedAmount", sql.Decimal(18, 2), certified)
+      .input("Status", sql.NVarChar(50), body.Status || "Draft")
+      .input("Remarks", sql.NVarChar(sql.MAX), body.Remarks || null)
+      .input("UpdatedBy", sql.NVarChar(100), userEmail).query(`
         UPDATE dbo.EngineeringWorkDone SET
           DocNo = @DocNo,
           DocTypeId = @DocTypeId,
@@ -488,7 +542,11 @@ router.delete("/work-done/:id", async (req, res) => {
   try {
     const role = req.user?.role;
     if (!role || !["admin", "manager"].includes(role.toLowerCase())) {
-      return res.status(403).json({ error: "Insufficient permissions to delete work done entries." });
+      return res
+        .status(403)
+        .json({
+          error: "Insufficient permissions to delete work done entries.",
+        });
     }
 
     const userEmail = requireUserEmail(req, res);
@@ -499,9 +557,8 @@ router.delete("/work-done/:id", async (req, res) => {
 
     const result = await pool
       .request()
-      .input("ID",        sql.Int,          req.params.id)
-      .input("DeletedBy", sql.NVarChar(100), userEmail)
-      .query(`
+      .input("ID", sql.Int, req.params.id)
+      .input("DeletedBy", sql.NVarChar(100), userEmail).query(`
         UPDATE dbo.EngineeringWorkDone
         SET Status    = 'Deleted',
             UpdatedBy = @DeletedBy,
@@ -510,7 +567,9 @@ router.delete("/work-done/:id", async (req, res) => {
       `);
 
     if (result.rowsAffected[0] === 0) {
-      return res.status(404).json({ error: "Work Done entry not found or already deleted." });
+      return res
+        .status(404)
+        .json({ error: "Work Done entry not found or already deleted." });
     }
 
     await bumpCacheVersion(WORK_DONE_CACHE);
@@ -527,7 +586,13 @@ router.put("/work-done/:id/submit", async (req, res) => {
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-    const result = await transition("work-done", id, "Pending", userEmail, req.user?.role);
+    const result = await transition(
+      "work-done",
+      id,
+      "Pending",
+      userEmail,
+      req.user?.role,
+    );
     await bumpCacheVersion(WORK_DONE_CACHE);
     await bumpCacheVersion("engineering-dashboard");
     res.json({ message: "Work Done submitted for approval", ...result });
@@ -541,12 +606,20 @@ router.put("/work-done/:id/approve", async (req, res) => {
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-    const result = await transition("work-done", id, "Approved", userEmail, req.user?.role);
+    const result = await transition(
+      "work-done",
+      id,
+      "Approved",
+      userEmail,
+      req.user?.role,
+    );
     await bumpCacheVersion(WORK_DONE_CACHE);
     await bumpCacheVersion("engineering-dashboard");
     res.json({ message: "Work Done approved", ...result });
   } catch (err) {
-    res.status(err.message.includes("not authorized") ? 403 : 400).json({ error: err.message });
+    res
+      .status(err.message.includes("not authorized") ? 403 : 400)
+      .json({ error: err.message });
   }
 });
 
@@ -556,13 +629,20 @@ router.put("/work-done/:id/reject", async (req, res) => {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
     const result = await transition(
-      "work-done", id, "Rejected", userEmail, req.user?.role, req.body?.note || null,
+      "work-done",
+      id,
+      "Rejected",
+      userEmail,
+      req.user?.role,
+      req.body?.note || null,
     );
     await bumpCacheVersion(WORK_DONE_CACHE);
     await bumpCacheVersion("engineering-dashboard");
     res.json({ message: "Work Done rejected", ...result });
   } catch (err) {
-    res.status(err.message.includes("not authorized") ? 403 : 400).json({ error: err.message });
+    res
+      .status(err.message.includes("not authorized") ? 403 : 400)
+      .json({ error: err.message });
   }
 });
 
@@ -590,7 +670,10 @@ router.get(
       `);
       res.json(result.recordset);
     } catch (err) {
-      console.error("[GET /engineering/work-orders-with-activities]", err.message);
+      console.error(
+        "[GET /engineering/work-orders-with-activities]",
+        err.message,
+      );
       res.status(500).json({ error: err.message });
     }
   },
@@ -601,7 +684,8 @@ router.get("/work-order-summary/:woId", async (req, res) => {
   try {
     const pool = getPool();
     const woId = parseInt(req.params.woId, 10);
-    if (!Number.isFinite(woId)) return res.status(400).json({ error: "Invalid WO ID" });
+    if (!Number.isFinite(woId))
+      return res.status(400).json({ error: "Invalid WO ID" });
 
     const result = await pool
       .request()
@@ -617,7 +701,11 @@ router.get("/work-order-summary/:woId", async (req, res) => {
       `);
 
     const row = result.recordset[0] ?? {
-      ActivityCount: 0, GrossAmount: 0, LabourAmount: 0, MaterialAmount: 0, NetAmount: 0,
+      ActivityCount: 0,
+      GrossAmount: 0,
+      LabourAmount: 0,
+      MaterialAmount: 0,
+      NetAmount: 0,
     };
     res.json(row);
   } catch (err) {
