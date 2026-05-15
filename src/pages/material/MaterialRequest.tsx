@@ -89,9 +89,9 @@ const blankCartItem = (): CartItem => ({
 const PRIORITY_OPTIONS = ["Low", "Normal", "High", "Urgent"];
 
 const PRIORITY_COLOR: Record<string, string> = {
-  Low:    "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
+  Low: "bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300",
   Normal: "bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300",
-  High:   "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
+  High: "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300",
   Urgent: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
 };
 
@@ -189,7 +189,7 @@ export default function MaterialRequest() {
     queryFn: async () => {
       const data = await mrApi.getMRUomOptions();
       return (Array.isArray(data) ? data : []).filter(
-        (u: any) => u.IsActive === true || u.IsActive === 1
+        (u: any) => u.IsActive === true || u.IsActive === 1,
       );
     },
     staleTime: 5 * 60_000,
@@ -210,7 +210,12 @@ export default function MaterialRequest() {
   // ── Auto-select active fin year ──────────────────────────────────────────────
 
   useEffect(() => {
-    if (finYears.length > 0 && !header.finYearId && viewMode === "form" && !editingId) {
+    if (
+      finYears.length > 0 &&
+      !header.finYearId &&
+      viewMode === "form" &&
+      !editingId
+    ) {
       const active = (finYears as any[]).find((f) => f.isActive);
       if (active) setH("finYearId", String(active.id));
     }
@@ -235,10 +240,10 @@ export default function MaterialRequest() {
   const updateCartItem = useCallback(
     <K extends keyof CartItem>(key: string, field: K, value: CartItem[K]) => {
       setCart((prev) =>
-        prev.map((ci) => (ci._key === key ? { ...ci, [field]: value } : ci))
+        prev.map((ci) => (ci._key === key ? { ...ci, [field]: value } : ci)),
       );
     },
-    []
+    [],
   );
 
   const pickItem = useCallback(
@@ -257,11 +262,11 @@ export default function MaterialRequest() {
                 DefaultUOM: defaultUom,
                 UOMCode: defaultUom,
               }
-            : ci
-        )
+            : ci,
+        ),
       );
     },
-    [itemMap, uoms]
+    [itemMap, uoms],
   );
 
   const addCartRow = () => setCart((p) => [...p, blankCartItem()]);
@@ -275,20 +280,20 @@ export default function MaterialRequest() {
       cart.length > 0 &&
       cart.every(
         (ci) =>
-          ci.ItemId && ci.UOMCode && ci.Quantity && Number(ci.Quantity) > 0
+          ci.ItemId && ci.UOMCode && ci.Quantity && Number(ci.Quantity) > 0,
       ),
-    [cart]
+    [cart],
   );
 
   const headerIsValid = useMemo(
     () =>
       Boolean(
         header.companyId &&
-          header.projectId &&
-          header.requestDate &&
-          header.reason.trim()
+        header.projectId &&
+        header.requestDate &&
+        header.reason.trim(),
       ),
-    [header]
+    [header],
   );
 
   const canSave = headerIsValid && cartIsValid;
@@ -306,7 +311,8 @@ export default function MaterialRequest() {
       invalidate();
       goToList();
     },
-    onError: (err: any) => toast.error(err.message || "Failed to create request"),
+    onError: (err: any) =>
+      toast.error(err.message || "Failed to create request"),
   });
 
   const updateMutation = useMutation({
@@ -316,7 +322,8 @@ export default function MaterialRequest() {
       invalidate();
       goToList();
     },
-    onError: (err: any) => toast.error(err.message || "Failed to update request"),
+    onError: (err: any) =>
+      toast.error(err.message || "Failed to update request"),
   });
 
   const deleteMutation = useMutation({
@@ -325,7 +332,8 @@ export default function MaterialRequest() {
       toast.success("Material Request deleted");
       invalidate();
     },
-    onError: (err: any) => toast.error(err.message || "Failed to delete request"),
+    onError: (err: any) =>
+      toast.error(err.message || "Failed to delete request"),
   });
 
   const submitMutation = useMutation({
@@ -352,22 +360,26 @@ export default function MaterialRequest() {
 
   const handleEdit = (record: any) => {
     setHeader({
-      companyId:     String(record.CompanyId ?? ""),
-      projectId:     String(record.ProjectId ?? ""),
-      finYearId:     String(record.FinYearId ?? ""),
-      requestDate:   record.RequestDate ? String(record.RequestDate).slice(0, 10) : defaultHeader.requestDate,
-      requiredByDate:record.RequiredByDate ? String(record.RequiredByDate).slice(0, 10) : "",
-      priority:      record.Priority ?? "Normal",
-      reason:        record.Reason ?? "",
-      remarks:       record.Remarks ?? "",
+      companyId: String(record.CompanyId ?? ""),
+      projectId: String(record.ProjectId ?? ""),
+      finYearId: String(record.FinYearId ?? ""),
+      requestDate: record.RequestDate
+        ? String(record.RequestDate).slice(0, 10)
+        : defaultHeader.requestDate,
+      requiredByDate: record.RequiredByDate
+        ? String(record.RequiredByDate).slice(0, 10)
+        : "",
+      priority: record.Priority ?? "Normal",
+      reason: record.Reason ?? "",
+      remarks: record.Remarks ?? "",
     });
     const items: CartItem[] = (record.items || []).map((it: any) => ({
       _key: crypto.randomUUID(),
-      ItemId:   String(it.ItemId ?? ""),
+      ItemId: String(it.ItemId ?? ""),
       ItemName: it.ItemName,
-      UOMCode:  String(it.UOMCode ?? ""),
+      UOMCode: String(it.UOMCode ?? ""),
       Quantity: String(it.Quantity ?? ""),
-      Remarks:  it.Remarks ?? "",
+      Remarks: it.Remarks ?? "",
       AvailableStock: Number(itemMap[it.ItemId]?.AvailableStock ?? 0),
     }));
     setCart(items.length > 0 ? items : [blankCartItem()]);
@@ -392,20 +404,20 @@ export default function MaterialRequest() {
       return;
     }
     const payload = {
-      CompanyId:     Number(header.companyId)  || null,
-      ProjectId:     Number(header.projectId)  || null,
-      FinYearId:     Number(header.finYearId)  || null,
-      RequestDate:   header.requestDate,
-      RequiredByDate:header.requiredByDate || null,
-      Priority:      header.priority,
-      Reason:        header.reason,
-      Remarks:       header.remarks || null,
+      CompanyId: Number(header.companyId) || null,
+      ProjectId: Number(header.projectId) || null,
+      FinYearId: Number(header.finYearId) || null,
+      RequestDate: header.requestDate,
+      RequiredByDate: header.requiredByDate || null,
+      Priority: header.priority,
+      Reason: header.reason,
+      Remarks: header.remarks || null,
       items: cart.map((ci) => ({
-        ItemId:   ci.ItemId,
+        ItemId: ci.ItemId,
         ItemName: ci.ItemName || itemMap[ci.ItemId]?.M_Name || null,
-        UOMCode:  ci.UOMCode,
+        UOMCode: ci.UOMCode,
         Quantity: Number(ci.Quantity),
-        Remarks:  ci.Remarks || null,
+        Remarks: ci.Remarks || null,
       })),
     };
     editingId ? updateMutation.mutate(payload) : createMutation.mutate(payload);
@@ -431,7 +443,9 @@ export default function MaterialRequest() {
       cell: ({ getValue }) => {
         const v = (getValue() as string) || "Normal";
         return (
-          <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${PRIORITY_COLOR[v] ?? PRIORITY_COLOR.Normal}`}>
+          <span
+            className={`text-xs font-semibold px-2 py-0.5 rounded-full ${PRIORITY_COLOR[v] ?? PRIORITY_COLOR.Normal}`}
+          >
             {v}
           </span>
         );
@@ -466,7 +480,9 @@ export default function MaterialRequest() {
       cell: ({ row }) => (
         <div className="flex items-center gap-1.5">
           <ShoppingCart size={12} className="text-muted-foreground" />
-          <span className="font-semibold text-sm">{row.original.ItemCount || 0}</span>
+          <span className="font-semibold text-sm">
+            {row.original.ItemCount || 0}
+          </span>
           <span className="text-xs text-muted-foreground">
             ({(row.original.TotalQty || 0).toFixed(2)} units)
           </span>
@@ -478,7 +494,9 @@ export default function MaterialRequest() {
       accessorKey: "RequestDate",
       header: "Requested",
       cell: ({ getValue }) => (
-        <span className="text-sm text-muted-foreground">{fmtDate(getValue() as string)}</span>
+        <span className="text-sm text-muted-foreground">
+          {fmtDate(getValue() as string)}
+        </span>
       ),
     },
     {
@@ -489,7 +507,9 @@ export default function MaterialRequest() {
         const v = getValue() as string | null;
         const isUrgent = v && new Date(v) < new Date();
         return (
-          <span className={`text-sm ${isUrgent ? "text-destructive font-semibold" : "text-muted-foreground"}`}>
+          <span
+            className={`text-sm ${isUrgent ? "text-destructive font-semibold" : "text-muted-foreground"}`}
+          >
             {fmtDate(v)}
           </span>
         );
@@ -556,7 +576,9 @@ export default function MaterialRequest() {
         <CardHeader className="pb-3 border-b border-border">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
-              <CardTitle className="text-base font-semibold">Request Register</CardTitle>
+              <CardTitle className="text-base font-semibold">
+                Request Register
+              </CardTitle>
               {!loadingList && (
                 <p className="text-xs text-muted-foreground mt-0.5">
                   {totalCount} record{totalCount !== 1 ? "s" : ""}
@@ -564,10 +586,16 @@ export default function MaterialRequest() {
               )}
             </div>
             <div className="relative w-full sm:w-64">
-              <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Search
+                size={13}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+              />
               <Input
                 value={search}
-                onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setPage(1);
+                }}
                 placeholder="Search doc no, company…"
                 className="pl-9 h-9 text-sm"
               />
@@ -594,10 +622,22 @@ export default function MaterialRequest() {
                     Page {page} of {totalPages}
                   </span>
                   <div className="flex gap-2">
-                    <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(p - 1, 1))} disabled={page <= 1}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setPage((p) => Math.max(p - 1, 1))}
+                      disabled={page <= 1}
+                    >
                       Previous
                     </Button>
-                    <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.min(p + 1, totalPages))} disabled={page >= totalPages}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() =>
+                        setPage((p) => Math.min(p + 1, totalPages))
+                      }
+                      disabled={page >= totalPages}
+                    >
                       Next
                     </Button>
                   </div>
@@ -618,10 +658,19 @@ export default function MaterialRequest() {
       <Card className="border-border shadow-sm">
         <CardHeader className="pb-3 border-b border-border bg-muted/20 flex flex-row items-center justify-between">
           <CardTitle className="text-base font-semibold flex items-center gap-2">
-            {editingId ? <Edit3 size={15} className="text-primary" /> : <FileText size={15} className="text-primary" />}
+            {editingId ? (
+              <Edit3 size={15} className="text-primary" />
+            ) : (
+              <FileText size={15} className="text-primary" />
+            )}
             {editingId ? "Edit Material Request" : "New Material Request"}
           </CardTitle>
-          <Button variant="ghost" size="icon" onClick={goToList} className="h-8 w-8">
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={goToList}
+            className="h-8 w-8"
+          >
             <X size={15} />
           </Button>
         </CardHeader>
@@ -642,50 +691,83 @@ export default function MaterialRequest() {
                 {numberPreview.nextDocNo}
               </span>
             ) : (
-              <span className="text-sm text-muted-foreground/50 italic">Auto-generated on save</span>
+              <span className="text-sm text-muted-foreground/50 italic">
+                Auto-generated on save
+              </span>
             )}
           </div>
 
           {/* Row 1: Company | Project | Fin Year | Priority */}
           <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
             <Field label="Company" required>
-              <Select value={header.companyId} onValueChange={(v) => setH("companyId", v)}>
+              <Select
+                value={header.companyId}
+                onValueChange={(v) => setH("companyId", v)}
+              >
                 <SelectTrigger className="h-9 gap-2">
-                  <Building2 size={13} className="text-muted-foreground shrink-0" />
+                  <Building2
+                    size={13}
+                    className="text-muted-foreground shrink-0"
+                  />
                   <SelectValue placeholder="Select company" />
                 </SelectTrigger>
                 <SelectContent>
                   {(companies as any[]).map((c) => (
-                    <SelectItem key={c.id} value={String(c.id)}>{c.label ?? c.name}</SelectItem>
+                    <SelectItem key={c.id} value={String(c.id)}>
+                      {c.label ?? c.name}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </Field>
 
             <Field label="Project" required>
-              <Select value={header.projectId} onValueChange={(v) => setH("projectId", v)}>
+              <Select
+                value={header.projectId}
+                onValueChange={(v) => setH("projectId", v)}
+              >
                 <SelectTrigger className="h-9 gap-2">
-                  <FolderOpen size={13} className="text-muted-foreground shrink-0" />
+                  <FolderOpen
+                    size={13}
+                    className="text-muted-foreground shrink-0"
+                  />
                   <SelectValue placeholder="Select project" />
                 </SelectTrigger>
                 <SelectContent>
                   {(projects as any[]).map((p) => (
-                    <SelectItem key={p.id} value={String(p.id)}>{p.name}</SelectItem>
+                    <SelectItem key={p.id} value={String(p.id)}>
+                      {p.name}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </Field>
 
             <Field label="Financial Year">
-              <Select value={header.finYearId} onValueChange={(v) => setH("finYearId", v)}>
+              <Select
+                value={header.finYearId}
+                onValueChange={(v) => setH("finYearId", v)}
+              >
                 <SelectTrigger className="h-9 gap-2">
-                  <Calendar size={13} className="text-muted-foreground shrink-0" />
+                  <Calendar
+                    size={13}
+                    className="text-muted-foreground shrink-0"
+                  />
                   <SelectValue placeholder="Select fin year" />
                 </SelectTrigger>
                 <SelectContent>
                   {(finYears as any[]).map((fy) => (
-                    <SelectItem key={fy.id} value={String(fy.id)} disabled={fy.isLocked}>
-                      {fy.name}{fy.isLocked && <span className="ml-1 text-xs text-muted-foreground">(locked)</span>}
+                    <SelectItem
+                      key={fy.id}
+                      value={String(fy.id)}
+                      disabled={fy.isLocked}
+                    >
+                      {fy.name}
+                      {fy.isLocked && (
+                        <span className="ml-1 text-xs text-muted-foreground">
+                          (locked)
+                        </span>
+                      )}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -693,14 +775,19 @@ export default function MaterialRequest() {
             </Field>
 
             <Field label="Priority">
-              <Select value={header.priority} onValueChange={(v) => setH("priority", v)}>
+              <Select
+                value={header.priority}
+                onValueChange={(v) => setH("priority", v)}
+              >
                 <SelectTrigger className="h-9 gap-2">
                   <Flag size={13} className="text-muted-foreground shrink-0" />
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   {PRIORITY_OPTIONS.map((p) => (
-                    <SelectItem key={p} value={p}>{p}</SelectItem>
+                    <SelectItem key={p} value={p}>
+                      {p}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -711,7 +798,10 @@ export default function MaterialRequest() {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <Field label="Request Date" required>
               <div className="relative">
-                <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                <CalendarDays
+                  size={13}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                />
                 <Input
                   type="date"
                   value={header.requestDate}
@@ -722,7 +812,10 @@ export default function MaterialRequest() {
             </Field>
             <Field label="Required By Date">
               <div className="relative">
-                <CalendarDays size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                <CalendarDays
+                  size={13}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                />
                 <Input
                   type="date"
                   value={header.requiredByDate}
@@ -759,129 +852,214 @@ export default function MaterialRequest() {
 
       {/* Items card */}
       <Card className="border-border shadow-sm">
-        <CardHeader className="pb-3 border-b border-border bg-muted/20 flex flex-row items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <ShoppingCart size={15} className="text-primary" />
-            <CardTitle className="text-base font-semibold">Requested Items</CardTitle>
-            <span className="px-2 py-0.5 rounded-full bg-primary/10 text-primary text-xs font-semibold">
-              {cart.length}
-            </span>
+        <CardHeader className="px-6 py-4 border-b border-border flex flex-row items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+              <ShoppingCart size={15} className="text-primary" />
+            </div>
+            <div>
+              <CardTitle className="text-sm font-semibold">
+                Requested Items
+              </CardTitle>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {cart.length} line item{cart.length !== 1 ? "s" : ""}
+              </p>
+            </div>
           </div>
-          <Button type="button" variant="outline" size="sm" onClick={addCartRow} className="gap-1.5 h-8 text-xs">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={addCartRow}
+            className="gap-2 h-9 px-4"
+          >
             <Plus size={13} /> Add Item
           </Button>
         </CardHeader>
 
-        <CardContent className="p-4 space-y-3">
+        <CardContent className="p-6 space-y-4">
+          {/* Column headers — visible on md+ */}
+          <div className="hidden md:grid md:grid-cols-[2fr_1fr_1fr_auto] gap-4 px-1 pb-1 border-b border-border/50">
+            <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+              Item
+            </span>
+            <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+              Unit (UOM)
+            </span>
+            <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+              Quantity
+            </span>
+            <span className="w-8" />
+          </div>
+
           {cart.map((ci, idx) => (
-            <div key={ci._key} className="rounded-lg border border-border bg-muted/10 hover:bg-muted/20 transition-colors">
-              {/* Top row: index + item select + remove */}
-              <div className="flex items-center gap-3 px-3 pt-3 pb-2">
-                <span className="w-5 h-5 rounded-full bg-muted flex items-center justify-center text-[10px] font-bold text-muted-foreground shrink-0">
-                  {idx + 1}
-                </span>
-                <div className="flex-1 min-w-0">
-                  <Select value={ci.ItemId} onValueChange={(v) => pickItem(ci._key, v)}>
-                    <SelectTrigger className="h-9">
-                      <div className="flex items-center gap-2 min-w-0 text-sm">
-                        <Box size={12} className="text-muted-foreground shrink-0" />
-                        <SelectValue placeholder="Select item" />
-                      </div>
-                    </SelectTrigger>
-                    <SelectContent className="max-h-64">
-                      {(itemOptions as any[]).map((item) => (
-                        <SelectItem key={item.M_Id} value={String(item.M_Id)}>
-                          <div className="flex flex-col">
-                            <span>{item.M_Name}</span>
-                            <span className="text-xs text-muted-foreground">
-                              Stock: {Number(item.AvailableStock).toFixed(2)}
-                              {item.M_Group && ` · ${item.M_Group}`}
-                            </span>
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => removeCartRow(ci._key)}
-                  disabled={cart.length === 1}
-                  title="Remove"
-                  className="p-1.5 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-30"
-                >
-                  <X size={14} />
-                </button>
+            <div
+              key={ci._key}
+              className="group relative rounded-xl border border-border bg-card hover:border-primary/30 hover:shadow-sm transition-all duration-150"
+            >
+              {/* Row number pill */}
+              <div className="absolute -left-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-muted border border-border flex items-center justify-center text-[10px] font-bold text-muted-foreground shadow-sm">
+                {idx + 1}
               </div>
 
-              {/* Bottom row: UOM + Qty */}
-              <div className="grid grid-cols-2 gap-3 px-3 pb-3">
-                <div className="space-y-1">
-                  <label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-                    Unit (UOM) *
-                  </label>
-                  <Select value={ci.UOMCode} onValueChange={(v) => updateCartItem(ci._key, "UOMCode", v)}>
-                    <SelectTrigger className="h-9">
-                      <div className="flex items-center gap-2 min-w-0 text-sm">
-                        <Ruler size={12} className="text-muted-foreground shrink-0" />
-                        <SelectValue placeholder="Select UOM" />
-                      </div>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(uoms as any[]).map((u) => (
-                        <SelectItem key={u.UOMCode} value={u.UOMCode}>
-                          {u.UOMName}
-                          {u.Symbol && <span className="text-muted-foreground ml-1">({u.Symbol})</span>}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1">
-                  <label className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-                    Quantity *
-                  </label>
-                  <div className="relative">
-                    <Hash size={12} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                    <Input
-                      type="number"
-                      min={0}
-                      step="0.01"
-                      value={ci.Quantity}
-                      onChange={(e) => updateCartItem(ci._key, "Quantity", e.target.value)}
-                      className="pl-8 h-9 font-mono text-sm"
-                      placeholder="0.00"
-                    />
+              <div className="p-4 pl-5">
+                {/* Main row: item | uom | qty | remove — all on one line on desktop */}
+                <div className="grid grid-cols-1 md:grid-cols-[2fr_1fr_1fr_auto] gap-3 items-start">
+                  {/* Item selector */}
+                  <div className="space-y-1.5">
+                    <label className="md:hidden text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                      Item *
+                    </label>
+                    <Select
+                      value={ci.ItemId}
+                      onValueChange={(v) => pickItem(ci._key, v)}
+                    >
+                      <SelectTrigger className="h-10">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Box
+                            size={13}
+                            className="text-muted-foreground shrink-0"
+                          />
+                          <SelectValue placeholder="Select item…" />
+                        </div>
+                      </SelectTrigger>
+                      <SelectContent className="max-h-72">
+                        {(itemOptions as any[]).map((item) => (
+                          <SelectItem key={item.M_Id} value={String(item.M_Id)}>
+                            <div className="flex flex-col py-0.5">
+                              <span className="font-medium">{item.M_Name}</span>
+                              <span className="text-xs text-muted-foreground">
+                                Stock: {Number(item.AvailableStock).toFixed(2)}
+                                {item.M_Group && ` · ${item.M_Group}`}
+                              </span>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* UOM selector */}
+                  <div className="space-y-1.5">
+                    <label className="md:hidden text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                      Unit (UOM) *
+                    </label>
+                    <Select
+                      value={ci.UOMCode}
+                      onValueChange={(v) =>
+                        updateCartItem(ci._key, "UOMCode", v)
+                      }
+                    >
+                      <SelectTrigger className="h-10">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Ruler
+                            size={12}
+                            className="text-muted-foreground shrink-0"
+                          />
+                          <SelectValue placeholder="UOM…" />
+                        </div>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {ci.DefaultUOM && uomMap[ci.DefaultUOM] && (
+                          <SelectItem
+                            key={"default-" + ci.DefaultUOM}
+                            value={ci.DefaultUOM}
+                          >
+                            <span className="font-medium">
+                              {uomMap[ci.DefaultUOM].UOMName}
+                            </span>
+                            {uomMap[ci.DefaultUOM].Symbol && (
+                              <span className="text-muted-foreground ml-1.5 text-xs">
+                                {uomMap[ci.DefaultUOM].Symbol} · default
+                              </span>
+                            )}
+                          </SelectItem>
+                        )}
+                        {(uoms as any[])
+                          .filter((u) => u.UOMCode !== ci.DefaultUOM)
+                          .map((u) => (
+                            <SelectItem key={u.UOMCode} value={u.UOMCode}>
+                              {u.UOMName}
+                              {u.Symbol && (
+                                <span className="text-muted-foreground ml-1.5 text-xs">
+                                  {u.Symbol}
+                                </span>
+                              )}
+                            </SelectItem>
+                          ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Quantity */}
+                  <div className="space-y-1.5">
+                    <label className="md:hidden text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                      Quantity *
+                    </label>
+                    <div className="relative">
+                      <Hash
+                        size={12}
+                        className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                      />
+                      <Input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={ci.Quantity}
+                        onChange={(e) =>
+                          updateCartItem(ci._key, "Quantity", e.target.value)
+                        }
+                        className="pl-8 h-10 font-mono"
+                        placeholder="0.00"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Remove */}
+                  <div className="flex items-start pt-0 md:pt-0">
+                    <button
+                      type="button"
+                      onClick={() => removeCartRow(ci._key)}
+                      disabled={cart.length === 1}
+                      title="Remove row"
+                      className="h-10 w-10 flex items-center justify-center rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-25"
+                    >
+                      <X size={15} />
+                    </button>
                   </div>
                 </div>
-              </div>
 
-              {/* Remarks per line */}
-              {ci.ItemId && (
-                <div className="border-t border-border/60 mx-3 pt-2 pb-3">
-                  <Input
-                    value={ci.Remarks}
-                    onChange={(e) => updateCartItem(ci._key, "Remarks", e.target.value)}
-                    placeholder="Line remarks (optional)"
-                    className="h-8 text-xs"
-                  />
-                </div>
-              )}
+                {/* Remarks — always full width below, only shown when item picked */}
+                {ci.ItemId && (
+                  <div className="mt-3 pt-3 border-t border-border/40">
+                    <Input
+                      value={ci.Remarks}
+                      onChange={(e) =>
+                        updateCartItem(ci._key, "Remarks", e.target.value)
+                      }
+                      placeholder="Line remarks (optional)"
+                      className="h-9 text-sm text-muted-foreground placeholder:text-muted-foreground/50"
+                    />
+                  </div>
+                )}
+              </div>
             </div>
           ))}
 
           {/* Cart summary */}
           {cart.some((ci) => ci.ItemId && ci.Quantity) && (
-            <div className="flex items-center justify-between rounded-lg border border-border bg-muted/20 px-4 py-2.5 text-sm">
+            <div className="flex items-center justify-between rounded-xl border border-border bg-muted/20 px-5 py-3.5 text-sm mt-2">
               <div className="flex items-center gap-3 text-muted-foreground">
-                <Package size={13} />
+                <Package size={14} />
                 <span>
                   <span className="font-semibold text-foreground">
                     {cart.filter((ci) => ci.ItemId).length}
                   </span>{" "}
                   item{cart.filter((ci) => ci.ItemId).length !== 1 ? "s" : ""} ·{" "}
                   <span className="font-semibold text-foreground font-mono">
-                    {cart.reduce((s, ci) => s + (Number(ci.Quantity) || 0), 0).toFixed(2)}
+                    {cart
+                      .reduce((s, ci) => s + (Number(ci.Quantity) || 0), 0)
+                      .toFixed(2)}
                   </span>{" "}
                   units total
                 </span>
@@ -902,16 +1080,31 @@ export default function MaterialRequest() {
 
       {/* Save bar */}
       <div className="flex items-center gap-3 pt-1">
-        <Button variant="outline" onClick={goToList} disabled={isSaving} className="px-6">
+        <Button
+          variant="outline"
+          onClick={goToList}
+          disabled={isSaving}
+          className="px-6"
+        >
           Cancel
         </Button>
-        <Button onClick={onSave} disabled={!canSave || isSaving} className="px-6 gap-2">
-          {isSaving ? <RefreshCw size={14} className="animate-spin" /> : <Save size={14} />}
+        <Button
+          onClick={onSave}
+          disabled={!canSave || isSaving}
+          className="px-6 gap-2"
+        >
+          {isSaving ? (
+            <RefreshCw size={14} className="animate-spin" />
+          ) : (
+            <Save size={14} />
+          )}
           {isSaving ? "Saving…" : editingId ? "Update Request" : "Save Request"}
         </Button>
         {!canSave && (
           <span className="text-xs text-muted-foreground">
-            {!headerIsValid ? "Fill required header fields" : "Complete all cart items"}
+            {!headerIsValid
+              ? "Fill required header fields"
+              : "Complete all cart items"}
           </span>
         )}
       </div>
@@ -950,14 +1143,21 @@ export default function MaterialRequest() {
                     disabled={submitMutation.isPending}
                     className="gap-1.5 h-8 bg-emerald-600 hover:bg-emerald-700 text-white"
                   >
-                    {submitMutation.isPending
-                      ? <RefreshCw size={13} className="animate-spin" />
-                      : <Send size={13} />}
+                    {submitMutation.isPending ? (
+                      <RefreshCw size={13} className="animate-spin" />
+                    ) : (
+                      <Send size={13} />
+                    )}
                     Submit
                   </Button>
                 </>
               )}
-              <Button variant="ghost" size="icon" onClick={goToList} className="h-8 w-8">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={goToList}
+                className="h-8 w-8"
+              >
                 <X size={15} />
               </Button>
             </div>
@@ -966,21 +1166,36 @@ export default function MaterialRequest() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-5 mb-5">
               <DetailRow
                 label="Doc No"
-                value={<span className="font-mono font-bold text-primary">{viewingRecord.DocNo || "—"}</span>}
+                value={
+                  <span className="font-mono font-bold text-primary">
+                    {viewingRecord.DocNo || "—"}
+                  </span>
+                }
               />
               <DetailRow
                 label="Priority"
                 value={
-                  <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${PRIORITY_COLOR[priority] ?? PRIORITY_COLOR.Normal}`}>
+                  <span
+                    className={`text-xs font-semibold px-2 py-0.5 rounded-full ${PRIORITY_COLOR[priority] ?? PRIORITY_COLOR.Normal}`}
+                  >
                     {priority}
                   </span>
                 }
               />
               <DetailRow label="Company" value={viewingRecord.CompanyName} />
               <DetailRow label="Project" value={viewingRecord.ProjectName} />
-              <DetailRow label="Financial Year" value={viewingRecord.FinYearName} />
-              <DetailRow label="Request Date" value={fmtDate(viewingRecord.RequestDate)} />
-              <DetailRow label="Required By" value={fmtDate(viewingRecord.RequiredByDate)} />
+              <DetailRow
+                label="Financial Year"
+                value={viewingRecord.FinYearName}
+              />
+              <DetailRow
+                label="Request Date"
+                value={fmtDate(viewingRecord.RequestDate)}
+              />
+              <DetailRow
+                label="Required By"
+                value={fmtDate(viewingRecord.RequiredByDate)}
+              />
               <DetailRow
                 label="Status"
                 value={<StatusBadge status={viewingRecord.Status || "Draft"} />}
@@ -1013,7 +1228,9 @@ export default function MaterialRequest() {
             <CardTitle className="text-sm font-semibold flex items-center gap-2">
               <ShoppingCart size={14} className="text-primary" />
               Requested Items
-              <Badge variant="secondary" className="text-xs">{items.length}</Badge>
+              <Badge variant="secondary" className="text-xs">
+                {items.length}
+              </Badge>
             </CardTitle>
           </CardHeader>
           <CardContent className="p-0">
@@ -1025,17 +1242,27 @@ export default function MaterialRequest() {
             </div>
             <div className="divide-y divide-border">
               {items.length === 0 ? (
-                <div className="px-4 py-8 text-center text-sm text-muted-foreground">No items found</div>
+                <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+                  No items found
+                </div>
               ) : (
                 items.map((it, i) => (
                   <div
                     key={i}
                     className="grid md:grid-cols-[2fr_1fr_1fr_1.5fr] gap-3 px-4 py-3 items-center hover:bg-muted/20 transition-colors text-sm"
                   >
-                    <span className="font-medium">{it.ItemName || it.ItemId}</span>
-                    <span className="text-muted-foreground">{it.UOMName || it.UOMCode}</span>
-                    <span className="font-mono font-semibold">{Number(it.Quantity).toFixed(2)}</span>
-                    <span className="text-xs text-muted-foreground">{it.Remarks || "—"}</span>
+                    <span className="font-medium">
+                      {it.ItemName || it.ItemId}
+                    </span>
+                    <span className="text-muted-foreground">
+                      {it.UOMName || it.UOMCode}
+                    </span>
+                    <span className="font-mono font-semibold">
+                      {Number(it.Quantity).toFixed(2)}
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {it.Remarks || "—"}
+                    </span>
                   </div>
                 ))
               )}
@@ -1044,7 +1271,10 @@ export default function MaterialRequest() {
               <div className="border-t border-border bg-muted/20 px-4 py-2.5 flex items-center gap-4 text-sm">
                 <span className="text-muted-foreground">Total requested:</span>
                 <span className="font-bold font-mono">
-                  {items.reduce((s, it) => s + Number(it.Quantity), 0).toFixed(2)} units
+                  {items
+                    .reduce((s, it) => s + Number(it.Quantity), 0)
+                    .toFixed(2)}{" "}
+                  units
                 </span>
               </div>
             )}
@@ -1071,7 +1301,10 @@ export default function MaterialRequest() {
           </p>
         </div>
         {viewMode === "list" && (
-          <Button onClick={() => setViewMode("form")} className="gap-2 shrink-0">
+          <Button
+            onClick={() => setViewMode("form")}
+            className="gap-2 shrink-0"
+          >
             <Plus size={15} /> New Request
           </Button>
         )}

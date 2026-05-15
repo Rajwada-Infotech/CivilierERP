@@ -1,58 +1,51 @@
-import React, { useState, useEffect, useRef } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
+import React, { useEffect, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { useModule } from "@/contexts/ModuleContext";
 import { useReminders } from "@/hooks/useReminders";
 import { useAppVersion } from "@/hooks/useAppVersion";
 import { useAuth } from "@/contexts/AuthContext";
 import { useSidebarState } from "./AppLayout";
 import {
-  TrendingUp,
   BarChart3,
   Calendar,
-  CheckCircle2,
-  ChevronDown,
-  ChevronUp,
   ChevronLeft,
   ChevronRight,
-  FileText,
-  Scale,
-  Shield,
-  Landmark,
-  ShieldCheck,
-  Archive,
-  MessageSquare,
-  Package,
-  Receipt,
-  HardHat,
-  Building2,
-  Users,
-  FileWarning,
   Crown,
   Database,
-  Globe,
+  Landmark,
+  Package,
+  ShieldCheck,
   User,
-  Key,
-  Terminal,
-  Megaphone,
-  BellRing,
-  FileEdit,
   Wrench,
-  Hammer,
-  MapPin,
 } from "lucide-react";
 
-// ── Approval pending count (polls every 60 s) ────────────────────────────────
+// ── Per-module nav definitions ────────────────────────────────────────────────
+import { engineeringNavItems } from "./sidebars/EngineeringSidebar";
+import { buildFinanceNavItems } from "./sidebars/FinanceSidebar";
+import { materialNavItems } from "./sidebars/MaterialSidebar";
+import { followupNavItems } from "./sidebars/FollowupSidebar";
+import { buildAdminNavItems } from "./sidebars/AdminSidebar";
+import { dbaNavItems } from "./sidebars/DbaSidebar";
+import { superAdminNavItems } from "./sidebars/SuperAdminSidebar";
+import { SidebarNav, NavItem } from "./sidebars/SidebarPrimitives";
+
+// ── User sidebar (tiny — lives here) ─────────────────────────────────────────
+const userNavItems: NavItem[] = [
+  { label: "My Profile", icon: User, path: "/user/profile" },
+  { label: "Dashboard", icon: BarChart3, path: "/home" },
+];
+
+// ── Approval count poller ─────────────────────────────────────────────────────
 function useApprovalCount() {
   const [count, setCount] = useState(0);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const failureCountRef = useRef(0);
+  const failRef = useRef(0);
 
-  const fetch = () => {
+  const poll = () => {
     if (document.visibilityState === "hidden") {
-      timerRef.current = setTimeout(fetch, 60_000);
+      timerRef.current = setTimeout(poll, 60_000);
       return;
     }
-
     const token = localStorage.getItem("token");
     window
       .fetch("/api/approval-inbox/count", {
@@ -60,19 +53,21 @@ function useApprovalCount() {
       })
       .then((r) => (r.ok ? r.json() : Promise.reject()))
       .then((d) => {
-        failureCountRef.current = 0;
+        failRef.current = 0;
         setCount(d.total ?? 0);
-        timerRef.current = setTimeout(fetch, 60_000);
+        timerRef.current = setTimeout(poll, 60_000);
       })
       .catch(() => {
-        failureCountRef.current += 1;
-        const delay = Math.min(5 * 60_000, 60_000 * failureCountRef.current);
-        timerRef.current = setTimeout(fetch, delay);
+        failRef.current += 1;
+        timerRef.current = setTimeout(
+          poll,
+          Math.min(5 * 60_000, 60_000 * failRef.current),
+        );
       });
   };
 
   useEffect(() => {
-    fetch();
+    poll();
     return () => {
       if (timerRef.current) clearTimeout(timerRef.current);
     };
@@ -81,577 +76,137 @@ function useApprovalCount() {
   return count;
 }
 
-interface SubItem {
-  label: string;
-  path: string;
-  badge?: number;
-}
+// ── Module badge metadata ─────────────────────────────────────────────────────
+type ModuleKey =
+  | "engineering"
+  | "finance"
+  | "material"
+  | "followup"
+  | "admin"
+  | "super_admin"
+  | "dba"
+  | "user";
 
-interface SubSection {
-  label: string;
-  icon: React.ElementType;
-  items: SubItem[];
-}
-
-interface NavItem {
-  label: string;
-  icon: React.ElementType;
-  path?: string;
-  children?: SubItem[];
-  sections?: SubSection[];
-}
-
-// ── Finance module sidebar ──────────────────────────────────────────────────
-const buildFinanceNavItems = (overdueCount: number): NavItem[] => [
-  { label: "Dashboard", icon: BarChart3, path: "/finance" },
-  {
-    label: "Transaction",
-    icon: Landmark,
-    children: [
-      { label: "Payment", path: "/payments" },
-      { label: "Received Payment", path: "/received-payments" },
-      { label: "BRS", path: "/brs" },
-    ],
+const MODULE_META: Record<
+  ModuleKey,
+  { label: string; icon: React.ElementType; color: string; dot: string }
+> = {
+  engineering: {
+    label: "Engineering",
+    icon: Wrench,
+    color: "bg-orange-500/10 text-orange-500 border-orange-500/20",
+    dot: "bg-orange-500",
   },
-  {
-    label: "Query",
-    icon: Scale,
-    children: [
-      { label: "Trial Balance", path: "/transactions" },
-      {
-        label: "Tasks",
-        path: "/tasks",
-        badge: overdueCount > 0 ? overdueCount : undefined,
-      },
-    ],
-  },
-  {
-    label: "Record Management",
-    icon: Archive,
-    children: [{ label: "Records", path: "/records" }],
-  },
-];
-
-// ── Follow-Up module sidebar ─────────────────────────────────────────────────
-const buildFollowupNavItems = (): NavItem[] => [
-  { label: "Follow-Up Dashboard", icon: BarChart3, path: "/followup" },
-  {
-    label: "Sales",
-    icon: Users,
-    children: [
-      { label: "Applicants", path: "/followup/sales/applicants" },
-      { label: "Unit Selection", path: "/followup/sales/unit-selection" },
-      { label: "Welcome Calls", path: "/followup/sales/welcome-calls" },
-    ],
-  },
-  {
-    label: "Agreement",
-    icon: FileText,
-    children: [{ label: "Agreements", path: "/followup/agreement/agreements" }],
-  },
-  {
+  finance: {
     label: "Finance",
     icon: Landmark,
-    children: [
-      { label: "Demands", path: "/followup/finance/demands" },
-      { label: "Payments", path: "/followup/finance/payments" },
-    ],
+    color: "bg-primary/10 text-primary border-primary/20",
+    dot: "bg-primary",
   },
-  {
-    label: "Closure",
-    icon: CheckCircle2,
-    children: [
-      { label: "NOC", path: "/followup/closure/noc" },
-      { label: "Sales Deed", path: "/followup/closure/sales-deed" },
-      { label: "Handover", path: "/followup/closure/handover" },
-    ],
+  material: {
+    label: "Material",
+    icon: Package,
+    color: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20",
+    dot: "bg-emerald-500",
   },
-  {
-    label: "Follow-Ups",
-    icon: BellRing,
-    children: [
-      { label: "Reminders", path: "/followup/follow-ups/reminders" },
-      { label: "Tasks", path: "/followup/follow-ups/tasks" },
-      { label: "Follow-Up Log", path: "/followup/follow-ups/log" },
-    ],
+  followup: {
+    label: "Follow-Up",
+    icon: Calendar,
+    color: "bg-indigo-500/10 text-indigo-500 border-indigo-500/20",
+    dot: "bg-indigo-500",
   },
-  {
-    label: "Construction",
-    icon: HardHat,
-    children: [{ label: "Updates", path: "/followup/construction/updates" }],
-  },
-  {
-    label: "Reports",
-    icon: BarChart3,
-    children: [
-      { label: "Customer Report", path: "/followup/reports/customer" },
-      { label: "Financial Report", path: "/followup/reports/financial" },
-      { label: "Project Status", path: "/followup/reports/project-status" },
-      {
-        label: "Employee Performance",
-        path: "/followup/reports/employee-performance",
-      },
-    ],
-  },
-];
-
-// ── Material module sidebar ──────────────────────────────────────────────────
-const buildMaterialNavItems = (): NavItem[] => [
-  { label: "Dashboard", icon: BarChart3, path: "/material" },
-  {
-    label: "Transaction",
-    icon: Receipt,
-    children: [
-      { label: "Material Request", path: "/material/material-request" },
-      { label: "Purchase Order", path: "/material/purchase-order" },
-      { label: "GRN", path: "/material/grn" },
-      { label: "Issues", path: "/material/issues" },
-      { label: "Expense Booking", path: "/material/expense-booking" },
-    ],
-  },
-  {
-    label: "Debit Note",
-    icon: FileWarning,
-    path: "/masters/debit-note",
-  },
-  { label: "Amendment Menu", icon: FileEdit, path: "/material/amendment-menu" },
-];
-
-// ── Engineering module sidebar ───────────────────────────────────────────────
-const buildEngineeringNavItems = (): NavItem[] => [
-  { label: "Dashboard", icon: BarChart3, path: "/engineering" },
-  {
-    label: "Transaction",
-    icon: Receipt,
-    children: [
-      { label: "Work Order", path: "/engineering/work-order" },
-      { label: "BOQ", path: "/engineering/boq" },
-      { label: "Work Done", path: "/engineering/work-done" },
-    ],
-  },
-];
-
-const buildAdminNavItems = (pendingCount: number): NavItem[] => [
-  { label: "Transaction", icon: BarChart3, path: "/admin" },
-  {
-    label: "Enterprise",
-    icon: Building2,
-    children: [
-      { label: "Enterprise", path: "/admin/masters/business-unit" },
-      { label: "Company", path: "/admin/masters/company" },
-      { label: "Project", path: "/admin/masters/project" },
-    ],
-  },
-  {
-    label: "User Control",
-    icon: Users,
-    children: [
-      { label: "Manage Users", path: "/users" },
-      { label: "Activity Browser", path: "/admin/activity-browser" },
-    ],
-  },
-  {
-    label: "Rights",
-    icon: Shield,
-    children: [
-      { label: "Menu", path: "/admin/rights/menu" },
-      { label: "Widgets", path: "/admin/rights/widgets" },
-      { label: "Financial Year", path: "/admin/rights/fin-year" },
-    ],
-  },
-  {
-    label: "Approval",
-    icon: CheckCircle2,
-    children: [
-      {
-        label: "Inbox",
-        path: "/admin/approval/inbox",
-        badge: pendingCount > 0 ? pendingCount : undefined,
-      },
-      { label: "Approval Setup", path: "/admin/approval/setup" },
-      { label: "Post Approval Rights", path: "/admin/approval/post-rights" },
-    ],
-  },
-  {
-    label: "Security",
+  admin: {
+    label: "Admin",
     icon: ShieldCheck,
-    children: [
-      { label: "Password Reset", path: "/admin/security/password-reset" },
-    ],
+    color: "bg-blue-500/10 text-blue-500 border-blue-500/20",
+    dot: "bg-blue-500",
   },
-  {
-    label: "Communicator",
-    icon: MessageSquare,
-    children: [
-      { label: "SMS Setup", path: "/admin/communicator/sms-setup" },
-      { label: "Email Setup", path: "/admin/communicator/email-setup" },
-      { label: "WhatsApp Setup", path: "/admin/communicator/whatsapp-setup" },
-    ],
+  super_admin: {
+    label: "Super Admin",
+    icon: Crown,
+    color: "bg-yellow-500/10 text-yellow-500 border-yellow-500/20",
+    dot: "bg-yellow-500",
   },
-  { label: "API Integration", icon: Shield, path: "/admin/api-integration" },
-  { label: "Live Metrics", icon: TrendingUp, path: "/admin/metrics" },
-  { label: "Signature", icon: FileText, path: "/admin/signature" },
-];
-
-// ── Super Admin sidebar ────────────────────────────────────────────────────
-const SUPER_ADMIN_NAV_ITEMS: NavItem[] = [
-  { label: "Control Panel", icon: Crown, path: "/superadmin" },
-  {
-    label: "Tenant Management",
-    icon: Building2,
-    children: [
-      { label: "All Tenants", path: "/superadmin" },
-      { label: "Admin Control", path: "/admin/control-panel" },
-    ],
+  dba: {
+    label: "DBA",
+    icon: Database,
+    color: "bg-emerald-500/10 text-emerald-500 border-emerald-500/20",
+    dot: "bg-emerald-500",
   },
-  {
-    label: "Admin Tools",
-    icon: ShieldCheck,
-    children: [
-      { label: "Menu Rights", path: "/admin/rights/menu" },
-      { label: "Widgets Rights", path: "/admin/rights/widgets" },
-      { label: "Approval Setup", path: "/admin/approval/setup" },
-      { label: "Activity Browser", path: "/admin/activity-browser" },
-      { label: "Password Reset", path: "/admin/security/password-reset" },
-    ],
+  user: {
+    label: "User",
+    icon: User,
+    color: "bg-gray-500/10 text-gray-500 border-gray-500/20",
+    dot: "bg-gray-400",
   },
-  {
-    label: "Enterprise",
-    icon: Globe,
-    children: [
-      { label: "Enterprise", path: "/admin/masters/business-unit" },
-      { label: "Company", path: "/admin/masters/company" },
-      { label: "Project", path: "/admin/masters/project" },
-    ],
-  },
-  { label: "API Integration", icon: Shield, path: "/admin/api-integration" },
-];
-
-// ── DBA sidebar ────────────────────────────────────────────────────────────
-const DBA_NAV_ITEMS: NavItem[] = [
-  { label: "DB Console", icon: Database, path: "/dba" },
-  {
-    label: "Database",
-    icon: Terminal,
-    children: [
-      { label: "Overview", path: "/dba" },
-      { label: "Control Panel", path: "/dba/control-panel" },
-    ],
-  },
-  {
-    label: "Ads",
-    icon: Megaphone,
-    children: [{ label: "Campaigns", path: "/dba/ads" }],
-  },
-  {
-    label: "Reminders",
-    icon: BellRing,
-    children: [{ label: "Payment Reminders", path: "/dba/reminders" }],
-  },
-  {
-    label: "Logs",
-    icon: Receipt,
-    children: [{ label: "Payment Logs", path: "/dba/payment-logs" }],
-  },
-  {
-    label: "Admin Tools",
-    icon: ShieldCheck,
-    children: [
-      { label: "Manage Users", path: "/users" },
-      { label: "Activity Browser", path: "/admin/activity-browser" },
-    ],
-  },
-];
-
-// ── User sidebar ───────────────────────────────────────────────────────────
-const USER_NAV_ITEMS: NavItem[] = [
-  { label: "My Profile", icon: User, path: "/user/profile" },
-  { label: "Dashboard", icon: BarChart3, path: "/home" },
-];
-
-// NavButton Component
-const NavButton = ({
-  item,
-  collapsed,
-  isActive,
-}: {
-  item: NavItem;
-  collapsed: boolean;
-  isActive: boolean;
-}) => {
-  const navigate = useNavigate();
-  return (
-    <button
-      onClick={() => item.path && navigate(item.path)}
-      className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-        isActive
-          ? "bg-primary/15 text-primary font-medium"
-          : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-      } ${collapsed ? "justify-center" : ""}`}
-      title={collapsed ? item.label : undefined}
-    >
-      <item.icon size={18} className="shrink-0" />
-      {!collapsed && <span className="truncate">{item.label}</span>}
-    </button>
-  );
 };
 
-// NavGroup Component
-const NavGroup = ({
-  item,
-  collapsed,
-  hasActiveChild,
-}: {
-  item: NavItem;
-  collapsed: boolean;
-  hasActiveChild: boolean;
-}) => {
-  const navigate = useNavigate();
-  const location = useLocation();
-  const [open, setOpen] = useState(hasActiveChild);
-  const [openSections, setOpenSections] = useState<Record<string, boolean>>(
-    () => {
-      const init: Record<string, boolean> = {};
-      (item.sections || []).forEach((s: SubSection) => {
-        init[s.label] = s.items.some(
-          (i: SubItem) => location.pathname === i.path,
-        );
-      });
-      return init;
-    },
-  );
-
-  const handleClick = () => {
-    if (collapsed && item.children?.length) {
-      navigate(item.children[0].path);
-      return;
-    }
-    setOpen((prev) => !prev);
-  };
-
-  const toggleSection = (label: string) =>
-    setOpenSections((prev) => ({ ...prev, [label]: !prev[label] }));
-
-  return (
-    <div>
-      <button
-        onClick={handleClick}
-        className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-          hasActiveChild
-            ? "bg-primary/10 text-primary"
-            : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-        }`}
-      >
-        <item.icon size={18} className="shrink-0" />
-        {!collapsed && (
-          <span className="flex-1 text-left truncate">{item.label}</span>
-        )}
-        {!collapsed &&
-          (open ? <ChevronUp size={14} /> : <ChevronDown size={14} />)}
-      </button>
-
-      {!collapsed && open && (
-        <div className="ml-6 mt-1 space-y-1">
-          {item.children?.map((child: SubItem) => (
-            <button
-              key={child.path}
-              onClick={() => navigate(child.path)}
-              className={`w-full flex justify-between items-center text-xs px-2 py-1.5 rounded-md transition-colors ${
-                location.pathname === child.path
-                  ? "bg-primary/15 text-primary font-medium"
-                  : "text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              }`}
-            >
-              <span>{child.label}</span>
-              {child.badge && (
-                <span className="bg-red-500 text-white text-[9px] px-1.5 py-0.5 rounded-full">
-                  {child.badge}
-                </span>
-              )}
-            </button>
-          ))}
-
-          {item.sections?.map((section: SubSection) => (
-            <div key={section.label}>
-              <button
-                onClick={() => toggleSection(section.label)}
-                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-md text-xs text-sidebar-foreground/60 hover:text-sidebar-foreground hover:bg-sidebar-accent"
-              >
-                <section.icon size={13} />
-                <span className="flex-1 text-left truncate font-medium">
-                  {section.label}
-                </span>
-                {openSections[section.label] ? (
-                  <ChevronUp size={11} />
-                ) : (
-                  <ChevronDown size={11} />
-                )}
-              </button>
-              {openSections[section.label] && (
-                <div className="ml-4 mt-0.5 space-y-0.5">
-                  {section.items.map((child: SubItem) => (
-                    <button
-                      key={child.path}
-                      onClick={() => navigate(child.path)}
-                      className={`w-full text-xs px-2 py-1.5 rounded-md ${
-                        location.pathname === child.path
-                          ? "bg-primary/15 text-primary font-medium"
-                          : "text-sidebar-foreground/70 hover:bg-sidebar-accent"
-                      }`}
-                    >
-                      {child.label}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
-
+// ── AppSidebar ────────────────────────────────────────────────────────────────
 export const AppSidebar = () => {
   const location = useLocation();
   const { activeModule } = useModule();
   const { collapsed, setCollapsed } = useSidebarState();
   const { overdueTaskCount: overdueCount } = useReminders();
   const { currentUser } = useAuth();
+  const { version } = useAppVersion();
   const pendingApprovalCount = useApprovalCount();
+
+  const role = currentUser?.role ?? "";
+  const isAdminTier = ["super_admin", "admin", "dba"].includes(role);
 
   const ADMIN_SETUP_PATHS = [
     "/masters/named-entry-type",
     "/masters/type-of-doc",
   ];
 
-  const ADMIN_TIER_ROLES = ["super_admin", "admin", "dba"];
-  const hasAdminRole = ADMIN_TIER_ROLES.includes(currentUser?.role ?? "");
-
+  const isSuperAdminPage =
+    role === "super_admin" && location.pathname.startsWith("/superadmin");
+  const isDbaPage = isAdminTier && location.pathname.startsWith("/dba");
   const isAdminPage =
-    hasAdminRole &&
+    isAdminTier &&
     (location.pathname.startsWith("/admin") ||
       location.pathname.startsWith("/users") ||
       ADMIN_SETUP_PATHS.some((p) => location.pathname.startsWith(p)));
-
-  const isSuperAdminPage =
-    currentUser?.role === "super_admin" &&
-    location.pathname.startsWith("/superadmin");
-
-  const isDbaPage = hasAdminRole && location.pathname.startsWith("/dba");
   const isUserProfilePage = location.pathname.startsWith("/user/profile");
+  const isHomePage = location.pathname === "/home" || location.pathname === "/";
 
-  const getModuleNavItems = (): NavItem[] => {
+  // ── Pick nav items ──────────────────────────────────────────────────────────
+  const getNavItems = (): NavItem[] => {
+    if (isHomePage) return [];
+    if (isSuperAdminPage) return superAdminNavItems;
+    if (isDbaPage) return dbaNavItems;
+    if (isUserProfilePage) return userNavItems;
+    if (isAdminPage) return buildAdminNavItems(pendingApprovalCount);
+
     switch (activeModule) {
-      case "admin":
-        return buildAdminNavItems(pendingApprovalCount);
       case "engineering":
-        return buildEngineeringNavItems();
-      case "material":
-        return buildMaterialNavItems();
+        return engineeringNavItems;
       case "finance":
         return buildFinanceNavItems(overdueCount);
+      case "material":
+        return materialNavItems;
       case "followup":
-        return buildFollowupNavItems();
+        return followupNavItems;
+      case "admin":
+        return buildAdminNavItems(pendingApprovalCount);
       default:
         return [];
     }
   };
 
-  const isHomePage = location.pathname === "/home" || location.pathname === "/";
+  // ── Resolve module key for badge ────────────────────────────────────────────
+  const resolvedModule: ModuleKey | null = isSuperAdminPage
+    ? "super_admin"
+    : isDbaPage
+      ? "dba"
+      : isUserProfilePage
+        ? "user"
+        : isAdminPage
+          ? "admin"
+          : (activeModule as ModuleKey | null);
 
-  const getNavItems = (): NavItem[] => {
-    if (isHomePage) return [];
-    if (isSuperAdminPage) return SUPER_ADMIN_NAV_ITEMS;
-    if (isDbaPage) return DBA_NAV_ITEMS;
-    if (isUserProfilePage) return USER_NAV_ITEMS;
-    if (isAdminPage) return buildAdminNavItems(pendingApprovalCount);
-    return getModuleNavItems();
-  };
-
-  const itemsToRender = getNavItems();
-
-  const isAdminModule = activeModule === "admin";
-  const isFinance =
-    !isAdminPage &&
-    !isSuperAdminPage &&
-    !isDbaPage &&
-    !isUserProfilePage &&
-    activeModule === "finance";
-
-  const isEngineering =
-    !isAdminPage &&
-    !isSuperAdminPage &&
-    !isDbaPage &&
-    !isUserProfilePage &&
-    activeModule === "engineering";
-
-  const isMaterial =
-    !isAdminPage &&
-    !isSuperAdminPage &&
-    !isDbaPage &&
-    !isUserProfilePage &&
-    activeModule === "material";
-
-  const isAdmin = isAdminPage;
-  const isSuperAdmin = isSuperAdminPage;
-  const isDba = isDbaPage;
-
-  const getModuleLabel = () => {
-    if (isSuperAdmin) return "Super Admin";
-    if (isDba) return "DBA";
-    if (isUserProfilePage) return "User";
-    if (isAdminModule || isAdmin) return "Admin";
-    if (isFinance) return "Finance";
-    if (isMaterial) return "Material";
-    if (isEngineering) return "Engineering";
-    if (activeModule === "followup") return "Follow-Up";
-    return "No module";
-  };
-
-  const getModuleColor = () => {
-    if (isSuperAdmin)
-      return "bg-yellow-500/10 text-yellow-500 border-yellow-500/20";
-    if (isDba)
-      return "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
-    if (isUserProfilePage)
-      return "bg-gray-500/10 text-gray-500 border-gray-500/20";
-    if (isAdminModule || isAdmin)
-      return "bg-blue-500/10 text-blue-500 border-blue-500/20";
-    if (isFinance) return "bg-primary/10 text-primary border-primary/20";
-    if (isMaterial)
-      return "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
-    if (isEngineering)
-      return "bg-orange-500/10 text-orange-500 border-orange-500/20";
-    if (activeModule === "followup")
-      return "bg-indigo-500/10 text-indigo-500 border-indigo-500/20";
-    return "bg-muted text-muted-foreground border-border";
-  };
-
-  const getDotColor = () => {
-    if (isSuperAdmin) return "bg-yellow-500";
-    if (isDba) return "bg-emerald-500";
-    if (isAdminModule || isAdmin) return "bg-blue-500";
-    if (isFinance) return "bg-primary";
-    if (isMaterial) return "bg-emerald-500";
-    if (isEngineering) return "bg-orange-500";
-    return "bg-muted-foreground/40";
-  };
-
-  const getModuleIcon = () => {
-    if (isSuperAdmin) return Crown;
-    if (isDba) return Database;
-    if (isUserProfilePage) return User;
-    if (isAdminModule || isAdmin) return ShieldCheck;
-    if (isFinance) return Landmark;
-    if (isMaterial) return Package;
-    if (isEngineering) return Wrench;
-    if (activeModule === "followup") return Calendar;
-    return Landmark;
-  };
-
-  const ModuleIcon = getModuleIcon();
-  const { version } = useAppVersion();
+  const meta = resolvedModule ? MODULE_META[resolvedModule] : null;
+  const ModuleIcon = meta?.icon;
 
   return (
     <aside
@@ -659,50 +214,26 @@ export const AppSidebar = () => {
         collapsed ? "w-16" : "w-56"
       }`}
     >
+      {/* Nav items */}
       <div className="flex-1 overflow-y-auto p-2 space-y-1">
-        {itemsToRender.map((item) =>
-          item.children || item.sections ? (
-            <NavGroup
-              key={item.label}
-              item={item}
-              collapsed={collapsed}
-              hasActiveChild={
-                !!(
-                  item.children?.some((c) => location.pathname === c.path) ||
-                  item.sections?.some((s) =>
-                    s.items.some((i) => location.pathname === i.path),
-                  )
-                )
-              }
-            />
-          ) : (
-            <NavButton
-              key={item.label}
-              item={item}
-              collapsed={collapsed}
-              isActive={
-                item.path === "/"
-                  ? location.pathname === "/"
-                  : location.pathname.startsWith(item.path || "")
-              }
-            />
-          ),
-        )}
+        <SidebarNav items={getNavItems()} collapsed={collapsed} />
       </div>
 
+      {/* Footer */}
       <div className="p-2 border-t border-sidebar-border space-y-2">
-        {!collapsed ? (
-          <div
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold border ${getModuleColor()}`}
-          >
-            <ModuleIcon size={13} />
-            <span>{getModuleLabel()}</span>
-          </div>
-        ) : (
-          <div className="flex justify-center">
-            <div className={`w-2 h-2 rounded-full ${getDotColor()}`} />
-          </div>
-        )}
+        {meta &&
+          (collapsed ? (
+            <div className="flex justify-center">
+              <div className={`w-2 h-2 rounded-full ${meta.dot}`} />
+            </div>
+          ) : (
+            <div
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-semibold border ${meta.color}`}
+            >
+              {ModuleIcon && <ModuleIcon size={13} />}
+              <span>{meta.label}</span>
+            </div>
+          ))}
 
         <button
           onClick={() => setCollapsed(!collapsed)}
