@@ -497,16 +497,28 @@ function DocSelectorPanel({
   // Match fin year by looking for the year string embedded in the doc number.
   // e.g. filterFinYear = "2026-2027", docNo = "CI/PUR/000001/2026-2027" → match
   // Falls back to true when no filter is set or doc has no number.
-  const inFinYear = (docNo?: string) => {
-    if (!filterFinYear || !docNo) return true;
+  const inFinYear = (docNo?: string, recFinYear?: string) => {
+    if (!filterFinYear) return true;
+    // Prefer matching against the record's own FinYear field if available
+    if (recFinYear) return recFinYear === filterFinYear;
+    // Fallback: check if the doc number embeds the fin year (PO/GRN style)
+    if (!docNo) return true;
     return docNo.includes(filterFinYear);
   };
 
   const filteredPO = poList.filter((p) => {
     if (bookedPOIds?.has(p.PurchaseOrderID)) return false;
-    if (filterCompanyId && p.CompanyId && p.CompanyId !== filterCompanyId)
+    if (
+      filterCompanyId &&
+      p.CompanyId &&
+      Number(p.CompanyId) !== Number(filterCompanyId)
+    )
       return false;
-    if (filterProjectId && p.ProjectId && p.ProjectId !== filterProjectId)
+    if (
+      filterProjectId &&
+      p.ProjectId &&
+      Number(p.ProjectId) !== Number(filterProjectId)
+    )
       return false;
     if (!inFinYear(p.DocNo || p.PurchaseOrderNo)) return false;
     return (
@@ -516,11 +528,19 @@ function DocSelectorPanel({
   });
   const filteredWorkDone = workDoneList.filter((wd) => {
     if (bookedWorkDoneIds?.has(wd.ID)) return false;
-    if (filterCompanyId && wd.CompanyId && wd.CompanyId !== filterCompanyId)
+    if (
+      filterCompanyId &&
+      wd.CompanyId &&
+      Number(wd.CompanyId) !== Number(filterCompanyId)
+    )
       return false;
-    if (filterProjectId && wd.ProjectId && wd.ProjectId !== filterProjectId)
+    if (
+      filterProjectId &&
+      wd.ProjectId &&
+      Number(wd.ProjectId) !== Number(filterProjectId)
+    )
       return false;
-    if (!inFinYear(wd.DocNo)) return false;
+    if (!inFinYear(wd.DocNo, wd.FinYear)) return false;
     return (
       (wd.DocNo || "").toLowerCase().includes(q) ||
       (wd.ContractorName || "").toLowerCase().includes(q) ||
@@ -530,9 +550,17 @@ function DocSelectorPanel({
   });
   const filteredWOPO = woPOList.filter((p) => {
     if (bookedWOPOIds?.has(p.PurchaseOrderID)) return false;
-    if (filterCompanyId && p.CompanyId && p.CompanyId !== filterCompanyId)
+    if (
+      filterCompanyId &&
+      p.CompanyId &&
+      Number(p.CompanyId) !== Number(filterCompanyId)
+    )
       return false;
-    if (filterProjectId && p.ProjectId && p.ProjectId !== filterProjectId)
+    if (
+      filterProjectId &&
+      p.ProjectId &&
+      Number(p.ProjectId) !== Number(filterProjectId)
+    )
       return false;
     if (!inFinYear(p.DocNo || p.PurchaseOrderNo)) return false;
     return (
