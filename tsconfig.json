@@ -5,7 +5,7 @@
     "module": "ESNext",
     "moduleResolution": "node",
     // ignoreDeprecations is not supported in the local TypeScript version
-    "ignoreDeprecations": "6.0",
+    "ignoreDeprecations": "5.0",
 
 
 
