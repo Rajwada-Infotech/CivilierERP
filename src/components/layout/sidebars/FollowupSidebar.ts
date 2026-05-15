@@ -1,0 +1,76 @@
+import {
+  BarChart3,
+  ListTodo,
+  BellRing,
+  Users,
+  FileText,
+  CheckCircle2,
+  HardHat,
+} from "lucide-react";
+import { NavItem } from "./SidebarPrimitives";
+
+export const followupNavItems: NavItem[] = [
+  { label: "Follow-Up Dashboard", icon: BarChart3, path: "/followup" },
+  {
+    label: "Tasks",
+    icon: ListTodo,
+    children: [
+      { label: "Tasks", path: "/followup/follow-ups/tasks" },
+      { label: "Follow-Up Log", path: "/followup/follow-ups/log" },
+    ],
+  },
+  {
+    label: "Reminders",
+    icon: BellRing,
+    children: [
+      {
+        label: "PO Reminders",
+        path: "/followup/follow-ups/reminders?module=PO",
+      },
+      {
+        label: "WO Reminders",
+        path: "/followup/follow-ups/reminders?module=WO",
+      },
+      {
+        label: "CHQ Reminders",
+        path: "/followup/follow-ups/reminders?module=CHQ",
+      },
+      {
+        label: "TDS Reminders",
+        path: "/followup/follow-ups/reminders?module=TDS",
+      },
+      {
+        label: "GRN Reminders",
+        path: "/followup/follow-ups/reminders?module=GRN",
+      },
+    ],
+  },
+  {
+    label: "Sales",
+    icon: Users,
+    children: [
+      { label: "Applicants", path: "/followup/sales/applicants" },
+      { label: "Unit Selection", path: "/followup/sales/unit-selection" },
+      { label: "Welcome Calls", path: "/followup/sales/welcome-calls" },
+    ],
+  },
+  {
+    label: "Agreement",
+    icon: FileText,
+    children: [{ label: "Agreements", path: "/followup/agreement/agreements" }],
+  },
+  {
+    label: "Closure",
+    icon: CheckCircle2,
+    children: [
+      { label: "NOC", path: "/followup/closure/noc" },
+      { label: "Sales Deed", path: "/followup/closure/sales-deed" },
+      { label: "Handover", path: "/followup/closure/handover" },
+    ],
+  },
+  {
+    label: "Construction",
+    icon: HardHat,
+    children: [{ label: "Updates", path: "/followup/construction/updates" }],
+  },
+];

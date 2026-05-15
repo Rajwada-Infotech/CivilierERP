@@ -143,6 +143,7 @@ interface FormState {
   docNo: string;
   docDate: string;
   supplierId: string;
+  workOrderId: string;
   remarks: string;
   PeriodFrom: string;
   PeriodTo: string;
@@ -162,6 +163,7 @@ const EMPTY_FORM = (activeFinYear?: string): FormState => ({
   docNo: "",
   docDate: new Date().toISOString().slice(0, 10),
   supplierId: "",
+  workOrderId: "",
   remarks: "",
   PeriodFrom: "",
   PeriodTo: "",
@@ -173,6 +175,20 @@ const EMPTY_FORM = (activeFinYear?: string): FormState => ({
   Status: "Draft",
 });
 
+// ─── WO Activity type (from /api/work-orders/:id/activities) ─────────────────
+interface WoActivity {
+  Id: number;
+  ActivityGroupName: string | null;
+  ActivityName: string | null;
+  UOMName: string | null;
+  Rate: number | null;
+  Area: number | null;
+  LabourAmount: number | null;
+  MaterialAmount: number | null;
+  GrandTotal: number | null;
+  Remarks: string | null;
+}
+
 // ─── Form ─────────────────────────────────────────────────────────────────────
 function WorkDoneForm({
   record,
@@ -180,6 +196,7 @@ function WorkDoneForm({
   companies,
   projects,
   suppliers,
+  workOrders,
   finYearOptions,
   loadingDropdowns,
   activeFinYear,
@@ -189,6 +206,7 @@ function WorkDoneForm({
   companies: DropdownOption[];
   projects: DropdownOption[];
   suppliers: DropdownOption[];
+  workOrders: DropdownOption[];
   finYearOptions: { id: string; year: string }[];
   loadingDropdowns: boolean;
   activeFinYear: string;
@@ -208,6 +226,7 @@ function WorkDoneForm({
             record.DocDate?.slice(0, 10) ??
             new Date().toISOString().slice(0, 10),
           supplierId: String(record.SupplierId ?? ""),
+          workOrderId: String(record.WorkOrderID ?? ""),
           remarks: record.Remarks ?? "",
           PeriodFrom: record.PeriodFrom?.slice(0, 10) ?? "",
           PeriodTo: record.PeriodTo?.slice(0, 10) ?? "",
@@ -223,6 +242,8 @@ function WorkDoneForm({
 
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [docRefreshTrigger, setDocRefreshTrigger] = useState(0);
+  const [woSummaryLoading, setWoSummaryLoading] = useState(false);
+  const [woActivities, setWoActivities] = useState<WoActivity[]>([]);
 
   const setField = useCallback(
     <K extends keyof FormState>(k: K, v: FormState[K]) =>
@@ -254,6 +275,7 @@ function WorkDoneForm({
         DocNo: form.docNo,
         DocDate: form.docDate,
         SupplierId: parseInt(form.supplierId) || null,
+        WorkOrderID: parseInt(form.workOrderId) || null,
         Remarks: form.remarks,
         PeriodFrom: form.PeriodFrom,
         PeriodTo: form.PeriodTo,
@@ -458,7 +480,81 @@ function WorkDoneForm({
             </div>
           </div>
 
-          {/* Row 3: Remarks full width */}
+          {/* Row 3: Work Order */}
+          <div>
+            <FieldLabel>
+              <span className="flex items-center gap-1.5">
+                <Hammer size={11} />
+                Work Order
+              </span>
+            </FieldLabel>
+            {loadingDropdowns ? (
+              <SelectSkeleton />
+            ) : (
+              <select
+                value={form.workOrderId}
+                onChange={async (e) => {
+                  const woId = e.target.value;
+                  setField("workOrderId", woId);
+                  setWoActivities([]);
+                  if (!woId) return;
+                  setWoSummaryLoading(true);
+                  try {
+                    const [sumRes, actRes] = await Promise.all([
+                      fetchWithAuth(
+                        `/api/engineering/work-order-summary/${woId}`,
+                      ),
+                      fetchWithAuth(
+                        `/api/work-orders/${woId}/activities?_t=${Date.now()}`,
+                      ),
+                    ]);
+                    if (sumRes.ok) {
+                      const s = await sumRes.json();
+                      setForm((prev) => ({
+                        ...prev,
+                        workOrderId: woId,
+                        RatePerUnit: s.GrossAmount
+                          ? String(s.GrossAmount)
+                          : prev.RatePerUnit,
+                        QuantityDone: "1",
+                        Deductions: "0",
+                      }));
+                    }
+                    if (actRes.ok) {
+                      const acts = await actRes.json();
+                      console.log("[WO activities raw]", acts);
+                      setWoActivities(Array.isArray(acts) ? acts : []);
+                    } else {
+                      console.error(
+                        "[WO activities] non-ok",
+                        actRes.status,
+                        await actRes.text().catch(() => ""),
+                      );
+                    }
+                  } catch (err) {
+                    console.error("[WO select] fetch failed", err);
+                  } finally {
+                    setWoSummaryLoading(false);
+                  }
+                }}
+                className={selectCls}
+              >
+                <option value="">Select work order…</option>
+                {workOrders.map((wo) => (
+                  <option key={wo.id} value={String(wo.id)}>
+                    {wo.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            {woSummaryLoading && (
+              <p className="text-[10px] text-muted-foreground mt-1 animate-pulse">
+                Loading WO summary…
+              </p>
+            )}
+          </div>
+
+          {/* Row 4: Remarks full width */}
           <div>
             <FieldLabel>Remarks</FieldLabel>
             <textarea
@@ -482,8 +578,8 @@ function WorkDoneForm({
         </div>
 
         <div className="p-5 space-y-5">
-          {/* Row 1: Period From | Period To | Status */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-5">
+          {/* Period range */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
             <div>
               <FieldLabel>Period From</FieldLabel>
               <input
@@ -502,23 +598,199 @@ function WorkDoneForm({
                 className={inputCls}
               />
             </div>
-            <div>
-              <FieldLabel>Status</FieldLabel>
-              <select
-                value={form.Status}
-                onChange={(e) => setField("Status", e.target.value)}
-                className={selectCls}
-              >
-                {["Draft", "Pending", "Approved", "Rejected"].map((s) => (
-                  <option key={s} value={s}>
-                    {s}
-                  </option>
-                ))}
-              </select>
-            </div>
           </div>
 
-          {/* Row 2: Description full width */}
+          {/* Activity breakdown table */}
+          {woSummaryLoading ? (
+            <div className="rounded-xl border border-border bg-muted/20 p-6 flex items-center justify-center gap-2 text-sm text-muted-foreground animate-pulse">
+              <Hammer size={14} className="text-orange-400" />
+              Loading activity breakdown…
+            </div>
+          ) : woActivities.length > 0 ? (
+            <div className="rounded-xl border border-border overflow-hidden">
+              <div className="px-4 py-2.5 bg-muted/30 border-b border-border flex items-center justify-between">
+                <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  Activity Breakdown
+                </span>
+                <span className="text-xs text-muted-foreground">
+                  {woActivities.length} activit
+                  {woActivities.length === 1 ? "y" : "ies"}
+                </span>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/10">
+                      <th className="text-left px-3 py-2 text-muted-foreground font-semibold">
+                        Group
+                      </th>
+                      <th className="text-left px-3 py-2 text-muted-foreground font-semibold">
+                        Activity
+                      </th>
+                      <th className="text-right px-3 py-2 text-muted-foreground font-semibold">
+                        UOM
+                      </th>
+                      <th className="text-right px-3 py-2 text-muted-foreground font-semibold">
+                        Area
+                      </th>
+                      <th className="text-right px-3 py-2 text-muted-foreground font-semibold">
+                        Rate
+                      </th>
+                      <th className="text-right px-3 py-2 text-muted-foreground font-semibold">
+                        Labour
+                      </th>
+                      <th className="text-right px-3 py-2 text-muted-foreground font-semibold">
+                        Material
+                      </th>
+                      <th className="text-right px-3 py-2 text-muted-foreground font-semibold">
+                        Total
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {woActivities.map((a, i) => (
+                      <tr
+                        key={a.Id}
+                        className={`border-b border-border/50 ${i % 2 === 0 ? "" : "bg-muted/10"}`}
+                      >
+                        <td className="px-3 py-2 text-muted-foreground">
+                          {a.ActivityGroupName || "—"}
+                        </td>
+                        <td className="px-3 py-2 font-medium text-foreground">
+                          {a.ActivityName || "—"}
+                        </td>
+                        <td className="px-3 py-2 text-right text-muted-foreground">
+                          {a.UOMName || "—"}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          {a.Area != null ? a.Area : "—"}
+                        </td>
+                        <td className="px-3 py-2 text-right">
+                          {a.Rate != null ? fmt(a.Rate) : "—"}
+                        </td>
+                        <td className="px-3 py-2 text-right text-blue-600">
+                          {a.LabourAmount != null ? fmt(a.LabourAmount) : "—"}
+                        </td>
+                        <td className="px-3 py-2 text-right text-amber-600">
+                          {a.MaterialAmount != null
+                            ? fmt(a.MaterialAmount)
+                            : "—"}
+                        </td>
+                        <td className="px-3 py-2 text-right font-semibold text-foreground">
+                          {a.GrandTotal != null ? fmt(a.GrandTotal) : "—"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-border bg-muted/20">
+                      <td
+                        colSpan={5}
+                        className="px-3 py-2.5 text-xs font-semibold text-muted-foreground uppercase"
+                      >
+                        Totals
+                      </td>
+                      <td className="px-3 py-2.5 text-right text-xs font-bold text-blue-600">
+                        {fmt(
+                          woActivities.reduce(
+                            (s, a) => s + (a.LabourAmount ?? 0),
+                            0,
+                          ),
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5 text-right text-xs font-bold text-amber-600">
+                        {fmt(
+                          woActivities.reduce(
+                            (s, a) => s + (a.MaterialAmount ?? 0),
+                            0,
+                          ),
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5 text-right text-xs font-bold text-foreground">
+                        {fmt(
+                          woActivities.reduce(
+                            (s, a) => s + (a.GrandTotal ?? 0),
+                            0,
+                          ),
+                        )}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          ) : form.workOrderId ? (
+            <div className="rounded-xl border border-dashed border-border p-5 text-center text-sm text-muted-foreground">
+              No activities found for this Work Order.
+            </div>
+          ) : null}
+
+          {/* Amount breakdown + deductions */}
+          {(woActivities.length > 0 || parseFloat(form.RatePerUnit) > 0) && (
+            <div className="rounded-xl bg-violet-500/5 border border-violet-500/20 p-4 space-y-3">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                Amount Summary
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+                <div>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                    Labour
+                  </p>
+                  <p className="text-sm font-bold text-blue-600 mt-0.5">
+                    {fmt(
+                      woActivities.reduce(
+                        (s, a) => s + (a.LabourAmount ?? 0),
+                        0,
+                      ) ||
+                        parseFloat(form.RatePerUnit) ||
+                        0,
+                    )}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                    Material
+                  </p>
+                  <p className="text-sm font-bold text-amber-600 mt-0.5">
+                    {fmt(
+                      woActivities.reduce(
+                        (s, a) => s + (a.MaterialAmount ?? 0),
+                        0,
+                      ),
+                    )}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                    Gross Amount
+                  </p>
+                  <p className="text-sm font-bold text-foreground mt-0.5">
+                    {fmt(gross)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide">
+                    Certified Amount
+                  </p>
+                  <p className="text-sm font-bold text-emerald-600 mt-0.5">
+                    {fmt(certified)}
+                  </p>
+                </div>
+              </div>
+              <div className="pt-2 border-t border-violet-500/20">
+                <FieldLabel>Deductions (₹)</FieldLabel>
+                <input
+                  type="number"
+                  value={form.Deductions}
+                  onChange={(e) => setField("Deductions", e.target.value)}
+                  placeholder="0.00"
+                  className={`${inputCls} max-w-[200px]`}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Description at bottom */}
           <div>
             <FieldLabel required>Description of Work</FieldLabel>
             <textarea
@@ -533,69 +805,6 @@ function WorkDoneForm({
             {errors.DescriptionOfWork && (
               <p className="text-xs text-red-500 mt-1">Required</p>
             )}
-          </div>
-
-          {/* Row 3: Qty | Unit | Rate | Deductions */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-5">
-            <div>
-              <FieldLabel>Quantity Done</FieldLabel>
-              <input
-                type="number"
-                value={form.QuantityDone}
-                onChange={(e) => setField("QuantityDone", e.target.value)}
-                placeholder="0"
-                className={inputCls}
-              />
-            </div>
-            <div>
-              <FieldLabel>Unit</FieldLabel>
-              <input
-                value={form.Unit}
-                onChange={(e) => setField("Unit", e.target.value)}
-                placeholder="sqm, rmt, nos…"
-                className={inputCls}
-              />
-            </div>
-            <div>
-              <FieldLabel>Rate per Unit (₹)</FieldLabel>
-              <input
-                type="number"
-                value={form.RatePerUnit}
-                onChange={(e) => setField("RatePerUnit", e.target.value)}
-                placeholder="0.00"
-                className={inputCls}
-              />
-            </div>
-            <div>
-              <FieldLabel>Deductions (₹)</FieldLabel>
-              <input
-                type="number"
-                value={form.Deductions}
-                onChange={(e) => setField("Deductions", e.target.value)}
-                placeholder="0.00"
-                className={inputCls}
-              />
-            </div>
-          </div>
-
-          {/* Row 4: Computed totals */}
-          <div className="rounded-xl bg-violet-500/5 border border-violet-500/20 p-4 grid grid-cols-2 gap-4">
-            <div>
-              <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                Gross Amount
-              </p>
-              <p className="text-lg font-heading font-bold text-foreground mt-0.5">
-                {fmt(gross)}
-              </p>
-            </div>
-            <div>
-              <p className="text-xs text-muted-foreground uppercase tracking-wide">
-                Certified Amount
-              </p>
-              <p className="text-lg font-heading font-bold text-emerald-600 mt-0.5">
-                {fmt(certified)}
-              </p>
-            </div>
           </div>
         </div>
       </div>
@@ -661,8 +870,29 @@ export default function WorkDone() {
     staleTime: 5 * 60 * 1000,
   });
 
+  const { data: workOrders = [], isLoading: loadingWorkOrders } = useQuery<
+    DropdownOption[]
+  >({
+    queryKey: ["work-orders-wd-list"],
+    queryFn: () =>
+      fetchWithAuth("/api/engineering/work-orders-with-activities").then(
+        async (r) => {
+          const json = await r.json();
+          const rows = Array.isArray(json) ? json : [];
+          return rows.map((w: any) => ({
+            id: w.Id,
+            name: `${w.DocNo || "WO"} — ${w.ContractorName || "No contractor"} (${w.ActivityCount} activities)`,
+          }));
+        },
+      ),
+    staleTime: 5 * 60 * 1000,
+  });
+
   const loadingDropdowns =
-    loadingCompanies || loadingProjects || loadingSuppliers;
+    loadingCompanies ||
+    loadingProjects ||
+    loadingSuppliers ||
+    loadingWorkOrders;
 
   // ── List query ───────────────────────────────────────────────────────────────
   const {
@@ -932,6 +1162,7 @@ export default function WorkDone() {
           companies={companies}
           projects={projects}
           suppliers={suppliers}
+          workOrders={workOrders}
           finYearOptions={finYearOptions}
           loadingDropdowns={loadingDropdowns}
           activeFinYear={activeFinYear}

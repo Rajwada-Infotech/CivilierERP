@@ -171,13 +171,14 @@ export const ActivityBrowserProvider: React.FC<{
 
   const recordLogin = useCallback(
     async (user: { id: string; name: string; email: string; role: string }) => {
-      // IP is intentionally omitted: the backend resolves it from
-      // X-Forwarded-For and ignores any client-supplied value.
       const fingerprint = await getDeviceFingerprint();
       const deviceInfo = getDeviceInfo();
       const sessionId = crypto.randomUUID();
+      const loginTime = Date.now();
 
       localStorage.setItem("currentSessionId", sessionId);
+      // Store login timestamp so logout can compute sessionDuration precisely
+      localStorage.setItem("sessionLoginTime", String(loginTime));
 
       const entry: SessionEvent = {
         userId: user.id,
@@ -185,7 +186,7 @@ export const ActivityBrowserProvider: React.FC<{
         userEmail: user.email,
         userRole: user.role,
         event: "login",
-        timestamp: new Date().toISOString(),
+        timestamp: new Date(loginTime).toISOString(),
         deviceInfo,
         deviceFingerprint: fingerprint,
         sessionId,
@@ -206,9 +207,15 @@ export const ActivityBrowserProvider: React.FC<{
       const sessionId = localStorage.getItem("currentSessionId");
       if (!sessionId) return;
 
-      // IP is intentionally omitted: the backend resolves it from
-      // X-Forwarded-For and ignores any client-supplied value.
       const deviceInfo = getDeviceInfo();
+
+      // ── Compute session duration ───────────────────────────────────────────
+      // loginTime is stored (ms) by recordLogin. If missing, fall back to 0
+      // so we still log the logout row rather than silently dropping it.
+      const loginTimeRaw = localStorage.getItem("sessionLoginTime");
+      const sessionDurationSeconds = loginTimeRaw
+        ? Math.round((Date.now() - parseInt(loginTimeRaw, 10)) / 1000)
+        : null;
 
       const entry: SessionEvent = {
         userId: user.id,
@@ -219,6 +226,8 @@ export const ActivityBrowserProvider: React.FC<{
         timestamp: new Date().toISOString(),
         deviceInfo,
         sessionId,
+        // Persist to UserActivityLog.SessionDuration (INT, seconds)
+        sessionDuration: sessionDurationSeconds ?? undefined,
       };
 
       setRawSessions((prev) => [normalizeEvent(entry, 0), ...prev]);
@@ -228,6 +237,7 @@ export const ActivityBrowserProvider: React.FC<{
         console.error("Logout log failed:", err);
       } finally {
         localStorage.removeItem("currentSessionId");
+        localStorage.removeItem("sessionLoginTime");
       }
     },
     [],
@@ -245,8 +255,6 @@ export const ActivityBrowserProvider: React.FC<{
       const user = getStoredUser();
       if (!sessionId || !user.id) return;
 
-      // IP is intentionally omitted: the backend resolves it from
-      // X-Forwarded-For and ignores any client-supplied value.
       const fingerprint = await getDeviceFingerprint();
       const deviceInfo = getDeviceInfo();
 
@@ -317,9 +325,13 @@ export const ActivityBrowserProvider: React.FC<{
       } else if (event.event === "logout") {
         group.logoutTime = event.timestamp;
         group.logoutEvent = event;
+        // Use the DB-persisted sessionDuration (seconds) when available;
+        // fall back to computing from timestamps for legacy rows.
         group.durationMs =
-          new Date(event.timestamp).getTime() -
-          new Date(group.loginTime).getTime();
+          event.sessionDuration != null
+            ? event.sessionDuration * 1000
+            : new Date(event.timestamp).getTime() -
+              new Date(group.loginTime).getTime();
       } else {
         group.actions.push(event);
       }

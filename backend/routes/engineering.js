@@ -14,9 +14,6 @@ const {
 const WORK_DONE_TABLE = "EngineeringWorkDone";
 const WORK_DONE_CACHE = "engineering-work-done";
 
-// Cache table-existence results at module level so we don't hit sys.tables
-// on every request. Tables don't disappear at runtime; one check per process
-// lifetime is sufficient. Set to null initially (unknown).
 const tableExists = {
   [WORK_DONE_TABLE]: null,
   BOQ: null,
@@ -103,26 +100,29 @@ const selectWorkDoneSql = `
   LEFT JOIN dbo.AccountHeadMaster ctr ON ctr.LHeadId = woh.ContractorId
 `;
 
-router.get("/dashboard", cache("engineering-dashboard", 120), async (req, res) => {
-  try {
-    const pool = getPool();
-    const hasWorkDone = await hasTable(pool, WORK_DONE_TABLE);
-    const hasBOQ = await hasTable(pool, "BOQ");
-    const hasWO = await hasTable(pool, "WorkOrderHeader");
+router.get(
+  "/dashboard",
+  cache("engineering-dashboard", 120),
+  async (req, res) => {
+    try {
+      const pool = getPool();
+      const hasWorkDone = await hasTable(pool, WORK_DONE_TABLE);
+      const hasBOQ = await hasTable(pool, "BOQ");
+      const hasWO = await hasTable(pool, "WorkOrderHeader");
 
-    const [
-      workOrdersResult,
-      recentWOsResult,
-      woStatusResult,
-      boqResult,
-      recentBOQsResult,
-      workDoneResult,
-      recentWorkDoneResult,
-      workDoneStatusResult,
-      projectsResult,
-    ] = await Promise.all([
-      hasWO
-        ? pool.request().query(`
+      const [
+        workOrdersResult,
+        recentWOsResult,
+        woStatusResult,
+        boqResult,
+        recentBOQsResult,
+        workDoneResult,
+        recentWorkDoneResult,
+        workDoneStatusResult,
+        projectsResult,
+      ] = await Promise.all([
+        hasWO
+          ? pool.request().query(`
             SELECT
               COUNT(1) AS total,
               SUM(CASE WHEN ISNULL(Status, 'Draft') IN ('Draft', 'Pending', 'Open', 'In Progress') THEN 1 ELSE 0 END) AS openCount,
@@ -132,9 +132,9 @@ router.get("/dashboard", cache("engineering-dashboard", 120), async (req, res) =
             WHERE DocTypeId = 14
                OR (DocTypeId IS NULL AND COALESCE(DocNo, DocumentNumber) LIKE 'WO-%')
           `)
-        : Promise.resolve({ recordset: [{}] }),
-      hasWO
-        ? pool.request().query(`
+          : Promise.resolve({ recordset: [{}] }),
+        hasWO
+          ? pool.request().query(`
             SELECT TOP 6
               h.Id,
               COALESCE(h.DocNo, h.DocumentNumber) AS DocNo,
@@ -147,27 +147,27 @@ router.get("/dashboard", cache("engineering-dashboard", 120), async (req, res) =
                OR (h.DocTypeId IS NULL AND COALESCE(h.DocNo, h.DocumentNumber) LIKE 'WO-%')
             ORDER BY ISNULL(h.UpdatedAt, h.CreatedAt) DESC
           `)
-        : Promise.resolve({ recordset: [] }),
-      hasWO
-        ? pool.request().query(`
+          : Promise.resolve({ recordset: [] }),
+        hasWO
+          ? pool.request().query(`
             SELECT ISNULL(Status, 'Draft') AS Status, COUNT(1) AS Count, ISNULL(SUM(TotalAmount), 0) AS TotalValue
             FROM dbo.WorkOrderHeader
             WHERE DocTypeId = 14
                OR (DocTypeId IS NULL AND COALESCE(DocNo, DocumentNumber) LIKE 'WO-%')
             GROUP BY ISNULL(Status, 'Draft')
           `)
-        : Promise.resolve({ recordset: [] }),
-      hasBOQ
-        ? pool.request().query(`
+          : Promise.resolve({ recordset: [] }),
+        hasBOQ
+          ? pool.request().query(`
             SELECT
               COUNT(1) AS total,
               SUM(CASE WHEN Status = 'Approved' THEN 1 ELSE 0 END) AS approved,
               ISNULL(SUM(TotalAmount), 0) AS totalValue
             FROM dbo.BOQ
           `)
-        : Promise.resolve({ recordset: [{}] }),
-      hasBOQ
-        ? pool.request().query(`
+          : Promise.resolve({ recordset: [{}] }),
+        hasBOQ
+          ? pool.request().query(`
             SELECT TOP 6
               b.BoqID,
               COALESCE(b.DocNo, b.BoqNo) AS DocNo,
@@ -178,18 +178,18 @@ router.get("/dashboard", cache("engineering-dashboard", 120), async (req, res) =
             LEFT JOIN dbo.enterprise pr ON pr.id = b.ProjectId
             ORDER BY ISNULL(b.UpdatedAt, b.CreatedAt) DESC
           `)
-        : Promise.resolve({ recordset: [] }),
-      hasWorkDone
-        ? pool.request().query(`
+          : Promise.resolve({ recordset: [] }),
+        hasWorkDone
+          ? pool.request().query(`
             SELECT
               COUNT(1) AS total,
               SUM(CASE WHEN Status = 'Pending' THEN 1 ELSE 0 END) AS pending,
               ISNULL(SUM(CertifiedAmount), 0) AS certifiedAmount
             FROM dbo.EngineeringWorkDone
           `)
-        : Promise.resolve({ recordset: [{}] }),
-      hasWorkDone
-        ? pool.request().query(`
+          : Promise.resolve({ recordset: [{}] }),
+        hasWorkDone
+          ? pool.request().query(`
             SELECT TOP 6
               wd.ID,
               wd.DocNo,
@@ -200,60 +200,61 @@ router.get("/dashboard", cache("engineering-dashboard", 120), async (req, res) =
             LEFT JOIN dbo.WorkOrderHeader woh ON woh.Id = wd.WorkOrderID
             ORDER BY ISNULL(wd.UpdatedAt, wd.CreatedAt) DESC
           `)
-        : Promise.resolve({ recordset: [] }),
-      hasWorkDone
-        ? pool.request().query(`
+          : Promise.resolve({ recordset: [] }),
+        hasWorkDone
+          ? pool.request().query(`
             SELECT ISNULL(Status, 'Draft') AS Status, COUNT(1) AS Count, ISNULL(SUM(CertifiedAmount), 0) AS TotalValue
             FROM dbo.EngineeringWorkDone
             GROUP BY ISNULL(Status, 'Draft')
           `)
-        : Promise.resolve({ recordset: [] }),
-      pool.request().query(`
-        SELECT
-          COUNT(1) AS total,
-          SUM(CASE WHEN ISNULL(discontinue, 0) = 0 THEN 1 ELSE 0 END) AS active
-        FROM dbo.enterprise
-        WHERE business_type = 'P'
-      `),
-    ]);
+          : Promise.resolve({ recordset: [] }),
+        pool.request().query(`
+          SELECT
+            COUNT(1) AS total,
+            SUM(CASE WHEN ISNULL(discontinue, 0) = 0 THEN 1 ELSE 0 END) AS active
+          FROM dbo.enterprise
+          WHERE business_type = 'P'
+        `),
+      ]);
 
-    const wo = workOrdersResult.recordset[0] || {};
-    const boq = boqResult.recordset[0] || {};
-    const wd = workDoneResult.recordset[0] || {};
-    const projects = projectsResult.recordset[0] || {};
+      const wo = workOrdersResult.recordset[0] || {};
+      const boq = boqResult.recordset[0] || {};
+      const wd = workDoneResult.recordset[0] || {};
+      const projects = projectsResult.recordset[0] || {};
 
-    res.json({
-      workOrders: {
-        total: Number(wo.total || 0),
-        open: Number(wo.openCount || 0),
-        thisMonth: Number(wo.thisMonth || 0),
-        totalValue: Number(wo.totalValue || 0),
-      },
-      boq: {
-        total: Number(boq.total || 0),
-        approved: Number(boq.approved || 0),
-        totalValue: Number(boq.totalValue || 0),
-      },
-      workDone: {
-        total: Number(wd.total || 0),
-        pending: Number(wd.pending || 0),
-        certifiedAmount: Number(wd.certifiedAmount || 0),
-      },
-      projects: {
-        total: Number(projects.total || 0),
-        active: Number(projects.active || 0),
-      },
-      recentWOs: recentWOsResult.recordset,
-      recentBOQs: recentBOQsResult.recordset,
-      recentWorkDone: recentWorkDoneResult.recordset,
-      woStatusBreakdown: woStatusResult.recordset,
-      workDoneStatusBreakdown: workDoneStatusResult.recordset,
-    });
-  } catch (err) {
-    console.error("[engineering-dashboard]", err);
-    res.status(500).json({ error: "Failed to load engineering dashboard. Please try again." });
-  }
-});
+      res.json({
+        workOrders: {
+          total: Number(wo.total || 0),
+          open: Number(wo.openCount || 0),
+          thisMonth: Number(wo.thisMonth || 0),
+          totalValue: Number(wo.totalValue || 0),
+        },
+        boq: {
+          total: Number(boq.total || 0),
+          approved: Number(boq.approved || 0),
+          totalValue: Number(boq.totalValue || 0),
+        },
+        workDone: {
+          total: Number(wd.total || 0),
+          pending: Number(wd.pending || 0),
+          certifiedAmount: Number(wd.certifiedAmount || 0),
+        },
+        projects: {
+          total: Number(projects.total || 0),
+          active: Number(projects.active || 0),
+        },
+        recentWOs: recentWOsResult.recordset,
+        recentBOQs: recentBOQsResult.recordset,
+        recentWorkDone: recentWorkDoneResult.recordset,
+        woStatusBreakdown: woStatusResult.recordset,
+        workDoneStatusBreakdown: workDoneStatusResult.recordset,
+      });
+    } catch (err) {
+      console.error("[engineering-dashboard]", err);
+      res.status(500).json({ error: "Failed to load engineering dashboard. Please try again." });
+    }
+  },
+);
 
 router.get("/work-done", cache(WORK_DONE_CACHE, 120), async (req, res) => {
   try {
@@ -294,9 +295,8 @@ router.get("/work-done/:id", async (req, res) => {
     const pool = getPool();
     if (!(await ensureWorkDoneTable(pool, res))) return;
 
-    const result = await pool
-      .request()
-      .input("ID", sql.Int, req.params.id).query(`
+    const result = await pool.request().input("ID", sql.Int, req.params.id)
+      .query(`
         ${selectWorkDoneSql}
         WHERE wd.ID = @ID
       `);
@@ -323,7 +323,6 @@ router.post("/work-done", async (req, res) => {
     const body = req.body || {};
     const docTypeId = toIntOrNull(body.DocTypeId);
 
-    // Guard: require either a DocTypeId (auto-number) or an explicit DocNo
     if (!docTypeId && !body.DocNo) {
       return res.status(400).json({ error: "Either DocTypeId or DocNo is required." });
     }
@@ -337,7 +336,6 @@ router.post("/work-done", async (req, res) => {
     transaction = pool.transaction();
     await transaction.begin();
 
-    // Lock doc number INSIDE the transaction so a rollback releases the lock
     let finalDocNo = body.DocNo || null;
     if (docTypeId) {
       finalDocNo = await lockNextDocNumber(pool, sql, {
@@ -392,7 +390,11 @@ router.post("/work-done", async (req, res) => {
     await bumpCacheVersion(WORK_DONE_CACHE);
     await bumpCacheVersion("engineering-dashboard");
 
-    res.status(201).json({ message: "Work Done entry created", ID: newId, DocNo: finalDocNo });
+    res.status(201).json({
+      message: "Work Done entry created",
+      ID: newId,
+      DocNo: finalDocNo,
+    });
   } catch (err) {
     try { if (transaction) await transaction.rollback(); } catch (_) {}
     console.error("[POST /engineering/work-done]", err);
@@ -415,36 +417,35 @@ router.put("/work-done/:id", async (req, res) => {
     if (!(await ensureWorkDoneTable(pool, res))) return;
 
     const body = req.body || {};
-    const quantity = toNumber(body.QuantityDone);
-    const rate = toNumber(body.RatePerUnit);
+    const quantity   = toNumber(body.QuantityDone);
+    const rate       = toNumber(body.RatePerUnit);
     const deductions = toNumber(body.Deductions);
-    const gross = body.GrossAmount != null ? toNumber(body.GrossAmount) : quantity * rate;
-    const certified =
-      body.CertifiedAmount != null ? toNumber(body.CertifiedAmount) : gross - deductions;
+    const gross      = body.GrossAmount    != null ? toNumber(body.GrossAmount)    : quantity * rate;
+    const certified  = body.CertifiedAmount != null ? toNumber(body.CertifiedAmount) : gross - deductions;
 
     const result = await pool
       .request()
-      .input("ID", sql.Int, req.params.id)
-      .input("DocNo", sql.NVarChar(100), body.DocNo || null)
-      .input("DocTypeId", sql.Int, toIntOrNull(body.DocTypeId))
-      .input("DocDate", sql.Date, body.DocDate || null)
-      .input("CompanyId", sql.Int, toIntOrNull(body.CompanyId))
-      .input("ProjectId", sql.Int, toIntOrNull(body.ProjectId))
-      .input("FinYear", sql.NVarChar(20), body.FinYear || null)
-      .input("SupplierId", sql.Int, toIntOrNull(body.SupplierId))
-      .input("WorkOrderID", sql.Int, toIntOrNull(body.WorkOrderID))
-      .input("PeriodFrom", sql.Date, body.PeriodFrom || null)
-      .input("PeriodTo", sql.Date, body.PeriodTo || null)
-      .input("DescriptionOfWork", sql.NVarChar(sql.MAX), body.DescriptionOfWork || null)
-      .input("QuantityDone", sql.Decimal(18, 4), quantity)
-      .input("Unit", sql.NVarChar(50), body.Unit || null)
-      .input("RatePerUnit", sql.Decimal(18, 4), rate)
-      .input("GrossAmount", sql.Decimal(18, 2), gross)
-      .input("Deductions", sql.Decimal(18, 2), deductions)
-      .input("CertifiedAmount", sql.Decimal(18, 2), certified)
-      .input("Status", sql.NVarChar(50), body.Status || "Draft")
-      .input("Remarks", sql.NVarChar(sql.MAX), body.Remarks || null)
-      .input("UpdatedBy", sql.NVarChar(100), userEmail).query(`
+      .input("ID",                 sql.Int,               req.params.id)
+      .input("DocNo",              sql.NVarChar(100),     body.DocNo || null)
+      .input("DocTypeId",          sql.Int,               toIntOrNull(body.DocTypeId))
+      .input("DocDate",            sql.Date,              body.DocDate || null)
+      .input("CompanyId",          sql.Int,               toIntOrNull(body.CompanyId))
+      .input("ProjectId",          sql.Int,               toIntOrNull(body.ProjectId))
+      .input("FinYear",            sql.NVarChar(20),      body.FinYear || null)
+      .input("SupplierId",         sql.Int,               toIntOrNull(body.SupplierId))
+      .input("WorkOrderID",        sql.Int,               toIntOrNull(body.WorkOrderID))
+      .input("PeriodFrom",         sql.Date,              body.PeriodFrom || null)
+      .input("PeriodTo",           sql.Date,              body.PeriodTo   || null)
+      .input("DescriptionOfWork",  sql.NVarChar(sql.MAX), body.DescriptionOfWork || null)
+      .input("QuantityDone",       sql.Decimal(18, 4),    quantity)
+      .input("Unit",               sql.NVarChar(50),      body.Unit || null)
+      .input("RatePerUnit",        sql.Decimal(18, 4),    rate)
+      .input("GrossAmount",        sql.Decimal(18, 2),    gross)
+      .input("Deductions",         sql.Decimal(18, 2),    deductions)
+      .input("CertifiedAmount",    sql.Decimal(18, 2),    certified)
+      .input("Status",             sql.NVarChar(50),      body.Status || "Draft")
+      .input("Remarks",            sql.NVarChar(sql.MAX), body.Remarks || null)
+      .input("UpdatedBy",          sql.NVarChar(100),     userEmail).query(`
         UPDATE dbo.EngineeringWorkDone SET
           DocNo = @DocNo,
           DocTypeId = @DocTypeId,
@@ -485,7 +486,6 @@ router.put("/work-done/:id", async (req, res) => {
 
 router.delete("/work-done/:id", async (req, res) => {
   try {
-    // Only admins and managers may delete work done entries
     const role = req.user?.role;
     if (!role || !["admin", "manager"].includes(role.toLowerCase())) {
       return res.status(403).json({ error: "Insufficient permissions to delete work done entries." });
@@ -497,7 +497,6 @@ router.delete("/work-done/:id", async (req, res) => {
     const pool = getPool();
     if (!(await ensureWorkDoneTable(pool, res))) return;
 
-    // Soft-delete: mark as Deleted with auditor info rather than hard DELETE
     const result = await pool
       .request()
       .input("ID",        sql.Int,          req.params.id)
@@ -557,12 +556,7 @@ router.put("/work-done/:id/reject", async (req, res) => {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
     const result = await transition(
-      "work-done",
-      id,
-      "Rejected",
-      userEmail,
-      req.user?.role,
-      req.body?.note || null,
+      "work-done", id, "Rejected", userEmail, req.user?.role, req.body?.note || null,
     );
     await bumpCacheVersion(WORK_DONE_CACHE);
     await bumpCacheVersion("engineering-dashboard");
@@ -572,6 +566,64 @@ router.put("/work-done/:id/reject", async (req, res) => {
   }
 });
 
+// ── GET /engineering/work-orders-with-activities ──────────────────────────────
+router.get(
+  "/work-orders-with-activities",
+  cache("eng-wo-with-activities", 300),
+  async (req, res) => {
+    try {
+      const pool = getPool();
+      const result = await pool.request().query(`
+        SELECT
+          h.Id,
+          COALESCE(h.DocNo, h.DocumentNumber) AS DocNo,
+          ah.LHeadName AS ContractorName,
+          COUNT(a.Id) AS ActivityCount,
+          ISNULL(SUM(a.GrandTotal), 0) AS GrossTotal,
+          ISNULL(SUM(a.LabourAmount), 0) AS LabourTotal,
+          ISNULL(SUM(a.MaterialAmount), 0) AS MaterialTotal
+        FROM dbo.WorkOrderHeader h
+        INNER JOIN dbo.WorkOrderActivities a ON a.WorkOrderHeaderId = h.Id
+        LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = h.ContractorId
+        GROUP BY h.Id, h.DocNo, h.DocumentNumber, ah.LHeadName
+        ORDER BY h.Id DESC
+      `);
+      res.json(result.recordset);
+    } catch (err) {
+      console.error("[GET /engineering/work-orders-with-activities]", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+// ── GET /engineering/work-order-summary/:woId ─────────────────────────────────
+router.get("/work-order-summary/:woId", async (req, res) => {
+  try {
+    const pool = getPool();
+    const woId = parseInt(req.params.woId, 10);
+    if (!Number.isFinite(woId)) return res.status(400).json({ error: "Invalid WO ID" });
+
+    const result = await pool
+      .request()
+      .input("WorkOrderHeaderId", sql.Int, woId).query(`
+        SELECT
+          COUNT(a.Id)                      AS ActivityCount,
+          ISNULL(SUM(a.GrandTotal), 0)     AS GrossAmount,
+          ISNULL(SUM(a.LabourAmount), 0)   AS LabourAmount,
+          ISNULL(SUM(a.MaterialAmount), 0) AS MaterialAmount,
+          ISNULL(SUM(a.GrandTotal), 0)     AS NetAmount
+        FROM dbo.WorkOrderActivities a
+        WHERE a.WorkOrderHeaderId = @WorkOrderHeaderId
+      `);
+
+    const row = result.recordset[0] ?? {
+      ActivityCount: 0, GrossAmount: 0, LabourAmount: 0, MaterialAmount: 0, NetAmount: 0,
+    };
+    res.json(row);
+  } catch (err) {
+    console.error("[GET /engineering/work-order-summary/:woId]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 module.exports = router;
-
-
