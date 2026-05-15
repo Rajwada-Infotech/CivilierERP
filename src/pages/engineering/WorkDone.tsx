@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -244,6 +244,17 @@ function WorkDoneForm({
   const [docRefreshTrigger, setDocRefreshTrigger] = useState(0);
   const [woSummaryLoading, setWoSummaryLoading] = useState(false);
   const [woActivities, setWoActivities] = useState<WoActivity[]>([]);
+
+  // When editing an existing record, fetch activities for the pre-filled WO
+  useEffect(() => {
+    const woId = form.workOrderId;
+    if (!woId) return;
+    fetchWithAuth(`/api/work-orders/${woId}/activities?_t=${Date.now()}`)
+      .then((res) => (res.ok ? res.json() : Promise.reject()))
+      .then((acts) => setWoActivities(Array.isArray(acts) ? acts : []))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // run once on mount — workOrderId is stable from initial form state
 
   const setField = useCallback(
     <K extends keyof FormState>(k: K, v: FormState[K]) =>
