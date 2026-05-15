@@ -1285,16 +1285,25 @@ export default function MaterialExpenseBooking() {
     };
 
     load("po", "/api/purchase-orders?limit=500", setPoList, setLoadingPO);
-    load<WorkDoneItem>(
-      "workDone",
-      "/api/engineering/work-done?status=Approved&limit=500",
-      setWorkDoneList,
-      setLoadingWorkDone,
-      (r) => {
+    // Always re-fetch Work Done fresh (no cache) so newly-approved entries appear
+    _mastersCache.workDone = null;
+    setLoadingWorkDone(true);
+    apiFetch("/api/engineering/work-done?status=Approved&limit=500")
+      .then((r: any) => {
         const all: WorkDoneItem[] = Array.isArray(r) ? r : (r.data ?? []);
-        return all.filter((wd) => wd.Status === "Approved");
-      },
-    );
+        const list = all.filter(
+          (wd) => (wd.Status ?? "").toLowerCase() === "approved",
+        );
+        _mastersCache.workDone = list;
+        setWorkDoneList(list);
+      })
+      .catch((err: any) => {
+        console.error("Work Done fetch failed:", err?.message);
+        toast.error(
+          "Could not load Work Done list: " + (err?.message ?? "Unknown error"),
+        );
+      })
+      .finally(() => setLoadingWorkDone(false));
     load<POItem>(
       "woPO",
       "/api/purchase-orders?limit=500",
@@ -1607,7 +1616,9 @@ export default function MaterialExpenseBooking() {
           apiFetch("/api/engineering/work-done?status=Approved&limit=500")
             .then((r: any) => {
               const all: WorkDoneItem[] = Array.isArray(r) ? r : (r.data ?? []);
-              const list = all.filter((wd) => wd.Status === "Approved");
+              const list = all.filter(
+                (wd) => (wd.Status ?? "").toLowerCase() === "approved",
+              );
               _mastersCache.workDone = list;
               tryBuildWorkDone(list);
             })
