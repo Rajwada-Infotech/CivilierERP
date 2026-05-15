@@ -141,15 +141,14 @@ const uid = () => `k${_uidSeed++}`;
 
 const getToken = () => localStorage.getItem("token") || "";
 
+// Thin wrapper around fetchWithAuth that prepends /api, sets Content-Type,
+// and throws on non-OK responses. No manual token injection needed —
+// fetchWithAuth already handles the Authorization header.
 const apiFetch = async (path: string, opts?: RequestInit) => {
   const url = `/api${path}`;
   const headers = new Headers(opts?.headers || {});
   if (!headers.has("Content-Type") && !(opts?.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
-  }
-  const token = getToken();
-  if (token) {
-    headers.set("Authorization", `Bearer ${token}`);
   }
   const res = await fetchWithAuth(url, { ...opts, headers });
   if (!res.ok) {
