@@ -1,10 +1,11 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { StatusBadge } from "@/components/StatusBadge";
+import { ApprovalActions } from "@/components/ApprovalActions";
 import { useFinYear } from "@/contexts/FinYearContext";
 import {
   fetchCompanies,
@@ -29,6 +30,9 @@ import {
   ArrowLeft,
   Save,
   RotateCcw,
+  Eye,
+  Printer,
+  X,
 } from "lucide-react";
 
 // ─── Style constants ──────────────────────────────────────────────────────────
@@ -244,6 +248,17 @@ function WorkDoneForm({
   const [docRefreshTrigger, setDocRefreshTrigger] = useState(0);
   const [woSummaryLoading, setWoSummaryLoading] = useState(false);
   const [woActivities, setWoActivities] = useState<WoActivity[]>([]);
+
+  // When editing an existing record, fetch activities for the pre-filled WO
+  useEffect(() => {
+    const woId = form.workOrderId;
+    if (!woId) return;
+    fetchWithAuth(`/api/work-orders/${woId}/activities?_t=${Date.now()}`)
+      .then((res) => (res.ok ? res.json() : Promise.reject()))
+      .then((acts) => setWoActivities(Array.isArray(acts) ? acts : []))
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // run once on mount — workOrderId is stable from initial form state
 
   const setField = useCallback(
     <K extends keyof FormState>(k: K, v: FormState[K]) =>
@@ -651,7 +666,9 @@ function WorkDoneForm({
                     {woActivities.map((a, i) => (
                       <tr
                         key={a.Id}
-                        className={`border-b border-border/50 ${i % 2 === 0 ? "" : "bg-muted/10"}`}
+                        className={`border-b border-border/50 ${
+                          i % 2 === 0 ? "" : "bg-muted/10"
+                        }`}
                       >
                         <td className="px-3 py-2 text-muted-foreground">
                           {a.ActivityGroupName || "—"}
@@ -841,6 +858,7 @@ export default function WorkDone() {
   const { finYears } = useFinYear();
   const [view, setView] = useState<"list" | "form">("list");
   const [editRecord, setEditRecord] = useState<WorkDoneEntry | null>(null);
+  const [viewRecord, setViewRecord] = useState<WorkDoneEntry | null>(null);
   const [statusFilter, setStatusFilter] = useState("all");
 
   const activeFinYear =
@@ -937,6 +955,117 @@ export default function WorkDone() {
     setEditRecord(null);
   };
 
+  // ── Print handler ────────────────────────────────────────────────────────────
+  const handlePrint = (r: WorkDoneEntry) => {
+    const win = window.open("", "_blank", "width=900,height=700");
+    if (!win) return;
+    const fmtN = (n: number) =>
+      new Intl.NumberFormat("en-IN", {
+        style: "currency",
+        currency: "INR",
+        maximumFractionDigits: 0,
+      }).format(n ?? 0);
+    const fmtD = (d: string | null) =>
+      d
+        ? new Date(d).toLocaleDateString("en-IN", {
+            day: "2-digit",
+            month: "short",
+            year: "numeric",
+          })
+        : "—";
+    win.document
+      .write(`<!DOCTYPE html><html><head><title>Work Done — ${r.DocNo || r.ID}</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 12px; color: #1a1a2e; background: #fff; padding: 32px; }
+  .header { display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid #7c3aed; padding-bottom: 16px; margin-bottom: 20px; }
+  .logo-block h1 { font-size: 20px; font-weight: 800; color: #7c3aed; letter-spacing: -0.5px; }
+  .logo-block p { font-size: 10px; color: #6b7280; margin-top: 2px; }
+  .doc-block { text-align: right; }
+  .doc-block .doc-no { font-size: 16px; font-weight: 700; color: #7c3aed; font-family: monospace; }
+  .doc-block .doc-label { font-size: 9px; color: #9ca3af; text-transform: uppercase; letter-spacing: 1px; }
+  .status-badge { display: inline-block; padding: 3px 10px; border-radius: 20px; font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+    background: ${r.Status === "Approved" ? "#d1fae5" : r.Status === "Pending" ? "#fef3c7" : r.Status === "Rejected" ? "#fee2e2" : "#f3f4f6"};
+    color: ${r.Status === "Approved" ? "#065f46" : r.Status === "Pending" ? "#92400e" : r.Status === "Rejected" ? "#991b1b" : "#374151"}; }
+  .section { margin-bottom: 20px; }
+  .section-title { font-size: 9px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: #7c3aed; margin-bottom: 10px; padding-bottom: 4px; border-bottom: 1px solid #ede9fe; }
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  .field { }
+  .field label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.8px; color: #9ca3af; font-weight: 600; display: block; margin-bottom: 3px; }
+  .field span { font-size: 12px; color: #111827; font-weight: 500; }
+  .amount-box { background: #f5f3ff; border: 1px solid #ede9fe; border-radius: 10px; padding: 16px; }
+  .amount-row { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-bottom: 1px solid #ede9fe; }
+  .amount-row:last-child { border-bottom: none; }
+  .amount-row .label { color: #6b7280; font-size: 11px; }
+  .amount-row .value { font-weight: 600; color: #111827; font-family: monospace; }
+  .net-row { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; padding: 12px 16px; background: #7c3aed; border-radius: 8px; }
+  .net-row .label { color: #ede9fe; font-size: 12px; font-weight: 600; }
+  .net-row .value { color: #fff; font-size: 16px; font-weight: 800; font-family: monospace; }
+  .desc-box { background: #fafafa; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; font-size: 12px; color: #374151; line-height: 1.6; }
+  .footer { margin-top: 32px; padding-top: 12px; border-top: 1px solid #e5e7eb; display: flex; justify-content: space-between; font-size: 9px; color: #9ca3af; }
+  @media print { body { padding: 20px; } }
+</style></head><body>
+<div class="header">
+  <div class="logo-block">
+    <h1>Civilier ERP</h1>
+    <p>Work Done Certificate</p>
+  </div>
+  <div class="doc-block">
+    <div class="doc-label">Document No</div>
+    <div class="doc-no">${r.DocNo || "—"}</div>
+    <div style="margin-top:6px"><span class="status-badge">${r.Status || "Draft"}</span></div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-title">Project Information</div>
+  <div class="grid-3">
+    <div class="field"><label>Company</label><span>${r.CompanyName || "—"}</span></div>
+    <div class="field"><label>Project / Site</label><span>${r.ProjectName || "—"}</span></div>
+    <div class="field"><label>Financial Year</label><span>${r.FinYear || "—"}</span></div>
+    <div class="field"><label>Document Date</label><span>${fmtD(r.DocDate)}</span></div>
+    <div class="field"><label>Work Order Ref</label><span>${r.WorkOrderNo || "—"}</span></div>
+    <div class="field"><label>Contractor</label><span>${r.ContractorName || r.SupplierName || "—"}</span></div>
+  </div>
+</div>
+
+<div class="section">
+  <div class="section-title">Work Period & Details</div>
+  <div class="grid-3" style="margin-bottom:12px">
+    <div class="field"><label>Period From</label><span>${fmtD(r.PeriodFrom)}</span></div>
+    <div class="field"><label>Period To</label><span>${fmtD(r.PeriodTo)}</span></div>
+    <div class="field"><label>Unit</label><span>${r.Unit || "—"}</span></div>
+    <div class="field"><label>Quantity Done</label><span>${r.QuantityDone ?? "—"}</span></div>
+    <div class="field"><label>Rate Per Unit</label><span>${fmtN(r.RatePerUnit)}</span></div>
+  </div>
+  <div class="field"><label>Description of Work</label></div>
+  <div class="desc-box" style="margin-top:6px">${r.DescriptionOfWork || "—"}</div>
+</div>
+
+<div class="section">
+  <div class="section-title">Amount Summary</div>
+  <div class="amount-box">
+    <div class="amount-row"><span class="label">Gross Amount</span><span class="value">${fmtN(r.GrossAmount)}</span></div>
+    <div class="amount-row"><span class="label">Deductions</span><span class="value" style="color:#dc2626">− ${fmtN(r.Deductions)}</span></div>
+  </div>
+  <div class="net-row"><span class="label">Certified Amount</span><span class="value">${fmtN(r.CertifiedAmount)}</span></div>
+</div>
+
+${r.Remarks ? `<div class="section"><div class="section-title">Remarks</div><div class="desc-box">${r.Remarks}</div></div>` : ""}
+
+<div class="footer">
+  <span>Generated from Civilier ERP · ${new Date().toLocaleDateString("en-IN")}</span>
+  <span>Doc: ${r.DocNo || r.ID} · Status: ${r.Status}</span>
+</div>
+</body></html>`);
+    win.document.close();
+    win.focus();
+    setTimeout(() => {
+      win.print();
+    }, 400);
+  };
+
   // ── Columns ──────────────────────────────────────────────────────────────────
   const COLUMNS: ColumnDef<WorkDoneEntry>[] = [
     {
@@ -1019,12 +1148,35 @@ export default function WorkDone() {
       id: "actions",
       header: "",
       cell: ({ row }) => (
-        <button
-          onClick={() => openEdit(row.original)}
-          className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 px-2 py-1 rounded hover:bg-muted transition-colors"
-        >
-          <PenSquare size={11} /> Edit
-        </button>
+        <div className="flex items-center gap-1">
+          <button
+            onClick={() => setViewRecord(row.original)}
+            title="View details"
+            className="p-1.5 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-primary"
+          >
+            <Eye size={13} />
+          </button>
+          <button
+            onClick={() => handlePrint(row.original)}
+            title="Print"
+            className="p-1.5 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-violet-600"
+          >
+            <Printer size={13} />
+          </button>
+          <button
+            onClick={() => openEdit(row.original)}
+            className="text-[10px] text-muted-foreground hover:text-foreground flex items-center gap-1 px-2 py-1 rounded hover:bg-muted transition-colors"
+          >
+            <PenSquare size={11} /> Edit
+          </button>
+          <ApprovalActions
+            status={row.original.Status}
+            recordId={row.original.ID}
+            endpoint="/api/engineering/work-done"
+            onSuccess={() => refetch()}
+            submitOnly={true}
+          />
+        </div>
       ),
     },
   ];
@@ -1037,7 +1189,7 @@ export default function WorkDone() {
         <div>
           <Breadcrumbs
             items={[
-              { label: "Engineering", href: "/engineering" },
+              { label: "Engineering", path: "/engineering" },
               { label: "Work Done" },
             ]}
           />
@@ -1167,6 +1319,183 @@ export default function WorkDone() {
           loadingDropdowns={loadingDropdowns}
           activeFinYear={activeFinYear}
         />
+      )}
+
+      {/* ── View Modal ── */}
+      {viewRecord && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+          onClick={() => setViewRecord(null)}
+        >
+          <div
+            className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-border sticky top-0 bg-card z-10">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-lg bg-orange-500/10">
+                  <Hammer size={15} className="text-orange-600" />
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide font-semibold">
+                    Work Done
+                  </p>
+                  <p className="text-sm font-heading font-bold text-foreground font-mono">
+                    {viewRecord.DocNo || `#${viewRecord.ID}`}
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => handlePrint(viewRecord)}
+                  title="Print"
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border border-border text-muted-foreground hover:text-violet-600 hover:border-violet-300 hover:bg-violet-500/5 transition-colors"
+                >
+                  <Printer size={12} /> Print
+                </button>
+                <button
+                  onClick={() => setViewRecord(null)}
+                  className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+                >
+                  <X size={16} />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal body */}
+            <div className="p-6 space-y-5">
+              {/* Status badge */}
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-muted-foreground">Status</span>
+                <span
+                  className={`px-3 py-1 rounded-full text-xs font-bold border ${
+                    viewRecord.Status === "Approved"
+                      ? "bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800"
+                      : viewRecord.Status === "Pending"
+                        ? "bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-800"
+                        : viewRecord.Status === "Rejected"
+                          ? "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-400 dark:border-red-800"
+                          : "bg-muted text-muted-foreground border-border"
+                  }`}
+                >
+                  {viewRecord.Status || "Draft"}
+                </span>
+              </div>
+
+              {/* Project info */}
+              <div className="rounded-xl border border-border overflow-hidden">
+                <div className="px-4 py-2.5 bg-muted/30 border-b border-border text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  Project Information
+                </div>
+                <div className="p-4 grid grid-cols-2 gap-4">
+                  {[
+                    ["Company", viewRecord.CompanyName],
+                    ["Project / Site", viewRecord.ProjectName],
+                    ["Financial Year", viewRecord.FinYear],
+                    ["Document Date", fmtDate(viewRecord.DocDate)],
+                    ["Work Order", viewRecord.WorkOrderNo],
+                    [
+                      "Contractor",
+                      viewRecord.ContractorName || viewRecord.SupplierName,
+                    ],
+                  ].map(([label, value]) => (
+                    <div key={label}>
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold mb-0.5">
+                        {label}
+                      </p>
+                      <p className="text-sm text-foreground font-medium">
+                        {value || "—"}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Work period */}
+              <div className="rounded-xl border border-border overflow-hidden">
+                <div className="px-4 py-2.5 bg-muted/30 border-b border-border text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  Work Period & Measurement
+                </div>
+                <div className="p-4 grid grid-cols-3 gap-4">
+                  {[
+                    ["Period From", fmtDate(viewRecord.PeriodFrom)],
+                    ["Period To", fmtDate(viewRecord.PeriodTo)],
+                    ["Unit", viewRecord.Unit],
+                    ["Quantity Done", String(viewRecord.QuantityDone ?? "—")],
+                    ["Rate Per Unit", fmt(viewRecord.RatePerUnit)],
+                  ].map(([label, value]) => (
+                    <div key={label}>
+                      <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold mb-0.5">
+                        {label}
+                      </p>
+                      <p className="text-sm text-foreground font-medium">
+                        {value || "—"}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+                {viewRecord.DescriptionOfWork && (
+                  <div className="px-4 pb-4">
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold mb-1.5">
+                      Description of Work
+                    </p>
+                    <p className="text-sm text-foreground bg-muted/30 rounded-lg px-3 py-2.5 leading-relaxed">
+                      {viewRecord.DescriptionOfWork}
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Amount summary */}
+              <div className="rounded-xl border border-violet-500/20 bg-violet-500/5 overflow-hidden">
+                <div className="px-4 py-2.5 border-b border-violet-500/20 text-xs font-semibold text-violet-600 dark:text-violet-400 uppercase tracking-wide">
+                  Amount Summary
+                </div>
+                <div className="p-4 space-y-2">
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-muted-foreground">Gross Amount</span>
+                    <span className="font-mono font-semibold text-foreground">
+                      {fmt(viewRecord.GrossAmount)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-muted-foreground">Deductions</span>
+                    <span className="font-mono font-semibold text-red-500">
+                      − {fmt(viewRecord.Deductions)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-center pt-2 border-t border-violet-500/20">
+                    <span className="font-semibold text-foreground text-sm">
+                      Certified Amount
+                    </span>
+                    <span className="font-mono font-bold text-emerald-600 text-base">
+                      {fmt(viewRecord.CertifiedAmount)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Remarks */}
+              {viewRecord.Remarks && (
+                <div>
+                  <p className="text-[10px] text-muted-foreground uppercase tracking-wide font-semibold mb-1.5">
+                    Remarks
+                  </p>
+                  <p className="text-sm text-foreground bg-muted/30 rounded-lg px-3 py-2.5">
+                    {viewRecord.Remarks}
+                  </p>
+                </div>
+              )}
+
+              {/* Created info */}
+              <div className="flex items-center justify-between text-[10px] text-muted-foreground pt-2 border-t border-border">
+                <span>Created by {viewRecord.CreatedBy || "—"}</span>
+                <span>{fmtDate(viewRecord.CreatedAt)}</span>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

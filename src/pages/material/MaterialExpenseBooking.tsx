@@ -47,6 +47,7 @@ import {
   FolderKanban,
   ShoppingCart,
   HardHat,
+  Hammer,
   Search,
   X,
   ChevronLeft,
@@ -112,7 +113,8 @@ const _mastersCache: {
   woPO: POItem[] | null;
   tod: TodItem[] | null;
   grn: GRNItem[] | null;
-} = { po: null, wo: null, woPO: null, tod: null, grn: null };
+  workDone: WorkDoneItem[] | null;
+} = { po: null, wo: null, woPO: null, tod: null, grn: null, workDone: null };
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 interface CompanyOption {
@@ -156,6 +158,20 @@ interface WOItem {
   Status: string;
   GST?: GSTConfig | null;
 }
+interface WorkDoneItem {
+  ID: number;
+  DocNo?: string;
+  DocDate?: string;
+  ContractorName?: string;
+  DescriptionOfWork?: string;
+  CertifiedAmount?: number;
+  Status: string;
+  CompanyId?: number;
+  ProjectId?: number;
+  WorkOrderID?: number;
+  WorkOrderNo?: string;
+  GST?: GSTConfig | null;
+}
 interface TodItem {
   TypeOfDocId: number;
   Prefix: string;
@@ -163,7 +179,7 @@ interface TodItem {
   Description: string;
   EntryType?: string;
 }
-type SourceKind = "PO" | "WO" | "WO_PO" | "TOD" | "GRN";
+type SourceKind = "PO" | "WO" | "WO_PO" | "TOD" | "GRN" | "WORK_DONE";
 
 interface GRNItemLine {
   itemName?: string;
@@ -392,12 +408,12 @@ function RateInput({
 // ─── Document Selector Panel ──────────────────────────────────────────────────
 interface DocSelectorProps {
   poList: POItem[];
-  woList: WOItem[];
   woPOList: POItem[];
+  workDoneList: WorkDoneItem[];
   todList: TodItem[];
   grnList: GRNItem[];
   loadingPO: boolean;
-  loadingWO: boolean;
+  loadingWorkDone: boolean;
   loadingWOPO: boolean;
   loadingTOD: boolean;
   loadingGRN: boolean;
@@ -414,7 +430,7 @@ interface DocSelectorProps {
   filterFinYear?: string | null;
   /** IDs already booked — excludes them from picker (except the one being edited) */
   bookedPOIds?: Set<number>;
-  bookedWOIds?: Set<number>;
+  bookedWorkDoneIds?: Set<number>;
   bookedWOPOIds?: Set<number>;
   bookedGRNIds?: Set<number>;
   onSelect: (doc: SelectedDoc) => void;
@@ -424,12 +440,12 @@ interface DocSelectorProps {
 
 function DocSelectorPanel({
   poList,
-  woList,
   woPOList,
+  workDoneList,
   todList,
   grnList,
   loadingPO,
-  loadingWO,
+  loadingWorkDone,
   loadingWOPO,
   loadingTOD,
   loadingGRN,
@@ -442,7 +458,7 @@ function DocSelectorPanel({
   filterProjectId,
   filterFinYear,
   bookedPOIds,
-  bookedWOIds,
+  bookedWorkDoneIds,
   bookedWOPOIds,
   bookedGRNIds,
   onSelect,
@@ -481,16 +497,28 @@ function DocSelectorPanel({
   // Match fin year by looking for the year string embedded in the doc number.
   // e.g. filterFinYear = "2026-2027", docNo = "CI/PUR/000001/2026-2027" → match
   // Falls back to true when no filter is set or doc has no number.
-  const inFinYear = (docNo?: string) => {
-    if (!filterFinYear || !docNo) return true;
+  const inFinYear = (docNo?: string, recFinYear?: string) => {
+    if (!filterFinYear) return true;
+    // Prefer matching against the record's own FinYear field if available
+    if (recFinYear) return recFinYear === filterFinYear;
+    // Fallback: check if the doc number embeds the fin year (PO/GRN style)
+    if (!docNo) return true;
     return docNo.includes(filterFinYear);
   };
 
   const filteredPO = poList.filter((p) => {
     if (bookedPOIds?.has(p.PurchaseOrderID)) return false;
-    if (filterCompanyId && p.CompanyId && p.CompanyId !== filterCompanyId)
+    if (
+      filterCompanyId &&
+      p.CompanyId &&
+      Number(p.CompanyId) !== Number(filterCompanyId)
+    )
       return false;
-    if (filterProjectId && p.ProjectId && p.ProjectId !== filterProjectId)
+    if (
+      filterProjectId &&
+      p.ProjectId &&
+      Number(p.ProjectId) !== Number(filterProjectId)
+    )
       return false;
     if (!inFinYear(p.DocNo || p.PurchaseOrderNo)) return false;
     return (
@@ -498,23 +526,41 @@ function DocSelectorPanel({
       (p.SupplierName || "").toLowerCase().includes(q)
     );
   });
-  const filteredWO = woList.filter((w) => {
-    if (bookedWOIds?.has(w.Id)) return false;
-    if (filterCompanyId && w.CompanyId && w.CompanyId !== filterCompanyId)
+  const filteredWorkDone = workDoneList.filter((wd) => {
+    if (bookedWorkDoneIds?.has(wd.ID)) return false;
+    if (
+      filterCompanyId &&
+      wd.CompanyId &&
+      Number(wd.CompanyId) !== Number(filterCompanyId)
+    )
       return false;
-    if (filterProjectId && w.ProjectId && w.ProjectId !== filterProjectId)
+    if (
+      filterProjectId &&
+      wd.ProjectId &&
+      Number(wd.ProjectId) !== Number(filterProjectId)
+    )
       return false;
-    if (!inFinYear(w.DocNo || w.DocumentNumber)) return false;
+    if (!inFinYear(wd.DocNo, wd.FinYear)) return false;
     return (
-      (w.DocNo || w.DocumentNumber).toLowerCase().includes(q) ||
-      (w.ContractorName || "").toLowerCase().includes(q)
+      (wd.DocNo || "").toLowerCase().includes(q) ||
+      (wd.ContractorName || "").toLowerCase().includes(q) ||
+      (wd.WorkOrderNo || "").toLowerCase().includes(q) ||
+      (wd.DescriptionOfWork || "").toLowerCase().includes(q)
     );
   });
   const filteredWOPO = woPOList.filter((p) => {
     if (bookedWOPOIds?.has(p.PurchaseOrderID)) return false;
-    if (filterCompanyId && p.CompanyId && p.CompanyId !== filterCompanyId)
+    if (
+      filterCompanyId &&
+      p.CompanyId &&
+      Number(p.CompanyId) !== Number(filterCompanyId)
+    )
       return false;
-    if (filterProjectId && p.ProjectId && p.ProjectId !== filterProjectId)
+    if (
+      filterProjectId &&
+      p.ProjectId &&
+      Number(p.ProjectId) !== Number(filterProjectId)
+    )
       return false;
     if (!inFinYear(p.DocNo || p.PurchaseOrderNo)) return false;
     return (
@@ -539,13 +585,13 @@ function DocSelectorPanel({
 
   if (selected) {
     const isPO = selected.kind === "PO",
-      isWO = selected.kind === "WO",
+      isWorkDone = selected.kind === "WORK_DONE",
       isWOPO = selected.kind === "WO_PO",
       isGRN = selected.kind === "GRN";
     const Icon = isPO
       ? ShoppingCart
-      : isWO
-        ? HardHat
+      : isWorkDone
+        ? Hammer
         : isWOPO
           ? Package
           : isGRN
@@ -559,7 +605,7 @@ function DocSelectorPanel({
           badge:
             "bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20",
         }
-      : isWO
+      : isWorkDone
         ? {
             ring: "border-violet-500/30 bg-violet-500/5",
             icon: "bg-violet-500/10",
@@ -606,8 +652,8 @@ function DocSelectorPanel({
                 >
                   {isPO
                     ? "Purchase Order"
-                    : isWO
-                      ? "Work Order"
+                    : isWorkDone
+                      ? "Work Done"
                       : isWOPO
                         ? "WO Material PO"
                         : isGRN
@@ -632,7 +678,7 @@ function DocSelectorPanel({
                     label={
                       isPO
                         ? "Supplier"
-                        : isWO
+                        : isWorkDone
                           ? "Contractor"
                           : isWOPO
                             ? "Supplier"
@@ -739,7 +785,12 @@ function DocSelectorPanel({
       icon: ShoppingCart,
       count: filteredPO.length,
     },
-    { id: "WO", label: "Work Orders", icon: HardHat, count: filteredWO.length },
+    {
+      id: "WORK_DONE",
+      label: "Work Done",
+      icon: Hammer,
+      count: filteredWorkDone.length,
+    },
     {
       id: "WO_PO",
       label: "WO Material POs",
@@ -757,8 +808,8 @@ function DocSelectorPanel({
   const loading =
     tab === "PO"
       ? loadingPO
-      : tab === "WO"
-        ? loadingWO
+      : tab === "WORK_DONE"
+        ? loadingWorkDone
         : tab === "WO_PO"
           ? loadingWOPO
           : tab === "GRN"
@@ -767,8 +818,8 @@ function DocSelectorPanel({
   const placeholder =
     tab === "PO"
       ? "Search by PO number or supplier…"
-      : tab === "WO"
-        ? "Search by WO number or contractor…"
+      : tab === "WORK_DONE"
+        ? "Search by Work Done doc no, contractor, or WO ref…"
         : tab === "WO_PO"
           ? "Search by WO_PO number, supplier, or WO ref…"
           : tab === "GRN"
@@ -861,37 +912,40 @@ function DocSelectorPanel({
               );
             })
           )
-        ) : tab === "WO" ? (
-          filteredWO.length === 0 ? (
-            <EmptyState label="No work orders found" />
+        ) : tab === "WORK_DONE" ? (
+          filteredWorkDone.length === 0 ? (
+            <EmptyState label="No approved Work Done entries found" />
           ) : (
-            filteredWO.map((wo) => {
-              const docNo = wo.DocNo || wo.DocumentNumber;
+            filteredWorkDone.map((wd) => {
               return (
                 <PickerRow
-                  key={wo.Id}
-                  icon={<HardHat size={12} className="text-violet-500" />}
+                  key={wd.ID}
+                  icon={<Hammer size={12} className="text-violet-500" />}
                   iconBg="bg-violet-500/10"
-                  primary={docNo}
+                  primary={wd.DocNo || `WD-${wd.ID}`}
                   primaryColor="text-violet-600 dark:text-violet-400"
-                  secondary={[wo.ContractorName, wo.DocumentDate?.slice(0, 10)]
+                  secondary={[
+                    wd.ContractorName,
+                    wd.WorkOrderNo ? `WO: ${wd.WorkOrderNo}` : null,
+                    wd.DocDate?.slice(0, 10),
+                  ]
                     .filter(Boolean)
                     .join(" · ")}
-                  badge={wo.Status}
-                  amount={wo.TotalAmount}
+                  badge={wd.Status}
+                  amount={wd.CertifiedAmount}
                   onClick={() =>
                     onSelect({
-                      kind: "WO",
-                      docNo,
-                      sourceId: wo.Id,
-                      nameLabel: wo.Remarks,
-                      vendorLabel: wo.ContractorName,
-                      companyId: wo.CompanyId,
-                      projectId: wo.ProjectId,
-                      amount: wo.TotalAmount,
-                      status: wo.Status,
-                      date: wo.DocumentDate,
-                      gst: wo.GST ?? null,
+                      kind: "WORK_DONE",
+                      docNo: wd.DocNo || `WD-${wd.ID}`,
+                      sourceId: wd.ID,
+                      nameLabel: wd.DescriptionOfWork,
+                      vendorLabel: wd.ContractorName,
+                      companyId: wd.CompanyId,
+                      projectId: wd.ProjectId,
+                      amount: wd.CertifiedAmount,
+                      status: wd.Status,
+                      date: wd.DocDate,
+                      gst: wd.GST ?? null,
                     })
                   }
                 />
@@ -1089,7 +1143,7 @@ function resolveGstRates(
 ) {
   if (
     (doc.kind === "PO" ||
-      doc.kind === "WO" ||
+      doc.kind === "WORK_DONE" ||
       doc.kind === "WO_PO" ||
       doc.kind === "GRN") &&
     doc.gst?.applicable
@@ -1101,7 +1155,7 @@ function resolveGstRates(
   }
   if (
     doc.kind === "PO" ||
-    doc.kind === "WO" ||
+    doc.kind === "WORK_DONE" ||
     doc.kind === "WO_PO" ||
     doc.kind === "GRN"
   )
@@ -1172,12 +1226,12 @@ export default function MaterialExpenseBooking() {
   const [companyOptions, setCompanyOptions] = useState<CompanyOption[]>([]);
   const [projectOptions, setProjectOptions] = useState<ProjectOption[]>([]);
   const [poList, setPoList] = useState<POItem[]>([]);
-  const [woList, setWoList] = useState<WOItem[]>([]);
+  const [workDoneList, setWorkDoneList] = useState<WorkDoneItem[]>([]);
   const [woPOList, setWoPOList] = useState<POItem[]>([]);
   const [todList, setTodList] = useState<TodItem[]>([]);
   const [grnList, setGrnList] = useState<GRNItem[]>([]);
   const [loadingPO, setLoadingPO] = useState(false);
-  const [loadingWO, setLoadingWO] = useState(false);
+  const [loadingWorkDone, setLoadingWorkDone] = useState(false);
   const [loadingWOPO, setLoadingWOPO] = useState(false);
   const [loadingTOD, setLoadingTOD] = useState(false);
   const [loadingGRN, setLoadingGRN] = useState(false);
@@ -1259,7 +1313,25 @@ export default function MaterialExpenseBooking() {
     };
 
     load("po", "/api/purchase-orders?limit=500", setPoList, setLoadingPO);
-    load("wo", "/api/work-orders?limit=500", setWoList, setLoadingWO);
+    // Always re-fetch Work Done fresh (no cache) so newly-approved entries appear
+    _mastersCache.workDone = null;
+    setLoadingWorkDone(true);
+    apiFetch("/api/engineering/work-done?status=Approved&limit=500")
+      .then((r: any) => {
+        const all: WorkDoneItem[] = Array.isArray(r) ? r : (r.data ?? []);
+        const list = all.filter(
+          (wd) => (wd.Status ?? "").toLowerCase() === "approved",
+        );
+        _mastersCache.workDone = list;
+        setWorkDoneList(list);
+      })
+      .catch((err: any) => {
+        console.error("Work Done fetch failed:", err?.message);
+        toast.error(
+          "Could not load Work Done list: " + (err?.message ?? "Unknown error"),
+        );
+      })
+      .finally(() => setLoadingWorkDone(false));
     load<POItem>(
       "woPO",
       "/api/purchase-orders?limit=500",
@@ -1416,8 +1488,8 @@ export default function MaterialExpenseBooking() {
       materialCategory:
         doc.kind === "PO"
           ? "PO"
-          : doc.kind === "WO"
-            ? "WO"
+          : doc.kind === "WORK_DONE"
+            ? "WORK_DONE"
             : doc.kind === "WO_PO"
               ? "WO_PO"
               : doc.kind === "GRN"
@@ -1548,32 +1620,35 @@ export default function MaterialExpenseBooking() {
             })
             .catch(() => {});
         }
-      } else if (kind === "WO") {
-        const tryBuildWO = (list: WOItem[]) => {
-          const wo = list.find((w) => w.Id === sourceId);
-          if (wo) {
+      } else if (kind === "WORK_DONE") {
+        const tryBuildWorkDone = (list: WorkDoneItem[]) => {
+          const wd = list.find((w) => w.ID === sourceId);
+          if (wd) {
             setSelectedDoc({
-              kind: "WO",
-              docNo: wo.DocNo || wo.DocumentNumber,
+              kind: "WORK_DONE",
+              docNo: wd.DocNo || `WD-${wd.ID}`,
               sourceId,
-              vendorLabel: wo.ContractorName,
-              companyId: wo.CompanyId,
-              projectId: wo.ProjectId,
-              amount: wo.TotalAmount,
-              status: wo.Status,
-              date: wo.DocumentDate,
-              gst: wo.GST ?? null,
+              vendorLabel: wd.ContractorName,
+              companyId: wd.CompanyId,
+              projectId: wd.ProjectId,
+              amount: wd.CertifiedAmount,
+              status: wd.Status,
+              date: wd.DocDate,
+              gst: wd.GST ?? null,
             });
           }
         };
-        if (_mastersCache.wo) {
-          tryBuildWO(_mastersCache.wo);
+        if (_mastersCache.workDone) {
+          tryBuildWorkDone(_mastersCache.workDone);
         } else {
-          apiFetch("/api/work-orders?limit=500")
+          apiFetch("/api/engineering/work-done?status=Approved&limit=500")
             .then((r: any) => {
-              const list: WOItem[] = Array.isArray(r) ? r : (r.data ?? []);
-              _mastersCache.wo = list;
-              tryBuildWO(list);
+              const all: WorkDoneItem[] = Array.isArray(r) ? r : (r.data ?? []);
+              const list = all.filter(
+                (wd) => (wd.Status ?? "").toLowerCase() === "approved",
+              );
+              _mastersCache.workDone = list;
+              tryBuildWorkDone(list);
             })
             .catch(() => {});
         }
@@ -1795,10 +1870,10 @@ export default function MaterialExpenseBooking() {
   const pendingCount = records.filter((r) => r.status === "Pending").length;
   const emiCount = records.filter((r) => r.emi?.enabled).length;
   const vendorLabel =
-    selectedDoc?.kind === "WO" ? "Contractor" : "Supplier / Vendor";
+    selectedDoc?.kind === "WORK_DONE" ? "Contractor" : "Supplier / Vendor";
   const isPOorWO =
     selectedDoc?.kind === "PO" ||
-    selectedDoc?.kind === "WO" ||
+    selectedDoc?.kind === "WORK_DONE" ||
     selectedDoc?.kind === "WO_PO";
   const isGRN = selectedDoc?.kind === "GRN";
   const hasParentGST = isPOorWO || isGRN;
@@ -1806,13 +1881,14 @@ export default function MaterialExpenseBooking() {
 
   // Compute sets of already-booked source IDs (excluding the record being edited)
   const bookedPOIds = new Set<number>();
-  const bookedWOIds = new Set<number>();
+  const bookedWorkDoneIds = new Set<number>();
   const bookedWOPOIds = new Set<number>();
   const bookedGRNIds = new Set<number>();
   for (const r of records) {
     if (r.id === editingId) continue; // allow re-selecting own doc when editing
     if (r.eSourceType === "PO" && r.eSourceId) bookedPOIds.add(r.eSourceId);
-    if (r.eSourceType === "WO" && r.eSourceId) bookedWOIds.add(r.eSourceId);
+    if (r.eSourceType === "WORK_DONE" && r.eSourceId)
+      bookedWorkDoneIds.add(r.eSourceId);
     if (r.eSourceType === "WO_PO" && r.eSourceId)
       bookedWOPOIds.add(r.eSourceId);
     if (r.eSourceType === "GRN" && r.eSourceId) bookedGRNIds.add(r.eSourceId);
@@ -1832,8 +1908,8 @@ export default function MaterialExpenseBooking() {
               Expense Booking
             </h1>
             <p className="text-xs text-muted-foreground mt-0.5">
-              Book expenses against purchase orders, work orders, or invoice
-              documents
+              Book expenses against purchase orders, confirmed work done, or
+              invoice documents
             </p>
           </div>
           {view === "list" && (
@@ -1930,8 +2006,8 @@ export default function MaterialExpenseBooking() {
                     label={vendorLabel}
                     hint={
                       selectedDoc?.vendorLabel
-                        ? `Auto-filled from ${selectedDoc.kind === "PO" ? "Purchase Order (supplier)" : selectedDoc.kind === "GRN" ? "GRN (supplier)" : "Work Order (contractor)"}`
-                        : "Select supplier or auto-filled when a PO/WO is selected"
+                        ? `Auto-filled from ${selectedDoc.kind === "PO" ? "Purchase Order (supplier)" : selectedDoc.kind === "GRN" ? "GRN (supplier)" : "Work Done (contractor)"}`
+                        : "Select supplier or auto-filled when a source document is selected"
                     }
                   >
                     {selectedDoc?.vendorLabel ? (
@@ -2054,18 +2130,18 @@ export default function MaterialExpenseBooking() {
                   <div className="space-y-3">
                     <SectionHeader label="Document Selection" />
                     <p className="text-[11px] text-muted-foreground -mt-1">
-                      Pick a Purchase Order, Work Order, or GRN to auto-fill
-                      booking details, or choose a document type from Other
-                      Expenses for standalone expense entries.
+                      Pick a Purchase Order, confirmed Work Done entry, or GRN
+                      to auto-fill booking details, or choose a document type
+                      from Other Expenses for standalone expense entries.
                     </p>
                     <DocSelectorPanel
                       poList={poList}
-                      woList={woList}
                       woPOList={woPOList}
+                      workDoneList={workDoneList}
                       todList={todList}
                       grnList={grnList}
                       loadingPO={loadingPO}
-                      loadingWO={loadingWO}
+                      loadingWorkDone={loadingWorkDone}
                       loadingWOPO={loadingWOPO}
                       loadingTOD={loadingTOD}
                       loadingGRN={loadingGRN}
@@ -2080,7 +2156,7 @@ export default function MaterialExpenseBooking() {
                       }
                       filterFinYear={form.financialYear || null}
                       bookedPOIds={bookedPOIds}
-                      bookedWOIds={bookedWOIds}
+                      bookedWorkDoneIds={bookedWorkDoneIds}
                       bookedWOPOIds={bookedWOPOIds}
                       bookedGRNIds={bookedGRNIds}
                       onSelect={applyDoc}
@@ -2090,7 +2166,7 @@ export default function MaterialExpenseBooking() {
 
                     {/* Source chain banner */}
                     {selectedDoc &&
-                      (selectedDoc.kind === "WO" ||
+                      (selectedDoc.kind === "WORK_DONE" ||
                         selectedDoc.kind === "WO_PO" ||
                         selectedDoc.kind === "PO" ||
                         selectedDoc.kind === "GRN") && (
@@ -2119,10 +2195,10 @@ export default function MaterialExpenseBooking() {
                               </>
                             )}
                           <span
-                            className={`ml-auto shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold ${selectedDoc.kind === "WO" ? "bg-orange-100 dark:bg-orange-950/40 text-orange-700 dark:text-orange-400" : selectedDoc.kind === "GRN" ? "bg-teal-100 dark:bg-teal-950/40 text-teal-700 dark:text-teal-400" : "bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400"}`}
+                            className={`ml-auto shrink-0 px-1.5 py-0.5 rounded text-[10px] font-semibold ${selectedDoc.kind === "WORK_DONE" ? "bg-violet-100 dark:bg-violet-950/40 text-violet-700 dark:text-violet-400" : selectedDoc.kind === "GRN" ? "bg-teal-100 dark:bg-teal-950/40 text-teal-700 dark:text-teal-400" : "bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400"}`}
                           >
-                            {selectedDoc.kind === "WO"
-                              ? "Work Order"
+                            {selectedDoc.kind === "WORK_DONE"
+                              ? "Work Done"
                               : selectedDoc.kind === "GRN"
                                 ? "GRN"
                                 : "Purchase Order"}
@@ -2135,7 +2211,7 @@ export default function MaterialExpenseBooking() {
                       required
                       hint={
                         selectedDoc
-                          ? `Auto-filled from the selected ${selectedDoc.kind === "PO" ? "Purchase Order" : selectedDoc.kind === "WO" ? "Work Order" : selectedDoc.kind === "GRN" ? "GRN" : "document"}.`
+                          ? `Auto-filled from the selected ${selectedDoc.kind === "PO" ? "Purchase Order" : selectedDoc.kind === "WORK_DONE" ? "Work Done" : selectedDoc.kind === "GRN" ? "GRN" : "document"}.`
                           : "Will be populated once you select a document above."
                       }
                     >
@@ -2188,7 +2264,7 @@ export default function MaterialExpenseBooking() {
                             ? "Purchase Order"
                             : selectedDoc!.kind === "GRN"
                               ? "GRN (parent PO)"
-                              : "Work Order"}
+                              : "Work Done"}
                         </span>
                         {" — "}
                         {selectedDoc!.gst!.type === "cgst_sgst"
@@ -2205,7 +2281,7 @@ export default function MaterialExpenseBooking() {
                           ? "Purchase Order"
                           : selectedDoc!.kind === "GRN"
                             ? "GRN (parent PO)"
-                            : "Work Order"}{" "}
+                            : "Work Done"}{" "}
                         has no GST applied — rates set to 0. Editable if needed.
                       </span>
                     )}

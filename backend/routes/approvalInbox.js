@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const logger = require("../logger");
 const { getPool, sql } = require("../db");
+
 router.get("/", async (req, res) => {
   try {
     const pool = getPool();
@@ -150,6 +151,31 @@ router.get("/", async (req, res) => {
       `);
     }
 
+    // Engineering → Work Done approval
+    // Matches backend/services/approvalService.js MODULE_MAP: "work-done"
+    if (!module || module === "work-done") {
+      queries.push(`
+        SELECT
+          'work-done'                AS Module,
+          'Work Done'               AS ModuleLabel,
+          CAST(wd.ID AS NVARCHAR)   AS RecordId,
+          wd.DocNo                   AS Reference,
+          wd.DocDate                 AS RecordDate,
+          ISNULL(wd.Status, 'Draft') AS Status,
+          NULL                       AS ContractorName,
+          NULL                       AS SupplierName,
+          NULL                       AS Amount,
+          wd.CreatedBy               AS CreatedBy,
+          ''                         AS ApprovedBy,
+          ''                         AS ApprovedAt,
+          ''                         AS RejectedBy,
+          ISNULL(wd.Remarks, '')    AS RejectionNote,
+          wd.UpdatedAt               AS LastModified
+        FROM dbo.WorkDone wd
+        WHERE ISNULL(wd.Status, 'Draft') = 'Pending'
+      `);
+    }
+
     if (queries.length === 0) return res.json([]);
 
     const fullQuery =
@@ -160,7 +186,10 @@ router.get("/", async (req, res) => {
   } catch (err) {
     logger.error({ err, requestId: req.id }, "approval-inbox error");
     res.status(500).json({
-      error: process.env.NODE_ENV === "development" ? err.message : "Internal Server Error",
+      error:
+        process.env.NODE_ENV === "development"
+          ? err.message
+          : "Internal Server Error",
     });
   }
 });
@@ -171,19 +200,23 @@ router.get("/count", async (req, res) => {
     const pool = getPool();
     const result = await pool.request().query(`
       SELECT
-        (SELECT COUNT(*) FROM dbo.PurchaseOrders    WHERE Status = 'Pending') +
+        (SELECT COUNT(*) FROM dbo.PurchaseOrders      WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.WorkOrderHeader    WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.NewPayment         WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.ReceivedPayment    WHERE RPStatus = 'Pending') +
         (SELECT COUNT(*) FROM dbo.GoodsReceiptNotes  WHERE Status = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.ExpenseBooking     WHERE EStatus = 'Pending')
+        (SELECT COUNT(*) FROM dbo.ExpenseBooking     WHERE EStatus = 'Pending') +
+        (SELECT COUNT(*) FROM dbo.WorkDone           WHERE ISNULL(Status,'Draft') = 'Pending')
       AS TotalPending
     `);
     res.json({ count: result.recordset[0].TotalPending ?? 0 });
   } catch (err) {
     logger.error({ err, requestId: req.id }, "approval-inbox count error");
     res.status(500).json({
-      error: process.env.NODE_ENV === "development" ? err.message : "Internal Server Error",
+      error:
+        process.env.NODE_ENV === "development"
+          ? err.message
+          : "Internal Server Error",
     });
   }
 });

@@ -1,14 +1,10 @@
-import React, {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { type DbItem } from "@/api/itemMasterApi";
+import { type DbActivity } from "@/api/activityMasterApi";
 import {
   FileText,
   Save,
@@ -19,15 +15,11 @@ import {
   RefreshCw,
   X,
   Edit3,
-  Building2,
-  FolderOpen,
   CheckCircle2,
-  AlertCircle,
-  Clock,
-  Package,
-  Settings2,
   Send,
   XCircle,
+  Package,
+  Settings2,
 } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
@@ -58,7 +50,7 @@ import { fetchNextDocNumber } from "@/pages/material/ExpenseBooking/DocNumberPre
 
 interface BoqItem {
   Id?: number;
-  _key: string; // local react key only
+  _key: string;
   itemId: string;
   itemName: string;
   itemCode: string;
@@ -130,6 +122,18 @@ interface DocType {
 interface UomOption {
   Id: number;
   UOMName: string;
+  UOMCode: string;
+}
+interface ItemOption {
+  id: string;
+  name: string;
+  code: string;
+  uomCode: string;
+}
+interface ActivityOption {
+  id: string;
+  name: string;
+  code: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -139,11 +143,6 @@ interface UomOption {
 let _uidSeed = 1;
 const uid = () => `k${_uidSeed++}`;
 
-const getToken = () => localStorage.getItem("token") || "";
-
-// Thin wrapper around fetchWithAuth that prepends /api, sets Content-Type,
-// and throws on non-OK responses. No manual token injection needed —
-// fetchWithAuth already handles the Authorization header.
 const apiFetch = async (path: string, opts?: RequestInit) => {
   const url = `/api${path}`;
   const headers = new Headers(opts?.headers || {});
@@ -244,7 +243,7 @@ const buildPayload = (
   Description: form.Description,
   Remarks: form.Remarks,
   DocTypeId: form.DocTypeId ? Number(form.DocTypeId) : null,
-  finYear: finYear,
+  finYear,
   Status: form.Status,
   BoqItems: items.map((it) => ({
     itemId: it.itemId,
@@ -273,23 +272,26 @@ const buildPayload = (
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// UI Wrappers
+// Field wrapper
 // ─────────────────────────────────────────────────────────────────────────────
 
 const Field = ({
   label,
   required,
+  error,
   children,
 }: {
   label: string;
   required?: boolean;
+  error?: string;
   children: React.ReactNode;
 }) => (
   <div className="space-y-1.5">
-    <label className="block text-xs uppercase tracking-widest font-heading font-semibold text-muted-foreground">
+    <label className="block text-[10px] uppercase tracking-widest font-semibold text-muted-foreground">
       {label} {required && <span className="text-destructive">*</span>}
     </label>
     {children}
+    {error && <p className="text-[11px] text-destructive">{error}</p>}
   </div>
 );
 
@@ -301,7 +303,7 @@ const DetailRow = ({
   value?: React.ReactNode;
 }) => (
   <div>
-    <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
+    <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">
       {label}
     </p>
     <p className="font-medium text-foreground">{value || "—"}</p>
@@ -309,7 +311,7 @@ const DetailRow = ({
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Line Items Editor — used for both BoqItems and BoqActivities
+// Line Items Editor — redesigned
 // ─────────────────────────────────────────────────────────────────────────────
 
 type LineMode = "item" | "activity";
@@ -318,21 +320,28 @@ interface LineEditorProps {
   mode: LineMode;
   rows: BoqItem[] | BoqActivity[];
   uoms: UomOption[];
+  itemOptions?: ItemOption[];
+  activityOptions?: ActivityOption[];
+  itemsTotal?: number;
+  activitiesTotal?: number;
   onChange: (rows: any[]) => void;
   readOnly?: boolean;
+  onTabChange?: (tab: "items" | "activities") => void;
 }
 
 const LineEditor: React.FC<LineEditorProps> = ({
   mode,
   rows,
   uoms,
+  itemOptions = [],
+  activityOptions = [],
+  itemsTotal = 0,
+  activitiesTotal = 0,
   onChange,
   readOnly,
+  onTabChange,
 }) => {
   const isItem = mode === "item";
-  const nameKey = isItem ? "itemName" : "activityName";
-  const codeKey = isItem ? "itemCode" : "activityCode";
-  const namePlh = isItem ? "Item description" : "Activity name";
 
   const upd = (idx: number, field: string, val: string) => {
     const next = (rows as any[]).map((r, i) => {
@@ -356,159 +365,745 @@ const LineEditor: React.FC<LineEditorProps> = ({
     (s: number, r: any) => s + (parseFloat(r.amount) || 0),
     0,
   );
-
-  const cellInput = (
-    idx: number,
-    field: string,
-    value: string,
-    placeholder = "",
-    type = "text",
-  ) => (
-    <td className="p-2">
-      {readOnly ? (
-        <span className="text-sm font-medium">{value || "—"}</span>
-      ) : (
-        <Input
-          type={type}
-          value={value}
-          placeholder={placeholder}
-          min={type === "number" ? 0 : undefined}
-          onChange={(e) => upd(idx, field, e.target.value)}
-          className="h-9 text-sm"
-        />
-      )}
-    </td>
-  );
+  const grandTotal = itemsTotal + activitiesTotal;
 
   return (
-    <div className="border border-border rounded-xl overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+    <div
+      style={{
+        border: "1px solid hsl(var(--border))",
+        borderRadius: "calc(var(--radius) + 2px)",
+        overflow: "hidden",
+        background: "hsl(var(--background))",
+      }}
+    >
+      {/* ── Tab strip + add button ── */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "8px 12px",
+          background: "hsl(var(--muted))",
+          borderBottom: "1px solid hsl(var(--border))",
+          gap: 12,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            gap: 2,
+            background: "hsl(var(--border))",
+            borderRadius: 8,
+            padding: 3,
+          }}
+        >
+          {(["items", "activities"] as const).map((t) => {
+            const active = (t === "items") === isItem;
+            return (
+              <button
+                key={t}
+                onClick={() => onTabChange?.(t)}
+                style={{
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 5,
+                  padding: "4px 14px",
+                  borderRadius: 6,
+                  border: "none",
+                  cursor: "pointer",
+                  fontSize: 12,
+                  fontWeight: 500,
+                  transition: "all 0.1s",
+                  background: active ? "hsl(var(--background))" : "transparent",
+                  color: active
+                    ? "hsl(var(--primary))"
+                    : "hsl(var(--muted-foreground))",
+                  boxShadow: active ? "0 0 0 0.5px hsl(var(--border))" : "none",
+                }}
+              >
+                {t === "items" ? (
+                  <Package size={12} />
+                ) : (
+                  <Settings2 size={12} />
+                )}
+                {t === "items" ? "Items" : "Activities"}
+              </button>
+            );
+          })}
+        </div>
+
+        {!readOnly && (
+          <button
+            onClick={add}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 5,
+              padding: "5px 12px",
+              border: "1px solid hsl(var(--primary) / 0.35)",
+              borderRadius: 6,
+              background: "hsl(var(--primary) / 0.08)",
+              color: "hsl(var(--primary))",
+              fontSize: 12,
+              fontWeight: 500,
+              cursor: "pointer",
+              transition: "background 0.1s",
+            }}
+          >
+            <Plus size={13} />
+            Add {isItem ? "item" : "activity"}
+          </button>
+        )}
+      </div>
+
+      {/* ── Table ── */}
+      <div style={{ overflowX: "auto" }}>
+        <table
+          style={{
+            width: "100%",
+            borderCollapse: "collapse",
+            fontSize: 12.5,
+            tableLayout: "fixed",
+          }}
+        >
+          <colgroup>
+            <col style={{ width: 36 }} />
+            <col style={{ width: 180 }} />
+            <col style={{ width: 80 }} />
+            <col style={{ width: 120 }} />
+            <col style={{ width: 72 }} />
+            <col style={{ width: 96 }} />
+            <col style={{ width: 96 }} />
+            <col style={{ width: 64 }} />
+            <col style={{ width: 108 }} />
+            {!readOnly && <col style={{ width: 36 }} />}
+          </colgroup>
+
           <thead>
-            <tr className="bg-muted/50 border-b border-border">
-              <th className="px-4 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground w-12">
-                #
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">
-                {isItem ? "Item Name" : "Activity Name"}
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground w-32">
-                Code
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">
-                Spec/Notes
-              </th>
-              <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground w-24">
-                Qty
-              </th>
-              <th className="px-4 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground w-32">
-                UOM
-              </th>
-              <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground w-32">
-                Rate (₹)
-              </th>
-              <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground w-24">
-                Tax %
-              </th>
-              <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground w-32">
-                Amount (₹)
-              </th>
-              {!readOnly && <th className="px-4 py-3 w-12"></th>}
+            <tr
+              style={{
+                background: "hsl(var(--muted))",
+                borderBottom: "1px solid hsl(var(--border))",
+              }}
+            >
+              {[
+                "#",
+                isItem ? "Item" : "Activity",
+                "Code",
+                "Spec / Notes",
+                "Qty",
+                "UOM",
+                "Rate (₹)",
+                "Tax %",
+                "Amount (₹)",
+              ].map((h, i) => (
+                <th
+                  key={h}
+                  style={{
+                    padding: "0 8px",
+                    height: 30,
+                    textAlign:
+                      i >= 4 && i !== 5 ? "right" : i === 0 ? "center" : "left",
+                    fontSize: 10,
+                    fontWeight: 600,
+                    letterSpacing: "0.07em",
+                    textTransform: "uppercase",
+                    color: "hsl(var(--muted-foreground))",
+                    borderRight: "1px solid hsl(var(--border))",
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                  }}
+                >
+                  {h}
+                </th>
+              ))}
+              {!readOnly && <th style={{ borderRight: "none", padding: 0 }} />}
             </tr>
           </thead>
-          <tbody className="divide-y divide-border">
-            {(rows as any[]).length === 0 && (
+
+          <tbody>
+            {(rows as any[]).length === 0 ? (
               <tr>
                 <td
                   colSpan={readOnly ? 9 : 10}
-                  className="text-center py-8 text-muted-foreground italic"
+                  style={{
+                    textAlign: "center",
+                    padding: 32,
+                    color: "hsl(var(--muted-foreground))",
+                    fontSize: 12,
+                    fontStyle: "italic",
+                  }}
                 >
                   No {isItem ? "items" : "activities"} added yet.
-                  {!readOnly && " Click + Add below."}
+                  {!readOnly && ' Click "Add item" to begin.'}
                 </td>
               </tr>
+            ) : (
+              (rows as any[]).map((row, idx) => {
+                const amt = parseFloat(row.amount) || 0;
+                const codeVal = isItem
+                  ? row.itemCode || ""
+                  : row.activityCode || "";
+
+                const isEven = idx % 2 === 1;
+
+                return (
+                  <tr
+                    key={row._key ?? row.Id ?? idx}
+                    style={{
+                      borderBottom: "1px solid hsl(var(--border))",
+                      background: isEven
+                        ? "hsl(var(--muted) / 0.4)"
+                        : "hsl(var(--background))",
+                    }}
+                  >
+                    {/* # */}
+                    <td
+                      style={{
+                        textAlign: "center",
+                        borderRight: "1px solid hsl(var(--border))",
+                        padding: "4px 6px",
+                        height: 40,
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 600,
+                          color: "hsl(var(--muted-foreground))",
+                        }}
+                      >
+                        {idx + 1}
+                      </span>
+                    </td>
+
+                    {/* Name select */}
+                    <td
+                      style={{
+                        borderRight: "1px solid hsl(var(--border))",
+                        padding: "4px 6px",
+                      }}
+                    >
+                      {readOnly ? (
+                        <span style={{ fontSize: 12.5, fontWeight: 500 }}>
+                          {(isItem ? row.itemName : row.activityName) || "—"}
+                        </span>
+                      ) : isItem ? (
+                        <Select
+                          value={row.itemId ? String(row.itemId) : ""}
+                          onValueChange={(val) => {
+                            const sel = itemOptions.find((o) => o.id === val);
+                            if (!sel) return;
+                            const matchedUom = uoms.find(
+                              (u) => u.UOMCode === sel.uomCode,
+                            );
+                            const resolvedUom =
+                              matchedUom?.UOMName ?? sel.uomCode;
+                            onChange(
+                              (rows as any[]).map((r, i) =>
+                                i !== idx
+                                  ? r
+                                  : {
+                                      ...r,
+                                      itemId: sel.id,
+                                      itemName: sel.name,
+                                      itemCode: sel.code,
+                                      uomName: resolvedUom,
+                                    },
+                              ),
+                            );
+                          }}
+                        >
+                          <SelectTrigger className="h-8 text-xs border-border/60 focus:ring-1 focus:ring-primary/40 w-full">
+                            <SelectValue placeholder="— Select item —" />
+                          </SelectTrigger>
+                          <SelectContent className="z-[300] max-h-60">
+                            {itemOptions.map((o) => (
+                              <SelectItem
+                                key={o.id}
+                                value={o.id}
+                                className="text-xs"
+                              >
+                                {o.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <Select
+                          value={row.activityId ? String(row.activityId) : ""}
+                          onValueChange={(val) => {
+                            const sel = activityOptions.find(
+                              (o) => o.id === val,
+                            );
+                            if (!sel) return;
+                            onChange(
+                              (rows as any[]).map((r, i) =>
+                                i !== idx
+                                  ? r
+                                  : {
+                                      ...r,
+                                      activityId: sel.id,
+                                      activityName: sel.name,
+                                      activityCode: sel.code,
+                                    },
+                              ),
+                            );
+                          }}
+                        >
+                          <SelectTrigger className="h-8 text-xs border-border/60 focus:ring-1 focus:ring-primary/40 w-full">
+                            <SelectValue placeholder="— Select activity —" />
+                          </SelectTrigger>
+                          <SelectContent className="z-[300] max-h-60">
+                            {activityOptions.map((o) => (
+                              <SelectItem
+                                key={o.id}
+                                value={o.id}
+                                className="text-xs"
+                              >
+                                {o.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                    </td>
+
+                    {/* Code */}
+                    <td
+                      style={{
+                        borderRight: "1px solid hsl(var(--border))",
+                        padding: "4px 6px",
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontFamily: "monospace",
+                          fontSize: 10,
+                          color: "hsl(var(--muted-foreground))",
+                          background: "hsl(var(--muted))",
+                          border: "0.5px solid hsl(var(--border))",
+                          borderRadius: 3,
+                          padding: "2px 5px",
+                          display: "inline-block",
+                          maxWidth: "100%",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {codeVal || <em>Auto</em>}
+                      </span>
+                    </td>
+
+                    {/* Spec/Notes */}
+                    <td
+                      style={{
+                        borderRight: "1px solid hsl(var(--border))",
+                        padding: "4px 6px",
+                      }}
+                    >
+                      {readOnly ? (
+                        <span
+                          style={{
+                            fontSize: 11.5,
+                            color: "hsl(var(--muted-foreground))",
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                            whiteSpace: "nowrap",
+                            display: "block",
+                          }}
+                        >
+                          {row.description || "—"}
+                        </span>
+                      ) : (
+                        <input
+                          value={row.description}
+                          placeholder="Notes…"
+                          onChange={(e) =>
+                            upd(idx, "description", e.target.value)
+                          }
+                          style={{
+                            width: "100%",
+                            height: 30,
+                            border: "0.5px solid hsl(var(--border))",
+                            borderRadius: 4,
+                            background: "hsl(var(--background))",
+                            padding: "0 7px",
+                            fontSize: 12,
+                            color: "hsl(var(--foreground))",
+                            outline: "none",
+                            fontFamily: "inherit",
+                          }}
+                        />
+                      )}
+                    </td>
+
+                    {/* Qty */}
+                    <td
+                      style={{
+                        borderRight: "1px solid hsl(var(--border))",
+                        padding: "4px 6px",
+                      }}
+                    >
+                      {readOnly ? (
+                        <span
+                          style={{
+                            fontFamily: "monospace",
+                            fontSize: 12.5,
+                            display: "block",
+                            textAlign: "right",
+                          }}
+                        >
+                          {row.quantity || "—"}
+                        </span>
+                      ) : (
+                        <input
+                          type="number"
+                          min={0}
+                          value={row.quantity}
+                          placeholder="0"
+                          onChange={(e) => upd(idx, "quantity", e.target.value)}
+                          style={{
+                            width: "100%",
+                            height: 30,
+                            border: "0.5px solid hsl(var(--border))",
+                            borderRadius: 4,
+                            background: "hsl(var(--background))",
+                            padding: "0 7px",
+                            fontSize: 12,
+                            color: "hsl(var(--foreground))",
+                            outline: "none",
+                            fontFamily: "monospace",
+                            textAlign: "right",
+                          }}
+                        />
+                      )}
+                    </td>
+
+                    {/* UOM */}
+                    <td
+                      style={{
+                        borderRight: "1px solid hsl(var(--border))",
+                        padding: "4px 6px",
+                      }}
+                    >
+                      {readOnly ? (
+                        <span
+                          style={{
+                            fontSize: 11,
+                            color: "hsl(var(--muted-foreground))",
+                            fontWeight: 500,
+                          }}
+                        >
+                          {row.uomName || "—"}
+                        </span>
+                      ) : (
+                        <Select
+                          value={row.uomName}
+                          onValueChange={(val) => upd(idx, "uomName", val)}
+                        >
+                          <SelectTrigger className="h-8 text-xs border-border/60 focus:ring-1 focus:ring-primary/40 w-full">
+                            <SelectValue placeholder="UOM" />
+                          </SelectTrigger>
+                          <SelectContent className="z-[300] max-h-52">
+                            {uoms.map((u) => (
+                              <SelectItem
+                                key={String(u.Id)}
+                                value={u.UOMName}
+                                className="text-xs"
+                              >
+                                {u.UOMName}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
+                    </td>
+
+                    {/* Rate */}
+                    <td
+                      style={{
+                        borderRight: "1px solid hsl(var(--border))",
+                        padding: "4px 6px",
+                      }}
+                    >
+                      {readOnly ? (
+                        <span
+                          style={{
+                            fontFamily: "monospace",
+                            fontSize: 12.5,
+                            display: "block",
+                            textAlign: "right",
+                          }}
+                        >
+                          {row.rate || "—"}
+                        </span>
+                      ) : (
+                        <input
+                          type="number"
+                          min={0}
+                          value={row.rate}
+                          placeholder="0.00"
+                          onChange={(e) => upd(idx, "rate", e.target.value)}
+                          style={{
+                            width: "100%",
+                            height: 30,
+                            border: "0.5px solid hsl(var(--border))",
+                            borderRadius: 4,
+                            background: "hsl(var(--background))",
+                            padding: "0 7px",
+                            fontSize: 12,
+                            color: "hsl(var(--foreground))",
+                            outline: "none",
+                            fontFamily: "monospace",
+                            textAlign: "right",
+                          }}
+                        />
+                      )}
+                    </td>
+
+                    {/* Tax % */}
+                    <td
+                      style={{
+                        borderRight: "1px solid hsl(var(--border))",
+                        padding: "4px 6px",
+                      }}
+                    >
+                      {readOnly ? (
+                        <span
+                          style={{
+                            fontFamily: "monospace",
+                            fontSize: 11.5,
+                            display: "block",
+                            textAlign: "right",
+                            color: "hsl(var(--muted-foreground))",
+                          }}
+                        >
+                          {row.tax}%
+                        </span>
+                      ) : (
+                        <input
+                          type="number"
+                          min={0}
+                          max={100}
+                          value={row.tax}
+                          placeholder="18"
+                          onChange={(e) => upd(idx, "tax", e.target.value)}
+                          style={{
+                            width: "100%",
+                            height: 30,
+                            border: "0.5px solid hsl(var(--border))",
+                            borderRadius: 4,
+                            background: "hsl(var(--background))",
+                            padding: "0 7px",
+                            fontSize: 12,
+                            color: "hsl(var(--muted-foreground))",
+                            outline: "none",
+                            fontFamily: "monospace",
+                            textAlign: "right",
+                          }}
+                        />
+                      )}
+                    </td>
+
+                    {/* Amount */}
+                    <td
+                      style={{
+                        borderRight: !readOnly
+                          ? "1px solid hsl(var(--border))"
+                          : "none",
+                        padding: "4px 10px",
+                        textAlign: "right",
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontFamily: "monospace",
+                          fontSize: 12.5,
+                          fontWeight: 700,
+                          color: "hsl(var(--primary))",
+                        }}
+                      >
+                        {fmt(amt)}
+                      </span>
+                    </td>
+
+                    {/* Delete */}
+                    {!readOnly && (
+                      <td style={{ textAlign: "center", padding: "4px 4px" }}>
+                        <button
+                          onClick={() => remove(idx)}
+                          style={{
+                            background: "none",
+                            border: "none",
+                            cursor: "pointer",
+                            width: 26,
+                            height: 26,
+                            borderRadius: 4,
+                            display: "inline-flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            color: "hsl(var(--muted-foreground))",
+                            transition: "all 0.1s",
+                          }}
+                          onMouseEnter={(e) => {
+                            (e.currentTarget as HTMLButtonElement).style.color =
+                              "hsl(var(--destructive))";
+                            (
+                              e.currentTarget as HTMLButtonElement
+                            ).style.background =
+                              "hsl(var(--destructive) / 0.08)";
+                          }}
+                          onMouseLeave={(e) => {
+                            (e.currentTarget as HTMLButtonElement).style.color =
+                              "hsl(var(--muted-foreground))";
+                            (
+                              e.currentTarget as HTMLButtonElement
+                            ).style.background = "none";
+                          }}
+                          aria-label={`Remove row ${idx + 1}`}
+                        >
+                          <X size={12} />
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                );
+              })
             )}
-            {(rows as any[]).map((row, idx) => (
-              <tr key={row._key ?? row.Id ?? idx}>
-                <td className="p-3 text-muted-foreground font-bold text-xs text-center">
-                  {idx + 1}
-                </td>
-                {cellInput(idx, nameKey, row[nameKey], namePlh, "text")}
-                {cellInput(idx, codeKey, row[codeKey], "Code", "text")}
-                {cellInput(idx, "description", row.description, "Spec / notes")}
-                {cellInput(idx, "quantity", row.quantity, "0", "number")}
-                <td className="p-2">
-                  {readOnly ? (
-                    <span className="text-sm">{row.uomName || "—"}</span>
-                  ) : (
-                    <Select
-                      value={row.uomName}
-                      onValueChange={(val) => upd(idx, "uomName", val)}
-                    >
-                      <SelectTrigger className="h-9 text-sm">
-                        <SelectValue placeholder="—" />
-                      </SelectTrigger>
-                      <SelectContent className="z-[300]">
-                        {uoms.map((u) => (
-                          <SelectItem key={String(u.Id)} value={u.UOMName}>
-                            {u.UOMName}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                </td>
-                {cellInput(idx, "rate", row.rate, "0.00", "number")}
-                {cellInput(idx, "tax", row.tax, "18", "number")}
-                <td className="p-3 text-right">
-                  <span className="font-semibold text-primary">
-                    {fmt(parseFloat(row.amount) || 0)}
-                  </span>
-                </td>
-                {!readOnly && (
-                  <td className="p-3 text-center">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => remove(idx)}
-                      className="text-muted-foreground hover:text-destructive h-8 w-8 p-0"
-                    >
-                      <X size={15} />
-                    </Button>
-                  </td>
-                )}
-              </tr>
-            ))}
           </tbody>
+
+          {/* Subtotal footer */}
           {(rows as any[]).length > 0 && (
-            <tfoot className="bg-muted/30 border-t-2 border-border">
-              <tr className="text-right">
+            <tfoot>
+              <tr
+                style={{
+                  background: "hsl(var(--muted))",
+                  borderTop: "1px solid hsl(var(--border))",
+                }}
+              >
                 <td
                   colSpan={readOnly ? 8 : 9}
-                  className="px-4 py-3 text-xs font-heading uppercase tracking-widest text-muted-foreground"
+                  style={{
+                    textAlign: "right",
+                    padding: "6px 10px",
+                    fontSize: 10,
+                    fontWeight: 600,
+                    letterSpacing: "0.07em",
+                    textTransform: "uppercase",
+                    color: "hsl(var(--muted-foreground))",
+                    borderRight: "1px solid hsl(var(--border))",
+                  }}
                 >
-                  {isItem ? "Items" : "Activities"} Subtotal
+                  {isItem ? "Items" : "Activities"} subtotal
                 </td>
-                <td className="px-4 py-3 font-bold text-primary">
-                  {fmt(subtotal)}
+                <td style={{ padding: "6px 10px", textAlign: "right" }}>
+                  <span
+                    style={{
+                      fontFamily: "monospace",
+                      fontSize: 13,
+                      fontWeight: 700,
+                      color: "hsl(var(--primary))",
+                    }}
+                  >
+                    {fmt(subtotal)}
+                  </span>
                 </td>
-                {!readOnly && <td></td>}
+                {!readOnly && <td />}
               </tr>
             </tfoot>
           )}
         </table>
       </div>
 
-      {!readOnly && (
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={add}
-          className="mt-3 border-dashed"
-        >
-          + Add {isItem ? "Item" : "Activity"}
-        </Button>
-      )}
+      {/* ── Grand total bar ── */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "10px 16px",
+          borderTop: "1px solid hsl(var(--border))",
+          background: "hsl(var(--muted))",
+          flexWrap: "wrap",
+          gap: 12,
+        }}
+      >
+        <div style={{ display: "flex", gap: 20, alignItems: "center" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+            <span
+              style={{
+                fontSize: 9,
+                fontWeight: 600,
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                color: "hsl(var(--muted-foreground))",
+              }}
+            >
+              Items
+            </span>
+            <span
+              style={{
+                fontFamily: "monospace",
+                fontSize: 12.5,
+                fontWeight: 600,
+                color: "hsl(var(--foreground))",
+              }}
+            >
+              {fmt(itemsTotal)}
+            </span>
+          </div>
+          <span style={{ color: "hsl(var(--border))", fontSize: 16 }}>+</span>
+          <div style={{ display: "flex", flexDirection: "column", gap: 1 }}>
+            <span
+              style={{
+                fontSize: 9,
+                fontWeight: 600,
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                color: "hsl(var(--muted-foreground))",
+              }}
+            >
+              Activities
+            </span>
+            <span
+              style={{
+                fontFamily: "monospace",
+                fontSize: 12.5,
+                fontWeight: 600,
+                color: "hsl(var(--foreground))",
+              }}
+            >
+              {fmt(activitiesTotal)}
+            </span>
+          </div>
+        </div>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+          <span
+            style={{
+              fontSize: 9,
+              fontWeight: 600,
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+              color: "hsl(var(--muted-foreground))",
+            }}
+          >
+            Grand total (excl. tax)
+          </span>
+          <span
+            style={{
+              fontFamily: "monospace",
+              fontSize: 20,
+              fontWeight: 700,
+              color: "hsl(var(--primary))",
+              letterSpacing: "-0.5px",
+            }}
+          >
+            {fmt(grandTotal)}
+          </span>
+        </div>
+      </div>
     </div>
   );
 };
@@ -551,15 +1146,17 @@ const recordToForm = (r: BoqRecord): FormState => ({
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
-// BOQ Form Modal (Create + Edit)
+// BOQ Form Modal
 // ─────────────────────────────────────────────────────────────────────────────
 
 interface FormModalProps {
-  record: BoqRecord | null; // null = create
+  record: BoqRecord | null;
   companies: Company[];
   projects: Project[];
   docTypes: DocType[];
   uoms: UomOption[];
+  itemOptions: ItemOption[];
+  activityOptions: ActivityOption[];
   finYear?: string;
   onClose: () => void;
   onSaved: () => void;
@@ -571,6 +1168,8 @@ const FormModal: React.FC<FormModalProps> = ({
   projects,
   docTypes,
   uoms,
+  itemOptions,
+  activityOptions,
   finYear,
   onClose,
   onSaved,
@@ -598,15 +1197,13 @@ const FormModal: React.FC<FormModalProps> = ({
     set("DocTypeId", val);
     set("BoqNo", "");
     if (!val || isEdit) return;
-
     try {
       const nextDocNo = await fetchNextDocNumber(
         Number(val),
         finYear || undefined,
       );
       set("BoqNo", nextDocNo);
-    } catch (err) {
-      console.error("BOQ number preview failed:", err);
+    } catch {
       toast.error("Failed to generate BOQ number preview");
     }
   };
@@ -616,7 +1213,7 @@ const FormModal: React.FC<FormModalProps> = ({
     if (!form.BoqDate) e.BoqDate = "Date is required";
     if (!form.CompanyId) e.CompanyId = "Company is required";
     if (!form.ProjectId) e.ProjectId = "Project is required";
-    if (!form.DocTypeId) e.DocTypeId = "Document Type is required";
+    if (!form.DocTypeId) e.DocTypeId = "Document type is required";
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -631,13 +1228,13 @@ const FormModal: React.FC<FormModalProps> = ({
           method: "PUT",
           body: JSON.stringify(payload),
         });
-        toast.success("BOQ updated successfully");
+        toast.success("BOQ updated");
       } else {
         await apiFetch("/boq", {
           method: "POST",
           body: JSON.stringify(payload),
         });
-        toast.success("BOQ created successfully");
+        toast.success("BOQ created");
       }
       onSaved();
       onClose();
@@ -656,69 +1253,128 @@ const FormModal: React.FC<FormModalProps> = ({
     (s, r) => s + (parseFloat(String(r.amount)) || 0),
     0,
   );
-  const grandTotal = itemsTotal + activitiesTotal;
-
-  const hasErr = (k: string) => !!errors[k];
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-start justify-center bg-black/50 p-4 sm:p-8 overflow-y-auto">
-      <Card className="w-full max-w-5xl my-auto animate-in fade-in slide-in-from-bottom-4 shadow-2xl">
-        <CardHeader className="flex flex-row items-center justify-between border-b border-border pb-4 bg-muted/30">
-          <div className="space-y-1">
-            <CardTitle className="text-xl flex items-center gap-2">
+    <div className="fixed inset-0 z-[200] flex flex-col bg-background overflow-hidden">
+      <div className="w-full h-full flex flex-col animate-in fade-in">
+        {/* ── Header ── */}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "14px 20px",
+            borderBottom: "1px solid hsl(var(--border))",
+            background: "hsl(var(--muted))",
+            flexShrink: 0,
+          }}
+        >
+          <div>
+            <h2
+              style={{
+                fontSize: 16,
+                fontWeight: 600,
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
               {isEdit ? (
-                <Edit3 size={20} className="text-primary" />
+                <Edit3 size={17} style={{ color: "hsl(var(--primary))" }} />
               ) : (
-                <FileText size={20} className="text-primary" />
+                <FileText size={17} style={{ color: "hsl(var(--primary))" }} />
               )}
               {isEdit
                 ? `Edit BOQ — ${record!.BoqNo}`
                 : "New Bill of Quantities"}
-            </CardTitle>
-            <CardDescription>
+            </h2>
+            <p
+              style={{
+                fontSize: 12,
+                color: "hsl(var(--muted-foreground))",
+                marginTop: 2,
+              }}
+            >
               {isEdit
-                ? "Modify header, items and activities. Status must be Draft to edit."
-                : "Fill in the header then add items and/or activities."}
-            </CardDescription>
+                ? "Modify header, items and activities."
+                : "Fill in the header, then add items and/or activities."}
+            </p>
           </div>
           <Button variant="ghost" size="icon" onClick={onClose}>
-            <X size={20} />
+            <X size={18} />
           </Button>
-        </CardHeader>
+        </div>
 
-        <CardContent className="p-6 overflow-y-auto max-h-[calc(100vh-200px)] space-y-6">
-          <div className="space-y-4">
-            <h3 className="text-xs uppercase tracking-widest font-heading font-semibold text-muted-foreground flex items-center gap-1.5 border-b pb-2">
-              <span className="w-5 h-5 rounded bg-primary/10 text-primary flex items-center justify-center">
+        {/* ── Scrollable body ── */}
+        <div
+          style={{
+            flex: 1,
+            overflowY: "auto",
+            padding: "20px 24px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 24,
+          }}
+        >
+          {/* Section 1: Header */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                borderBottom: "1px solid hsl(var(--border))",
+                paddingBottom: 8,
+              }}
+            >
+              <span
+                style={{
+                  width: 20,
+                  height: 20,
+                  borderRadius: 4,
+                  background: "hsl(var(--primary) / 0.1)",
+                  color: "hsl(var(--primary))",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 10,
+                  fontWeight: 700,
+                }}
+              >
                 1
               </span>
-              BOQ Header
-            </h3>
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.07em",
+                  color: "hsl(var(--muted-foreground))",
+                }}
+              >
+                BOQ Header
+              </span>
+            </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-              <Field label="Document Type" required>
+              <Field label="Document Type" required error={errors.DocTypeId}>
                 <Select
                   value={form.DocTypeId}
                   onValueChange={handleDocTypeChange}
                 >
                   <SelectTrigger
-                    className={`h-10 ${hasErr("DocTypeId") ? "border-destructive" : ""}`}
+                    className={`h-10 ${errors.DocTypeId ? "border-destructive" : ""}`}
                   >
-                    <SelectValue placeholder="— Select Document Type —" />
+                    <SelectValue placeholder="— Select type —" />
                   </SelectTrigger>
                   <SelectContent className="z-[300]">
                     {docTypes.map((dt) => (
                       <SelectItem key={String(dt.id)} value={String(dt.id)}>
-                        {dt.code} - {dt.name || dt.description}
+                        {dt.code} — {dt.name || dt.description}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                {hasErr("DocTypeId") && (
-                  <span className="text-xs text-destructive mt-1">
-                    {errors.DocTypeId}
-                  </span>
-                )}
               </Field>
 
               <Field label="BOQ No">
@@ -726,35 +1382,30 @@ const FormModal: React.FC<FormModalProps> = ({
                   value={form.BoqNo || ""}
                   readOnly
                   placeholder="Auto generated"
-                  className="h-10 bg-muted/50 text-muted-foreground focus-visible:ring-0 cursor-not-allowed"
+                  className="h-10 bg-muted/50 text-muted-foreground cursor-not-allowed focus-visible:ring-0"
                 />
               </Field>
 
-              <Field label="BOQ Date" required>
+              <Field label="BOQ Date" required error={errors.BoqDate}>
                 <Input
                   type="date"
                   value={form.BoqDate}
                   onChange={(e) => set("BoqDate", e.target.value)}
-                  className={`h-10 ${hasErr("BoqDate") ? "border-destructive" : ""}`}
+                  className={`h-10 ${errors.BoqDate ? "border-destructive" : ""}`}
                 />
-                {hasErr("BoqDate") && (
-                  <span className="text-xs text-destructive mt-1">
-                    {errors.BoqDate}
-                  </span>
-                )}
               </Field>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-              <Field label="Company" required>
+              <Field label="Company" required error={errors.CompanyId}>
                 <Select
                   value={form.CompanyId}
-                  onValueChange={(val) => set("CompanyId", val)}
+                  onValueChange={(v) => set("CompanyId", v)}
                 >
                   <SelectTrigger
-                    className={`h-10 ${hasErr("CompanyId") ? "border-destructive" : ""}`}
+                    className={`h-10 ${errors.CompanyId ? "border-destructive" : ""}`}
                   >
-                    <SelectValue placeholder="— Select Company —" />
+                    <SelectValue placeholder="— Select company —" />
                   </SelectTrigger>
                   <SelectContent className="z-[300]">
                     {companies.map((c) => (
@@ -764,22 +1415,17 @@ const FormModal: React.FC<FormModalProps> = ({
                     ))}
                   </SelectContent>
                 </Select>
-                {hasErr("CompanyId") && (
-                  <span className="text-xs text-destructive mt-1">
-                    {errors.CompanyId}
-                  </span>
-                )}
               </Field>
 
-              <Field label="Project" required>
+              <Field label="Project" required error={errors.ProjectId}>
                 <Select
                   value={form.ProjectId}
-                  onValueChange={(val) => set("ProjectId", val)}
+                  onValueChange={(v) => set("ProjectId", v)}
                 >
                   <SelectTrigger
-                    className={`h-10 ${hasErr("ProjectId") ? "border-destructive" : ""}`}
+                    className={`h-10 ${errors.ProjectId ? "border-destructive" : ""}`}
                   >
-                    <SelectValue placeholder="— Select Project —" />
+                    <SelectValue placeholder="— Select project —" />
                   </SelectTrigger>
                   <SelectContent className="z-[300]">
                     {projects.map((p) => (
@@ -789,11 +1435,6 @@ const FormModal: React.FC<FormModalProps> = ({
                     ))}
                   </SelectContent>
                 </Select>
-                {hasErr("ProjectId") && (
-                  <span className="text-xs text-destructive mt-1">
-                    {errors.ProjectId}
-                  </span>
-                )}
               </Field>
             </div>
 
@@ -802,7 +1443,7 @@ const FormModal: React.FC<FormModalProps> = ({
                 <Textarea
                   value={form.Description}
                   rows={2}
-                  placeholder="Describe the scope of work for this BOQ…"
+                  placeholder="Describe the scope of work…"
                   onChange={(e) => set("Description", e.target.value)}
                   className="resize-none"
                 />
@@ -811,7 +1452,7 @@ const FormModal: React.FC<FormModalProps> = ({
                 <Textarea
                   value={form.Remarks}
                   rows={2}
-                  placeholder="Internal remarks or notes…"
+                  placeholder="Internal notes…"
                   onChange={(e) => set("Remarks", e.target.value)}
                   className="resize-none"
                 />
@@ -819,79 +1460,87 @@ const FormModal: React.FC<FormModalProps> = ({
             </div>
           </div>
 
-          <div className="space-y-4">
-            <h3 className="text-xs uppercase tracking-widest font-heading font-semibold text-muted-foreground flex items-center gap-1.5 border-b pb-2">
-              <span className="w-5 h-5 rounded bg-primary/10 text-primary flex items-center justify-center">
+          {/* Section 2: Line items */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                borderBottom: "1px solid hsl(var(--border))",
+                paddingBottom: 8,
+              }}
+            >
+              <span
+                style={{
+                  width: 20,
+                  height: 20,
+                  borderRadius: 4,
+                  background: "hsl(var(--primary) / 0.1)",
+                  color: "hsl(var(--primary))",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  fontSize: 10,
+                  fontWeight: 700,
+                }}
+              >
                 2
               </span>
-              Items & Activities
-            </h3>
-
-            <div className="flex gap-2 bg-muted/50 p-1.5 rounded-xl w-fit">
-              {(["items", "activities"] as const).map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setLineTab(t)}
-                  className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
-                    lineTab === t
-                      ? "bg-background text-primary shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  {t === "items"
-                    ? `📦 Items (${items.length})`
-                    : `⚙ Activities (${activities.length})`}
-                </button>
-              ))}
+              <span
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.07em",
+                  color: "hsl(var(--muted-foreground))",
+                }}
+              >
+                Items & Activities
+              </span>
             </div>
 
-            {lineTab === "items" ? (
-              <LineEditor
-                mode="item"
-                rows={items}
-                uoms={uoms}
-                onChange={setItems as any}
-              />
-            ) : (
-              <LineEditor
-                mode="activity"
-                rows={activities}
-                uoms={uoms}
-                onChange={setActivities as any}
-              />
-            )}
+            <LineEditor
+              mode={lineTab === "items" ? "item" : "activity"}
+              rows={lineTab === "items" ? items : activities}
+              uoms={uoms}
+              itemOptions={itemOptions}
+              activityOptions={activityOptions}
+              itemsTotal={itemsTotal}
+              activitiesTotal={activitiesTotal}
+              onChange={
+                lineTab === "items" ? (setItems as any) : (setActivities as any)
+              }
+              onTabChange={setLineTab}
+            />
           </div>
+        </div>
 
-          <div className="bg-gradient-to-r from-primary to-blue-600 rounded-xl p-5 flex items-center justify-between text-primary-foreground shadow-lg">
-            <div>
-              <div className="text-xs font-bold opacity-80 uppercase tracking-wider">
-                Grand Total (excl. tax)
-              </div>
-              <div className="text-xs opacity-70 mt-1">
-                Items: {fmt(itemsTotal)} &nbsp;+&nbsp; Activities:{" "}
-                {fmt(activitiesTotal)}
-              </div>
-            </div>
-            <div className="text-2xl font-bold font-mono">
-              {fmt(grandTotal)}
-            </div>
-          </div>
-        </CardContent>
-
-        <div className="p-4 border-t border-border flex justify-end gap-3 bg-muted/10 rounded-b-xl">
+        {/* ── Footer actions ── */}
+        <div
+          style={{
+            padding: "12px 20px",
+            borderTop: "1px solid hsl(var(--border))",
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: 10,
+            background: "hsl(var(--muted) / 0.5)",
+            flexShrink: 0,
+          }}
+        >
           <Button variant="outline" onClick={onClose} disabled={saving}>
             Cancel
           </Button>
           <Button onClick={handleSave} disabled={saving} className="gap-2">
             {saving ? (
-              <RefreshCw className="animate-spin" size={16} />
+              <RefreshCw className="animate-spin" size={14} />
             ) : (
-              <Save size={16} />
+              <Save size={14} />
             )}
             {isEdit ? "Update BOQ" : "Create BOQ"}
           </Button>
         </div>
-      </Card>
+      </div>
     </div>
   );
 };
@@ -945,11 +1594,7 @@ const DetailModal: React.FC<DetailModalProps> = ({
   };
 
   const doDelete = async () => {
-    if (
-      !window.confirm(
-        "Delete this BOQ and all its items/activities? This cannot be undone.",
-      )
-    )
+    if (!window.confirm("Delete this BOQ and all its items/activities?"))
       return;
     setActing(true);
     try {
@@ -964,33 +1609,82 @@ const DetailModal: React.FC<DetailModalProps> = ({
     }
   };
 
+  const itemsTotal = (record.BoqItems ?? []).reduce(
+    (s, r) => s + (parseFloat(String(r.amount ?? 0)) || 0),
+    0,
+  );
+  const activitiesTotal = (record.BoqActivities ?? []).reduce(
+    (s, r) => s + (parseFloat(String(r.amount ?? 0)) || 0),
+    0,
+  );
+
   return (
-    <div className="fixed inset-0 z-[200] flex items-start justify-center bg-black/50 p-4 sm:p-8 overflow-y-auto">
-      <Card className="w-full max-w-5xl my-auto animate-in fade-in slide-in-from-bottom-4 shadow-2xl">
-        <CardHeader className="flex flex-row items-center justify-between border-b border-border pb-4 bg-muted/30">
-          <div className="flex items-center gap-4">
-            <CardTitle className="text-xl font-mono text-primary">
+    <div className="fixed inset-0 z-[200] flex flex-col bg-background overflow-hidden">
+      <div className="w-full h-full flex flex-col animate-in fade-in">
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "14px 20px",
+            borderBottom: "1px solid hsl(var(--border))",
+            background: "hsl(var(--muted))",
+            flexShrink: 0,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <span
+              style={{
+                fontSize: 16,
+                fontWeight: 600,
+                color: "hsl(var(--primary))",
+                fontFamily: "monospace",
+              }}
+            >
               {record.BoqNo || record.DocNo}
-            </CardTitle>
+            </span>
             <StatusBadge status={record.Status} />
           </div>
           <Button variant="ghost" size="icon" onClick={onClose}>
-            <X size={20} />
+            <X size={18} />
           </Button>
-        </CardHeader>
+        </div>
 
-        <CardContent className="p-6 overflow-y-auto max-h-[calc(100vh-200px)] space-y-6">
+        <div
+          style={{
+            flex: 1,
+            overflowY: "auto",
+            padding: "20px 24px",
+            display: "flex",
+            flexDirection: "column",
+            gap: 20,
+          }}
+        >
+          {/* Status banner */}
           {record.Status !== "Draft" && (
             <div
-              className={`p-4 rounded-xl border flex items-center gap-3 ${
-                record.Status === "Pending"
-                  ? "bg-amber-500/10 border-amber-500/20 text-amber-700"
-                  : record.Status === "Approved"
-                    ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700"
-                    : "bg-red-500/10 border-red-500/20 text-red-700"
-              }`}
+              style={{
+                padding: "12px 16px",
+                borderRadius: 8,
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+                background:
+                  record.Status === "Pending"
+                    ? "hsl(38 90% 95%)"
+                    : record.Status === "Approved"
+                      ? "hsl(142 70% 95%)"
+                      : "hsl(0 80% 96%)",
+                border: `1px solid ${record.Status === "Pending" ? "hsl(38 80% 85%)" : record.Status === "Approved" ? "hsl(142 60% 85%)" : "hsl(0 70% 88%)"}`,
+                color:
+                  record.Status === "Pending"
+                    ? "hsl(38 80% 35%)"
+                    : record.Status === "Approved"
+                      ? "hsl(142 60% 30%)"
+                      : "hsl(0 70% 38%)",
+              }}
             >
-              <span className="font-semibold text-sm flex-1">
+              <span style={{ fontSize: 13, fontWeight: 500, flex: 1 }}>
                 {record.Status === "Pending" &&
                   "⏳ Awaiting approval — you can approve or reject below."}
                 {record.Status === "Approved" &&
@@ -999,35 +1693,36 @@ const DetailModal: React.FC<DetailModalProps> = ({
                   `✕ Rejected${record.RejectedBy ? ` by ${record.RejectedBy}` : ""}${record.RejectionNote ? ` — ${record.RejectionNote}` : ""}.`}
               </span>
               {record.Status === "Pending" && (
-                <div className="flex items-center gap-2">
+                <div style={{ display: "flex", gap: 8 }}>
                   <Button
                     size="sm"
                     variant="outline"
-                    className="bg-emerald-50 text-emerald-600 hover:bg-emerald-100 hover:text-emerald-700 border-emerald-200"
                     disabled={acting}
+                    className="bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
                     onClick={() => doTransition("approve")}
                   >
-                    <CheckCircle2 size={14} className="mr-1.5" /> Approve
+                    <CheckCircle2 size={13} className="mr-1.5" /> Approve
                   </Button>
                   <Button
                     size="sm"
                     variant="outline"
-                    className="bg-red-50 text-red-600 hover:bg-red-100 hover:text-red-700 border-red-200"
                     disabled={acting}
+                    className="bg-red-50 text-red-700 border-red-200 hover:bg-red-100"
                     onClick={() => {
-                      const note =
+                      const n =
                         window.prompt("Rejection note (optional):") ?? "";
-                      doTransition("reject", note);
+                      doTransition("reject", n);
                     }}
                   >
-                    <XCircle size={14} className="mr-1.5" /> Reject
+                    <XCircle size={13} className="mr-1.5" /> Reject
                   </Button>
                 </div>
               )}
             </div>
           )}
 
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-6">
+          {/* Header details grid */}
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-5">
             <DetailRow label="Company" value={record.CompanyName} />
             <DetailRow label="Project" value={record.ProjectName} />
             <DetailRow label="BOQ Date" value={fmtDate(record.BoqDate)} />
@@ -1047,78 +1742,76 @@ const DetailModal: React.FC<DetailModalProps> = ({
           </div>
 
           {record.Description && (
-            <div className="bg-muted/40 border-l-4 border-l-primary rounded-r-lg p-4 text-sm">
+            <div
+              style={{
+                background: "hsl(var(--muted))",
+                borderLeft: "3px solid hsl(var(--primary))",
+                borderRadius: "0 6px 6px 0",
+                padding: "10px 14px",
+                fontSize: 13,
+              }}
+            >
               {record.Description}
             </div>
           )}
 
-          <div className="flex gap-2 bg-muted/50 p-1.5 rounded-xl w-fit">
-            {(["items", "activities"] as const).map((t) => (
-              <button
-                key={t}
-                onClick={() => setLineTab(t)}
-                className={`px-4 py-2 rounded-lg text-sm font-semibold transition-all ${
-                  lineTab === t
-                    ? "bg-background text-primary shadow-sm"
-                    : "text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                {t === "items"
-                  ? `📦 Items (${record.BoqItems?.length ?? 0})`
-                  : `⚙ Activities (${record.BoqActivities?.length ?? 0})`}
-              </button>
-            ))}
-          </div>
+          {/* Line items viewer */}
+          <LineEditor
+            mode={lineTab === "items" ? "item" : "activity"}
+            rows={
+              lineTab === "items"
+                ? (record.BoqItems ?? []).map(rowToItem)
+                : (record.BoqActivities ?? []).map(rowToActivity)
+            }
+            uoms={uoms}
+            itemsTotal={itemsTotal}
+            activitiesTotal={activitiesTotal}
+            onChange={() => {}}
+            readOnly
+            onTabChange={setLineTab}
+          />
+        </div>
 
-          {lineTab === "items" ? (
-            <LineEditor
-              mode="item"
-              rows={(record.BoqItems ?? []).map(rowToItem)}
-              uoms={uoms}
-              onChange={() => {}}
-              readOnly
-            />
-          ) : (
-            <LineEditor
-              mode="activity"
-              rows={(record.BoqActivities ?? []).map(rowToActivity)}
-              uoms={uoms}
-              onChange={() => {}}
-              readOnly
-            />
-          )}
-        </CardContent>
-
-        <div className="p-4 border-t border-border flex justify-between gap-3 bg-muted/10 rounded-b-xl">
+        <div
+          style={{
+            padding: "12px 20px",
+            borderTop: "1px solid hsl(var(--border))",
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 10,
+            background: "hsl(var(--muted) / 0.5)",
+            flexShrink: 0,
+          }}
+        >
           <Button
             variant="outline"
-            className="text-destructive hover:bg-destructive/10 border-destructive/30"
             disabled={acting}
             onClick={doDelete}
+            className="text-destructive hover:bg-destructive/10 border-destructive/30"
           >
-            <Trash2 size={16} className="mr-1.5" /> Delete
+            <Trash2 size={14} className="mr-1.5" /> Delete
           </Button>
-          <div className="flex gap-2">
+          <div style={{ display: "flex", gap: 8 }}>
             <Button variant="outline" onClick={onClose}>
               Close
             </Button>
             {record.Status === "Draft" && (
               <>
                 <Button variant="secondary" disabled={acting} onClick={onEdit}>
-                  <Edit3 size={16} className="mr-1.5" /> Edit
+                  <Edit3 size={14} className="mr-1.5" /> Edit
                 </Button>
                 <Button
                   disabled={acting}
                   onClick={() => doTransition("submit")}
-                  className="bg-primary hover:bg-primary/90"
                 >
-                  Submit for Approval <Send size={14} className="ml-1.5" />
+                  Submit for Approval <Send size={13} className="ml-1.5" />
                 </Button>
               </>
             )}
           </div>
         </div>
-      </Card>
+      </div>
     </div>
   );
 };
@@ -1150,9 +1843,7 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
     accessorKey: "CompanyName",
     header: "Company",
     cell: ({ getValue }) => (
-      <span className="text-sm text-foreground">
-        {String(getValue() || "—")}
-      </span>
+      <span className="text-sm">{String(getValue() || "—")}</span>
     ),
   },
   {
@@ -1168,7 +1859,9 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
     accessorKey: "TotalAmount",
     header: "Total Amount",
     cell: ({ getValue }) => (
-      <span className="text-sm font-semibold">{fmt(getValue() as number)}</span>
+      <span className="text-sm font-semibold font-mono tabular-nums">
+        {fmt(getValue() as number)}
+      </span>
     ),
   },
   {
@@ -1184,7 +1877,6 @@ export default function BOQ() {
   const { finYears } = useFinYear();
   const [page, setPage] = useState(1);
   const PAGE_LIMIT = 10;
-
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState<string>("All");
   const searchRef = useRef<ReturnType<typeof setTimeout>>();
@@ -1193,10 +1885,13 @@ export default function BOQ() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [docTypes, setDocTypes] = useState<DocType[]>([]);
   const [uoms, setUoms] = useState<UomOption[]>([]);
+  const [itemOptions, setItemOptions] = useState<ItemOption[]>([]);
+  const [activityOptions, setActivityOptions] = useState<ActivityOption[]>([]);
 
   const [showForm, setShowForm] = useState(false);
   const [editRecord, setEditRecord] = useState<BoqRecord | null>(null);
   const [viewRecord, setViewRecord] = useState<BoqRecord | null>(null);
+
   const activeFinYear =
     finYears.find((fy) => fy.status === "Active")?.year || undefined;
 
@@ -1229,32 +1924,29 @@ export default function BOQ() {
 
   const loadMasterData = useCallback(async () => {
     try {
-      const [cosResult, prosResult, dtsResult, uomResult] =
-        await Promise.allSettled([
-          apiFetch("/enterprises/options?business_type=C"),
-          apiFetch("/enterprises/options?business_type=P"),
-          apiFetch("/document-type?module=BOQ"),
-          apiFetch("/uom-master"),
-        ]);
+      const [
+        cosResult,
+        prosResult,
+        dtsResult,
+        uomResult,
+        itemResult,
+        activityResult,
+      ] = await Promise.allSettled([
+        apiFetch("/enterprises/options?business_type=C"),
+        apiFetch("/enterprises/options?business_type=P"),
+        apiFetch("/document-type?module=BOQ"),
+        apiFetch("/uom-master"),
+        apiFetch("/item-master"),
+        apiFetch("/activity-master"),
+      ]);
 
       const cos = cosResult.status === "fulfilled" ? cosResult.value : [];
       const pros = prosResult.status === "fulfilled" ? prosResult.value : [];
       let dts = dtsResult.status === "fulfilled" ? dtsResult.value : [];
       const uomRes = uomResult.status === "fulfilled" ? uomResult.value : [];
-
-      if (
-        cosResult.status === "rejected" ||
-        prosResult.status === "rejected" ||
-        dtsResult.status === "rejected" ||
-        uomResult.status === "rejected"
-      ) {
-        console.error("Some BOQ master data failed to load:", {
-          companies: cosResult.status === "rejected" ? cosResult.reason : null,
-          projects: prosResult.status === "rejected" ? prosResult.reason : null,
-          docTypes: dtsResult.status === "rejected" ? dtsResult.reason : null,
-          uoms: uomResult.status === "rejected" ? uomResult.reason : null,
-        });
-      }
+      const itemRes = itemResult.status === "fulfilled" ? itemResult.value : [];
+      const activityRes =
+        activityResult.status === "fulfilled" ? activityResult.value : [];
 
       const filteredDocData = Array.isArray(dts?.data)
         ? dts.data
@@ -1262,19 +1954,14 @@ export default function BOQ() {
           ? dts
           : [];
       if (filteredDocData.length === 0) {
-        dts = await apiFetch("/document-type").catch((err) => {
-          console.error("BOQ document type fallback failed:", err);
-          return [];
-        });
+        dts = await apiFetch("/document-type").catch(() => []);
       }
 
-      // Companies
       const companyData = Array.isArray(cos?.data)
         ? cos.data
         : Array.isArray(cos)
           ? cos
           : [];
-
       setCompanies(
         companyData.map((item: any, idx: number) => ({
           id: Number(item.id ?? item.Id ?? item.EId ?? idx + 1),
@@ -1283,17 +1970,15 @@ export default function BOQ() {
             item.name ??
             item.CompanyName ??
             item.EName ??
-            "Unknown Company",
+            "Unknown",
         })),
       );
 
-      // Projects
       const projectData = Array.isArray(pros?.data)
         ? pros.data
         : Array.isArray(pros)
           ? pros
           : [];
-
       setProjects(
         projectData.map((item: any, idx: number) => ({
           id: Number(item.id ?? item.Id ?? item.EId ?? idx + 1),
@@ -1302,17 +1987,15 @@ export default function BOQ() {
             item.name ??
             item.ProjectName ??
             item.EName ??
-            "Unknown Project",
+            "Unknown",
         })),
       );
 
-      // Document Types
       const docData = Array.isArray(dts?.data)
         ? dts.data
         : Array.isArray(dts)
           ? dts
           : [];
-
       setDocTypes(
         docData.map((item: any, idx: number) => ({
           id: Number(item.id ?? item.TypeOfDocId ?? idx + 1),
@@ -1322,21 +2005,44 @@ export default function BOQ() {
         })),
       );
 
-      // UOM
       const uomData = Array.isArray(uomRes?.data)
         ? uomRes.data
         : Array.isArray(uomRes)
           ? uomRes
           : [];
-
       setUoms(
         uomData.map((item: any, idx: number) => ({
           Id: Number(item.Id ?? item.id ?? idx + 1),
           UOMName: item.UOMName ?? item.name ?? "",
+          UOMCode: item.UOMCode ?? "",
         })),
       );
+
+      const itemData: DbItem[] = Array.isArray(itemRes)
+        ? itemRes
+        : (itemRes?.data ?? []);
+      setItemOptions(
+        itemData.map((it) => ({
+          id: String(it.M_Id),
+          name: it.M_Name ?? "",
+          code: it.M_code ?? "",
+          uomCode: it.M_UOM ?? "",
+        })),
+      );
+
+      const activityData: DbActivity[] = Array.isArray(activityRes)
+        ? activityRes
+        : (activityRes?.data ?? []);
+      setActivityOptions(
+        activityData
+          .filter((a) => a.activity_type === 1 && a.is_active !== false)
+          .map((a) => ({
+            id: String(a.id),
+            name: a.activity_name ?? "",
+            code: String(a.id),
+          })),
+      );
     } catch (err) {
-      console.error("Master data load failed:", err);
       toast.error("Failed to load dropdown data");
     }
   }, []);
@@ -1348,12 +2054,8 @@ export default function BOQ() {
   const onSearchChange = (val: string) => {
     setSearch(val);
     clearTimeout(searchRef.current);
-    searchRef.current = setTimeout(() => {
-      setPage(1);
-    }, 350);
+    searchRef.current = setTimeout(() => setPage(1), 350);
   };
-
-  const refresh = () => loadList();
 
   const openDetail = async (r: BoqRecord) => {
     try {
@@ -1380,13 +2082,7 @@ export default function BOQ() {
     setShowForm(true);
   };
 
-  const statuses: string[] = [
-    "All",
-    "Draft",
-    "Pending",
-    "Approved",
-    "Rejected",
-  ];
+  const statuses = ["All", "Draft", "Pending", "Approved", "Rejected"];
 
   const enrichedColumns = [
     ...COLUMNS,
@@ -1401,12 +2097,13 @@ export default function BOQ() {
             onClick={() => openDetail(row.original)}
             className="h-8 w-8 p-0"
           >
-            <Eye size={15} />
+            <Eye size={14} />
           </Button>
           {row.original.Status === "Draft" && (
             <Button
               variant="ghost"
               size="sm"
+              className="h-8 w-8 p-0 text-primary"
               onClick={async () => {
                 const full = await apiFetch(`/boq/${row.original.BoqID}`).catch(
                   () => row.original,
@@ -1417,9 +2114,8 @@ export default function BOQ() {
                   BoqActivities: full.BoqActivities ?? [],
                 });
               }}
-              className="h-8 w-8 p-0 text-primary"
             >
-              <Edit3 size={15} />
+              <Edit3 size={14} />
             </Button>
           )}
         </div>
@@ -1427,15 +2123,24 @@ export default function BOQ() {
     },
   ];
 
+  // Summary stat cards config
+  const stats = [
+    { label: "Total BOQs", value: total, color: "#3b82f6" },
+    { label: "Portfolio Value", value: fmt(totalValue), color: "#10b981" },
+    { label: "Pending Approval", value: countPending, color: "#f59e0b" },
+    { label: "Approved", value: countApproved, color: "#8b5cf6" },
+  ];
+
   return (
     <>
       <Breadcrumbs items={["Engineering", "BOQ"]} />
 
       <div className="space-y-6">
+        {/* Page header */}
         <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold text-foreground flex items-center gap-2">
-              <FileText size={24} className="text-primary" />
+            <h1 className="text-2xl font-bold flex items-center gap-2">
+              <FileText size={22} className="text-primary" />
               Bill of Quantities
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
@@ -1450,55 +2155,59 @@ export default function BOQ() {
             }}
             className="gap-2"
           >
-            <Plus size={16} /> New BOQ
+            <Plus size={15} /> New BOQ
           </Button>
         </div>
 
+        {/* Stat cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {[
-            { label: "Total BOQs", value: total, accent: "border-t-blue-500" },
-            {
-              label: "Portfolio Value",
-              value: fmt(totalValue),
-              accent: "border-t-emerald-500",
-            },
-            {
-              label: "Pending Approval",
-              value: countPending,
-              accent: "border-t-amber-500",
-            },
-            {
-              label: "Approved",
-              value: countApproved,
-              accent: "border-t-violet-500",
-            },
-          ].map((s) => (
-            <Card
+          {stats.map((s) => (
+            <div
               key={s.label}
-              className={`border-t-[3px] ${s.accent} shadow-sm`}
+              style={{
+                background: "hsl(var(--background))",
+                border: "1px solid hsl(var(--border))",
+                borderTop: `3px solid ${s.color}`,
+                borderRadius: "calc(var(--radius) + 2px)",
+                padding: "14px 16px",
+              }}
             >
-              <CardContent className="p-4">
-                <div className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
-                  {s.label}
-                </div>
-                <div className="text-2xl font-bold mt-1 font-mono">
-                  {s.value}
-                </div>
-              </CardContent>
-            </Card>
+              <div
+                style={{
+                  fontSize: 10,
+                  fontWeight: 600,
+                  textTransform: "uppercase",
+                  letterSpacing: "0.07em",
+                  color: "hsl(var(--muted-foreground))",
+                }}
+              >
+                {s.label}
+              </div>
+              <div
+                style={{
+                  fontSize: 22,
+                  fontWeight: 700,
+                  marginTop: 4,
+                  fontFamily: "monospace",
+                }}
+              >
+                {s.value}
+              </div>
+            </div>
           ))}
         </div>
 
+        {/* Table card */}
         <Card className="shadow-sm">
           <CardHeader className="p-4 border-b flex flex-col md:flex-row md:items-center gap-4">
             <div className="relative flex-1 max-w-sm">
               <Search
-                size={14}
+                size={13}
                 className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
               />
               <Input
                 value={search}
-                placeholder="Search BOQ No, company, project…"
+                placeholder="Search BOQ no, company, project…"
                 onChange={(e) => onSearchChange(e.target.value)}
                 className="pl-9 h-9"
               />
@@ -1509,7 +2218,7 @@ export default function BOQ() {
                   key={s}
                   variant={filterStatus === s ? "default" : "outline"}
                   size="sm"
-                  className="h-8 rounded-full"
+                  className="h-8 rounded-full text-xs"
                   onClick={() => {
                     setFilterStatus(s);
                     setPage(1);
@@ -1524,7 +2233,7 @@ export default function BOQ() {
           <CardContent className="p-0">
             {loading ? (
               <div className="flex items-center justify-center p-12 text-muted-foreground text-sm gap-2">
-                <RefreshCw size={16} className="animate-spin" /> Loading BOQs...
+                <RefreshCw size={15} className="animate-spin" /> Loading BOQs…
               </div>
             ) : (
               <>
@@ -1573,12 +2282,14 @@ export default function BOQ() {
           projects={projects}
           docTypes={docTypes}
           uoms={uoms}
+          itemOptions={itemOptions}
+          activityOptions={activityOptions}
           finYear={activeFinYear}
           onClose={() => {
             setShowForm(false);
             setEditRecord(null);
           }}
-          onSaved={refresh}
+          onSaved={() => loadList()}
         />
       )}
 
@@ -1590,7 +2301,7 @@ export default function BOQ() {
           onEdit={() => openEdit(viewRecord)}
           onRefresh={() => {
             setViewRecord(null);
-            refresh();
+            loadList();
           }}
         />
       )}
