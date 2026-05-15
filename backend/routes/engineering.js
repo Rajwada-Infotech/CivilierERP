@@ -34,8 +34,9 @@ const toNumber = (value) => {
 };
 
 const hasTable = async (pool, tableName) => {
-  const result = await pool.request().input("tableName", sql.NVarChar(128), tableName)
-    .query(`
+  const result = await pool
+    .request()
+    .input("tableName", sql.NVarChar(128), tableName).query(`
       SELECT COUNT(1) AS cnt
       FROM sys.tables
       WHERE object_id = OBJECT_ID(N'dbo.' + @tableName)
@@ -91,26 +92,29 @@ const selectWorkDoneSql = `
   LEFT JOIN dbo.AccountHeadMaster ctr ON ctr.LHeadId = woh.ContractorId
 `;
 
-router.get("/dashboard", cache("engineering-dashboard", 120), async (req, res) => {
-  try {
-    const pool = getPool();
-    const hasWorkDone = await hasTable(pool, WORK_DONE_TABLE);
-    const hasBOQ = await hasTable(pool, "BOQ");
-    const hasWO = await hasTable(pool, "WorkOrderHeader");
+router.get(
+  "/dashboard",
+  cache("engineering-dashboard", 120),
+  async (req, res) => {
+    try {
+      const pool = getPool();
+      const hasWorkDone = await hasTable(pool, WORK_DONE_TABLE);
+      const hasBOQ = await hasTable(pool, "BOQ");
+      const hasWO = await hasTable(pool, "WorkOrderHeader");
 
-    const [
-      workOrdersResult,
-      recentWOsResult,
-      woStatusResult,
-      boqResult,
-      recentBOQsResult,
-      workDoneResult,
-      recentWorkDoneResult,
-      workDoneStatusResult,
-      projectsResult,
-    ] = await Promise.all([
-      hasWO
-        ? pool.request().query(`
+      const [
+        workOrdersResult,
+        recentWOsResult,
+        woStatusResult,
+        boqResult,
+        recentBOQsResult,
+        workDoneResult,
+        recentWorkDoneResult,
+        workDoneStatusResult,
+        projectsResult,
+      ] = await Promise.all([
+        hasWO
+          ? pool.request().query(`
             SELECT
               COUNT(1) AS total,
               SUM(CASE WHEN ISNULL(Status, 'Draft') IN ('Draft', 'Pending', 'Open', 'In Progress') THEN 1 ELSE 0 END) AS openCount,
@@ -118,9 +122,9 @@ router.get("/dashboard", cache("engineering-dashboard", 120), async (req, res) =
               ISNULL(SUM(TotalAmount), 0) AS totalValue
             FROM dbo.WorkOrderHeader
           `)
-        : Promise.resolve({ recordset: [{}] }),
-      hasWO
-        ? pool.request().query(`
+          : Promise.resolve({ recordset: [{}] }),
+        hasWO
+          ? pool.request().query(`
             SELECT TOP 6
               h.Id,
               COALESCE(h.DocNo, h.DocumentNumber) AS DocNo,
@@ -131,25 +135,25 @@ router.get("/dashboard", cache("engineering-dashboard", 120), async (req, res) =
             LEFT JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = h.ContractorId
             ORDER BY ISNULL(h.UpdatedAt, h.CreatedAt) DESC
           `)
-        : Promise.resolve({ recordset: [] }),
-      hasWO
-        ? pool.request().query(`
+          : Promise.resolve({ recordset: [] }),
+        hasWO
+          ? pool.request().query(`
             SELECT ISNULL(Status, 'Draft') AS Status, COUNT(1) AS Count, ISNULL(SUM(TotalAmount), 0) AS TotalValue
             FROM dbo.WorkOrderHeader
             GROUP BY ISNULL(Status, 'Draft')
           `)
-        : Promise.resolve({ recordset: [] }),
-      hasBOQ
-        ? pool.request().query(`
+          : Promise.resolve({ recordset: [] }),
+        hasBOQ
+          ? pool.request().query(`
             SELECT
               COUNT(1) AS total,
               SUM(CASE WHEN Status = 'Approved' THEN 1 ELSE 0 END) AS approved,
               ISNULL(SUM(TotalAmount), 0) AS totalValue
             FROM dbo.BOQ
           `)
-        : Promise.resolve({ recordset: [{}] }),
-      hasBOQ
-        ? pool.request().query(`
+          : Promise.resolve({ recordset: [{}] }),
+        hasBOQ
+          ? pool.request().query(`
             SELECT TOP 6
               b.BoqID,
               COALESCE(b.DocNo, b.BoqNo) AS DocNo,
@@ -160,18 +164,18 @@ router.get("/dashboard", cache("engineering-dashboard", 120), async (req, res) =
             LEFT JOIN dbo.enterprise pr ON pr.id = b.ProjectId
             ORDER BY ISNULL(b.UpdatedAt, b.CreatedAt) DESC
           `)
-        : Promise.resolve({ recordset: [] }),
-      hasWorkDone
-        ? pool.request().query(`
+          : Promise.resolve({ recordset: [] }),
+        hasWorkDone
+          ? pool.request().query(`
             SELECT
               COUNT(1) AS total,
               SUM(CASE WHEN Status = 'Pending' THEN 1 ELSE 0 END) AS pending,
               ISNULL(SUM(CertifiedAmount), 0) AS certifiedAmount
             FROM dbo.EngineeringWorkDone
           `)
-        : Promise.resolve({ recordset: [{}] }),
-      hasWorkDone
-        ? pool.request().query(`
+          : Promise.resolve({ recordset: [{}] }),
+        hasWorkDone
+          ? pool.request().query(`
             SELECT TOP 6
               wd.ID,
               wd.DocNo,
@@ -182,60 +186,61 @@ router.get("/dashboard", cache("engineering-dashboard", 120), async (req, res) =
             LEFT JOIN dbo.WorkOrderHeader woh ON woh.Id = wd.WorkOrderID
             ORDER BY ISNULL(wd.UpdatedAt, wd.CreatedAt) DESC
           `)
-        : Promise.resolve({ recordset: [] }),
-      hasWorkDone
-        ? pool.request().query(`
+          : Promise.resolve({ recordset: [] }),
+        hasWorkDone
+          ? pool.request().query(`
             SELECT ISNULL(Status, 'Draft') AS Status, COUNT(1) AS Count, ISNULL(SUM(CertifiedAmount), 0) AS TotalValue
             FROM dbo.EngineeringWorkDone
             GROUP BY ISNULL(Status, 'Draft')
           `)
-        : Promise.resolve({ recordset: [] }),
-      pool.request().query(`
+          : Promise.resolve({ recordset: [] }),
+        pool.request().query(`
         SELECT
           COUNT(1) AS total,
           SUM(CASE WHEN ISNULL(discontinue, 0) = 0 THEN 1 ELSE 0 END) AS active
         FROM dbo.enterprise
         WHERE business_type = 'P'
       `),
-    ]);
+      ]);
 
-    const wo = workOrdersResult.recordset[0] || {};
-    const boq = boqResult.recordset[0] || {};
-    const wd = workDoneResult.recordset[0] || {};
-    const projects = projectsResult.recordset[0] || {};
+      const wo = workOrdersResult.recordset[0] || {};
+      const boq = boqResult.recordset[0] || {};
+      const wd = workDoneResult.recordset[0] || {};
+      const projects = projectsResult.recordset[0] || {};
 
-    res.json({
-      workOrders: {
-        total: Number(wo.total || 0),
-        open: Number(wo.openCount || 0),
-        thisMonth: Number(wo.thisMonth || 0),
-        totalValue: Number(wo.totalValue || 0),
-      },
-      boq: {
-        total: Number(boq.total || 0),
-        approved: Number(boq.approved || 0),
-        totalValue: Number(boq.totalValue || 0),
-      },
-      workDone: {
-        total: Number(wd.total || 0),
-        pending: Number(wd.pending || 0),
-        certifiedAmount: Number(wd.certifiedAmount || 0),
-      },
-      projects: {
-        total: Number(projects.total || 0),
-        active: Number(projects.active || 0),
-      },
-      recentWOs: recentWOsResult.recordset,
-      recentBOQs: recentBOQsResult.recordset,
-      recentWorkDone: recentWorkDoneResult.recordset,
-      woStatusBreakdown: woStatusResult.recordset,
-      workDoneStatusBreakdown: workDoneStatusResult.recordset,
-    });
-  } catch (err) {
-    console.error("[engineering-dashboard]", err.message);
-    res.status(500).json({ error: err.message });
-  }
-});
+      res.json({
+        workOrders: {
+          total: Number(wo.total || 0),
+          open: Number(wo.openCount || 0),
+          thisMonth: Number(wo.thisMonth || 0),
+          totalValue: Number(wo.totalValue || 0),
+        },
+        boq: {
+          total: Number(boq.total || 0),
+          approved: Number(boq.approved || 0),
+          totalValue: Number(boq.totalValue || 0),
+        },
+        workDone: {
+          total: Number(wd.total || 0),
+          pending: Number(wd.pending || 0),
+          certifiedAmount: Number(wd.certifiedAmount || 0),
+        },
+        projects: {
+          total: Number(projects.total || 0),
+          active: Number(projects.active || 0),
+        },
+        recentWOs: recentWOsResult.recordset,
+        recentBOQs: recentBOQsResult.recordset,
+        recentWorkDone: recentWorkDoneResult.recordset,
+        woStatusBreakdown: woStatusResult.recordset,
+        workDoneStatusBreakdown: workDoneStatusResult.recordset,
+      });
+    } catch (err) {
+      console.error("[engineering-dashboard]", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
 router.get("/work-done", cache(WORK_DONE_CACHE, 120), async (req, res) => {
   try {
@@ -258,9 +263,8 @@ router.get("/work-done/:id", async (req, res) => {
     const pool = getPool();
     if (!(await ensureWorkDoneTable(pool, res))) return;
 
-    const result = await pool
-      .request()
-      .input("ID", sql.Int, req.params.id).query(`
+    const result = await pool.request().input("ID", sql.Int, req.params.id)
+      .query(`
         ${selectWorkDoneSql}
         WHERE wd.ID = @ID
       `);
@@ -288,9 +292,12 @@ router.post("/work-done", async (req, res) => {
     const quantity = toNumber(body.QuantityDone);
     const rate = toNumber(body.RatePerUnit);
     const deductions = toNumber(body.Deductions);
-    const gross = body.GrossAmount != null ? toNumber(body.GrossAmount) : quantity * rate;
+    const gross =
+      body.GrossAmount != null ? toNumber(body.GrossAmount) : quantity * rate;
     const certified =
-      body.CertifiedAmount != null ? toNumber(body.CertifiedAmount) : gross - deductions;
+      body.CertifiedAmount != null
+        ? toNumber(body.CertifiedAmount)
+        : gross - deductions;
 
     transaction = pool.transaction();
     await transaction.begin();
@@ -318,7 +325,11 @@ router.post("/work-done", async (req, res) => {
       .input("WorkOrderID", sql.Int, toIntOrNull(body.WorkOrderID))
       .input("PeriodFrom", sql.Date, body.PeriodFrom || null)
       .input("PeriodTo", sql.Date, body.PeriodTo || null)
-      .input("DescriptionOfWork", sql.NVarChar(sql.MAX), body.DescriptionOfWork || null)
+      .input(
+        "DescriptionOfWork",
+        sql.NVarChar(sql.MAX),
+        body.DescriptionOfWork || null,
+      )
       .input("QuantityDone", sql.Decimal(18, 4), quantity)
       .input("Unit", sql.NVarChar(50), body.Unit || null)
       .input("RatePerUnit", sql.Decimal(18, 4), rate)
@@ -350,7 +361,13 @@ router.post("/work-done", async (req, res) => {
     await bumpCacheVersion(WORK_DONE_CACHE);
     await bumpCacheVersion("engineering-dashboard");
 
-    res.status(201).json({ message: "Work Done entry created", ID: newId, DocNo: finalDocNo });
+    res
+      .status(201)
+      .json({
+        message: "Work Done entry created",
+        ID: newId,
+        DocNo: finalDocNo,
+      });
   } catch (err) {
     try {
       if (transaction) await transaction.rollback();
@@ -378,9 +395,12 @@ router.put("/work-done/:id", async (req, res) => {
     const quantity = toNumber(body.QuantityDone);
     const rate = toNumber(body.RatePerUnit);
     const deductions = toNumber(body.Deductions);
-    const gross = body.GrossAmount != null ? toNumber(body.GrossAmount) : quantity * rate;
+    const gross =
+      body.GrossAmount != null ? toNumber(body.GrossAmount) : quantity * rate;
     const certified =
-      body.CertifiedAmount != null ? toNumber(body.CertifiedAmount) : gross - deductions;
+      body.CertifiedAmount != null
+        ? toNumber(body.CertifiedAmount)
+        : gross - deductions;
 
     const result = await pool
       .request()
@@ -395,7 +415,11 @@ router.put("/work-done/:id", async (req, res) => {
       .input("WorkOrderID", sql.Int, toIntOrNull(body.WorkOrderID))
       .input("PeriodFrom", sql.Date, body.PeriodFrom || null)
       .input("PeriodTo", sql.Date, body.PeriodTo || null)
-      .input("DescriptionOfWork", sql.NVarChar(sql.MAX), body.DescriptionOfWork || null)
+      .input(
+        "DescriptionOfWork",
+        sql.NVarChar(sql.MAX),
+        body.DescriptionOfWork || null,
+      )
       .input("QuantityDone", sql.Decimal(18, 4), quantity)
       .input("Unit", sql.NVarChar(50), body.Unit || null)
       .input("RatePerUnit", sql.Decimal(18, 4), rate)
@@ -471,7 +495,13 @@ router.put("/work-done/:id/submit", async (req, res) => {
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-    const result = await transition("work-done", id, "Pending", userEmail, req.user?.role);
+    const result = await transition(
+      "work-done",
+      id,
+      "Pending",
+      userEmail,
+      req.user?.role,
+    );
     await bumpCacheVersion(WORK_DONE_CACHE);
     await bumpCacheVersion("engineering-dashboard");
     res.json({ message: "Work Done submitted for approval", ...result });
@@ -485,12 +515,20 @@ router.put("/work-done/:id/approve", async (req, res) => {
   try {
     const userEmail = requireUserEmail(req, res);
     if (!userEmail) return;
-    const result = await transition("work-done", id, "Approved", userEmail, req.user?.role);
+    const result = await transition(
+      "work-done",
+      id,
+      "Approved",
+      userEmail,
+      req.user?.role,
+    );
     await bumpCacheVersion(WORK_DONE_CACHE);
     await bumpCacheVersion("engineering-dashboard");
     res.json({ message: "Work Done approved", ...result });
   } catch (err) {
-    res.status(err.message.includes("not authorized") ? 403 : 400).json({ error: err.message });
+    res
+      .status(err.message.includes("not authorized") ? 403 : 400)
+      .json({ error: err.message });
   }
 });
 
@@ -511,7 +549,79 @@ router.put("/work-done/:id/reject", async (req, res) => {
     await bumpCacheVersion("engineering-dashboard");
     res.json({ message: "Work Done rejected", ...result });
   } catch (err) {
-    res.status(err.message.includes("not authorized") ? 403 : 400).json({ error: err.message });
+    res
+      .status(err.message.includes("not authorized") ? 403 : 400)
+      .json({ error: err.message });
+  }
+});
+
+// ── GET /engineering/work-orders-with-activities ──────────────────────────────
+// Returns only WOs that have at least one activity row, for the WD form dropdown.
+router.get(
+  "/work-orders-with-activities",
+  cache("eng-wo-with-activities", 300),
+  async (req, res) => {
+    try {
+      const pool = getPool();
+      const result = await pool.request().query(`
+      SELECT
+        h.Id,
+        COALESCE(h.DocNo, h.DocumentNumber) AS DocNo,
+        ah.LHeadName AS ContractorName,
+        COUNT(a.Id) AS ActivityCount,
+        ISNULL(SUM(a.GrandTotal), 0) AS GrossTotal,
+        ISNULL(SUM(a.LabourAmount), 0) AS LabourTotal,
+        ISNULL(SUM(a.MaterialAmount), 0) AS MaterialTotal
+      FROM dbo.WorkOrderHeader h
+      INNER JOIN dbo.WorkOrderActivities a ON a.WorkOrderHeaderId = h.Id
+      LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = h.ContractorId
+      GROUP BY h.Id, h.DocNo, h.DocumentNumber, ah.LHeadName
+      ORDER BY h.Id DESC
+    `);
+      res.json(result.recordset);
+    } catch (err) {
+      console.error(
+        "[GET /engineering/work-orders-with-activities]",
+        err.message,
+      );
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
+// ── GET /engineering/work-order-summary/:woId ─────────────────────────────────
+// Returns aggregated gross + net (labour + material) from WO activities.
+router.get("/work-order-summary/:woId", async (req, res) => {
+  try {
+    const pool = getPool();
+    const woId = parseInt(req.params.woId, 10);
+    if (!Number.isFinite(woId))
+      return res.status(400).json({ error: "Invalid WO ID" });
+
+    const result = await pool
+      .request()
+      .input("WorkOrderHeaderId", sql.Int, woId).query(`
+        SELECT
+          COUNT(a.Id)                          AS ActivityCount,
+          ISNULL(SUM(a.GrandTotal), 0)         AS GrossAmount,
+          ISNULL(SUM(a.LabourAmount), 0)       AS LabourAmount,
+          ISNULL(SUM(a.MaterialAmount), 0)     AS MaterialAmount,
+          ISNULL(SUM(a.GrandTotal), 0)         AS NetAmount
+        FROM dbo.WorkOrderActivities a
+        WHERE a.WorkOrderHeaderId = @WorkOrderHeaderId
+      `);
+
+    const row = result.recordset[0] ?? {
+      ActivityCount: 0,
+      GrossAmount: 0,
+      LabourAmount: 0,
+      MaterialAmount: 0,
+      NetAmount: 0,
+    };
+    res.json(row);
+  } catch (err) {
+    console.error("[GET /engineering/work-order-summary/:woId]", err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 
