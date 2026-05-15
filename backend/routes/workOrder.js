@@ -549,8 +549,14 @@ router.get("/:id/activities", async (req, res) => {
     const result = await pool
       .request()
       .input("WorkOrderHeaderId", sql.Int, req.params.id).query(`
-        SELECT a.*, ag.activity_name AS ActivityGroupName,
-          act.activity_name AS ActivityName, uom.UOMName,
+        SELECT
+          a.Id, a.WorkOrderHeaderId, a.ActivityGroupId, a.ActivityId,
+          a.UOMId, a.Rate, a.Area, a.LabourAmount, a.MaterialAmount,
+          a.GrandTotal, a.Remarks, a.DocNo,
+          a.CreatedAt,
+          ag.activity_name AS ActivityGroupName,
+          act.activity_name AS ActivityName,
+          uom.UOMName,
           COUNT(m.Id) AS MaterialCount,
           ISNULL(SUM(m.Quantity * m.Rate), 0) AS MaterialTotal
         FROM dbo.WorkOrderActivities a
@@ -559,9 +565,11 @@ router.get("/:id/activities", async (req, res) => {
         LEFT JOIN dbo.UOMMaster                  uom ON uom.Id = a.UOMId
         LEFT JOIN dbo.WorkOrderActivityMaterials m   ON m.WorkOrderActivityId = a.Id
         WHERE a.WorkOrderHeaderId = @WorkOrderHeaderId
-        GROUP BY a.Id, a.WorkOrderHeaderId, a.ActivityGroupId, a.ActivityId,
+        GROUP BY
+          a.Id, a.WorkOrderHeaderId, a.ActivityGroupId, a.ActivityId,
           a.UOMId, a.Rate, a.Area, a.LabourAmount, a.MaterialAmount,
-          a.GrandTotal, a.Remarks, a.CreatedAt,
+          a.GrandTotal, a.Remarks, a.DocNo,
+          a.CreatedAt,
           ag.activity_name, act.activity_name, uom.UOMName
         ORDER BY a.Id
       `);
