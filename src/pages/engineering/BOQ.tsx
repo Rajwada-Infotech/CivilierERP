@@ -9,6 +9,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { type DbItem } from "@/api/itemMasterApi";
+import { type DbActivity } from "@/api/activityMasterApi";
 import {
   FileText,
   Save,
@@ -130,6 +132,20 @@ interface DocType {
 interface UomOption {
   Id: number;
   UOMName: string;
+  UOMCode: string;
+}
+
+// Master lookup types fed into the line editor
+interface ItemOption {
+  id: string;
+  name: string;
+  code: string;
+  uomCode: string;  // M_UOM = UOMCode from item master
+}
+interface ActivityOption {
+  id: string;
+  name: string;
+  code: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -318,6 +334,8 @@ interface LineEditorProps {
   mode: LineMode;
   rows: BoqItem[] | BoqActivity[];
   uoms: UomOption[];
+  itemOptions?: ItemOption[];
+  activityOptions?: ActivityOption[];
   onChange: (rows: any[]) => void;
   readOnly?: boolean;
 }
@@ -326,6 +344,8 @@ const LineEditor: React.FC<LineEditorProps> = ({
   mode,
   rows,
   uoms,
+  itemOptions = [],
+  activityOptions = [],
   onChange,
   readOnly,
 }) => {
@@ -383,37 +403,49 @@ const LineEditor: React.FC<LineEditorProps> = ({
   return (
     <div className="border border-border rounded-xl overflow-hidden">
       <div className="overflow-x-auto">
-        <table className="w-full text-sm">
+        <table className="w-full text-sm table-fixed">
+          <colgroup>
+            <col style={{width:"40px"}} />
+            <col style={{width:"22%"}} />
+            <col style={{width:"90px"}} />
+            <col style={{width:"13%"}} />
+            <col style={{width:"72px"}} />
+            <col />
+            <col style={{width:"100px"}} />
+            <col style={{width:"72px"}} />
+            <col style={{width:"100px"}} />
+            <col style={{width:"40px"}} />
+          </colgroup>
           <thead>
             <tr className="bg-muted/50 border-b border-border">
-              <th className="px-4 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground w-12">
+              <th className="px-3 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">
                 #
               </th>
-              <th className="px-4 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">
+              <th className="px-3 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">
                 {isItem ? "Item Name" : "Activity Name"}
               </th>
-              <th className="px-4 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground w-32">
+              <th className="px-3 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">
                 Code
               </th>
-              <th className="px-4 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">
+              <th className="px-3 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">
                 Spec/Notes
               </th>
-              <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground w-24">
+              <th className="px-3 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
                 Qty
               </th>
-              <th className="px-4 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground w-32">
+              <th className="px-3 py-3 text-left text-xs font-heading uppercase tracking-widest text-muted-foreground">
                 UOM
               </th>
-              <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground w-32">
+              <th className="px-3 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
                 Rate (₹)
               </th>
-              <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground w-24">
+              <th className="px-3 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
                 Tax %
               </th>
-              <th className="px-4 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground w-32">
+              <th className="px-3 py-3 text-right text-xs font-heading uppercase tracking-widest text-muted-foreground">
                 Amount (₹)
               </th>
-              {!readOnly && <th className="px-4 py-3 w-12"></th>}
+              {!readOnly && <th className="px-3 py-3"></th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-border">
@@ -430,12 +462,84 @@ const LineEditor: React.FC<LineEditorProps> = ({
             )}
             {(rows as any[]).map((row, idx) => (
               <tr key={row._key ?? row.Id ?? idx}>
-                <td className="p-3 text-muted-foreground font-bold text-xs text-center">
+                <td className="px-2 py-3 text-muted-foreground font-bold text-xs text-center">
                   {idx + 1}
                 </td>
-                {cellInput(idx, nameKey, row[nameKey], namePlh, "text")}
-                {cellInput(idx, codeKey, row[codeKey], "Code", "text")}
-                {cellInput(idx, "description", row.description, "Spec / notes")}
+                {/* ── Name cell: shadcn Select from master ── */}
+                <td className="p-2">
+                  {readOnly ? (
+                    <span className="text-sm font-medium">{row[nameKey] || "—"}</span>
+                  ) : isItem ? (
+                    <Select
+                      value={row.itemId ? String(row.itemId) : ""}
+                      onValueChange={(val) => {
+                        const selected = itemOptions.find((o) => o.id === val);
+                        if (!selected) return;
+                        // Resolve UOMCode -> UOMName for the dropdown value
+                        const matchedUom = uoms.find((u) => u.UOMCode === selected.uomCode);
+                        const resolvedUom = matchedUom?.UOMName ?? selected.uomCode;
+                        const next = (rows as any[]).map((r, i) => {
+                          if (i !== idx) return r;
+                          return { ...r, itemId: selected.id, itemName: selected.name, itemCode: selected.code, uomName: resolvedUom };
+                        });
+                        onChange(next);
+                      }}
+                    >
+                      <SelectTrigger className="h-9 text-sm w-full">
+                        <SelectValue placeholder="— Select Item —" />
+                      </SelectTrigger>
+                      <SelectContent className="z-[300] max-h-60">
+                        {itemOptions.map((o) => (
+                          <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Select
+                      value={row.activityId ? String(row.activityId) : ""}
+                      onValueChange={(val) => {
+                        const selected = activityOptions.find((o) => o.id === val);
+                        if (!selected) return;
+                        const next = (rows as any[]).map((r, i) => {
+                          if (i !== idx) return r;
+                          return { ...r, activityId: selected.id, activityName: selected.name, activityCode: selected.code };
+                        });
+                        onChange(next);
+                      }}
+                    >
+                      <SelectTrigger className="h-9 text-sm w-full">
+                        <SelectValue placeholder="— Select Activity —" />
+                      </SelectTrigger>
+                      <SelectContent className="z-[300] max-h-60">
+                        {activityOptions.map((o) => (
+                          <SelectItem key={o.id} value={o.id}>{o.name}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </td>
+                {/* ── Code cell: read-only badge, auto-filled from master ── */}
+                <td className="p-2">
+                  {readOnly ? (
+                    <span className="text-sm">{row[codeKey] || "—"}</span>
+                  ) : (
+                    <div className="h-9 flex items-center px-3 rounded-md border border-dashed border-border bg-muted/40 text-muted-foreground text-sm font-body truncate">
+                      {row[codeKey] || <span className="italic text-xs">Auto</span>}
+                    </div>
+                  )}
+                </td>
+                <td className="p-2">
+                  {readOnly ? (
+                    <span className="text-sm text-muted-foreground">{row.description || "—"}</span>
+                  ) : (
+                    <Input
+                      value={row.description}
+                      placeholder="Notes"
+                      onChange={(e) => upd(idx, "description", e.target.value)}
+                      className="h-9 text-sm w-full"
+                    />
+                  )}
+                </td>
                 {cellInput(idx, "quantity", row.quantity, "0", "number")}
                 <td className="p-2">
                   {readOnly ? (
@@ -445,7 +549,7 @@ const LineEditor: React.FC<LineEditorProps> = ({
                       value={row.uomName}
                       onValueChange={(val) => upd(idx, "uomName", val)}
                     >
-                      <SelectTrigger className="h-9 text-sm">
+                      <SelectTrigger className="h-9 text-sm w-full">
                         <SelectValue placeholder="—" />
                       </SelectTrigger>
                       <SelectContent className="z-[300]">
@@ -460,13 +564,13 @@ const LineEditor: React.FC<LineEditorProps> = ({
                 </td>
                 {cellInput(idx, "rate", row.rate, "0.00", "number")}
                 {cellInput(idx, "tax", row.tax, "18", "number")}
-                <td className="p-3 text-right">
+                <td className="px-3 py-3 text-right">
                   <span className="font-semibold text-primary">
                     {fmt(parseFloat(row.amount) || 0)}
                   </span>
                 </td>
                 {!readOnly && (
-                  <td className="p-3 text-center">
+                  <td className="px-2 py-3 text-center">
                     <Button
                       variant="ghost"
                       size="sm"
@@ -485,11 +589,11 @@ const LineEditor: React.FC<LineEditorProps> = ({
               <tr className="text-right">
                 <td
                   colSpan={readOnly ? 8 : 9}
-                  className="px-4 py-3 text-xs font-heading uppercase tracking-widest text-muted-foreground"
+                  className="px-3 py-3 text-xs font-heading uppercase tracking-widest text-muted-foreground"
                 >
                   {isItem ? "Items" : "Activities"} Subtotal
                 </td>
-                <td className="px-4 py-3 font-bold text-primary">
+                <td className="px-3 py-3 font-bold text-primary">
                   {fmt(subtotal)}
                 </td>
                 {!readOnly && <td></td>}
@@ -560,6 +664,8 @@ interface FormModalProps {
   projects: Project[];
   docTypes: DocType[];
   uoms: UomOption[];
+  itemOptions: ItemOption[];
+  activityOptions: ActivityOption[];
   finYear?: string;
   onClose: () => void;
   onSaved: () => void;
@@ -571,6 +677,8 @@ const FormModal: React.FC<FormModalProps> = ({
   projects,
   docTypes,
   uoms,
+  itemOptions,
+  activityOptions,
   finYear,
   onClose,
   onSaved,
@@ -661,8 +769,8 @@ const FormModal: React.FC<FormModalProps> = ({
   const hasErr = (k: string) => !!errors[k];
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-start justify-center bg-black/50 p-4 sm:p-8 overflow-y-auto">
-      <Card className="w-full max-w-5xl my-auto animate-in fade-in slide-in-from-bottom-4 shadow-2xl">
+    <div className="fixed inset-0 z-[200] flex flex-col bg-background overflow-hidden">
+      <Card className="w-full h-full flex flex-col rounded-none border-0 shadow-none animate-in fade-in">
         <CardHeader className="flex flex-row items-center justify-between border-b border-border pb-4 bg-muted/30">
           <div className="space-y-1">
             <CardTitle className="text-xl flex items-center gap-2">
@@ -686,7 +794,7 @@ const FormModal: React.FC<FormModalProps> = ({
           </Button>
         </CardHeader>
 
-        <CardContent className="p-6 overflow-y-auto max-h-[calc(100vh-200px)] space-y-6">
+        <CardContent className="p-6 overflow-y-auto flex-1 space-y-6">
           <div className="space-y-4">
             <h3 className="text-xs uppercase tracking-widest font-heading font-semibold text-muted-foreground flex items-center gap-1.5 border-b pb-2">
               <span className="w-5 h-5 rounded bg-primary/10 text-primary flex items-center justify-center">
@@ -850,6 +958,7 @@ const FormModal: React.FC<FormModalProps> = ({
                 mode="item"
                 rows={items}
                 uoms={uoms}
+                itemOptions={itemOptions}
                 onChange={setItems as any}
               />
             ) : (
@@ -857,6 +966,7 @@ const FormModal: React.FC<FormModalProps> = ({
                 mode="activity"
                 rows={activities}
                 uoms={uoms}
+                activityOptions={activityOptions}
                 onChange={setActivities as any}
               />
             )}
@@ -872,13 +982,13 @@ const FormModal: React.FC<FormModalProps> = ({
                 {fmt(activitiesTotal)}
               </div>
             </div>
-            <div className="text-2xl font-bold font-mono">
+            <div className="text-2xl font-bold font-body">
               {fmt(grandTotal)}
             </div>
           </div>
         </CardContent>
 
-        <div className="p-4 border-t border-border flex justify-end gap-3 bg-muted/10 rounded-b-xl">
+        <div className="p-4 border-t border-border flex justify-end gap-3 bg-muted/10 shrink-0">
           <Button variant="outline" onClick={onClose} disabled={saving}>
             Cancel
           </Button>
@@ -965,11 +1075,11 @@ const DetailModal: React.FC<DetailModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-start justify-center bg-black/50 p-4 sm:p-8 overflow-y-auto">
-      <Card className="w-full max-w-5xl my-auto animate-in fade-in slide-in-from-bottom-4 shadow-2xl">
+    <div className="fixed inset-0 z-[200] flex flex-col bg-background overflow-hidden">
+      <Card className="w-full h-full flex flex-col rounded-none border-0 shadow-none animate-in fade-in">
         <CardHeader className="flex flex-row items-center justify-between border-b border-border pb-4 bg-muted/30">
           <div className="flex items-center gap-4">
-            <CardTitle className="text-xl font-mono text-primary">
+            <CardTitle className="text-xl font-body text-primary">
               {record.BoqNo || record.DocNo}
             </CardTitle>
             <StatusBadge status={record.Status} />
@@ -979,7 +1089,7 @@ const DetailModal: React.FC<DetailModalProps> = ({
           </Button>
         </CardHeader>
 
-        <CardContent className="p-6 overflow-y-auto max-h-[calc(100vh-200px)] space-y-6">
+        <CardContent className="p-6 overflow-y-auto flex-1 space-y-6">
           {record.Status !== "Draft" && (
             <div
               className={`p-4 rounded-xl border flex items-center gap-3 ${
@@ -1033,13 +1143,13 @@ const DetailModal: React.FC<DetailModalProps> = ({
             <DetailRow label="BOQ Date" value={fmtDate(record.BoqDate)} />
             <DetailRow
               label="Document No"
-              value={<span className="font-mono">{record.DocNo}</span>}
+              value={<span className="font-body">{record.DocNo}</span>}
             />
             <DetailRow label="Created By" value={record.CreatedBy} />
             <DetailRow
               label="Total Amount"
               value={
-                <span className="font-mono text-primary font-bold">
+                <span className="font-body text-primary font-bold">
                   {fmt(record.TotalAmount)}
                 </span>
               }
@@ -1089,7 +1199,7 @@ const DetailModal: React.FC<DetailModalProps> = ({
           )}
         </CardContent>
 
-        <div className="p-4 border-t border-border flex justify-between gap-3 bg-muted/10 rounded-b-xl">
+        <div className="p-4 border-t border-border flex justify-between gap-3 bg-muted/10 shrink-0">
           <Button
             variant="outline"
             className="text-destructive hover:bg-destructive/10 border-destructive/30"
@@ -1132,7 +1242,7 @@ const COLUMNS: ColumnDef<any, unknown>[] = [
     accessorKey: "BoqNo",
     header: "BOQ No",
     cell: ({ row }) => (
-      <span className="font-mono font-semibold text-primary text-sm">
+      <span className="font-body font-semibold text-primary text-sm">
         {row.original.BoqNo || row.original.DocNo || "—"}
       </span>
     ),
@@ -1193,6 +1303,8 @@ export default function BOQ() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [docTypes, setDocTypes] = useState<DocType[]>([]);
   const [uoms, setUoms] = useState<UomOption[]>([]);
+  const [itemOptions, setItemOptions] = useState<ItemOption[]>([]);
+  const [activityOptions, setActivityOptions] = useState<ActivityOption[]>([]);
 
   const [showForm, setShowForm] = useState(false);
   const [editRecord, setEditRecord] = useState<BoqRecord | null>(null);
@@ -1229,30 +1341,38 @@ export default function BOQ() {
 
   const loadMasterData = useCallback(async () => {
     try {
-      const [cosResult, prosResult, dtsResult, uomResult] =
+      const [cosResult, prosResult, dtsResult, uomResult, itemResult, activityResult] =
         await Promise.allSettled([
           apiFetch("/enterprises/options?business_type=C"),
           apiFetch("/enterprises/options?business_type=P"),
           apiFetch("/document-type?module=BOQ"),
           apiFetch("/uom-master"),
+          apiFetch("/item-master"),
+          apiFetch("/activity-master"),
         ]);
 
       const cos = cosResult.status === "fulfilled" ? cosResult.value : [];
       const pros = prosResult.status === "fulfilled" ? prosResult.value : [];
       let dts = dtsResult.status === "fulfilled" ? dtsResult.value : [];
       const uomRes = uomResult.status === "fulfilled" ? uomResult.value : [];
+      const itemRes = itemResult.status === "fulfilled" ? itemResult.value : [];
+      const activityRes = activityResult.status === "fulfilled" ? activityResult.value : [];
 
       if (
         cosResult.status === "rejected" ||
         prosResult.status === "rejected" ||
         dtsResult.status === "rejected" ||
-        uomResult.status === "rejected"
+        uomResult.status === "rejected" ||
+        itemResult.status === "rejected" ||
+        activityResult.status === "rejected"
       ) {
         console.error("Some BOQ master data failed to load:", {
           companies: cosResult.status === "rejected" ? cosResult.reason : null,
           projects: prosResult.status === "rejected" ? prosResult.reason : null,
           docTypes: dtsResult.status === "rejected" ? dtsResult.reason : null,
           uoms: uomResult.status === "rejected" ? uomResult.reason : null,
+          items: itemResult.status === "rejected" ? (itemResult as any).reason : null,
+          activities: activityResult.status === "rejected" ? (activityResult as any).reason : null,
         });
       }
 
@@ -1333,7 +1453,31 @@ export default function BOQ() {
         uomData.map((item: any, idx: number) => ({
           Id: Number(item.Id ?? item.id ?? idx + 1),
           UOMName: item.UOMName ?? item.name ?? "",
+          UOMCode: item.UOMCode ?? "",
         })),
+      );
+
+      // Item Master options (only leaf items, filter out groups if needed)
+      const itemData: DbItem[] = Array.isArray(itemRes) ? itemRes : (itemRes?.data ?? []);
+      setItemOptions(
+        itemData.map((it) => ({
+          id: String(it.M_Id),
+          name: it.M_Name ?? "",
+          code: it.M_code ?? "",
+          uomCode: it.M_UOM ?? "",  // M_UOM stores UOMCode
+        })),
+      );
+
+      // Activity Master options (activity_type === 1 = actual activities, not groups)
+      const activityData: DbActivity[] = Array.isArray(activityRes) ? activityRes : (activityRes?.data ?? []);
+      setActivityOptions(
+        activityData
+          .filter((a) => a.activity_type === 1 && a.is_active !== false)
+          .map((a) => ({
+            id: String(a.id),
+            name: a.activity_name ?? "",
+            code: String(a.id),
+          })),
       );
     } catch (err) {
       console.error("Master data load failed:", err);
@@ -1481,7 +1625,7 @@ export default function BOQ() {
                 <div className="text-xs font-bold text-muted-foreground uppercase tracking-wider">
                   {s.label}
                 </div>
-                <div className="text-2xl font-bold mt-1 font-mono">
+                <div className="text-2xl font-bold mt-1 font-body">
                   {s.value}
                 </div>
               </CardContent>
@@ -1573,6 +1717,8 @@ export default function BOQ() {
           projects={projects}
           docTypes={docTypes}
           uoms={uoms}
+          itemOptions={itemOptions}
+          activityOptions={activityOptions}
           finYear={activeFinYear}
           onClose={() => {
             setShowForm(false);
