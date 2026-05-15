@@ -43,6 +43,10 @@ router.get("/", async (req, res) => {
       poStatusBreakdown,
       woStatusBreakdown,
       topItems,
+      materialIssueStats,
+      materialRequestStats,
+      recentIssues,
+      recentRequests,
     ] = await Promise.all([
       // ── Items + Groups ──────────────────────────────────────────────
       safeQuery(`
@@ -203,6 +207,56 @@ router.get("/", async (req, res) => {
         GROUP BY sl.ItemID, img.M_Name
         ORDER BY TotalIn DESC
       `),
+
+      // ── Material Issues ───────────────────────────────────────────────
+      safeQuery(`
+        SELECT
+          COUNT(*) AS TotalCount,
+          COUNT(CASE WHEN YEAR(CreatedAt) = YEAR(GETDATE())
+                      AND MONTH(CreatedAt) = MONTH(GETDATE()) THEN 1 END) AS ThisMonthCount,
+          COUNT(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) THEN 1 END) AS TodayCount,
+          ISNULL(SUM((SELECT ISNULL(SUM(mii.Quantity),0) FROM dbo.MaterialIssueItems mii WHERE mii.IssueId = mi.IssueId)), 0) AS TotalQty
+        FROM dbo.MaterialIssues mi
+      `),
+
+      // ── Material Requests ─────────────────────────────────────────────
+      safeQuery(`
+        SELECT
+          COUNT(*) AS TotalCount,
+          COUNT(CASE WHEN ISNULL(Status,'') = 'Pending'  THEN 1 END) AS PendingCount,
+          COUNT(CASE WHEN ISNULL(Status,'') = 'Approved' THEN 1 END) AS ApprovedCount,
+          COUNT(CASE WHEN ISNULL(Status,'') = 'Draft'    THEN 1 END) AS DraftCount,
+          COUNT(CASE WHEN YEAR(CreatedAt) = YEAR(GETDATE())
+                      AND MONTH(CreatedAt) = MONTH(GETDATE()) THEN 1 END) AS ThisMonthCount
+        FROM dbo.MaterialRequests
+      `),
+
+      // ── Recent Issues (last 6) ────────────────────────────────────────
+      safeQuery(`
+        SELECT TOP 6
+          mi.IssueId, mi.DocNo, mi.IssueNo, mi.Date AS IssueDate,
+          mi.Status, mi.Reason,
+          ec.name AS CompanyName,
+          ep.name AS ProjectName,
+          (SELECT COUNT(*) FROM dbo.MaterialIssueItems mii WHERE mii.IssueId = mi.IssueId) AS ItemCount
+        FROM dbo.MaterialIssues mi
+        LEFT JOIN dbo.enterprise ec ON ec.id = mi.CompanyId
+        LEFT JOIN dbo.enterprise ep ON ep.id = mi.ProjectId
+        ORDER BY mi.CreatedAt DESC
+      `),
+
+      // ── Recent Requests (last 6) ──────────────────────────────────────
+      safeQuery(`
+        SELECT TOP 6
+          mr.MRId, mr.DocNo, mr.RequestDate, mr.Status, mr.Priority, mr.Reason,
+          ec.name AS CompanyName,
+          ep.name AS ProjectName,
+          (SELECT COUNT(*) FROM dbo.MaterialRequestItems mri WHERE mri.MRId = mr.MRId) AS ItemCount
+        FROM dbo.MaterialRequests mr
+        LEFT JOIN dbo.enterprise ec ON ec.id = mr.CompanyId
+        LEFT JOIN dbo.enterprise ep ON ep.id = mr.ProjectId
+        ORDER BY mr.CreatedAt DESC
+      `),
     ]);
 
     const it = itemStats?.recordset[0] ?? {};
@@ -212,6 +266,8 @@ router.get("/", async (req, res) => {
     const ex = expenseStats?.recordset[0] ?? {};
     const st = stockStats?.recordset[0] ?? {};
     const um = uomStats?.recordset[0] ?? {};
+    const mi = materialIssueStats?.recordset[0] ?? {};
+    const mr = materialRequestStats?.recordset[0] ?? {};
 
     const responseObj = {
       items: {
@@ -260,9 +316,26 @@ router.get("/", async (req, res) => {
       poStatusBreakdown: poStatusBreakdown?.recordset ?? [],
       woStatusBreakdown: woStatusBreakdown?.recordset ?? [],
       topItems: topItems?.recordset ?? [],
+      materialIssues: {
+        total: mi.TotalCount ?? 0,
+        thisMonth: mi.ThisMonthCount ?? 0,
+        today: mi.TodayCount ?? 0,
+        totalQty: parseFloat(mi.TotalQty ?? 0),
+      },
+      materialRequests: {
+        total: mr.TotalCount ?? 0,
+        pending: mr.PendingCount ?? 0,
+        approved: mr.ApprovedCount ?? 0,
+        draft: mr.DraftCount ?? 0,
+        thisMonth: mr.ThisMonthCount ?? 0,
+      },
+      recentIssues: recentIssues?.recordset ?? [],
+      recentRequests: recentRequests?.recordset ?? [],
     };
 
-    try { await redisSet(CACHE_KEY, JSON.stringify(responseObj), CACHE_TTL); } catch (_) {}
+    try {
+      await redisSet(CACHE_KEY, JSON.stringify(responseObj), CACHE_TTL);
+    } catch (_) {}
 
     res.json(responseObj);
   } catch (err) {
