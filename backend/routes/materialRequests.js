@@ -138,19 +138,21 @@ router.get("/item-options", authenticateToken, async (req, res) => {
     const hasUOM = colCheck.recordset[0].cnt > 0;
 
     const result = await pool.request().query(`
-      SELECT  img.M_Id, img.M_Name, ig.I_Name AS M_Group,
+      SELECT  img.M_Id, img.M_Name, grp.M_Name AS M_Group,
               ${hasUOM ? "img.M_UOM AS DefaultUOM," : "NULL AS DefaultUOM,"}
-              ISNULL(SUM(sl.TotalQuantity), 0) AS AvailableStock
+              uom.UOMName  AS DefaultUOMName,
+              uom.Symbol   AS DefaultUOMSymbol,
+              ISNULL(SUM(CASE WHEN sl.Type = 'IN'  THEN sl.Qty ELSE 0 END), 0)
+            - ISNULL(SUM(CASE WHEN sl.Type = 'OUT' THEN sl.Qty ELSE 0 END), 0)
+              AS AvailableStock
       FROM    dbo.Item_Master_Group img
-      LEFT JOIN dbo.ItemGroup ig ON ig.I_Id = img.I_Id
-      LEFT JOIN (
-        SELECT  ItemId,
-                SUM(CASE WHEN TranType = 'IN'  THEN Quantity ELSE 0 END) -
-                SUM(CASE WHEN TranType = 'OUT' THEN Quantity ELSE 0 END) AS TotalQuantity
-        FROM    dbo.StockLedger
-        GROUP BY ItemId
-      ) sl ON sl.ItemId = img.M_Id
-      GROUP BY img.M_Id, img.M_Name, ig.I_Name${hasUOM ? ", img.M_UOM" : ""}
+      LEFT JOIN dbo.Item_Master_Group grp ON grp.M_Id = img.Parent_Id
+      LEFT JOIN dbo.StockLedger sl
+        ON CONVERT(NVARCHAR(50), sl.ItemID) = CONVERT(NVARCHAR(50), img.M_Id)
+      ${hasUOM ? "LEFT JOIN dbo.UOMMaster uom ON uom.UOMCode = img.M_UOM" : "LEFT JOIN dbo.UOMMaster uom ON 1=0"}
+      WHERE (img.Parent_Id IS NOT NULL OR img.M_IdentityCode = 1)
+      GROUP BY img.M_Id, img.M_Name, grp.M_Name${hasUOM ? ", img.M_UOM" : ""},
+               uom.UOMName, uom.Symbol
       ORDER BY img.M_Name
     `);
     res.json(result.recordset);
@@ -165,7 +167,7 @@ router.get("/uom-options", authenticateToken, async (req, res) => {
     const pool = getPool();
     const result = await pool.request().query(`
       SELECT UOMCode, UOMName, Symbol, IsActive
-      FROM   dbo.UOM_Master
+      FROM   dbo.UOMMaster
       ORDER  BY UOMName
     `);
     res.json(result.recordset);
@@ -230,7 +232,13 @@ router.get("/", authenticateToken, async (req, res) => {
 
     const total = result.recordset[0]?._total ?? 0;
     const data = result.recordset.map(({ _total, ...row }) => row);
-    res.json({ data, page, limit, total, totalPages: Math.ceil(total / limit) });
+    res.json({
+      data,
+      page,
+      limit,
+      total,
+      totalPages: Math.ceil(total / limit),
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -245,9 +253,7 @@ router.get("/:id", authenticateToken, async (req, res) => {
     const id = parseInt(req.params.id);
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
-    const hdr = await pool.request()
-      .input("id", sql.Int, id)
-      .query(`
+    const hdr = await pool.request().input("id", sql.Int, id).query(`
         SELECT mr.*, ec.name AS CompanyName, ep.name AS ProjectName, fy.FName AS FinYearName
         FROM   dbo.MaterialRequests mr
         LEFT JOIN dbo.enterprise ec ON ec.id  = mr.CompanyId
@@ -256,14 +262,13 @@ router.get("/:id", authenticateToken, async (req, res) => {
         WHERE mr.MRId = @id
       `);
 
-    if (!hdr.recordset.length) return res.status(404).json({ error: "Not found" });
+    if (!hdr.recordset.length)
+      return res.status(404).json({ error: "Not found" });
 
-    const items = await pool.request()
-      .input("id", sql.Int, id)
-      .query(`
+    const items = await pool.request().input("id", sql.Int, id).query(`
         SELECT mri.*, u.UOMName, u.Symbol AS UOMSymbol
         FROM   dbo.MaterialRequestItems mri
-        LEFT JOIN dbo.UOM_Master u ON u.UOMCode = mri.UOMCode
+        LEFT JOIN dbo.UOMMaster u ON u.UOMCode = mri.UOMCode
         WHERE  mri.MRId = @id
         ORDER  BY mri.MRItemId
       `);
@@ -284,31 +289,39 @@ router.post("/", authenticateToken, async (req, res) => {
     await ensureTablesExist(pool);
 
     const {
-      CompanyId, ProjectId, FinYearId,
-      RequestDate, RequiredByDate,
+      CompanyId,
+      ProjectId,
+      FinYearId,
+      RequestDate,
+      RequiredByDate,
       Priority = "Normal",
-      Reason, Remarks,
+      Reason,
+      Remarks,
       items = [],
     } = req.body;
 
-    if (!Reason?.trim()) return res.status(400).json({ error: "Reason is required" });
-    if (!items.length)   return res.status(400).json({ error: "At least one item required" });
+    if (!Reason?.trim())
+      return res.status(400).json({ error: "Reason is required" });
+    if (!items.length)
+      return res.status(400).json({ error: "At least one item required" });
 
     const dtId = await resolveDocTypeId(pool, sql, "MR");
-    const { token } = dtId ? await lockNextDocNumber(pool, sql, dtId) : { token: null };
+    const { token } = dtId
+      ? await lockNextDocNumber(pool, sql, dtId)
+      : { token: null };
 
-    const insertHdr = await pool.request()
-      .input("CompanyId",     sql.Int,           CompanyId     || null)
-      .input("ProjectId",     sql.Int,           ProjectId     || null)
-      .input("FinYearId",     sql.Int,           FinYearId     || null)
-      .input("RequestDate",   sql.Date,          RequestDate   || new Date())
-      .input("RequiredByDate",sql.Date,          RequiredByDate|| null)
-      .input("Priority",      sql.NVarChar(20),  Priority)
-      .input("Reason",        sql.NVarChar(sql.MAX), Reason)
-      .input("Remarks",       sql.NVarChar(sql.MAX), Remarks || null)
-      .input("DocTypeId",     sql.Int,           dtId          || null)
-      .input("CreatedBy",     sql.NVarChar(200), user)
-      .query(`
+    const insertHdr = await pool
+      .request()
+      .input("CompanyId", sql.Int, CompanyId || null)
+      .input("ProjectId", sql.Int, ProjectId || null)
+      .input("FinYearId", sql.Int, FinYearId || null)
+      .input("RequestDate", sql.Date, RequestDate || new Date())
+      .input("RequiredByDate", sql.Date, RequiredByDate || null)
+      .input("Priority", sql.NVarChar(20), Priority)
+      .input("Reason", sql.NVarChar(sql.MAX), Reason)
+      .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
+      .input("DocTypeId", sql.Int, dtId || null)
+      .input("CreatedBy", sql.NVarChar(200), user).query(`
         INSERT INTO dbo.MaterialRequests
           (CompanyId, ProjectId, FinYearId, RequestDate, RequiredByDate,
            Priority, Reason, Remarks, Status, DocTypeId, CreatedBy, UpdatedBy)
@@ -322,21 +335,22 @@ router.post("/", authenticateToken, async (req, res) => {
     if (token) await backPatchRecordId(pool, sql, token, newId);
 
     for (const item of items) {
-      await pool.request()
-        .input("MRId",     sql.Int,              newId)
-        .input("ItemId",   sql.NVarChar(50),     String(item.ItemId))
-        .input("ItemName", sql.NVarChar(200),    item.ItemName  || null)
-        .input("UOMCode",  sql.NVarChar(20),     item.UOMCode   || null)
-        .input("Quantity", sql.Decimal(18, 4),   parseFloat(item.Quantity) || 0)
-        .input("Remarks",  sql.NVarChar(sql.MAX), item.Remarks  || null)
-        .query(`
+      await pool
+        .request()
+        .input("MRId", sql.Int, newId)
+        .input("ItemId", sql.NVarChar(50), String(item.ItemId))
+        .input("ItemName", sql.NVarChar(200), item.ItemName || null)
+        .input("UOMCode", sql.NVarChar(20), item.UOMCode || null)
+        .input("Quantity", sql.Decimal(18, 4), parseFloat(item.Quantity) || 0)
+        .input("Remarks", sql.NVarChar(sql.MAX), item.Remarks || null).query(`
           INSERT INTO dbo.MaterialRequestItems (MRId, ItemId, ItemName, UOMCode, Quantity, Remarks)
           VALUES (@MRId, @ItemId, @ItemName, @UOMCode, @Quantity, @Remarks)
         `);
     }
 
     await bumpCacheVersion("material-requests");
-    const created = await pool.request()
+    const created = await pool
+      .request()
       .input("id", sql.Int, newId)
       .query("SELECT DocNo FROM dbo.MaterialRequests WHERE MRId = @id");
 
@@ -357,26 +371,31 @@ router.put("/:id", authenticateToken, async (req, res) => {
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
     const {
-      CompanyId, ProjectId, FinYearId,
-      RequestDate, RequiredByDate,
+      CompanyId,
+      ProjectId,
+      FinYearId,
+      RequestDate,
+      RequiredByDate,
       Priority = "Normal",
-      Reason, Remarks, Status,
+      Reason,
+      Remarks,
+      Status,
       items = [],
     } = req.body;
 
-    await pool.request()
-      .input("id",            sql.Int,           id)
-      .input("CompanyId",     sql.Int,           CompanyId      || null)
-      .input("ProjectId",     sql.Int,           ProjectId      || null)
-      .input("FinYearId",     sql.Int,           FinYearId      || null)
-      .input("RequestDate",   sql.Date,          RequestDate    || new Date())
-      .input("RequiredByDate",sql.Date,          RequiredByDate || null)
-      .input("Priority",      sql.NVarChar(20),  Priority)
-      .input("Reason",        sql.NVarChar(sql.MAX), Reason)
-      .input("Remarks",       sql.NVarChar(sql.MAX), Remarks || null)
-      .input("Status",        sql.NVarChar(20),  Status || "Draft")
-      .input("UpdatedBy",     sql.NVarChar(200), user)
-      .query(`
+    await pool
+      .request()
+      .input("id", sql.Int, id)
+      .input("CompanyId", sql.Int, CompanyId || null)
+      .input("ProjectId", sql.Int, ProjectId || null)
+      .input("FinYearId", sql.Int, FinYearId || null)
+      .input("RequestDate", sql.Date, RequestDate || new Date())
+      .input("RequiredByDate", sql.Date, RequiredByDate || null)
+      .input("Priority", sql.NVarChar(20), Priority)
+      .input("Reason", sql.NVarChar(sql.MAX), Reason)
+      .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
+      .input("Status", sql.NVarChar(20), Status || "Draft")
+      .input("UpdatedBy", sql.NVarChar(200), user).query(`
         UPDATE dbo.MaterialRequests
         SET CompanyId=@CompanyId, ProjectId=@ProjectId, FinYearId=@FinYearId,
             RequestDate=@RequestDate, RequiredByDate=@RequiredByDate,
@@ -386,18 +405,20 @@ router.put("/:id", authenticateToken, async (req, res) => {
       `);
 
     // Replace items
-    await pool.request().input("id", sql.Int, id)
+    await pool
+      .request()
+      .input("id", sql.Int, id)
       .query("DELETE FROM dbo.MaterialRequestItems WHERE MRId=@id");
 
     for (const item of items) {
-      await pool.request()
-        .input("MRId",     sql.Int,              id)
-        .input("ItemId",   sql.NVarChar(50),     String(item.ItemId))
-        .input("ItemName", sql.NVarChar(200),    item.ItemName  || null)
-        .input("UOMCode",  sql.NVarChar(20),     item.UOMCode   || null)
-        .input("Quantity", sql.Decimal(18, 4),   parseFloat(item.Quantity) || 0)
-        .input("Remarks",  sql.NVarChar(sql.MAX), item.Remarks  || null)
-        .query(`
+      await pool
+        .request()
+        .input("MRId", sql.Int, id)
+        .input("ItemId", sql.NVarChar(50), String(item.ItemId))
+        .input("ItemName", sql.NVarChar(200), item.ItemName || null)
+        .input("UOMCode", sql.NVarChar(20), item.UOMCode || null)
+        .input("Quantity", sql.Decimal(18, 4), parseFloat(item.Quantity) || 0)
+        .input("Remarks", sql.NVarChar(sql.MAX), item.Remarks || null).query(`
           INSERT INTO dbo.MaterialRequestItems (MRId, ItemId, ItemName, UOMCode, Quantity, Remarks)
           VALUES (@MRId, @ItemId, @ItemName, @UOMCode, @Quantity, @Remarks)
         `);
@@ -418,13 +439,20 @@ router.delete("/:id", authenticateToken, async (req, res) => {
     if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
 
     // Check status — only Draft can be deleted
-    const check = await pool.request().input("id", sql.Int, id)
+    const check = await pool
+      .request()
+      .input("id", sql.Int, id)
       .query("SELECT Status FROM dbo.MaterialRequests WHERE MRId=@id");
-    if (!check.recordset.length) return res.status(404).json({ error: "Not found" });
+    if (!check.recordset.length)
+      return res.status(404).json({ error: "Not found" });
     if (check.recordset[0].Status !== "Draft")
-      return res.status(400).json({ error: "Only Draft requests can be deleted" });
+      return res
+        .status(400)
+        .json({ error: "Only Draft requests can be deleted" });
 
-    await pool.request().input("id", sql.Int, id)
+    await pool
+      .request()
+      .input("id", sql.Int, id)
       .query("DELETE FROM dbo.MaterialRequests WHERE MRId=@id");
 
     await bumpCacheVersion("material-requests");
@@ -441,9 +469,13 @@ router.put("/:id/submit", authenticateToken, async (req, res) => {
   try {
     const pool = getPool();
     const id = parseInt(req.params.id);
-    await pool.request()
-      .input("id", sql.Int, id).input("user", sql.NVarChar(200), user)
-      .query(`UPDATE dbo.MaterialRequests SET Status='Pending', UpdatedBy=@user, UpdatedAt=GETDATE() WHERE MRId=@id AND Status='Draft'`);
+    await pool
+      .request()
+      .input("id", sql.Int, id)
+      .input("user", sql.NVarChar(200), user)
+      .query(
+        `UPDATE dbo.MaterialRequests SET Status='Pending', UpdatedBy=@user, UpdatedAt=GETDATE() WHERE MRId=@id AND Status='Draft'`,
+      );
     await bumpCacheVersion("material-requests");
     res.json({ message: "Submitted for approval" });
   } catch (err) {
