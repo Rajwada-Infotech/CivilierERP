@@ -182,9 +182,15 @@ export function subscribeToActivityStream(
   // connected, so calling it here is safe even when called multiple times.
   const socket = connectSocket();
 
+  if (!socket) {
+    // No JWT/token yet; skip subscription safely.
+    return () => {};
+  }
+
   socket.on("activity:new", onEvent);
   if (onConnect) socket.on("connect", onConnect);
   if (onDisconnect) socket.on("disconnect", onDisconnect);
+
 
   // Capture the exact socket instance so the cleanup always targets the right
   // object — even if connectSocket() later returns a different instance after
