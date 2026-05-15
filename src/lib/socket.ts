@@ -28,14 +28,15 @@ function resolveSocketOrigin(): string {
 let socket: Socket | null = null;
 
 /** Connect (or reconnect) with the current JWT token. */
-export function connectSocket(): Socket {
+export function connectSocket(): Socket | null {
   if (socket?.connected) return socket;
 
   const token = localStorage.getItem("token");
   if (!token) {
     // No JWT => don't start socket connection (prevents connect_error spam)
-    return socket as Socket;
+    return null;
   }
+
 
   const origin = resolveSocketOrigin();
 
