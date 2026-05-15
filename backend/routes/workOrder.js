@@ -543,15 +543,12 @@ router.delete("/:id", async (req, res) => {
 //  ACTIVITIES
 // =============================================
 
-router.get(
-  "/:id/activities",
-  cache("work-orders", 300, { shared: true }),
-  async (req, res) => {
-    try {
-      const pool = getPool();
-      const result = await pool
-        .request()
-        .input("WorkOrderHeaderId", sql.Int, req.params.id).query(`
+router.get("/:id/activities", async (req, res) => {
+  try {
+    const pool = getPool();
+    const result = await pool
+      .request()
+      .input("WorkOrderHeaderId", sql.Int, req.params.id).query(`
         SELECT a.*, ag.activity_name AS ActivityGroupName,
           act.activity_name AS ActivityName, uom.UOMName,
           COUNT(m.Id) AS MaterialCount,
@@ -568,13 +565,12 @@ router.get(
           ag.activity_name, act.activity_name, uom.UOMName
         ORDER BY a.Id
       `);
-      res.json(result.recordset);
-    } catch (err) {
-      console.error("[GET /:id/activities]", err.message);
-      res.status(500).json({ error: err.message });
-    }
-  },
-);
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("[GET /:id/activities]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 router.post("/:id/activities", async (req, res) => {
   const {
