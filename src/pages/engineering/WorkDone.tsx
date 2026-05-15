@@ -143,6 +143,7 @@ interface FormState {
   docNo: string;
   docDate: string;
   supplierId: string;
+  workOrderId: string;
   remarks: string;
   PeriodFrom: string;
   PeriodTo: string;
@@ -162,6 +163,7 @@ const EMPTY_FORM = (activeFinYear?: string): FormState => ({
   docNo: "",
   docDate: new Date().toISOString().slice(0, 10),
   supplierId: "",
+  workOrderId: "",
   remarks: "",
   PeriodFrom: "",
   PeriodTo: "",
@@ -180,6 +182,7 @@ function WorkDoneForm({
   companies,
   projects,
   suppliers,
+  workOrders,
   finYearOptions,
   loadingDropdowns,
   activeFinYear,
@@ -189,6 +192,7 @@ function WorkDoneForm({
   companies: DropdownOption[];
   projects: DropdownOption[];
   suppliers: DropdownOption[];
+  workOrders: DropdownOption[];
   finYearOptions: { id: string; year: string }[];
   loadingDropdowns: boolean;
   activeFinYear: string;
@@ -208,6 +212,7 @@ function WorkDoneForm({
             record.DocDate?.slice(0, 10) ??
             new Date().toISOString().slice(0, 10),
           supplierId: String(record.SupplierId ?? ""),
+          workOrderId: String(record.WorkOrderID ?? ""),
           remarks: record.Remarks ?? "",
           PeriodFrom: record.PeriodFrom?.slice(0, 10) ?? "",
           PeriodTo: record.PeriodTo?.slice(0, 10) ?? "",
@@ -254,6 +259,7 @@ function WorkDoneForm({
         DocNo: form.docNo,
         DocDate: form.docDate,
         SupplierId: parseInt(form.supplierId) || null,
+        WorkOrderID: parseInt(form.workOrderId) || null,
         Remarks: form.remarks,
         PeriodFrom: form.PeriodFrom,
         PeriodTo: form.PeriodTo,
@@ -458,7 +464,33 @@ function WorkDoneForm({
             </div>
           </div>
 
-          {/* Row 3: Remarks full width */}
+          {/* Row 3: Work Order */}
+          <div>
+            <FieldLabel>
+              <span className="flex items-center gap-1.5">
+                <Hammer size={11} />
+                Work Order
+              </span>
+            </FieldLabel>
+            {loadingDropdowns ? (
+              <SelectSkeleton />
+            ) : (
+              <select
+                value={form.workOrderId}
+                onChange={(e) => setField("workOrderId", e.target.value)}
+                className={selectCls}
+              >
+                <option value="">Select work order…</option>
+                {workOrders.map((wo) => (
+                  <option key={wo.id} value={String(wo.id)}>
+                    {wo.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+
+          {/* Row 4: Remarks full width */}
           <div>
             <FieldLabel>Remarks</FieldLabel>
             <textarea
@@ -661,8 +693,27 @@ export default function WorkDone() {
     staleTime: 5 * 60 * 1000,
   });
 
+  const { data: workOrders = [], isLoading: loadingWorkOrders } = useQuery<
+    DropdownOption[]
+  >({
+    queryKey: ["work-orders-wd-list"],
+    queryFn: () =>
+      fetchWithAuth("/api/work-orders?limit=500").then(async (r) => {
+        const json = await r.json();
+        const rows = Array.isArray(json) ? json : (json.data ?? []);
+        return rows.map((w: any) => ({
+          id: w.Id,
+          name: `${w.DocNo || w.DocumentNumber} — ${w.ContractorName || "No contractor"}`,
+        }));
+      }),
+    staleTime: 5 * 60 * 1000,
+  });
+
   const loadingDropdowns =
-    loadingCompanies || loadingProjects || loadingSuppliers;
+    loadingCompanies ||
+    loadingProjects ||
+    loadingSuppliers ||
+    loadingWorkOrders;
 
   // ── List query ───────────────────────────────────────────────────────────────
   const {
@@ -932,6 +983,7 @@ export default function WorkDone() {
           companies={companies}
           projects={projects}
           suppliers={suppliers}
+          workOrders={workOrders}
           finYearOptions={finYearOptions}
           loadingDropdowns={loadingDropdowns}
           activeFinYear={activeFinYear}

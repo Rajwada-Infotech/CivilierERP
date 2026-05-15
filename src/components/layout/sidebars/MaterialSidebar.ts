@@ -1,4 +1,12 @@
-import { BarChart3, Receipt, FileEdit } from "lucide-react";
+import {
+  BarChart3,
+  Receipt,
+  ClipboardList,
+  Truck,
+  PackageOpen,
+  BookOpen,
+  FileEdit,
+} from "lucide-react";
 import { NavItem } from "./SidebarPrimitives";
 
 export const materialNavItems: NavItem[] = [
@@ -7,9 +15,11 @@ export const materialNavItems: NavItem[] = [
     label: "Transaction",
     icon: Receipt,
     children: [
+      { label: "Material Request", path: "/material/material-request" },
       { label: "Purchase Order", path: "/material/purchase-order" },
-      { label: "GRN",            path: "/material/grn" },
-      { label: "Stock Ledger",   path: "/material/stock-ledger" },
+      { label: "GRN", path: "/material/grn" },
+      { label: "Issues", path: "/material/issues" },
+      { label: "Expense Booking", path: "/material/expense-booking" },
     ],
   },
   { label: "Amendment Menu", icon: FileEdit, path: "/material/amendment-menu" },
