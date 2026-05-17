@@ -1342,9 +1342,9 @@ export default function MaterialRequest() {
         )}
       </div>
 
-      {viewMode === "list" && <ListView />}
-      {viewMode === "form" && <FormView />}
-      {viewMode === "view" && <ViewMode />}
+      {viewMode === "list" && ListView()}
+      {viewMode === "form" && FormView()}
+      {viewMode === "view" && ViewMode()}
     </>
   );
 }
