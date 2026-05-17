@@ -466,7 +466,7 @@ export default function Stock() {
   const { data: companiesData } = useQuery({
     queryKey: ["enterprises-companies"],
     queryFn: () =>
-      fetchWithAuth("/api/enterprises?business_type=C")
+      fetchWithAuth("/api/enterprises/options?business_type=C")
         .then((r) => r.json())
         .catch(() => []),
     staleTime: 300_000,
@@ -477,7 +477,7 @@ export default function Stock() {
   const { data: projectsData } = useQuery({
     queryKey: ["enterprises-projects"],
     queryFn: () =>
-      fetchWithAuth("/api/enterprises?business_type=P")
+      fetchWithAuth("/api/enterprises/options?business_type=P")
         .then((r) => r.json())
         .catch(() => []),
     staleTime: 300_000,
@@ -649,7 +649,7 @@ export default function Stock() {
                   }}
                   options={companies.map((c: any) => ({
                     value: c.id,
-                    label: c.name,
+                    label: c.label,
                   }))}
                   placeholder="All Companies"
                   icon={Building2}
@@ -663,7 +663,7 @@ export default function Stock() {
                   }}
                   options={projects.map((p: any) => ({
                     value: p.id,
-                    label: p.name,
+                    label: p.label,
                   }))}
                   placeholder="All Projects"
                   icon={FolderKanban}
