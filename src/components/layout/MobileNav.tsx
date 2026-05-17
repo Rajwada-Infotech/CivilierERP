@@ -215,17 +215,17 @@ export const MobileNav: React.FC = () => {
                 path: "/material/expense-booking",
                 icon: Receipt,
               },
-              {
-                label: "Amendment Menu",
-                path: "/material/amendment-menu",
-                icon: CheckSquare,
-              },
             ],
           },
           {
             label: "Debit Note",
             icon: FileWarning,
-            path: "/masters/debit-note",
+            path: "/material/debit-note",
+          },
+          {
+            label: "Amendment Menu",
+            path: "/material/amendment-menu",
+            icon: CheckSquare,
           },
         ];
 

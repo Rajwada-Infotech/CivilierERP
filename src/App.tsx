@@ -597,6 +597,14 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/material/debit-note"
+        element={
+          <ProtectedRoute>
+            <DebitNoteMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/material/boq"
         element={
           <ProtectedRoute>
