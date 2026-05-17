@@ -337,6 +337,37 @@ router.get(
 // ─── GET /:id ─────────────────────────────────────────────────────────────────
 router.get("/chain-status", handleChainStatus);
 
+router.get("/:id/can-delete", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id) || id <= 0)
+    return res.status(400).json({ error: "Invalid id" });
+
+  try {
+    const pool = getPool();
+    const refCheck = await pool.request().input("Eid", sql.Int, id).query(`
+      SELECT COUNT(*) AS cnt
+      FROM dbo.DebitNote
+      WHERE bill_id = @Eid
+    `);
+
+    const linkedDebitNoteCount = Number(refCheck.recordset[0]?.cnt) || 0;
+    if (linkedDebitNoteCount > 0) {
+      const reason =
+        "This booking cannot be deleted because it has linked Debit Notes. Please delete or unlink them first.";
+      return res.json({
+        deletable: false,
+        reason,
+        linkedDebitNoteCount,
+      });
+    }
+
+    res.json({ deletable: true });
+  } catch (err) {
+    console.error("Can-delete check error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get("/:id", async (req, res) => {
   const id = parseInt(req.params.id, 10);
   if (!Number.isFinite(id) || id <= 0)
@@ -1320,6 +1351,26 @@ router.delete("/:id", async (req, res) => {
 
   try {
     const pool = getPool();
+
+    const refCheck = await pool
+      .request()
+      .input("Eid", sql.Int, numericId).query(`
+        SELECT COUNT(*) AS cnt
+        FROM dbo.DebitNote
+        WHERE bill_id = @Eid
+      `);
+
+    const linkedDebitNoteCount = Number(refCheck.recordset[0]?.cnt) || 0;
+    if (linkedDebitNoteCount > 0) {
+      const message =
+        "This booking cannot be deleted because it has linked Debit Notes. Please delete or unlink them first.";
+      return res.status(409).json({
+        error: message,
+        message,
+        linkedDebitNoteCount,
+      });
+    }
+
     await pool
       .request()
       .input("Eid", sql.Int, numericId)
@@ -1331,6 +1382,11 @@ router.delete("/:id", async (req, res) => {
     res.json({ message: "Expense deleted successfully" });
   } catch (err) {
     console.error("Delete error:", err.message);
+    if (err.number === 547 && String(err.message).includes("FK_DN_Bill")) {
+      const message =
+        "This booking cannot be deleted because it has linked Debit Notes. Please delete or unlink them first.";
+      return res.status(409).json({ error: message, message });
+    }
     res.status(500).json({ error: err.message });
   }
 });
