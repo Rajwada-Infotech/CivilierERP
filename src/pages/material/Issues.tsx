@@ -1515,9 +1515,9 @@ export default function Issues() {
         )}
       </div>
 
-      {viewMode === "list" && <IssueList />}
-      {viewMode === "form" && <IssueForm />}
-      {viewMode === "view" && <IssueView />}
+      {viewMode === "list" && IssueList()}
+      {viewMode === "form" && IssueForm()}
+      {viewMode === "view" && IssueView()}
     </>
   );
 }
