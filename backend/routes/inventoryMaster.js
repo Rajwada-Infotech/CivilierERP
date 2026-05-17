@@ -21,28 +21,30 @@ async function hasColumn(pool, tableName, columnName) {
 /**
  * GET /api/inventory-master
  *
- * Returns inventory master records for a given date (defaults to today).
- * Each row has:
- *  - AcquiringDate   : the date filter
- *  - ItemID / ItemName / ItemGroupName  : from Item_Master_Group
- *  - UOMID / UOMName / UOMCode / UOMSymbol : from UOMMaster (linked via M_UOM on item)
- *  - OpeningStock    : net qty in StockLedger BEFORE the given date
- *  - StockIn         : total IN qty on that date
- *  - StockOut        : total OUT qty on that date
- *  - ClosingStock    : OpeningStock + StockIn - StockOut  (closing for the day)
+ * Returns inventory master records for a given date and godown.
  *
  * Query params:
- *  ?date=YYYY-MM-DD   (default: today)
+ *  ?date=YYYY-MM-DD      (default: today)
+ *  ?godownId=<int>       (default: Main Godown)
  */
 router.get("/", cache("inventory-master", 60), async (req, res) => {
   try {
     const pool = getPool();
 
     // ── Detect optional columns ──────────────────────────────────────────────
-    const hasCreatedDate = await hasColumn(pool, "dbo.StockLedger", "CreatedDate");
-    const hasEntryDate   = await hasColumn(pool, "dbo.StockLedger", "EntryDate");
-    const hasUomCol      = await hasColumn(pool, "dbo.StockLedger", "UOM");
-    const hasUomOnItem   = await hasColumn(pool, "dbo.Item_Master_Group", "M_UOM");
+    const hasCreatedDate = await hasColumn(
+      pool,
+      "dbo.StockLedger",
+      "CreatedDate",
+    );
+    const hasEntryDate = await hasColumn(pool, "dbo.StockLedger", "EntryDate");
+    const hasUomCol = await hasColumn(pool, "dbo.StockLedger", "UOM");
+    const hasUomOnItem = await hasColumn(
+      pool,
+      "dbo.Item_Master_Group",
+      "M_UOM",
+    );
+    const hasGodownCol = await hasColumn(pool, "dbo.StockLedger", "GodownID");
 
     const ledgerDateExpr =
       hasCreatedDate && hasEntryDate
@@ -53,16 +55,31 @@ router.get("/", cache("inventory-master", 60), async (req, res) => {
             ? "sl.EntryDate"
             : "NULL";
 
-    // ── Parse & validate date param ──────────────────────────────────────────
+    // ── Parse & validate params ───────────────────────────────────────────────
     const rawDate = req.query.date;
     const targetDate =
       rawDate && /^\d{4}-\d{2}-\d{2}$/.test(rawDate)
         ? rawDate
         : new Date().toISOString().slice(0, 10);
 
+    const rawGodownId = req.query.godownId;
+    let godownId = rawGodownId ? parseInt(rawGodownId, 10) : null;
+
+    // If no godownId supplied, resolve Main Godown ID from DB
+    if (!godownId) {
+      try {
+        const mainRes = await pool
+          .request()
+          .query(
+            "SELECT TOP 1 GodownID FROM dbo.Godowns WHERE IsMain=1 AND IsDeleted=0",
+          );
+        godownId = mainRes.recordset[0]?.GodownID || null;
+      } catch {
+        godownId = null;
+      }
+    }
+
     // ── UOM join strategy ────────────────────────────────────────────────────
-    //   Prefer item-level UOM (M_UOM on Item_Master_Group → join UOMMaster on UOMCode).
-    //   Fall back to StockLedger.UOM column if item doesn't carry UOM.
     const uomJoinClause = hasUomOnItem
       ? "LEFT JOIN dbo.UOMMaster uom ON uom.UOMCode = img.M_UOM"
       : hasUomCol
@@ -80,12 +97,12 @@ router.get("/", cache("inventory-master", 60), async (req, res) => {
       uom.Symbol    AS UOMSymbol
     `;
 
-    // ── Main query ───────────────────────────────────────────────────────────
-    //  We aggregate per item:
-    //    OpeningStock = SUM of all movements BEFORE targetDate
-    //    StockIn      = SUM of IN movements ON targetDate
-    //    StockOut     = SUM of OUT movements ON targetDate
-    //    ClosingStock = OpeningStock + StockIn - StockOut
+    // ── Godown filter clause for StockLedger ─────────────────────────────────
+    // If GodownID column exists, filter by it. Otherwise show all (legacy).
+    const godownFilter =
+      hasGodownCol && godownId
+        ? `AND (sl.GodownID = ${godownId} OR sl.GodownID IS NULL)`
+        : "";
 
     const request = pool.request();
     request.input("targetDate", sql.Date, targetDate);
@@ -124,36 +141,44 @@ router.get("/", cache("inventory-master", 60), async (req, res) => {
       ${uomJoinClause}
       LEFT JOIN dbo.StockLedger sl
         ON TRY_CONVERT(uniqueidentifier, CONVERT(NVARCHAR(50), sl.ItemID)) = img.M_Id
-      WHERE img.Parent_Id IS NOT NULL        -- only leaf items, not groups
+        ${godownFilter}
+      WHERE img.Parent_Id IS NOT NULL
       GROUP BY
         img.M_Id, img.M_Name, img.M_Group, grp.M_Name,
         uom.Id, uom.UOMName, uom.UOMCode, uom.Symbol
       ORDER BY ItemGroupName, ItemName
     `);
 
-    // ── Compute ClosingStock in JS (simpler than nested SQL) ─────────────────
     const rows = result.recordset.map((r) => ({
       ...r,
       OpeningStock: Number(r.OpeningStock || 0),
-      StockIn:      Number(r.StockIn      || 0),
-      StockOut:     Number(r.StockOut     || 0),
-      ClosingStock: Number(r.OpeningStock || 0) + Number(r.StockIn || 0) - Number(r.StockOut || 0),
+      StockIn: Number(r.StockIn || 0),
+      StockOut: Number(r.StockOut || 0),
+      ClosingStock:
+        Number(r.OpeningStock || 0) +
+        Number(r.StockIn || 0) -
+        Number(r.StockOut || 0),
     }));
 
     res.json({
       date: targetDate,
+      godownId: godownId,
       data: rows,
       total: rows.length,
     });
   } catch (err) {
     console.error("[inventory-master] GET error:", err.message);
-    res.status(500).json({ error: "Failed to fetch inventory master", message: err.message });
+    res
+      .status(500)
+      .json({
+        error: "Failed to fetch inventory master",
+        message: err.message,
+      });
   }
 });
 
 /**
  * POST /api/inventory-master/cache-bust
- * Clears the cached inventory master data.
  */
 router.post("/cache-bust", async (req, res) => {
   try {
