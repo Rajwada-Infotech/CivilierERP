@@ -11,6 +11,7 @@ import {
   Upload,
   X,
   Eye,
+  Printer,
 } from "lucide-react";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
@@ -22,6 +23,7 @@ import {
 } from "@/api/enterpriseApi";
 import { toast } from "sonner";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { printMasterPreview } from "@/utils/masterPreviewPrint";
 
 const ENTITY_TYPES = ["Enterprise", "Company", "Business Unit"];
 const GST_TYPES = [
@@ -111,14 +113,14 @@ function EnterpriseViewModal({
   onClose: () => void;
 }) {
   const Row = ({ label, value }: { label: string; value?: string | null }) =>
-    value ? (
-      <div className="flex flex-col gap-0.5">
-        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-          {label}
-        </span>
-        <span className="text-sm text-foreground break-words">{value}</span>
-      </div>
-    ) : null;
+    (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+        {label}
+      </span>
+      <span className="text-sm text-foreground break-words">{value || "—"}</span>
+    </div>
+  );
 
   const Section = ({ title }: { title: string }) => (
     <div className="col-span-full pt-2">
@@ -127,6 +129,71 @@ function EnterpriseViewModal({
       </p>
     </div>
   );
+
+  const printPreview = () =>
+    printMasterPreview({
+      title: enterprise.name || "Enterprise",
+      subtitle: "Enterprise Master Preview",
+      code: enterprise.short_name,
+      status: enterprise.status || (enterprise.discontinue ? "Inactive" : null),
+      logo: enterprise.logo,
+      sections: [
+        {
+          title: "General",
+          fields: [
+            { label: "Name", value: enterprise.name },
+            { label: "Short Name", value: enterprise.short_name },
+            { label: "Entity Type", value: enterprise.entity_type },
+            { label: "Description", value: enterprise.description },
+            { label: "Start Date", value: enterprise.start_date?.slice(0, 10) },
+            { label: "Start Fin Year", value: enterprise.start_fin_year },
+            { label: "Status", value: enterprise.status },
+            { label: "Discontinued", value: !!enterprise.discontinue },
+          ],
+        },
+        {
+          title: "Address",
+          fields: [
+            { label: "Address Line 1", value: enterprise.address },
+            { label: "Address Line 2", value: enterprise.address_line2 },
+            { label: "City", value: enterprise.city },
+            { label: "State", value: enterprise.state },
+            { label: "Country", value: enterprise.country },
+            { label: "Pincode", value: enterprise.pincode },
+            { label: "Phone", value: enterprise.phone_number },
+            { label: "Email", value: enterprise.email },
+            { label: "Website", value: enterprise.website },
+            { label: "Latitude", value: enterprise.latitude },
+            { label: "Longitude", value: enterprise.longitude },
+          ],
+        },
+        {
+          title: "Legal / Compliance",
+          fields: [
+            { label: "GST Type", value: enterprise.gst_type },
+            {
+              label: "GST Issue Date",
+              value: enterprise.gst_issue_date?.slice(0, 10),
+            },
+            { label: "TAN", value: enterprise.tan },
+            { label: "PAN", value: enterprise.pan },
+            { label: "CIN", value: enterprise.cin },
+            { label: "CR Code", value: enterprise.cr_code },
+            { label: "RERA No.", value: enterprise.rera_no },
+            { label: "RERA Date", value: enterprise.rera_date?.slice(0, 10) },
+            { label: "Trade License", value: enterprise.trade_license },
+            {
+              label: "Date of Entry",
+              value: enterprise.date_of_entry?.slice(0, 10),
+            },
+            {
+              label: "Date of Establishment",
+              value: enterprise.date_of_establishment?.slice(0, 10),
+            },
+          ],
+        },
+      ],
+    });
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
@@ -159,12 +226,21 @@ function EnterpriseViewModal({
               </div>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-          >
-            <X size={16} />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={printPreview}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors"
+              title="Print"
+            >
+              <Printer size={13} /> Print
+            </button>
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            >
+              <X size={16} />
+            </button>
+          </div>
         </div>
 
         {/* Body */}

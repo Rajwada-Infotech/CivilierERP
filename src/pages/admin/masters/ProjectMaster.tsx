@@ -17,6 +17,7 @@ import {
   MapPin,
   Shield,
   Users,
+  Printer,
 } from "lucide-react";
 import { toast } from "sonner";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
@@ -27,6 +28,7 @@ import {
   deleteProject,
 } from "@/api/projectMasterApi";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { printMasterPreview } from "@/utils/masterPreviewPrint";
 
 interface Project {
   Id?: number;
@@ -160,11 +162,11 @@ function rowToForm(row: any): Project {
     latitude: row.Latitude != null ? String(row.Latitude) : "",
     longitude: row.Longitude != null ? String(row.Longitude) : "",
     // compliance — display-only when editing; refetched on company change
-    gst: "",
-    gstDate: "",
-    pan: "",
-    tan: "",
-    tradeLicenseNo: "",
+    gst: row.CompanyGST ?? "",
+    gstDate: row.CompanyGSTDate ? row.CompanyGSTDate.slice(0, 10) : "",
+    pan: row.CompanyPAN ?? "",
+    tan: row.CompanyTAN ?? "",
+    tradeLicenseNo: row.CompanyTradeLicenseNo ?? "",
     jvEnabled: !!row.JvEnabled,
     jvCompanyName: row.JvCompanyName ?? "",
     teamSize: row.TeamSize != null ? String(row.TeamSize) : "",
@@ -196,15 +198,16 @@ function ProjectViewModal({
     Cancelled: "bg-muted text-muted-foreground",
   };
 
-  const Row = ({ label, value }: { label: string; value?: string | null }) =>
-    value ? (
-      <div className="flex flex-col gap-0.5">
-        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-          {label}
-        </span>
-        <span className="text-sm text-foreground break-words">{value}</span>
-      </div>
-    ) : null;
+  const Row = ({ label, value }: { label: string; value?: string | null }) => (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+        {label}
+      </span>
+      <span className="text-sm text-foreground break-words">
+        {value || "—"}
+      </span>
+    </div>
+  );
 
   const Section = ({
     title,
@@ -230,17 +233,81 @@ function ProjectViewModal({
     .filter(Boolean)
     .join(", ");
 
+  const projectLogo =
+    typeof project.projectImage === "string" ? project.projectImage : null;
+
+  const printPreview = () =>
+    printMasterPreview({
+      title: project.name || "Project",
+      subtitle: "Project Master Preview",
+      code: project.code,
+      status: project.status || (project.isActive ? "Active" : "Inactive"),
+      logo: projectLogo,
+      sections: [
+        {
+          title: "General",
+          fields: [
+            { label: "Project Code", value: project.code },
+            { label: "Project Name", value: project.name },
+            { label: "Short Name", value: project.shortName },
+            { label: "Type", value: project.type },
+            { label: "Enterprise", value: project.enterpriseName },
+            { label: "Company", value: project.companyName },
+            { label: "Status", value: project.status },
+            { label: "Priority", value: project.priority },
+            { label: "Active", value: project.isActive },
+            { label: "Description", value: project.description },
+            { label: "Remarks", value: project.remarks },
+          ],
+        },
+        {
+          title: "Location & Address",
+          fields: [
+            { label: "Address Line 1", value: project.addressLine1 },
+            { label: "Address Line 2", value: project.addressLine2 },
+            { label: "Address Line 3", value: project.addressLine3 },
+            { label: "ZIP Code", value: project.zipCode },
+            { label: "Full Address", value: fullAddress },
+            { label: "Latitude", value: project.latitude },
+            { label: "Longitude", value: project.longitude },
+          ],
+        },
+        {
+          title: "Compliance",
+          fields: [
+            { label: "GST Number", value: project.gst },
+            { label: "GST Registration Date", value: project.gstDate },
+            { label: "PAN Number", value: project.pan },
+            { label: "TAN Number", value: project.tan },
+            { label: "Trade License Number", value: project.tradeLicenseNo },
+          ],
+        },
+        {
+          title: "Timeline & Financial",
+          fields: [
+            { label: "Start Date", value: project.startDate },
+            { label: "End Date", value: project.endDate },
+            { label: "Team Size", value: project.teamSize },
+            { label: "Currency", value: project.currency },
+          ],
+        },
+        {
+          title: "Joint Venture",
+          fields: [
+            { label: "JV Enabled", value: project.jvEnabled },
+            { label: "JV Partner / Company", value: project.jvCompanyName },
+          ],
+        },
+      ],
+    });
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
       <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
         <div className="p-5 border-b border-border flex items-center justify-between bg-muted/30 flex-shrink-0">
           <div className="flex items-center gap-3">
             <ProjectAvatar
-              imageUrl={
-                typeof project.projectImage === "string"
-                  ? project.projectImage
-                  : null
-              }
+              imageUrl={projectLogo}
               name={project.name || "?"}
               size="md"
             />
@@ -274,12 +341,21 @@ function ProjectViewModal({
               </div>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-          >
-            <X size={16} />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={printPreview}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors"
+              title="Print"
+            >
+              <Printer size={13} /> Print
+            </button>
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            >
+              <X size={16} />
+            </button>
+          </div>
         </div>
 
         <div className="overflow-y-auto p-5 flex-1">
@@ -306,6 +382,17 @@ function ProjectViewModal({
 
             <Section title="Financial" />
             <Row label="Currency" value={project.currency} />
+            <Row label="Priority" value={project.priority} />
+
+            <Section title="Compliance" icon={<Shield size={11} />} />
+            <Row label="GST Number" value={project.gst} />
+            <Row label="GST Registration Date" value={project.gstDate} />
+            <Row label="PAN Number" value={project.pan} />
+            <Row label="TAN Number" value={project.tan} />
+            <Row
+              label="Trade License Number"
+              value={project.tradeLicenseNo}
+            />
 
             {project.jvEnabled && (
               <>
