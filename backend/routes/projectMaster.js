@@ -43,6 +43,11 @@ router.get(
         -- company FK
         p.company_id            AS CompanyId,
         c.name                  AS CompanyName,
+        c.b_sub_identity_type   AS CompanyGST,
+        c.gst_issue_date        AS CompanyGSTDate,
+        c.pan                   AS CompanyPAN,
+        c.tan                   AS CompanyTAN,
+        c.trade_license         AS CompanyTradeLicenseNo,
         -- jv
         ISNULL(p.jv_enabled, 0) AS JvEnabled,
         p.jv_company_name       AS JvCompanyName,

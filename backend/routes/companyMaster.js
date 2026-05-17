@@ -6,6 +6,39 @@ const { bumpCacheVersion } = require("../redis");
 const { cache } = require("../middleware/cache");
 
 const adminOnly = allowRoles("admin", "super_admin", "dba");
+const GST_STATUSES = new Set(["Registered", "Unregistered"]);
+const GSTIN_REGEX =
+  /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
+
+function normalizeCompanyGst(f) {
+  const gstType = f.gstType || "Unregistered";
+  if (!GST_STATUSES.has(gstType)) {
+    return { error: "GST Status must be Registered or Unregistered" };
+  }
+
+  if (gstType === "Unregistered") {
+    return { gstType, gstNumber: null, gstDate: null };
+  }
+
+  const gstNumber = String(f.gstNumber || "")
+    .trim()
+    .toUpperCase();
+  const gstDate = f.gstDate || null;
+
+  if (!gstNumber) {
+    return { error: "GST Number is required for registered companies" };
+  }
+  if (!gstDate) {
+    return {
+      error: "GST Registration Date is required for registered companies",
+    };
+  }
+  if (!GSTIN_REGEX.test(gstNumber)) {
+    return { error: "Enter a valid GSTIN" };
+  }
+
+  return { gstType, gstNumber, gstDate };
+}
 
 // GET all — reads from enterprise where business_type = 'C'
 router.get(
@@ -27,7 +60,12 @@ router.get(
         cin                       AS CIN,
         pan                       AS PAN,
         tan                       AS TAN,
-        gst_type                  AS GSTType,
+        CASE
+          WHEN gst_type IN ('Registered', 'Unregistered') THEN gst_type
+          WHEN gst_type IS NOT NULL AND gst_type <> '' AND gst_type <> 'Unregistered' THEN 'Registered'
+          WHEN b_sub_identity_type IS NOT NULL OR gst_issue_date IS NOT NULL THEN 'Registered'
+          ELSE 'Unregistered'
+        END                       AS GSTType,
         b_sub_identity_type       AS GST,
         gst_issue_date            AS GSTDate,
         trade_license             AS TradeLicenseNo,
@@ -66,6 +104,9 @@ router.get(
 // POST — inserts into enterprise with business_type = 'C'
 router.post("/", adminOnly, async (req, res) => {
   const f = req.body;
+  const gst = normalizeCompanyGst(f);
+  if (gst.error) return res.status(400).json({ error: gst.error });
+
   try {
     const pool = getPool();
     await pool
@@ -81,9 +122,9 @@ router.post("/", adminOnly, async (req, res) => {
       .input("cin", sql.NVarChar(50), f.cinNumber || null)
       .input("pan", sql.NVarChar(20), f.panNumber || null)
       .input("tan", sql.NVarChar(15), f.tanNumber || null)
-      .input("gst_type", sql.NVarChar(50), f.gstType || null)
-      .input("b_sub_identity_type", sql.NVarChar(100), f.gstNumber || null)
-      .input("gst_issue_date", sql.Date, f.gstDate || null)
+      .input("gst_type", sql.NVarChar(50), gst.gstType)
+      .input("b_sub_identity_type", sql.NVarChar(100), gst.gstNumber)
+      .input("gst_issue_date", sql.Date, gst.gstDate)
       .input("trade_license", sql.NVarChar(100), f.tradeLicenseNo || null)
       .input("rera_date", sql.Date, f.tradeLicenseDate || null)
       .input("address", sql.NVarChar(sql.MAX), f.registeredAddress || null)
@@ -145,6 +186,9 @@ router.post("/", adminOnly, async (req, res) => {
 // PUT — updates enterprise row
 router.put("/:id", adminOnly, async (req, res) => {
   const f = req.body;
+  const gst = normalizeCompanyGst(f);
+  if (gst.error) return res.status(400).json({ error: gst.error });
+
   try {
     const pool = getPool();
     await pool
@@ -160,9 +204,9 @@ router.put("/:id", adminOnly, async (req, res) => {
       .input("cin", sql.NVarChar(50), f.cinNumber || null)
       .input("pan", sql.NVarChar(20), f.panNumber || null)
       .input("tan", sql.NVarChar(15), f.tanNumber || null)
-      .input("gst_type", sql.NVarChar(50), f.gstType || null)
-      .input("b_sub_identity_type", sql.NVarChar(100), f.gstNumber || null)
-      .input("gst_issue_date", sql.Date, f.gstDate || null)
+      .input("gst_type", sql.NVarChar(50), gst.gstType)
+      .input("b_sub_identity_type", sql.NVarChar(100), gst.gstNumber)
+      .input("gst_issue_date", sql.Date, gst.gstDate)
       .input("trade_license", sql.NVarChar(100), f.tradeLicenseNo || null)
       .input("rera_date", sql.Date, f.tradeLicenseDate || null)
       .input("address", sql.NVarChar(sql.MAX), f.registeredAddress || null)
