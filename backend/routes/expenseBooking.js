@@ -307,6 +307,31 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
   }
 });
 
+// ─── GET /source-ids — all booked (ESourceType, ESourceId) pairs ──────────────
+// Used by the frontend to filter already-booked documents from pickers (PO, GRN,
+// Work Done, etc.) regardless of pagination. Lightweight — returns only the two
+// columns needed to build the exclusion sets.
+router.get(
+  "/source-ids",
+  cache("expense-booking-source-ids", 60),
+  async (req, res) => {
+    try {
+      const pool = getPool();
+      const result = await pool.request().query(`
+        SELECT ESourceType, ESourceId, Eid
+        FROM dbo.ExpenseBooking
+        WHERE EIsDeleted = 0
+          AND ESourceType IS NOT NULL
+          AND ESourceId   IS NOT NULL
+      `);
+      res.json(result.recordset);
+    } catch (err) {
+      console.error("source-ids error:", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
+
 // ─── GET /:id ─────────────────────────────────────────────────────────────────
 router.get("/chain-status", handleChainStatus);
 
@@ -704,6 +729,7 @@ router.post("/", async (req, res) => {
 
     await bumpCacheVersion("expense-booking");
     await bumpCacheVersion("expense-booking-options");
+    await bumpCacheVersion("expense-booking-source-ids");
 
     res.status(201).json({
       message: "Expense booked successfully",
@@ -801,6 +827,7 @@ router.put("/:id/emi-schedule/:no/pay", async (req, res) => {
 
     await bumpCacheVersion("expense-booking");
     await bumpCacheVersion("expense-booking-options");
+    await bumpCacheVersion("expense-booking-source-ids");
     res.json({ message: "Installment marked as paid" });
   } catch (err) {
     console.error("EMI pay error:", err.message);
@@ -1034,6 +1061,7 @@ router.put("/:id/emi-toggle", async (req, res) => {
 
     await bumpCacheVersion("expense-booking");
     await bumpCacheVersion("expense-booking-options");
+    await bumpCacheVersion("expense-booking-source-ids");
 
     res.json({
       message: enabled ? "EMI re-enabled" : "EMI disabled",
@@ -1220,6 +1248,7 @@ router.put("/:id", async (req, res) => {
 
     await bumpCacheVersion("expense-booking");
     await bumpCacheVersion("expense-booking-options");
+    await bumpCacheVersion("expense-booking-source-ids");
     res.json({ message: "Expense updated successfully" });
   } catch (err) {
     console.error("Update error:", err.message);
@@ -1242,6 +1271,7 @@ router.delete("/:id", async (req, res) => {
 
     await bumpCacheVersion("expense-booking");
     await bumpCacheVersion("expense-booking-options");
+    await bumpCacheVersion("expense-booking-source-ids");
     res.json({ message: "Expense deleted successfully" });
   } catch (err) {
     console.error("Delete error:", err.message);
@@ -1264,6 +1294,7 @@ router.put("/:id/submit", async (req, res) => {
     );
     await bumpCacheVersion("expense-booking");
     await bumpCacheVersion("expense-booking-options");
+    await bumpCacheVersion("expense-booking-source-ids");
     res.json({ message: "Submitted for approval", ...result });
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -1284,6 +1315,7 @@ router.put("/:id/approve", async (req, res) => {
     );
     await bumpCacheVersion("expense-booking");
     await bumpCacheVersion("expense-booking-options");
+    await bumpCacheVersion("expense-booking-source-ids");
     res.json({ message: "Approved", ...result });
   } catch (err) {
     const status = err.message.includes("not authorized") ? 403 : 400;
@@ -1307,6 +1339,7 @@ router.put("/:id/reject", async (req, res) => {
     );
     await bumpCacheVersion("expense-booking");
     await bumpCacheVersion("expense-booking-options");
+    await bumpCacheVersion("expense-booking-source-ids");
     res.json({ message: "Rejected", ...result });
   } catch (err) {
     const status = err.message.includes("not authorized") ? 403 : 400;

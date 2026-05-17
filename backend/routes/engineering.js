@@ -668,7 +668,7 @@ router.get(
           ISNULL(SUM(a.LabourAmount), 0) AS LabourTotal,
           ISNULL(SUM(a.MaterialAmount), 0) AS MaterialTotal
         FROM dbo.WorkOrderHeader h
-        INNER JOIN dbo.WorkOrderActivities a ON a.WorkOrderHeaderId = h.Id
+        LEFT JOIN dbo.WorkOrderActivities a ON a.WorkOrderHeaderId = h.Id
         LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = h.ContractorId
         WHERE ISNULL(h.Status, 'Draft') = 'Approved'
         GROUP BY h.Id, h.DocNo, h.DocumentNumber, ah.LHeadName
@@ -693,9 +693,10 @@ router.get("/work-order-summary/:woId", async (req, res) => {
     if (!Number.isFinite(woId))
       return res.status(400).json({ error: "Invalid WO ID" });
 
-    const result = await pool
-      .request()
-      .input("WorkOrderHeaderId", sql.Int, woId).query(`
+    const req2 = pool.request().input("WorkOrderHeaderId", sql.Int, woId);
+
+    // Main WO header + activity totals
+    const woResult = await req2.query(`
         SELECT
           h.CompanyId,
           h.ProjectId,
@@ -713,7 +714,47 @@ router.get("/work-order-summary/:woId", async (req, res) => {
         GROUP BY h.CompanyId, h.ProjectId, h.SupplierId, h.ContractorId, h.TotalAmount
       `);
 
-    const row = result.recordset[0] ?? {
+    // Certified total from approved Work Done entries
+    const certResult = await pool
+      .request()
+      .input("WorkOrderHeaderId2", sql.Int, woId).query(`
+        SELECT ISNULL(SUM(CertifiedAmount), 0) AS TotalCertified
+        FROM dbo.WorkDone
+        WHERE WorkOrderID = @WorkOrderHeaderId2
+          AND ISNULL(Status, 'Draft') = 'Approved'
+      `);
+
+    // Booked total from Expense Bookings linked to this WO's Work Done entries
+    const bookedResult = await pool
+      .request()
+      .input("WorkOrderHeaderId3", sql.Int, woId).query(`
+        SELECT ISNULL(SUM(eb.ENetAmount), 0) AS TotalBooked
+        FROM dbo.ExpenseBooking eb
+        WHERE eb.ESourceType = 'WORK_DONE'
+          AND eb.EIsDeleted = 0
+          AND eb.ESourceId IN (
+            SELECT ID FROM dbo.WorkDone WHERE WorkOrderID = @WorkOrderHeaderId3
+          )
+      `);
+
+    // Paid total from Payments linked to those expense bookings
+    const paidResult = await pool
+      .request()
+      .input("WorkOrderHeaderId4", sql.Int, woId).query(`
+        SELECT ISNULL(SUM(p.PAmount), 0) AS TotalPaid
+        FROM dbo.NewPayment p
+        WHERE p.PExpenseRef IN (
+          SELECT eb.EDocNo
+          FROM dbo.ExpenseBooking eb
+          WHERE eb.ESourceType = 'WORK_DONE'
+            AND eb.EIsDeleted = 0
+            AND eb.ESourceId IN (
+              SELECT ID FROM dbo.WorkDone WHERE WorkOrderID = @WorkOrderHeaderId4
+            )
+        )
+      `);
+
+    const row = woResult.recordset[0] ?? {
       CompanyId: null,
       ProjectId: null,
       SupplierId: null,
@@ -725,7 +766,15 @@ router.get("/work-order-summary/:woId", async (req, res) => {
       MaterialAmount: 0,
       NetAmount: 0,
     };
-    res.json(row);
+
+    const totalCertified = parseFloat(
+      certResult.recordset[0]?.TotalCertified || 0,
+    );
+    const totalBooked = parseFloat(bookedResult.recordset[0]?.TotalBooked || 0);
+    const totalPaid = parseFloat(paidResult.recordset[0]?.TotalPaid || 0);
+    const balance = (row.ContractValue || 0) - totalPaid;
+
+    res.json({ ...row, totalCertified, totalBooked, totalPaid, balance });
   } catch (err) {
     console.error("[GET /engineering/work-order-summary/:woId]", err.message);
     res.status(500).json({ error: err.message });
