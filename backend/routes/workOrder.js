@@ -369,6 +369,7 @@ router.post("/", async (req, res) => {
     DocNo,
     finYear,
     GST,
+    BoqID,
   } = req.body;
   const gstJson = GST
     ? typeof GST === "string"
@@ -412,14 +413,15 @@ router.post("/", async (req, res) => {
       .input("DocNo", sql.NVarChar(100), finalDocNo || null)
       .input("CreatedBy", sql.NVarChar(100), req.user?.name || null)
       .input("CreatedAt", sql.DateTime, new Date())
-      .input("GST", sql.NVarChar(sql.MAX), gstJson).query(`
+      .input("GST", sql.NVarChar(sql.MAX), gstJson)
+      .input("BoqID", sql.Int, BoqID ? parseInt(BoqID, 10) : null).query(`
         INSERT INTO dbo.WorkOrderHeader
           (CompanyId, ProjectId, DocumentNumber, DocumentDate, ContractorId, SupplierId,
-           TotalAmount, Remarks, TermsAndConditions, DocTypeId, DocNo, CreatedBy, CreatedAt, GST)
+           TotalAmount, Remarks, TermsAndConditions, DocTypeId, DocNo, CreatedBy, CreatedAt, GST, BoqID)
         OUTPUT INSERTED.Id
         VALUES
           (@CompanyId, @ProjectId, @DocumentNumber, @DocumentDate, @ContractorId, @SupplierId,
-           @TotalAmount, @Remarks, @TermsAndConditions, @DocTypeId, @DocNo, @CreatedBy, @CreatedAt, @GST)
+           @TotalAmount, @Remarks, @TermsAndConditions, @DocTypeId, @DocNo, @CreatedBy, @CreatedAt, @GST, @BoqID)
       `);
     const newId = result.recordset[0].Id;
 
@@ -466,6 +468,7 @@ router.put("/:id", async (req, res) => {
     DocTypeId,
     DocNo,
     GST,
+    BoqID,
   } = req.body;
   const gstJson = GST
     ? typeof GST === "string"
@@ -494,14 +497,15 @@ router.put("/:id", async (req, res) => {
       .input("DocNo", sql.NVarChar(100), DocNo || null)
       .input("UpdatedBy", sql.NVarChar(100), req.user?.name || null)
       .input("UpdatedAt", sql.DateTime, new Date())
-      .input("GST", sql.NVarChar(sql.MAX), gstJson).query(`
+      .input("GST", sql.NVarChar(sql.MAX), gstJson)
+      .input("BoqID", sql.Int, BoqID ? parseInt(BoqID, 10) : null).query(`
         UPDATE dbo.WorkOrderHeader SET
           CompanyId=@CompanyId, ProjectId=@ProjectId,
           DocumentNumber=@DocumentNumber, DocumentDate=@DocumentDate,
           ContractorId=@ContractorId, SupplierId=@SupplierId, TotalAmount=@TotalAmount,
           Remarks=@Remarks, TermsAndConditions=@TermsAndConditions,
           DocTypeId=@DocTypeId, DocNo=@DocNo,
-          UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt, GST=@GST
+          UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt, GST=@GST, BoqID=@BoqID
         WHERE Id=@Id
       `);
     await bumpCacheVersion("work-orders");
@@ -912,14 +916,15 @@ router.post("/:id/save-full", async (req, res) => {
             ? header.GST
             : JSON.stringify(header.GST)
           : null,
-      ).query(`
+      )
+      .input("BoqID", sql.Int, header.BoqID ? parseInt(header.BoqID, 10) : null).query(`
         UPDATE dbo.WorkOrderHeader SET
           CompanyId=@CompanyId, ProjectId=@ProjectId,
           DocumentNumber=@DocumentNumber, DocumentDate=@DocumentDate,
           ContractorId=@ContractorId, SupplierId=@SupplierId, TotalAmount=@TotalAmount,
           Remarks=@Remarks, TermsAndConditions=@TermsAndConditions,
           DocTypeId=@DocTypeId, DocNo=@DocNo,
-          UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt, GST=@GST
+          UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt, GST=@GST, BoqID=@BoqID
         WHERE Id=@Id
       `);
 
