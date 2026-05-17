@@ -314,7 +314,7 @@ router.post("/", async (req, res) => {
 
     let finalDocNo = null;
     if (DocTypeId) {
-      finalDocNo = await lockNextDocNumber(pool, sql, {
+      finalDocNo = await lockNextDocNumber(transaction, sql, {
         docTypeId: parseInt(DocTypeId, 10),
         finYear,
         tableName: "BOQ",
@@ -366,7 +366,7 @@ router.post("/", async (req, res) => {
     await syncBoqActivities(transaction, sql, newId, activitiesArray, uomMap);
 
     if (DocTypeId && finalDocNo) {
-      await backPatchRecordId(pool, sql, finalDocNo, "BOQ", newId);
+      await backPatchRecordId(transaction, sql, finalDocNo, "BOQ", newId);
     }
 
     await transaction.commit();

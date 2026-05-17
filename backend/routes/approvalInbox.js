@@ -176,6 +176,35 @@ router.get("/", async (req, res) => {
       `);
     }
 
+    if (!module || module === "boq") {
+      queries.push(`
+        SELECT
+          'boq'                       AS Module,
+          'BOQ'                       AS ModuleLabel,
+          CAST(b.BoqID AS NVARCHAR)   AS RecordId,
+          COALESCE(b.DocNo, b.BoqNo)  AS Reference,
+          b.BoqDate                   AS RecordDate,
+          ISNULL(b.Status, 'Draft')   AS Status,
+          pr.name                     AS ContractorName,
+          CONCAT(
+            COALESCE(pr.name, ''),
+            CASE WHEN pr.name IS NOT NULL AND co.name IS NOT NULL THEN ' / ' ELSE '' END,
+            COALESCE(co.name, '')
+          )                           AS SupplierName,
+          b.TotalAmount               AS Amount,
+          b.CreatedBy                 AS CreatedBy,
+          ''                          AS ApprovedBy,
+          ''                          AS ApprovedAt,
+          ''                          AS RejectedBy,
+          ISNULL(b.Remarks, '')       AS RejectionNote,
+          ISNULL(b.UpdatedAt, b.CreatedAt) AS LastModified
+        FROM dbo.BOQ b
+        LEFT JOIN dbo.enterprise co ON co.id = b.CompanyId
+        LEFT JOIN dbo.enterprise pr ON pr.id = b.ProjectId
+        WHERE ISNULL(b.Status, 'Draft') = 'Pending'
+      `);
+    }
+
     if (queries.length === 0) return res.json([]);
 
     const fullQuery =
@@ -206,7 +235,8 @@ router.get("/count", async (req, res) => {
         (SELECT COUNT(*) FROM dbo.ReceivedPayment    WHERE RPStatus = 'Pending') +
         (SELECT COUNT(*) FROM dbo.GoodsReceiptNotes  WHERE Status = 'Pending') +
         (SELECT COUNT(*) FROM dbo.ExpenseBooking     WHERE EStatus = 'Pending') +
-        (SELECT COUNT(*) FROM dbo.WorkDone           WHERE ISNULL(Status,'Draft') = 'Pending')
+        (SELECT COUNT(*) FROM dbo.WorkDone           WHERE ISNULL(Status,'Draft') = 'Pending') +
+        (SELECT COUNT(*) FROM dbo.BOQ                WHERE ISNULL(Status,'Draft') = 'Pending')
       AS TotalPending
     `);
     res.json({ count: result.recordset[0].TotalPending ?? 0 });
