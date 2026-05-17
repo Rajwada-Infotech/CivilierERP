@@ -20,6 +20,7 @@ import {
   XCircle,
   Package,
   Settings2,
+  ArrowLeft,
 } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
@@ -463,7 +464,6 @@ const LineEditor: React.FC<LineEditorProps> = ({
             width: "100%",
             borderCollapse: "collapse",
             fontSize: 12.5,
-            tableLayout: "fixed",
           }}
         >
           <colgroup>
@@ -476,6 +476,7 @@ const LineEditor: React.FC<LineEditorProps> = ({
             <col style={{ width: 96 }} />
             <col style={{ width: 64 }} />
             <col style={{ width: 108 }} />
+            <col />
             {!readOnly && <col style={{ width: 36 }} />}
           </colgroup>
 
@@ -496,6 +497,7 @@ const LineEditor: React.FC<LineEditorProps> = ({
                 "Rate (₹)",
                 "Tax %",
                 "Amount (₹)",
+                "Tax Amt (₹)",
               ].map((h, i) => (
                 <th
                   key={h}
@@ -525,7 +527,7 @@ const LineEditor: React.FC<LineEditorProps> = ({
             {(rows as any[]).length === 0 ? (
               <tr>
                 <td
-                  colSpan={readOnly ? 9 : 10}
+                  colSpan={readOnly ? 10 : 11}
                   style={{
                     textAlign: "center",
                     padding: 32,
@@ -910,9 +912,7 @@ const LineEditor: React.FC<LineEditorProps> = ({
                     {/* Amount */}
                     <td
                       style={{
-                        borderRight: !readOnly
-                          ? "1px solid hsl(var(--border))"
-                          : "none",
+                        borderRight: "1px solid hsl(var(--border))",
                         padding: "4px 10px",
                         textAlign: "right",
                       }}
@@ -926,6 +926,28 @@ const LineEditor: React.FC<LineEditorProps> = ({
                         }}
                       >
                         {fmt(amt)}
+                      </span>
+                    </td>
+
+                    {/* Tax Amt */}
+                    <td
+                      style={{
+                        borderRight: !readOnly
+                          ? "1px solid hsl(var(--border))"
+                          : "none",
+                        padding: "4px 10px",
+                        textAlign: "right",
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontFamily: "monospace",
+                          fontSize: 12.5,
+                          fontWeight: 600,
+                          color: "hsl(var(--muted-foreground))",
+                        }}
+                      >
+                        {fmt((amt * (parseFloat(row.tax) || 0)) / 100)}
                       </span>
                     </td>
 
@@ -984,7 +1006,7 @@ const LineEditor: React.FC<LineEditorProps> = ({
                 }}
               >
                 <td
-                  colSpan={readOnly ? 8 : 9}
+                  colSpan={readOnly ? 9 : 10}
                   style={{
                     textAlign: "right",
                     padding: "6px 10px",
@@ -1255,8 +1277,11 @@ const FormModal: React.FC<FormModalProps> = ({
   );
 
   return (
-    <div className="fixed inset-0 z-[200] flex flex-col bg-background overflow-hidden">
-      <div className="w-full h-full flex flex-col animate-in fade-in">
+    <div
+      className="flex flex-col animate-in fade-in"
+      style={{ minHeight: "calc(100vh - 112px)" }}
+    >
+      <div className="w-full flex flex-col">
         {/* ── Header ── */}
         <div
           style={{
@@ -1266,50 +1291,83 @@ const FormModal: React.FC<FormModalProps> = ({
             padding: "14px 20px",
             borderBottom: "1px solid hsl(var(--border))",
             background: "hsl(var(--muted))",
-            flexShrink: 0,
           }}
         >
-          <div>
-            <h2
-              style={{
-                fontSize: 16,
-                fontWeight: 600,
-                display: "flex",
-                alignItems: "center",
-                gap: 8,
-              }}
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onClose}
+              className="gap-1.5 text-muted-foreground hover:text-foreground px-2"
             >
-              {isEdit ? (
-                <Edit3 size={17} style={{ color: "hsl(var(--primary))" }} />
-              ) : (
-                <FileText size={17} style={{ color: "hsl(var(--primary))" }} />
-              )}
-              {isEdit
-                ? `Edit BOQ — ${record!.BoqNo}`
-                : "New Bill of Quantities"}
-            </h2>
-            <p
-              style={{
-                fontSize: 12,
-                color: "hsl(var(--muted-foreground))",
-                marginTop: 2,
-              }}
-            >
-              {isEdit
-                ? "Modify header, items and activities."
-                : "Fill in the header, then add items and/or activities."}
-            </p>
+              <ArrowLeft size={15} /> Back
+            </Button>
+            <div
+              style={{ width: 1, height: 28, background: "hsl(var(--border))" }}
+            />
+            <div>
+              <h2
+                style={{
+                  fontSize: 16,
+                  fontWeight: 600,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                {isEdit ? (
+                  <Edit3 size={17} style={{ color: "hsl(var(--primary))" }} />
+                ) : (
+                  <FileText
+                    size={17}
+                    style={{ color: "hsl(var(--primary))" }}
+                  />
+                )}
+                {isEdit
+                  ? `Edit BOQ — ${record!.BoqNo}`
+                  : "New Bill of Quantities"}
+              </h2>
+              <p
+                style={{
+                  fontSize: 12,
+                  color: "hsl(var(--muted-foreground))",
+                  marginTop: 2,
+                }}
+              >
+                {isEdit
+                  ? "Modify header, items and activities."
+                  : "Fill in the header, then add items and/or activities."}
+              </p>
+            </div>
           </div>
-          <Button variant="ghost" size="icon" onClick={onClose}>
-            <X size={18} />
-          </Button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <Button
+              variant="outline"
+              onClick={onClose}
+              disabled={saving}
+              size="sm"
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={handleSave}
+              disabled={saving}
+              className="gap-2"
+              size="sm"
+            >
+              {saving ? (
+                <RefreshCw className="animate-spin" size={14} />
+              ) : (
+                <Save size={14} />
+              )}
+              {isEdit ? "Update BOQ" : "Create BOQ"}
+            </Button>
+          </div>
         </div>
 
-        {/* ── Scrollable body ── */}
+        {/* ── Body ── */}
         <div
           style={{
-            flex: 1,
-            overflowY: "auto",
             padding: "20px 24px",
             display: "flex",
             flexDirection: "column",
@@ -1515,31 +1573,6 @@ const FormModal: React.FC<FormModalProps> = ({
             />
           </div>
         </div>
-
-        {/* ── Footer actions ── */}
-        <div
-          style={{
-            padding: "12px 20px",
-            borderTop: "1px solid hsl(var(--border))",
-            display: "flex",
-            justifyContent: "flex-end",
-            gap: 10,
-            background: "hsl(var(--muted) / 0.5)",
-            flexShrink: 0,
-          }}
-        >
-          <Button variant="outline" onClick={onClose} disabled={saving}>
-            Cancel
-          </Button>
-          <Button onClick={handleSave} disabled={saving} className="gap-2">
-            {saving ? (
-              <RefreshCw className="animate-spin" size={14} />
-            ) : (
-              <Save size={14} />
-            )}
-            {isEdit ? "Update BOQ" : "Create BOQ"}
-          </Button>
-        </div>
       </div>
     </div>
   );
@@ -1619,8 +1652,11 @@ const DetailModal: React.FC<DetailModalProps> = ({
   );
 
   return (
-    <div className="fixed inset-0 z-[200] flex flex-col bg-background overflow-hidden">
-      <div className="w-full h-full flex flex-col animate-in fade-in">
+    <div
+      className="flex flex-col animate-in fade-in"
+      style={{ minHeight: "calc(100vh - 112px)" }}
+    >
+      <div className="w-full flex flex-col">
         <div
           style={{
             display: "flex",
@@ -1629,10 +1665,20 @@ const DetailModal: React.FC<DetailModalProps> = ({
             padding: "14px 20px",
             borderBottom: "1px solid hsl(var(--border))",
             background: "hsl(var(--muted))",
-            flexShrink: 0,
           }}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={onClose}
+              className="gap-1.5 text-muted-foreground hover:text-foreground px-2"
+            >
+              <ArrowLeft size={15} /> Back
+            </Button>
+            <div
+              style={{ width: 1, height: 28, background: "hsl(var(--border))" }}
+            />
             <span
               style={{
                 fontSize: 16,
@@ -1645,15 +1691,42 @@ const DetailModal: React.FC<DetailModalProps> = ({
             </span>
             <StatusBadge status={record.Status} />
           </div>
-          <Button variant="ghost" size="icon" onClick={onClose}>
-            <X size={18} />
-          </Button>
+
+          {/* Right-side actions */}
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={acting}
+              onClick={doDelete}
+              className="text-destructive hover:bg-destructive/10 border-destructive/30"
+            >
+              <Trash2 size={13} className="mr-1.5" /> Delete
+            </Button>
+            {record.Status === "Draft" && (
+              <>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  disabled={acting}
+                  onClick={onEdit}
+                >
+                  <Edit3 size={13} className="mr-1.5" /> Edit
+                </Button>
+                <Button
+                  size="sm"
+                  disabled={acting}
+                  onClick={() => doTransition("submit")}
+                >
+                  Submit for Approval <Send size={12} className="ml-1.5" />
+                </Button>
+              </>
+            )}
+          </div>
         </div>
 
         <div
           style={{
-            flex: 1,
-            overflowY: "auto",
             padding: "20px 24px",
             display: "flex",
             flexDirection: "column",
@@ -1770,46 +1843,6 @@ const DetailModal: React.FC<DetailModalProps> = ({
             readOnly
             onTabChange={setLineTab}
           />
-        </div>
-
-        <div
-          style={{
-            padding: "12px 20px",
-            borderTop: "1px solid hsl(var(--border))",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            gap: 10,
-            background: "hsl(var(--muted) / 0.5)",
-            flexShrink: 0,
-          }}
-        >
-          <Button
-            variant="outline"
-            disabled={acting}
-            onClick={doDelete}
-            className="text-destructive hover:bg-destructive/10 border-destructive/30"
-          >
-            <Trash2 size={14} className="mr-1.5" /> Delete
-          </Button>
-          <div style={{ display: "flex", gap: 8 }}>
-            <Button variant="outline" onClick={onClose}>
-              Close
-            </Button>
-            {record.Status === "Draft" && (
-              <>
-                <Button variant="secondary" disabled={acting} onClick={onEdit}>
-                  <Edit3 size={14} className="mr-1.5" /> Edit
-                </Button>
-                <Button
-                  disabled={acting}
-                  onClick={() => doTransition("submit")}
-                >
-                  Submit for Approval <Send size={13} className="ml-1.5" />
-                </Button>
-              </>
-            )}
-          </div>
         </div>
       </div>
     </div>
@@ -2135,146 +2168,7 @@ export default function BOQ() {
     <>
       <Breadcrumbs items={["Engineering", "BOQ"]} />
 
-      <div className="space-y-6">
-        {/* Page header */}
-        <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold flex items-center gap-2">
-              <FileText size={22} className="text-primary" />
-              Bill of Quantities
-            </h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              Manage material items and work activities with structured cost
-              estimation
-            </p>
-          </div>
-          <Button
-            onClick={() => {
-              setEditRecord(null);
-              setShowForm(true);
-            }}
-            className="gap-2"
-          >
-            <Plus size={15} /> New BOQ
-          </Button>
-        </div>
-
-        {/* Stat cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          {stats.map((s) => (
-            <div
-              key={s.label}
-              style={{
-                background: "hsl(var(--background))",
-                border: "1px solid hsl(var(--border))",
-                borderTop: `3px solid ${s.color}`,
-                borderRadius: "calc(var(--radius) + 2px)",
-                padding: "14px 16px",
-              }}
-            >
-              <div
-                style={{
-                  fontSize: 10,
-                  fontWeight: 600,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.07em",
-                  color: "hsl(var(--muted-foreground))",
-                }}
-              >
-                {s.label}
-              </div>
-              <div
-                style={{
-                  fontSize: 22,
-                  fontWeight: 700,
-                  marginTop: 4,
-                  fontFamily: "monospace",
-                }}
-              >
-                {s.value}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {/* Table card */}
-        <Card className="shadow-sm">
-          <CardHeader className="p-4 border-b flex flex-col md:flex-row md:items-center gap-4">
-            <div className="relative flex-1 max-w-sm">
-              <Search
-                size={13}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-              />
-              <Input
-                value={search}
-                placeholder="Search BOQ no, company, project…"
-                onChange={(e) => onSearchChange(e.target.value)}
-                className="pl-9 h-9"
-              />
-            </div>
-            <div className="flex gap-2 flex-wrap">
-              {statuses.map((s) => (
-                <Button
-                  key={s}
-                  variant={filterStatus === s ? "default" : "outline"}
-                  size="sm"
-                  className="h-8 rounded-full text-xs"
-                  onClick={() => {
-                    setFilterStatus(s);
-                    setPage(1);
-                  }}
-                >
-                  {s}
-                </Button>
-              ))}
-            </div>
-          </CardHeader>
-
-          <CardContent className="p-0">
-            {loading ? (
-              <div className="flex items-center justify-center p-12 text-muted-foreground text-sm gap-2">
-                <RefreshCw size={15} className="animate-spin" /> Loading BOQs…
-              </div>
-            ) : (
-              <>
-                <DataTable
-                  data={rows}
-                  columns={enrichedColumns}
-                  searchable={false}
-                  paginated={false}
-                  emptyMessage="No BOQs found. Adjust your filters or create a new one."
-                />
-                {totalPages > 1 && (
-                  <div className="flex items-center justify-between border-t p-4 text-sm">
-                    <span className="text-muted-foreground">
-                      Page {page} of {totalPages} ({total} records)
-                    </span>
-                    <div className="flex gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={page === 1}
-                        onClick={() => setPage((p) => p - 1)}
-                      >
-                        Prev
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        disabled={page === totalPages}
-                        onClick={() => setPage((p) => p + 1)}
-                      >
-                        Next
-                      </Button>
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-          </CardContent>
-        </Card>
-      </div>
-
+      {/* ── Inline Form (create / edit) ── */}
       {showForm && (
         <FormModal
           record={editRecord}
@@ -2293,7 +2187,8 @@ export default function BOQ() {
         />
       )}
 
-      {viewRecord && (
+      {/* ── Inline Detail / View ── */}
+      {!showForm && viewRecord && (
         <DetailModal
           record={viewRecord}
           uoms={uoms}
@@ -2304,6 +2199,149 @@ export default function BOQ() {
             loadList();
           }}
         />
+      )}
+
+      {/* ── List page ── */}
+      {!showForm && !viewRecord && (
+        <div className="space-y-6">
+          {/* Page header */}
+          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
+            <div>
+              <h1 className="text-2xl font-bold flex items-center gap-2">
+                <FileText size={22} className="text-primary" />
+                Bill of Quantities
+              </h1>
+              <p className="text-sm text-muted-foreground mt-1">
+                Manage material items and work activities with structured cost
+                estimation
+              </p>
+            </div>
+            <Button
+              onClick={() => {
+                setEditRecord(null);
+                setShowForm(true);
+              }}
+              className="gap-2"
+            >
+              <Plus size={15} /> New BOQ
+            </Button>
+          </div>
+
+          {/* Stat cards */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {stats.map((s) => (
+              <div
+                key={s.label}
+                style={{
+                  background: "hsl(var(--background))",
+                  border: "1px solid hsl(var(--border))",
+                  borderTop: `3px solid ${s.color}`,
+                  borderRadius: "calc(var(--radius) + 2px)",
+                  padding: "14px 16px",
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 600,
+                    textTransform: "uppercase",
+                    letterSpacing: "0.07em",
+                    color: "hsl(var(--muted-foreground))",
+                  }}
+                >
+                  {s.label}
+                </div>
+                <div
+                  style={{
+                    fontSize: 22,
+                    fontWeight: 700,
+                    marginTop: 4,
+                    fontFamily: "monospace",
+                  }}
+                >
+                  {s.value}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Table card */}
+          <Card className="shadow-sm">
+            <CardHeader className="p-4 border-b flex flex-col md:flex-row md:items-center gap-4">
+              <div className="relative flex-1 max-w-sm">
+                <Search
+                  size={13}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                />
+                <Input
+                  value={search}
+                  placeholder="Search BOQ no, company, project…"
+                  onChange={(e) => onSearchChange(e.target.value)}
+                  className="pl-9 h-9"
+                />
+              </div>
+              <div className="flex gap-2 flex-wrap">
+                {statuses.map((s) => (
+                  <Button
+                    key={s}
+                    variant={filterStatus === s ? "default" : "outline"}
+                    size="sm"
+                    className="h-8 rounded-full text-xs"
+                    onClick={() => {
+                      setFilterStatus(s);
+                      setPage(1);
+                    }}
+                  >
+                    {s}
+                  </Button>
+                ))}
+              </div>
+            </CardHeader>
+
+            <CardContent className="p-0">
+              {loading ? (
+                <div className="flex items-center justify-center p-12 text-muted-foreground text-sm gap-2">
+                  <RefreshCw size={15} className="animate-spin" /> Loading BOQs…
+                </div>
+              ) : (
+                <>
+                  <DataTable
+                    data={rows}
+                    columns={enrichedColumns}
+                    searchable={false}
+                    paginated={false}
+                    emptyMessage="No BOQs found. Adjust your filters or create a new one."
+                  />
+                  {totalPages > 1 && (
+                    <div className="flex items-center justify-between border-t p-4 text-sm">
+                      <span className="text-muted-foreground">
+                        Page {page} of {totalPages} ({total} records)
+                      </span>
+                      <div className="flex gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={page === 1}
+                          onClick={() => setPage((p) => p - 1)}
+                        >
+                          Prev
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={page === totalPages}
+                          onClick={() => setPage((p) => p + 1)}
+                        >
+                          Next
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       )}
     </>
   );

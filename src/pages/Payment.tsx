@@ -140,6 +140,8 @@ interface ExpenseDetail {
   ENetAmount: number | null;
   EDocumentType: string | null;
   DocTypeName: string | null;
+  ESourceType?: string | null;
+  ESourceId?: number | null;
   // GST breakdown
   ECgstRate?: number | null;
   ESgstRate?: number | null;
@@ -302,6 +304,14 @@ const fetchExpenseGRNs = async (expenseId: string): Promise<GRNRef[]> => {
   if (!res.ok) return [];
   const data = await res.json();
   return Array.isArray(data) ? data : [];
+};
+
+const fetchWorkDoneById = async (
+  id: number,
+): Promise<{ ProjectName: string | null } | null> => {
+  const res = await fetchWithAuth(`/api/engineering/work-done/${id}`);
+  if (!res.ok) return null;
+  return res.json();
 };
 
 const fetchChequeNumbers = async (
@@ -1783,12 +1793,19 @@ const Payment: React.FC = () => {
 
   // Derive unique project names and fin-years from all loaded records for filter dropdowns
   const projectOptions: string[] = Array.from(
-    new Set(dbItems.map((p) => p.PProject).filter((v): v is string => !!v && v.trim() !== ""))
+    new Set(
+      dbItems
+        .map((p) => p.PProject)
+        .filter((v): v is string => !!v && v.trim() !== ""),
+    ),
   ).sort();
 
   // Generate financial year options: current year ± 3, formatted as "YYYY"
   const currentYear = new Date().getFullYear();
-  const finYearOptions: number[] = Array.from({ length: 7 }, (_, i) => currentYear - 3 + i);
+  const finYearOptions: number[] = Array.from(
+    { length: 7 },
+    (_, i) => currentYear - 3 + i,
+  );
 
   // Fetch full detail (name + logo + address) for the selected company — used in PDF export
   const { data: selectedCompanyDetail = null } = useQuery<CompanyDetail | null>(
@@ -1972,6 +1989,15 @@ const Payment: React.FC = () => {
           sgstRate: detail.ESgstRate ?? null,
           igstRate: detail.EIgstRate ?? null,
         }));
+
+        // For WORK_DONE entries, resolve project from the linked WorkDone record
+        if (detail.EDocumentType === "WORK_DONE" && detail.ESourceId) {
+          const wd = await fetchWorkDoneById(detail.ESourceId);
+          if (wd?.ProjectName) {
+            setForm((prev) => ({ ...prev, projectSite: wd.ProjectName! }));
+          }
+        }
+
         const grns = await fetchExpenseGRNs(expenseId);
         setLinkedGRNs(grns);
         if (grns.length > 0 && grns[0].ProjectName) {
@@ -2758,10 +2784,21 @@ const Payment: React.FC = () => {
           <>
             {/* ── Filter Panel ── */}
             {(() => {
-              const hasActiveFilters = !!(companyFilter || projectFilter || finYearFilter || docNumberFilter || docDateFilter || supplierFilter);
+              const hasActiveFilters = !!(
+                companyFilter ||
+                projectFilter ||
+                finYearFilter ||
+                docNumberFilter ||
+                docDateFilter ||
+                supplierFilter
+              );
               const clearAll = () => {
-                setCompanyFilter(""); setProjectFilter(""); setFinYearFilter("");
-                setDocNumberFilter(""); setDocDateFilter(""); setSupplierFilter("");
+                setCompanyFilter("");
+                setProjectFilter("");
+                setFinYearFilter("");
+                setDocNumberFilter("");
+                setDocDateFilter("");
+                setSupplierFilter("");
                 setPage(1);
               };
               return (
@@ -2769,17 +2806,29 @@ const Payment: React.FC = () => {
                   {/* Header / toggle */}
                   <button
                     type="button"
-                    onClick={() => setShowFilters(v => !v)}
+                    onClick={() => setShowFilters((v) => !v)}
                     className="w-full flex items-center justify-between gap-3 px-4 py-3 hover:bg-muted/30 transition-colors"
                   >
                     <div className="flex items-center gap-2">
                       <div className="flex items-center justify-center w-5 h-5 rounded bg-primary/10">
                         <Search size={11} className="text-primary" />
                       </div>
-                      <span className="text-xs font-heading font-semibold text-foreground uppercase tracking-wider">Filters</span>
+                      <span className="text-xs font-heading font-semibold text-foreground uppercase tracking-wider">
+                        Filters
+                      </span>
                       {hasActiveFilters && (
                         <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-[10px] font-heading font-semibold bg-primary text-primary-foreground">
-                          {[companyFilter, projectFilter, finYearFilter, docNumberFilter, docDateFilter, supplierFilter].filter(Boolean).length} active
+                          {
+                            [
+                              companyFilter,
+                              projectFilter,
+                              finYearFilter,
+                              docNumberFilter,
+                              docDateFilter,
+                              supplierFilter,
+                            ].filter(Boolean).length
+                          }{" "}
+                          active
                         </span>
                       )}
                     </div>
@@ -2787,13 +2836,19 @@ const Payment: React.FC = () => {
                       {hasActiveFilters && (
                         <span
                           role="button"
-                          onClick={(e) => { e.stopPropagation(); clearAll(); }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            clearAll();
+                          }}
                           className="text-[11px] text-destructive/70 hover:text-destructive font-heading transition-colors cursor-pointer"
                         >
                           Clear all
                         </span>
                       )}
-                      <ChevronDown size={13} className={`text-muted-foreground transition-transform duration-200 ${showFilters ? "rotate-180" : ""}`} />
+                      <ChevronDown
+                        size={13}
+                        className={`text-muted-foreground transition-transform duration-200 ${showFilters ? "rotate-180" : ""}`}
+                      />
                     </div>
                   </button>
 
@@ -2801,7 +2856,6 @@ const Payment: React.FC = () => {
                   {showFilters && (
                     <div className="border-t border-border px-4 py-4">
                       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-6 gap-y-4">
-
                         {/* 1. Company */}
                         <div className="space-y-1.5">
                           <label className="text-[10px] font-heading uppercase tracking-wider text-muted-foreground flex items-center gap-1">
@@ -2810,13 +2864,23 @@ const Payment: React.FC = () => {
                           <div className="relative">
                             <select
                               value={companyFilter}
-                              onChange={(e) => { setCompanyFilter(e.target.value); setPage(1); }}
+                              onChange={(e) => {
+                                setCompanyFilter(e.target.value);
+                                setPage(1);
+                              }}
                               className="w-full appearance-none pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                             >
                               <option value="">All Companies</option>
-                              {companyOptions.map((c) => <option key={c.id} value={String(c.id)}>{c.label}</option>)}
+                              {companyOptions.map((c) => (
+                                <option key={c.id} value={String(c.id)}>
+                                  {c.label}
+                                </option>
+                              ))}
                             </select>
-                            <ChevronDown size={11} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                            <ChevronDown
+                              size={11}
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                            />
                           </div>
                         </div>
 
@@ -2828,13 +2892,23 @@ const Payment: React.FC = () => {
                           <div className="relative">
                             <select
                               value={projectFilter}
-                              onChange={(e) => { setProjectFilter(e.target.value); setPage(1); }}
+                              onChange={(e) => {
+                                setProjectFilter(e.target.value);
+                                setPage(1);
+                              }}
                               className="w-full appearance-none pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                             >
                               <option value="">All Projects</option>
-                              {projectOptions.map((p) => <option key={p} value={p}>{p}</option>)}
+                              {projectOptions.map((p) => (
+                                <option key={p} value={p}>
+                                  {p}
+                                </option>
+                              ))}
                             </select>
-                            <ChevronDown size={11} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                            <ChevronDown
+                              size={11}
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                            />
                           </div>
                         </div>
 
@@ -2846,13 +2920,23 @@ const Payment: React.FC = () => {
                           <div className="relative">
                             <select
                               value={finYearFilter}
-                              onChange={(e) => { setFinYearFilter(e.target.value); setPage(1); }}
+                              onChange={(e) => {
+                                setFinYearFilter(e.target.value);
+                                setPage(1);
+                              }}
                               className="w-full appearance-none pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                             >
                               <option value="">All Fin Years</option>
-                              {finYearOptions.map((y) => <option key={y} value={String(y)}>{y}–{y + 1}</option>)}
+                              {finYearOptions.map((y) => (
+                                <option key={y} value={String(y)}>
+                                  {y}–{y + 1}
+                                </option>
+                              ))}
                             </select>
-                            <ChevronDown size={11} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                            <ChevronDown
+                              size={11}
+                              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+                            />
                           </div>
                         </div>
 
@@ -2866,11 +2950,20 @@ const Payment: React.FC = () => {
                               type="text"
                               placeholder="e.g. PAY-2024-001"
                               value={docNumberFilter}
-                              onChange={(e) => { setDocNumberFilter(e.target.value); setPage(1); }}
+                              onChange={(e) => {
+                                setDocNumberFilter(e.target.value);
+                                setPage(1);
+                              }}
                               className="w-full pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary"
                             />
                             {docNumberFilter && (
-                              <button onClick={() => { setDocNumberFilter(""); setPage(1); }} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                              <button
+                                onClick={() => {
+                                  setDocNumberFilter("");
+                                  setPage(1);
+                                }}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                              >
                                 <X size={11} />
                               </button>
                             )}
@@ -2886,11 +2979,20 @@ const Payment: React.FC = () => {
                             <input
                               type="date"
                               value={docDateFilter}
-                              onChange={(e) => { setDocDateFilter(e.target.value); setPage(1); }}
+                              onChange={(e) => {
+                                setDocDateFilter(e.target.value);
+                                setPage(1);
+                              }}
                               className="w-full pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
                             />
                             {docDateFilter && (
-                              <button onClick={() => { setDocDateFilter(""); setPage(1); }} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                              <button
+                                onClick={() => {
+                                  setDocDateFilter("");
+                                  setPage(1);
+                                }}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                              >
                                 <X size={11} />
                               </button>
                             )}
@@ -2907,17 +3009,25 @@ const Payment: React.FC = () => {
                               type="text"
                               placeholder="Search name…"
                               value={supplierFilter}
-                              onChange={(e) => { setSupplierFilter(e.target.value); setPage(1); }}
+                              onChange={(e) => {
+                                setSupplierFilter(e.target.value);
+                                setPage(1);
+                              }}
                               className="w-full pl-3 pr-7 py-2 rounded-lg border border-border bg-background text-xs text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-primary"
                             />
                             {supplierFilter && (
-                              <button onClick={() => { setSupplierFilter(""); setPage(1); }} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                              <button
+                                onClick={() => {
+                                  setSupplierFilter("");
+                                  setPage(1);
+                                }}
+                                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                              >
                                 <X size={11} />
                               </button>
                             )}
                           </div>
                         </div>
-
                       </div>
                     </div>
                   )}
@@ -2925,43 +3035,100 @@ const Payment: React.FC = () => {
                   {/* Active filter chips — always visible when filters set */}
                   {hasActiveFilters && (
                     <div className="flex flex-wrap gap-1.5 px-4 pb-3 border-t border-border/50 pt-2.5">
-                      {companyFilter && (() => {
-                        const co = companyOptions.find((c) => String(c.id) === companyFilter);
-                        return (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading bg-primary/10 text-primary border border-primary/20">
-                            <Building2 size={9} />{co?.label || companyFilter}
-                            <button onClick={() => { setCompanyFilter(""); setPage(1); }} className="ml-0.5 hover:text-destructive"><X size={9} /></button>
-                          </span>
-                        );
-                      })()}
+                      {companyFilter &&
+                        (() => {
+                          const co = companyOptions.find(
+                            (c) => String(c.id) === companyFilter,
+                          );
+                          return (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading bg-primary/10 text-primary border border-primary/20">
+                              <Building2 size={9} />
+                              {co?.label || companyFilter}
+                              <button
+                                onClick={() => {
+                                  setCompanyFilter("");
+                                  setPage(1);
+                                }}
+                                className="ml-0.5 hover:text-destructive"
+                              >
+                                <X size={9} />
+                              </button>
+                            </span>
+                          );
+                        })()}
                       {projectFilter && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading bg-violet-500/10 text-violet-600 border border-violet-500/20">
-                          <FolderKanban size={9} />{projectFilter}
-                          <button onClick={() => { setProjectFilter(""); setPage(1); }} className="ml-0.5 hover:text-destructive"><X size={9} /></button>
+                          <FolderKanban size={9} />
+                          {projectFilter}
+                          <button
+                            onClick={() => {
+                              setProjectFilter("");
+                              setPage(1);
+                            }}
+                            className="ml-0.5 hover:text-destructive"
+                          >
+                            <X size={9} />
+                          </button>
                         </span>
                       )}
                       {finYearFilter && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading bg-amber-500/10 text-amber-600 border border-amber-500/20">
-                          <CalendarDays size={9} />FY {finYearFilter}–{parseInt(finYearFilter) + 1}
-                          <button onClick={() => { setFinYearFilter(""); setPage(1); }} className="ml-0.5 hover:text-destructive"><X size={9} /></button>
+                          <CalendarDays size={9} />
+                          FY {finYearFilter}–{parseInt(finYearFilter) + 1}
+                          <button
+                            onClick={() => {
+                              setFinYearFilter("");
+                              setPage(1);
+                            }}
+                            className="ml-0.5 hover:text-destructive"
+                          >
+                            <X size={9} />
+                          </button>
                         </span>
                       )}
                       {docNumberFilter && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading bg-emerald-500/10 text-emerald-600 border border-emerald-500/20">
-                          <Hash size={9} />{docNumberFilter}
-                          <button onClick={() => { setDocNumberFilter(""); setPage(1); }} className="ml-0.5 hover:text-destructive"><X size={9} /></button>
+                          <Hash size={9} />
+                          {docNumberFilter}
+                          <button
+                            onClick={() => {
+                              setDocNumberFilter("");
+                              setPage(1);
+                            }}
+                            className="ml-0.5 hover:text-destructive"
+                          >
+                            <X size={9} />
+                          </button>
                         </span>
                       )}
                       {docDateFilter && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading bg-cyan-500/10 text-cyan-600 border border-cyan-500/20">
-                          <FileText size={9} />Date: {docDateFilter}
-                          <button onClick={() => { setDocDateFilter(""); setPage(1); }} className="ml-0.5 hover:text-destructive"><X size={9} /></button>
+                          <FileText size={9} />
+                          Date: {docDateFilter}
+                          <button
+                            onClick={() => {
+                              setDocDateFilter("");
+                              setPage(1);
+                            }}
+                            className="ml-0.5 hover:text-destructive"
+                          >
+                            <X size={9} />
+                          </button>
                         </span>
                       )}
                       {supplierFilter && (
                         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-heading bg-teal-500/10 text-teal-600 border border-teal-500/20">
-                          <Truck size={9} />{supplierFilter}
-                          <button onClick={() => { setSupplierFilter(""); setPage(1); }} className="ml-0.5 hover:text-destructive"><X size={9} /></button>
+                          <Truck size={9} />
+                          {supplierFilter}
+                          <button
+                            onClick={() => {
+                              setSupplierFilter("");
+                              setPage(1);
+                            }}
+                            className="ml-0.5 hover:text-destructive"
+                          >
+                            <X size={9} />
+                          </button>
                         </span>
                       )}
                     </div>

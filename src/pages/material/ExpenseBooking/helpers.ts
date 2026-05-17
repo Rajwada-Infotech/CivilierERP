@@ -265,7 +265,7 @@ export function dbToRecord(row: any): ExpenseRecord {
     tcName: row.ETCName ?? "",
     tcText: row.ETCText ?? "",
     eSourceType:
-      (row.ESourceType as "PO" | "WO" | "WO_PO" | "GRN" | "TOD" | null) ?? null,
+      (row.ESourceType as "PO" | "WO" | "WO_PO" | "GRN" | "TOD" | "WORK_DONE" | null) ?? null,
     eSourceId: row.ESourceId ? parseInt(row.ESourceId, 10) : null,
   };
 }
