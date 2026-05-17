@@ -287,6 +287,7 @@ router.post("/", authenticateToken, async (req, res) => {
       IssuedTo = null,
       CostCenter = null,
       Purpose = null,
+      DocTypeId: clientDocTypeId = null,
     } = req.body;
 
     if (!Array.isArray(items) || items.length === 0)
@@ -302,7 +303,9 @@ router.post("/", authenticateToken, async (req, res) => {
     const userId = req.user?.id || null;
     const issuedBy = req.user?.email || null;
 
-    const docTypeId = await resolveIssueDocTypeId(pool, RootExBDocNo);
+    const docTypeId = clientDocTypeId
+      ? parseInt(clientDocTypeId, 10)
+      : await resolveIssueDocTypeId(pool, RootExBDocNo);
     const docNo = await lockNextDocNumber(pool, sql, {
       docTypeId,
       tableName: "MaterialIssues",

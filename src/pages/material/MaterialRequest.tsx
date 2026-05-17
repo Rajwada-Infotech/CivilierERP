@@ -43,6 +43,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { StatusBadge } from "@/components/StatusBadge";
+import {
+  DocNumberPreview,
+  fetchNextDocNumber,
+} from "@/pages/material/ExpenseBooking/DocNumberPreview";
+import { useFinYear } from "@/contexts/FinYearContext";
 import { Badge } from "@/components/ui/badge";
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
@@ -67,6 +72,8 @@ interface FormHeader {
   priority: string;
   reason: string;
   remarks: string;
+  docTypeId: number | null;
+  docNoPreview: string;
 }
 
 const defaultHeader: FormHeader = {
@@ -78,6 +85,8 @@ const defaultHeader: FormHeader = {
   priority: "Normal",
   reason: "",
   remarks: "",
+  docTypeId: null,
+  docNoPreview: "",
 };
 
 const blankCartItem = (): CartItem => ({
@@ -163,6 +172,11 @@ export default function MaterialRequest() {
 
   // ── Master data ──────────────────────────────────────────────────────────────
 
+  const { activeYear } = useFinYear();
+  const finYearStr = activeYear
+    ? `${String(activeYear.StartYear).slice(-2)}-${String(activeYear.EndYear).slice(-2)}`
+    : undefined;
+
   const { data: companies = [] } = useQuery({
     queryKey: ["mr-companies"],
     queryFn: mrApi.getMRCompanies,
@@ -201,13 +215,6 @@ export default function MaterialRequest() {
   const { data: listData, isLoading: loadingList } = useQuery({
     queryKey: ["mr-list", page, search],
     queryFn: () => mrApi.getMaterialRequests({ page, limit, search }),
-  });
-
-  const { data: numberPreview } = useQuery({
-    queryKey: ["mr-next-number"],
-    queryFn: mrApi.previewNextMRNumber,
-    enabled: viewMode === "form" && !editingId,
-    staleTime: 15_000,
   });
 
   // ── Auto-select active fin year ──────────────────────────────────────────────
@@ -366,6 +373,8 @@ export default function MaterialRequest() {
       companyId: String(record.CompanyId ?? ""),
       projectId: String(record.ProjectId ?? ""),
       finYearId: String(record.FinYearId ?? ""),
+      docTypeId: record.DocTypeId ?? null,
+      docNoPreview: "",
       requestDate: record.RequestDate
         ? String(record.RequestDate).slice(0, 10)
         : defaultHeader.requestDate,
@@ -424,6 +433,7 @@ export default function MaterialRequest() {
       Priority: header.priority,
       Reason: header.reason,
       Remarks: header.remarks || null,
+      DocTypeId: header.docTypeId || null,
       items: cart.map((ci) => ({
         ItemId: ci.ItemId,
         ItemName: ci.ItemName || itemMap[ci.ItemId]?.M_Name || null,
@@ -698,24 +708,32 @@ export default function MaterialRequest() {
         </CardHeader>
 
         <CardContent className="p-5 space-y-4">
-          {/* Doc number preview */}
-          <div className="flex items-center gap-2 rounded-lg border border-dashed border-border bg-muted/30 px-4 py-2.5">
+          {/* Doc number / Type of Doc */}
+          <div className="flex items-center gap-3 rounded-lg border border-dashed border-border bg-muted/30 px-4 py-3">
             <FileText size={13} className="text-muted-foreground shrink-0" />
-            <span className="text-xs text-muted-foreground font-medium uppercase tracking-widest mr-2">
+            <span className="text-xs text-muted-foreground font-medium uppercase tracking-widest mr-2 whitespace-nowrap">
               Request No:
             </span>
             {editingId ? (
               <span className="font-mono font-bold text-primary text-sm">
                 {viewingRecord?.DocNo ?? "Immutable after creation"}
               </span>
-            ) : numberPreview?.nextDocNo ? (
-              <span className="font-mono font-bold text-primary text-sm">
-                {numberPreview.nextDocNo}
-              </span>
             ) : (
-              <span className="text-sm text-muted-foreground/50 italic">
-                Auto-generated on save
-              </span>
+              <div className="flex-1">
+                <DocNumberPreview
+                  module="MR"
+                  finYear={finYearStr}
+                  selectedDocTypeId={header.docTypeId}
+                  preview={header.docNoPreview}
+                  onSelect={(id, preview) =>
+                    setHeader((p) => ({
+                      ...p,
+                      docTypeId: id,
+                      docNoPreview: preview,
+                    }))
+                  }
+                />
+              </div>
             )}
           </div>
 

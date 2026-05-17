@@ -26,7 +26,9 @@ export type DocModule =
   | "PAY" // Payment (Outgoing)
   | "RECP" // Received Payment
   | "DN" // Debit Note
-  | "WD"; // Work Done
+  | "WD" // Work Done
+  | "MR" // Material Request
+  | "ISS"; // Material Issue
 
 /**
  * Shape returned by GET /api/document-type.
