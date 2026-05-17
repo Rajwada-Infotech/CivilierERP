@@ -6,7 +6,7 @@ import {
   PackageOpen,
   BookOpen,
   FileEdit,
-  FileWarning,
+  ArrowLeftRight,
 } from "lucide-react";
 import { NavItem } from "./SidebarPrimitives";
 
@@ -23,6 +23,7 @@ export const materialNavItems: NavItem[] = [
       { label: "Expense Booking", path: "/material/expense-booking" },
     ],
   },
-  { label: "Debit Note", icon: FileWarning, path: "/material/debit-note" },
+  { label: "Stock", icon: ArrowLeftRight, path: "/material/stock" },
+  { label: "Debit Note", icon: ClipboardList, path: "/material/debit-note" },
   { label: "Amendment Menu", icon: FileEdit, path: "/material/amendment-menu" },
 ];
