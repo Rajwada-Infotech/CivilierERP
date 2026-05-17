@@ -14,18 +14,15 @@ import {
   Upload,
   X,
   Eye,
+  Printer,
 } from "lucide-react";
 import { toast } from "sonner";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
+import { printMasterPreview } from "@/utils/masterPreviewPrint";
 
-const GST_TYPES = [
-  "Regular",
-  "Composition",
-  "Unregistered",
-  "Consumer",
-  "SEZ",
-  "Overseas",
-];
+const GST_STATUSES = ["Registered", "Unregistered"];
+const GSTIN_REGEX =
+  /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/;
 
 const CO_TYPES = [
   "Private Limited",
@@ -98,7 +95,7 @@ const empty: Company = {
   cinNumber: "",
   panNumber: "",
   tanNumber: "",
-  gstType: "Regular",
+  gstType: "Unregistered",
   gstNumber: "",
   gstDate: "",
   tradeLicenseNo: "",
@@ -124,6 +121,16 @@ const empty: Company = {
 };
 
 function rowToForm(row: any): Company {
+  const savedGstType = row.GSTType ?? "";
+  const gstType =
+    savedGstType === "Registered" || savedGstType === "Unregistered"
+      ? savedGstType
+      : savedGstType && savedGstType !== "Unregistered"
+        ? "Registered"
+        : row.GST || row.GSTDate
+          ? "Registered"
+          : "Unregistered";
+
   return {
     Id: row.Id,
     code: row.Code ?? "",
@@ -138,7 +145,7 @@ function rowToForm(row: any): Company {
     cinNumber: row.CIN ?? "",
     panNumber: row.PAN ?? "",
     tanNumber: row.TAN ?? "",
-    gstType: row.GSTType ?? "Regular",
+    gstType,
     // GST number is stored in b_sub_identity_type → aliased as GST in backend
     gstNumber: row.GST ?? "",
     gstDate: row.GSTDate ? row.GSTDate.slice(0, 10) : "",
@@ -202,18 +209,78 @@ function LogoAvatar({
 }
 
 // ── View Modal ───────────────────────────────────────────────────────────────
+function printCompanyPreview(c: Company) {
+  printMasterPreview({
+    title: c.name || "Company",
+    subtitle: "Company Master Preview",
+    code: c.code,
+    status: c.isActive ? "Active" : "Inactive",
+    logo: c.logoUrl,
+    sections: [
+      {
+        title: "General",
+        fields: [
+          { label: "Company Code", value: c.code },
+          { label: "Company Name", value: c.name },
+          { label: "Legal Name", value: c.legalName },
+          { label: "Short Name", value: c.shortName },
+          { label: "Company Type", value: c.type },
+          { label: "Industry", value: c.industry },
+          { label: "Incorporation Date", value: c.incorporationDate },
+          { label: "Currency", value: c.currency },
+          { label: "Fiscal Year Start", value: c.fiscalYearStart },
+          { label: "Enterprise Parent", value: c.belongsTo as string },
+          { label: "Status", value: c.isActive ? "Active" : "Inactive" },
+          { label: "Remarks", value: c.remarks },
+        ],
+      },
+      {
+        title: "Address",
+        fields: [
+          { label: "Registered Address", value: c.registeredAddress },
+          { label: "City", value: c.city },
+          { label: "State", value: c.state },
+          { label: "Country", value: c.country },
+          { label: "Pincode", value: c.pincode },
+          { label: "Phone", value: c.phone },
+          { label: "Fax", value: c.fax },
+          { label: "Email", value: c.email },
+          { label: "Website", value: c.website },
+          { label: "Auditor Name", value: c.auditorName },
+        ],
+      },
+      {
+        title: "Legal / Compliance",
+        fields: [
+          { label: "CIN Number", value: c.cinNumber },
+          { label: "PAN Number", value: c.panNumber },
+          { label: "TAN Number", value: c.tanNumber },
+          { label: "GST Status", value: c.gstType },
+          { label: "GST Number", value: c.gstNumber },
+          { label: "GST Registration Date", value: c.gstDate },
+          { label: "Trade License No.", value: c.tradeLicenseNo },
+          { label: "Trade License Date", value: c.tradeLicenseDate },
+          { label: "Authorized Capital", value: c.authorizedCapital },
+          { label: "Paid Up Capital", value: c.paidUpCapital },
+        ],
+      },
+    ],
+  });
+}
+
 function CompanyViewModal({ row, onClose }: { row: any; onClose: () => void }) {
   const c = rowToForm(row);
 
-  const Row = ({ label, value }: { label: string; value?: string | null }) =>
-    value ? (
-      <div className="flex flex-col gap-0.5">
-        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-          {label}
-        </span>
-        <span className="text-sm text-foreground break-words">{value}</span>
-      </div>
-    ) : null;
+  const Row = ({ label, value }: { label: string; value?: string | null }) => (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+        {label}
+      </span>
+      <span className="text-sm text-foreground break-words">
+        {value || "—"}
+      </span>
+    </div>
+  );
 
   const Section = ({ title }: { title: string }) => (
     <div className="col-span-full pt-2">
@@ -253,12 +320,21 @@ function CompanyViewModal({ row, onClose }: { row: any; onClose: () => void }) {
               </div>
             </div>
           </div>
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-          >
-            <X size={16} />
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => printCompanyPreview(c)}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors"
+              title="Print"
+            >
+              <Printer size={13} /> Print
+            </button>
+            <button
+              onClick={onClose}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            >
+              <X size={16} />
+            </button>
+          </div>
         </div>
 
         {/* Body */}
@@ -290,7 +366,7 @@ function CompanyViewModal({ row, onClose }: { row: any; onClose: () => void }) {
             <Row label="CIN Number" value={c.cinNumber} />
             <Row label="PAN Number" value={c.panNumber} />
             <Row label="TAN Number" value={c.tanNumber} />
-            <Row label="GST Type" value={c.gstType} />
+            <Row label="GST Status" value={c.gstType} />
             <Row label="GST Number" value={c.gstNumber} />
             <Row label="GST Date" value={c.gstDate} />
             <Row label="Trade License No." value={c.tradeLicenseNo} />
@@ -400,7 +476,7 @@ function buildCompanyColumns(
     },
     {
       accessorKey: "GSTType",
-      header: "GST Type",
+      header: "GST Status",
       cell: ({ getValue }) => (
         <span className="text-muted-foreground text-xs">
           {(getValue() as string) || "—"}
@@ -492,13 +568,35 @@ export default function CompanyMaster() {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
+      if (form.gstType === "Registered") {
+        if (!form.gstNumber.trim()) {
+          throw new Error("GST Number is required for registered companies");
+        }
+        if (!form.gstDate) {
+          throw new Error(
+            "GST Registration Date is required for registered companies",
+          );
+        }
+        if (!GSTIN_REGEX.test(form.gstNumber.trim().toUpperCase())) {
+          throw new Error("Enter a valid GSTIN");
+        }
+      }
+
       const url = editId
         ? `/api/company-master/${editId}`
         : "/api/company-master";
+      const payload = {
+        ...form,
+        gstNumber:
+          form.gstType === "Registered"
+            ? form.gstNumber.trim().toUpperCase()
+            : "",
+        gstDate: form.gstType === "Registered" ? form.gstDate : "",
+      };
       const res = await fetchWithAuth(url, {
         method: editId ? "PUT" : "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+        body: JSON.stringify(payload),
       });
       if (!res.ok) {
         const e = await res.json().catch(() => ({}));
@@ -584,7 +682,21 @@ export default function CompanyMaster() {
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  const fi = (label: string, key: keyof Company, type = "text", ph = "") => (
+  const setGstStatus = (value: string) => {
+    setForm((c) => ({
+      ...c,
+      gstType: value,
+      ...(value === "Unregistered" ? { gstNumber: "", gstDate: "" } : {}),
+    }));
+  };
+
+  const fi = (
+    label: string,
+    key: keyof Company,
+    type = "text",
+    ph = "",
+    options?: { disabled?: boolean; title?: string; required?: boolean },
+  ) => (
     <div key={key}>
       <label className="block text-xs font-medium text-muted-foreground mb-1">
         {label}
@@ -594,8 +706,16 @@ export default function CompanyMaster() {
         value={form[key] as string}
         onChange={(e) => setForm((c) => ({ ...c, [key]: e.target.value }))}
         placeholder={ph || label}
-        className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all"
+        disabled={options?.disabled}
+        required={options?.required}
+        title={options?.title}
+        className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary transition-all disabled:bg-muted/60 disabled:text-muted-foreground disabled:cursor-not-allowed"
       />
+      {options?.disabled && options?.title && (
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          {options.title}
+        </p>
+      )}
     </div>
   );
 
@@ -881,9 +1001,36 @@ export default function CompanyMaster() {
                       GST Details
                     </p>
                   </div>
-                  {se("GST Type", "gstType", GST_TYPES)}
-                  {fi("GST Number", "gstNumber", "text", "22AAAAA0000A1Z5")}
-                  {fi("GST Registration Date", "gstDate", "date")}
+                  <div>
+                    <label className="block text-xs font-medium text-muted-foreground mb-1">
+                      GST Status
+                    </label>
+                    <select
+                      value={form.gstType}
+                      onChange={(e) => setGstStatus(e.target.value)}
+                      className="w-full px-3 py-2 text-sm rounded-lg border border-border bg-background text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 focus:border-primary"
+                    >
+                      {GST_STATUSES.map((o) => (
+                        <option key={o}>{o}</option>
+                      ))}
+                    </select>
+                  </div>
+                  {fi("GST Number", "gstNumber", "text", "Enter GSTIN", {
+                    disabled: form.gstType !== "Registered",
+                    title: "Available only for registered companies",
+                    required: form.gstType === "Registered",
+                  })}
+                  {fi(
+                    "GST Registration Date",
+                    "gstDate",
+                    "date",
+                    "Select Registration Date",
+                    {
+                      disabled: form.gstType !== "Registered",
+                      title: "Available only for registered companies",
+                      required: form.gstType === "Registered",
+                    },
+                  )}
 
                   <div className="col-span-full pt-2">
                     <p className="text-xs font-heading font-semibold text-muted-foreground uppercase tracking-widest mb-3 border-b border-border pb-1">
