@@ -296,6 +296,12 @@ export function dbToRecord(row: any): ExpenseRecord {
         return [];
       }
     })(),
+    billStatus: (row.EBillStatus as any) ?? null,
+    totalPaid: row.ETotalPaid != null ? parseFloat(row.ETotalPaid) : undefined,
+    remainingAmount:
+      row.ERemainingAmount != null
+        ? parseFloat(row.ERemainingAmount)
+        : undefined,
   };
 }
 

@@ -23,6 +23,9 @@ import {
   Clock,
   AlertCircle,
   Edit,
+  FileText,
+  ArrowRight,
+  Wallet,
 } from "lucide-react";
 import { StatusBadge } from "@/components/StatusBadge";
 import { parseJsonArray } from "@/utils/parseJsonArray";
@@ -92,7 +95,8 @@ export function ExpenseBookingPreviewModal({
           {/* ── Section 1: Booking Info ── */}
           <div>
             <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-              <CalendarDays size={10} className="text-primary" /> Booking Information
+              <CalendarDays size={10} className="text-primary" /> Booking
+              Information
             </p>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-4">
               <div className="space-y-0.5">
@@ -116,7 +120,9 @@ export function ExpenseBookingPreviewModal({
                   Document Type
                 </p>
                 <p className="text-sm font-medium truncate">
-                  {previewRecord.docTypeName || previewRecord.materialCategory || "—"}
+                  {previewRecord.docTypeName ||
+                    previewRecord.materialCategory ||
+                    "—"}
                 </p>
               </div>
               <div className="space-y-0.5">
@@ -248,18 +254,23 @@ export function ExpenseBookingPreviewModal({
                     </p>
                   </div>
                 )}
-                {!hasIgst && (previewRecord.cgstRate || 0) === 0 && (previewRecord.sgstRate || 0) === 0 && (
-                  <div className="flex items-center justify-between px-4 py-2.5">
-                    <p className="text-xs text-muted-foreground">GST</p>
-                    <p className="text-xs text-muted-foreground">Not applicable</p>
-                  </div>
-                )}
+                {!hasIgst &&
+                  (previewRecord.cgstRate || 0) === 0 &&
+                  (previewRecord.sgstRate || 0) === 0 && (
+                    <div className="flex items-center justify-between px-4 py-2.5">
+                      <p className="text-xs text-muted-foreground">GST</p>
+                      <p className="text-xs text-muted-foreground">
+                        Not applicable
+                      </p>
+                    </div>
+                  )}
                 {hasDiscount && (
                   <div className="flex items-center justify-between px-4 py-2.5 bg-red-500/5">
                     <p className="text-xs text-red-600 dark:text-red-400 flex items-center gap-1.5">
                       <TrendingUp size={10} />
                       Discount
-                      {previewRecord.discount?.type === "percentage" && previewRecord.discount?.value ? (
+                      {previewRecord.discount?.type === "percentage" &&
+                      previewRecord.discount?.value ? (
                         <span className="font-mono text-[10px] bg-red-500/10 px-1.5 py-0.5 rounded">
                           {previewRecord.discount.value}%
                         </span>
@@ -286,7 +297,8 @@ export function ExpenseBookingPreviewModal({
           {hasEmi && (
             <div className="border-t border-border/60 pt-4">
               <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-                <CreditCard size={10} className="text-primary" /> EMI / Installment Plan
+                <CreditCard size={10} className="text-primary" /> EMI /
+                Installment Plan
               </p>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div className="bg-violet-500/5 border border-violet-500/20 rounded-xl p-3 text-center">
@@ -363,33 +375,35 @@ export function ExpenseBookingPreviewModal({
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-border/50">
-                        {(previewRecord.grnItems as GRNItemLine[]).map((item, idx) => (
-                          <tr key={idx} className="hover:bg-muted/20">
-                            <td className="px-3 py-2.5 font-medium max-w-[140px] truncate">
-                              {item.itemName || `Item ${idx + 1}`}
-                            </td>
-                            <td className="px-3 py-2.5 text-right font-mono text-muted-foreground">
-                              {item.orderedQty}
-                            </td>
-                            <td className="px-3 py-2.5 text-right font-mono text-emerald-600 dark:text-emerald-400 font-semibold">
-                              {item.receivedQty}
-                            </td>
-                            <td className="px-3 py-2.5 text-right font-mono hidden sm:table-cell">
-                              <span
-                                className={
-                                  item.remainingQty > 0
-                                    ? "text-amber-600 dark:text-amber-400"
-                                    : "text-muted-foreground"
-                                }
-                              >
-                                {item.remainingQty}
-                              </span>
-                            </td>
-                            <td className="px-3 py-2.5 text-muted-foreground hidden sm:table-cell">
-                              {item.uom || "—"}
-                            </td>
-                          </tr>
-                        ))}
+                        {(previewRecord.grnItems as GRNItemLine[]).map(
+                          (item, idx) => (
+                            <tr key={idx} className="hover:bg-muted/20">
+                              <td className="px-3 py-2.5 font-medium max-w-[140px] truncate">
+                                {item.itemName || `Item ${idx + 1}`}
+                              </td>
+                              <td className="px-3 py-2.5 text-right font-mono text-muted-foreground">
+                                {item.orderedQty}
+                              </td>
+                              <td className="px-3 py-2.5 text-right font-mono text-emerald-600 dark:text-emerald-400 font-semibold">
+                                {item.receivedQty}
+                              </td>
+                              <td className="px-3 py-2.5 text-right font-mono hidden sm:table-cell">
+                                <span
+                                  className={
+                                    item.remainingQty > 0
+                                      ? "text-amber-600 dark:text-amber-400"
+                                      : "text-muted-foreground"
+                                  }
+                                >
+                                  {item.remainingQty}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2.5 text-muted-foreground hidden sm:table-cell">
+                                {item.uom || "—"}
+                              </td>
+                            </tr>
+                          ),
+                        )}
                       </tbody>
                     </table>
                   </div>
@@ -397,7 +411,254 @@ export function ExpenseBookingPreviewModal({
               </div>
             )}
 
-          {/* ── Section 6: Billing Terms ── */}
+          {/* ── Section 6: Invoice & Allocation ── */}
+          {(previewRecord.vendorInvoiceNo ||
+            previewRecord.costCenter ||
+            previewRecord.glAccount ||
+            previewRecord.workDoneRef ||
+            (previewRecord.additionalCharges &&
+              previewRecord.additionalCharges.length > 0)) && (
+            <div className="border-t border-border/60 pt-4">
+              <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
+                <FileText size={10} className="text-primary" /> Invoice &amp;
+                Allocation
+              </p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-4 gap-y-3">
+                {previewRecord.vendorInvoiceNo && (
+                  <div className="space-y-0.5">
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                      Vendor Invoice No
+                    </p>
+                    <p className="text-sm font-mono font-semibold">
+                      {previewRecord.vendorInvoiceNo}
+                    </p>
+                  </div>
+                )}
+                {previewRecord.vendorInvoiceDate && (
+                  <div className="space-y-0.5">
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                      Vendor Invoice Date
+                    </p>
+                    <p className="text-sm font-medium">
+                      {previewRecord.vendorInvoiceDate}
+                    </p>
+                  </div>
+                )}
+                {previewRecord.costCenter && (
+                  <div className="space-y-0.5">
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                      Cost Centre
+                    </p>
+                    <p className="text-sm font-medium">
+                      {previewRecord.costCenter}
+                    </p>
+                  </div>
+                )}
+                {previewRecord.glAccount && (
+                  <div className="space-y-0.5">
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                      GL Account
+                    </p>
+                    <p className="text-sm font-medium">
+                      {previewRecord.glAccount}
+                    </p>
+                  </div>
+                )}
+                {previewRecord.workDoneRef && (
+                  <div className="space-y-0.5">
+                    <p className="text-[10px] text-muted-foreground uppercase tracking-wider">
+                      Work Done Ref
+                    </p>
+                    <p className="text-sm font-mono font-semibold text-violet-600 dark:text-violet-400">
+                      {previewRecord.workDoneRef}
+                    </p>
+                  </div>
+                )}
+              </div>
+              {previewRecord.additionalCharges &&
+                previewRecord.additionalCharges.length > 0 && (
+                  <div className="mt-3 rounded-xl border border-border overflow-hidden">
+                    <p className="text-[10px] uppercase tracking-wider text-muted-foreground px-3 py-2 bg-muted/30 border-b border-border">
+                      Additional Charges
+                    </p>
+                    <div className="divide-y divide-border/50">
+                      {previewRecord.additionalCharges.map((c, i) => (
+                        <div
+                          key={i}
+                          className="flex items-center justify-between px-3 py-2"
+                        >
+                          <span className="text-xs text-foreground">
+                            {c.label || `Charge ${i + 1}`}
+                          </span>
+                          <span className="font-mono text-xs font-semibold">
+                            ₹{fmt(c.amount || 0)}
+                          </span>
+                        </div>
+                      ))}
+                      <div className="flex items-center justify-between px-3 py-2 bg-muted/20">
+                        <span className="text-xs font-semibold">
+                          Total Additional
+                        </span>
+                        <span className="font-mono text-xs font-bold">
+                          ₹
+                          {fmt(
+                            previewRecord.additionalCharges.reduce(
+                              (s, c) => s + (c.amount || 0),
+                              0,
+                            ),
+                          )}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                )}
+            </div>
+          )}
+
+          {/* ── Section 7: Bill Status & Payment Summary ── */}
+          {previewRecord.billStatus && (
+            <div className="border-t border-border/60 pt-4">
+              <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
+                <Wallet size={10} className="text-primary" /> Bill Status
+              </p>
+              <div className="flex flex-wrap gap-3 mb-3">
+                <div
+                  className={`flex items-center gap-1.5 text-xs px-3 py-2 rounded-xl border font-semibold ${
+                    previewRecord.billStatus === "Paid"
+                      ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400"
+                      : previewRecord.billStatus === "Partially Paid"
+                        ? "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400"
+                        : "bg-red-500/10 border-red-500/20 text-red-700 dark:text-red-400"
+                  }`}
+                >
+                  {previewRecord.billStatus === "Paid" ? (
+                    <CheckCircle2 size={11} />
+                  ) : previewRecord.billStatus === "Partially Paid" ? (
+                    <Clock size={11} />
+                  ) : (
+                    <AlertCircle size={11} />
+                  )}
+                  {previewRecord.billStatus}
+                </div>
+              </div>
+              <div className="rounded-xl border border-border overflow-hidden">
+                <div className="divide-y divide-border/60">
+                  <div className="flex items-center justify-between px-4 py-2.5 bg-muted/10">
+                    <p className="text-xs text-muted-foreground">Net Payable</p>
+                    <p className="font-mono text-sm font-semibold">
+                      ₹{fmt(previewRecord.netAmount ?? 0)}
+                    </p>
+                  </div>
+                  {(previewRecord.totalPaid ?? 0) > 0 && (
+                    <div className="flex items-center justify-between px-4 py-2.5">
+                      <p className="text-xs text-emerald-600 dark:text-emerald-400">
+                        Total Paid
+                      </p>
+                      <p className="font-mono text-sm text-emerald-600 dark:text-emerald-400 font-semibold">
+                        ₹{fmt(previewRecord.totalPaid ?? 0)}
+                      </p>
+                    </div>
+                  )}
+                  {(previewRecord.remainingAmount ?? 0) > 0 && (
+                    <div className="flex items-center justify-between px-4 py-2.5 bg-amber-500/5">
+                      <p className="text-xs text-amber-600 dark:text-amber-400">
+                        Remaining
+                      </p>
+                      <p className="font-mono text-sm text-amber-600 dark:text-amber-400 font-semibold">
+                        ₹{fmt(previewRecord.remainingAmount ?? 0)}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Section 7b: Traceability Chain ── */}
+          <div className="border-t border-border/60 pt-4">
+            <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
+              <ArrowRight size={10} className="text-primary" /> Document Chain
+            </p>
+            <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+              {previewRecord.workDoneRef && (
+                <>
+                  <span className="bg-violet-500/10 border border-violet-500/20 text-violet-700 dark:text-violet-400 px-2.5 py-1.5 rounded-lg font-mono font-semibold">
+                    WD: {previewRecord.workDoneRef}
+                  </span>
+                  <ArrowRight
+                    size={10}
+                    className="text-muted-foreground shrink-0"
+                  />
+                </>
+              )}
+              {(previewRecord.purchaseOrderId ||
+                previewRecord.eSourceType === "PO" ||
+                previewRecord.eSourceType === "WO_PO") && (
+                <>
+                  <span className="bg-blue-500/10 border border-blue-500/20 text-blue-700 dark:text-blue-400 px-2.5 py-1.5 rounded-lg font-mono font-semibold">
+                    {previewRecord.eSourceType === "WO_PO" ? "WO_PO" : "PO"}
+                    {previewRecord.purchaseOrderId
+                      ? ` #${previewRecord.purchaseOrderId}`
+                      : ""}
+                  </span>
+                  <ArrowRight
+                    size={10}
+                    className="text-muted-foreground shrink-0"
+                  />
+                </>
+              )}
+              {previewRecord.eSourceType === "GRN" &&
+                previewRecord.eSourceId && (
+                  <>
+                    <span className="bg-teal-500/10 border border-teal-500/20 text-teal-700 dark:text-teal-400 px-2.5 py-1.5 rounded-lg font-mono font-semibold">
+                      GRN #{previewRecord.eSourceId}
+                    </span>
+                    <ArrowRight
+                      size={10}
+                      className="text-muted-foreground shrink-0"
+                    />
+                  </>
+                )}
+              {previewRecord.bookingReference && (
+                <>
+                  <span className="bg-primary/10 border border-primary/20 text-primary px-2.5 py-1.5 rounded-lg font-mono font-semibold">
+                    {previewRecord.bookingReference}
+                  </span>
+                  {previewRecord.billStatus && (
+                    <ArrowRight
+                      size={10}
+                      className="text-muted-foreground shrink-0"
+                    />
+                  )}
+                </>
+              )}
+              {previewRecord.billStatus && (
+                <span
+                  className={`px-2.5 py-1.5 rounded-lg font-semibold border ${
+                    previewRecord.billStatus === "Paid"
+                      ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400"
+                      : previewRecord.billStatus === "Partially Paid"
+                        ? "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400"
+                        : "bg-muted border-border text-muted-foreground"
+                  }`}
+                >
+                  {previewRecord.billStatus}
+                </span>
+              )}
+              {!previewRecord.workDoneRef &&
+                !previewRecord.purchaseOrderId &&
+                previewRecord.eSourceType !== "GRN" &&
+                previewRecord.eSourceType !== "PO" &&
+                previewRecord.eSourceType !== "WO_PO" &&
+                !previewRecord.billStatus && (
+                  <span className="text-muted-foreground italic">
+                    No chain data yet
+                  </span>
+                )}
+            </div>
+          </div>
+
+          {/* ── Section 8: Billing Terms ── */}
           {previewRecord.billingTerms && (
             <div className="border-t border-border/60 pt-4">
               <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
@@ -407,7 +668,10 @@ export function ExpenseBookingPreviewModal({
                 {billingTerms.length > 0 ? (
                   <div className="space-y-1.5">
                     {billingTerms.map((t: any, idx: number) => (
-                      <div key={t?.BillingTermID ?? t?.id ?? idx} className="flex flex-col gap-0.5">
+                      <div
+                        key={t?.BillingTermID ?? t?.id ?? idx}
+                        className="flex flex-col gap-0.5"
+                      >
                         <span className="font-medium">
                           {t?.TermName || t?.Name || t?.name || "Billing Term"}
                         </span>
@@ -424,7 +688,7 @@ export function ExpenseBookingPreviewModal({
             </div>
           )}
 
-          {/* ── Section 7: Remarks ── */}
+          {/* ── Section 9: Remarks ── */}
           {previewRecord.remarks && (
             <div className="border-t border-border/60 pt-4">
               <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
@@ -436,15 +700,18 @@ export function ExpenseBookingPreviewModal({
             </div>
           )}
 
-          {/* ── Section 8: Approval Status ── */}
+          {/* ── Section 10: Approval Status ── */}
           <div className="border-t border-border/60 pt-4">
             <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-3 flex items-center gap-1.5">
-              <CheckCircle2 size={10} className="text-primary" /> Approval Status
+              <CheckCircle2 size={10} className="text-primary" /> Approval
+              Status
             </p>
             <div className="flex flex-wrap items-center gap-3">
               <div className="flex items-center gap-2 bg-muted/30 border border-border rounded-xl px-4 py-2.5">
                 <StatusBadge status={previewRecord.status} />
-                <span className="text-xs text-muted-foreground">Current Status</span>
+                <span className="text-xs text-muted-foreground">
+                  Current Status
+                </span>
               </div>
               {previewRecord.status === "Approved" && (
                 <div className="flex items-center gap-1.5 text-[10px] text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-3 py-2 rounded-xl">
@@ -470,10 +737,21 @@ export function ExpenseBookingPreviewModal({
             ID: <span className="font-mono">{previewRecord.id || "—"}</span>
           </p>
           <div className="flex gap-2 w-full sm:w-auto">
-            <Button variant="outline" className="flex-1 sm:flex-none h-8 text-xs" onClick={() => { onClose(); onEdit(previewRecord); }}>
+            <Button
+              variant="outline"
+              className="flex-1 sm:flex-none h-8 text-xs"
+              onClick={() => {
+                onClose();
+                onEdit(previewRecord);
+              }}
+            >
               <Edit size={11} className="mr-1.5" /> Edit
             </Button>
-            <Button variant="outline" className="flex-1 sm:flex-none h-8 text-xs" onClick={onClose}>
+            <Button
+              variant="outline"
+              className="flex-1 sm:flex-none h-8 text-xs"
+              onClick={onClose}
+            >
               Close
             </Button>
           </div>

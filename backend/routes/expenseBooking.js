@@ -272,6 +272,7 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           eb.ETCId, eb.ETCName, eb.ETCText,
           eb.EVendorInvoiceNo, eb.EVendorInvoiceDate,
           eb.EAdditionalCharges, eb.ECostCenter, eb.EGLAccount, eb.EWorkDoneRef,
+          eb.EBillStatus, eb.ETotalPaid, eb.ERemainingAmount,
           CASE
             WHEN t.Prefix IS NOT NULL AND t.Description IS NOT NULL THEN t.Prefix + N' — ' + t.Description
             WHEN t.Prefix IS NOT NULL THEN t.Prefix
@@ -336,6 +337,37 @@ router.get(
 
 // ─── GET /:id ─────────────────────────────────────────────────────────────────
 router.get("/chain-status", handleChainStatus);
+
+router.get("/:id/can-delete", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id) || id <= 0)
+    return res.status(400).json({ error: "Invalid id" });
+
+  try {
+    const pool = getPool();
+    const refCheck = await pool.request().input("Eid", sql.Int, id).query(`
+      SELECT COUNT(*) AS cnt
+      FROM dbo.DebitNote
+      WHERE bill_id = @Eid
+    `);
+
+    const linkedDebitNoteCount = Number(refCheck.recordset[0]?.cnt) || 0;
+    if (linkedDebitNoteCount > 0) {
+      const reason =
+        "This booking cannot be deleted because it has linked Debit Notes. Please delete or unlink them first.";
+      return res.json({
+        deletable: false,
+        reason,
+        linkedDebitNoteCount,
+      });
+    }
+
+    res.json({ deletable: true });
+  } catch (err) {
+    console.error("Can-delete check error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 router.get("/:id", async (req, res) => {
   const id = parseInt(req.params.id, 10);
@@ -1320,6 +1352,26 @@ router.delete("/:id", async (req, res) => {
 
   try {
     const pool = getPool();
+
+    const refCheck = await pool
+      .request()
+      .input("Eid", sql.Int, numericId).query(`
+        SELECT COUNT(*) AS cnt
+        FROM dbo.DebitNote
+        WHERE bill_id = @Eid
+      `);
+
+    const linkedDebitNoteCount = Number(refCheck.recordset[0]?.cnt) || 0;
+    if (linkedDebitNoteCount > 0) {
+      const message =
+        "This booking cannot be deleted because it has linked Debit Notes. Please delete or unlink them first.";
+      return res.status(409).json({
+        error: message,
+        message,
+        linkedDebitNoteCount,
+      });
+    }
+
     await pool
       .request()
       .input("Eid", sql.Int, numericId)
@@ -1331,6 +1383,11 @@ router.delete("/:id", async (req, res) => {
     res.json({ message: "Expense deleted successfully" });
   } catch (err) {
     console.error("Delete error:", err.message);
+    if (err.number === 547 && String(err.message).includes("FK_DN_Bill")) {
+      const message =
+        "This booking cannot be deleted because it has linked Debit Notes. Please delete or unlink them first.";
+      return res.status(409).json({ error: message, message });
+    }
     res.status(500).json({ error: err.message });
   }
 });
@@ -1406,6 +1463,100 @@ router.put("/:id/reject", async (req, res) => {
 // ─── GET /chain-status ────────────────────────────────────────────────────────
 // Used by PO / WO / GRN detail panels to show "Expense Booked ✓ / Paid ✓" badges.
 // Query params: sourceType (PO | WO | GRN), sourceId (numeric DB id)
+// ─── GET /:id/payment-summary ─────────────────────────────────────────────────
+// Returns aggregated payment info for a single expense booking.
+// Used by the traceability chain panel in the preview modal.
+router.get("/:id/payment-summary", async (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  if (!Number.isFinite(id) || id <= 0)
+    return res.status(400).json({ error: "Invalid id" });
+
+  try {
+    const pool = getPool();
+
+    const ebRes = await pool.request().input("Eid", sql.Int, id).query(`
+        SELECT
+          eb.Eid, eb.EDocNo, eb.EStatus, eb.EBillStatus,
+          eb.ENetAmount, eb.EAmount, eb.ETotalPaid, eb.ERemainingAmount,
+          eb.ESourceType, eb.ESourceId, eb.EWorkDoneRef,
+          eb.EVendorInvoiceNo, eb.EVendorInvoiceDate,
+          -- GRN info
+          grn.GRNNo, grn.GRNID,
+          -- PO info via GRN or direct
+          po.PurchaseOrderNo, po.PurchaseOrderID,
+          po.SourceMRDocNo
+        FROM dbo.ExpenseBooking eb
+        LEFT JOIN dbo.GoodsReceiptNotes grn
+          ON eb.ESourceType = 'GRN' AND grn.GRNID = TRY_CAST(eb.ESourceId AS INT)
+        LEFT JOIN dbo.PurchaseOrders po
+          ON (
+            (eb.ESourceType = 'GRN' AND po.PurchaseOrderID = grn.POID)
+            OR (eb.ESourceType IN ('PO','WO_PO','WORK_DONE') AND po.PurchaseOrderID = TRY_CAST(eb.ESourceId AS INT))
+          )
+        WHERE eb.Eid = @Eid
+      `);
+
+    if (!ebRes.recordset.length)
+      return res.status(404).json({ error: "Not found" });
+
+    const eb = ebRes.recordset[0];
+    const netAmount = parseFloat(eb.ENetAmount ?? eb.EAmount ?? 0) || 0;
+
+    // Fetch approved payments against this booking
+    const payRes = await pool
+      .request()
+      .input("PExpenseRef", sql.NVarChar(100), eb.EDocNo).query(`
+        SELECT
+          PPaymentID, DocNo, PDate, PMode, PAmount, Status,
+          PPaymentName, PChequeNo, PNeftNumber, PUpiTransactionId
+        FROM dbo.NewPayment
+        WHERE PExpenseRef = @PExpenseRef
+        ORDER BY PPaymentID ASC
+      `);
+
+    const payments = payRes.recordset.map((p) => ({
+      id: p.PPaymentID,
+      docNo: p.DocNo,
+      date: p.PDate ? String(p.PDate).slice(0, 10) : null,
+      mode: p.PMode,
+      amount: parseFloat(p.PAmount) || 0,
+      status: p.Status,
+      ref: p.PChequeNo || p.PNeftNumber || p.PUpiTransactionId || null,
+    }));
+
+    const totalPaid = parseFloat(eb.ETotalPaid ?? 0) || 0;
+    const remaining = parseFloat(eb.ERemainingAmount ?? netAmount) || 0;
+
+    res.json({
+      expenseId: eb.Eid,
+      docNo: eb.EDocNo,
+      status: eb.EStatus,
+      billStatus:
+        eb.EBillStatus || (payments.length === 0 ? "Payment Due" : null),
+      netAmount,
+      totalPaid,
+      remaining,
+      payments,
+      chain: {
+        mrDocNo: eb.SourceMRDocNo || null,
+        workDoneRef: eb.EWorkDoneRef || null,
+        poNo: eb.PurchaseOrderNo || null,
+        poId: eb.PurchaseOrderID || null,
+        grnNo: eb.GRNNo || null,
+        grnId: eb.GRNID || null,
+        expenseDocNo: eb.EDocNo,
+        vendorInvoiceNo: eb.EVendorInvoiceNo || null,
+        vendorInvoiceDate: eb.EVendorInvoiceDate
+          ? String(eb.EVendorInvoiceDate).slice(0, 10)
+          : null,
+      },
+    });
+  } catch (err) {
+    console.error("payment-summary error:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── GET /:id/grns ────────────────────────────────────────────────────────────
 // Returns GRNs linked to an expense booking.
 // Two strategies:
