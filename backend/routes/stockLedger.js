@@ -142,7 +142,7 @@ router.get("/", cache("stock-ledger", 120), async (req, res) => {
     const fromJoin = `
       FROM dbo.StockLedger sl
       LEFT JOIN dbo.Item_Master_Group img
-        ON img.M_Id = TRY_CONVERT(uniqueidentifier, CONVERT(NVARCHAR(50), sl.ItemID))
+        ON img.M_Id = TRY_CAST(sl.ItemID AS INT)
       LEFT JOIN dbo.Item_Master_Group parent
         ON parent.M_Id = img.Parent_Id
       ${uomJoin}
