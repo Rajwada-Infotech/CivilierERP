@@ -5,6 +5,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { type DbItem } from "@/api/itemMasterApi";
 import { type DbActivity } from "@/api/activityMasterApi";
+import { ApprovalActions } from "@/components/ApprovalActions";
 import {
   FileText,
   Save,
@@ -15,11 +16,9 @@ import {
   RefreshCw,
   X,
   Edit3,
-  CheckCircle2,
-  Send,
-  XCircle,
   Package,
   Settings2,
+  Printer,
 } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
@@ -234,7 +233,6 @@ const buildPayload = (
   form: FormState,
   items: BoqItem[],
   activities: BoqActivity[],
-  finYear?: string,
 ) => ({
   BoqNo: form.BoqNo || undefined,
   BoqDate: form.BoqDate,
@@ -243,7 +241,7 @@ const buildPayload = (
   Description: form.Description,
   Remarks: form.Remarks,
   DocTypeId: form.DocTypeId ? Number(form.DocTypeId) : null,
-  finYear,
+  finYear: form.FinYear || undefined,
   Status: form.Status,
   BoqItems: items.map((it) => ({
     itemId: it.itemId,
@@ -1117,17 +1115,22 @@ interface FormState {
   BoqDate: string;
   CompanyId: string;
   ProjectId: string;
+  FinYear: string;
   Description: string;
   Remarks: string;
   DocTypeId: string;
   Status: "Draft" | "Pending" | "Approved" | "Rejected";
 }
 
-const defaultForm = (): FormState => ({
+const canEditBoq = (status?: string | null) =>
+  !status || status === "Draft" || status === "Rejected";
+
+const defaultForm = (finYear?: string): FormState => ({
   BoqNo: "",
   BoqDate: new Date().toISOString().slice(0, 10),
   CompanyId: "",
   ProjectId: "",
+  FinYear: finYear ?? "",
   Description: "",
   Remarks: "",
   DocTypeId: "",
@@ -1139,6 +1142,7 @@ const recordToForm = (r: BoqRecord): FormState => ({
   BoqDate: r.BoqDate?.slice(0, 10) ?? "",
   CompanyId: String(r.CompanyId ?? ""),
   ProjectId: String(r.ProjectId ?? ""),
+  FinYear: (r as any).FinYear ?? "",
   Description: r.Description ?? "",
   Remarks: r.Remarks ?? "",
   DocTypeId: String(r.DocTypeId ?? ""),
@@ -1157,7 +1161,8 @@ interface FormModalProps {
   uoms: UomOption[];
   itemOptions: ItemOption[];
   activityOptions: ActivityOption[];
-  finYear?: string;
+  finYears: { id?: number | string; year: string; status?: string }[];
+  activeFinYear?: string;
   onClose: () => void;
   onSaved: () => void;
 }
@@ -1170,13 +1175,16 @@ const FormModal: React.FC<FormModalProps> = ({
   uoms,
   itemOptions,
   activityOptions,
-  finYear,
+  finYears,
+  activeFinYear,
   onClose,
   onSaved,
 }) => {
   const isEdit = record !== null;
   const [form, setForm] = useState<FormState>(
-    isEdit ? recordToForm(record!) : defaultForm(),
+    isEdit
+      ? { ...recordToForm(record!), FinYear: (record as any)?.FinYear ?? activeFinYear ?? "" }
+      : defaultForm(activeFinYear),
   );
   const [items, setItems] = useState<BoqItem[]>(
     (record?.BoqItems ?? []).map(rowToItem),
@@ -1193,18 +1201,31 @@ const FormModal: React.FC<FormModalProps> = ({
     setErrors((p) => ({ ...p, [k]: "" }));
   };
 
-  const handleDocTypeChange = async (val: string) => {
-    set("DocTypeId", val);
-    set("BoqNo", "");
-    if (!val || isEdit) return;
+  const refreshBoqNo = async (docTypeId: string, finYear: string) => {
+    if (!docTypeId) {
+      set("BoqNo", "");
+      return;
+    }
     try {
       const nextDocNo = await fetchNextDocNumber(
-        Number(val),
+        Number(docTypeId),
         finYear || undefined,
       );
       set("BoqNo", nextDocNo);
     } catch {
       toast.error("Failed to generate BOQ number preview");
+    }
+  };
+
+  const handleDocTypeChange = async (value: string) => {
+    set("DocTypeId", value);
+    await refreshBoqNo(value, form.FinYear);
+  };
+
+  const handleFinYearChange = async (value: string) => {
+    set("FinYear", value);
+    if (form.DocTypeId) {
+      await refreshBoqNo(form.DocTypeId, value);
     }
   };
 
@@ -1214,6 +1235,7 @@ const FormModal: React.FC<FormModalProps> = ({
     if (!form.CompanyId) e.CompanyId = "Company is required";
     if (!form.ProjectId) e.ProjectId = "Project is required";
     if (!form.DocTypeId) e.DocTypeId = "Document type is required";
+    if (!form.FinYear) e.FinYear = "Financial year is required";
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -1222,7 +1244,7 @@ const FormModal: React.FC<FormModalProps> = ({
     if (!validate()) return;
     setSaving(true);
     try {
-      const payload = buildPayload(form, items, activities, finYear);
+      const payload = buildPayload(form, items, activities);
       if (isEdit) {
         await apiFetch(`/boq/${record!.BoqID}`, {
           method: "PUT",
@@ -1357,6 +1379,27 @@ const FormModal: React.FC<FormModalProps> = ({
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+              <Field label="Financial Year" required error={errors.FinYear}>
+                <Select
+                  value={form.FinYear}
+                  onValueChange={handleFinYearChange}
+                >
+                  <SelectTrigger
+                    className={`h-10 ${errors.FinYear ? "border-destructive" : ""}`}
+                  >
+                    <SelectValue placeholder="Select financial year" />
+                  </SelectTrigger>
+                  <SelectContent className="z-[300]">
+                    {finYears.map((fy) => (
+                      <SelectItem key={String(fy.id ?? fy.year)} value={fy.year}>
+                        {fy.year}
+                        {fy.status === "Active" ? " - Active" : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+
               <Field label="Document Type" required error={errors.DocTypeId}>
                 <Select
                   value={form.DocTypeId}
@@ -1554,6 +1597,7 @@ interface DetailModalProps {
   uoms: UomOption[];
   onClose: () => void;
   onEdit: () => void;
+  onPrint: () => void;
   onRefresh: () => void;
 }
 
@@ -1562,36 +1606,11 @@ const DetailModal: React.FC<DetailModalProps> = ({
   uoms,
   onClose,
   onEdit,
+  onPrint,
   onRefresh,
 }) => {
   const [lineTab, setLineTab] = useState<"items" | "activities">("items");
   const [acting, setActing] = useState(false);
-
-  const doTransition = async (
-    action: "submit" | "approve" | "reject",
-    note?: string,
-  ) => {
-    setActing(true);
-    try {
-      await apiFetch(`/boq/${record.BoqID}/${action}`, {
-        method: "PUT",
-        body: JSON.stringify(note ? { note } : {}),
-      });
-      toast.success(
-        action === "submit"
-          ? "BOQ submitted for approval"
-          : action === "approve"
-            ? "BOQ approved"
-            : "BOQ rejected",
-      );
-      onRefresh();
-      onClose();
-    } catch (err: any) {
-      toast.error(err.message ?? `${action} failed`);
-    } finally {
-      setActing(false);
-    }
-  };
 
   const doDelete = async () => {
     if (!window.confirm("Delete this BOQ and all its items/activities?"))
@@ -1685,39 +1704,16 @@ const DetailModal: React.FC<DetailModalProps> = ({
               }}
             >
               <span style={{ fontSize: 13, fontWeight: 500, flex: 1 }}>
-                {record.Status === "Pending" &&
-                  "⏳ Awaiting approval — you can approve or reject below."}
+                {record.Status === "Pending" ? (
+                  "Awaiting admin approval from the Approval Inbox."
+                ) : null}
+                {false && record.Status === "Pending" &&
+                  "Awaiting approval."}
                 {record.Status === "Approved" &&
                   `✓ Approved${record.ApprovedBy ? ` by ${record.ApprovedBy}` : ""}.`}
                 {record.Status === "Rejected" &&
                   `✕ Rejected${record.RejectedBy ? ` by ${record.RejectedBy}` : ""}${record.RejectionNote ? ` — ${record.RejectionNote}` : ""}.`}
               </span>
-              {record.Status === "Pending" && (
-                <div style={{ display: "flex", gap: 8 }}>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={acting}
-                    className="bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
-                    onClick={() => doTransition("approve")}
-                  >
-                    <CheckCircle2 size={13} className="mr-1.5" /> Approve
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    disabled={acting}
-                    className="bg-red-50 text-red-700 border-red-200 hover:bg-red-100"
-                    onClick={() => {
-                      const n =
-                        window.prompt("Rejection note (optional):") ?? "";
-                      doTransition("reject", n);
-                    }}
-                  >
-                    <XCircle size={13} className="mr-1.5" /> Reject
-                  </Button>
-                </div>
-              )}
             </div>
           )}
 
@@ -1793,20 +1789,24 @@ const DetailModal: React.FC<DetailModalProps> = ({
             <Trash2 size={14} className="mr-1.5" /> Delete
           </Button>
           <div style={{ display: "flex", gap: 8 }}>
+            <Button variant="outline" onClick={onPrint} className="gap-1.5">
+              <Printer size={14} /> Print
+            </Button>
             <Button variant="outline" onClick={onClose}>
               Close
             </Button>
-            {record.Status === "Draft" && (
+            {canEditBoq(record.Status) && (
               <>
                 <Button variant="secondary" disabled={acting} onClick={onEdit}>
                   <Edit3 size={14} className="mr-1.5" /> Edit
                 </Button>
-                <Button
-                  disabled={acting}
-                  onClick={() => doTransition("submit")}
-                >
-                  Submit for Approval <Send size={13} className="ml-1.5" />
-                </Button>
+                <ApprovalActions
+                  status={record.Status}
+                  recordId={record.BoqID}
+                  endpoint="/api/boq"
+                  onSuccess={() => onRefresh()}
+                  submitOnly
+                />
               </>
             )}
           </div>
@@ -2077,12 +2077,120 @@ export default function BOQ() {
   };
 
   const openEdit = (r: BoqRecord) => {
+    if (!canEditBoq(r.Status)) {
+      toast.error("Only Draft or Rejected BOQs can be edited.");
+      return;
+    }
     setViewRecord(null);
     setEditRecord(r);
     setShowForm(true);
   };
 
   const statuses = ["All", "Draft", "Pending", "Approved", "Rejected"];
+
+  const handlePrint = (record: BoqRecord) => {
+    const items = Array.isArray(record.BoqItems) ? record.BoqItems : [];
+    const activities = Array.isArray(record.BoqActivities)
+      ? record.BoqActivities
+      : [];
+    const itemTotal = items.reduce(
+      (sum, row: any) =>
+        sum + (Number(row.amount ?? row.LineAmount ?? row.Amount) || 0),
+      0,
+    );
+    const activityTotal = activities.reduce(
+      (sum, row: any) =>
+        sum + (Number(row.amount ?? row.LineAmount ?? row.Amount) || 0),
+      0,
+    );
+    const renderRows = (rows: any[], type: "item" | "activity") =>
+      rows
+        .map((row, idx) => {
+          const name =
+            type === "item"
+              ? row.itemName ?? row.ItemName
+              : row.activityName ?? row.ActivityName;
+          const code =
+            type === "item"
+              ? row.itemCode ?? row.ItemCode
+              : row.activityCode ?? row.ActivityCode;
+          const qty = row.quantity ?? row.Quantity ?? "";
+          const uom = row.uomName ?? row.UomName ?? "";
+          const rate = Number(row.rate ?? row.Rate ?? 0);
+          const amount = Number(row.amount ?? row.LineAmount ?? row.Amount ?? 0);
+          return `<tr>
+            <td>${idx + 1}</td>
+            <td>${name || ""}</td>
+            <td>${code || ""}</td>
+            <td>${row.description ?? row.Description ?? ""}</td>
+            <td class="num">${qty}</td>
+            <td>${uom}</td>
+            <td class="num">${fmt(rate)}</td>
+            <td class="num">${fmt(amount)}</td>
+          </tr>`;
+        })
+        .join("");
+
+    const win = window.open("", "_blank", "width=980,height=720");
+    if (!win) return;
+    win.document.write(`<!doctype html>
+      <html>
+        <head>
+          <title>BOQ ${record.BoqNo || record.DocNo || record.BoqID}</title>
+          <style>
+            body { font-family: Arial, sans-serif; color: #111827; margin: 32px; }
+            .head { display:flex; justify-content:space-between; gap:24px; border-bottom:2px solid #111827; padding-bottom:16px; margin-bottom:20px; }
+            h1 { margin:0; font-size:22px; }
+            .muted { color:#6b7280; font-size:12px; }
+            .badge { display:inline-block; border:1px solid #d1d5db; border-radius:999px; padding:4px 10px; font-size:12px; font-weight:700; }
+            .grid { display:grid; grid-template-columns:repeat(3,1fr); gap:10px 18px; margin-bottom:18px; }
+            .label { font-size:10px; text-transform:uppercase; color:#6b7280; letter-spacing:.06em; }
+            .value { font-size:13px; font-weight:600; margin-top:3px; }
+            table { width:100%; border-collapse:collapse; margin-top:10px; font-size:12px; }
+            th, td { border:1px solid #d1d5db; padding:7px; vertical-align:top; }
+            th { background:#f3f4f6; text-align:left; font-size:10px; text-transform:uppercase; letter-spacing:.06em; }
+            .num { text-align:right; white-space:nowrap; }
+            .section { margin-top:18px; }
+            .total { display:flex; justify-content:flex-end; gap:28px; margin-top:16px; font-weight:700; }
+            @media print { body { margin: 18mm; } }
+          </style>
+        </head>
+        <body>
+          <div class="head">
+            <div>
+              <h1>Bill of Quantities</h1>
+              <div class="muted">${record.BoqNo || record.DocNo || `#${record.BoqID}`}</div>
+            </div>
+            <div><span class="badge">${record.Status || "Draft"}</span></div>
+          </div>
+          <div class="grid">
+            <div><div class="label">Company</div><div class="value">${record.CompanyName || ""}</div></div>
+            <div><div class="label">Project</div><div class="value">${record.ProjectName || ""}</div></div>
+            <div><div class="label">Date</div><div class="value">${fmtDate(record.BoqDate)}</div></div>
+            <div><div class="label">Created By</div><div class="value">${record.CreatedBy || ""}</div></div>
+            <div><div class="label">Document No</div><div class="value">${record.DocNo || record.BoqNo || ""}</div></div>
+            <div><div class="label">Total</div><div class="value">${fmt(record.TotalAmount || itemTotal + activityTotal)}</div></div>
+          </div>
+          ${record.Description ? `<p>${record.Description}</p>` : ""}
+          <div class="section">
+            <h3>Items</h3>
+            <table><thead><tr><th>#</th><th>Item</th><th>Code</th><th>Description</th><th>Qty</th><th>UOM</th><th>Rate</th><th>Amount</th></tr></thead><tbody>${renderRows(items, "item") || '<tr><td colspan="8">No items</td></tr>'}</tbody></table>
+          </div>
+          <div class="section">
+            <h3>Activities</h3>
+            <table><thead><tr><th>#</th><th>Activity</th><th>Code</th><th>Description</th><th>Qty</th><th>UOM</th><th>Rate</th><th>Amount</th></tr></thead><tbody>${renderRows(activities, "activity") || '<tr><td colspan="8">No activities</td></tr>'}</tbody></table>
+          </div>
+          <div class="total">
+            <span>Items: ${fmt(itemTotal)}</span>
+            <span>Activities: ${fmt(activityTotal)}</span>
+            <span>Grand Total: ${fmt(record.TotalAmount || itemTotal + activityTotal)}</span>
+          </div>
+        </body>
+      </html>`);
+    win.document.close();
+    win.focus();
+    setTimeout(() => win.print(), 250);
+  };
 
   const enrichedColumns = [
     ...COLUMNS,
@@ -2099,7 +2207,24 @@ export default function BOQ() {
           >
             <Eye size={14} />
           </Button>
-          {row.original.Status === "Draft" && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 w-8 p-0 text-violet-600"
+            onClick={async () => {
+              const full = await apiFetch(`/boq/${row.original.BoqID}`).catch(
+                () => row.original,
+              );
+              handlePrint({
+                ...full,
+                BoqItems: full.BoqItems ?? [],
+                BoqActivities: full.BoqActivities ?? [],
+              });
+            }}
+          >
+            <Printer size={14} />
+          </Button>
+          {canEditBoq(row.original.Status) && (
             <Button
               variant="ghost"
               size="sm"
@@ -2118,6 +2243,13 @@ export default function BOQ() {
               <Edit3 size={14} />
             </Button>
           )}
+          <ApprovalActions
+            status={row.original.Status}
+            recordId={row.original.BoqID}
+            endpoint="/api/boq"
+            onSuccess={() => loadList()}
+            submitOnly
+          />
         </div>
       ),
     },
@@ -2284,7 +2416,8 @@ export default function BOQ() {
           uoms={uoms}
           itemOptions={itemOptions}
           activityOptions={activityOptions}
-          finYear={activeFinYear}
+          finYears={finYears}
+          activeFinYear={activeFinYear}
           onClose={() => {
             setShowForm(false);
             setEditRecord(null);
@@ -2299,6 +2432,7 @@ export default function BOQ() {
           uoms={uoms}
           onClose={() => setViewRecord(null)}
           onEdit={() => openEdit(viewRecord)}
+          onPrint={() => handlePrint(viewRecord)}
           onRefresh={() => {
             setViewRecord(null);
             loadList();

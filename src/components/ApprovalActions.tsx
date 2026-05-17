@@ -104,6 +104,7 @@ export function ApprovalActions({
 
   const showSubmit =
     status === "Draft" ||
+    status === "Rejected" ||
     status === "Issued" ||
     status === "Partially Received";
   const showApproveReject = !submitOnly && status === "Pending" && approver;
