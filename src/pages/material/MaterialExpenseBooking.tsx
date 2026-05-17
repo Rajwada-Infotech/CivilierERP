@@ -144,6 +144,9 @@ interface POItem {
   GST?: GSTConfig | null;
   SourceWOId?: number | null;
   SourceWODocNo?: string | null;
+  SourceWDId?: number | null;
+  SourceWDDocNo?: string | null;
+  POType?: string | null;
 }
 interface WOItem {
   Id: number;
@@ -970,6 +973,7 @@ function DocSelectorPanel({
                   secondary={[
                     po.SupplierName,
                     po.SourceWODocNo ? `WO: ${po.SourceWODocNo}` : null,
+                    po.SourceWDDocNo ? `WD: ${po.SourceWDDocNo}` : null,
                     po.PODate?.slice(0, 10),
                   ]
                     .filter(Boolean)
@@ -1353,7 +1357,12 @@ export default function MaterialExpenseBooking() {
       setLoadingWOPO,
       (r) => {
         const all: POItem[] = Array.isArray(r) ? r : (r.data ?? []);
-        return all.filter((p) => p.SourceWOId != null);
+        return all.filter(
+          (p) =>
+            p.SourceWOId != null ||
+            p.SourceWDId != null ||
+            p.POType === "WO_PO",
+        );
       },
     );
     load<TodItem>("tod", "/api/document-type", setTodList, setLoadingTOD, (r) =>
@@ -1691,7 +1700,12 @@ export default function MaterialExpenseBooking() {
           apiFetch("/api/purchase-orders?limit=500")
             .then((r: any) => {
               const all: POItem[] = Array.isArray(r) ? r : (r.data ?? []);
-              const list = all.filter((p) => p.SourceWOId != null);
+              const list = all.filter(
+                (p) =>
+                  p.SourceWOId != null ||
+                  p.SourceWDId != null ||
+                  p.POType === "WO_PO",
+              );
               _mastersCache.woPO = list;
               tryBuildWOPO(list);
             })

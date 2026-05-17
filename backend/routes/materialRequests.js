@@ -85,7 +85,7 @@ router.get("/companies", authenticateToken, async (req, res) => {
     const result = await pool.request().query(`
       SELECT id, name, short_name
       FROM   dbo.enterprise
-      WHERE  business_type = 'E' AND (status IS NULL OR status = 'Active')
+      WHERE  business_type = 'C' AND (status IS NULL OR status = 'Active')
       ORDER  BY name
     `);
     res.json(result.recordset);
@@ -511,11 +511,9 @@ router.get("/:id/create-po-prefill", authenticateToken, async (req, res) => {
 
     const mr = header.recordset[0];
     if (mr.Status !== "Approved")
-      return res
-        .status(400)
-        .json({
-          error: `MR is ${mr.Status}. Only Approved MRs can generate a Normal PO.`,
-        });
+      return res.status(400).json({
+        error: `MR is ${mr.Status}. Only Approved MRs can generate a Normal PO.`,
+      });
 
     const items = await pool.request().input("id", sql.Int, id).query(`
         SELECT
