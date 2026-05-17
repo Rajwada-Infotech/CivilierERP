@@ -8,6 +8,8 @@ export type BookingStatus =
   | "Hold"
   | "Received";
 
+export type BillStatus = "Payment Due" | "Partially Paid" | "Paid";
+
 export type PageView = "list" | "form";
 
 export interface PurchaseOrder {
@@ -137,6 +139,14 @@ export interface ExpenseRecord {
   workDoneRef?: string;
   /** Additional charges: freight, insurance, etc. JSON array {label, amount} */
   additionalCharges?: { label: string; amount: number }[];
+
+  // ── Bill Status (Step 7 spec) ────────────────────────────────────────────────
+  /** Payment Due | Partially Paid | Paid — set by syncBillStatus after each payment */
+  billStatus?: BillStatus | null;
+  /** Sum of all Approved payments against this booking */
+  totalPaid?: number;
+  /** ENetAmount - totalPaid */
+  remainingAmount?: number;
 
   grnItems?: {
     itemName?: string;
