@@ -132,6 +132,8 @@ const ALL_ROUTES = [
   { path: "/api/typeofdoc", file: "./routes/typeofdoc" },
   { path: "/api/boq", file: "./routes/boq" },
   { path: "/api/app-version", file: "./routes/appVersion" },
+  { path: "/api/godowns", file: "./routes/godowns" },
+  { path: "/api/stock-transfers", file: "./routes/stockTransfers" },
 ];
 
 // ─── createApp ──────────────────────────────────────────────────────────────

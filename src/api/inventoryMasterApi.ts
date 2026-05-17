@@ -1,13 +1,11 @@
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 
-const BASE_URL = "/api/inventory-master";
+const BASE = "/api/inventory-master";
 
 export interface InventoryMasterRow {
-  AcquiringDate: string;
   ItemID: string;
-  ItemName: string;
+  ItemName: string | null;
   ItemGroupName: string | null;
-  UOMID: number | null;
   UOMName: string | null;
   UOMCode: string | null;
   UOMSymbol: string | null;
@@ -18,28 +16,19 @@ export interface InventoryMasterRow {
 }
 
 export interface InventoryMasterResponse {
-  date: string;
   data: InventoryMasterRow[];
   total: number;
+  date: string;
+  godownId: number | null;
 }
 
 export const getInventoryMaster = async (
-  date?: string
+  date: string,
+  godownId?: number | null,
 ): Promise<InventoryMasterResponse> => {
-  const params = date ? `?date=${date}` : "";
-  const res = await fetchWithAuth(`${BASE_URL}${params}`);
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || `GET failed: ${res.status}`);
-  }
-  return res.json();
-};
-
-export const bustInventoryMasterCache = async () => {
-  const res = await fetchWithAuth(`${BASE_URL}/cache-bust`, { method: "POST" });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.error || "Cache bust failed");
-  }
+  const qs = new URLSearchParams({ date });
+  if (godownId != null) qs.set("godownId", String(godownId));
+  const res = await fetchWithAuth(`${BASE}?${qs}`);
+  if (!res.ok) throw new Error(`Failed to fetch inventory: ${res.status}`);
   return res.json();
 };

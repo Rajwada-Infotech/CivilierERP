@@ -143,6 +143,7 @@ const UnitOfMeasurementMaster = lazy(
   () => import("./pages/material/UnitOfMeasurementMaster"),
 );
 const InventoryMaster = lazy(() => import("./pages/material/InventoryMaster"));
+const Stock = lazy(() => import("./pages/material/Stock"));
 const EnterpriseMasterPage = lazy(
   () => import("./pages/admin/masters/EnterpriseMaster"),
 );
@@ -674,6 +675,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <InventoryMaster />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/material/stock"
+        element={
+          <ProtectedRoute>
+            <Stock />
           </ProtectedRoute>
         }
       />
