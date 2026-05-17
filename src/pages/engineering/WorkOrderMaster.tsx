@@ -226,6 +226,8 @@ interface WorkOrderListItem {
   SupplierName: string;
   ActivityCount: number;
   Remarks?: string;
+  BoqID?: number | null;
+  BoqDocNo?: string | null;
 }
 
 interface WorkOrderDetail {
@@ -2465,11 +2467,12 @@ const WorkOrdersList: React.FC<{
       {/* Table */}
       <div className="rounded-xl border border-border bg-card overflow-hidden">
         {/* Desktop table header */}
-        <div className="hidden sm:grid grid-cols-[1fr_1fr_1fr_100px_90px_100px_80px_120px] gap-3 px-4 py-3 bg-muted/30 border-b border-border">
+        <div className="hidden sm:grid grid-cols-[1fr_1fr_1fr_90px_100px_90px_100px_80px_120px] gap-3 px-4 py-3 bg-muted/30 border-b border-border">
           {[
             "Document No.",
             "Company",
             "Project / Contractor",
+            "BOQ",
             "Date",
             "Activities",
             "Amount",
@@ -2489,8 +2492,8 @@ const WorkOrdersList: React.FC<{
           <div className="divide-y divide-border">
             {[1, 2, 3, 4, 5].map((i) => (
               <div key={i} className="px-4 py-4 animate-pulse">
-                <div className="grid grid-cols-[1fr_1fr_1fr_100px_90px_100px_80px_120px] gap-3">
-                  {[1, 2, 3, 4, 5, 6, 7, 8].map((j) => (
+                <div className="grid grid-cols-[1fr_1fr_1fr_90px_100px_90px_100px_80px_120px] gap-3">
+                  {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((j) => (
                     <div key={j} className="h-4 bg-muted rounded" />
                   ))}
                 </div>
@@ -2595,7 +2598,7 @@ const WorkOrdersList: React.FC<{
                   </div>
 
                   {/* Desktop row */}
-                  <div className="hidden sm:grid grid-cols-[1fr_1fr_1fr_100px_90px_100px_80px_120px] gap-3 items-center px-4 py-3.5 hover:bg-muted/20 transition-colors group">
+                  <div className="hidden sm:grid grid-cols-[1fr_1fr_1fr_90px_100px_90px_100px_80px_120px] gap-3 items-center px-4 py-3.5 hover:bg-muted/20 transition-colors group">
                     <div>
                       <p className="text-sm font-mono font-semibold text-primary">
                         {wo.DocumentNumber}
@@ -2625,6 +2628,20 @@ const WorkOrdersList: React.FC<{
                       <p className="text-[10px] text-muted-foreground truncate">
                         {wo.ContractorName || "—"}
                       </p>
+                    </div>
+                    <div>
+                      {wo.BoqDocNo ? (
+                        <span
+                          className="text-[10px] font-mono text-primary/80 bg-primary/5 border border-primary/15 px-1.5 py-0.5 rounded truncate block"
+                          title={wo.BoqDocNo}
+                        >
+                          {wo.BoqDocNo}
+                        </span>
+                      ) : (
+                        <span className="text-[10px] text-muted-foreground">
+                          —
+                        </span>
+                      )}
                     </div>
                     <div className="text-sm text-muted-foreground">
                       {dateStr}
@@ -3270,7 +3287,7 @@ const WorkOrderEditPanel: React.FC<{
               </FieldLabel>
               <select
                 value={form.boqId}
-                onChange={(e) => {
+                onChange={async (e) => {
                   const boqId = e.target.value;
                   const boq = approvedBoqs.find((b) => String(b.id) === boqId);
                   setFormState((prev) => ({
@@ -3283,6 +3300,45 @@ const WorkOrderEditPanel: React.FC<{
                       ? String(boq.ProjectId)
                       : prev.projectId,
                   }));
+                  // Inherit BOQ activities as WO activity groups
+                  if (boqId) {
+                    try {
+                      const acts = await fetchWithAuth(
+                        `/api/engineering/boq-activities/${boqId}`,
+                      ).then((r) => r.json());
+                      if (Array.isArray(acts) && acts.length > 0) {
+                        // Group by ActivityName (BOQ uses flat list; each becomes its own group)
+                        const inherited: ActivityGroup[] = acts.map(
+                          (a: any) => ({
+                            id: uid(),
+                            groupId: null,
+                            name: a.ActivityName || "",
+                            expanded: true,
+                            activities: [
+                              {
+                                id: uid(),
+                                activityId: a.ActivityId
+                                  ? parseInt(a.ActivityId)
+                                  : null,
+                                name: a.ActivityName || "",
+                                uomId: a.UomId ?? null,
+                                unit: a.UomName || "",
+                                ratePerUnit: parseFloat(a.Rate || 0),
+                                area: parseFloat(a.Quantity || 0),
+                                materials: [],
+                                hsnCode: "",
+                                hsnGstRate: parseFloat(a.TaxPct || 0),
+                                hsnGstType: "cgst_sgst" as const,
+                              },
+                            ],
+                          }),
+                        );
+                        setGroups(inherited);
+                      }
+                    } catch {
+                      /* non-fatal */
+                    }
+                  }
                 }}
                 className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
               >
@@ -4300,7 +4356,7 @@ const WorkOrderMaster: React.FC = () => {
                   </FieldLabel>
                   <select
                     value={form.boqId}
-                    onChange={(e) => {
+                    onChange={async (e) => {
                       const boqId = e.target.value;
                       const boq = approvedBoqs.find(
                         (b) => String(b.id) === boqId,
@@ -4315,6 +4371,43 @@ const WorkOrderMaster: React.FC = () => {
                           ? String(boq.ProjectId)
                           : prev.projectId,
                       }));
+                      if (boqId) {
+                        try {
+                          const acts = await fetchWithAuth(
+                            `/api/engineering/boq-activities/${boqId}`,
+                          ).then((r) => r.json());
+                          if (Array.isArray(acts) && acts.length > 0) {
+                            const inherited: ActivityGroup[] = acts.map(
+                              (a: any) => ({
+                                id: uid(),
+                                groupId: null,
+                                name: a.ActivityName || "",
+                                expanded: true,
+                                activities: [
+                                  {
+                                    id: uid(),
+                                    activityId: a.ActivityId
+                                      ? parseInt(a.ActivityId)
+                                      : null,
+                                    name: a.ActivityName || "",
+                                    uomId: a.UomId ?? null,
+                                    unit: a.UomName || "",
+                                    ratePerUnit: parseFloat(a.Rate || 0),
+                                    area: parseFloat(a.Quantity || 0),
+                                    materials: [],
+                                    hsnCode: "",
+                                    hsnGstRate: parseFloat(a.TaxPct || 0),
+                                    hsnGstType: "cgst_sgst" as const,
+                                  },
+                                ],
+                              }),
+                            );
+                            setGroups(inherited);
+                          }
+                        } catch {
+                          /* non-fatal */
+                        }
+                      }
                     }}
                     className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
                   >

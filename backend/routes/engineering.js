@@ -383,6 +383,27 @@ router.post("/work-done", async (req, res) => {
     transaction = pool.transaction();
     await transaction.begin();
 
+    // Period overlap guard
+    if (toIntOrNull(body.WorkOrderID) && body.PeriodFrom && body.PeriodTo) {
+      const overlapCheck = await pool
+        .request()
+        .input("WOId", sql.Int, toIntOrNull(body.WorkOrderID))
+        .input("PFrom", sql.Date, body.PeriodFrom)
+        .input("PTo", sql.Date, body.PeriodTo).query(`
+          SELECT COUNT(1) AS cnt
+          FROM dbo.WorkDone
+          WHERE WorkOrderID = @WOId
+            AND PeriodFrom IS NOT NULL AND PeriodTo IS NOT NULL
+            AND PeriodFrom <= @PTo AND PeriodTo >= @PFrom
+        `);
+      if ((overlapCheck.recordset[0]?.cnt ?? 0) > 0) {
+        return res.status(409).json({
+          error:
+            "A Work Done entry already exists for an overlapping period on this Work Order.",
+        });
+      }
+    }
+
     let finalDocNo = body.DocNo || null;
     if (docTypeId) {
       finalDocNo = await lockNextDocNumber(pool, sql, {
@@ -475,6 +496,29 @@ router.put("/work-done/:id", async (req, res) => {
       body.CertifiedAmount != null
         ? toNumber(body.CertifiedAmount)
         : gross - deductions;
+
+    // Period overlap guard (exclude self)
+    if (toIntOrNull(body.WorkOrderID) && body.PeriodFrom && body.PeriodTo) {
+      const overlapCheck = await pool
+        .request()
+        .input("WOId", sql.Int, toIntOrNull(body.WorkOrderID))
+        .input("PFrom", sql.Date, body.PeriodFrom)
+        .input("PTo", sql.Date, body.PeriodTo)
+        .input("SelfId", sql.BigInt, req.params.id).query(`
+          SELECT COUNT(1) AS cnt
+          FROM dbo.WorkDone
+          WHERE WorkOrderID = @WOId
+            AND ID <> @SelfId
+            AND PeriodFrom IS NOT NULL AND PeriodTo IS NOT NULL
+            AND PeriodFrom <= @PTo AND PeriodTo >= @PFrom
+        `);
+      if ((overlapCheck.recordset[0]?.cnt ?? 0) > 0) {
+        return res.status(409).json({
+          error:
+            "A Work Done entry already exists for an overlapping period on this Work Order.",
+        });
+      }
+    }
 
     const result = await pool
       .request()
@@ -777,6 +821,28 @@ router.get("/work-order-summary/:woId", async (req, res) => {
     res.json({ ...row, totalCertified, totalBooked, totalPaid, balance });
   } catch (err) {
     console.error("[GET /engineering/work-order-summary/:woId]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /engineering/boq-activities/:boqId ─────────────────────────────────────
+// Returns BoqActivities for a specific BOQ so the WO create/edit form can
+// inherit line items when a BOQ is selected.
+router.get("/boq-activities/:boqId", async (req, res) => {
+  const boqId = parseInt(req.params.boqId, 10);
+  if (!Number.isFinite(boqId))
+    return res.status(400).json({ error: "Invalid BOQ ID" });
+  try {
+    const pool = getPool();
+    const result = await pool
+      .request()
+      .input("BoqID", sql.Int, boqId)
+      .query(
+        "SELECT * FROM dbo.BoqActivities WHERE BoqID = @BoqID ORDER BY SortOrder",
+      );
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("[GET /engineering/boq-activities/:boqId]", err.message);
     res.status(500).json({ error: err.message });
   }
 });
