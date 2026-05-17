@@ -24,6 +24,7 @@ import {
   type PurchaseOrder,
 } from "@/api/purchaseOrdersApi";
 import { type MRPOPrefill } from "@/api/materialRequestApi";
+import { type WDPOPrefill } from "@/api/engineeringApi";
 import { getItems, type DbItem } from "@/api/itemMasterApi";
 import { getTCRecords } from "@/api/tcMasterApi";
 import { getEnterprises } from "@/api/enterpriseApi";
@@ -304,6 +305,10 @@ const PurchaseOrderMaster: React.FC = () => {
   const mrPrefill =
     (location.state as { mrPrefill?: MRPOPrefill } | null)?.mrPrefill ?? null;
 
+  // ── WD prefill (when navigated from Work Done "Create WO_PO") ────────────
+  const wdPrefill =
+    (location.state as { wdPrefill?: WDPOPrefill } | null)?.wdPrefill ?? null;
+
   // ── View state ────────────────────────────────────────────────────────────
   const [viewMode, setViewMode] = useState<ViewMode>("list");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -340,6 +345,12 @@ const PurchaseOrderMaster: React.FC = () => {
   const [tcDropdownOpen, setTcDropdownOpen] = useState(false);
   // Source MR reference — set when form is opened from a Material Request
   const [sourceMR, setSourceMR] = useState<{
+    id: number;
+    docNo: string;
+  } | null>(null);
+
+  // Source WD reference — set when form is opened from a Work Done entry
+  const [sourceWD, setSourceWD] = useState<{
     id: number;
     docNo: string;
   } | null>(null);
@@ -689,6 +700,49 @@ const PurchaseOrderMaster: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mrPrefill, companies.length, allProjects.length]);
 
+  // ── Pre-populate form when arriving from Work Done "Create WO_PO" ─────────
+  useEffect(() => {
+    if (!wdPrefill || companies.length === 0 || allProjects.length === 0)
+      return;
+
+    const matchCompany = companies.find(
+      (c) => String(c.id) === String(wdPrefill.CompanyId),
+    );
+    const matchProject = allProjects.find(
+      (p) => String(p.id) === String(wdPrefill.ProjectId),
+    );
+
+    setForm((prev) => ({
+      ...prev,
+      companyId: matchCompany?.id ?? prev.companyId,
+      projectId: matchProject?.id ?? prev.projectId,
+      remarks: wdPrefill.Remarks ?? prev.remarks,
+    }));
+
+    const prefillLines: POLineItem[] = wdPrefill.items.map((it) => ({
+      id: uid(),
+      itemId: "",
+      itemName: "",
+      itemDescription: it.itemDescription ?? "",
+      quantity: Number(it.quantity) || 1,
+      uomId: null,
+      unit: it.unit ?? "LS",
+      rate: Number(it.rate) || 0,
+      cgstRate: 0,
+      sgstRate: 0,
+      igstRate: 0,
+      gstRate: 0,
+      taxAmount: 0,
+      amount: Number(it.amount) || 0,
+    }));
+
+    if (prefillLines.length > 0) setLineItems(prefillLines);
+    setSourceWD({ id: wdPrefill.WDId, docNo: wdPrefill.DocNo });
+    setViewMode("create");
+    // Only run once when wdPrefill is present and master data is loaded
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wdPrefill, companies.length, allProjects.length]);
+
   const filteredList = useMemo(() => {
     if (!searchQuery.trim()) return listData;
     const q = searchQuery.toLowerCase();
@@ -870,7 +924,9 @@ const PurchaseOrderMaster: React.FC = () => {
       // Source tracking
       SourceMRId: sourceMR?.id ?? null,
       SourceMRDocNo: sourceMR?.docNo ?? null,
-      POType: sourceMR ? "Normal" : undefined,
+      SourceWDId: sourceWD?.id ?? null,
+      SourceWDDocNo: sourceWD?.docNo ?? null,
+      POType: sourceMR ? "Normal" : sourceWD ? "WO_PO" : undefined,
     };
   };
 
@@ -942,6 +998,7 @@ const PurchaseOrderMaster: React.FC = () => {
     setSelectedTCs([]);
     setErrors({});
     setSourceMR(null);
+    setSourceWD(null);
   };
 
   const goToCreate = () => {
@@ -950,6 +1007,7 @@ const PurchaseOrderMaster: React.FC = () => {
     setSelectedTCs([]);
     setErrors({});
     setSourceMR(null);
+    setSourceWD(null);
     setViewMode("create");
   };
 
@@ -1364,6 +1422,20 @@ const PurchaseOrderMaster: React.FC = () => {
               Material Request{" "}
               <span className="font-mono font-bold">{sourceMR.docNo}</span>.
               Items, company and project have been pre-filled.
+            </span>
+          </div>
+        )}
+
+        {sourceWD && !isReadOnly && (
+          <div className="rounded-xl border border-orange-200 dark:border-orange-800 bg-orange-50 dark:bg-orange-900/20 px-4 py-3 flex items-center gap-3 text-sm">
+            <ClipboardList
+              size={15}
+              className="text-orange-600 dark:text-orange-400 shrink-0"
+            />
+            <span className="text-orange-700 dark:text-orange-300">
+              Creating <span className="font-semibold">WO_PO</span> from Work
+              Done <span className="font-mono font-bold">{sourceWD.docNo}</span>
+              . Company, project and line items have been pre-filled.
             </span>
           </div>
         )}

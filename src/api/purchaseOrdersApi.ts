@@ -66,6 +66,8 @@ export interface PurchaseOrder {
   SourceWODocNo?: string | null;
   SourceMRId?: number | null;
   SourceMRDocNo?: string | null;
+  SourceWDId?: number | null;
+  SourceWDDocNo?: string | null;
   POType?: "Normal" | "Direct" | "WO_PO";
   CreatedBy?: string;
   CreatedAt?: string;
@@ -116,6 +118,8 @@ export interface CreatePOPayload {
   SourceWODocNo?: string | null;
   SourceMRId?: number | string | null;
   SourceMRDocNo?: string | null;
+  SourceWDId?: number | string | null;
+  SourceWDDocNo?: string | null;
   POType?: "Normal" | "Direct" | "WO_PO";
 }
 
