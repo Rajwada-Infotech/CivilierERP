@@ -102,7 +102,7 @@ async function apiFetch(url: string, opts?: RequestInit, timeoutMs = 25000) {
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
-    throw new Error(body.error ?? `HTTP ${res.status}`);
+    throw new Error(body.error ?? body.message ?? `HTTP ${res.status}`);
   }
   return res.json();
 }
@@ -1752,6 +1752,19 @@ export default function MaterialExpenseBooking() {
     setView("form");
   };
 
+  const requestDelete = async (id: string) => {
+    try {
+      const result = await apiFetch(`${API}/${id}/can-delete`);
+      if (!result.deletable) {
+        toast.error(result.reason || "This booking cannot be deleted.");
+        return;
+      }
+      setDeleteId(id);
+    } catch (err: any) {
+      toast.error(err.message || "Could not verify whether this booking can be deleted.");
+    }
+  };
+
   const handleDelete = async (id: string) => {
     try {
       await apiFetch(`${API}/${id}`, { method: "DELETE" });
@@ -1760,7 +1773,8 @@ export default function MaterialExpenseBooking() {
       await fetchRecords(page);
       fetchBookedSources();
     } catch (err: any) {
-      toast.error("Delete failed: " + err.message);
+      setDeleteId(null);
+      toast.error(err.message || "Failed to delete booking.");
     }
   };
 
@@ -2986,11 +3000,8 @@ export default function MaterialExpenseBooking() {
                       rec={rec}
                       onEdit={() => openEdit(rec)}
                       onPreview={() => setPreviewRecord(rec)}
-                      onDelete={() => setDeleteId(rec.id)}
-                      onApprovalSuccess={() => {
-                        fetchRecords(page);
-                        fetchBookedSources();
-                      }}
+                      onDelete={() => requestDelete(rec.id)}
+                      onApprovalSuccess={fetchRecords}
                     />
                   ))}
                 </div>
@@ -3129,7 +3140,7 @@ export default function MaterialExpenseBooking() {
                                       variant="destructive"
                                       size="sm"
                                       className="h-7 w-7 p-0"
-                                      onClick={() => setDeleteId(rec.id)}
+                                      onClick={() => requestDelete(rec.id)}
                                     >
                                       <Trash2 size={12} />
                                     </Button>
