@@ -144,6 +144,9 @@ interface POItem {
   GST?: GSTConfig | null;
   SourceWOId?: number | null;
   SourceWODocNo?: string | null;
+  SourceWDId?: number | null;
+  SourceWDDocNo?: string | null;
+  POType?: string | null;
 }
 interface WOItem {
   Id: number;
@@ -163,6 +166,8 @@ interface WorkDoneItem {
   DocNo?: string;
   DocDate?: string;
   ContractorName?: string;
+  SupplierId?: number;
+  SupplierName?: string;
   DescriptionOfWork?: string;
   CertifiedAmount?: number;
   Status: string;
@@ -968,6 +973,7 @@ function DocSelectorPanel({
                   secondary={[
                     po.SupplierName,
                     po.SourceWODocNo ? `WO: ${po.SourceWODocNo}` : null,
+                    po.SourceWDDocNo ? `WD: ${po.SourceWDDocNo}` : null,
                     po.PODate?.slice(0, 10),
                   ]
                     .filter(Boolean)
@@ -1239,6 +1245,9 @@ export default function MaterialExpenseBooking() {
   const [grnItemsLoading, setGrnItemsLoading] = useState(false);
   const [selectedTod, setSelectedTod] = useState<TodItem | null>(null);
   const [records, setRecords] = useState<ExpenseRecord[]>([]);
+  const [bookedSourceIds, setBookedSourceIds] = useState<
+    { ESourceType: string; ESourceId: number; Eid: number }[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -1282,6 +1291,15 @@ export default function MaterialExpenseBooking() {
       toast.error("Failed to load bookings: " + err.message);
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  const fetchBookedSources = useCallback(async () => {
+    try {
+      const data = await apiFetch(`${API}/source-ids`);
+      setBookedSourceIds(Array.isArray(data) ? data : []);
+    } catch {
+      // non-fatal — pickers will show everything if this fails
     }
   }, []);
 
@@ -1339,7 +1357,12 @@ export default function MaterialExpenseBooking() {
       setLoadingWOPO,
       (r) => {
         const all: POItem[] = Array.isArray(r) ? r : (r.data ?? []);
-        return all.filter((p) => p.SourceWOId != null);
+        return all.filter(
+          (p) =>
+            p.SourceWOId != null ||
+            p.SourceWDId != null ||
+            p.POType === "WO_PO",
+        );
       },
     );
     load<TodItem>("tod", "/api/document-type", setTodList, setLoadingTOD, (r) =>
@@ -1394,6 +1417,7 @@ export default function MaterialExpenseBooking() {
 
   useEffect(() => {
     fetchRecords(1);
+    fetchBookedSources();
     apiFetch("/api/enterprises/options?business_type=C")
       .then((list: CompanyOption[]) => setCompanyOptions(list ?? []))
       .catch(() => {});
@@ -1497,6 +1521,13 @@ export default function MaterialExpenseBooking() {
                 : doc.docNo.split("/")[0],
       cgstRate: cgst,
       sgstRate: sgst,
+      // Auto-populate workDoneRef for WO_PO and WORK_DONE sources
+      workDoneRef:
+        doc.kind === "WORK_DONE"
+          ? doc.docNo
+          : doc.kind === "WO_PO" && (doc as any).sourcWDDocNo
+            ? (doc as any).sourceWDDocNo
+            : undefined,
     }));
     if (doc.kind === "GRN") {
       // GRN selected — no filter state to update
@@ -1676,7 +1707,12 @@ export default function MaterialExpenseBooking() {
           apiFetch("/api/purchase-orders?limit=500")
             .then((r: any) => {
               const all: POItem[] = Array.isArray(r) ? r : (r.data ?? []);
-              const list = all.filter((p) => p.SourceWOId != null);
+              const list = all.filter(
+                (p) =>
+                  p.SourceWOId != null ||
+                  p.SourceWDId != null ||
+                  p.POType === "WO_PO",
+              );
               _mastersCache.woPO = list;
               tryBuildWOPO(list);
             })
@@ -1722,6 +1758,7 @@ export default function MaterialExpenseBooking() {
       toast.success("Expense booking deleted.");
       setDeleteId(null);
       await fetchRecords(page);
+      fetchBookedSources();
     } catch (err: any) {
       toast.error("Delete failed: " + err.message);
     }
@@ -1754,6 +1791,7 @@ export default function MaterialExpenseBooking() {
     }
     cancelForm();
     await fetchRecords(page);
+    fetchBookedSources();
   };
 
   const handleSave = async () => {
@@ -1846,6 +1884,7 @@ export default function MaterialExpenseBooking() {
       }
       cancelForm();
       await fetchRecords(page);
+      fetchBookedSources();
     } catch (err: any) {
       toast.error("Save failed: " + err.message);
     } finally {
@@ -1879,19 +1918,19 @@ export default function MaterialExpenseBooking() {
   const hasParentGST = isPOorWO || isGRN;
   const gstHighlighted = hasParentGST && !!selectedDoc?.gst?.applicable;
 
-  // Compute sets of already-booked source IDs (excluding the record being edited)
+  // Compute sets of already-booked source IDs from the full dataset (all pages),
+  // excluding the record currently being edited so it can re-select its own doc.
+  const editingIdNum = editingId ? parseInt(editingId, 10) : null;
   const bookedPOIds = new Set<number>();
   const bookedWorkDoneIds = new Set<number>();
   const bookedWOPOIds = new Set<number>();
   const bookedGRNIds = new Set<number>();
-  for (const r of records) {
-    if (r.id === editingId) continue; // allow re-selecting own doc when editing
-    if (r.eSourceType === "PO" && r.eSourceId) bookedPOIds.add(r.eSourceId);
-    if (r.eSourceType === "WORK_DONE" && r.eSourceId)
-      bookedWorkDoneIds.add(r.eSourceId);
-    if (r.eSourceType === "WO_PO" && r.eSourceId)
-      bookedWOPOIds.add(r.eSourceId);
-    if (r.eSourceType === "GRN" && r.eSourceId) bookedGRNIds.add(r.eSourceId);
+  for (const r of bookedSourceIds) {
+    if (editingIdNum && r.Eid === editingIdNum) continue;
+    if (r.ESourceType === "PO") bookedPOIds.add(r.ESourceId);
+    if (r.ESourceType === "WORK_DONE") bookedWorkDoneIds.add(r.ESourceId);
+    if (r.ESourceType === "WO_PO") bookedWOPOIds.add(r.ESourceId);
+    if (r.ESourceType === "GRN") bookedGRNIds.add(r.ESourceId);
   }
 
   // Gate: reveal Document Selection only after booking info is started
@@ -2522,7 +2561,209 @@ export default function MaterialExpenseBooking() {
                 </div>
               )}
 
-              {/* ── 3. Billing Terms ───────────────────────────────────── */}
+              {/* ── 3. Invoice Details ─────────────────────────────────── */}
+              <div className="space-y-4">
+                <SectionHeader label="Invoice Details" />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Field
+                    label="Vendor Invoice No."
+                    hint="Supplier's invoice / bill number as printed on their document"
+                  >
+                    <Input
+                      value={form.vendorInvoiceNo ?? ""}
+                      onChange={(e) => set("vendorInvoiceNo", e.target.value)}
+                      placeholder="e.g. INV-2024-00123"
+                      className="font-mono"
+                    />
+                  </Field>
+                  <Field
+                    label="Vendor Invoice Date"
+                    hint="Date printed on the supplier's invoice"
+                  >
+                    <Input
+                      type="date"
+                      value={form.vendorInvoiceDate ?? ""}
+                      onChange={(e) => set("vendorInvoiceDate", e.target.value)}
+                    />
+                  </Field>
+                </div>
+              </div>
+
+              {/* ── 4. Expense Allocation ──────────────────────────────── */}
+              <div className="space-y-4">
+                <SectionHeader label="Expense Allocation" />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <Field
+                    label="Cost Centre"
+                    hint="Department, project phase, or cost centre for this expense"
+                  >
+                    <Input
+                      value={form.costCenter ?? ""}
+                      onChange={(e) => set("costCenter", e.target.value)}
+                      placeholder="e.g. Civil — Block A, Q2 Operations…"
+                    />
+                  </Field>
+                  <Field
+                    label="GL Account"
+                    hint="General ledger account code or name for the debit entry"
+                  >
+                    <Input
+                      value={form.glAccount ?? ""}
+                      onChange={(e) => set("glAccount", e.target.value)}
+                      placeholder="e.g. 5001 — Material Expense"
+                    />
+                  </Field>
+                </div>
+
+                {/* Work Done Reference — shown and auto-filled for WO/WO_PO sources */}
+                {(selectedDoc?.kind === "WORK_DONE" ||
+                  selectedDoc?.kind === "WO_PO") && (
+                  <Field
+                    label="Work Done Reference"
+                    hint={
+                      form.workDoneRef
+                        ? "Auto-populated from the linked Work Done document"
+                        : "Enter the Work Done document number for traceability"
+                    }
+                  >
+                    <div className="relative">
+                      <HardHat
+                        size={13}
+                        className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                      />
+                      <Input
+                        value={form.workDoneRef ?? ""}
+                        onChange={(e) => set("workDoneRef", e.target.value)}
+                        placeholder="e.g. WD-2024-001"
+                        className={`pl-8 font-mono ${form.workDoneRef ? "bg-violet-500/5 border-violet-500/30" : ""}`}
+                      />
+                    </div>
+                  </Field>
+                )}
+
+                {/* Additional Charges table */}
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <p className="text-xs font-medium text-foreground">
+                      Additional Charges
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        set("additionalCharges", [
+                          ...(form.additionalCharges ?? []),
+                          { label: "", amount: 0 },
+                        ])
+                      }
+                      className="flex items-center gap-1 text-[11px] text-primary hover:underline"
+                    >
+                      <Plus size={11} /> Add charge
+                    </button>
+                  </div>
+                  {(form.additionalCharges ?? []).length === 0 ? (
+                    <p className="text-[11px] text-muted-foreground py-2">
+                      No additional charges. Click "Add charge" to include
+                      freight, insurance, or other items.
+                    </p>
+                  ) : (
+                    <div className="rounded-xl border border-border overflow-hidden">
+                      <table className="w-full text-xs">
+                        <thead>
+                          <tr className="bg-muted/30 border-b border-border">
+                            <th className="px-3 py-2 text-left font-heading uppercase tracking-wider text-muted-foreground text-[10px]">
+                              Charge Label
+                            </th>
+                            <th className="px-3 py-2 text-right font-heading uppercase tracking-wider text-muted-foreground text-[10px]">
+                              Amount (₹)
+                            </th>
+                            <th className="w-8" />
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border">
+                          {(form.additionalCharges ?? []).map((charge, idx) => (
+                            <tr key={idx} className="hover:bg-muted/10">
+                              <td className="px-3 py-1.5">
+                                <Input
+                                  value={charge.label}
+                                  onChange={(e) => {
+                                    const next = [
+                                      ...(form.additionalCharges ?? []),
+                                    ];
+                                    next[idx] = {
+                                      ...next[idx],
+                                      label: e.target.value,
+                                    };
+                                    set("additionalCharges", next);
+                                  }}
+                                  placeholder="e.g. Freight, Insurance…"
+                                  className="h-7 text-xs"
+                                />
+                              </td>
+                              <td className="px-3 py-1.5">
+                                <div className="relative">
+                                  <span className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground text-xs">
+                                    ₹
+                                  </span>
+                                  <Input
+                                    type="number"
+                                    min={0}
+                                    value={charge.amount || ""}
+                                    onChange={(e) => {
+                                      const next = [
+                                        ...(form.additionalCharges ?? []),
+                                      ];
+                                      next[idx] = {
+                                        ...next[idx],
+                                        amount: parseFloat(e.target.value) || 0,
+                                      };
+                                      set("additionalCharges", next);
+                                    }}
+                                    className="h-7 text-xs pl-5 text-right font-mono"
+                                    placeholder="0.00"
+                                  />
+                                </div>
+                              </td>
+                              <td className="px-2 py-1.5 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const next = (
+                                      form.additionalCharges ?? []
+                                    ).filter((_, i) => i !== idx);
+                                    set("additionalCharges", next);
+                                  }}
+                                  className="text-muted-foreground hover:text-destructive transition-colors"
+                                >
+                                  <X size={12} />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                        <tfoot className="border-t border-border bg-muted/20">
+                          <tr>
+                            <td className="px-3 py-2 text-[10px] font-heading uppercase tracking-wider text-muted-foreground">
+                              Total Additional
+                            </td>
+                            <td className="px-3 py-2 text-right font-mono text-xs font-bold text-foreground">
+                              ₹
+                              {fmt(
+                                (form.additionalCharges ?? []).reduce(
+                                  (s, c) => s + (Number(c.amount) || 0),
+                                  0,
+                                ),
+                              )}
+                            </td>
+                            <td />
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* ── 5. Billing Terms ───────────────────────────────────── */}
               <div className="space-y-3">
                 <SectionHeader label="Billing Terms" />
                 <BillingAccordion
@@ -2536,7 +2777,7 @@ export default function MaterialExpenseBooking() {
                 />
               </div>
 
-              {/* ── 4. EMI Options ─────────────────────────────────────── */}
+              {/* ── 6. EMI Options ─────────────────────────────────────── */}
               {!isGRN && (
                 <div className="space-y-3">
                   <SectionHeader label="EMI / Installment Options" />
@@ -2572,7 +2813,7 @@ export default function MaterialExpenseBooking() {
                 </div>
               )}
 
-              {/* ── 5. Approval Trail ──────────────────────────────────── */}
+              {/* ── 7. Approval Trail ──────────────────────────────────── */}
               {isEditing && (
                 <div className="space-y-3">
                   <SectionHeader label="Approval Workflow" />
@@ -2583,7 +2824,7 @@ export default function MaterialExpenseBooking() {
                 </div>
               )}
 
-              {/* ── 6. Remarks ─────────────────────────────────────────── */}
+              {/* ── 8. Remarks ─────────────────────────────────────────── */}
               {/* ── Terms & Conditions ────────────────────────────────── */}
               <div className="space-y-3">
                 <SectionHeader label="Terms & Conditions" />
@@ -2746,7 +2987,10 @@ export default function MaterialExpenseBooking() {
                       onEdit={() => openEdit(rec)}
                       onPreview={() => setPreviewRecord(rec)}
                       onDelete={() => setDeleteId(rec.id)}
-                      onApprovalSuccess={fetchRecords}
+                      onApprovalSuccess={() => {
+                        fetchRecords(page);
+                        fetchBookedSources();
+                      }}
                     />
                   ))}
                 </div>

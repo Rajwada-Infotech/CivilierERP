@@ -118,9 +118,25 @@ export interface ExpenseRecord {
   sourceDocNo?: string;
   igstRate?: number;
   /** Source document type: PO | WO | GRN | TOD — saved to DB and restored on edit */
-  eSourceType?: "PO" | "WO" | "WO_PO" | "GRN" | "TOD" | null;
+  eSourceType?: "PO" | "WO" | "WO_PO" | "GRN" | "TOD" | "WORK_DONE" | null;
   /** Source document DB id — saved to DB and restored on edit */
   eSourceId?: number | null;
+
+  // ── Invoice Details (Step 6 spec) ───────────────────────────────────────────
+  /** Vendor/supplier invoice number (from their physical invoice) */
+  vendorInvoiceNo?: string;
+  /** Vendor/supplier invoice date */
+  vendorInvoiceDate?: string;
+
+  // ── Expense Allocation (Step 6 spec) ────────────────────────────────────────
+  /** Cost Centre / Department for expense allocation */
+  costCenter?: string;
+  /** GL Account code or name for accounting entry */
+  glAccount?: string;
+  /** Work Done doc reference — auto-populated when source is WO_PO or WORK_DONE */
+  workDoneRef?: string;
+  /** Additional charges: freight, insurance, etc. JSON array {label, amount} */
+  additionalCharges?: { label: string; amount: number }[];
 
   grnItems?: {
     itemName?: string;

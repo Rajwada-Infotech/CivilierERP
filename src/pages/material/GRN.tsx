@@ -101,7 +101,9 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
     header: "Doc No",
     cell: ({ row, getValue }) => {
       const v = (getValue() as string) || row.original.GRNNo;
-      return <span className="font-mono text-xs font-semibold">{v || "—"}</span>;
+      return (
+        <span className="font-mono text-xs font-semibold">{v || "—"}</span>
+      );
     },
   },
   {
@@ -119,7 +121,28 @@ const GRN_LIST_COLUMNS: ColumnDef<any, unknown>[] = [
   {
     accessorKey: "PONumber",
     header: "PO No",
-    cell: ({ getValue }) => <span>{(getValue() as string) || "—"}</span>,
+    cell: ({ row }) => {
+      const grn = row.original;
+      const poType = grn.POType as string | undefined;
+      const typeColor =
+        poType === "Normal"
+          ? "bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800"
+          : poType === "WO_PO"
+            ? "bg-orange-100 dark:bg-orange-950/40 text-orange-700 dark:text-orange-400 border-orange-200 dark:border-orange-800"
+            : "bg-muted text-muted-foreground border-border";
+      return (
+        <div className="flex flex-col gap-0.5">
+          <span>{(grn.PONumber as string) || "—"}</span>
+          {poType && (
+            <span
+              className={`inline-flex w-fit items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border ${typeColor}`}
+            >
+              {poType}
+            </span>
+          )}
+        </div>
+      );
+    },
   },
   {
     accessorKey: "SupplierName",
@@ -254,14 +277,21 @@ export default function GRN() {
   const pos = posData
     .filter((po: PurchaseOrder) => {
       if (!selectedFinYear) return true;
-      // PO number format: CI/PUR/000001/2025-2026 — fin year is the last segment
       const docNo = po.PurchaseOrderNo || "";
       return docNo.includes(selectedFinYear);
     })
-    .map((po: PurchaseOrder) => ({
-      value: String(po.PurchaseOrderID),
-      label: po.PurchaseOrderNo,
-    }));
+    .map((po: PurchaseOrder) => {
+      const typeTag =
+        po.POType === "Normal"
+          ? " [Normal]"
+          : po.POType === "WO_PO"
+            ? " [WO_PO]"
+            : "";
+      return {
+        value: String(po.PurchaseOrderID),
+        label: `${po.PurchaseOrderNo}${typeTag}`,
+      };
+    });
 
   const filteredGrns = grns.filter((grn: any) => {
     if (!search) return true;
@@ -1025,9 +1055,24 @@ export default function GRN() {
                       <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
                         Purchase Order
                       </p>
-                      <p className="font-medium">
-                        {viewingGrn.PONumber || "—"}
-                      </p>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <p className="font-medium">
+                          {viewingGrn.PONumber || "—"}
+                        </p>
+                        {viewingGrn.POType && (
+                          <span
+                            className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold border ${
+                              viewingGrn.POType === "Normal"
+                                ? "bg-blue-100 dark:bg-blue-950/40 text-blue-700 dark:text-blue-400 border-blue-200 dark:border-blue-800"
+                                : viewingGrn.POType === "WO_PO"
+                                  ? "bg-orange-100 dark:bg-orange-950/40 text-orange-700 dark:text-orange-400 border-orange-200 dark:border-orange-800"
+                                  : "bg-muted text-muted-foreground border-border"
+                            }`}
+                          >
+                            {viewingGrn.POType}
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <div>
                       <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
@@ -1055,6 +1100,36 @@ export default function GRN() {
                       </p>
                       <StatusBadge status={viewingGrn.Status || "Draft"} />
                     </div>
+                    {viewingGrn.SourceMRDocNo && (
+                      <div>
+                        <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
+                          Source MR
+                        </p>
+                        <p className="font-mono text-sm font-semibold text-blue-600 dark:text-blue-400">
+                          {viewingGrn.SourceMRDocNo}
+                        </p>
+                      </div>
+                    )}
+                    {viewingGrn.SourceWODocNo && (
+                      <div>
+                        <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
+                          Source Work Order
+                        </p>
+                        <p className="font-mono text-sm font-semibold text-orange-600 dark:text-orange-400">
+                          {viewingGrn.SourceWODocNo}
+                        </p>
+                      </div>
+                    )}
+                    {viewingGrn.SourceWDDocNo && (
+                      <div>
+                        <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
+                          Source Work Done
+                        </p>
+                        <p className="font-mono text-sm font-semibold text-orange-600 dark:text-orange-400">
+                          {viewingGrn.SourceWDDocNo}
+                        </p>
+                      </div>
+                    )}
                   </div>
 
                   {/* Items table */}

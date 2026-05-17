@@ -321,6 +321,63 @@ router.get("/work-done", cache(WORK_DONE_CACHE, 120), async (req, res) => {
   }
 });
 
+// ── GET /work-done/:id/create-po-prefill ─────────────────────────────────────
+// Returns Work Done header shaped for the PO form (WO_PO creation).
+// Only Approved Work Done entries can generate a WO_PO.
+router.get("/work-done/:id/create-po-prefill", async (req, res) => {
+  try {
+    const pool = getPool();
+    if (!(await ensureWorkDoneTable(pool, res))) return;
+
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const result = await pool.request().input("ID", sql.Int, id).query(`
+      ${selectWorkDoneSql}
+      WHERE wd.ID = @ID
+    `);
+
+    if (!result.recordset.length)
+      return res.status(404).json({ error: "Work Done entry not found" });
+
+    const wd = result.recordset[0];
+    if (wd.Status !== "Approved")
+      return res.status(400).json({
+        error: `Work Done is ${wd.Status}. Only Approved entries can generate a WO_PO.`,
+      });
+
+    res.json({
+      WDId: wd.ID,
+      DocNo: wd.DocNo,
+      CompanyId: wd.CompanyId,
+      CompanyName: wd.CompanyName,
+      ProjectId: wd.ProjectId,
+      ProjectName: wd.ProjectName,
+      SupplierId: wd.SupplierId,
+      SupplierName: wd.SupplierName || wd.ContractorName,
+      WorkOrderId: wd.WorkOrderID,
+      WorkOrderNo: wd.WorkOrderNo,
+      CertifiedAmount: wd.CertifiedAmount,
+      DescriptionOfWork: wd.DescriptionOfWork,
+      Remarks: wd.Remarks,
+      // Single line item derived from the Work Done itself
+      items: [
+        {
+          itemDescription:
+            wd.DescriptionOfWork || "Work Done — see Work Done document",
+          unit: wd.Unit || "LS",
+          quantity: Number(wd.QuantityDone) || 1,
+          rate: Number(wd.RatePerUnit) || 0,
+          amount: Number(wd.CertifiedAmount) || 0,
+        },
+      ],
+    });
+  } catch (err) {
+    console.error("[GET /engineering/work-done/:id/create-po-prefill]", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get("/work-done/:id", async (req, res) => {
   try {
     const pool = getPool();
@@ -382,6 +439,27 @@ router.post("/work-done", async (req, res) => {
 
     transaction = pool.transaction();
     await transaction.begin();
+
+    // Period overlap guard
+    if (toIntOrNull(body.WorkOrderID) && body.PeriodFrom && body.PeriodTo) {
+      const overlapCheck = await pool
+        .request()
+        .input("WOId", sql.Int, toIntOrNull(body.WorkOrderID))
+        .input("PFrom", sql.Date, body.PeriodFrom)
+        .input("PTo", sql.Date, body.PeriodTo).query(`
+          SELECT COUNT(1) AS cnt
+          FROM dbo.WorkDone
+          WHERE WorkOrderID = @WOId
+            AND PeriodFrom IS NOT NULL AND PeriodTo IS NOT NULL
+            AND PeriodFrom <= @PTo AND PeriodTo >= @PFrom
+        `);
+      if ((overlapCheck.recordset[0]?.cnt ?? 0) > 0) {
+        return res.status(409).json({
+          error:
+            "A Work Done entry already exists for an overlapping period on this Work Order.",
+        });
+      }
+    }
 
     let finalDocNo = body.DocNo || null;
     if (docTypeId) {
@@ -475,6 +553,29 @@ router.put("/work-done/:id", async (req, res) => {
       body.CertifiedAmount != null
         ? toNumber(body.CertifiedAmount)
         : gross - deductions;
+
+    // Period overlap guard (exclude self)
+    if (toIntOrNull(body.WorkOrderID) && body.PeriodFrom && body.PeriodTo) {
+      const overlapCheck = await pool
+        .request()
+        .input("WOId", sql.Int, toIntOrNull(body.WorkOrderID))
+        .input("PFrom", sql.Date, body.PeriodFrom)
+        .input("PTo", sql.Date, body.PeriodTo)
+        .input("SelfId", sql.BigInt, req.params.id).query(`
+          SELECT COUNT(1) AS cnt
+          FROM dbo.WorkDone
+          WHERE WorkOrderID = @WOId
+            AND ID <> @SelfId
+            AND PeriodFrom IS NOT NULL AND PeriodTo IS NOT NULL
+            AND PeriodFrom <= @PTo AND PeriodTo >= @PFrom
+        `);
+      if ((overlapCheck.recordset[0]?.cnt ?? 0) > 0) {
+        return res.status(409).json({
+          error:
+            "A Work Done entry already exists for an overlapping period on this Work Order.",
+        });
+      }
+    }
 
     const result = await pool
       .request()
@@ -668,8 +769,9 @@ router.get(
           ISNULL(SUM(a.LabourAmount), 0) AS LabourTotal,
           ISNULL(SUM(a.MaterialAmount), 0) AS MaterialTotal
         FROM dbo.WorkOrderHeader h
-        INNER JOIN dbo.WorkOrderActivities a ON a.WorkOrderHeaderId = h.Id
+        LEFT JOIN dbo.WorkOrderActivities a ON a.WorkOrderHeaderId = h.Id
         LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = h.ContractorId
+        WHERE ISNULL(h.Status, 'Draft') = 'Approved'
         GROUP BY h.Id, h.DocNo, h.DocumentNumber, ah.LHeadName
         ORDER BY h.Id DESC
       `);
@@ -692,31 +794,145 @@ router.get("/work-order-summary/:woId", async (req, res) => {
     if (!Number.isFinite(woId))
       return res.status(400).json({ error: "Invalid WO ID" });
 
-    const result = await pool
-      .request()
-      .input("WorkOrderHeaderId", sql.Int, woId).query(`
+    const req2 = pool.request().input("WorkOrderHeaderId", sql.Int, woId);
+
+    // Main WO header + activity totals
+    const woResult = await req2.query(`
         SELECT
+          h.CompanyId,
+          h.ProjectId,
+          h.SupplierId,
+          h.ContractorId,
+          h.TotalAmount                    AS ContractValue,
           COUNT(a.Id)                      AS ActivityCount,
           ISNULL(SUM(a.GrandTotal), 0)     AS GrossAmount,
           ISNULL(SUM(a.LabourAmount), 0)   AS LabourAmount,
           ISNULL(SUM(a.MaterialAmount), 0) AS MaterialAmount,
           ISNULL(SUM(a.GrandTotal), 0)     AS NetAmount
-        FROM dbo.WorkOrderActivities a
-        WHERE a.WorkOrderHeaderId = @WorkOrderHeaderId
+        FROM dbo.WorkOrderHeader h
+        LEFT JOIN dbo.WorkOrderActivities a ON a.WorkOrderHeaderId = h.Id
+        WHERE h.Id = @WorkOrderHeaderId
+        GROUP BY h.CompanyId, h.ProjectId, h.SupplierId, h.ContractorId, h.TotalAmount
       `);
 
-    const row = result.recordset[0] ?? {
+    // Certified total from approved Work Done entries
+    const certResult = await pool
+      .request()
+      .input("WorkOrderHeaderId2", sql.Int, woId).query(`
+        SELECT ISNULL(SUM(CertifiedAmount), 0) AS TotalCertified
+        FROM dbo.WorkDone
+        WHERE WorkOrderID = @WorkOrderHeaderId2
+          AND ISNULL(Status, 'Draft') = 'Approved'
+      `);
+
+    // Booked total from Expense Bookings linked to this WO's Work Done entries
+    const bookedResult = await pool
+      .request()
+      .input("WorkOrderHeaderId3", sql.Int, woId).query(`
+        SELECT ISNULL(SUM(eb.ENetAmount), 0) AS TotalBooked
+        FROM dbo.ExpenseBooking eb
+        WHERE eb.ESourceType = 'WORK_DONE'
+          AND eb.EIsDeleted = 0
+          AND eb.ESourceId IN (
+            SELECT ID FROM dbo.WorkDone WHERE WorkOrderID = @WorkOrderHeaderId3
+          )
+      `);
+
+    // Paid total from Payments linked to those expense bookings
+    const paidResult = await pool
+      .request()
+      .input("WorkOrderHeaderId4", sql.Int, woId).query(`
+        SELECT ISNULL(SUM(p.PAmount), 0) AS TotalPaid
+        FROM dbo.NewPayment p
+        WHERE p.PExpenseRef IN (
+          SELECT eb.EDocNo
+          FROM dbo.ExpenseBooking eb
+          WHERE eb.ESourceType = 'WORK_DONE'
+            AND eb.EIsDeleted = 0
+            AND eb.ESourceId IN (
+              SELECT ID FROM dbo.WorkDone WHERE WorkOrderID = @WorkOrderHeaderId4
+            )
+        )
+      `);
+
+    const row = woResult.recordset[0] ?? {
+      CompanyId: null,
+      ProjectId: null,
+      SupplierId: null,
+      ContractorId: null,
+      ContractValue: 0,
       ActivityCount: 0,
       GrossAmount: 0,
       LabourAmount: 0,
       MaterialAmount: 0,
       NetAmount: 0,
     };
-    res.json(row);
+
+    const totalCertified = parseFloat(
+      certResult.recordset[0]?.TotalCertified || 0,
+    );
+    const totalBooked = parseFloat(bookedResult.recordset[0]?.TotalBooked || 0);
+    const totalPaid = parseFloat(paidResult.recordset[0]?.TotalPaid || 0);
+    const balance = (row.ContractValue || 0) - totalPaid;
+
+    res.json({ ...row, totalCertified, totalBooked, totalPaid, balance });
   } catch (err) {
     console.error("[GET /engineering/work-order-summary/:woId]", err.message);
     res.status(500).json({ error: err.message });
   }
 });
+
+// ── GET /engineering/boq-activities/:boqId ─────────────────────────────────────
+// Returns BoqActivities for a specific BOQ so the WO create/edit form can
+// inherit line items when a BOQ is selected.
+router.get("/boq-activities/:boqId", async (req, res) => {
+  const boqId = parseInt(req.params.boqId, 10);
+  if (!Number.isFinite(boqId))
+    return res.status(400).json({ error: "Invalid BOQ ID" });
+  try {
+    const pool = getPool();
+    const result = await pool
+      .request()
+      .input("BoqID", sql.Int, boqId)
+      .query(
+        "SELECT * FROM dbo.BoqActivities WHERE BoqID = @BoqID ORDER BY SortOrder",
+      );
+    res.json(result.recordset);
+  } catch (err) {
+    console.error("[GET /engineering/boq-activities/:boqId]", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /engineering/approved-boqs ─────────────────────────────────────────────
+// Lightweight list of Approved BOQs for the Work Order BOQ picker.
+router.get(
+  "/approved-boqs",
+  cache("eng-approved-boqs", 120),
+  async (req, res) => {
+    try {
+      const pool = getPool();
+      const result = await pool.request().query(`
+        SELECT
+          b.BoqID   AS id,
+          COALESCE(b.DocNo, b.BoqNo) AS name,
+          b.CompanyId,
+          co.name   AS CompanyName,
+          b.ProjectId,
+          pr.name   AS ProjectName,
+          b.TotalAmount
+        FROM dbo.BOQ b
+        LEFT JOIN dbo.enterprise co ON co.id = b.CompanyId
+        LEFT JOIN dbo.enterprise pr ON pr.id = b.ProjectId
+        WHERE b.Status = 'Approved'
+        ORDER BY b.BoqID DESC
+      `);
+      res.json(result.recordset);
+    } catch (err) {
+      console.error("[GET /engineering/approved-boqs]", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
 module.exports = router;

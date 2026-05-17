@@ -61,7 +61,9 @@ async function handleResponse<T = any>(res: Response): Promise<T> {
     try {
       const body = await res.json();
       message = body.error ?? body.message ?? message;
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     throw new Error(message);
   }
   return res.json() as Promise<T>;
@@ -72,7 +74,7 @@ const BASE = "/api/material-requests";
 // ── API ────────────────────────────────────────────────────────────────────────
 
 export const getMaterialRequests = (
-  query: { page?: number; limit?: number; search?: string } = {}
+  query: { page?: number; limit?: number; search?: string } = {},
 ) => {
   const { page = 1, limit = 10, search = "" } = query;
   const qs = new URLSearchParams({
@@ -81,13 +83,13 @@ export const getMaterialRequests = (
     ...(search ? { search } : {}),
   });
   return fetchWithAuth(`${BASE}?${qs}`).then((r) =>
-    handleResponse<MRListResponse>(r)
+    handleResponse<MRListResponse>(r),
   );
 };
 
 export const getMaterialRequestById = (id: number | string) =>
   fetchWithAuth(`${BASE}/${id}`).then((r) =>
-    handleResponse<MaterialRequest>(r)
+    handleResponse<MaterialRequest>(r),
   );
 
 export const createMaterialRequest = (payload: CreateMRPayload) =>
@@ -99,7 +101,7 @@ export const createMaterialRequest = (payload: CreateMRPayload) =>
 
 export const updateMaterialRequest = (
   id: number | string,
-  payload: CreateMRPayload & { Status?: string }
+  payload: CreateMRPayload & { Status?: string },
 ) =>
   fetchWithAuth(`${BASE}/${id}`, {
     method: "PUT",
@@ -109,12 +111,12 @@ export const updateMaterialRequest = (
 
 export const deleteMaterialRequest = (id: number | string) =>
   fetchWithAuth(`${BASE}/${id}`, { method: "DELETE" }).then((r) =>
-    handleResponse(r)
+    handleResponse(r),
   );
 
 export const submitMaterialRequest = (id: number | string) =>
   fetchWithAuth(`${BASE}/${id}/submit`, { method: "PUT" }).then((r) =>
-    handleResponse(r)
+    handleResponse(r),
   );
 
 // ── Master data ────────────────────────────────────────────────────────────────
@@ -136,5 +138,43 @@ export const getMRUomOptions = () =>
 
 export const previewNextMRNumber = () =>
   fetchWithAuth(`${BASE}/preview-next-number`).then((r) =>
-    handleResponse<{ nextDocNo: string | null }>(r)
+    handleResponse<{ nextDocNo: string | null }>(r),
+  );
+
+// ── PO creation from MR ────────────────────────────────────────────────────────
+
+export interface MRPOPrefillItem {
+  MRItemId: number;
+  ItemId: string;
+  ItemName: string;
+  UOMCode: string;
+  UOMName: string;
+  Quantity: number;
+  Remarks: string;
+  M_CGST: number | null;
+  M_SGST: number | null;
+  M_IGST: number | null;
+}
+
+export interface MRPOPrefill {
+  MRId: number;
+  DocNo: string;
+  CompanyId: number | null;
+  CompanyName: string;
+  ProjectId: number | null;
+  ProjectName: string;
+  FinYearId: number | null;
+  FinYearName: string;
+  Remarks: string;
+  items: MRPOPrefillItem[];
+}
+
+export const getMRPOPrefill = (id: number | string) =>
+  fetchWithAuth(`${BASE}/${id}/create-po-prefill`).then((r) =>
+    handleResponse<MRPOPrefill>(r),
+  );
+
+export const markMROrdered = (id: number | string) =>
+  fetchWithAuth(`${BASE}/${id}/mark-ordered`, { method: "PUT" }).then((r) =>
+    handleResponse(r),
   );
