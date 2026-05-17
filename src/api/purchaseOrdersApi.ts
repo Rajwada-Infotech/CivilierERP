@@ -62,6 +62,11 @@ export interface PurchaseOrder {
   DocNo?: string;
   DocTypePrefix?: string;
   DocTypeDescription?: string;
+  SourceWOId?: number | null;
+  SourceWODocNo?: string | null;
+  SourceMRId?: number | null;
+  SourceMRDocNo?: string | null;
+  POType?: "Normal" | "Direct" | "WO_PO";
   CreatedBy?: string;
   CreatedAt?: string;
   UpdatedAt?: string;
@@ -106,6 +111,12 @@ export interface CreatePOPayload {
   Discount?: DiscountConfig | null;
   // GST configuration
   GST?: GSTConfig | null;
+  // Source tracking
+  SourceWOId?: number | string | null;
+  SourceWODocNo?: string | null;
+  SourceMRId?: number | string | null;
+  SourceMRDocNo?: string | null;
+  POType?: "Normal" | "Direct" | "WO_PO";
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────

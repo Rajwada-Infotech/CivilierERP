@@ -1,4 +1,5 @@
 import React, { useEffect, useState, useMemo, useCallback } from "react";
+import { useLocation } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -22,6 +23,7 @@ import {
   getUOMs,
   type PurchaseOrder,
 } from "@/api/purchaseOrdersApi";
+import { type MRPOPrefill } from "@/api/materialRequestApi";
 import { getItems, type DbItem } from "@/api/itemMasterApi";
 import { getTCRecords } from "@/api/tcMasterApi";
 import { getEnterprises } from "@/api/enterpriseApi";
@@ -295,7 +297,12 @@ type ViewMode = "list" | "create" | "edit" | "view";
 
 const PurchaseOrderMaster: React.FC = () => {
   const queryClient = useQueryClient();
+  const location = useLocation();
   const { finYears } = useFinYear();
+
+  // ── MR prefill (when navigated from Material Request "Create PO") ─────────
+  const mrPrefill =
+    (location.state as { mrPrefill?: MRPOPrefill } | null)?.mrPrefill ?? null;
 
   // ── View state ────────────────────────────────────────────────────────────
   const [viewMode, setViewMode] = useState<ViewMode>("list");
@@ -331,6 +338,11 @@ const PurchaseOrderMaster: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedTCs, setSelectedTCs] = useState<TCRecord[]>([]);
   const [tcDropdownOpen, setTcDropdownOpen] = useState(false);
+  // Source MR reference — set when form is opened from a Material Request
+  const [sourceMR, setSourceMR] = useState<{
+    id: number;
+    docNo: string;
+  } | null>(null);
 
   // ── Remote data ───────────────────────────────────────────────────────────
   const { data: dbData, isLoading } = useQuery({
@@ -625,6 +637,58 @@ const PurchaseOrderMaster: React.FC = () => {
     remarks: item.Remarks ?? "",
   }));
 
+  // ── Pre-populate form when arriving from Material Request ─────────────────
+  useEffect(() => {
+    if (!mrPrefill || companies.length === 0 || allProjects.length === 0)
+      return;
+
+    const matchCompany = companies.find(
+      (c) => String(c.id) === String(mrPrefill.CompanyId),
+    );
+    const matchProject = allProjects.find(
+      (p) => String(p.id) === String(mrPrefill.ProjectId),
+    );
+
+    setForm((prev) => ({
+      ...prev,
+      companyId: matchCompany?.id ?? prev.companyId,
+      projectId: matchProject?.id ?? prev.projectId,
+      remarks: mrPrefill.Remarks ?? prev.remarks,
+    }));
+
+    const prefillLines: POLineItem[] = mrPrefill.items.map((it) => {
+      const cgst = Number(it.M_CGST ?? 0);
+      const sgst = Number(it.M_SGST ?? 0);
+      const igst = Number(it.M_IGST ?? 0);
+      const gstRate = igst > 0 ? igst : cgst + sgst;
+      const qty = Number(it.Quantity ?? 1);
+      const rate = 0;
+      const taxAmount = (qty * rate * gstRate) / 100;
+      return {
+        id: uid(),
+        itemId: it.ItemId ?? "",
+        itemName: it.ItemName ?? "",
+        itemDescription: "",
+        quantity: qty,
+        uomId: null,
+        unit: it.UOMCode ?? "",
+        rate,
+        cgstRate: cgst,
+        sgstRate: sgst,
+        igstRate: igst,
+        gstRate,
+        taxAmount,
+        amount: qty * rate + taxAmount,
+      };
+    });
+
+    if (prefillLines.length > 0) setLineItems(prefillLines);
+    setSourceMR({ id: mrPrefill.MRId, docNo: mrPrefill.DocNo });
+    setViewMode("create");
+    // Only run once when mrPrefill is present and master data is loaded
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mrPrefill, companies.length, allProjects.length]);
+
   const filteredList = useMemo(() => {
     if (!searchQuery.trim()) return listData;
     const q = searchQuery.toLowerCase();
@@ -803,6 +867,10 @@ const PurchaseOrderMaster: React.FC = () => {
         ? null
         : form.poNumber || form.docNo || poDocNo || null,
       finYear: selectedFinYear || null,
+      // Source tracking
+      SourceMRId: sourceMR?.id ?? null,
+      SourceMRDocNo: sourceMR?.docNo ?? null,
+      POType: sourceMR ? "Normal" : undefined,
     };
   };
 
@@ -873,6 +941,7 @@ const PurchaseOrderMaster: React.FC = () => {
     setLineItems([EMPTY_LINE()]);
     setSelectedTCs([]);
     setErrors({});
+    setSourceMR(null);
   };
 
   const goToCreate = () => {
@@ -880,6 +949,7 @@ const PurchaseOrderMaster: React.FC = () => {
     setLineItems([EMPTY_LINE()]);
     setSelectedTCs([]);
     setErrors({});
+    setSourceMR(null);
     setViewMode("create");
   };
 
@@ -1283,6 +1353,21 @@ const PurchaseOrderMaster: React.FC = () => {
 
       <div className="space-y-5">
         {/* ── Document Type & Fin Year Card ─────────────────────────────────── */}
+        {sourceMR && !isReadOnly && (
+          <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-900/20 px-4 py-3 flex items-center gap-3 text-sm">
+            <ClipboardList
+              size={15}
+              className="text-emerald-600 dark:text-emerald-400 shrink-0"
+            />
+            <span className="text-emerald-700 dark:text-emerald-300">
+              Creating <span className="font-semibold">Normal PO</span> from
+              Material Request{" "}
+              <span className="font-mono font-bold">{sourceMR.docNo}</span>.
+              Items, company and project have been pre-filled.
+            </span>
+          </div>
+        )}
+
         {!isReadOnly && (
           <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
             <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-widest flex items-center gap-1.5 mb-4">
