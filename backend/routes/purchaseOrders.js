@@ -176,6 +176,8 @@ const PO_SELECT = `
     po.SourceWODocNo,
     po.SourceMRId,
     po.SourceMRDocNo,
+    po.SourceWDId,
+    po.SourceWDDocNo,
     po.POType,
     td.Prefix             AS DocTypePrefix,
     td.Description        AS DocTypeDescription
@@ -304,6 +306,8 @@ router.post("/", async (req, res) => {
     SourceWODocNo,
     SourceMRId,
     SourceMRDocNo,
+    SourceWDId,
+    SourceWDDocNo,
     POType,
   } = req.body;
 
@@ -398,11 +402,17 @@ router.post("/", async (req, res) => {
         sql.Int,
         SourceMRId ? parseInt(SourceMRId, 10) : null,
       )
-      .input("SourceMRDocNo", sql.NVarChar(100), SourceMRDocNo || null)
+      .input(\"SourceMRDocNo\", sql.NVarChar(100), SourceMRDocNo || null)
+      .input(
+        "SourceWDId",
+        sql.Int,
+        SourceWDId ? parseInt(SourceWDId, 10) : null,
+      )
+      .input("SourceWDDocNo", sql.NVarChar(100), SourceWDDocNo || null)
       .input(
         "POType",
         sql.NVarChar(20),
-        POType || (SourceWOId ? "WO_PO" : SourceMRId ? "Normal" : "Direct"),
+        POType || (SourceWOId ? "WO_PO" : SourceMRId ? "Normal" : SourceWDId ? "WO_PO" : "Direct"),
       ).query(`
         INSERT INTO dbo.PurchaseOrders (
           PurchaseOrderNo, PODate, ExpectedDeliveryDate, SupplierID, CompanyId,
@@ -412,7 +422,9 @@ router.post("/", async (req, res) => {
           PaymentTerms, Status, Remarks, DocTypeId, DocNo,
           CreatedBy, CreatedAt, POItems, Discount, GST,
           SourceWOId, SourceWODocNo,
-          SourceMRId, SourceMRDocNo, POType
+          SourceMRId, SourceMRDocNo,
+          SourceWDId, SourceWDDocNo,
+          POType
         )
         OUTPUT INSERTED.PurchaseOrderID
         VALUES (
@@ -423,7 +435,9 @@ router.post("/", async (req, res) => {
           @PaymentTerms, @Status, @Remarks, @DocTypeId, @DocNo,
           @CreatedBy, @CreatedAt, @POItems, @Discount, @GST,
           @SourceWOId, @SourceWODocNo,
-          @SourceMRId, @SourceMRDocNo, @POType
+          @SourceMRId, @SourceMRDocNo,
+          @SourceWDId, @SourceWDDocNo,
+          @POType
         )
       `);
 
