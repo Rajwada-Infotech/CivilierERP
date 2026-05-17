@@ -162,6 +162,7 @@ interface ActivityGroup {
 }
 
 interface WorkOrderForm {
+  boqId: string;
   companyId: string;
   projectId: string;
   docNumber: string;
@@ -286,6 +287,7 @@ function ensureArray<T>(val: unknown): T[] {
 }
 
 const EMPTY_FORM = (): WorkOrderForm => ({
+  boqId: "",
   companyId: "",
   projectId: "",
   docNumber: generateDocNumber(),
@@ -2656,6 +2658,15 @@ const WorkOrderEditPanel: React.FC<{
   const [projects, setProjects] = useState<DropdownOption[]>([]);
   const [contractors, setContractors] = useState<DropdownOption[]>([]);
   const [suppliers, setSuppliers] = useState<DropdownOption[]>([]);
+  const [approvedBoqs, setApprovedBoqs] = useState<
+    Array<{
+      id: number;
+      name: string;
+      CompanyId: number | null;
+      ProjectId: number | null;
+      TotalAmount: number;
+    }>
+  >([]);
   const [activityGroupOptions, setActivityGroupOptions] = useState<
     DropdownOption[]
   >([]);
@@ -2687,6 +2698,7 @@ const WorkOrderEditPanel: React.FC<{
           detail,
           items,
           tcRaw,
+          boqsRaw,
         ] = await Promise.all([
           fetchCompanies(),
           fetchProjects(),
@@ -2710,6 +2722,9 @@ const WorkOrderEditPanel: React.FC<{
           getWorkOrder(workOrderId),
           fetchItems(),
           getTCRecords().catch(() => []),
+          fetchWithAuth("/api/engineering/approved-boqs").then((r) =>
+            r.ok ? r.json() : [],
+          ),
         ]);
         const parsedTCs: TCRecord[] = (Array.isArray(tcRaw) ? tcRaw : [])
           .filter((t: any) => t.isActive !== false)
@@ -2723,6 +2738,7 @@ const WorkOrderEditPanel: React.FC<{
         setProjects(ensureArray<DropdownOption>(proj));
         setContractors(ensureArray<DropdownOption>(cont));
         setSuppliers(ensureArray<DropdownOption>(supp));
+        setApprovedBoqs(Array.isArray(boqsRaw) ? boqsRaw : []);
         setActivityGroupOptions(ensureArray<DropdownOption>(grps));
         const rawActs = ensureArray<ActivityOption>(acts);
         setActivityOptions(
@@ -2754,6 +2770,7 @@ const WorkOrderEditPanel: React.FC<{
           "";
 
         setFormState({
+          boqId: detail.BoqID ? String(detail.BoqID) : "",
           companyId: compId ? String(compId) : "",
           projectId: projId ? String(projId) : "",
           docNumber: detail.DocumentNumber || "",
@@ -2970,9 +2987,8 @@ const WorkOrderEditPanel: React.FC<{
       );
       await saveFullWorkOrder(workOrderId, {
         header: {
+          BoqID: form.boqId ? parseInt(form.boqId) : null,
           CompanyId: parseInt(form.companyId),
-          ProjectId: parseInt(form.projectId),
-          DocumentNumber: form.docNumber,
           DocumentDate: form.docDate,
           ContractorId: parseInt(form.contractorId),
           SupplierId: form.supplierId ? parseInt(form.supplierId) : undefined,
@@ -3147,6 +3163,43 @@ const WorkOrderEditPanel: React.FC<{
         </div>
         <div className="p-4 sm:p-5">
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-5 gap-y-4">
+            {/* ── BOQ Link ────────────────────────────────────────────── */}
+            <div>
+              <FieldLabel>
+                <span className="flex items-center gap-1.5">
+                  <FileText size={11} />
+                  Linked BOQ
+                </span>
+              </FieldLabel>
+              <select
+                value={form.boqId}
+                onChange={(e) => {
+                  const boqId = e.target.value;
+                  const boq = approvedBoqs.find(
+                    (b) => String(b.id) === boqId,
+                  );
+                  setFormState((prev) => ({
+                    ...prev,
+                    boqId,
+                    companyId: boq?.CompanyId ? String(boq.CompanyId) : prev.companyId,
+                    projectId: boq?.ProjectId ? String(boq.ProjectId) : prev.projectId,
+                  }));
+                }}
+                className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                <option value="">— None —</option>
+                {approvedBoqs.map((b) => (
+                  <option key={b.id} value={String(b.id)}>
+                    {b.name}
+                  </option>
+                ))}
+              </select>
+              {form.boqId && (
+                <p className="text-[10px] text-muted-foreground mt-1">
+                  Company &amp; Project auto-filled from BOQ
+                </p>
+              )}
+            </div>
             <div>
               <FieldLabel required>
                 <span className="flex items-center gap-1.5">
@@ -3623,6 +3676,15 @@ const WorkOrderMaster: React.FC = () => {
   const [projects, setProjects] = useState<DropdownOption[]>([]);
   const [contractors, setContractors] = useState<DropdownOption[]>([]);
   const [suppliers, setSuppliers] = useState<DropdownOption[]>([]);
+  const [approvedBoqs, setApprovedBoqs] = useState<
+    Array<{
+      id: number;
+      name: string;
+      CompanyId: number | null;
+      ProjectId: number | null;
+      TotalAmount: number;
+    }>
+  >([]);
   const [activityGroupOptions, setActivityGroupOptions] = useState<
     DropdownOption[]
   >([]);
@@ -3641,7 +3703,7 @@ const WorkOrderMaster: React.FC = () => {
       setLoadingDropdowns(true);
       setDropdownError(null);
       try {
-        const [comp, proj, cont, supp, grps, acts, uomsRaw, tcRaw] =
+        const [comp, proj, cont, supp, grps, acts, uomsRaw, tcRaw, boqsRaw] =
           await Promise.all([
             fetchCompanies(),
             fetchProjects(),
@@ -3663,6 +3725,9 @@ const WorkOrderMaster: React.FC = () => {
                 : [],
             ),
             getTCRecords().catch(() => []),
+            fetchWithAuth("/api/engineering/approved-boqs").then((r) =>
+              r.ok ? r.json() : [],
+            ),
           ]);
         const parsedTCs: TCRecord[] = (Array.isArray(tcRaw) ? tcRaw : [])
           .filter((t: any) => t.isActive !== false)
@@ -3676,6 +3741,7 @@ const WorkOrderMaster: React.FC = () => {
         setProjects(ensureArray<DropdownOption>(proj));
         setContractors(ensureArray<DropdownOption>(cont));
         setSuppliers(ensureArray<DropdownOption>(supp));
+        setApprovedBoqs(Array.isArray(boqsRaw) ? boqsRaw : []);
         setActivityGroupOptions(ensureArray<DropdownOption>(grps));
         setUomOptions(ensureArray<DropdownOption>(uomsRaw));
         const rawActs = ensureArray<ActivityOption>(acts);
@@ -3797,6 +3863,7 @@ const WorkOrderMaster: React.FC = () => {
     try {
       const userId = parseInt(currentUser?.id ?? "1");
       const created = await createWorkOrder({
+        BoqID: form.boqId ? parseInt(form.boqId) : null,
         CompanyId: parseInt(form.companyId),
         ProjectId: parseInt(form.projectId),
         DocumentNumber: form.docNumber,
@@ -3854,9 +3921,8 @@ const WorkOrderMaster: React.FC = () => {
       );
       await saveFullWorkOrder(newHeaderId, {
         header: {
+          BoqID: form.boqId ? parseInt(form.boqId) : null,
           CompanyId: parseInt(form.companyId),
-          ProjectId: parseInt(form.projectId),
-          DocumentNumber: confirmedDocNumber,
           DocumentDate: form.docDate,
           ContractorId: parseInt(form.contractorId),
           SupplierId: form.supplierId ? parseInt(form.supplierId) : undefined,
@@ -4125,6 +4191,47 @@ const WorkOrderMaster: React.FC = () => {
             </div>
             <div className="p-4 sm:p-5">
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-x-5 gap-y-4 items-start">
+                {/* BOQ Link */}
+                <div>
+                  <FieldLabel>
+                    <span className="flex items-center gap-1.5">
+                      <FileText size={11} />
+                      Linked BOQ
+                    </span>
+                  </FieldLabel>
+                  <select
+                    value={form.boqId}
+                    onChange={(e) => {
+                      const boqId = e.target.value;
+                      const boq = approvedBoqs.find(
+                        (b) => String(b.id) === boqId,
+                      );
+                      setForm((prev) => ({
+                        ...prev,
+                        boqId,
+                        companyId: boq?.CompanyId
+                          ? String(boq.CompanyId)
+                          : prev.companyId,
+                        projectId: boq?.ProjectId
+                          ? String(boq.ProjectId)
+                          : prev.projectId,
+                      }));
+                    }}
+                    className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    <option value="">— None —</option>
+                    {approvedBoqs.map((b) => (
+                      <option key={b.id} value={String(b.id)}>
+                        {b.name}
+                      </option>
+                    ))}
+                  </select>
+                  {form.boqId && (
+                    <p className="text-[10px] text-muted-foreground mt-1">
+                      Company &amp; Project auto-filled from BOQ
+                    </p>
+                  )}
+                </div>
                 {/* Row 1: Company | Project | Financial Year */}
                 <div>
                   <FieldLabel required>

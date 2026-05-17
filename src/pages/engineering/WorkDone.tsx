@@ -528,6 +528,11 @@ function WorkDoneForm({
                       setForm((prev) => ({
                         ...prev,
                         workOrderId: woId,
+                        // Auto-fill company/project/supplier from WO
+                        companyId: s.CompanyId ? String(s.CompanyId) : prev.companyId,
+                        projectId: s.ProjectId ? String(s.ProjectId) : prev.projectId,
+                        supplierId: s.SupplierId ? String(s.SupplierId) : prev.supplierId,
+                        // Set rate from WO contract value
                         RatePerUnit: s.GrossAmount
                           ? String(s.GrossAmount)
                           : prev.RatePerUnit,

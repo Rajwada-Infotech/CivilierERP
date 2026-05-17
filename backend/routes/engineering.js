@@ -670,6 +670,7 @@ router.get(
         FROM dbo.WorkOrderHeader h
         INNER JOIN dbo.WorkOrderActivities a ON a.WorkOrderHeaderId = h.Id
         LEFT JOIN dbo.AccountHeadMaster ah ON ah.LHeadId = h.ContractorId
+        WHERE ISNULL(h.Status, 'Draft') = 'Approved'
         GROUP BY h.Id, h.DocNo, h.DocumentNumber, ah.LHeadName
         ORDER BY h.Id DESC
       `);
@@ -696,16 +697,28 @@ router.get("/work-order-summary/:woId", async (req, res) => {
       .request()
       .input("WorkOrderHeaderId", sql.Int, woId).query(`
         SELECT
+          h.CompanyId,
+          h.ProjectId,
+          h.SupplierId,
+          h.ContractorId,
+          h.TotalAmount                    AS ContractValue,
           COUNT(a.Id)                      AS ActivityCount,
           ISNULL(SUM(a.GrandTotal), 0)     AS GrossAmount,
           ISNULL(SUM(a.LabourAmount), 0)   AS LabourAmount,
           ISNULL(SUM(a.MaterialAmount), 0) AS MaterialAmount,
           ISNULL(SUM(a.GrandTotal), 0)     AS NetAmount
-        FROM dbo.WorkOrderActivities a
-        WHERE a.WorkOrderHeaderId = @WorkOrderHeaderId
+        FROM dbo.WorkOrderHeader h
+        LEFT JOIN dbo.WorkOrderActivities a ON a.WorkOrderHeaderId = h.Id
+        WHERE h.Id = @WorkOrderHeaderId
+        GROUP BY h.CompanyId, h.ProjectId, h.SupplierId, h.ContractorId, h.TotalAmount
       `);
 
     const row = result.recordset[0] ?? {
+      CompanyId: null,
+      ProjectId: null,
+      SupplierId: null,
+      ContractorId: null,
+      ContractValue: 0,
       ActivityCount: 0,
       GrossAmount: 0,
       LabourAmount: 0,
@@ -718,5 +731,36 @@ router.get("/work-order-summary/:woId", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// ── GET /engineering/approved-boqs ─────────────────────────────────────────────
+// Lightweight list of Approved BOQs for the Work Order BOQ picker.
+router.get(
+  "/approved-boqs",
+  cache("eng-approved-boqs", 120),
+  async (req, res) => {
+    try {
+      const pool = getPool();
+      const result = await pool.request().query(`
+        SELECT
+          b.BoqID   AS id,
+          COALESCE(b.DocNo, b.BoqNo) AS name,
+          b.CompanyId,
+          co.name   AS CompanyName,
+          b.ProjectId,
+          pr.name   AS ProjectName,
+          b.TotalAmount
+        FROM dbo.BOQ b
+        LEFT JOIN dbo.enterprise co ON co.id = b.CompanyId
+        LEFT JOIN dbo.enterprise pr ON pr.id = b.ProjectId
+        WHERE b.Status = 'Approved'
+        ORDER BY b.BoqID DESC
+      `);
+      res.json(result.recordset);
+    } catch (err) {
+      console.error("[GET /engineering/approved-boqs]", err.message);
+      res.status(500).json({ error: err.message });
+    }
+  },
+);
 
 module.exports = router;
