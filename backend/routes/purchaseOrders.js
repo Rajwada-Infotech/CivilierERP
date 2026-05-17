@@ -174,6 +174,9 @@ const PO_SELECT = `
     po.GST,
     po.SourceWOId,
     po.SourceWODocNo,
+    po.SourceMRId,
+    po.SourceMRDocNo,
+    po.POType,
     td.Prefix             AS DocTypePrefix,
     td.Description        AS DocTypeDescription
   FROM dbo.PurchaseOrders po
@@ -222,7 +225,10 @@ router.get(
       const total = result.recordset[0]?._total ?? 0;
 
       res.json({
-        data: result.recordset.map(r => { const { _total, ...rest } = r; return mapRow(rest); }),
+        data: result.recordset.map((r) => {
+          const { _total, ...rest } = r;
+          return mapRow(rest);
+        }),
         page,
         limit,
         total,
@@ -296,6 +302,9 @@ router.post("/", async (req, res) => {
     GST,
     SourceWOId,
     SourceWODocNo,
+    SourceMRId,
+    SourceMRDocNo,
+    POType,
   } = req.body;
 
   const poItemsArray = Array.isArray(POItems)
@@ -383,7 +392,18 @@ router.post("/", async (req, res) => {
         sql.Int,
         SourceWOId ? parseInt(SourceWOId, 10) : null,
       )
-      .input("SourceWODocNo", sql.NVarChar(100), SourceWODocNo || null).query(`
+      .input("SourceWODocNo", sql.NVarChar(100), SourceWODocNo || null)
+      .input(
+        "SourceMRId",
+        sql.Int,
+        SourceMRId ? parseInt(SourceMRId, 10) : null,
+      )
+      .input("SourceMRDocNo", sql.NVarChar(100), SourceMRDocNo || null)
+      .input(
+        "POType",
+        sql.NVarChar(20),
+        POType || (SourceWOId ? "WO_PO" : SourceMRId ? "Normal" : "Direct"),
+      ).query(`
         INSERT INTO dbo.PurchaseOrders (
           PurchaseOrderNo, PODate, ExpectedDeliveryDate, SupplierID, CompanyId,
           ProjectId, ItemDescription, Quantity, Unit, Rate,
@@ -391,7 +411,8 @@ router.post("/", async (req, res) => {
           HsnCode, GstType, GstRate,
           PaymentTerms, Status, Remarks, DocTypeId, DocNo,
           CreatedBy, CreatedAt, POItems, Discount, GST,
-          SourceWOId, SourceWODocNo
+          SourceWOId, SourceWODocNo,
+          SourceMRId, SourceMRDocNo, POType
         )
         OUTPUT INSERTED.PurchaseOrderID
         VALUES (
@@ -401,7 +422,8 @@ router.post("/", async (req, res) => {
           @HsnCode, @GstType, @GstRate,
           @PaymentTerms, @Status, @Remarks, @DocTypeId, @DocNo,
           @CreatedBy, @CreatedAt, @POItems, @Discount, @GST,
-          @SourceWOId, @SourceWODocNo
+          @SourceWOId, @SourceWODocNo,
+          @SourceMRId, @SourceMRDocNo, @POType
         )
       `);
 
@@ -416,6 +438,20 @@ router.post("/", async (req, res) => {
 
     await transaction.commit();
     await bumpCacheVersion("purchase-orders");
+
+    // If this PO was created from an MR, mark the MR as Ordered (best-effort).
+    if (SourceMRId) {
+      pool
+        .request()
+        .input("mrId", sql.Int, parseInt(SourceMRId, 10))
+        .input("user", sql.NVarChar(200), userEmail)
+        .query(
+          `UPDATE dbo.MaterialRequests
+           SET Status='Ordered', UpdatedBy=@user, UpdatedAt=GETDATE()
+           WHERE MRId=@mrId AND Status IN ('Approved','Partially Ordered')`,
+        )
+        .catch((e) => console.error("MR status update failed:", e.message));
+    }
 
     res.status(201).json({
       message: "Purchase order created successfully",
