@@ -246,7 +246,8 @@ router.get(
           ahm.LHeadName AS ContractorName, h.ContractorId,
           ams.LHeadName AS SupplierName, h.SupplierId,
           h.Remarks, h.TermsAndConditions, h.CreatedBy, h.UpdatedBy,
-          h.DocTypeId, h.DocNo, h.GST,
+          h.DocTypeId, h.DocNo, h.GST, h.BoqID,
+          COALESCE(b.DocNo, b.BoqNo) AS BoqDocNo,
           td.Prefix AS DocTypePrefix, td.Description AS DocTypeDescription,
           COUNT(DISTINCT a.Id) AS ActivityCount,
           COUNT(*) OVER() AS _total
@@ -257,10 +258,12 @@ router.get(
         LEFT JOIN dbo.AccountHeadMaster ams ON ams.LHeadId = h.SupplierId
         LEFT JOIN dbo.WorkOrderActivities a  ON a.WorkOrderHeaderId = h.Id
         LEFT JOIN dbo.TypeOfDoc         td  ON td.TypeOfDocId = h.DocTypeId
+        LEFT JOIN dbo.BOQ               b   ON b.BoqID = h.BoqID
         GROUP BY h.Id, h.DocumentNumber, h.DocumentDate, h.TotalAmount, h.Status,
           h.CreatedAt, h.UpdatedAt, h.CompanyId, h.ProjectId,
           h.ContractorId, h.SupplierId, h.Remarks, h.TermsAndConditions,
-          h.CreatedBy, h.UpdatedBy, h.DocTypeId, h.DocNo, h.GST,
+          h.CreatedBy, h.UpdatedBy, h.DocTypeId, h.DocNo, h.GST, h.BoqID,
+          b.DocNo, b.BoqNo,
           ec.name, ep.name, ahm.LHeadName, ams.LHeadName, td.Prefix, td.Description
         ORDER BY h.CreatedAt DESC
         OFFSET @offset ROWS FETCH NEXT @limit ROWS ONLY
@@ -369,6 +372,7 @@ router.post("/", async (req, res) => {
     DocNo,
     finYear,
     GST,
+    BoqID,
   } = req.body;
   const gstJson = GST
     ? typeof GST === "string"
@@ -412,14 +416,15 @@ router.post("/", async (req, res) => {
       .input("DocNo", sql.NVarChar(100), finalDocNo || null)
       .input("CreatedBy", sql.NVarChar(100), req.user?.name || null)
       .input("CreatedAt", sql.DateTime, new Date())
-      .input("GST", sql.NVarChar(sql.MAX), gstJson).query(`
+      .input("GST", sql.NVarChar(sql.MAX), gstJson)
+      .input("BoqID", sql.Int, BoqID ? parseInt(BoqID, 10) : null).query(`
         INSERT INTO dbo.WorkOrderHeader
           (CompanyId, ProjectId, DocumentNumber, DocumentDate, ContractorId, SupplierId,
-           TotalAmount, Remarks, TermsAndConditions, DocTypeId, DocNo, CreatedBy, CreatedAt, GST)
+           TotalAmount, Remarks, TermsAndConditions, DocTypeId, DocNo, CreatedBy, CreatedAt, GST, BoqID)
         OUTPUT INSERTED.Id
         VALUES
           (@CompanyId, @ProjectId, @DocumentNumber, @DocumentDate, @ContractorId, @SupplierId,
-           @TotalAmount, @Remarks, @TermsAndConditions, @DocTypeId, @DocNo, @CreatedBy, @CreatedAt, @GST)
+           @TotalAmount, @Remarks, @TermsAndConditions, @DocTypeId, @DocNo, @CreatedBy, @CreatedAt, @GST, @BoqID)
       `);
     const newId = result.recordset[0].Id;
 
@@ -466,6 +471,7 @@ router.put("/:id", async (req, res) => {
     DocTypeId,
     DocNo,
     GST,
+    BoqID,
   } = req.body;
   const gstJson = GST
     ? typeof GST === "string"
@@ -494,14 +500,15 @@ router.put("/:id", async (req, res) => {
       .input("DocNo", sql.NVarChar(100), DocNo || null)
       .input("UpdatedBy", sql.NVarChar(100), req.user?.name || null)
       .input("UpdatedAt", sql.DateTime, new Date())
-      .input("GST", sql.NVarChar(sql.MAX), gstJson).query(`
+      .input("GST", sql.NVarChar(sql.MAX), gstJson)
+      .input("BoqID", sql.Int, BoqID ? parseInt(BoqID, 10) : null).query(`
         UPDATE dbo.WorkOrderHeader SET
           CompanyId=@CompanyId, ProjectId=@ProjectId,
           DocumentNumber=@DocumentNumber, DocumentDate=@DocumentDate,
           ContractorId=@ContractorId, SupplierId=@SupplierId, TotalAmount=@TotalAmount,
           Remarks=@Remarks, TermsAndConditions=@TermsAndConditions,
           DocTypeId=@DocTypeId, DocNo=@DocNo,
-          UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt, GST=@GST
+          UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt, GST=@GST, BoqID=@BoqID
         WHERE Id=@Id
       `);
     await bumpCacheVersion("work-orders");
@@ -912,14 +919,16 @@ router.post("/:id/save-full", async (req, res) => {
             ? header.GST
             : JSON.stringify(header.GST)
           : null,
-      ).query(`
+      )
+      .input("BoqID", sql.Int, header.BoqID ? parseInt(header.BoqID, 10) : null)
+      .query(`
         UPDATE dbo.WorkOrderHeader SET
           CompanyId=@CompanyId, ProjectId=@ProjectId,
           DocumentNumber=@DocumentNumber, DocumentDate=@DocumentDate,
           ContractorId=@ContractorId, SupplierId=@SupplierId, TotalAmount=@TotalAmount,
           Remarks=@Remarks, TermsAndConditions=@TermsAndConditions,
           DocTypeId=@DocTypeId, DocNo=@DocNo,
-          UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt, GST=@GST
+          UpdatedBy=@UpdatedBy, UpdatedAt=@UpdatedAt, GST=@GST, BoqID=@BoqID
         WHERE Id=@Id
       `);
 

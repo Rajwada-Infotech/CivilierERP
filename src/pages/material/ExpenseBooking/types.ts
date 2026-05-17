@@ -118,7 +118,7 @@ export interface ExpenseRecord {
   sourceDocNo?: string;
   igstRate?: number;
   /** Source document type: PO | WO | GRN | TOD — saved to DB and restored on edit */
-  eSourceType?: "PO" | "WO" | "WO_PO" | "GRN" | "TOD" | null;
+  eSourceType?: "PO" | "WO" | "WO_PO" | "GRN" | "TOD" | "WORK_DONE" | null;
   /** Source document DB id — saved to DB and restored on edit */
   eSourceId?: number | null;
 
