@@ -476,6 +476,7 @@ router.post("/", async (req, res) => {
     ESourceId,
     EBillingTermId,
     EBillingTermName,
+    EBillingTermsData,
     ETCId,
     ETCName,
     ETCText,
@@ -651,6 +652,11 @@ router.post("/", async (req, res) => {
         EBillingTermId ? parseInt(EBillingTermId, 10) : null,
       )
       .input("EBillingTermName", sql.NVarChar(200), EBillingTermName || null)
+      .input(
+        "EBillingTermsData",
+        sql.NVarChar(sql.MAX),
+        EBillingTermsData ? JSON.stringify(EBillingTermsData) : null,
+      )
       .input("ETCId", sql.Int, ETCId ? parseInt(ETCId, 10) : null)
       .input("ETCName", sql.NVarChar(200), ETCName || null)
       .input("ETCText", sql.NVarChar(sql.MAX), ETCText || null).query(`
@@ -662,7 +668,8 @@ router.post("/", async (req, res) => {
           ECreatedAt, EUpdatedAt, ECreatedBy, EApprovedBy,
           ECompanyId, EDocTypeId, EFinYear,
           ESourceType, ESourceId,
-          EBillingTermId, EBillingTermName, ETCId, ETCName, ETCText
+          EBillingTermId, EBillingTermName, EBillingTermsData,
+          ETCId, ETCName, ETCText
         ) VALUES (
           @EName, @EProjectName, @EDocumentType, @EDocDate, @EAmount, @ENetAmount,
           @ECgstRate, @ESgstRate, @EDiscountData, @EDocNo,
@@ -671,7 +678,8 @@ router.post("/", async (req, res) => {
           @ECreatedAt, @EUpdatedAt, @ECreatedBy, @EApprovedBy,
           @ECompanyId, @EDocTypeId, @EFinYear,
           @ESourceType, @ESourceId,
-          @EBillingTermId, @EBillingTermName, @ETCId, @ETCName, @ETCText
+          @EBillingTermId, @EBillingTermName, @EBillingTermsData,
+          @ETCId, @ETCName, @ETCText
         );
         SELECT SCOPE_IDENTITY() AS NewId;
       `);
@@ -1118,6 +1126,7 @@ router.put("/:id", async (req, res) => {
     ESourceId,
     EBillingTermId,
     EBillingTermName,
+    EBillingTermsData,
     ETCId,
     ETCName,
     ETCText,
@@ -1182,6 +1191,11 @@ router.put("/:id", async (req, res) => {
         EBillingTermId ? parseInt(EBillingTermId, 10) : null,
       )
       .input("EBillingTermName", sql.NVarChar(200), EBillingTermName || null)
+      .input(
+        "EBillingTermsData",
+        sql.NVarChar(sql.MAX),
+        EBillingTermsData ? JSON.stringify(EBillingTermsData) : null,
+      )
       .input("ETCId", sql.Int, ETCId ? parseInt(ETCId, 10) : null)
       .input("ETCName", sql.NVarChar(200), ETCName || null)
       .input("ETCText", sql.NVarChar(sql.MAX), ETCText || null).query(`
@@ -1195,6 +1209,7 @@ router.put("/:id", async (req, res) => {
           EDocTypeId=@EDocTypeId, EFinYear=@EFinYear,
           ESourceType=@ESourceType, ESourceId=@ESourceId,
           EBillingTermId=@EBillingTermId, EBillingTermName=@EBillingTermName,
+          EBillingTermsData=@EBillingTermsData,
           ETCId=@ETCId, ETCName=@ETCName, ETCText=@ETCText
         WHERE Eid = @Eid
       `);
