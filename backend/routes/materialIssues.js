@@ -189,6 +189,8 @@ router.get(
         mi.ProjectId, p.name AS ProjectName,
         mi.FinYearId, fy.FName AS FinYearName,
         mi.Date, mi.Reason, mi.Remarks, mi.CreatedAt,
+        mi.ReferenceType, mi.ReferenceId, mi.ReferenceDocNo,
+        mi.IssuedTo, mi.CostCenter, mi.Purpose,
         (SELECT COUNT(*) FROM dbo.MaterialIssueItems mii WHERE mii.IssueId = mi.IssueId) AS ItemCount,
         (SELECT ISNULL(SUM(mii.Quantity),0) FROM dbo.MaterialIssueItems mii WHERE mii.IssueId = mi.IssueId) AS TotalQty,
         COUNT(*) OVER() AS TotalCount
@@ -227,7 +229,9 @@ router.get("/:id", authenticateToken, async (req, res) => {
     const id = parseInt(req.params.id, 10);
 
     const headerResult = await pool.request().input("id", sql.Int, id).query(`
-      SELECT mi.*, c.name AS CompanyName, p.name AS ProjectName, fy.FName AS FinYearName
+      SELECT mi.*, c.name AS CompanyName, p.name AS ProjectName, fy.FName AS FinYearName,
+             mi.ReferenceType, mi.ReferenceId, mi.ReferenceDocNo,
+             mi.IssuedTo, mi.CostCenter, mi.Purpose
       FROM dbo.MaterialIssues mi
       LEFT JOIN dbo.enterprise c  ON mi.CompanyId = c.id
       LEFT JOIN dbo.enterprise p  ON mi.ProjectId = p.id
@@ -277,6 +281,12 @@ router.post("/", authenticateToken, async (req, res) => {
       items = [],
       ParentDocNo = null,
       RootExBDocNo = null,
+      ReferenceType = null,
+      ReferenceId = null,
+      ReferenceDocNo = null,
+      IssuedTo = null,
+      CostCenter = null,
+      Purpose = null,
     } = req.body;
 
     if (!Array.isArray(items) || items.length === 0)
@@ -321,19 +331,37 @@ router.post("/", authenticateToken, async (req, res) => {
     headerReq.input("Reason", sql.NVarChar(sql.MAX), Reason);
     headerReq.input("Remarks", sql.NVarChar(sql.MAX), Remarks || null);
     headerReq.input("CreatedBy", sql.Int, userId);
+    headerReq.input("ReferenceType", sql.NVarChar(20), ReferenceType || null);
+    headerReq.input(
+      "ReferenceId",
+      sql.Int,
+      ReferenceId ? parseInt(ReferenceId, 10) : null,
+    );
+    headerReq.input(
+      "ReferenceDocNo",
+      sql.NVarChar(100),
+      ReferenceDocNo || null,
+    );
+    headerReq.input("IssuedTo", sql.NVarChar(200), IssuedTo || null);
+    headerReq.input("CostCenter", sql.NVarChar(200), CostCenter || null);
+    headerReq.input("Purpose", sql.NVarChar(500), Purpose || null);
 
     const headerResult = await headerReq.query(`
       INSERT INTO dbo.MaterialIssues
         (IssueNo, DocNo, DocTypeId, DocYear, DocSerial,
          ParentDocNo, RootExBDocNo,
          CompanyId, ProjectId, FinYearId, Date,
-         Reason, Remarks, CreatedBy)
+         Reason, Remarks, CreatedBy,
+         ReferenceType, ReferenceId, ReferenceDocNo,
+         IssuedTo, CostCenter, Purpose)
       OUTPUT INSERTED.*
       VALUES
         (@IssueNo, @DocNo, @DocTypeId, @DocYear, @DocSerial,
          @ParentDocNo, @RootExBDocNo,
          @CompanyId, @ProjectId, @FinYearId, @Date,
-         @Reason, @Remarks, @CreatedBy)
+         @Reason, @Remarks, @CreatedBy,
+         @ReferenceType, @ReferenceId, @ReferenceDocNo,
+         @IssuedTo, @CostCenter, @Purpose)
     `);
 
     const newRecord = headerResult.recordset[0];
@@ -393,6 +421,12 @@ router.put("/:id", authenticateToken, async (req, res) => {
       Reason,
       Remarks,
       items = [],
+      ReferenceType = null,
+      ReferenceId = null,
+      ReferenceDocNo = null,
+      IssuedTo = null,
+      CostCenter = null,
+      Purpose = null,
     } = req.body;
 
     if (!Array.isArray(items) || items.length === 0)
@@ -415,10 +449,23 @@ router.put("/:id", authenticateToken, async (req, res) => {
       .input("FinYearId", sql.Int, FinYearId || null)
       .input("Date", sql.Date, IssueDate)
       .input("Reason", sql.NVarChar(sql.MAX), Reason)
-      .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null).query(`
+      .input("Remarks", sql.NVarChar(sql.MAX), Remarks || null)
+      .input("ReferenceType", sql.NVarChar(20), ReferenceType || null)
+      .input(
+        "ReferenceId",
+        sql.Int,
+        ReferenceId ? parseInt(ReferenceId, 10) : null,
+      )
+      .input("ReferenceDocNo", sql.NVarChar(100), ReferenceDocNo || null)
+      .input("IssuedTo", sql.NVarChar(200), IssuedTo || null)
+      .input("CostCenter", sql.NVarChar(200), CostCenter || null)
+      .input("Purpose", sql.NVarChar(500), Purpose || null).query(`
         UPDATE dbo.MaterialIssues
         SET CompanyId=@CompanyId, ProjectId=@ProjectId, FinYearId=@FinYearId,
-            Date=@Date, Reason=@Reason, Remarks=@Remarks, UpdatedAt=GETDATE()
+            Date=@Date, Reason=@Reason, Remarks=@Remarks, UpdatedAt=GETDATE(),
+            ReferenceType=@ReferenceType, ReferenceId=@ReferenceId,
+            ReferenceDocNo=@ReferenceDocNo,
+            IssuedTo=@IssuedTo, CostCenter=@CostCenter, Purpose=@Purpose
         WHERE IssueId=@Id
       `);
 
@@ -488,6 +535,135 @@ router.delete("/:id", authenticateToken, async (req, res) => {
     res.json({ message: "Issue deleted successfully" });
   } catch (error) {
     res.status(500).json({ error: "Failed to delete issue" });
+  }
+});
+
+// ── GET /prefill/:type/:id ────────────────────────────────────────────────────
+// Returns items pre-filled from a GRN, MR, or Work Done record so the
+// Issues form can auto-populate the cart.
+//   type = 'GRN' | 'MR' | 'WORK_DONE'
+//   id   = numeric DB id of the source record
+router.get("/prefill/:type/:id", authenticateToken, async (req, res) => {
+  try {
+    const pool = getPool();
+    const type = (req.params.type || "").toUpperCase();
+    const id = parseInt(req.params.id, 10);
+    if (!Number.isFinite(id) || id <= 0)
+      return res.status(400).json({ error: "Invalid source id" });
+
+    if (type === "GRN") {
+      // Fetch GRN header + accepted items with current stock
+      const hdr = await pool.request().input("id", sql.Int, id).query(`
+        SELECT grn.GRNID, grn.GRNNo, grn.GRNDate,
+               po.CompanyId, po.ProjectId,
+               s.LHeadName AS SupplierName
+        FROM dbo.GoodsReceiptNotes grn
+        LEFT JOIN dbo.PurchaseOrders po ON grn.POID = po.PurchaseOrderID
+        LEFT JOIN dbo.AccountHeadMaster s ON grn.SupplierID = s.LHeadId
+        WHERE grn.GRNID = @id
+      `);
+      if (!hdr.recordset.length)
+        return res.status(404).json({ error: "GRN not found" });
+
+      const items = await pool.request().input("id", sql.Int, id).query(`
+        SELECT gi.ItemCode AS ItemId, gi.ItemName, gi.AcceptedQty AS Quantity,
+               gi.UOM AS UOMCode,
+               ISNULL(SUM(CASE WHEN sl.Type='IN'  THEN sl.Qty ELSE 0 END),0)
+             - ISNULL(SUM(CASE WHEN sl.Type='OUT' THEN sl.Qty ELSE 0 END),0)
+               AS AvailableStock
+        FROM dbo.GRNItems gi
+        LEFT JOIN dbo.StockLedger sl
+          ON CONVERT(NVARCHAR(100), sl.ItemID) = gi.ItemCode
+        WHERE gi.GRNID = @id AND gi.AcceptedQty > 0
+        GROUP BY gi.ItemCode, gi.ItemName, gi.AcceptedQty, gi.UOM
+      `);
+
+      const h = hdr.recordset[0];
+      return res.json({
+        referenceType: "GRN",
+        referenceId: h.GRNID,
+        referenceDocNo: h.GRNNo,
+        companyId: h.CompanyId,
+        projectId: h.ProjectId,
+        items: items.recordset.map((r) => ({
+          ItemId: String(r.ItemId),
+          ItemName: r.ItemName,
+          UOMCode: r.UOMCode || "",
+          Quantity: "", // user fills qty; we show max = AvailableStock
+          AvailableStock: Number(r.AvailableStock),
+        })),
+      });
+    }
+
+    if (type === "MR") {
+      const hdr = await pool.request().input("id", sql.Int, id).query(`
+        SELECT mr.MRId, mr.MRDocNo, mr.CompanyId, mr.ProjectId
+        FROM dbo.MaterialRequests mr
+        WHERE mr.MRId = @id AND mr.MRStatus = 'Approved'
+      `);
+      if (!hdr.recordset.length)
+        return res.status(404).json({ error: "Approved MR not found" });
+
+      const items = await pool.request().input("id", sql.Int, id).query(`
+        SELECT mri.ItemCode AS ItemId, img.M_Name AS ItemName,
+               mri.Quantity, mri.UOM AS UOMCode,
+               ISNULL(SUM(CASE WHEN sl.Type='IN'  THEN sl.Qty ELSE 0 END),0)
+             - ISNULL(SUM(CASE WHEN sl.Type='OUT' THEN sl.Qty ELSE 0 END),0)
+               AS AvailableStock
+        FROM dbo.MaterialRequestItems mri
+        LEFT JOIN dbo.Item_Master_Group img
+          ON CONVERT(NVARCHAR(100), img.M_Id) = mri.ItemCode
+        LEFT JOIN dbo.StockLedger sl
+          ON CONVERT(NVARCHAR(100), sl.ItemID) = mri.ItemCode
+        WHERE mri.MRId = @id
+        GROUP BY mri.ItemCode, img.M_Name, mri.Quantity, mri.UOM
+      `);
+
+      const h = hdr.recordset[0];
+      return res.json({
+        referenceType: "MR",
+        referenceId: h.MRId,
+        referenceDocNo: h.MRDocNo,
+        companyId: h.CompanyId,
+        projectId: h.ProjectId,
+        items: items.recordset.map((r) => ({
+          ItemId: String(r.ItemId),
+          ItemName: r.ItemName,
+          UOMCode: r.UOMCode || "",
+          Quantity: String(r.Quantity || ""),
+          AvailableStock: Number(r.AvailableStock),
+        })),
+      });
+    }
+
+    if (type === "WORK_DONE") {
+      const hdr = await pool.request().input("id", sql.Int, id).query(`
+        SELECT wd.ID, wd.DocNo, wd.CompanyId, wd.ProjectId
+        FROM dbo.WorkDone wd
+        WHERE wd.ID = @id AND wd.Status = 'Approved'
+      `);
+      if (!hdr.recordset.length)
+        return res.status(404).json({ error: "Approved Work Done not found" });
+
+      // Work Done has no explicit materials lines table in current schema;
+      // return header only so the form pre-fills reference + company/project.
+      const h = hdr.recordset[0];
+      return res.json({
+        referenceType: "WORK_DONE",
+        referenceId: h.ID,
+        referenceDocNo: h.DocNo,
+        companyId: h.CompanyId,
+        projectId: h.ProjectId,
+        items: [],
+      });
+    }
+
+    return res
+      .status(400)
+      .json({ error: "type must be GRN, MR, or WORK_DONE" });
+  } catch (err) {
+    console.error("Issue prefill error:", err.message);
+    res.status(500).json({ error: err.message });
   }
 });
 

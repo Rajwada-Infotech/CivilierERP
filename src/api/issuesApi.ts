@@ -108,6 +108,33 @@ export const deleteIssue = async (id: number) => {
   return res.json();
 };
 
+export interface IssuePrefill {
+  referenceType: "GRN" | "MR" | "WORK_DONE";
+  referenceId: number;
+  referenceDocNo: string;
+  companyId?: number | null;
+  projectId?: number | null;
+  items: {
+    ItemId: string;
+    ItemName?: string;
+    UOMCode: string;
+    Quantity: string;
+    AvailableStock: number;
+  }[];
+}
+
+export const getIssuePrefill = async (
+  type: "GRN" | "MR" | "WORK_DONE",
+  id: number,
+): Promise<IssuePrefill> => {
+  const res = await fetchWithAuth(`${BASE}/prefill/${type}/${id}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error((err as any).error || "Failed to fetch prefill data");
+  }
+  return res.json();
+};
+
 // Legacy compatibility exports
 export const getCompanyOptions = getCompanies;
 export const getProjectOptions = getProjects;

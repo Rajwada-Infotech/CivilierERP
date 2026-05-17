@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import * as issuesApi from "@/api/issuesApi";
+import type { IssuePrefill } from "@/api/issuesApi";
 import {
   CalendarDays,
   FileText,
@@ -65,6 +66,12 @@ interface IssueHeader {
   date: string;
   reason: string;
   remarks: string;
+  referenceType: "" | "GRN" | "MR" | "WORK_DONE";
+  referenceId: string;
+  referenceDocNo: string;
+  issuedTo: string;
+  costCenter: string;
+  purpose: string;
 }
 
 const defaultHeader: IssueHeader = {
@@ -74,6 +81,12 @@ const defaultHeader: IssueHeader = {
   date: new Date().toISOString().slice(0, 10),
   reason: "",
   remarks: "",
+  referenceType: "",
+  referenceId: "",
+  referenceDocNo: "",
+  issuedTo: "",
+  costCenter: "",
+  purpose: "",
 };
 
 const blankCartItem = (): CartItem => ({
@@ -177,6 +190,7 @@ export default function Issues() {
 
   // Header form
   const [header, setHeader] = useState<IssueHeader>(defaultHeader);
+  const [loadingPrefill, setLoadingPrefill] = useState(false);
   // Cart
   const [cart, setCart] = useState<CartItem[]>([blankCartItem()]);
 
@@ -378,6 +392,44 @@ export default function Issues() {
 
   const isSaving = createMutation.isPending || updateMutation.isPending;
 
+  // ── Reference source prefill ─────────────────────────────────────────────
+
+  const handleReferenceTypeChange = (val: string) => {
+    setH("referenceType", val as IssueHeader["referenceType"]);
+    setH("referenceId", "");
+    setH("referenceDocNo", "");
+  };
+
+  const handleLoadPrefill = async () => {
+    if (!header.referenceType || !header.referenceId) return;
+    setLoadingPrefill(true);
+    try {
+      const prefill: IssuePrefill = await issuesApi.getIssuePrefill(
+        header.referenceType as "GRN" | "MR" | "WORK_DONE",
+        Number(header.referenceId),
+      );
+      setH("referenceDocNo", prefill.referenceDocNo);
+      if (prefill.companyId) setH("companyId", String(prefill.companyId));
+      if (prefill.projectId) setH("projectId", String(prefill.projectId));
+      if (prefill.items.length > 0) {
+        const newCart: CartItem[] = prefill.items.map((it) => ({
+          _key: crypto.randomUUID(),
+          ItemId: it.ItemId,
+          UOMCode: it.UOMCode,
+          Quantity: it.Quantity,
+          Remarks: "",
+          ItemName: it.ItemName,
+          AvailableStock: it.AvailableStock,
+        }));
+        setCart(newCart);
+      }
+    } catch (err: any) {
+      toast.error("Prefill failed: " + (err?.message ?? "Unknown error"));
+    } finally {
+      setLoadingPrefill(false);
+    }
+  };
+
   // ── Navigation helpers ───────────────────────────────────────────────────
 
   const goToList = () => {
@@ -396,6 +448,12 @@ export default function Issues() {
       date: record.Date ? String(record.Date).slice(0, 10) : defaultHeader.date,
       reason: record.Reason ?? "",
       remarks: record.Remarks ?? "",
+      referenceType: record.ReferenceType ?? "",
+      referenceId: String(record.ReferenceId ?? ""),
+      referenceDocNo: record.ReferenceDocNo ?? "",
+      issuedTo: record.IssuedTo ?? "",
+      costCenter: record.CostCenter ?? "",
+      purpose: record.Purpose ?? "",
     });
     // Map child items to cart
     const items: CartItem[] = (record.items || []).map((it: any) => ({
@@ -439,6 +497,12 @@ export default function Issues() {
       Date: header.date,
       Reason: header.reason,
       Remarks: header.remarks || null,
+      ReferenceType: header.referenceType || null,
+      ReferenceId: header.referenceId ? Number(header.referenceId) : null,
+      ReferenceDocNo: header.referenceDocNo || null,
+      IssuedTo: header.issuedTo || null,
+      CostCenter: header.costCenter || null,
+      Purpose: header.purpose || null,
       items: cart.map((ci) => ({
         ItemId: ci.ItemId,
         UOMCode: ci.UOMCode,
@@ -848,6 +912,98 @@ export default function Issues() {
                 />
               </Field>
             </div>
+
+            {/* Row 3: Reference Source */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <Field label="Reference Source">
+                <Select
+                  value={header.referenceType}
+                  onValueChange={handleReferenceTypeChange}
+                >
+                  <SelectTrigger className="h-9 gap-2">
+                    <FileText
+                      size={13}
+                      className="text-muted-foreground shrink-0"
+                    />
+                    <SelectValue placeholder="None (optional)" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="">None</SelectItem>
+                    <SelectItem value="GRN">
+                      GRN (Goods Receipt Note)
+                    </SelectItem>
+                    <SelectItem value="MR">MR (Material Request)</SelectItem>
+                    <SelectItem value="WORK_DONE">Work Done</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+
+              {header.referenceType ? (
+                <Field
+                  label={`${header.referenceType === "GRN" ? "GRN" : header.referenceType === "MR" ? "MR" : "Work Done"} ID / Doc No`}
+                >
+                  <div className="flex gap-2">
+                    <Input
+                      value={header.referenceId}
+                      onChange={(e) => setH("referenceId", e.target.value)}
+                      className="h-9 text-sm font-mono"
+                      placeholder="Enter numeric ID…"
+                    />
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="h-9 gap-1.5 shrink-0"
+                      disabled={!header.referenceId || loadingPrefill}
+                      onClick={handleLoadPrefill}
+                    >
+                      {loadingPrefill ? (
+                        <RefreshCw size={13} className="animate-spin" />
+                      ) : (
+                        <Search size={13} />
+                      )}
+                      Load
+                    </Button>
+                  </div>
+                  {header.referenceDocNo && (
+                    <p className="text-xs text-emerald-600 dark:text-emerald-400 mt-1 font-medium">
+                      ✓ Loaded: {header.referenceDocNo}
+                    </p>
+                  )}
+                </Field>
+              ) : (
+                <div />
+              )}
+
+              <Field label="Issued To (Dept / Employee / Project)">
+                <Input
+                  value={header.issuedTo}
+                  onChange={(e) => setH("issuedTo", e.target.value)}
+                  className="h-9 text-sm"
+                  placeholder="Department, employee, or project name…"
+                />
+              </Field>
+            </div>
+
+            {/* Row 4: Cost Center | Purpose */}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <Field label="Cost Center / GL Account">
+                <Input
+                  value={header.costCenter}
+                  onChange={(e) => setH("costCenter", e.target.value)}
+                  className="h-9 text-sm"
+                  placeholder="Cost centre or GL code…"
+                />
+              </Field>
+              <Field label="Purpose of Consumption">
+                <Input
+                  value={header.purpose}
+                  onChange={(e) => setH("purpose", e.target.value)}
+                  className="h-9 text-sm"
+                  placeholder="Brief purpose or work order reference…"
+                />
+              </Field>
+            </div>
           </CardContent>
         </Card>
 
@@ -1205,6 +1361,27 @@ export default function Issues() {
                 label="Status"
                 value={<StatusBadge status={viewingRecord.Status || "Draft"} />}
               />
+              {viewingRecord.ReferenceType && (
+                <DetailRow
+                  label="Reference"
+                  value={
+                    <span className="font-mono text-xs bg-muted px-2 py-0.5 rounded">
+                      {viewingRecord.ReferenceType}:{" "}
+                      {viewingRecord.ReferenceDocNo ||
+                        viewingRecord.ReferenceId}
+                    </span>
+                  }
+                />
+              )}
+              {viewingRecord.IssuedTo && (
+                <DetailRow label="Issued To" value={viewingRecord.IssuedTo} />
+              )}
+              {viewingRecord.CostCenter && (
+                <DetailRow
+                  label="Cost Center"
+                  value={viewingRecord.CostCenter}
+                />
+              )}
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
@@ -1224,6 +1401,16 @@ export default function Issues() {
                 </div>
               </div>
             </div>
+            {viewingRecord.Purpose && (
+              <div>
+                <p className="text-xs uppercase tracking-widest font-semibold text-muted-foreground mb-1.5">
+                  Purpose of Consumption
+                </p>
+                <div className="bg-muted/40 border border-border rounded-lg p-3 text-sm">
+                  {viewingRecord.Purpose}
+                </div>
+              </div>
+            )}
           </CardContent>
         </Card>
 
