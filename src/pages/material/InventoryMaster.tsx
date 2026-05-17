@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
   Calendar,
@@ -15,12 +15,17 @@ import {
   ChevronRight,
   ArrowDownToLine,
   ArrowUpFromLine,
+  Warehouse,
+  Plus,
+  X,
+  ChevronDown as ChevronDownIcon,
 } from "lucide-react";
 import {
   getInventoryMaster,
   type InventoryMasterRow,
 } from "@/api/inventoryMasterApi";
 import { getStockLedger } from "@/api/stockLedgerApi";
+import { getGodowns, createGodown, type Godown } from "@/api/godownsApi";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const fmtNum = (n: number) =>
@@ -39,7 +44,7 @@ const fmtDate = (d: string | null) => {
   });
 };
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
+// ─── Summary Card ─────────────────────────────────────────────────────────────
 function SummaryCard({
   label,
   value,
@@ -70,6 +75,7 @@ function SummaryCard({
   );
 }
 
+// ─── Stock Badge ──────────────────────────────────────────────────────────────
 function StockBadge({ value }: { value: number }) {
   if (value > 0)
     return (
@@ -92,31 +98,27 @@ function StockBadge({ value }: { value: number }) {
   );
 }
 
-// ─── Stock Ledger Panel (per item drill-down) ─────────────────────────────────
+// ─── Stock Ledger Panel ───────────────────────────────────────────────────────
 function StockLedgerPanel({ itemId }: { itemId: string }) {
   const { data, isLoading } = useQuery({
     queryKey: ["stock-ledger-item", itemId],
     queryFn: () => getStockLedger({ itemId, limit: 50, page: 1 }),
     staleTime: 60_000,
   });
-
   const entries = data?.data ?? [];
 
-  if (isLoading) {
+  if (isLoading)
     return (
       <div className="px-6 py-4 flex items-center gap-2 text-xs text-muted-foreground">
         <RefreshCw size={12} className="animate-spin" /> Loading ledger…
       </div>
     );
-  }
-
-  if (entries.length === 0) {
+  if (entries.length === 0)
     return (
       <div className="px-6 py-4 text-xs text-muted-foreground italic">
-        No ledger entries found for this item.
+        No ledger entries found.
       </div>
     );
-  }
 
   return (
     <div className="border-t border-border bg-muted/20">
@@ -124,30 +126,23 @@ function StockLedgerPanel({ itemId }: { itemId: string }) {
         <table className="w-full text-[11px]">
           <thead>
             <tr className="border-b border-border bg-muted/40">
-              <th className="px-4 py-2 text-left font-semibold text-muted-foreground">
-                Stock ID
-              </th>
-              <th className="px-4 py-2 text-left font-semibold text-muted-foreground">
-                Item Name
-              </th>
-              <th className="px-4 py-2 text-left font-semibold text-muted-foreground">
-                Type
-              </th>
-              <th className="px-4 py-2 text-right font-semibold text-muted-foreground">
-                Qty
-              </th>
-              <th className="px-4 py-2 text-left font-semibold text-muted-foreground">
-                UOM
-              </th>
-              <th className="px-4 py-2 text-left font-semibold text-muted-foreground">
-                Ref Type
-              </th>
-              <th className="px-4 py-2 text-left font-semibold text-muted-foreground">
-                Doc No
-              </th>
-              <th className="px-4 py-2 text-left font-semibold text-muted-foreground">
-                Date
-              </th>
+              {[
+                "Stock ID",
+                "Item Name",
+                "Type",
+                "Qty",
+                "UOM",
+                "Ref Type",
+                "Doc No",
+                "Date",
+              ].map((h) => (
+                <th
+                  key={h}
+                  className="px-4 py-2 text-left font-semibold text-muted-foreground"
+                >
+                  {h}
+                </th>
+              ))}
             </tr>
           </thead>
           <tbody>
@@ -195,23 +190,266 @@ function StockLedgerPanel({ itemId }: { itemId: string }) {
           </tbody>
         </table>
       </div>
-      {(data?.total ?? 0) > 50 && (
-        <p className="px-4 py-2 text-[10px] text-muted-foreground border-t border-border">
-          Showing 50 of {data?.total} entries
-        </p>
+    </div>
+  );
+}
+
+// ─── Create Godown Modal ──────────────────────────────────────────────────────
+function CreateGodownModal({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
+  const qc = useQueryClient();
+  const [form, setForm] = useState({
+    GodownCode: "",
+    GodownName: "",
+    ShortDesc: "",
+    Description: "",
+    Remarks: "",
+    Location: "",
+  });
+  const [err, setErr] = useState("");
+
+  const mut = useMutation({
+    mutationFn: createGodown,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["godowns"] });
+      onClose();
+      setForm({
+        GodownCode: "",
+        GodownName: "",
+        ShortDesc: "",
+        Description: "",
+        Remarks: "",
+        Location: "",
+      });
+    },
+    onError: (e: Error) => setErr(e.message),
+  });
+
+  if (!open) return null;
+
+  const set =
+    (k: string) =>
+    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+      setForm((f) => ({ ...f, [k]: e.target.value }));
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+      <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6 space-y-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-heading font-bold text-foreground flex items-center gap-2">
+            <Warehouse size={16} className="text-emerald-600" /> Create New
+            Godown
+          </h2>
+          <button
+            onClick={onClose}
+            className="p-1 rounded hover:bg-muted transition-colors"
+          >
+            <X size={16} className="text-muted-foreground" />
+          </button>
+        </div>
+
+        {err && (
+          <div className="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-600 text-xs flex items-center gap-2">
+            <AlertCircle size={13} />
+            {err}
+          </div>
+        )}
+
+        <div className="space-y-3">
+          {[
+            {
+              label: "Godown Name *",
+              key: "GodownName",
+              placeholder: "e.g. Site A Warehouse",
+            },
+            {
+              label: "Godown Code",
+              key: "GodownCode",
+              placeholder: "e.g. SITE-A",
+            },
+            {
+              label: "Short Description",
+              key: "ShortDesc",
+              placeholder: "Shown in badges",
+            },
+            {
+              label: "Location",
+              key: "Location",
+              placeholder: "Physical address or location",
+            },
+          ].map(({ label, key, placeholder }) => (
+            <div key={key}>
+              <label className="text-xs font-medium text-muted-foreground block mb-1">
+                {label}
+              </label>
+              <input
+                value={(form as any)[key]}
+                onChange={set(key)}
+                placeholder={placeholder}
+                className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-emerald-500/30 focus:border-emerald-500/50"
+              />
+            </div>
+          ))}
+          <div>
+            <label className="text-xs font-medium text-muted-foreground block mb-1">
+              Description
+            </label>
+            <textarea
+              value={form.Description}
+              onChange={set("Description")}
+              rows={2}
+              placeholder="Detailed description of this godown"
+              className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-emerald-500/30 resize-none"
+            />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-muted-foreground block mb-1">
+              Remarks
+            </label>
+            <textarea
+              value={form.Remarks}
+              onChange={set("Remarks")}
+              rows={2}
+              placeholder="Any additional remarks"
+              className="w-full px-3 py-2 rounded-lg border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground outline-none focus:ring-2 focus:ring-emerald-500/30 resize-none"
+            />
+          </div>
+        </div>
+
+        <div className="flex gap-2 pt-1">
+          <button
+            onClick={onClose}
+            className="flex-1 px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => {
+              setErr("");
+              mut.mutate(form);
+            }}
+            disabled={!form.GodownName.trim() || mut.isPending}
+            className="flex-1 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+          >
+            {mut.isPending ? (
+              <RefreshCw size={13} className="animate-spin" />
+            ) : (
+              <Plus size={13} />
+            )}
+            Create Godown
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Godown Selector Dropdown ─────────────────────────────────────────────────
+function GodownSelector({
+  godowns,
+  selectedId,
+  onSelect,
+  onCreateNew,
+}: {
+  godowns: Godown[];
+  selectedId: number | null;
+  onSelect: (id: number) => void;
+  onCreateNew: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const selected = godowns.find((g) => g.GodownID === selectedId);
+
+  return (
+    <div className="relative">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border bg-card text-sm hover:bg-muted transition-colors min-w-[180px]"
+      >
+        <Warehouse size={14} className="text-emerald-600 shrink-0" />
+        <span className="text-foreground font-medium truncate">
+          {selected ? (
+            <>
+              {selected.GodownName}
+              {selected.IsMain && (
+                <span className="ml-1 text-[10px] bg-emerald-500/15 text-emerald-600 px-1.5 py-0.5 rounded-full font-semibold">
+                  Main
+                </span>
+              )}
+            </>
+          ) : (
+            "Select Godown"
+          )}
+        </span>
+        <ChevronDownIcon
+          size={13}
+          className={`text-muted-foreground ml-auto transition-transform ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute top-full mt-1 left-0 z-20 bg-card border border-border rounded-xl shadow-xl py-1 min-w-[220px] max-h-64 overflow-y-auto">
+            {godowns.map((g) => (
+              <button
+                key={g.GodownID}
+                onClick={() => {
+                  onSelect(g.GodownID);
+                  setOpen(false);
+                }}
+                className={`w-full px-3 py-2 text-left text-sm hover:bg-muted transition-colors flex items-center gap-2 ${g.GodownID === selectedId ? "bg-emerald-500/10 text-emerald-600" : "text-foreground"}`}
+              >
+                <Warehouse
+                  size={13}
+                  className={
+                    g.GodownID === selectedId
+                      ? "text-emerald-600"
+                      : "text-muted-foreground"
+                  }
+                />
+                <span className="flex-1 truncate">{g.GodownName}</span>
+                {g.IsMain && (
+                  <span className="text-[9px] bg-emerald-500/15 text-emerald-600 px-1.5 py-0.5 rounded-full font-bold">
+                    MAIN
+                  </span>
+                )}
+              </button>
+            ))}
+            <div className="border-t border-border mt-1 pt-1">
+              <button
+                onClick={() => {
+                  setOpen(false);
+                  onCreateNew();
+                }}
+                className="w-full px-3 py-2 text-left text-sm text-emerald-600 hover:bg-emerald-500/10 transition-colors flex items-center gap-2"
+              >
+                <Plus size={13} /> Create New Godown
+              </button>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
 }
 
-// ─── Export to CSV ────────────────────────────────────────────────────────────
-function exportToCsv(rows: InventoryMasterRow[], date: string) {
+// ─── Export CSV ───────────────────────────────────────────────────────────────
+function exportToCsv(
+  rows: InventoryMasterRow[],
+  date: string,
+  godownName: string,
+) {
   const headers = [
     "Date",
+    "Godown",
     "Item Name",
     "Item Group",
     "UOM",
-    "UOM Symbol",
     "Opening Stock",
     "Stock In",
     "Stock Out",
@@ -222,10 +460,10 @@ function exportToCsv(rows: InventoryMasterRow[], date: string) {
     ...rows.map((r) =>
       [
         date,
+        `"${godownName}"`,
         `"${(r.ItemName || "").replace(/"/g, '""')}"`,
         `"${(r.ItemGroupName || "").replace(/"/g, '""')}"`,
         r.UOMCode || "",
-        r.UOMSymbol || "",
         r.OpeningStock,
         r.StockIn,
         r.StockOut,
@@ -237,7 +475,7 @@ function exportToCsv(rows: InventoryMasterRow[], date: string) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `inventory-master-${date}.csv`;
+  a.download = `inventory-${godownName.replace(/\s+/g, "-")}-${date}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -245,19 +483,48 @@ function exportToCsv(rows: InventoryMasterRow[], date: string) {
 // ─── Main Component ───────────────────────────────────────────────────────────
 export default function InventoryMaster() {
   const [selectedDate, setSelectedDate] = useState<string>(today());
+  const [selectedGodownId, setSelectedGodownId] = useState<number | null>(null);
   const [search, setSearch] = useState("");
   const [expandedItemId, setExpandedItemId] = useState<string | null>(null);
+  const [showCreateGodown, setShowCreateGodown] = useState(false);
 
+  // ── Load godowns ─────────────────────────────────────────────────────────────
+  const { data: godownsData } = useQuery({
+    queryKey: ["godowns"],
+    queryFn: getGodowns,
+    staleTime: 120_000,
+    onSuccess: (d) => {
+      // Auto-select main godown on first load
+      if (!selectedGodownId) {
+        const main = d.data.find((g) => g.IsMain);
+        if (main) setSelectedGodownId(main.GodownID);
+      }
+    },
+  } as any);
+
+  const godowns: Godown[] = godownsData?.data ?? [];
+
+  // Auto-select main godown when godowns load
+  React.useEffect(() => {
+    if (godowns.length && !selectedGodownId) {
+      const main = godowns.find((g) => g.IsMain);
+      if (main) setSelectedGodownId(main.GodownID);
+    }
+  }, [godowns, selectedGodownId]);
+
+  const selectedGodown = godowns.find((g) => g.GodownID === selectedGodownId);
+
+  // ── Load inventory data ───────────────────────────────────────────────────────
   const { data, isLoading, isError, error, refetch, isFetching } = useQuery({
-    queryKey: ["inventory-master", selectedDate],
-    queryFn: () => getInventoryMaster(selectedDate),
+    queryKey: ["inventory-master", selectedDate, selectedGodownId],
+    queryFn: () => getInventoryMaster(selectedDate, selectedGodownId),
     staleTime: 60_000,
     refetchOnWindowFocus: false,
+    enabled: !!selectedGodownId,
   });
 
   const rows: InventoryMasterRow[] = data?.data ?? [];
 
-  // ── Search filter ────────────────────────────────────────────────────────────
   const filtered = useMemo(() => {
     if (!search.trim()) return rows;
     const q = search.toLowerCase();
@@ -270,7 +537,6 @@ export default function InventoryMaster() {
     );
   }, [rows, search]);
 
-  // ── Summary totals ───────────────────────────────────────────────────────────
   const totals = useMemo(
     () =>
       filtered.reduce(
@@ -293,10 +559,14 @@ export default function InventoryMaster() {
       <Breadcrumbs
         items={["Dashboard", "Material Module", "Inventory Master"]}
       />
+      <CreateGodownModal
+        open={showCreateGodown}
+        onClose={() => setShowCreateGodown(false)}
+      />
 
       <div className="p-6 space-y-5">
-        {/* ── Header ──────────────────────────────────────────────────────── */}
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        {/* Header */}
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
               <Package size={20} className="text-emerald-600" />
@@ -306,9 +576,22 @@ export default function InventoryMaster() {
               Daily stock positions: opening, received, issued, and closing
               balance
             </p>
+            {selectedGodown?.Description && (
+              <p className="text-xs text-muted-foreground/70 mt-0.5 italic max-w-md truncate">
+                {selectedGodown.Description}
+              </p>
+            )}
           </div>
 
           <div className="flex items-center gap-2 flex-wrap">
+            {/* Godown Selector */}
+            <GodownSelector
+              godowns={godowns}
+              selectedId={selectedGodownId}
+              onSelect={setSelectedGodownId}
+              onCreateNew={() => setShowCreateGodown(true)}
+            />
+
             {/* Date picker */}
             <label className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border bg-card text-sm cursor-pointer hover:bg-muted transition-colors">
               <Calendar size={14} className="text-muted-foreground" />
@@ -323,12 +606,17 @@ export default function InventoryMaster() {
 
             {/* Export */}
             <button
-              onClick={() => exportToCsv(filtered, selectedDate)}
+              onClick={() =>
+                exportToCsv(
+                  filtered,
+                  selectedDate,
+                  selectedGodown?.GodownName ?? "All",
+                )
+              }
               disabled={filtered.length === 0}
               className="flex items-center gap-2 px-3 py-1.5 text-xs rounded-lg border border-border hover:bg-muted transition-colors disabled:opacity-40"
             >
-              <Download size={13} />
-              Export CSV
+              <Download size={13} /> Export CSV
             </button>
 
             {/* Refresh */}
@@ -340,23 +628,53 @@ export default function InventoryMaster() {
               <RefreshCw
                 size={13}
                 className={isFetching ? "animate-spin" : ""}
-              />
+              />{" "}
               Refresh
             </button>
           </div>
         </div>
 
-        {/* ── Error banner ─────────────────────────────────────────────────── */}
+        {/* Godown info banner */}
+        {selectedGodown && (
+          <div className="flex items-center gap-3 px-4 py-2.5 rounded-xl border border-border bg-card">
+            <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
+              <Warehouse size={15} className="text-emerald-600" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-semibold text-foreground flex items-center gap-1.5">
+                {selectedGodown.GodownName}
+                {selectedGodown.IsMain && (
+                  <span className="text-[9px] bg-emerald-500/15 text-emerald-600 px-1.5 py-0.5 rounded-full font-bold tracking-wide">
+                    MAIN GODOWN
+                  </span>
+                )}
+              </p>
+              {(selectedGodown.ShortDesc || selectedGodown.Location) && (
+                <p className="text-[11px] text-muted-foreground truncate">
+                  {[selectedGodown.ShortDesc, selectedGodown.Location]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </p>
+              )}
+            </div>
+            {selectedGodown.Remarks && (
+              <p className="text-[11px] text-muted-foreground/70 italic hidden sm:block max-w-xs truncate">
+                {selectedGodown.Remarks}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Error */}
         {isError && (
           <div className="px-4 py-3 rounded-lg bg-red-500/10 text-red-600 text-sm border border-red-500/20 flex items-center gap-2">
             <AlertCircle size={15} />
             Failed to load inventory data
-            {(error as Error)?.message ? `: ${(error as Error).message}` : ""}.
-            Please refresh.
+            {(error as Error)?.message ? `: ${(error as Error).message}` : ""}
           </div>
         )}
 
-        {/* ── Summary cards ─────────────────────────────────────────────────── */}
+        {/* Summary Cards */}
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           <SummaryCard
             label="Opening Stock (Total)"
@@ -388,9 +706,8 @@ export default function InventoryMaster() {
           />
         </div>
 
-        {/* ── Table card ──────────────────────────────────────────────────── */}
+        {/* Table */}
         <div className="rounded-xl border border-border bg-card overflow-hidden">
-          {/* Table header / search bar */}
           <div className="px-5 py-3 border-b border-border flex flex-wrap items-center justify-between gap-3">
             <div>
               <p className="text-sm font-heading font-semibold text-foreground">
@@ -399,11 +716,8 @@ export default function InventoryMaster() {
               <p className="text-xs text-muted-foreground">
                 {selectedDate} · {filtered.length} item
                 {filtered.length !== 1 ? "s" : ""}
-                {search ? ` (filtered from ${rows.length})` : ""}
-                {" · "}
-                <span className="text-muted-foreground/70">
-                  Click a row to view ledger entries
-                </span>
+                {search ? ` (filtered from ${rows.length})` : ""} · Click a row
+                to view ledger
               </p>
             </div>
             <label className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border bg-background text-xs">
@@ -418,7 +732,6 @@ export default function InventoryMaster() {
             </label>
           </div>
 
-          {/* Table */}
           <div className="overflow-x-auto">
             <table className="w-full text-xs">
               <thead>
@@ -469,7 +782,7 @@ export default function InventoryMaster() {
                     >
                       {search
                         ? "No items match your search."
-                        : "No inventory data found for the selected date."}
+                        : "No inventory data found for the selected date and godown."}
                     </td>
                   </tr>
                 ) : (
@@ -481,7 +794,6 @@ export default function InventoryMaster() {
                           className={`border-b border-border hover:bg-muted/30 transition-colors cursor-pointer ${isExpanded ? "bg-muted/20" : ""}`}
                           onClick={() => toggleExpand(row.ItemID)}
                         >
-                          {/* Expand toggle */}
                           <td className="px-4 py-3 text-muted-foreground">
                             {isExpanded ? (
                               <ChevronDown size={13} />
@@ -489,13 +801,9 @@ export default function InventoryMaster() {
                               <ChevronRight size={13} />
                             )}
                           </td>
-
-                          {/* # */}
                           <td className="px-4 py-3 text-muted-foreground font-mono">
                             {idx + 1}
                           </td>
-
-                          {/* Item Name */}
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-2">
                               <span className="w-7 h-7 rounded-lg bg-emerald-500/10 flex items-center justify-center shrink-0">
@@ -509,13 +817,9 @@ export default function InventoryMaster() {
                               </span>
                             </div>
                           </td>
-
-                          {/* Item Group */}
                           <td className="px-4 py-3 text-muted-foreground">
                             {row.ItemGroupName || "—"}
                           </td>
-
-                          {/* UOM */}
                           <td className="px-4 py-3">
                             {row.UOMCode ? (
                               <span
@@ -531,13 +835,9 @@ export default function InventoryMaster() {
                               <span className="text-muted-foreground">—</span>
                             )}
                           </td>
-
-                          {/* Opening Stock */}
                           <td className="px-4 py-3 text-right">
                             <StockBadge value={row.OpeningStock} />
                           </td>
-
-                          {/* Stock In */}
                           <td className="px-4 py-3 text-right">
                             {row.StockIn > 0 ? (
                               <span className="text-emerald-600 font-medium">
@@ -547,8 +847,6 @@ export default function InventoryMaster() {
                               <span className="text-muted-foreground">—</span>
                             )}
                           </td>
-
-                          {/* Stock Out */}
                           <td className="px-4 py-3 text-right">
                             {row.StockOut > 0 ? (
                               <span className="text-red-600 font-medium">
@@ -558,24 +856,14 @@ export default function InventoryMaster() {
                               <span className="text-muted-foreground">—</span>
                             )}
                           </td>
-
-                          {/* Closing Stock */}
                           <td className="px-4 py-3 text-right">
                             <span
-                              className={`font-heading font-bold ${
-                                row.ClosingStock > 0
-                                  ? "text-emerald-600"
-                                  : row.ClosingStock < 0
-                                    ? "text-red-600"
-                                    : "text-muted-foreground"
-                              }`}
+                              className={`font-heading font-bold ${row.ClosingStock > 0 ? "text-emerald-600" : row.ClosingStock < 0 ? "text-red-600" : "text-muted-foreground"}`}
                             >
                               {fmtNum(row.ClosingStock)}
                             </span>
                           </td>
                         </tr>
-
-                        {/* ── Ledger drill-down ── */}
                         {isExpanded && (
                           <tr className="border-b border-border">
                             <td colSpan={9} className="p-0">
@@ -588,8 +876,6 @@ export default function InventoryMaster() {
                   })
                 )}
               </tbody>
-
-              {/* Totals footer */}
               {!isLoading && filtered.length > 0 && (
                 <tfoot>
                   <tr className="border-t-2 border-border bg-muted/60">
