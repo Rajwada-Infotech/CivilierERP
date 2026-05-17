@@ -43,6 +43,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { StatusBadge } from "@/components/StatusBadge";
+import {
+  DocNumberPreview,
+  fetchNextDocNumber,
+} from "@/pages/material/ExpenseBooking/DocNumberPreview";
+import { useFinYear } from "@/contexts/FinYearContext";
 import { Badge } from "@/components/ui/badge";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -67,6 +72,8 @@ interface IssueHeader {
   reason: string;
   remarks: string;
   referenceType: "" | "GRN" | "MR" | "WORK_DONE";
+  docTypeId: number | null;
+  docNoPreview: string;
   referenceId: string;
   referenceDocNo: string;
   issuedTo: string;
@@ -82,6 +89,8 @@ const defaultHeader: IssueHeader = {
   reason: "",
   remarks: "",
   referenceType: "",
+  docTypeId: null,
+  docNoPreview: "",
   referenceId: "",
   referenceDocNo: "",
   issuedTo: "",
@@ -190,6 +199,10 @@ export default function Issues() {
 
   // Header form
   const [header, setHeader] = useState<IssueHeader>(defaultHeader);
+  const { activeYear } = useFinYear();
+  const finYearStr = activeYear
+    ? `${String(activeYear.StartYear).slice(-2)}-${String(activeYear.EndYear).slice(-2)}`
+    : undefined;
   const [loadingPrefill, setLoadingPrefill] = useState(false);
   // Cart
   const [cart, setCart] = useState<CartItem[]>([blankCartItem()]);
@@ -238,13 +251,6 @@ export default function Issues() {
   const { data: issuesData, isLoading: loadingIssues } = useQuery({
     queryKey: ["issues-list", page, search],
     queryFn: () => issuesApi.getIssues({ page, limit, search }),
-  });
-
-  const { data: issueNumberPreview, isFetching: loadingPreview } = useQuery({
-    queryKey: ["issues-next-number"],
-    queryFn: () => issuesApi.previewNextIssueNumber(false),
-    enabled: viewMode === "form" && !editingId,
-    staleTime: 15_000,
   });
 
   // ── Auto-select active fin year ──────────────────────────────────────────
@@ -395,7 +401,8 @@ export default function Issues() {
   // ── Reference source prefill ─────────────────────────────────────────────
 
   const handleReferenceTypeChange = (val: string) => {
-    setH("referenceType", val as IssueHeader["referenceType"]);
+    const refType = val === "__none__" ? "" : val;
+    setH("referenceType", refType as IssueHeader["referenceType"]);
     setH("referenceId", "");
     setH("referenceDocNo", "");
   };
@@ -451,6 +458,8 @@ export default function Issues() {
       referenceType: record.ReferenceType ?? "",
       referenceId: String(record.ReferenceId ?? ""),
       referenceDocNo: record.ReferenceDocNo ?? "",
+      docTypeId: record.DocTypeId ?? null,
+      docNoPreview: "",
       issuedTo: record.IssuedTo ?? "",
       costCenter: record.CostCenter ?? "",
       purpose: record.Purpose ?? "",
@@ -500,6 +509,7 @@ export default function Issues() {
       ReferenceType: header.referenceType || null,
       ReferenceId: header.referenceId ? Number(header.referenceId) : null,
       ReferenceDocNo: header.referenceDocNo || null,
+      DocTypeId: header.docTypeId || null,
       IssuedTo: header.issuedTo || null,
       CostCenter: header.costCenter || null,
       Purpose: header.purpose || null,
@@ -759,30 +769,32 @@ export default function Issues() {
           </CardHeader>
 
           <CardContent className="p-5 space-y-4">
-            {/* Doc number preview */}
-            <div className="flex items-center gap-2 rounded-lg border border-dashed border-border bg-muted/30 px-4 py-2.5">
+            {/* Doc number / Type of Doc */}
+            <div className="flex items-center gap-3 rounded-lg border border-dashed border-border bg-muted/30 px-4 py-3">
               <FileText size={13} className="text-muted-foreground shrink-0" />
-              <span className="text-xs text-muted-foreground font-medium uppercase tracking-widest mr-2">
+              <span className="text-xs text-muted-foreground font-medium uppercase tracking-widest mr-2 whitespace-nowrap">
                 Issue No:
               </span>
               {editingId ? (
                 <span className="font-mono font-bold text-primary text-sm">
-                  {header.companyId
-                    ? (viewingRecord?.DocNo ?? "Immutable after creation")
-                    : "—"}
-                </span>
-              ) : issueNumberPreview?.nextDocNo ? (
-                <span className="font-mono font-bold text-primary text-sm">
-                  {issueNumberPreview.nextDocNo}
-                </span>
-              ) : loadingPreview ? (
-                <span className="text-sm text-muted-foreground animate-pulse">
-                  Loading…
+                  {viewingRecord?.DocNo ?? "Immutable after creation"}
                 </span>
               ) : (
-                <span className="text-sm text-muted-foreground/50 italic">
-                  Auto-generated on save
-                </span>
+                <div className="flex-1">
+                  <DocNumberPreview
+                    module="ISS"
+                    finYear={finYearStr}
+                    selectedDocTypeId={header.docTypeId}
+                    preview={header.docNoPreview}
+                    onSelect={(id, preview) =>
+                      setHeader((p) => ({
+                        ...p,
+                        docTypeId: id,
+                        docNoPreview: preview,
+                      }))
+                    }
+                  />
+                </div>
               )}
             </div>
 
@@ -917,7 +929,7 @@ export default function Issues() {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <Field label="Reference Source">
                 <Select
-                  value={header.referenceType}
+                  value={header.referenceType || "__none__"}
                   onValueChange={handleReferenceTypeChange}
                 >
                   <SelectTrigger className="h-9 gap-2">
@@ -928,7 +940,7 @@ export default function Issues() {
                     <SelectValue placeholder="None (optional)" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">None</SelectItem>
+                    <SelectItem value="__none__">None</SelectItem>
                     <SelectItem value="GRN">
                       GRN (Goods Receipt Note)
                     </SelectItem>

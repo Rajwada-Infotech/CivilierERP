@@ -297,6 +297,7 @@ router.post("/", authenticateToken, async (req, res) => {
       Priority = "Normal",
       Reason,
       Remarks,
+      DocTypeId: clientDocTypeId,
       items = [],
     } = req.body;
 
@@ -305,7 +306,9 @@ router.post("/", authenticateToken, async (req, res) => {
     if (!items.length)
       return res.status(400).json({ error: "At least one item required" });
 
-    const dtId = await resolveDocTypeId(pool, sql, "MR");
+    const dtId = clientDocTypeId
+      ? parseInt(clientDocTypeId, 10)
+      : await resolveDocTypeId(pool, sql, "MR");
     const { token } = dtId
       ? await lockNextDocNumber(pool, sql, dtId)
       : { token: null };
