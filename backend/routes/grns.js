@@ -147,6 +147,10 @@ router.get("/filtered", async (req, res) => {
              grn.Status, grn.Remarks, grn.DocNo,
              s.LHeadName AS SupplierName,
              p.PurchaseOrderNo AS PONumber,
+             p.POType,
+             p.SourceWODocNo,
+             p.SourceMRDocNo,
+             p.SourceWDDocNo,
              p.ProjectId, p.CompanyId,
              p.GST AS ParentGST
       FROM GoodsReceiptNotes grn
@@ -169,7 +173,6 @@ router.get("/filtered", async (req, res) => {
 router.get("/", cache("grns", 300), async (req, res) => {
   try {
     const pool = await getPool();
-
 
     const page = Math.max(parseInt(req.query.page) || 1, 1);
     const limit = Math.min(Math.max(parseInt(req.query.limit) || 10, 1), 500);
@@ -194,6 +197,10 @@ router.get("/", cache("grns", 300), async (req, res) => {
         grn.TotalAmount,
         s.LHeadName AS SupplierName,
         p.PurchaseOrderNo AS PONumber,
+        p.POType,
+        p.SourceWODocNo,
+        p.SourceMRDocNo,
+        p.SourceWDDocNo,
         td.Prefix AS DocTypePrefix,
         td.Description AS DocTypeDescription,
         COUNT(*) OVER() AS _total
@@ -208,7 +215,10 @@ router.get("/", cache("grns", 300), async (req, res) => {
     const total = result.recordset[0]?._total ?? 0;
 
     res.json({
-      data: result.recordset.map(r => { const { _total, ...rest } = r; return normaliseGRNRow(rest); }),
+      data: result.recordset.map((r) => {
+        const { _total, ...rest } = r;
+        return normaliseGRNRow(rest);
+      }),
       page,
       limit,
       total,
@@ -249,6 +259,10 @@ router.get("/:id", async (req, res) => {
           grn.TotalAmount,
           s.LHeadName AS SupplierName,
           p.PurchaseOrderNo AS PONumber,
+          p.POType,
+          p.SourceWODocNo,
+          p.SourceMRDocNo,
+          p.SourceWDDocNo,
           p.GST AS ParentGST,
           td.Prefix AS DocTypePrefix,
           td.Description AS DocTypeDescription
@@ -367,18 +381,75 @@ router.post("/", async (req, res) => {
 
     const grnId = grnResult.recordset[0].GRNID;
 
-    await backPatchRecordId(
-      pool,
-      sql,
-      finalDocNo,
-      "GoodsReceiptNotes",
-      grnId,
-    );
+    await backPatchRecordId(pool, sql, finalDocNo, "GoodsReceiptNotes", grnId);
 
     await insertStockLedgerEntries(transaction, grnId, grnItems, finalDocNo);
 
     await transaction.commit();
-    await bumpCacheVersion("grns");
+
+    // ── Update parent PO status ───────────────────────────────────────────────
+    // Check if all ordered quantities are now received; set status accordingly.
+    if (poId) {
+      try {
+        const poCheck = await pool
+          .request()
+          .input("POID", sql.Int, parseInt(poId, 10)).query(`
+            SELECT
+              po.Status AS POStatus,
+              po.POItems,
+              ISNULL(SUM(grn.TotalAmount), 0) AS TotalReceived,
+              COUNT(grn.GRNID) AS GRNCount
+            FROM PurchaseOrders po
+            LEFT JOIN GoodsReceiptNotes grn ON grn.POID = po.PurchaseOrderID
+              AND grn.Status != 'Rejected'
+            WHERE po.PurchaseOrderID = @POID
+            GROUP BY po.Status, po.POItems
+          `);
+
+        if (poCheck.recordset.length > 0) {
+          const poRow = poCheck.recordset[0];
+          const poItems = (() => {
+            try {
+              return JSON.parse(poRow.POItems || "[]");
+            } catch {
+              return [];
+            }
+          })();
+          const totalOrdered = poItems.reduce(
+            (s, i) => s + Number(i.quantity || 0) * Number(i.rate || 0),
+            0,
+          );
+          const newPOStatus =
+            poRow.GRNCount > 0 &&
+            totalOrdered > 0 &&
+            poRow.TotalReceived >= totalOrdered
+              ? "Received"
+              : poRow.GRNCount > 0
+                ? "Partially Received"
+                : poRow.POStatus;
+
+          if (
+            newPOStatus !== poRow.POStatus &&
+            ["Approved", "Partially Received"].includes(poRow.POStatus)
+          ) {
+            await pool
+              .request()
+              .input("POID", sql.Int, parseInt(poId, 10))
+              .input("Status", sql.NVarChar(50), newPOStatus)
+              .query(
+                `UPDATE PurchaseOrders SET Status = @Status WHERE PurchaseOrderID = @POID`,
+              );
+            await bumpCacheVersion("purchase-orders");
+          }
+        }
+      } catch (poErr) {
+        // Non-fatal — GRN was saved; PO status update is best-effort
+        console.warn(
+          "PO status update after GRN failed (non-fatal):",
+          poErr.message,
+        );
+      }
+    }
     await bumpCacheVersion("stock-ledger");
 
     res.status(201).json({

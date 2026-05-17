@@ -45,6 +45,10 @@ export interface PurchaseOrder {
   LineItems?: any[];
   DocTypeId?: number;
   Status?: string;
+  POType?: "Normal" | "Direct" | "WO_PO";
+  SourceWODocNo?: string | null;
+  SourceMRDocNo?: string | null;
+  SourceWDDocNo?: string | null;
 }
 
 // Matches Item_Master_Group leaf rows

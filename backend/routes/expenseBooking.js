@@ -270,6 +270,8 @@ router.get("/", cache("expense-booking", 60), async (req, res) => {
           eb.EFinYear, eb.ECreatedBy, eb.ESourceType, eb.ESourceId,
           eb.EName, eb.EBillingTermsData, eb.EDiscountData, eb.EEmiData,
           eb.ETCId, eb.ETCName, eb.ETCText,
+          eb.EVendorInvoiceNo, eb.EVendorInvoiceDate,
+          eb.EAdditionalCharges, eb.ECostCenter, eb.EGLAccount, eb.EWorkDoneRef,
           CASE
             WHEN t.Prefix IS NOT NULL AND t.Description IS NOT NULL THEN t.Prefix + N' — ' + t.Description
             WHEN t.Prefix IS NOT NULL THEN t.Prefix
@@ -476,9 +478,16 @@ router.post("/", async (req, res) => {
     ESourceId,
     EBillingTermId,
     EBillingTermName,
+    EBillingTermsData,
     ETCId,
     ETCName,
     ETCText,
+    EVendorInvoiceNo,
+    EVendorInvoiceDate,
+    EAdditionalCharges,
+    ECostCenter,
+    EGLAccount,
+    EWorkDoneRef,
   } = req.body;
 
   const pool = getPool();
@@ -651,9 +660,24 @@ router.post("/", async (req, res) => {
         EBillingTermId ? parseInt(EBillingTermId, 10) : null,
       )
       .input("EBillingTermName", sql.NVarChar(200), EBillingTermName || null)
+      .input(
+        "EBillingTermsData",
+        sql.NVarChar(sql.MAX),
+        EBillingTermsData ? JSON.stringify(EBillingTermsData) : null,
+      )
       .input("ETCId", sql.Int, ETCId ? parseInt(ETCId, 10) : null)
       .input("ETCName", sql.NVarChar(200), ETCName || null)
-      .input("ETCText", sql.NVarChar(sql.MAX), ETCText || null).query(`
+      .input("ETCText", sql.NVarChar(sql.MAX), ETCText || null)
+      .input("EVendorInvoiceNo", sql.NVarChar(100), EVendorInvoiceNo || null)
+      .input("EVendorInvoiceDate", sql.Date, EVendorInvoiceDate || null)
+      .input(
+        "EAdditionalCharges",
+        sql.NVarChar(sql.MAX),
+        EAdditionalCharges ? JSON.stringify(EAdditionalCharges) : null,
+      )
+      .input("ECostCenter", sql.NVarChar(200), ECostCenter || null)
+      .input("EGLAccount", sql.NVarChar(200), EGLAccount || null)
+      .input("EWorkDoneRef", sql.NVarChar(100), EWorkDoneRef || null).query(`
         INSERT INTO dbo.ExpenseBooking (
           EName, EProjectName, EDocumentType, EDocDate, EAmount, ENetAmount,
           ECgstRate, ESgstRate, EDiscountData, EDocNo,
@@ -662,7 +686,10 @@ router.post("/", async (req, res) => {
           ECreatedAt, EUpdatedAt, ECreatedBy, EApprovedBy,
           ECompanyId, EDocTypeId, EFinYear,
           ESourceType, ESourceId,
-          EBillingTermId, EBillingTermName, ETCId, ETCName, ETCText
+          EBillingTermId, EBillingTermName, EBillingTermsData,
+          ETCId, ETCName, ETCText,
+          EVendorInvoiceNo, EVendorInvoiceDate, EAdditionalCharges,
+          ECostCenter, EGLAccount, EWorkDoneRef
         ) VALUES (
           @EName, @EProjectName, @EDocumentType, @EDocDate, @EAmount, @ENetAmount,
           @ECgstRate, @ESgstRate, @EDiscountData, @EDocNo,
@@ -671,7 +698,10 @@ router.post("/", async (req, res) => {
           @ECreatedAt, @EUpdatedAt, @ECreatedBy, @EApprovedBy,
           @ECompanyId, @EDocTypeId, @EFinYear,
           @ESourceType, @ESourceId,
-          @EBillingTermId, @EBillingTermName, @ETCId, @ETCName, @ETCText
+          @EBillingTermId, @EBillingTermName, @EBillingTermsData,
+          @ETCId, @ETCName, @ETCText,
+          @EVendorInvoiceNo, @EVendorInvoiceDate, @EAdditionalCharges,
+          @ECostCenter, @EGLAccount, @EWorkDoneRef
         );
         SELECT SCOPE_IDENTITY() AS NewId;
       `);
@@ -1118,9 +1148,16 @@ router.put("/:id", async (req, res) => {
     ESourceId,
     EBillingTermId,
     EBillingTermName,
+    EBillingTermsData,
     ETCId,
     ETCName,
     ETCText,
+    EVendorInvoiceNo,
+    EVendorInvoiceDate,
+    EAdditionalCharges,
+    ECostCenter,
+    EGLAccount,
+    EWorkDoneRef,
   } = req.body;
 
   try {
@@ -1182,9 +1219,24 @@ router.put("/:id", async (req, res) => {
         EBillingTermId ? parseInt(EBillingTermId, 10) : null,
       )
       .input("EBillingTermName", sql.NVarChar(200), EBillingTermName || null)
+      .input(
+        "EBillingTermsData",
+        sql.NVarChar(sql.MAX),
+        EBillingTermsData ? JSON.stringify(EBillingTermsData) : null,
+      )
       .input("ETCId", sql.Int, ETCId ? parseInt(ETCId, 10) : null)
       .input("ETCName", sql.NVarChar(200), ETCName || null)
-      .input("ETCText", sql.NVarChar(sql.MAX), ETCText || null).query(`
+      .input("ETCText", sql.NVarChar(sql.MAX), ETCText || null)
+      .input("EVendorInvoiceNo", sql.NVarChar(100), EVendorInvoiceNo || null)
+      .input("EVendorInvoiceDate", sql.Date, EVendorInvoiceDate || null)
+      .input(
+        "EAdditionalCharges",
+        sql.NVarChar(sql.MAX),
+        EAdditionalCharges ? JSON.stringify(EAdditionalCharges) : null,
+      )
+      .input("ECostCenter", sql.NVarChar(200), ECostCenter || null)
+      .input("EGLAccount", sql.NVarChar(200), EGLAccount || null)
+      .input("EWorkDoneRef", sql.NVarChar(100), EWorkDoneRef || null).query(`
         UPDATE dbo.ExpenseBooking SET
           EName=@EName, EProjectName=@EProjectName, EDocumentType=@EDocumentType, EDocDate=@EDocDate,
           EAmount=@EAmount, ENetAmount=@ENetAmount, ECgstRate=@ECgstRate, ESgstRate=@ESgstRate,
@@ -1195,7 +1247,11 @@ router.put("/:id", async (req, res) => {
           EDocTypeId=@EDocTypeId, EFinYear=@EFinYear,
           ESourceType=@ESourceType, ESourceId=@ESourceId,
           EBillingTermId=@EBillingTermId, EBillingTermName=@EBillingTermName,
-          ETCId=@ETCId, ETCName=@ETCName, ETCText=@ETCText
+          EBillingTermsData=@EBillingTermsData,
+          ETCId=@ETCId, ETCName=@ETCName, ETCText=@ETCText,
+          EVendorInvoiceNo=@EVendorInvoiceNo, EVendorInvoiceDate=@EVendorInvoiceDate,
+          EAdditionalCharges=@EAdditionalCharges,
+          ECostCenter=@ECostCenter, EGLAccount=@EGLAccount, EWorkDoneRef=@EWorkDoneRef
         WHERE Eid = @Eid
       `);
 

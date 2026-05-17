@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useCallback, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -27,6 +28,7 @@ import {
   Flag,
   ShoppingCart,
   Package,
+  ExternalLink,
 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -144,6 +146,7 @@ const fmtDate = (d?: string | null) =>
 // ─── Main component ────────────────────────────────────────────────────────────
 
 export default function MaterialRequest() {
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [viewMode, setViewMode] = useState<"list" | "form" | "view">("list");
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -397,6 +400,15 @@ export default function MaterialRequest() {
     setViewMode("view");
   };
 
+  const handleCreatePO = async (record: any) => {
+    try {
+      const prefill = await mrApi.getMRPOPrefill(record.MRId);
+      navigate("/material/purchase-order", { state: { mrPrefill: prefill } });
+    } catch (err: any) {
+      toast.error(err.message || "Failed to load MR data for PO creation");
+    }
+  };
+
   const onSave = () => {
     if (!canSave) {
       if (!headerIsValid) toast.error("Fill all required header fields");
@@ -558,6 +570,16 @@ export default function MaterialRequest() {
                 <Trash2 size={14} />
               </button>
             </>
+          )}
+          {row.original.Status === "Approved" && (
+            <button
+              type="button"
+              onClick={() => handleCreatePO(row.original)}
+              className="p-1.5 rounded hover:bg-emerald-100 dark:hover:bg-emerald-900/30 text-emerald-600 dark:text-emerald-400 transition-colors"
+              title="Create Normal PO from this MR"
+            >
+              <ExternalLink size={14} />
+            </button>
           )}
         </div>
       ),
@@ -1127,6 +1149,16 @@ export default function MaterialRequest() {
               Request — {viewingRecord.DocNo || `#${viewingRecord.MRId}`}
             </CardTitle>
             <div className="flex items-center gap-2">
+              {viewingRecord.Status === "Approved" && (
+                <Button
+                  size="sm"
+                  onClick={() => handleCreatePO(viewingRecord)}
+                  className="gap-1.5 h-8 bg-emerald-600 hover:bg-emerald-700 text-white"
+                >
+                  <ExternalLink size={13} />
+                  Create Normal PO
+                </Button>
+              )}
               {viewingRecord.Status === "Draft" && (
                 <>
                   <Button
