@@ -402,7 +402,7 @@ router.post("/", async (req, res) => {
         sql.Int,
         SourceMRId ? parseInt(SourceMRId, 10) : null,
       )
-      .input(\"SourceMRDocNo\", sql.NVarChar(100), SourceMRDocNo || null)
+      .input("SourceMRDocNo", sql.NVarChar(100), SourceMRDocNo || null)
       .input(
         "SourceWDId",
         sql.Int,
@@ -412,7 +412,14 @@ router.post("/", async (req, res) => {
       .input(
         "POType",
         sql.NVarChar(20),
-        POType || (SourceWOId ? "WO_PO" : SourceMRId ? "Normal" : SourceWDId ? "WO_PO" : "Direct"),
+        POType ||
+          (SourceWOId
+            ? "WO_PO"
+            : SourceMRId
+              ? "Normal"
+              : SourceWDId
+                ? "WO_PO"
+                : "Direct"),
       ).query(`
         INSERT INTO dbo.PurchaseOrders (
           PurchaseOrderNo, PODate, ExpectedDeliveryDate, SupplierID, CompanyId,

@@ -167,6 +167,12 @@ export function blankForm(): Omit<ExpenseRecord, "id"> {
     tcId: null,
     tcName: "",
     tcText: "",
+    vendorInvoiceNo: "",
+    vendorInvoiceDate: "",
+    costCenter: "",
+    glAccount: "",
+    workDoneRef: "",
+    additionalCharges: [],
   };
 }
 
@@ -265,8 +271,31 @@ export function dbToRecord(row: any): ExpenseRecord {
     tcName: row.ETCName ?? "",
     tcText: row.ETCText ?? "",
     eSourceType:
-      (row.ESourceType as "PO" | "WO" | "WO_PO" | "GRN" | "TOD" | "WORK_DONE" | null) ?? null,
+      (row.ESourceType as
+        | "PO"
+        | "WO"
+        | "WO_PO"
+        | "GRN"
+        | "TOD"
+        | "WORK_DONE"
+        | null) ?? null,
     eSourceId: row.ESourceId ? parseInt(row.ESourceId, 10) : null,
+    vendorInvoiceNo: row.EVendorInvoiceNo ?? "",
+    vendorInvoiceDate: row.EVendorInvoiceDate
+      ? row.EVendorInvoiceDate.slice(0, 10)
+      : "",
+    costCenter: row.ECostCenter ?? "",
+    glAccount: row.EGLAccount ?? "",
+    workDoneRef: row.EWorkDoneRef ?? "",
+    additionalCharges: (() => {
+      try {
+        if (!row.EAdditionalCharges) return [];
+        const parsed = JSON.parse(row.EAdditionalCharges);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    })(),
   };
 }
 
@@ -306,5 +335,14 @@ export function recordToDb(
     ETCId: form.tcId ?? null,
     ETCName: form.tcName || null,
     ETCText: form.tcText || null,
+    EVendorInvoiceNo: form.vendorInvoiceNo || null,
+    EVendorInvoiceDate: form.vendorInvoiceDate || null,
+    EAdditionalCharges:
+      form.additionalCharges && form.additionalCharges.length > 0
+        ? JSON.stringify(form.additionalCharges)
+        : null,
+    ECostCenter: form.costCenter || null,
+    EGLAccount: form.glAccount || null,
+    EWorkDoneRef: form.workDoneRef || null,
   };
 }
