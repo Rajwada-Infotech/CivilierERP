@@ -1241,6 +1241,9 @@ export default function MaterialExpenseBooking() {
   const [grnItemsLoading, setGrnItemsLoading] = useState(false);
   const [selectedTod, setSelectedTod] = useState<TodItem | null>(null);
   const [records, setRecords] = useState<ExpenseRecord[]>([]);
+  const [bookedSourceIds, setBookedSourceIds] = useState<
+    { ESourceType: string; ESourceId: number; Eid: number }[]
+  >([]);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -1284,6 +1287,15 @@ export default function MaterialExpenseBooking() {
       toast.error("Failed to load bookings: " + err.message);
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  const fetchBookedSources = useCallback(async () => {
+    try {
+      const data = await apiFetch(`${API}/source-ids`);
+      setBookedSourceIds(Array.isArray(data) ? data : []);
+    } catch {
+      // non-fatal — pickers will show everything if this fails
     }
   }, []);
 
@@ -1396,6 +1408,7 @@ export default function MaterialExpenseBooking() {
 
   useEffect(() => {
     fetchRecords(1);
+    fetchBookedSources();
     apiFetch("/api/enterprises/options?business_type=C")
       .then((list: CompanyOption[]) => setCompanyOptions(list ?? []))
       .catch(() => {});
@@ -1724,6 +1737,7 @@ export default function MaterialExpenseBooking() {
       toast.success("Expense booking deleted.");
       setDeleteId(null);
       await fetchRecords(page);
+      fetchBookedSources();
     } catch (err: any) {
       toast.error("Delete failed: " + err.message);
     }
@@ -1756,6 +1770,7 @@ export default function MaterialExpenseBooking() {
     }
     cancelForm();
     await fetchRecords(page);
+    fetchBookedSources();
   };
 
   const handleSave = async () => {
@@ -1848,6 +1863,7 @@ export default function MaterialExpenseBooking() {
       }
       cancelForm();
       await fetchRecords(page);
+      fetchBookedSources();
     } catch (err: any) {
       toast.error("Save failed: " + err.message);
     } finally {
@@ -1881,19 +1897,19 @@ export default function MaterialExpenseBooking() {
   const hasParentGST = isPOorWO || isGRN;
   const gstHighlighted = hasParentGST && !!selectedDoc?.gst?.applicable;
 
-  // Compute sets of already-booked source IDs (excluding the record being edited)
+  // Compute sets of already-booked source IDs from the full dataset (all pages),
+  // excluding the record currently being edited so it can re-select its own doc.
+  const editingIdNum = editingId ? parseInt(editingId, 10) : null;
   const bookedPOIds = new Set<number>();
   const bookedWorkDoneIds = new Set<number>();
   const bookedWOPOIds = new Set<number>();
   const bookedGRNIds = new Set<number>();
-  for (const r of records) {
-    if (r.id === editingId) continue; // allow re-selecting own doc when editing
-    if (r.eSourceType === "PO" && r.eSourceId) bookedPOIds.add(r.eSourceId);
-    if (r.eSourceType === "WORK_DONE" && r.eSourceId)
-      bookedWorkDoneIds.add(r.eSourceId);
-    if (r.eSourceType === "WO_PO" && r.eSourceId)
-      bookedWOPOIds.add(r.eSourceId);
-    if (r.eSourceType === "GRN" && r.eSourceId) bookedGRNIds.add(r.eSourceId);
+  for (const r of bookedSourceIds) {
+    if (editingIdNum && r.Eid === editingIdNum) continue;
+    if (r.ESourceType === "PO") bookedPOIds.add(r.ESourceId);
+    if (r.ESourceType === "WORK_DONE") bookedWorkDoneIds.add(r.ESourceId);
+    if (r.ESourceType === "WO_PO") bookedWOPOIds.add(r.ESourceId);
+    if (r.ESourceType === "GRN") bookedGRNIds.add(r.ESourceId);
   }
 
   // Gate: reveal Document Selection only after booking info is started
@@ -2748,7 +2764,10 @@ export default function MaterialExpenseBooking() {
                       onEdit={() => openEdit(rec)}
                       onPreview={() => setPreviewRecord(rec)}
                       onDelete={() => setDeleteId(rec.id)}
-                      onApprovalSuccess={fetchRecords}
+                      onApprovalSuccess={() => {
+                        fetchRecords(page);
+                        fetchBookedSources();
+                      }}
                     />
                   ))}
                 </div>
