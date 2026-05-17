@@ -163,6 +163,8 @@ interface WorkDoneItem {
   DocNo?: string;
   DocDate?: string;
   ContractorName?: string;
+  SupplierId?: number;
+  SupplierName?: string;
   DescriptionOfWork?: string;
   CertifiedAmount?: number;
   Status: string;
