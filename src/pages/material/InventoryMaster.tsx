@@ -18,6 +18,7 @@ import {
   Warehouse,
   Plus,
   X,
+  Trash2,
   ChevronDown as ChevronDownIcon,
 } from "lucide-react";
 import {
@@ -25,7 +26,12 @@ import {
   type InventoryMasterRow,
 } from "@/api/inventoryMasterApi";
 import { getStockLedger } from "@/api/stockLedgerApi";
-import { getGodowns, createGodown, type Godown } from "@/api/godownsApi";
+import {
+  getGodowns,
+  createGodown,
+  deleteGodown,
+  type Godown,
+} from "@/api/godownsApi";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 const fmtNum = (n: number) =>
@@ -198,9 +204,11 @@ function StockLedgerPanel({ itemId }: { itemId: string }) {
 function CreateGodownModal({
   open,
   onClose,
+  onCreated,
 }: {
   open: boolean;
   onClose: () => void;
+  onCreated?: (id: number) => void;
 }) {
   const qc = useQueryClient();
   const [form, setForm] = useState({
@@ -209,14 +217,14 @@ function CreateGodownModal({
     ShortDesc: "",
     Description: "",
     Remarks: "",
-    Location: "",
   });
   const [err, setErr] = useState("");
 
   const mut = useMutation({
     mutationFn: createGodown,
-    onSuccess: () => {
+    onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ["godowns"] });
+      onCreated?.(res.GodownID);
       onClose();
       setForm({
         GodownCode: "",
@@ -224,8 +232,8 @@ function CreateGodownModal({
         ShortDesc: "",
         Description: "",
         Remarks: "",
-        Location: "",
       });
+      setErr("");
     },
     onError: (e: Error) => setErr(e.message),
   });
@@ -255,8 +263,7 @@ function CreateGodownModal({
 
         {err && (
           <div className="px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-600 text-xs flex items-center gap-2">
-            <AlertCircle size={13} />
-            {err}
+            <AlertCircle size={13} /> {err}
           </div>
         )}
 
@@ -276,11 +283,6 @@ function CreateGodownModal({
               label: "Short Description",
               key: "ShortDesc",
               placeholder: "Shown in badges",
-            },
-            {
-              label: "Location",
-              key: "Location",
-              placeholder: "Physical address or location",
             },
           ].map(({ label, key, placeholder }) => (
             <div key={key}>
@@ -355,86 +357,171 @@ function GodownSelector({
   selectedId,
   onSelect,
   onCreateNew,
+  onDeleted,
 }: {
   godowns: Godown[];
   selectedId: number | null;
   onSelect: (id: number) => void;
   onCreateNew: () => void;
+  onDeleted?: (id: number) => void;
 }) {
+  const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const selected = godowns.find((g) => g.GodownID === selectedId);
 
-  return (
-    <div className="relative">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border bg-card text-sm hover:bg-muted transition-colors min-w-[180px]"
-      >
-        <Warehouse size={14} className="text-emerald-600 shrink-0" />
-        <span className="text-foreground font-medium truncate">
-          {selected ? (
-            <>
-              {selected.GodownName}
-              {selected.IsMain && (
-                <span className="ml-1 text-[10px] bg-emerald-500/15 text-emerald-600 px-1.5 py-0.5 rounded-full font-semibold">
-                  Main
-                </span>
-              )}
-            </>
-          ) : (
-            "Select Godown"
-          )}
-        </span>
-        <ChevronDownIcon
-          size={13}
-          className={`text-muted-foreground ml-auto transition-transform ${open ? "rotate-180" : ""}`}
-        />
-      </button>
+  const deleteMut = useMutation({
+    mutationFn: deleteGodown,
+    onSuccess: (_, id) => {
+      qc.invalidateQueries({ queryKey: ["godowns"] });
+      setConfirmDeleteId(null);
+      onDeleted?.(id);
+    },
+  });
 
-      {open && (
-        <>
-          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
-          <div className="absolute top-full mt-1 left-0 z-20 bg-card border border-border rounded-xl shadow-xl py-1 min-w-[220px] max-h-64 overflow-y-auto">
-            {godowns.map((g) => (
-              <button
-                key={g.GodownID}
-                onClick={() => {
-                  onSelect(g.GodownID);
-                  setOpen(false);
-                }}
-                className={`w-full px-3 py-2 text-left text-sm hover:bg-muted transition-colors flex items-center gap-2 ${g.GodownID === selectedId ? "bg-emerald-500/10 text-emerald-600" : "text-foreground"}`}
-              >
-                <Warehouse
-                  size={13}
-                  className={
-                    g.GodownID === selectedId
-                      ? "text-emerald-600"
-                      : "text-muted-foreground"
-                  }
-                />
-                <span className="flex-1 truncate">{g.GodownName}</span>
-                {g.IsMain && (
-                  <span className="text-[9px] bg-emerald-500/15 text-emerald-600 px-1.5 py-0.5 rounded-full font-bold">
-                    MAIN
+  return (
+    <>
+      {/* Delete confirm dialog */}
+      {confirmDeleteId !== null &&
+        (() => {
+          const g = godowns.find((x) => x.GodownID === confirmDeleteId);
+          return (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+              <div className="bg-card border border-border rounded-2xl shadow-2xl w-full max-w-sm mx-4 p-6 space-y-4">
+                <h2 className="text-base font-heading font-bold text-foreground">
+                  Delete Godown?
+                </h2>
+                <p className="text-sm text-muted-foreground">
+                  Are you sure you want to delete{" "}
+                  <span className="font-semibold text-foreground">
+                    {g?.GodownName}
+                  </span>
+                  ? This cannot be undone.
+                </p>
+                {deleteMut.error && (
+                  <p className="text-xs text-red-600">
+                    {(deleteMut.error as Error).message}
+                  </p>
+                )}
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      setConfirmDeleteId(null);
+                      deleteMut.reset();
+                    }}
+                    className="flex-1 px-4 py-2 rounded-lg border border-border text-sm hover:bg-muted transition-colors"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => deleteMut.mutate(confirmDeleteId!)}
+                    disabled={deleteMut.isPending}
+                    className="flex-1 px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-medium hover:bg-red-700 disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
+                  >
+                    {deleteMut.isPending ? (
+                      <RefreshCw size={13} className="animate-spin" />
+                    ) : (
+                      <Trash2 size={13} />
+                    )}
+                    Delete
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
+      <div className="relative">
+        <button
+          onClick={() => setOpen((o) => !o)}
+          className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border bg-card text-sm hover:bg-muted transition-colors min-w-[180px]"
+        >
+          <Warehouse size={14} className="text-emerald-600 shrink-0" />
+          <span className="text-foreground font-medium truncate">
+            {selected ? (
+              <>
+                {selected.GodownName}
+                {selected.IsMain && (
+                  <span className="ml-1 text-[10px] bg-emerald-500/15 text-emerald-600 px-1.5 py-0.5 rounded-full font-semibold">
+                    Main
                   </span>
                 )}
-              </button>
-            ))}
-            <div className="border-t border-border mt-1 pt-1">
-              <button
-                onClick={() => {
-                  setOpen(false);
-                  onCreateNew();
-                }}
-                className="w-full px-3 py-2 text-left text-sm text-emerald-600 hover:bg-emerald-500/10 transition-colors flex items-center gap-2"
-              >
-                <Plus size={13} /> Create New Godown
-              </button>
+              </>
+            ) : (
+              "Select Godown"
+            )}
+          </span>
+          <ChevronDownIcon
+            size={13}
+            className={`text-muted-foreground ml-auto transition-transform ${open ? "rotate-180" : ""}`}
+          />
+        </button>
+
+        {open && (
+          <>
+            <div
+              className="fixed inset-0 z-10"
+              onClick={() => setOpen(false)}
+            />
+            <div className="absolute top-full mt-1 left-0 z-20 bg-card border border-border rounded-xl shadow-xl py-1 min-w-[240px] max-h-72 overflow-y-auto">
+              {godowns.map((g) => (
+                <div
+                  key={g.GodownID}
+                  className={`flex items-center gap-1 pr-1 hover:bg-muted transition-colors ${g.GodownID === selectedId ? "bg-emerald-500/10" : ""}`}
+                >
+                  <button
+                    onClick={() => {
+                      onSelect(g.GodownID);
+                      setOpen(false);
+                    }}
+                    className={`flex-1 px-3 py-2 text-left text-sm flex items-center gap-2 ${g.GodownID === selectedId ? "text-emerald-600" : "text-foreground"}`}
+                  >
+                    <Warehouse
+                      size={13}
+                      className={
+                        g.GodownID === selectedId
+                          ? "text-emerald-600"
+                          : "text-muted-foreground"
+                      }
+                    />
+                    <span className="flex-1 truncate">{g.GodownName}</span>
+                    {g.IsMain && (
+                      <span className="text-[9px] bg-emerald-500/15 text-emerald-600 px-1.5 py-0.5 rounded-full font-bold">
+                        MAIN
+                      </span>
+                    )}
+                  </button>
+                  {!g.IsMain && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setOpen(false);
+                        setConfirmDeleteId(g.GodownID);
+                      }}
+                      className="p-1.5 rounded hover:bg-red-500/10 text-muted-foreground hover:text-red-500 transition-colors shrink-0"
+                      title="Delete godown"
+                    >
+                      <Trash2 size={11} />
+                    </button>
+                  )}
+                </div>
+              ))}
+              <div className="border-t border-border mt-1 pt-1">
+                <button
+                  onClick={() => {
+                    setOpen(false);
+                    onCreateNew();
+                  }}
+                  className="w-full px-3 py-2 text-left text-sm text-emerald-600 hover:bg-emerald-500/10 transition-colors flex items-center gap-2"
+                >
+                  <Plus size={13} /> Create New Godown
+                </button>
+              </div>
             </div>
-          </div>
-        </>
-      )}
-    </div>
+          </>
+        )}
+      </div>
+    </>
   );
 }
 
@@ -562,6 +649,7 @@ export default function InventoryMaster() {
       <CreateGodownModal
         open={showCreateGodown}
         onClose={() => setShowCreateGodown(false)}
+        onCreated={(id) => setSelectedGodownId(id)}
       />
 
       <div className="p-6 space-y-5">
@@ -590,6 +678,14 @@ export default function InventoryMaster() {
               selectedId={selectedGodownId}
               onSelect={setSelectedGodownId}
               onCreateNew={() => setShowCreateGodown(true)}
+              onDeleted={(id) => {
+                if (selectedGodownId === id) {
+                  const main = godowns.find(
+                    (g) => g.IsMain && g.GodownID !== id,
+                  );
+                  setSelectedGodownId(main?.GodownID ?? null);
+                }
+              }}
             />
 
             {/* Date picker */}
@@ -649,11 +745,9 @@ export default function InventoryMaster() {
                   </span>
                 )}
               </p>
-              {(selectedGodown.ShortDesc || selectedGodown.Location) && (
+              {selectedGodown.ShortDesc && (
                 <p className="text-[11px] text-muted-foreground truncate">
-                  {[selectedGodown.ShortDesc, selectedGodown.Location]
-                    .filter(Boolean)
-                    .join(" · ")}
+                  {selectedGodown.ShortDesc}
                 </p>
               )}
             </div>

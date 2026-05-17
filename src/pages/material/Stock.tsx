@@ -458,7 +458,7 @@ export default function Stock() {
   const { data: godownsData } = useQuery({
     queryKey: ["godowns"],
     queryFn: getGodowns,
-    staleTime: 120_000,
+    staleTime: 0,
   });
   const godowns: Godown[] = godownsData?.data ?? [];
 
