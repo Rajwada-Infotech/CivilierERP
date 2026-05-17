@@ -108,6 +108,13 @@ const MODULE_CONFIG: Record<
     apiEndpoint: "/api/engineering/work-done",
     label: "Work Done",
   },
+  boq: {
+    icon: ClipboardCheck,
+    color: "text-indigo-500 bg-indigo-500/10",
+    navPath: "/engineering/boq",
+    apiEndpoint: "/api/boq",
+    label: "BOQ",
+  },
 };
 
 const ALL_MODULES = Object.keys(MODULE_CONFIG);
@@ -306,6 +313,7 @@ const ApprovalInbox: React.FC = () => {
   const handleActionDone = () => {
     queryClient.invalidateQueries({ queryKey: ["approval-inbox"] });
     queryClient.invalidateQueries({ queryKey: ["payments"], exact: false });
+    queryClient.invalidateQueries({ queryKey: ["boqs"], exact: false });
   };
 
   const { data: allItems = [] } = useQuery({
