@@ -47,6 +47,7 @@ import {
   Search,
   Eye,
   Printer,
+  ArrowRight,
 } from "lucide-react";
 import type { ExportColumn } from "@/lib/export";
 
@@ -304,6 +305,47 @@ const fetchExpenseGRNs = async (expenseId: string): Promise<GRNRef[]> => {
   if (!res.ok) return [];
   const data = await res.json();
   return Array.isArray(data) ? data : [];
+};
+
+interface ChainSummary {
+  docNo: string | null;
+  status: string | null;
+  billStatus: string | null;
+  netAmount: number;
+  totalPaid: number;
+  remaining: number;
+  payments: {
+    id: number;
+    docNo: string | null;
+    date: string | null;
+    mode: string | null;
+    amount: number;
+    status: string | null;
+  }[];
+  chain: {
+    mrDocNo: string | null;
+    workDoneRef: string | null;
+    poNo: string | null;
+    grnNo: string | null;
+    expenseDocNo: string | null;
+    vendorInvoiceNo: string | null;
+    vendorInvoiceDate: string | null;
+  };
+}
+
+const fetchPaymentSummary = async (
+  expenseId: string,
+): Promise<ChainSummary | null> => {
+  if (!expenseId) return null;
+  try {
+    const res = await fetchWithAuth(
+      `/api/expense-booking/${expenseId}/payment-summary`,
+    );
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
 };
 
 const fetchWorkDoneById = async (
@@ -1571,11 +1613,13 @@ const Payment: React.FC = () => {
   const [viewingRec, setViewingRec] = useState<PaymentRecord | null>(null);
   const [viewingCompanyDetail, setViewingCompanyDetail] =
     useState<CompanyDetail | null>(null);
+  const [viewingChain, setViewingChain] = useState<ChainSummary | null>(null);
 
   // Open the detail modal and eagerly fetch the company logo
   const openViewRec = async (rec: PaymentRecord) => {
     setViewingRec(rec);
     setViewingCompanyDetail(null);
+    setViewingChain(null);
     const matched = companyOptions.find(
       (c) => c.label === rec.company || String(c.id) === rec.company,
     );
@@ -1586,6 +1630,11 @@ const Payment: React.FC = () => {
       } catch {
         /* logo not critical */
       }
+    }
+    if (rec.expenseId) {
+      fetchPaymentSummary(rec.expenseId)
+        .then(setViewingChain)
+        .catch(() => {});
     }
   };
 
@@ -3459,7 +3508,10 @@ const Payment: React.FC = () => {
       {viewingRec && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-          onClick={() => setViewingRec(null)}
+          onClick={() => {
+            setViewingRec(null);
+            setViewingChain(null);
+          }}
         >
           <div
             className="w-full max-w-lg rounded-xl bg-card border border-border shadow-xl overflow-hidden"
@@ -3483,7 +3535,10 @@ const Payment: React.FC = () => {
                 </div>
               </div>
               <button
-                onClick={() => setViewingRec(null)}
+                onClick={() => {
+                  setViewingRec(null);
+                  setViewingChain(null);
+                }}
                 className="p-1.5 rounded-lg text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
               >
                 <X size={14} />
@@ -3491,12 +3546,152 @@ const Payment: React.FC = () => {
             </div>
 
             {/* Body */}
-            <div className="p-5 space-y-4">
+            <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
               {/* Status + Mode row */}
               <div className="flex items-center gap-2">
                 <StatusBadge status={viewingRec.status} />
                 <ModeBadge mode={viewingRec.mode} />
+                {viewingChain?.billStatus && (
+                  <span
+                    className={`flex items-center gap-1 text-[10px] font-semibold px-2.5 py-1 rounded-lg border ${
+                      viewingChain.billStatus === "Paid"
+                        ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-700 dark:text-emerald-400"
+                        : viewingChain.billStatus === "Partially Paid"
+                          ? "bg-amber-500/10 border-amber-500/20 text-amber-700 dark:text-amber-400"
+                          : "bg-red-500/10 border-red-500/20 text-red-700 dark:text-red-400"
+                    }`}
+                  >
+                    {viewingChain.billStatus === "Paid" ? (
+                      <CheckCircle2 size={10} />
+                    ) : viewingChain.billStatus === "Partially Paid" ? (
+                      <Clock size={10} />
+                    ) : (
+                      <AlertCircle size={10} />
+                    )}
+                    {viewingChain.billStatus}
+                  </span>
+                )}
               </div>
+
+              {/* Traceability chain */}
+              {viewingChain && (
+                <div className="rounded-xl border border-border bg-muted/10 p-3 space-y-2.5">
+                  <p className="text-[10px] font-heading font-semibold uppercase tracking-widest text-muted-foreground flex items-center gap-1.5">
+                    <ArrowRight size={9} className="text-primary" /> Document
+                    Chain
+                  </p>
+                  <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                    {viewingChain.chain.mrDocNo && (
+                      <>
+                        <span className="bg-purple-500/10 border border-purple-500/20 text-purple-700 dark:text-purple-400 px-2 py-1 rounded-md font-mono font-semibold">
+                          MR: {viewingChain.chain.mrDocNo}
+                        </span>
+                        <ArrowRight
+                          size={9}
+                          className="text-muted-foreground shrink-0"
+                        />
+                      </>
+                    )}
+                    {viewingChain.chain.workDoneRef && (
+                      <>
+                        <span className="bg-violet-500/10 border border-violet-500/20 text-violet-700 dark:text-violet-400 px-2 py-1 rounded-md font-mono font-semibold">
+                          WD: {viewingChain.chain.workDoneRef}
+                        </span>
+                        <ArrowRight
+                          size={9}
+                          className="text-muted-foreground shrink-0"
+                        />
+                      </>
+                    )}
+                    {viewingChain.chain.poNo && (
+                      <>
+                        <span className="bg-blue-500/10 border border-blue-500/20 text-blue-700 dark:text-blue-400 px-2 py-1 rounded-md font-mono font-semibold">
+                          PO: {viewingChain.chain.poNo}
+                        </span>
+                        <ArrowRight
+                          size={9}
+                          className="text-muted-foreground shrink-0"
+                        />
+                      </>
+                    )}
+                    {viewingChain.chain.grnNo && (
+                      <>
+                        <span className="bg-teal-500/10 border border-teal-500/20 text-teal-700 dark:text-teal-400 px-2 py-1 rounded-md font-mono font-semibold">
+                          GRN: {viewingChain.chain.grnNo}
+                        </span>
+                        <ArrowRight
+                          size={9}
+                          className="text-muted-foreground shrink-0"
+                        />
+                      </>
+                    )}
+                    {viewingChain.chain.expenseDocNo && (
+                      <>
+                        <span className="bg-primary/10 border border-primary/20 text-primary px-2 py-1 rounded-md font-mono font-semibold">
+                          {viewingChain.chain.expenseDocNo}
+                        </span>
+                        <ArrowRight
+                          size={9}
+                          className="text-muted-foreground shrink-0"
+                        />
+                      </>
+                    )}
+                    <span className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-700 dark:text-emerald-400 px-2 py-1 rounded-md font-mono font-semibold">
+                      {viewingRec.docNo || "This Payment"}
+                    </span>
+                  </div>
+
+                  {/* Payment summary strip */}
+                  {viewingChain.netAmount > 0 && (
+                    <div className="flex items-center gap-2 pt-1 border-t border-border/60 mt-2">
+                      <div className="flex-1 text-center">
+                        <p className="text-[9px] text-muted-foreground uppercase tracking-wider">
+                          Net Payable
+                        </p>
+                        <p className="font-mono text-xs font-bold text-foreground">
+                          {formatINR(viewingChain.netAmount)}
+                        </p>
+                      </div>
+                      <div className="w-px h-6 bg-border" />
+                      <div className="flex-1 text-center">
+                        <p className="text-[9px] text-muted-foreground uppercase tracking-wider">
+                          Total Paid
+                        </p>
+                        <p className="font-mono text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                          {formatINR(viewingChain.totalPaid)}
+                        </p>
+                      </div>
+                      <div className="w-px h-6 bg-border" />
+                      <div className="flex-1 text-center">
+                        <p className="text-[9px] text-muted-foreground uppercase tracking-wider">
+                          Remaining
+                        </p>
+                        <p
+                          className={`font-mono text-xs font-bold ${viewingChain.remaining > 0 ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground"}`}
+                        >
+                          {formatINR(viewingChain.remaining)}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Vendor invoice if present */}
+                  {viewingChain.chain.vendorInvoiceNo && (
+                    <div className="flex items-center gap-2 text-[10px] text-muted-foreground pt-1 border-t border-border/60">
+                      <FileText size={9} />
+                      Vendor Invoice:
+                      <span className="font-mono font-semibold text-foreground">
+                        {viewingChain.chain.vendorInvoiceNo}
+                      </span>
+                      {viewingChain.chain.vendorInvoiceDate && (
+                        <span className="text-muted-foreground">
+                          ({viewingChain.chain.vendorInvoiceDate})
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Grid of fields */}
               <div className="grid grid-cols-2 gap-3">
@@ -3580,6 +3775,7 @@ const Payment: React.FC = () => {
               <button
                 onClick={() => {
                   setViewingRec(null);
+                  setViewingChain(null);
                   openEdit(viewingRec);
                 }}
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading font-medium border border-border text-foreground hover:bg-muted transition-colors"
@@ -3587,7 +3783,10 @@ const Payment: React.FC = () => {
                 <Edit size={12} /> Edit
               </button>
               <button
-                onClick={() => setViewingRec(null)}
+                onClick={() => {
+                  setViewingRec(null);
+                  setViewingChain(null);
+                }}
                 className="px-3 py-1.5 rounded-lg text-xs font-heading font-medium gradient-accent text-white shadow-sm"
               >
                 Close
