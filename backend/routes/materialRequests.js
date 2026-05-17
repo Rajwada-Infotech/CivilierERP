@@ -85,7 +85,7 @@ router.get("/companies", authenticateToken, async (req, res) => {
     const result = await pool.request().query(`
       SELECT id, name, short_name
       FROM   dbo.enterprise
-      WHERE  business_type = 'E' AND (status IS NULL OR status = 'Active')
+      WHERE  business_type = 'C' AND (status IS NULL OR status = 'Active')
       ORDER  BY name
     `);
     res.json(result.recordset);
@@ -478,6 +478,100 @@ router.put("/:id/submit", authenticateToken, async (req, res) => {
       );
     await bumpCacheVersion("material-requests");
     res.json({ message: "Submitted for approval" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /:id/create-po-prefill ─────────────────────────────────────────────────
+// Returns MR header + items shaped for the PO form.
+// Only Approved MRs can generate a Normal PO.
+router.get("/:id/create-po-prefill", authenticateToken, async (req, res) => {
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const header = await pool.request().input("id", sql.Int, id).query(`
+        SELECT
+          mr.MRId, mr.DocNo, mr.Status,
+          mr.CompanyId, e_co.name  AS CompanyName,
+          mr.ProjectId, e_pr.name  AS ProjectName,
+          mr.FinYearId, fy.FinYearName,
+          mr.Remarks
+        FROM dbo.MaterialRequests mr
+        LEFT JOIN dbo.enterprise      e_co ON e_co.id = mr.CompanyId
+        LEFT JOIN dbo.enterprise      e_pr ON e_pr.id = mr.ProjectId
+        LEFT JOIN dbo.FinancialYear   fy   ON fy.FinYearId = mr.FinYearId
+        WHERE mr.MRId = @id
+      `);
+
+    if (!header.recordset.length)
+      return res.status(404).json({ error: "Material Request not found" });
+
+    const mr = header.recordset[0];
+    if (mr.Status !== "Approved")
+      return res.status(400).json({
+        error: `MR is ${mr.Status}. Only Approved MRs can generate a Normal PO.`,
+      });
+
+    const items = await pool.request().input("id", sql.Int, id).query(`
+        SELECT
+          mri.MRItemId,
+          mri.ItemId,
+          mri.ItemName,
+          mri.UOMCode,
+          u.UOMName,
+          mri.Quantity,
+          mri.Remarks,
+          im.M_CGST,
+          im.M_SGST,
+          im.M_IGST
+        FROM dbo.MaterialRequestItems mri
+        LEFT JOIN dbo.UOMMaster  u  ON u.UOMCode = mri.UOMCode
+        LEFT JOIN dbo.ItemMaster im ON im.M_Id = TRY_CAST(mri.ItemId AS INT)
+        WHERE mri.MRId = @id
+      `);
+
+    res.json({
+      MRId: mr.MRId,
+      DocNo: mr.DocNo,
+      CompanyId: mr.CompanyId,
+      CompanyName: mr.CompanyName,
+      ProjectId: mr.ProjectId,
+      ProjectName: mr.ProjectName,
+      FinYearId: mr.FinYearId,
+      FinYearName: mr.FinYearName,
+      Remarks: mr.Remarks,
+      items: items.recordset,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── PUT /:id/mark-ordered ──────────────────────────────────────────────────────
+// Called by the PO creation flow after a Normal PO is saved against this MR.
+router.put("/:id/mark-ordered", authenticateToken, async (req, res) => {
+  const user = requireUser(req, res);
+  if (!user) return;
+  try {
+    const pool = getPool();
+    const id = parseInt(req.params.id);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    // Idempotent: Approved → Ordered; Partially Ordered → Ordered
+    await pool
+      .request()
+      .input("id", sql.Int, id)
+      .input("user", sql.NVarChar(200), user).query(`
+        UPDATE dbo.MaterialRequests
+        SET    Status = 'Ordered', UpdatedBy = @user, UpdatedAt = GETDATE()
+        WHERE  MRId = @id AND Status IN ('Approved', 'Partially Ordered')
+      `);
+
+    await bumpCacheVersion("material-requests");
+    res.json({ message: "MR marked as Ordered" });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

@@ -321,6 +321,63 @@ router.get("/work-done", cache(WORK_DONE_CACHE, 120), async (req, res) => {
   }
 });
 
+// ── GET /work-done/:id/create-po-prefill ─────────────────────────────────────
+// Returns Work Done header shaped for the PO form (WO_PO creation).
+// Only Approved Work Done entries can generate a WO_PO.
+router.get("/work-done/:id/create-po-prefill", async (req, res) => {
+  try {
+    const pool = getPool();
+    if (!(await ensureWorkDoneTable(pool, res))) return;
+
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ error: "Invalid id" });
+
+    const result = await pool.request().input("ID", sql.Int, id).query(`
+      ${selectWorkDoneSql}
+      WHERE wd.ID = @ID
+    `);
+
+    if (!result.recordset.length)
+      return res.status(404).json({ error: "Work Done entry not found" });
+
+    const wd = result.recordset[0];
+    if (wd.Status !== "Approved")
+      return res.status(400).json({
+        error: `Work Done is ${wd.Status}. Only Approved entries can generate a WO_PO.`,
+      });
+
+    res.json({
+      WDId: wd.ID,
+      DocNo: wd.DocNo,
+      CompanyId: wd.CompanyId,
+      CompanyName: wd.CompanyName,
+      ProjectId: wd.ProjectId,
+      ProjectName: wd.ProjectName,
+      SupplierId: wd.SupplierId,
+      SupplierName: wd.SupplierName || wd.ContractorName,
+      WorkOrderId: wd.WorkOrderID,
+      WorkOrderNo: wd.WorkOrderNo,
+      CertifiedAmount: wd.CertifiedAmount,
+      DescriptionOfWork: wd.DescriptionOfWork,
+      Remarks: wd.Remarks,
+      // Single line item derived from the Work Done itself
+      items: [
+        {
+          itemDescription:
+            wd.DescriptionOfWork || "Work Done — see Work Done document",
+          unit: wd.Unit || "LS",
+          quantity: Number(wd.QuantityDone) || 1,
+          rate: Number(wd.RatePerUnit) || 0,
+          amount: Number(wd.CertifiedAmount) || 0,
+        },
+      ],
+    });
+  } catch (err) {
+    console.error("[GET /engineering/work-done/:id/create-po-prefill]", err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
 router.get("/work-done/:id", async (req, res) => {
   try {
     const pool = getPool();
