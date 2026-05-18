@@ -1,7 +1,12 @@
 import React, { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getAccountGroups } from "@/api/accountApi";
-import { getList, addRecord, updateRecord, deleteRecord } from "@/api/accountHeadApi";
+import {
+  getList,
+  addRecord,
+  updateRecord,
+  deleteRecord,
+} from "@/api/accountHeadApi";
 import { toast } from "sonner";
 import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
@@ -18,6 +23,8 @@ import {
   ChevronDown,
   ChevronsUpDown,
   AlertCircle,
+  Eye,
+  XCircle,
 } from "lucide-react";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -60,27 +67,34 @@ function buildExpenseColumns(
   setDeleteConfirm: (id: number | null) => void,
   startEdit: (l: LedgerHead) => void,
   deleteMut: { mutate: (id: number) => void },
+  onView: (l: LedgerHead) => void,
 ): ColumnDef<LedgerHead, unknown>[] {
   return [
     {
       accessorKey: "LHeadName",
       header: "Account Name",
       cell: ({ getValue }) => (
-        <span className="font-medium text-foreground">{getValue() as string}</span>
+        <span className="font-medium text-foreground">
+          {getValue() as string}
+        </span>
       ),
     },
     {
       accessorKey: "LHeadType",
       header: "Type",
       cell: ({ getValue }) => (
-        <span className="text-xs text-muted-foreground">{(getValue() as string) || "—"}</span>
+        <span className="text-xs text-muted-foreground">
+          {(getValue() as string) || "—"}
+        </span>
       ),
     },
     {
       accessorKey: "GroupName",
       header: "Account Group",
       cell: ({ getValue }) => (
-        <span className="text-xs text-muted-foreground">{(getValue() as string) || "—"}</span>
+        <span className="text-xs text-muted-foreground">
+          {(getValue() as string) || "—"}
+        </span>
       ),
     },
     {
@@ -89,7 +103,9 @@ function buildExpenseColumns(
       cell: ({ getValue }) => {
         const active = getValue() as boolean;
         return (
-          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${active ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}>
+          <span
+            className={`px-2 py-0.5 rounded-full text-xs font-medium ${active ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
+          >
             {active ? "Active" : "Inactive"}
           </span>
         );
@@ -104,16 +120,45 @@ function buildExpenseColumns(
         if (deleteConfirm === id) {
           return (
             <div className="flex items-center gap-1 justify-end">
-              <span className="text-[11px] text-muted-foreground mr-1">Delete?</span>
-              <button onClick={() => deleteMut.mutate(id)} className="p-1 rounded text-destructive hover:bg-destructive/10"><Check size={12} /></button>
-              <button onClick={() => setDeleteConfirm(null)} className="p-1 rounded text-muted-foreground hover:bg-muted"><X size={12} /></button>
+              <span className="text-[11px] text-muted-foreground mr-1">
+                Delete?
+              </span>
+              <button
+                onClick={() => deleteMut.mutate(id)}
+                className="p-1 rounded text-destructive hover:bg-destructive/10"
+              >
+                <Check size={12} />
+              </button>
+              <button
+                onClick={() => setDeleteConfirm(null)}
+                className="p-1 rounded text-muted-foreground hover:bg-muted"
+              >
+                <X size={12} />
+              </button>
             </div>
           );
         }
         return (
           <div className="flex items-center justify-end gap-1">
-            <button onClick={() => startEdit(row.original)} className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"><Pencil size={13} /></button>
-            <button onClick={() => setDeleteConfirm(id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"><Trash2 size={13} /></button>
+            <button
+              onClick={() => onView(row.original)}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-sky-500 hover:bg-sky-500/10"
+              title="View details"
+            >
+              <Eye size={13} />
+            </button>
+            <button
+              onClick={() => startEdit(row.original)}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
+            >
+              <Pencil size={13} />
+            </button>
+            <button
+              onClick={() => setDeleteConfirm(id)}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+            >
+              <Trash2 size={13} />
+            </button>
           </div>
         );
       },
@@ -140,10 +185,7 @@ const ExpensesMaster: React.FC = () => {
 
   // ── Remote data ────────────────────────────────────────────────────────────
 
-  const {
-    data: groupsData,
-    isLoading: groupsLoading,
-  } = useQuery({
+  const { data: groupsData, isLoading: groupsLoading } = useQuery({
     queryKey: ["account-groups"],
     queryFn: getAccountGroups,
     retry: 1,
@@ -182,12 +224,17 @@ const ExpensesMaster: React.FC = () => {
 
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState<LedgerForm>(EMPTY_FORM);
-  const [errors, setErrors] = useState<Partial<Record<keyof LedgerForm, boolean>>>({});
+  const [errors, setErrors] = useState<
+    Partial<Record<keyof LedgerForm, boolean>>
+  >({});
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
+  const [viewRecord, setViewRecord] = useState<LedgerHead | null>(null);
 
   const [search, setSearch] = useState("");
   const [filterGroup, setFilterGroup] = useState("");
-  const [sortField, setSortField] = useState<"LHeadName" | "LHeadType" | "GroupName">("LHeadName");
+  const [sortField, setSortField] = useState<
+    "LHeadName" | "LHeadType" | "GroupName"
+  >("LHeadName");
   const [sortAsc, setSortAsc] = useState(true);
 
   // ── Mutations ──────────────────────────────────────────────────────────────
@@ -195,37 +242,46 @@ const ExpensesMaster: React.FC = () => {
   const invalidate = () => qc.invalidateQueries({ queryKey: ["ledger-heads"] });
 
   const createMut = useMutation({
-    mutationFn: (data: LedgerForm) => addRecord({
-      LHeadName: data.LHeadName.trim(),
-      LBelongsTo: data.LBelongsTo ? Number(data.LBelongsTo) : null,
-    }, data.LHeadType || "Ledger"),
-    onSuccess: () => { 
-      toast.success("Ledger account created"); 
-      invalidate(); 
-      resetForm(); 
+    mutationFn: (data: LedgerForm) =>
+      addRecord(
+        {
+          LHeadName: data.LHeadName.trim(),
+          LBelongsTo: data.LBelongsTo ? Number(data.LBelongsTo) : null,
+        },
+        data.LHeadType || "Ledger",
+      ),
+    onSuccess: () => {
+      toast.success("Ledger account created");
+      invalidate();
+      resetForm();
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const updateMut = useMutation({
-    mutationFn: ({ id, data }: { id: number; data: LedgerForm }) => updateRecord(id, {
-      LHeadName: data.LHeadName.trim(),
-      LBelongsTo: data.LBelongsTo ? Number(data.LBelongsTo) : null,
-    }, data.LHeadType || "Ledger"),
-    onSuccess: () => { 
-      toast.success("Ledger account updated"); 
-      invalidate(); 
-      resetForm(); 
+    mutationFn: ({ id, data }: { id: number; data: LedgerForm }) =>
+      updateRecord(
+        id,
+        {
+          LHeadName: data.LHeadName.trim(),
+          LBelongsTo: data.LBelongsTo ? Number(data.LBelongsTo) : null,
+        },
+        data.LHeadType || "Ledger",
+      ),
+    onSuccess: () => {
+      toast.success("Ledger account updated");
+      invalidate();
+      resetForm();
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
   const deleteMut = useMutation({
     mutationFn: (id: number) => deleteRecord(id),
-    onSuccess: () => { 
-      toast.success("Ledger account deleted"); 
-      invalidate(); 
-      setDeleteConfirm(null); 
+    onSuccess: () => {
+      toast.success("Ledger account deleted");
+      invalidate();
+      setDeleteConfirm(null);
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -246,7 +302,15 @@ const ExpensesMaster: React.FC = () => {
   };
 
   const columns = useMemo(
-    () => buildExpenseColumns(editingId, deleteConfirm, setDeleteConfirm, startEdit, deleteMut),
+    () =>
+      buildExpenseColumns(
+        editingId,
+        deleteConfirm,
+        setDeleteConfirm,
+        startEdit,
+        deleteMut,
+        setViewRecord,
+      ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [editingId, deleteConfirm],
   );
@@ -260,9 +324,9 @@ const ExpensesMaster: React.FC = () => {
   const handleSave = () => {
     const e: Partial<Record<keyof LedgerForm, boolean>> = {};
     if (!form.LHeadName.trim()) e.LHeadName = true;
-    if (Object.keys(e).length) { 
-      setErrors(e); 
-      return; 
+    if (Object.keys(e).length) {
+      setErrors(e);
+      return;
     }
 
     if (editingId !== null) {
@@ -274,9 +338,9 @@ const ExpensesMaster: React.FC = () => {
 
   const toggleSort = (field: typeof sortField) => {
     if (sortField === field) setSortAsc((a) => !a);
-    else { 
-      setSortField(field); 
-      setSortAsc(true); 
+    else {
+      setSortField(field);
+      setSortAsc(true);
     }
   };
 
@@ -289,22 +353,23 @@ const ExpensesMaster: React.FC = () => {
         !q ||
         l.LHeadName?.toLowerCase().includes(q) ||
         (l.LHeadType ?? "").toLowerCase().includes(q);
-      const matchGroup =
-        !filterGroup || String(l.LBelongsTo) === filterGroup;
+      const matchGroup = !filterGroup || String(l.LBelongsTo) === filterGroup;
       return matchSearch && matchGroup;
     });
 
     return [...list].sort((a, b) => {
-      const av = (sortField === "LHeadName"
-        ? a.LHeadName
-        : sortField === "LHeadType"
-          ? a.LHeadType
-          : a.GroupName) ?? "";
-      const bv = (sortField === "LHeadName"
-        ? b.LHeadName
-        : sortField === "LHeadType"
-          ? b.LHeadType
-          : b.GroupName) ?? "";
+      const av =
+        (sortField === "LHeadName"
+          ? a.LHeadName
+          : sortField === "LHeadType"
+            ? a.LHeadType
+            : a.GroupName) ?? "";
+      const bv =
+        (sortField === "LHeadName"
+          ? b.LHeadName
+          : sortField === "LHeadType"
+            ? b.LHeadType
+            : b.GroupName) ?? "";
       return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
     });
   }, [ledgers, search, filterGroup, sortField, sortAsc]);
@@ -363,7 +428,6 @@ const ExpensesMaster: React.FC = () => {
 
         <div className="p-5">
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-x-6 gap-y-5">
-
             {/* Account Name */}
             <div>
               <label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide block mb-2">
@@ -377,7 +441,9 @@ const ExpensesMaster: React.FC = () => {
                 }}
                 placeholder="e.g. Cash in Hand"
                 className={`w-full text-sm rounded-lg border px-3 py-2.5 bg-background text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/30 transition ${
-                  errors.LHeadName ? "border-red-400 ring-red-400" : "border-border"
+                  errors.LHeadName
+                    ? "border-red-400 ring-red-400"
+                    : "border-border"
                 }`}
                 aria-label="Account Name"
               />
@@ -530,7 +596,10 @@ const ExpensesMaster: React.FC = () => {
 
           {(search || filterGroup) && (
             <button
-              onClick={() => { setSearch(""); setFilterGroup(""); }}
+              onClick={() => {
+                setSearch("");
+                setFilterGroup("");
+              }}
               className="text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-1.5 hover:bg-muted transition-colors flex items-center gap-1.5"
               aria-label="Clear filters"
             >
@@ -546,22 +615,107 @@ const ExpensesMaster: React.FC = () => {
 
         {/* Table */}
         <div className="rounded-xl border border-border overflow-hidden bg-card">
-            <DataTable
-              data={filtered}
-              columns={columns}
-              loading={ledgersLoading}
-              searchable={false}
-              paginated={true}
-              defaultPageSize={25}
-              getRowId={(row) => String(row.LHeadId)}
-              emptyMessage={ledgers.length === 0 ? "No expense accounts yet." : "No results match your search."}
-              rowClassName={(row) => row.original.LHeadId === editingId ? "bg-primary/5" : ""}
-            />
+          <DataTable
+            data={filtered}
+            columns={columns}
+            loading={ledgersLoading}
+            searchable={false}
+            paginated={true}
+            defaultPageSize={25}
+            getRowId={(row) => String(row.LHeadId)}
+            emptyMessage={
+              ledgers.length === 0
+                ? "No expense accounts yet."
+                : "No results match your search."
+            }
+            rowClassName={(row) =>
+              row.original.LHeadId === editingId ? "bg-primary/5" : ""
+            }
+          />
         </div>
       </div>
+      {/* ── View Detail Drawer ── */}
+      {viewRecord && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div
+            className="absolute inset-0 bg-black/30 backdrop-blur-sm"
+            onClick={() => setViewRecord(null)}
+          />
+          <div className="relative w-full max-w-sm bg-card border-l border-border shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <div className="flex items-center gap-2">
+                <BookOpen size={15} className="text-primary" />
+                <h3 className="font-heading font-semibold text-sm text-foreground">
+                  Expense Account Details
+                </h3>
+              </div>
+              <button
+                onClick={() => setViewRecord(null)}
+                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted"
+              >
+                <XCircle size={15} />
+              </button>
+            </div>
+            <div className="p-5 space-y-4 overflow-y-auto flex-1">
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  Account Name
+                </p>
+                <p className="text-sm font-medium text-foreground">
+                  {viewRecord.LHeadName}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  Type
+                </p>
+                <p className="text-sm text-foreground">
+                  {viewRecord.LHeadType || (
+                    <span className="text-muted-foreground italic">
+                      Not set
+                    </span>
+                  )}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  Account Group
+                </p>
+                <p className="text-sm text-foreground">
+                  {viewRecord.GroupName || (
+                    <span className="text-muted-foreground italic">
+                      No group assigned
+                    </span>
+                  )}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  Status
+                </p>
+                <span
+                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${viewRecord.LHeadStatus ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
+                >
+                  {viewRecord.LHeadStatus ? "Active" : "Inactive"}
+                </span>
+              </div>
+            </div>
+            <div className="px-5 py-3 border-t border-border">
+              <button
+                onClick={() => {
+                  startEdit(viewRecord);
+                  setViewRecord(null);
+                }}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-heading font-semibold bg-primary text-primary-foreground hover:bg-primary/90"
+              >
+                <Pencil size={13} /> Edit Account
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 };
 
 export default ExpensesMaster;
-
