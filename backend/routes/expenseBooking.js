@@ -6,6 +6,7 @@ const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition, guardEdit } = require("../services/approvalService");
 const { validateBody } = require("../middleware/validateRequest");
+const { checkPermissionForMethod } = require("../middleware/routePermission");
 const {
   expenseBookingBodySchema,
   expenseBookingUpdateSchema,
@@ -13,6 +14,8 @@ const {
   emiToggleSchema,
   expenseRejectSchema,
 } = require("../validation/expenseBookingSchemas");
+
+router.use(checkPermissionForMethod("Finance", "ExpenseBooking"));
 
 // Helper: Require authenticated user email
 const requireUserEmail = (req, res) => {
