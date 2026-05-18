@@ -303,7 +303,7 @@ export default function FollowupDashboard() {
     (r: any) => r.status === "sent",
   ).length;
 
-  // Task status breakdown for chart
+  // Task status breakdown
   const taskStatusBreakdown = ["open", "in_progress", "closed", "reviewed"].map(
     (s) => ({
       status: s,

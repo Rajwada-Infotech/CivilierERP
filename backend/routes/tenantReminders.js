@@ -2,13 +2,45 @@ const express = require("express");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 
+function normalizeText(value) {
+  if (value === undefined || value === null) return "";
+  return String(value).trim();
+}
+
+function normalizeNumber(value) {
+  if (value === undefined || value === null || value === "") return null;
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : Number.NaN;
+}
+
 // GET /api/tenant-reminders
 // Returns rows shaped for RemindersManager.tsx:
 //   id, tenantName, amountDue, status, dueDate, lastSentOn
 router.get("/", async (req, res) => {
   try {
-    const pool = getPool();
-    const result = await pool.request().query(`
+    const moduleName = normalizeText(req.query.module);
+    const refId = normalizeNumber(req.query.refId);
+
+    if (Number.isNaN(refId)) {
+      return res.status(400).json({ error: "refId must be a valid number" });
+    }
+
+    const filters = [];
+    const request = getPool().request();
+
+    if (moduleName) {
+      filters.push("Module = @Module");
+      request.input("Module", sql.NVarChar(100), moduleName);
+    }
+
+    if (refId !== null) {
+      filters.push("RefId = @RefId");
+      request.input("RefId", sql.Int, refId);
+    }
+
+    const whereClause = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
+
+    const result = await request.query(`
       SELECT
         ReminderId          AS id,
         Title               AS tenantName,
@@ -29,6 +61,7 @@ router.get("/", async (req, res) => {
         -- AmountDue stored in RefId column if numeric, else 0
         ISNULL(TRY_CAST(RefId AS DECIMAL(18,2)), 0) AS amountDue
       FROM dbo.TenantReminders
+      ${whereClause}
       ORDER BY
         CASE WHEN IsSent = 0 AND DueDate < CAST(GETDATE() AS DATE) THEN 0 ELSE 1 END,
         DueDate ASC
