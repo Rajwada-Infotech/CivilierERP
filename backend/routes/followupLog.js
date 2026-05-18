@@ -10,6 +10,7 @@ function mapLog(row) {
     id: String(row.Id),
     date: row.LogDate ? new Date(row.LogDate).toISOString().split("T")[0] : "",
     type: row.LogType,
+    module: row.Module || "",
     customer: row.Customer,
     amount: row.Amount == null ? null : Number(row.Amount),
     refId: row.RefId == null ? null : Number(row.RefId),
@@ -23,6 +24,15 @@ router.get("/", async (req, res) => {
   try {
     const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
     const type = typeof req.query.type === "string" ? req.query.type.trim().toLowerCase() : "";
+    const module = typeof req.query.module === "string" ? req.query.module.trim().toLowerCase() : "";
+    const refId =
+      req.query.refId == null || req.query.refId === ""
+        ? null
+        : Number(req.query.refId);
+
+    if (refId !== null && Number.isNaN(refId)) {
+      return res.status(400).json({ error: "refId must be numeric" });
+    }
 
     const filters = ["IsDeleted = 0"];
     const request = getPool().request();
@@ -37,11 +47,22 @@ router.get("/", async (req, res) => {
       request.input("type", sql.NVarChar(20), type);
     }
 
+    if (module) {
+      filters.push("LOWER(ISNULL(Module, '')) = @module");
+      request.input("module", sql.NVarChar(100), module);
+    }
+
+    if (refId !== null) {
+      filters.push("RefId = @refId");
+      request.input("refId", sql.Int, refId);
+    }
+
     const result = await request.query(`
       SELECT
         Id,
         LogDate,
         LogType,
+        Module,
         Customer,
         Amount,
         RefId,
@@ -64,6 +85,7 @@ router.post("/", async (req, res) => {
   const {
     date,
     type = "note",
+    module,
     customer,
     amount,
     refId,
@@ -83,6 +105,9 @@ router.post("/", async (req, res) => {
       .json({ error: `type must be one of: ${LOG_TYPES.join(", ")}` });
   }
 
+  const normalizedModule =
+    module == null ? null : String(module).trim().toLowerCase() || null;
+
   const normalizedAmount =
     amount == null || amount === "" ? null : Number(amount);
   const normalizedRefId =
@@ -101,6 +126,7 @@ router.post("/", async (req, res) => {
       .request()
       .input("LogDate", sql.Date, date ? new Date(date) : null)
       .input("LogType", sql.NVarChar(20), normalizedType)
+      .input("Module", sql.NVarChar(100), normalizedModule)
       .input("Customer", sql.NVarChar(255), String(customer).trim())
       .input("Amount", sql.Decimal(18, 2), normalizedAmount)
       .input("RefId", sql.Int, normalizedRefId)
@@ -108,11 +134,12 @@ router.post("/", async (req, res) => {
       .input("CreatedBy", sql.NVarChar(100), createdBy)
       .query(`
         INSERT INTO dbo.FollowupLog
-          (LogDate, LogType, Customer, Amount, RefId, Notes, CreatedBy)
+          (LogDate, LogType, Module, Customer, Amount, RefId, Notes, CreatedBy)
         OUTPUT
           INSERTED.Id,
           INSERTED.LogDate,
           INSERTED.LogType,
+          INSERTED.Module,
           INSERTED.Customer,
           INSERTED.Amount,
           INSERTED.RefId,
@@ -120,7 +147,7 @@ router.post("/", async (req, res) => {
           INSERTED.CreatedBy,
           INSERTED.CreatedAt
         VALUES
-          (ISNULL(@LogDate, CAST(SYSDATETIME() AS DATE)), @LogType, @Customer, @Amount, @RefId, @Notes, @CreatedBy)
+          (ISNULL(@LogDate, CAST(SYSDATETIME() AS DATE)), @LogType, @Module, @Customer, @Amount, @RefId, @Notes, @CreatedBy)
       `);
 
     res.status(201).json(mapLog(result.recordset[0]));
