@@ -18,7 +18,15 @@ import {
   MapPin,
   CreditCard,
   IndianRupee,
+  Eye,
+  Printer,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 import {
   getBanks,
@@ -56,11 +64,13 @@ const bankFormSchema = z.object({
   accountType: z.string(),
   bankType: z.string(),
   holderName: z.string(),
-  openingBalance: z.string().refine(
-    (value) =>
-      value === "" || (!Number.isNaN(Number(value)) && Number(value) >= 0),
-    "Opening balance must be 0 or greater",
-  ),
+  openingBalance: z
+    .string()
+    .refine(
+      (value) =>
+        value === "" || (!Number.isNaN(Number(value)) && Number(value) >= 0),
+      "Opening balance must be 0 or greater",
+    ),
   address: z.string(),
   status: z.boolean(),
 });
@@ -126,6 +136,8 @@ function buildColumns(
   onDeleteRequest: (id: string) => void,
   onDeleteConfirm: (id: string) => void,
   onDeleteCancel: () => void,
+  onView: (bank: BankRecord) => void,
+  onPrint: (bank: BankRecord) => void,
 ): ColumnDef<BankRecord, unknown>[] {
   return [
     {
@@ -260,6 +272,20 @@ function buildColumns(
             ) : (
               <>
                 <button
+                  onClick={() => onView(bank)}
+                  className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10 transition-colors"
+                  title="View details"
+                >
+                  <Eye size={13} />
+                </button>
+                <button
+                  onClick={() => onPrint(bank)}
+                  className="p-1.5 rounded-lg text-amber-500 hover:bg-amber-500/10 transition-colors"
+                  title="Print"
+                >
+                  <Printer size={13} />
+                </button>
+                <button
                   onClick={() => onEdit(bank)}
                   className="p-1.5 rounded-lg text-primary hover:bg-primary/10 transition-colors"
                 >
@@ -318,6 +344,7 @@ const BankMaster: React.FC = () => {
   const form = watch();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [viewRow, setViewRow] = useState<BankRecord | null>(null);
 
   const toPayload = (f: FormState) => ({
     BName: f.bankName.trim() || null,
@@ -390,6 +417,33 @@ const BankMaster: React.FC = () => {
     setEditingId(null);
   };
 
+  const handlePrint = (bank: BankRecord) => {
+    const win = window.open("", "_blank", "width=700,height=600");
+    if (!win) return;
+    win.document.write(`
+      <html><head><title>Bank — ${bank.BName}</title>
+      <style>body{font-family:sans-serif;padding:24px;color:#111}h2{margin-bottom:16px}table{border-collapse:collapse;width:100%}td{padding:6px 12px;border:1px solid #ddd;font-size:13px}td:first-child{font-weight:600;width:40%;background:#f5f5f5}</style>
+      </head><body>
+      <h2>Bank Details</h2>
+      <table>
+        <tr><td>Company</td><td>${bank.BCompanyName || "—"}</td></tr>
+        <tr><td>Bank Name</td><td>${bank.BName || "—"}</td></tr>
+        <tr><td>Branch</td><td>${bank.BBranch || "—"}</td></tr>
+        <tr><td>Account Number</td><td>${bank.BAccountNumber || "—"}</td></tr>
+        <tr><td>IFSC Code</td><td>${bank.BIfscCode || "—"}</td></tr>
+        <tr><td>Account Type</td><td>${bank.BAccountType || "—"}</td></tr>
+        <tr><td>Bank Type</td><td>${bank.BBankType || "—"}</td></tr>
+        <tr><td>Account Holder</td><td>${bank.BAccountHolderName || "—"}</td></tr>
+        <tr><td>Opening Balance</td><td>₹ ${Number(bank.BOpeningBalance || 0).toLocaleString("en-IN")}</td></tr>
+        <tr><td>Address</td><td>${bank.BAddress || "—"}</td></tr>
+        <tr><td>Status</td><td>${bank.BStatus ? "Active" : "Inactive"}</td></tr>
+      </table>
+      </body></html>
+    `);
+    win.document.close();
+    win.print();
+  };
+
   const columns = useMemo(
     () =>
       buildColumns(
@@ -399,6 +453,8 @@ const BankMaster: React.FC = () => {
         setDeleteId,
         handleDelete,
         () => setDeleteId(null),
+        setViewRow,
+        handlePrint,
       ),
     [editingId, deleteId],
   );
@@ -446,7 +502,10 @@ const BankMaster: React.FC = () => {
                     size={14}
                     className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
                   />
-                  <select {...register("companyName")} className={`${inp} pl-8`}>
+                  <select
+                    {...register("companyName")}
+                    className={`${inp} pl-8`}
+                  >
                     <option value="">Select Company...</option>
                     {companies.map((c) => (
                       <option key={c.id} value={c.label}>
@@ -720,6 +779,75 @@ const BankMaster: React.FC = () => {
           />
         </div>
       </div>
+
+      {/* View Detail Modal */}
+      <Dialog
+        open={!!viewRow}
+        onOpenChange={(open) => !open && setViewRow(null)}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="font-heading text-base">
+              Bank Details
+            </DialogTitle>
+          </DialogHeader>
+          {viewRow && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 pt-1">
+              {[
+                { label: "Company", value: viewRow.BCompanyName },
+                { label: "Bank Name", value: viewRow.BName },
+                { label: "Branch", value: viewRow.BBranch },
+                {
+                  label: "Account Number",
+                  value: viewRow.BAccountNumber,
+                  mono: true,
+                },
+                { label: "IFSC Code", value: viewRow.BIfscCode, mono: true },
+                { label: "Account Type", value: viewRow.BAccountType },
+                { label: "Bank Type", value: viewRow.BBankType },
+                { label: "Account Holder", value: viewRow.BAccountHolderName },
+                {
+                  label: "Opening Balance",
+                  value: `₹ ${Number(viewRow.BOpeningBalance || 0).toLocaleString("en-IN")}`,
+                  mono: true,
+                },
+                { label: "Address", value: viewRow.BAddress },
+                {
+                  label: "Status",
+                  value: viewRow.BStatus ? "Active" : "Inactive",
+                },
+              ].map(({ label, value, mono }) => (
+                <div key={label}>
+                  <p className="text-[10px] uppercase tracking-widest font-heading text-muted-foreground mb-0.5">
+                    {label}
+                  </p>
+                  <p
+                    className={`text-sm text-foreground break-words ${mono ? "font-mono" : "font-body"}`}
+                  >
+                    {value || "—"}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex justify-end gap-2 pt-2 border-t border-border mt-2">
+            {viewRow && (
+              <button
+                onClick={() => handlePrint(viewRow)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:bg-muted transition-all"
+              >
+                <Printer size={13} /> Print
+              </button>
+            )}
+            <button
+              onClick={() => setViewRow(null)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
+            >
+              Close
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 };

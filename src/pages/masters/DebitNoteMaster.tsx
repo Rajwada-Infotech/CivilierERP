@@ -762,6 +762,40 @@ const DebitNoteMaster: React.FC = () => {
             { header: "Status", accessor: "status" },
           ],
         }}
+        viewConfig={{
+          title: "Debit Note Details",
+          fields: [
+            { key: "company", label: "Company" },
+            { key: "project", label: "Project" },
+            { key: "supplier", label: "Supplier" },
+            { key: "billDiscountGroup", label: "Bill / Doc" },
+            { key: "discountDisplay", label: "Discount" },
+            { key: "createdBy", label: "Created By" },
+            { key: "status", label: "Status" },
+          ],
+        }}
+        onPrint={(row) => {
+          const win = window.open("", "_blank", "width=700,height=550");
+          if (!win) return;
+          win.document.write(`
+            <html><head><title>Debit Note</title>
+            <style>body{font-family:sans-serif;padding:24px;color:#111}h2{margin-bottom:16px}table{border-collapse:collapse;width:100%}td{padding:6px 12px;border:1px solid #ddd;font-size:13px}td:first-child{font-weight:600;width:40%;background:#f5f5f5}</style>
+            </head><body>
+            <h2>Debit Note</h2>
+            <table>
+              <tr><td>Company</td><td>${row.company || "—"}</td></tr>
+              <tr><td>Project</td><td>${row.project || "—"}</td></tr>
+              <tr><td>Supplier</td><td>${row.supplier || "—"}</td></tr>
+              <tr><td>Bill / Doc</td><td>${row.billDiscountGroup || "—"}</td></tr>
+              <tr><td>Discount</td><td>${row.discountDisplay || "—"}</td></tr>
+              <tr><td>Created By</td><td>${row.createdBy || "—"}</td></tr>
+              <tr><td>Status</td><td>${row.status ? "Active" : "Inactive"}</td></tr>
+            </table>
+            </body></html>
+          `);
+          win.document.close();
+          win.print();
+        }}
       />
     </>
   );
