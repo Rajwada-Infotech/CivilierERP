@@ -4,11 +4,14 @@ const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { validateBody } = require("../middleware/validateRequest");
+const allowRoles = require("../middleware/role");
 const {
   tenantCreateSchema,
   tenantUpdateSchema,
   tenantPatchStatusSchema,
 } = require("../validation/tenantSchemas");
+
+router.use(allowRoles("dba", "super_admin"));
 
 // GET all tenants
 router.get("/", cache("tenants", 300), async (req, res) => {

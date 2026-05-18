@@ -2,6 +2,7 @@ const express = require("express");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition, guardEdit } = require("../services/approvalService");
+const { checkPermissionForMethod } = require("../middleware/routePermission");
 const router = express.Router();
 const { getPool, sql } = require("../db");
 const {
@@ -11,6 +12,8 @@ const {
   resolveGRNPrefix,
   previewNextDocNumber,
 } = require("../utils/docNumberLock");
+
+router.use(checkPermissionForMethod("Material", "GRN"));
 
 const requireUserEmail = (req, res) => {
   const email = req.user?.email;

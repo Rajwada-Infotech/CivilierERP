@@ -204,6 +204,72 @@ const FollowupDashboard = lazy(
 const FollowupReminders = lazy(() => import("./pages/followup/Reminders"));
 const FollowupTasks = lazy(() => import("./pages/followup/FollowupTasks"));
 const FollowupLog = lazy(() => import("./pages/followup/FollowupLog"));
+const FollowupApplicants = lazy(() =>
+  import("./pages/followup/FollowupPipelinePage").then((module) => ({
+    default: module.ApplicantsPage,
+  })),
+);
+const FollowupUnitSelection = lazy(() =>
+  import("./pages/followup/FollowupPipelinePage").then((module) => ({
+    default: module.UnitSelectionPage,
+  })),
+);
+const FollowupAgreements = lazy(() =>
+  import("./pages/followup/FollowupPipelinePage").then((module) => ({
+    default: module.AgreementsPage,
+  })),
+);
+const ApplicantTimeline = lazy(() => import("./pages/followup/ApplicantTimeline"));
+const WelcomeCallsPage = lazy(() =>
+  import("./pages/followup/FollowupExtraPages").then((module) => ({
+    default: module.WelcomeCallsPage,
+  })),
+);
+const NocPage = lazy(() =>
+  import("./pages/followup/FollowupExtraPages").then((module) => ({
+    default: module.NocPage,
+  })),
+);
+const SalesDeedPage = lazy(() =>
+  import("./pages/followup/FollowupExtraPages").then((module) => ({
+    default: module.SalesDeedPage,
+  })),
+);
+const HandoverPage = lazy(() =>
+  import("./pages/followup/FollowupExtraPages").then((module) => ({
+    default: module.HandoverPage,
+  })),
+);
+const ConstructionUpdatesPage = lazy(() =>
+  import("./pages/followup/FollowupExtraPages").then((module) => ({
+    default: module.ConstructionUpdatesPage,
+  })),
+);
+const FinanceDemandsPage = lazy(() =>
+  import("./pages/followup/FollowupExtraPages").then((module) => ({
+    default: module.FinanceDemandsPage,
+  })),
+);
+const FollowupPaymentsPage = lazy(() =>
+  import("./pages/followup/FollowupExtraPages").then((module) => ({
+    default: module.FollowupPaymentsPage,
+  })),
+);
+const CustomerReportPage = lazy(() =>
+  import("./pages/followup/FollowupExtraPages").then((module) => ({
+    default: module.CustomerReportPage,
+  })),
+);
+const FinancialReportPage = lazy(() =>
+  import("./pages/followup/FollowupExtraPages").then((module) => ({
+    default: module.FinancialReportPage,
+  })),
+);
+const ProjectStatusReportPage = lazy(() =>
+  import("./pages/followup/FollowupExtraPages").then((module) => ({
+    default: module.ProjectStatusReportPage,
+  })),
+);
 const AmendmentMenu = lazy(() => import("./pages/material/AmendmentMenu"));
 const Amendments = lazy(() => import("./pages/material/Amendments"));
 const Issues = lazy(() => import("./pages/material/Issues"));
@@ -489,6 +555,118 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <FollowupLog />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/sales/applicants"
+        element={
+          <ProtectedRoute>
+            <FollowupApplicants />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/sales/applicants/:id"
+        element={
+          <ProtectedRoute>
+            <ApplicantTimeline />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/sales/unit-selection"
+        element={
+          <ProtectedRoute>
+            <FollowupUnitSelection />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/agreement/agreements"
+        element={
+          <ProtectedRoute>
+            <FollowupAgreements />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/sales/welcome-calls"
+        element={
+          <ProtectedRoute>
+            <WelcomeCallsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/closure/noc"
+        element={
+          <ProtectedRoute>
+            <NocPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/closure/sales-deed"
+        element={
+          <ProtectedRoute>
+            <SalesDeedPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/closure/handover"
+        element={
+          <ProtectedRoute>
+            <HandoverPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/construction/updates"
+        element={
+          <ProtectedRoute>
+            <ConstructionUpdatesPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/finance/demands"
+        element={
+          <ProtectedRoute>
+            <FinanceDemandsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/finance/payments"
+        element={
+          <ProtectedRoute>
+            <FollowupPaymentsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/reports/customer"
+        element={
+          <ProtectedRoute>
+            <CustomerReportPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/reports/financial"
+        element={
+          <ProtectedRoute>
+            <FinancialReportPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/reports/project-status"
+        element={
+          <ProtectedRoute>
+            <ProjectStatusReportPage />
           </ProtectedRoute>
         }
       />
