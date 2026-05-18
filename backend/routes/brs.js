@@ -5,6 +5,9 @@ const sql = require("mssql");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { getPool } = require("../db");
+const { checkPermissionForMethod } = require("../middleware/routePermission");
+
+router.use(checkPermissionForMethod("Finance", "BRS"));
 
 // ── Dynamic column detection for AccountHeadMaster (same pattern as bankMaster.js) ──
 let _colMetaPromise = null;

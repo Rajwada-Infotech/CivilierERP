@@ -4,11 +4,14 @@ const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition } = require("../services/approvalService");
+const { checkPermissionForMethod } = require("../middleware/routePermission");
 const {
   lockNextDocNumber,
   backPatchRecordId,
   resolveDocTypeId,
 } = require("../utils/docNumberLock");
+
+router.use(checkPermissionForMethod("Finance", "Payments"));
 
 const requireUserEmail = (req, res) => {
   const email = req.user?.email;

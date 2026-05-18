@@ -4,10 +4,13 @@ const { getPool, sql } = require("../db");
 const { cache } = require("../middleware/cache");
 const { bumpCacheVersion } = require("../redis");
 const { transition, guardEdit } = require("../services/approvalService");
+const { checkPermissionForMethod } = require("../middleware/routePermission");
 const {
   lockNextDocNumber,
   backPatchRecordId,
 } = require("../utils/docNumberLock");
+
+router.use(checkPermissionForMethod("Material", "PurchaseOrders"));
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 

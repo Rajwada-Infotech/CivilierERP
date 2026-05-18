@@ -3,18 +3,22 @@ import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
-  ArrowLeft,
-  CheckCircle,
+  ArrowUpRight,
+  CheckCircle2,
   Clock,
+  Activity,
+  ListTodo,
   Plus,
+  RefreshCw,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/contexts/AuthContext";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
-import { Badge } from "@/components/ui/badge";
+import { DashboardBackground } from "@/components/DashboardBackground";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
+import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -31,15 +35,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  Table as UITable,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 
+// ─── Types ────────────────────────────────────────────────────────────────────
 type TaskStatus = "open" | "in_progress" | "closed" | "reviewed";
 type TaskPriority = "low" | "medium" | "high";
 
@@ -73,26 +70,73 @@ const EMPTY_FORM: TaskFormState = {
   dueDate: "",
 };
 
-const STATUS_STYLES: Record<TaskStatus, string> = {
-  open: "bg-slate-500/10 text-slate-700 border-slate-300",
-  in_progress: "bg-blue-500/10 text-blue-700 border-blue-300",
-  closed: "bg-green-500/10 text-green-700 border-green-300",
-  reviewed: "bg-purple-500/10 text-purple-700 border-purple-300",
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+const fmtNum = (n: number) => new Intl.NumberFormat("en-IN").format(n ?? 0);
+
+const fmtDate = (d: string | null | undefined) =>
+  d
+    ? new Date(d).toLocaleDateString("en-IN", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+      })
+    : "—";
+
+function isOverdue(task: FollowupTask) {
+  if (!task.dueDate || task.status === "closed" || task.status === "reviewed")
+    return false;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const due = new Date(task.dueDate);
+  due.setHours(0, 0, 0, 0);
+  return due < today;
+}
+
+// ─── Status / Priority badges ─────────────────────────────────────────────────
+const STATUS_COLORS: Record<TaskStatus, string> = {
+  open: "bg-slate-500/10 text-slate-600 border-slate-400/20",
+  in_progress: "bg-blue-500/10 text-blue-600 border-blue-400/20",
+  closed: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
+  reviewed: "bg-purple-500/10 text-purple-600 border-purple-400/20",
 };
 
-const PRIORITY_STYLES: Record<TaskPriority, string> = {
-  low: "bg-emerald-500/10 text-emerald-700 border-emerald-300",
-  medium: "bg-amber-500/10 text-amber-700 border-amber-300",
-  high: "bg-red-500/10 text-red-700 border-red-300",
+const PRIORITY_COLORS: Record<TaskPriority, string> = {
+  low: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
+  medium: "bg-amber-500/10 text-amber-600 border-amber-400/20",
+  high: "bg-red-500/10 text-red-600 border-red-400/20",
 };
 
+function StatusBadge({ status }: { status: string }) {
+  const cls =
+    STATUS_COLORS[status as TaskStatus] ??
+    "bg-muted text-muted-foreground border-border";
+  return (
+    <span
+      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border ${cls}`}
+    >
+      {status.replace("_", " ")}
+    </span>
+  );
+}
+
+function PriorityBadge({ priority }: { priority: string | null }) {
+  const p = (priority ?? "medium") as TaskPriority;
+  const cls =
+    PRIORITY_COLORS[p] ?? "bg-muted text-muted-foreground border-border";
+  return (
+    <span
+      className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-medium border capitalize ${cls}`}
+    >
+      {p}
+    </span>
+  );
+}
+
+// ─── API fns ──────────────────────────────────────────────────────────────────
 async function fetchFollowupTasks(): Promise<FollowupTask[]> {
-  const response = await fetchWithAuth("/api/tasks?module=followup");
-  if (!response.ok) {
-    throw new Error("Failed to load follow-up tasks");
-  }
-
-  return response.json();
+  const res = await fetchWithAuth("/api/tasks?module=followup");
+  if (!res.ok) throw new Error("Failed to load follow-up tasks");
+  return res.json();
 }
 
 async function createFollowupTask(payload: {
@@ -103,53 +147,279 @@ async function createFollowupTask(payload: {
   dueDate: string;
   module: "followup";
 }) {
-  const response = await fetchWithAuth("/api/tasks", {
+  const res = await fetchWithAuth("/api/tasks", {
     method: "POST",
     body: JSON.stringify(payload),
   });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.error || "Failed to create task");
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to create task");
   }
 }
 
 async function updateTaskStatus(taskId: string, status: TaskStatus) {
-  const response = await fetchWithAuth(`/api/tasks/${taskId}`, {
+  const res = await fetchWithAuth(`/api/tasks/${taskId}`, {
     method: "PUT",
     body: JSON.stringify({ status }),
   });
-
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.error || "Failed to update task");
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || "Failed to update task");
   }
 }
 
-function formatDate(value: string) {
-  if (!value) return "-";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("en-IN");
+// ─── Stat Card ────────────────────────────────────────────────────────────────
+function StatCard({
+  label,
+  value,
+  sub,
+  icon: Icon,
+  iconColor = "text-indigo-600",
+  iconBg = "bg-indigo-500/10",
+  onClick,
+}: {
+  label: string;
+  value: string;
+  sub: string;
+  icon: React.ElementType;
+  iconColor?: string;
+  iconBg?: string;
+  onClick?: () => void;
+}) {
+  return (
+    <div
+      onClick={onClick}
+      className={`rounded-xl border border-border bg-card p-5 flex flex-col gap-3 transition-all duration-200 ${
+        onClick
+          ? "cursor-pointer hover:shadow-md hover:-translate-y-0.5 hover:border-primary/20"
+          : ""
+      }`}
+    >
+      <div className="flex items-start justify-between">
+        <div className={`p-2 rounded-lg ${iconBg}`}>
+          <Icon size={18} className={iconColor} />
+        </div>
+      </div>
+      <div>
+        <p className="text-2xl font-heading font-bold text-foreground leading-none">
+          {value}
+        </p>
+        <p className="text-xs text-muted-foreground mt-1">{label}</p>
+        {sub && (
+          <p className="text-[10px] text-muted-foreground/70 mt-0.5">{sub}</p>
+        )}
+      </div>
+    </div>
+  );
 }
 
-function isOverdue(task: FollowupTask) {
-  if (!task.dueDate || task.status === "closed" || task.status === "reviewed") {
-    return false;
-  }
-
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const due = new Date(task.dueDate);
-  due.setHours(0, 0, 0, 0);
-  return due < today;
+// ─── Section Header ───────────────────────────────────────────────────────────
+function SectionHeader({
+  icon: Icon,
+  title,
+  sub,
+  action,
+  onAction,
+}: {
+  icon: React.ElementType;
+  title: string;
+  sub?: string;
+  action?: string;
+  onAction?: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center gap-2">
+        <Icon size={16} className="text-indigo-600" />
+        <div>
+          <p className="text-sm font-heading font-semibold text-foreground">
+            {title}
+          </p>
+          {sub && <p className="text-[10px] text-muted-foreground">{sub}</p>}
+        </div>
+      </div>
+      {action && onAction && (
+        <button
+          onClick={onAction}
+          className="text-[10px] text-primary hover:underline flex items-center gap-0.5"
+        >
+          {action} <ArrowUpRight size={10} />
+        </button>
+      )}
+    </div>
+  );
 }
 
+// ─── Column defs ──────────────────────────────────────────────────────────────
+function makeColumns(
+  updateStatusMutation: ReturnType<
+    typeof useMutation<void, Error, { taskId: string; status: TaskStatus }>
+  >,
+): ColumnDef<FollowupTask>[] {
+  return [
+    {
+      id: "title",
+      accessorKey: "title",
+      header: "Title",
+      cell: ({ row }) => (
+        <div className={isOverdue(row.original) ? "text-red-600" : ""}>
+          <p className="text-xs font-medium text-foreground leading-snug line-clamp-1">
+            {row.original.title}
+          </p>
+          {row.original.description && (
+            <p className="text-[10px] text-muted-foreground mt-0.5 line-clamp-1">
+              {row.original.description}
+            </p>
+          )}
+        </div>
+      ),
+    },
+    {
+      id: "priority",
+      accessorKey: "priority",
+      header: "Priority",
+      cell: ({ getValue }) => (
+        <PriorityBadge priority={getValue() as string | null} />
+      ),
+    },
+    {
+      id: "assignedToName",
+      accessorKey: "assignedToName",
+      header: "Assigned To",
+      cell: ({ getValue }) => (
+        <span className="text-xs text-muted-foreground">
+          {(getValue() as string) || "—"}
+        </span>
+      ),
+    },
+    {
+      id: "dueDate",
+      accessorKey: "dueDate",
+      header: "Due Date",
+      cell: ({ row }) => (
+        <span
+          className={`text-xs ${
+            isOverdue(row.original)
+              ? "text-red-600 font-medium"
+              : "text-muted-foreground"
+          }`}
+        >
+          {fmtDate(row.original.dueDate)}
+        </span>
+      ),
+    },
+    {
+      id: "status",
+      accessorKey: "status",
+      header: "Status",
+      cell: ({ getValue }) => <StatusBadge status={getValue() as string} />,
+    },
+    {
+      id: "actions",
+      header: "Update",
+      cell: ({ row }) => (
+        <Select
+          value={row.original.status}
+          onValueChange={(val) =>
+            updateStatusMutation.mutate({
+              taskId: row.original.id,
+              status: val as TaskStatus,
+            })
+          }
+        >
+          <SelectTrigger className="h-7 w-32 text-[10px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="open">Open</SelectItem>
+            <SelectItem value="in_progress">In Progress</SelectItem>
+            <SelectItem value="closed">Closed</SelectItem>
+            <SelectItem value="reviewed">Reviewed</SelectItem>
+          </SelectContent>
+        </Select>
+      ),
+    },
+  ];
+}
+
+// ─── Status Breakdown ─────────────────────────────────────────────────────────
+function StatusBreakdown({ tasks }: { tasks: FollowupTask[] }) {
+  const entries = [
+    { status: "open", label: "Open", color: "bg-slate-400" },
+    { status: "in_progress", label: "In Progress", color: "bg-blue-500" },
+    { status: "closed", label: "Closed", color: "bg-emerald-500" },
+    { status: "reviewed", label: "Reviewed", color: "bg-purple-500" },
+  ].map((e) => ({
+    ...e,
+    count: tasks.filter((t) => t.status === e.status).length,
+  }));
+
+  const total = tasks.length || 1;
+
+  return (
+    <div className="space-y-2 mt-2">
+      {entries.map(({ status, label, color, count }) => {
+        const pct = Math.round((count / total) * 100);
+        return (
+          <div key={status}>
+            <div className="flex justify-between text-[10px] text-muted-foreground mb-0.5">
+              <span>{label}</span>
+              <span className="font-medium text-foreground">{count}</span>
+            </div>
+            <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+              <div
+                className={`h-full rounded-full ${color}`}
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Priority Breakdown ───────────────────────────────────────────────────────
+function PriorityBreakdown({ tasks }: { tasks: FollowupTask[] }) {
+  const entries = [
+    { priority: "high", label: "High", color: "bg-red-500" },
+    { priority: "medium", label: "Medium", color: "bg-amber-500" },
+    { priority: "low", label: "Low", color: "bg-emerald-500" },
+  ].map((e) => ({
+    ...e,
+    count: tasks.filter((t) => (t.priority ?? "medium") === e.priority).length,
+  }));
+
+  const total = tasks.length || 1;
+
+  return (
+    <div className="space-y-2 mt-2">
+      {entries.map(({ priority, label, color, count }) => {
+        const pct = Math.round((count / total) * 100);
+        return (
+          <div key={priority}>
+            <div className="flex justify-between text-[10px] text-muted-foreground mb-0.5">
+              <span>{label}</span>
+              <span className="font-medium text-foreground">{count}</span>
+            </div>
+            <div className="h-1.5 rounded-full bg-muted overflow-hidden">
+              <div
+                className={`h-full rounded-full ${color}`}
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
 export default function FollowupTasks() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { currentUser, allUsers } = useAuth();
-  const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | TaskStatus>("all");
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [form, setForm] = useState<TaskFormState>(EMPTY_FORM);
 
@@ -158,9 +428,15 @@ export default function FollowupTasks() {
     currentUser?.role === "super_admin" ||
     currentUser?.role === "dba";
 
-  const { data: tasks = [], isLoading, isError } = useQuery({
+  const {
+    data: tasks = [],
+    isLoading,
+    refetch,
+    isFetching,
+  } = useQuery({
     queryKey: ["followup-tasks"],
     queryFn: fetchFollowupTasks,
+    staleTime: 2 * 60 * 1000,
   });
 
   const createMutation = useMutation({
@@ -171,9 +447,7 @@ export default function FollowupTasks() {
       setForm(EMPTY_FORM);
       setIsDialogOpen(false);
     },
-    onError: (error: Error) => {
-      toast.error(error.message);
-    },
+    onError: (err: Error) => toast.error(err.message),
   });
 
   const updateStatusMutation = useMutation({
@@ -183,223 +457,173 @@ export default function FollowupTasks() {
       toast.success("Task updated");
       queryClient.invalidateQueries({ queryKey: ["followup-tasks"] });
     },
-    onError: (error: Error) => {
-      toast.error(error.message);
-    },
+    onError: (err: Error) => toast.error(err.message),
   });
 
-  const filteredTasks = tasks.filter((task) => {
-    const matchesSearch = [task.title, task.description, task.assignedToName]
-      .join(" ")
-      .toLowerCase()
-      .includes(search.toLowerCase());
-    const matchesStatus = statusFilter === "all" || task.status === statusFilter;
-    return matchesSearch && matchesStatus;
-  });
+  const columns = makeColumns(updateStatusMutation);
 
-  const openCount = tasks.filter((task) => task.status === "open").length;
-  const inProgressCount = tasks.filter((task) => task.status === "in_progress").length;
-  const completedCount = tasks.filter(
-    (task) => task.status === "closed" || task.status === "reviewed",
+  const openCount = tasks.filter((t) => t.status === "open").length;
+  const inProgressCount = tasks.filter(
+    (t) => t.status === "in_progress",
   ).length;
+  const completedCount = tasks.filter(
+    (t) => t.status === "closed" || t.status === "reviewed",
+  ).length;
+  const overdueCount = tasks.filter(isOverdue).length;
 
   return (
-    <div className="p-6 space-y-6 max-w-7xl mx-auto">
-      <div className="flex items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-heading font-bold text-foreground">
-            Follow-up Tasks
-          </h1>
-          <p className="text-muted-foreground mt-1">
-            Live task list filtered by `module=followup`.
-          </p>
-        </div>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            onClick={() => navigate("/followup")}
-            className="gap-2"
-          >
-            <ArrowLeft className="w-4 h-4" />
-            Dashboard
-          </Button>
-          {canCreate ? (
-            <Button onClick={() => setIsDialogOpen(true)} className="gap-2">
-              <Plus className="w-4 h-4" />
-              New Task
-            </Button>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {[
-          {
-            label: "Open",
-            value: openCount,
-            icon: AlertCircle,
-            color: "bg-slate-500/10 text-slate-700",
-          },
-          {
-            label: "In Progress",
-            value: inProgressCount,
-            icon: Clock,
-            color: "bg-blue-500/10 text-blue-700",
-          },
-          {
-            label: "Completed",
-            value: completedCount,
-            icon: CheckCircle,
-            color: "bg-green-500/10 text-green-700",
-          },
-        ].map(({ label, value, icon: Icon, color }) => (
-          <Card key={label}>
-            <CardContent className="pt-5 flex items-center gap-4">
-              <div className={`w-10 h-10 rounded-xl ${color} flex items-center justify-center`}>
-                <Icon className="w-5 h-5" />
+    <>
+      <DashboardBackground />
+      <div className="relative z-10 p-6 space-y-6 max-w-[1600px] mx-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <div>
+            <Breadcrumbs
+              items={[
+                { label: "Follow-Up", path: "/followup" },
+                { label: "Tasks", path: "/followup/follow-ups/tasks" },
+              ]}
+            />
+            <div className="flex items-center gap-3 mt-1">
+              <div className="p-2 rounded-lg bg-indigo-500/10">
+                <ListTodo size={20} className="text-indigo-600" />
               </div>
               <div>
-                <p className="text-2xl font-bold">{value}</p>
-                <p className="text-sm text-muted-foreground">{label}</p>
+                <h1 className="text-2xl font-heading font-bold text-foreground">
+                  Follow-Up Tasks
+                </h1>
+                <p className="text-xs text-muted-foreground">
+                  Live task list filtered to the follow-up module
+                </p>
               </div>
-            </CardContent>
-          </Card>
-        ))}
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => refetch()}
+              disabled={isFetching}
+              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-1.5 hover:bg-muted transition-colors"
+            >
+              <RefreshCw
+                size={13}
+                className={isFetching ? "animate-spin" : ""}
+              />
+              Refresh
+            </button>
+            {canCreate && (
+              <Button
+                size="sm"
+                onClick={() => setIsDialogOpen(true)}
+                className="gap-1.5"
+              >
+                <Plus size={14} />
+                New Task
+              </Button>
+            )}
+          </div>
+        </div>
+
+        {/* KPI Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <StatCard
+            label="Open Tasks"
+            value={fmtNum(openCount)}
+            sub={`${fmtNum(tasks.length)} total`}
+            icon={AlertCircle}
+            iconColor="text-slate-600"
+            iconBg="bg-slate-500/10"
+          />
+          <StatCard
+            label="In Progress"
+            value={fmtNum(inProgressCount)}
+            sub="Currently active"
+            icon={Activity}
+            iconColor="text-blue-600"
+            iconBg="bg-blue-500/10"
+          />
+          <StatCard
+            label="Completed"
+            value={fmtNum(completedCount)}
+            sub="Closed + reviewed"
+            icon={CheckCircle2}
+            iconColor="text-emerald-600"
+            iconBg="bg-emerald-500/10"
+          />
+          <StatCard
+            label="Overdue"
+            value={fmtNum(overdueCount)}
+            sub="Past due date"
+            icon={Clock}
+            iconColor="text-red-600"
+            iconBg="bg-red-500/10"
+          />
+        </div>
+
+        {/* Main content: table + breakdowns */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Task Table — takes 2/3 width */}
+          <div className="lg:col-span-2 rounded-xl border border-border bg-card overflow-hidden">
+            <div className="p-4 border-b border-border">
+              <SectionHeader
+                icon={ListTodo}
+                title="All Follow-Up Tasks"
+                sub="module=followup"
+              />
+            </div>
+            <DataTable
+              data={tasks}
+              columns={columns}
+              searchable
+              searchPlaceholder="Search title, description or assignee…"
+              paginated
+              defaultPageSize={10}
+              loading={isLoading}
+              emptyMessage="No follow-up tasks found."
+              rowClassName={(row) =>
+                isOverdue(row.original) ? "bg-red-500/5" : ""
+              }
+            />
+          </div>
+
+          {/* Breakdowns — takes 1/3 width */}
+          <div className="flex flex-col gap-4">
+            <div className="rounded-xl border border-border bg-card p-5">
+              <SectionHeader icon={ListTodo} title="Status Breakdown" />
+              {isLoading ? (
+                <div className="space-y-2 animate-pulse">
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <div key={i} className="h-5 bg-muted rounded" />
+                  ))}
+                </div>
+              ) : (
+                <StatusBreakdown tasks={tasks} />
+              )}
+            </div>
+
+            <div className="rounded-xl border border-border bg-card p-5">
+              <SectionHeader icon={Activity} title="Priority Breakdown" />
+              {isLoading ? (
+                <div className="space-y-2 animate-pulse">
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <div key={i} className="h-5 bg-muted rounded" />
+                  ))}
+                </div>
+              ) : (
+                <PriorityBreakdown tasks={tasks} />
+              )}
+            </div>
+          </div>
+        </div>
       </div>
 
-      <Card>
-        <CardHeader className="gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <CardTitle>Task List ({filteredTasks.length})</CardTitle>
-            <p className="text-sm text-muted-foreground mt-1">
-              Only follow-up module tasks are shown here.
-            </p>
-          </div>
-          <div className="flex flex-col sm:flex-row gap-3">
-            <Input
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search title, description, or assignee"
-              className="sm:w-72"
-            />
-            <Select
-              value={statusFilter}
-              onValueChange={(value) => setStatusFilter(value as "all" | TaskStatus)}
-            >
-              <SelectTrigger className="sm:w-44">
-                <SelectValue placeholder="Filter status" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Statuses</SelectItem>
-                <SelectItem value="open">Open</SelectItem>
-                <SelectItem value="in_progress">In Progress</SelectItem>
-                <SelectItem value="closed">Closed</SelectItem>
-                <SelectItem value="reviewed">Reviewed</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="overflow-x-auto">
-            <UITable>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Title</TableHead>
-                  <TableHead>Priority</TableHead>
-                  <TableHead>Assigned To</TableHead>
-                  <TableHead>Due Date</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Action</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {isLoading && (
-                  <TableRow>
-                    <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
-                      Loading tasks...
-                    </TableCell>
-                  </TableRow>
-                )}
-                {isError && (
-                  <TableRow>
-                    <TableCell colSpan={6} className="py-8 text-center text-red-600">
-                      Failed to load tasks.
-                    </TableCell>
-                  </TableRow>
-                )}
-                {!isLoading && !isError && filteredTasks.length === 0 && (
-                  <TableRow>
-                    <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
-                      No follow-up tasks found.
-                    </TableCell>
-                  </TableRow>
-                )}
-                {!isLoading &&
-                  !isError &&
-                  filteredTasks.map((task) => (
-                    <TableRow
-                      key={task.id}
-                      className={isOverdue(task) ? "bg-red-500/5" : undefined}
-                    >
-                      <TableCell className="align-top">
-                        <div className="font-medium">{task.title}</div>
-                        {task.description ? (
-                          <div className="text-xs text-muted-foreground max-w-md mt-1">
-                            {task.description}
-                          </div>
-                        ) : null}
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          className={PRIORITY_STYLES[task.priority || "medium"]}
-                        >
-                          {task.priority || "medium"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>{task.assignedToName || "-"}</TableCell>
-                      <TableCell>
-                        <span className={isOverdue(task) ? "text-red-600 font-medium" : ""}>
-                          {formatDate(task.dueDate)}
-                        </span>
-                      </TableCell>
-                      <TableCell>
-                        <Badge className={STATUS_STYLES[task.status]}>{task.status}</Badge>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Select
-                          value={task.status}
-                          onValueChange={(value) =>
-                            updateStatusMutation.mutate({
-                              taskId: task.id,
-                              status: value as TaskStatus,
-                            })
-                          }
-                        >
-                          <SelectTrigger className="ml-auto h-8 w-36 text-xs">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="open">Open</SelectItem>
-                            <SelectItem value="in_progress">In Progress</SelectItem>
-                            <SelectItem value="closed">Closed</SelectItem>
-                            <SelectItem value="reviewed">Reviewed</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-              </TableBody>
-            </UITable>
-          </div>
-        </CardContent>
-      </Card>
-
+      {/* New Task Dialog */}
       <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>New Follow-up Task</DialogTitle>
+            <DialogTitle>New Follow-Up Task</DialogTitle>
             <DialogDescription>
-              This creates a task with `module=followup`.
+              Creates a task with{" "}
+              <code className="text-xs">module=followup</code>.
             </DialogDescription>
           </DialogHeader>
 
@@ -408,8 +632,8 @@ export default function FollowupTasks() {
               <label className="text-sm font-medium">Title</label>
               <Input
                 value={form.title}
-                onChange={(event) =>
-                  setForm((current) => ({ ...current, title: event.target.value }))
+                onChange={(e) =>
+                  setForm((c) => ({ ...c, title: e.target.value }))
                 }
                 placeholder="Task title"
               />
@@ -418,26 +642,20 @@ export default function FollowupTasks() {
               <label className="text-sm font-medium">Description</label>
               <textarea
                 value={form.description}
-                onChange={(event) =>
-                  setForm((current) => ({
-                    ...current,
-                    description: event.target.value,
-                  }))
+                onChange={(e) =>
+                  setForm((c) => ({ ...c, description: e.target.value }))
                 }
                 placeholder="Optional details"
-                className="flex min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                className="flex min-h-20 w-full rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               />
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <label className="text-sm font-medium">Priority</label>
                 <Select
                   value={form.priority}
-                  onValueChange={(value) =>
-                    setForm((current) => ({
-                      ...current,
-                      priority: value as TaskPriority,
-                    }))
+                  onValueChange={(v) =>
+                    setForm((c) => ({ ...c, priority: v as TaskPriority }))
                   }
                 >
                   <SelectTrigger>
@@ -455,8 +673,8 @@ export default function FollowupTasks() {
                 <Input
                   type="date"
                   value={form.dueDate}
-                  onChange={(event) =>
-                    setForm((current) => ({ ...current, dueDate: event.target.value }))
+                  onChange={(e) =>
+                    setForm((c) => ({ ...c, dueDate: e.target.value }))
                   }
                 />
               </div>
@@ -465,9 +683,7 @@ export default function FollowupTasks() {
               <label className="text-sm font-medium">Assign To</label>
               <Select
                 value={form.assignedTo}
-                onValueChange={(value) =>
-                  setForm((current) => ({ ...current, assignedTo: value }))
-                }
+                onValueChange={(v) => setForm((c) => ({ ...c, assignedTo: v }))}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Select user" />
@@ -505,11 +721,11 @@ export default function FollowupTasks() {
                 createMutation.isPending
               }
             >
-              {createMutation.isPending ? "Creating..." : "Create Task"}
+              {createMutation.isPending ? "Creating…" : "Create Task"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </>
   );
 }
