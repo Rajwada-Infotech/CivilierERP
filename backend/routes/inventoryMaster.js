@@ -140,7 +140,7 @@ router.get("/", cache("inventory-master", 60), async (req, res) => {
         ON grp.M_Id = img.Parent_Id
       ${uomJoinClause}
       LEFT JOIN dbo.StockLedger sl
-        ON TRY_CONVERT(uniqueidentifier, CONVERT(NVARCHAR(50), sl.ItemID)) = img.M_Id
+        ON TRY_CAST(sl.ItemID AS INT) = img.M_Id
         ${godownFilter}
       WHERE img.Parent_Id IS NOT NULL
       GROUP BY
@@ -168,12 +168,10 @@ router.get("/", cache("inventory-master", 60), async (req, res) => {
     });
   } catch (err) {
     console.error("[inventory-master] GET error:", err.message);
-    res
-      .status(500)
-      .json({
-        error: "Failed to fetch inventory master",
-        message: err.message,
-      });
+    res.status(500).json({
+      error: "Failed to fetch inventory master",
+      message: err.message,
+    });
   }
 });
 

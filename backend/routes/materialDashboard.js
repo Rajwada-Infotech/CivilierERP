@@ -215,7 +215,7 @@ router.get("/", async (req, res) => {
           COUNT(CASE WHEN YEAR(CreatedAt) = YEAR(GETDATE())
                       AND MONTH(CreatedAt) = MONTH(GETDATE()) THEN 1 END) AS ThisMonthCount,
           COUNT(CASE WHEN CAST(CreatedAt AS DATE) = CAST(GETDATE() AS DATE) THEN 1 END) AS TodayCount,
-          ISNULL(SUM((SELECT ISNULL(SUM(mii.Quantity),0) FROM dbo.MaterialIssueItems mii WHERE mii.IssueId = mi.IssueId)), 0) AS TotalQty
+          ISNULL((SELECT SUM(mii.Quantity) FROM dbo.MaterialIssueItems mii), 0) AS TotalQty
         FROM dbo.MaterialIssues mi
       `),
 

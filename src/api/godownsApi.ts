@@ -46,7 +46,6 @@ export interface CreateGodownPayload {
   Remarks?: string;
   EnterpriseID?: number | null;
   ProjectID?: number | null;
-  Location?: string;
   IsActive?: boolean;
 }
 
