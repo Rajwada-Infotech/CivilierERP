@@ -202,6 +202,8 @@ const FollowupDashboard = lazy(
   () => import("./pages/followup/FollowupDashboard"),
 );
 const FollowupReminders = lazy(() => import("./pages/followup/Reminders"));
+const POReminders = lazy(() => import("./pages/followup/POReminders"));
+const WOReminders = lazy(() => import("./pages/followup/WOReminders"));
 const FollowupTasks = lazy(() => import("./pages/followup/FollowupTasks"));
 const FollowupLog = lazy(() => import("./pages/followup/FollowupLog"));
 const FollowupApplicants = lazy(() =>
@@ -219,7 +221,9 @@ const FollowupAgreements = lazy(() =>
     default: module.AgreementsPage,
   })),
 );
-const ApplicantTimeline = lazy(() => import("./pages/followup/ApplicantTimeline"));
+const ApplicantTimeline = lazy(
+  () => import("./pages/followup/ApplicantTimeline"),
+);
 const WelcomeCallsPage = lazy(() =>
   import("./pages/followup/FollowupExtraPages").then((module) => ({
     default: module.WelcomeCallsPage,
@@ -539,6 +543,22 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <FollowupReminders />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/follow-ups/po-reminders"
+        element={
+          <ProtectedRoute>
+            <POReminders />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/follow-ups/wo-reminders"
+        element={
+          <ProtectedRoute>
+            <WOReminders />
           </ProtectedRoute>
         }
       />
