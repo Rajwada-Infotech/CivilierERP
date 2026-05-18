@@ -572,9 +572,17 @@ export default function StockTransfer() {
 
   const filteredGodowns = useMemo(() => {
     return allGodowns.filter((g) => {
-      if (filterCompanyId && String(g.EnterpriseID) !== filterCompanyId)
+      if (
+        filterCompanyId &&
+        g.EnterpriseID != null &&
+        String(g.EnterpriseID) !== filterCompanyId
+      )
         return false;
-      if (filterProjectId && String(g.ProjectID) !== filterProjectId)
+      if (
+        filterProjectId &&
+        g.ProjectID != null &&
+        String(g.ProjectID) !== filterProjectId
+      )
         return false;
       return true;
     });
