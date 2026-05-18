@@ -23,6 +23,8 @@ import {
   Plus,
   Search,
   Layers,
+  Eye,
+  XCircle,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -118,6 +120,7 @@ function TreeRow({
   setDeleteConfirm,
   activeEditId,
   allGroups,
+  onView,
 }: {
   node: TreeNode;
   depth: number;
@@ -129,7 +132,7 @@ function TreeRow({
   setDeleteConfirm: (id: string | null) => void;
   activeEditId: string | null;
   allGroups: AccountGroup[];
-  onViewGL: (id: string) => void;
+  onView: (g: AccountGroup) => void;
 }) {
   const hasChildren = node.children.length > 0;
   const isExpanded = expanded.has(node._id);
@@ -208,21 +211,20 @@ function TreeRow({
           )}
         </td>
 
-        {/* Actions */}
         <td className="py-2.5 px-4 text-right">
           <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <button
+              onClick={() => onView(node)}
+              className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-sky-500 hover:bg-sky-500/10 transition-colors"
+              title="View details"
+            >
+              <Eye size={13} />
+            </button>
             <button
               onClick={() => onEdit(node)}
               className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
             >
               <Pencil size={13} />
-            </button>
-            <button
-              onClick={() => onViewGL(node._id)}
-              className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-violet-500 hover:bg-violet-50 transition-colors"
-              title="View GL accounts"
-            >
-              <Layers size={13} />
             </button>
             {deleteConfirm === node._id ? (
               <>
@@ -265,6 +267,7 @@ function TreeRow({
             setDeleteConfirm={setDeleteConfirm}
             activeEditId={activeEditId}
             allGroups={allGroups}
+            onView={onView}
           />
         ))}
     </>
@@ -306,12 +309,15 @@ const AccountGroupMaster: React.FC = () => {
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [selectedGroupId, setSelectedGroupId] = useState<string | null>(null);
+  const [viewRecord, setViewRecord] = useState<AccountGroup | null>(null);
 
   const { data: glAccounts, isLoading: glLoading } = useQuery({
     queryKey: ["account-head", "GL", selectedGroupId],
     queryFn: async () => {
       if (!selectedGroupId) return [];
-      const res = await fetchWithAuth(`/api/account-head?type=GL&groupId=${selectedGroupId}`);
+      const res = await fetchWithAuth(
+        `/api/account-head?type=GL&groupId=${selectedGroupId}`,
+      );
       if (!res.ok) throw new Error("Failed to load GL accounts");
       return res.json();
     },
@@ -706,6 +712,13 @@ const AccountGroupMaster: React.FC = () => {
                           <td className="py-2.5 px-4 text-right">
                             <div className="flex items-center justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                               <button
+                                onClick={() => setViewRecord(g)}
+                                className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-sky-500 hover:bg-sky-500/10 transition-colors"
+                                title="View details"
+                              >
+                                <Eye size={13} />
+                              </button>
+                              <button
                                 onClick={() => startEdit(g)}
                                 className="w-7 h-7 flex items-center justify-center rounded text-muted-foreground hover:text-primary hover:bg-primary/10 transition-colors"
                               >
@@ -769,6 +782,7 @@ const AccountGroupMaster: React.FC = () => {
                       setDeleteConfirm={setDeleteConfirm}
                       activeEditId={editingId}
                       allGroups={allGroups}
+                      onView={setViewRecord}
                     />
                   ))
                 )}
@@ -777,6 +791,144 @@ const AccountGroupMaster: React.FC = () => {
           )}
         </div>
       </div>
+      {/* ── View Detail Drawer ── */}
+      {viewRecord && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div
+            className="absolute inset-0 bg-black/30 backdrop-blur-sm"
+            onClick={() => setViewRecord(null)}
+          />
+          <div className="relative w-full max-w-sm bg-card border-l border-border shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <div className="flex items-center gap-2">
+                {allGroups.some((g) => g.parentId === viewRecord._id) ? (
+                  <FolderOpen size={15} className="text-amber-500" />
+                ) : viewRecord.parentId ? (
+                  <Folder size={15} className="text-muted-foreground" />
+                ) : (
+                  <Layers size={15} className="text-primary/60" />
+                )}
+                <h3 className="font-heading font-semibold text-sm text-foreground">
+                  Account Group Details
+                </h3>
+              </div>
+              <button
+                onClick={() => setViewRecord(null)}
+                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted"
+              >
+                <XCircle size={15} />
+              </button>
+            </div>
+            <div className="p-5 space-y-4 overflow-y-auto flex-1">
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  Group Name
+                </p>
+                <p className="text-sm font-medium text-foreground">
+                  {viewRecord.name}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  Code
+                </p>
+                <p className="font-mono text-sm font-semibold text-primary flex items-center gap-1">
+                  <Hash size={11} />
+                  {viewRecord.code || "—"}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  Belongs To
+                </p>
+                {(() => {
+                  const path = getBelongsTo(viewRecord._id, allGroups);
+                  return path ? (
+                    <p className="text-sm text-foreground">{path}</p>
+                  ) : (
+                    <p className="text-sm text-muted-foreground italic">
+                      Top-level group
+                    </p>
+                  );
+                })()}
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  Type
+                </p>
+                {(() => {
+                  const hasChildren = allGroups.some(
+                    (g) => g.parentId === viewRecord._id,
+                  );
+                  const isRoot = !viewRecord.parentId;
+                  return (
+                    <span
+                      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${isRoot ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}
+                    >
+                      {hasChildren ? (
+                        <>
+                          <FolderOpen size={10} /> Parent Group
+                        </>
+                      ) : isRoot ? (
+                        <>
+                          <Layers size={10} /> Root Group
+                        </>
+                      ) : (
+                        <>
+                          <Folder size={10} /> Sub-Group
+                        </>
+                      )}
+                    </span>
+                  );
+                })()}
+              </div>
+              {(() => {
+                const children = allGroups.filter(
+                  (g) => g.parentId === viewRecord._id,
+                );
+                if (children.length === 0) return null;
+                return (
+                  <div>
+                    <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-2">
+                      Sub-Groups ({children.length})
+                    </p>
+                    <div className="space-y-1">
+                      {children.map((c) => (
+                        <div
+                          key={c._id}
+                          className="flex items-center gap-2 px-2 py-1 rounded-lg bg-muted/40"
+                        >
+                          <Folder
+                            size={11}
+                            className="text-muted-foreground/60 shrink-0"
+                          />
+                          <span className="text-xs text-foreground flex-1">
+                            {c.name}
+                          </span>
+                          <span className="font-mono text-[10px] text-muted-foreground">
+                            {c.code}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+            <div className="px-5 py-3 border-t border-border">
+              <button
+                onClick={() => {
+                  startEdit(viewRecord);
+                  setViewRecord(null);
+                }}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-heading font-semibold bg-primary text-primary-foreground hover:bg-primary/90"
+              >
+                <Pencil size={13} /> Edit Group
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 };
