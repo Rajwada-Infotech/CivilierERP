@@ -80,9 +80,15 @@ export const deleteEnterprise = async (id: string | number) => {
   return handle(res);
 };
 
-export const getEnterpriseOptions = async (type?: string) => {
-  const url = type
-    ? `${BASE_URL}/options?type=${encodeURIComponent(type)}`
+export const getEnterpriseOptions = async (
+  type?: string,
+  businessType?: string,
+) => {
+  const qs = new URLSearchParams();
+  if (type) qs.set("type", type);
+  if (businessType) qs.set("business_type", businessType);
+  const url = qs.toString()
+    ? `${BASE_URL}/options?${qs}`
     : `${BASE_URL}/options`;
   const res = await fetchWithAuth(url);
   return handle<{ id: number; label: string }[]>(res);

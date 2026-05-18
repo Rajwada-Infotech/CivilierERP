@@ -323,8 +323,7 @@ router.get(
       const result = await pool.request().query(`
         SELECT ESourceType, ESourceId, Eid
         FROM dbo.ExpenseBooking
-        WHERE EIsDeleted = 0
-          AND ESourceType IS NOT NULL
+        WHERE ESourceType IS NOT NULL
           AND ESourceId   IS NOT NULL
       `);
       res.json(result.recordset);
@@ -1353,9 +1352,8 @@ router.delete("/:id", async (req, res) => {
   try {
     const pool = getPool();
 
-    const refCheck = await pool
-      .request()
-      .input("Eid", sql.Int, numericId).query(`
+    const refCheck = await pool.request().input("Eid", sql.Int, numericId)
+      .query(`
         SELECT COUNT(*) AS cnt
         FROM dbo.DebitNote
         WHERE bill_id = @Eid
