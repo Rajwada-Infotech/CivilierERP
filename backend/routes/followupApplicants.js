@@ -216,6 +216,37 @@ router.get("/", async (req, res) => {
   }
 });
 
+router.get("/:id", async (req, res) => {
+  const id = parseId(req.params.id);
+  if (!id) {
+    return res.status(400).json({ error: "Invalid applicant id" });
+  }
+
+  try {
+    const result = await getPool()
+      .request()
+      .input("Id", sql.Int, id)
+      .query(`
+        SELECT TOP 1 ${LIST_COLUMNS}
+        FROM dbo.FollowupApplicants fa
+        LEFT JOIN dbo.ProjectMaster pm ON pm.Id = fa.ProjectId
+        LEFT JOIN dbo.CompanyMaster cm ON cm.Id = fa.CompanyId
+        LEFT JOIN dbo.users u ON u.id = fa.AssignedTo
+        WHERE fa.Id = @Id AND fa.IsDeleted = 0
+      `);
+
+    const applicant = result.recordset[0];
+    if (!applicant) {
+      return res.status(404).json({ error: "Applicant not found" });
+    }
+
+    res.json(applicant);
+  } catch (err) {
+    console.error("followupApplicants DETAIL error:", err);
+    res.status(500).json({ error: "Failed to fetch applicant" });
+  }
+});
+
 router.post("/", async (req, res) => {
   const userName = requireUserName(req, res);
   if (!userName) return;
