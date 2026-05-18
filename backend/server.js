@@ -188,6 +188,54 @@ async function createApp() {
     });
   }
 
+  // ── Rate limiters ──────────────────────────────────────────────────────────
+  // Registered inside createApp() so they apply in ALL environments,
+  // including the Vercel serverless entry point (api/index.js) which calls
+  // createApp() directly and never goes through startServer().
+  if (!isTest) {
+    const loginLimiter = rateLimit({
+      windowMs: 15 * 60 * 1000,
+      max: 10,
+      message: { error: "Too many login attempts. Try again later." },
+      store: makeStore("rl:login:"),
+      standardHeaders: true,
+      legacyHeaders: false,
+    });
+
+    const apiLimiter = rateLimit({
+      windowMs: 60 * 1000,
+      max: async (req) => {
+        if (!req.user?.userId) return 1000;
+        try {
+          const score = Number(
+            (await redisZScore("engagement:score", req.user.userId)) || 0,
+          );
+          const metrics = await getSystemMetrics();
+          const predictedRPM = await getPredictedRPM();
+          return getDynamicLimit(
+            score,
+            predictedRPM || metrics.rpm,
+            metrics.memoryUsage,
+          );
+        } catch (err) {
+          logger.warn(
+            { event: "RATE_LIMIT_FALLBACK", err },
+            "Using default limit due to Redis issue",
+          );
+          return 500;
+        }
+      },
+      store: makeStore("rl:api:"),
+      skip: (req) => req.path.startsWith("/api/user-activity"),
+      keyGenerator: (req) => `${req.user?.userId || ipKeyGenerator(req)}`,
+      standardHeaders: true,
+      legacyHeaders: false,
+    });
+
+    app.use("/api/users/login", loginLimiter);
+    app.use("/api", apiLimiter);
+  }
+
   app.get("/", (req, res) => res.send("CivilierERP API running"));
   app.use("/health", require("./routes/health"));
 
@@ -279,48 +327,7 @@ async function startServer() {
 
     const app = await createApp();
 
-    // Rate limiters
-    const loginLimiter = rateLimit({
-      windowMs: 15 * 60 * 1000,
-      max: 10,
-      message: { error: "Too many login attempts. Try again later." },
-      store: makeStore("rl:login:"),
-      standardHeaders: true,
-      legacyHeaders: false,
-    });
-
-    const apiLimiter = rateLimit({
-      windowMs: 60 * 1000,
-      max: async (req) => {
-        if (!req.user?.userId) return 1000;
-        try {
-          const score = Number(
-            (await redisZScore("engagement:score", req.user.userId)) || 0,
-          );
-          const metrics = await getSystemMetrics();
-          const predictedRPM = await getPredictedRPM();
-          return getDynamicLimit(
-            score,
-            predictedRPM || metrics.rpm,
-            metrics.memoryUsage,
-          );
-        } catch (err) {
-          logger.warn(
-            { event: "RATE_LIMIT_FALLBACK", err },
-            "Using default limit due to Redis issue",
-          );
-          return 500;
-        }
-      },
-      store: makeStore("rl:api:"),
-      skip: (req) => req.path.startsWith("/api/user-activity"),
-      keyGenerator: (req) => `${req.user?.userId || ipKeyGenerator(req)}`,
-      standardHeaders: true,
-      legacyHeaders: false,
-    });
-
-    app.use("/api/users/login", loginLimiter);
-    app.use("/api", apiLimiter);
+    // Rate limiters are registered inside createApp() — no duplication needed here.
 
     const PORT = process.env.PORT || 5000;
 
