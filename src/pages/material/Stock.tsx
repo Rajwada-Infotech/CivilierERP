@@ -412,6 +412,7 @@ export default function Stock() {
   const [selectedCompany, setSelectedCompany] = useState<number | null>(null);
   const [selectedProject, setSelectedProject] = useState<number | null>(null);
   const [selectedGodownId, setSelectedGodownId] = useState<number | null>(null);
+  const autoSelected = React.useRef(false);
 
   // ── Load data ─────────────────────────────────────────────────────────────
   const { data: godownsData, isLoading: godownsLoading } = useQuery({
@@ -420,6 +421,19 @@ export default function Stock() {
     staleTime: 120_000,
   });
   const godowns: Godown[] = godownsData?.data ?? [];
+
+  // Auto-select main godown on first load
+  React.useEffect(() => {
+    if (
+      !autoSelected.current &&
+      godowns.length > 0 &&
+      selectedGodownId === null
+    ) {
+      const main = godowns.find((g) => g.IsMain) ?? godowns[0];
+      setSelectedGodownId(main.GodownID);
+      autoSelected.current = true;
+    }
+  }, [godowns]);
 
   const { data: companiesData } = useQuery({
     queryKey: ["enterprises-companies"],
@@ -441,27 +455,43 @@ export default function Stock() {
   });
   const projects = Array.isArray(projectsData) ? projectsData : [];
 
-  // Filter godowns by selected company/project
+  // Filter godowns by both company AND project simultaneously (additive, not exclusive)
   const filteredGodowns = useMemo(() => {
-    if (selectedCompany)
-      return godowns.filter((g) => g.EnterpriseID === selectedCompany);
-    if (selectedProject)
-      return godowns.filter((g) => g.ProjectID === selectedProject);
-    return godowns;
+    return godowns.filter((g) => {
+      const companyMatch = selectedCompany
+        ? g.EnterpriseID === selectedCompany
+        : true;
+      const projectMatch = selectedProject
+        ? g.ProjectID === selectedProject
+        : true;
+      return companyMatch && projectMatch;
+    });
   }, [godowns, selectedCompany, selectedProject]);
+
+  // If current selected godown is no longer in filtered list, reset to main within filtered
+  React.useEffect(() => {
+    if (selectedGodownId !== null && filteredGodowns.length > 0) {
+      const stillVisible = filteredGodowns.some(
+        (g) => g.GodownID === selectedGodownId,
+      );
+      if (!stillVisible) {
+        const main =
+          filteredGodowns.find((g) => g.IsMain) ?? filteredGodowns[0];
+        setSelectedGodownId(main?.GodownID ?? null);
+      }
+    }
+  }, [filteredGodowns]);
 
   const selectedGodown = godowns.find((g) => g.GodownID === selectedGodownId);
 
   const handleCompanyChange = (v: number | null) => {
     setSelectedCompany(v);
-    setSelectedProject(null);
-    setSelectedGodownId(null);
+    // Do NOT clear project — both filters are independent
   };
 
   const handleProjectChange = (v: number | null) => {
     setSelectedProject(v);
-    setSelectedCompany(null);
-    setSelectedGodownId(null);
+    // Do NOT clear company — both filters are independent
   };
 
   const handleGodownChange = (v: number | null) => {

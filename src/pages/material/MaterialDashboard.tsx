@@ -151,24 +151,24 @@ function StatCard({
   return (
     <div
       onClick={onClick}
-      className={`rounded-xl border border-border bg-card p-5 flex flex-col gap-3 transition-all duration-200 ${
+      className={`rounded-2xl border border-border bg-card p-5 flex flex-col gap-4 transition-all duration-200 ${
         onClick
-          ? "cursor-pointer hover:shadow-md hover:-translate-y-0.5 hover:border-primary/20"
+          ? "cursor-pointer hover:shadow-lg hover:-translate-y-0.5 hover:border-primary/20"
           : ""
       }`}
     >
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-heading uppercase tracking-widest text-muted-foreground">
+      <div className="flex items-start justify-between gap-2">
+        <span className="text-[10px] font-heading uppercase tracking-widest text-muted-foreground leading-tight">
           {label}
         </span>
         <div
-          className={`w-8 h-8 rounded-lg ${iconBg} flex items-center justify-center`}
+          className={`w-10 h-10 rounded-xl ${iconBg} flex items-center justify-center`}
         >
           <Icon size={15} className={iconColor} />
         </div>
       </div>
       <div>
-        <div className="text-2xl font-bold font-heading text-foreground">
+        <div className="text-3xl font-bold font-heading text-foreground leading-none">
           {value}
         </div>
         <div className="flex items-center gap-1 mt-1">
@@ -178,7 +178,9 @@ function StatCard({
           {trend === "down" && (
             <ArrowDownRight size={12} className="text-red-500" />
           )}
-          <span className="text-xs text-muted-foreground">{sub}</span>
+          <span className="text-[11px] text-muted-foreground leading-tight">
+            {sub}
+          </span>
         </div>
       </div>
     </div>
@@ -213,9 +215,9 @@ function SectionHeader({
   onAction?: () => void;
 }) {
   return (
-    <div className="flex items-center justify-between mb-3">
-      <div className="flex items-center gap-2">
-        <Icon size={15} className="text-muted-foreground" />
+    <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center gap-2.5">
+        <Icon size={16} className="text-muted-foreground" />
         <span className="text-sm font-heading font-semibold text-foreground">
           {title}
         </span>
@@ -664,10 +666,10 @@ export default function MaterialDashboard() {
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Material"]} />
-      <div className="relative p-6 space-y-6">
+      <div className="relative p-6 space-y-8">
         <DashboardBackground />
         {/* Header */}
-        <div className="flex items-center justify-between">
+        <div className="flex items-start justify-between gap-2">
           <div>
             <h1 className="text-xl font-heading font-bold text-foreground">
               Material Overview
@@ -696,44 +698,51 @@ export default function MaterialDashboard() {
           </div>
         )}
 
-        {/* Stat Cards */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-4">
+        {/* Stat Cards — 2 cols mobile, 4 cols tablet+, 4 cols desktop (2 rows of 4) */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           {isLoading
-            ? Array.from({ length: 7 }).map((_, i) => <StatSkeleton key={i} />)
+            ? Array.from({ length: 8 }).map((_, i) => <StatSkeleton key={i} />)
             : statCards.map((s) => <StatCard key={s.label} {...s} />)}
         </div>
 
-        {/* Summary Strip */}
+        {/* Value Summary Strip */}
         {data && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {[
               {
                 label: "Total GRN Value",
                 value: fmt(data.grns.totalValue),
                 icon: TrendingUp,
                 color: "text-emerald-600",
+                bg: "bg-emerald-500/10",
               },
               {
                 label: "Total PO Value",
                 value: fmt(data.purchaseOrders.totalValue),
                 icon: FileText,
                 color: "text-blue-600",
+                bg: "bg-blue-500/10",
               },
               {
                 label: "Total Expense Amount",
                 value: fmt(data.expenses.totalAmount),
                 icon: Receipt,
                 color: "text-amber-600",
+                bg: "bg-amber-500/10",
               },
             ].map((s) => (
               <div
                 key={s.label}
-                className="rounded-xl border border-border bg-card px-4 py-3 flex items-center gap-3"
+                className="rounded-xl border border-border bg-card px-5 py-4 flex items-center gap-4"
               >
-                <s.icon size={18} className={s.color} />
+                <div
+                  className={`w-10 h-10 rounded-xl ${s.bg} flex items-center justify-center shrink-0`}
+                >
+                  <s.icon size={18} className={s.color} />
+                </div>
                 <div>
                   <p className="text-xs text-muted-foreground">{s.label}</p>
-                  <p className="text-sm font-heading font-bold text-foreground">
+                  <p className="text-lg font-heading font-bold text-foreground leading-tight mt-0.5">
                     {s.value}
                   </p>
                 </div>
@@ -746,7 +755,7 @@ export default function MaterialDashboard() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Recent GRNs */}
           <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="p-4 border-b border-border">
+            <div className="px-5 py-4 border-b border-border">
               <SectionHeader
                 icon={Truck}
                 title="Recent GRNs"
@@ -772,7 +781,7 @@ export default function MaterialDashboard() {
 
           {/* Recent Purchase Orders */}
           <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="p-4 border-b border-border">
+            <div className="px-5 py-4 border-b border-border">
               <SectionHeader
                 icon={ShoppingCart}
                 title="Recent Purchase Orders"
@@ -799,7 +808,7 @@ export default function MaterialDashboard() {
 
         {/* Recent Expense Bookings */}
         <div className="rounded-xl border border-border bg-card overflow-hidden">
-          <div className="p-4 border-b border-border">
+          <div className="px-5 py-4 border-b border-border">
             <SectionHeader
               icon={Receipt}
               title="Recent Expense Bookings"
@@ -827,7 +836,7 @@ export default function MaterialDashboard() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Recent Material Issues */}
           <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="p-4 border-b border-border">
+            <div className="px-5 py-4 border-b border-border">
               <SectionHeader
                 icon={PackageCheck}
                 title="Recent Material Issues"
@@ -853,7 +862,7 @@ export default function MaterialDashboard() {
 
           {/* Recent Material Requests */}
           <div className="rounded-xl border border-border bg-card overflow-hidden">
-            <div className="p-4 border-b border-border">
+            <div className="px-5 py-4 border-b border-border">
               <SectionHeader
                 icon={Send}
                 title="Recent Material Requests"
@@ -1011,7 +1020,7 @@ export default function MaterialDashboard() {
         {/* Quick Actions */}
         <div className="rounded-xl border border-border bg-card p-5">
           <SectionHeader icon={BarChart3} title="Quick Actions" />
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-4">
             {[
               {
                 label: "New GRN",
@@ -1073,10 +1082,10 @@ export default function MaterialDashboard() {
               <button
                 key={path}
                 onClick={() => navigate(path)}
-                className="flex flex-col items-center gap-2 py-4 px-3 rounded-xl border border-border hover:bg-muted hover:border-primary/20 transition-all duration-150 active:scale-95 group"
+                className="flex flex-col items-center gap-3 py-5 px-3 rounded-2xl border border-border hover:bg-muted hover:border-primary/20 transition-all duration-150 active:scale-95 group"
               >
                 <div
-                  className={`w-9 h-9 rounded-lg ${bg} flex items-center justify-center group-hover:scale-110 transition-transform`}
+                  className={`w-11 h-11 rounded-xl ${bg} flex items-center justify-center group-hover:scale-110 transition-transform`}
                 >
                   <Icon size={16} className={color} />
                 </div>
