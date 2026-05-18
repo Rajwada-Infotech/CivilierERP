@@ -122,7 +122,11 @@ const ALL_ROUTES = [
   { path: "/api/reminders", file: "./routes/tenantReminders" },
   { path: "/api/followup-log", file: "./routes/followupLog" },
   { path: "/api/followup-applicants", file: "./routes/followupApplicants" },
-  { path: "/api/followup-unit-selections", file: "./routes/followupUnitSelections" },
+  { path: "/api/applicants", file: "./routes/applicants" },
+  {
+    path: "/api/followup-unit-selections",
+    file: "./routes/followupUnitSelections",
+  },
   { path: "/api/followup-agreements", file: "./routes/followupAgreements" },
   { path: "/api/company-master", file: "./routes/companyMaster" },
   { path: "/api/project-master", file: "./routes/projectMaster" },
