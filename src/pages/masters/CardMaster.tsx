@@ -22,6 +22,7 @@ import {
   Clock,
   ChevronDown,
   ChevronUp,
+  XCircle,
 } from "lucide-react";
 import {
   getCards,
@@ -270,6 +271,7 @@ function buildCardColumns(
   setDismissed: React.Dispatch<React.SetStateAction<string[]>>,
   calculateReminderDate: (expiry: string, days: number) => string,
   daysFromNow: (iso: string) => number,
+  onView: (card: CardRecord) => void,
 ): ColumnDef<CardRecord, unknown>[] {
   return [
     {
@@ -375,6 +377,13 @@ function buildCardColumns(
         return (
           <div className="flex items-center justify-end gap-1">
             <button
+              onClick={() => onView(row.original)}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-sky-500 hover:bg-sky-500/10 transition-colors"
+              title="View details"
+            >
+              <Eye size={13} />
+            </button>
+            <button
               onClick={() => handleEdit(id)}
               className={`p-1.5 rounded-lg transition-colors ${isEditing ? "text-primary bg-primary/10" : "text-muted-foreground hover:text-primary hover:bg-primary/10"}`}
             >
@@ -453,6 +462,8 @@ const CardMaster: React.FC = () => {
   const [showCvc, setShowCvc] = useState(false);
   const [showFormCard, setShowFormCard] = useState(false);
   const [showReminderPanel, setShowReminderPanel] = useState(true);
+  const [viewRecord, setViewRecord] = useState<CardRecord | null>(null);
+  const [drawerRevealed, setDrawerRevealed] = useState(false);
 
   const cardsWithDismiss = cards.map((c) => ({
     ...c,
@@ -606,6 +617,7 @@ const CardMaster: React.FC = () => {
         setDismissed,
         calculateReminderDate,
         daysFromNow,
+        setViewRecord,
       ),
     [editingId, deleteId, revealedRows, dismissed],
   );
@@ -1213,6 +1225,162 @@ const CardMaster: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* ── View Detail Drawer ── */}
+      {viewRecord && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div
+            className="absolute inset-0 bg-black/30 backdrop-blur-sm"
+            onClick={() => {
+              setViewRecord(null);
+              setDrawerRevealed(false);
+            }}
+          />
+          <div className="relative w-full max-w-sm bg-card border-l border-border shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <div className="flex items-center gap-2">
+                <CreditCard size={15} className="text-primary" />
+                <h3 className="font-heading font-semibold text-sm text-foreground">
+                  Card Details
+                </h3>
+              </div>
+              <button
+                onClick={() => {
+                  setViewRecord(null);
+                  setDrawerRevealed(false);
+                }}
+                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted"
+              >
+                <XCircle size={15} />
+              </button>
+            </div>
+            <div className="p-5 space-y-4 overflow-y-auto flex-1">
+              {viewRecord.companyName && (
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                    Company
+                  </p>
+                  <p className="text-sm font-medium text-foreground">
+                    {viewRecord.companyName}
+                  </p>
+                </div>
+              )}
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  Bank
+                </p>
+                <p className="text-sm font-medium text-foreground flex items-center gap-1.5">
+                  <Landmark size={12} className="text-muted-foreground" />
+                  {viewRecord.bankName || "—"}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  Card Holder
+                </p>
+                <p className="text-sm text-foreground">
+                  {viewRecord.cardHolder || "—"}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  Card Number
+                </p>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-sm text-foreground">
+                    {drawerRevealed
+                      ? formatted(viewRecord.cardNumber)
+                      : masked(viewRecord.cardNumber)}
+                  </span>
+                  <button
+                    onClick={() => setDrawerRevealed((p) => !p)}
+                    className="p-1 rounded text-muted-foreground hover:text-primary"
+                    title={drawerRevealed ? "Hide" : "Reveal"}
+                  >
+                    {drawerRevealed ? <EyeOff size={12} /> : <Eye size={12} />}
+                  </button>
+                </div>
+                <p className="text-[10px] text-muted-foreground mt-0.5 flex items-center gap-1">
+                  <ShieldAlert size={9} /> Card number hidden for security
+                </p>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                    Network
+                  </p>
+                  <span className="inline-flex px-2 py-0.5 rounded-full text-xs bg-primary/10 text-primary font-medium">
+                    {viewRecord.network || "—"}
+                  </span>
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                    Card Type
+                  </p>
+                  <p className="text-sm text-foreground">
+                    {viewRecord.cardType || "—"}
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                    Expiry
+                  </p>
+                  <p className="font-mono text-sm text-foreground flex items-center gap-1">
+                    <Calendar size={11} className="text-muted-foreground" />
+                    {viewRecord.expiryDate || "—"}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                    Status
+                  </p>
+                  <span
+                    className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${viewRecord.status ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
+                  >
+                    {viewRecord.status ? "Active" : "Inactive"}
+                  </span>
+                </div>
+              </div>
+              {viewRecord.reminderEnabled && viewRecord.expiryDate && (
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                    Reminder
+                  </p>
+                  <p className="text-sm text-foreground flex items-center gap-1.5">
+                    <Bell size={12} className="text-amber-500" />
+                    {viewRecord.reminderDays} days before expiry
+                  </p>
+                  {(() => {
+                    const rd = calculateReminderDate(
+                      viewRecord.expiryDate,
+                      viewRecord.reminderDays,
+                    );
+                    return rd ? (
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {formatDisplayDate(rd)}
+                      </p>
+                    ) : null;
+                  })()}
+                </div>
+              )}
+            </div>
+            <div className="px-5 py-3 border-t border-border">
+              <button
+                onClick={() => {
+                  handleEdit(viewRecord._id);
+                  setViewRecord(null);
+                  setDrawerRevealed(false);
+                }}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-heading font-semibold bg-primary text-primary-foreground hover:bg-primary/90"
+              >
+                <Edit2 size={13} /> Edit Card
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 };

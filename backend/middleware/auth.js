@@ -1,6 +1,5 @@
 const jwt = require("jsonwebtoken");
-const { redisGet } = require("../redis");
-const { pfaddActiveUser } = require("../redis");
+const { redisGetStrict, pfaddActiveUser } = require("../redis");
 const logger = require("../logger");
 
 const BLACKLIST_PREFIX = "blacklist:";
@@ -21,9 +20,24 @@ module.exports = async (req, res, next) => {
 
     const authStart = req.timing?.startStage();
 
-    // Check Redis blacklist (logout invalidation)
+    // Check Redis blacklist (logout invalidation).
+    // Uses redisGetStrict so a Redis failure throws rather than returning null.
+    // Fail-closed: if the blacklist cannot be consulted, reject the request
+    // with 503 rather than allowing a potentially revoked token through.
     const blacklistStart = req.timing?.startStage();
-    const isBlacklisted = await redisGet(`${BLACKLIST_PREFIX}${token}`);
+    let isBlacklisted;
+    try {
+      isBlacklisted = await redisGetStrict(`${BLACKLIST_PREFIX}${token}`);
+    } catch (err) {
+      logger.error(
+        { event: "BLACKLIST_CHECK_FAILED", err },
+        "Redis unavailable during auth blacklist check — rejecting request (fail-closed)",
+      );
+      return res.status(503).json({
+        error:
+          "Authentication service temporarily unavailable. Please try again shortly.",
+      });
+    }
     if (blacklistStart) {
       req.timing.mark("auth.redis_blacklist", blacklistStart, {
         redisKey: `${BLACKLIST_PREFIX}<token>`,
@@ -42,9 +56,6 @@ module.exports = async (req, res, next) => {
     req.token = token;
 
     // Track active user — fire-and-forget so it never blocks the request.
-    // FIX: was awaited, causing 10-30 ms delay on EVERY request because
-    // pfaddActiveUser issued two serial Redis commands (PFADD + EXPIRE)
-    // before next() could fire. Telemetry must never hold up responses.
     pfaddActiveUser(decoded.userId).catch(() => {});
 
     if (authStart) {

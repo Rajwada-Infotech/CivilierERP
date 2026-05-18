@@ -13,6 +13,8 @@ import {
   Save,
   X,
   Info,
+  Eye,
+  XCircle,
 } from "lucide-react";
 import {
   getDocumentTypes,
@@ -153,6 +155,7 @@ function buildDocColumns(
   editingId: number | null,
   openEdit: (item: DocTypeRecord) => void,
   handleDelete: (id: number) => void,
+  onView: (item: DocTypeRecord) => void,
 ): ColumnDef<DocTypeRecord, unknown>[] {
   return [
     {
@@ -280,6 +283,13 @@ function buildDocColumns(
       cell: ({ row }) => (
         <div className="flex items-center justify-end gap-1">
           <button
+            onClick={() => onView(row.original)}
+            className="p-1.5 rounded-lg text-muted-foreground hover:text-sky-500 hover:bg-sky-500/10"
+            title="View details"
+          >
+            <Eye size={13} />
+          </button>
+          <button
             onClick={() => openEdit(row.original)}
             className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
           >
@@ -304,6 +314,7 @@ const TypeOfDocMaster: React.FC = () => {
   const [form, setForm] = useState<FormState>(emptyForm);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [viewRecord, setViewRecord] = useState<DocTypeRecord | null>(null);
 
   // ── Queries ───────────────────────────────────────────────────────────────
 
@@ -444,7 +455,13 @@ const TypeOfDocMaster: React.FC = () => {
   };
 
   const columns = useMemo(
-    () => buildDocColumns(editingId, openEdit, deleteMutation.mutate),
+    () =>
+      buildDocColumns(
+        editingId,
+        openEdit,
+        deleteMutation.mutate,
+        setViewRecord,
+      ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [editingId, deleteMutation.mutate],
   );
@@ -831,6 +848,174 @@ const TypeOfDocMaster: React.FC = () => {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* ── View Detail Drawer ── */}
+      {viewRecord && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div
+            className="absolute inset-0 bg-black/30 backdrop-blur-sm"
+            onClick={() => setViewRecord(null)}
+          />
+          <div className="relative w-full max-w-sm bg-card border-l border-border shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <div className="flex items-center gap-2">
+                <FileText size={15} className="text-primary" />
+                <h3 className="font-heading font-semibold text-sm text-foreground">
+                  Document Type Details
+                </h3>
+              </div>
+              <button
+                onClick={() => setViewRecord(null)}
+                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted"
+              >
+                <XCircle size={15} />
+              </button>
+            </div>
+            <div className="p-5 space-y-4 overflow-y-auto flex-1">
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  Entry Type
+                </p>
+                <p className="text-sm font-medium text-foreground">
+                  {viewRecord.EntryType ?? "—"}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  Description
+                </p>
+                <p className="text-sm text-foreground">
+                  {viewRecord.Description || (
+                    <span className="text-muted-foreground italic">
+                      No description
+                    </span>
+                  )}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  Doc Number Prefix
+                </p>
+                <p className="font-mono text-sm font-semibold text-primary">
+                  {viewRecord.ProjectCode && viewRecord.ModuleCode
+                    ? `${viewRecord.ProjectCode}-${viewRecord.ModuleCode}`
+                    : viewRecord.DocNoPrefix ||
+                      viewRecord.FullPrefix ||
+                      viewRecord.Prefix ||
+                      "—"}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  Format
+                </p>
+                {(() => {
+                  let label = "Legacy · slash format";
+                  let cls = "bg-muted text-muted-foreground";
+                  if (viewRecord.ProjectCode && viewRecord.ModuleCode) {
+                    label = "New · Project-scoped";
+                    cls = "bg-emerald-500/10 text-emerald-600";
+                  } else if (viewRecord.DocNoPrefix) {
+                    label = "New · Global dash format";
+                    cls = "bg-blue-500/10 text-blue-600";
+                  }
+                  return (
+                    <span
+                      className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${cls}`}
+                    >
+                      {label}
+                    </span>
+                  );
+                })()}
+              </div>
+              {viewRecord.ProjectName && (
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                    Project
+                  </p>
+                  <p className="text-sm text-foreground">
+                    {viewRecord.ProjectCode && (
+                      <span className="font-mono font-semibold mr-1">
+                        {viewRecord.ProjectCode}
+                      </span>
+                    )}
+                    {viewRecord.ProjectName}
+                  </p>
+                </div>
+              )}
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  Module Code
+                </p>
+                <p className="font-mono text-sm text-foreground">
+                  {viewRecord.ModuleCode || (
+                    <span className="text-muted-foreground italic">
+                      Not set
+                    </span>
+                  )}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  Starting Number
+                </p>
+                <p className="font-mono text-sm text-foreground">
+                  {viewRecord.StartingDocNo ?? 1}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  Fin Year Reset
+                </p>
+                <span
+                  className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${viewRecord.FinYearReset ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
+                >
+                  {viewRecord.FinYearReset
+                    ? "Yes — resets each April"
+                    : "No — global counter"}
+                </span>
+              </div>
+              {viewRecord.links_to && (
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                    Links To
+                  </p>
+                  <div className="flex flex-wrap gap-1.5 mt-1">
+                    {viewRecord.links_to.split(",").map((l) => (
+                      <span
+                        key={l}
+                        className="px-2 py-0.5 rounded text-[10px] bg-primary/10 text-primary font-medium"
+                      >
+                        {l.trim()}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  Status
+                </p>
+                <span
+                  className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${viewRecord.IsActive ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
+                >
+                  {viewRecord.IsActive ? "Active" : "Inactive"}
+                </span>
+              </div>
+            </div>
+            <div className="px-5 py-3 border-t border-border">
+              <button
+                onClick={() => {
+                  openEdit(viewRecord);
+                  setViewRecord(null);
+                }}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-heading font-semibold bg-primary text-primary-foreground hover:bg-primary/90"
+              >
+                <Edit size={13} /> Edit Document Type
+              </button>
+            </div>
           </div>
         </div>
       )}
