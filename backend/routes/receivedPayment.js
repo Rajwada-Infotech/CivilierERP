@@ -6,6 +6,9 @@ const {
   backPatchRecordId,
 } = require("../utils/docNumberLock");
 const { cache, localVersionCache } = require("../middleware/cache");
+const { checkPermissionForMethod } = require("../middleware/routePermission");
+
+router.use(checkPermissionForMethod("Finance", "ReceivedPayments"));
 
 // ── Helpers ────────────────────────────────────────────────────────────────────
 

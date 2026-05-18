@@ -3,7 +3,10 @@ const router = express.Router();
 const { getPool } = require("../db");
 const sql = require("mssql");
 const { cache } = require("../middleware/cache");
+const { checkPermissionForMethod } = require("../middleware/routePermission");
 const toNumber = (value) => Number(value || 0);
+
+router.use(checkPermissionForMethod("Finance", "Reports"));
 
 function buildDateWhere(
   mode,

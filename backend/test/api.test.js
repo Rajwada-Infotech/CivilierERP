@@ -2,6 +2,7 @@
 
 // Load env FIRST so JWT_SECRET is available before any require
 require("dotenv").config({ path: require("path").resolve(__dirname, "../.env") });
+process.env.HEALTH_TOKEN = process.env.HEALTH_TOKEN || "test-health-token";
 
 // ─── Mocks (hoisted by Jest) ──────────────────────────────────────────────────
 
@@ -58,6 +59,7 @@ jest.mock("../redis", function () {
   return {
     getRedis: jest.fn().mockResolvedValue(mockClient),
     redisGet: jest.fn().mockResolvedValue(null),
+    redisGetStrict: jest.fn().mockResolvedValue(null),
     redisSet: jest.fn().mockResolvedValue("OK"),
     redisDel: jest.fn().mockResolvedValue(1),
     bumpCacheVersion: jest.fn().mockResolvedValue(undefined),
@@ -102,6 +104,9 @@ jest.mock("../utils/docNumberLock", function () {
   return {
     lockNextDocNumber: jest.fn().mockResolvedValue({ docNumber: "WO/2425/001", docTypeId: 1 }),
     backPatchRecordId: jest.fn().mockResolvedValue(undefined),
+    resolveDocTypeId: jest.fn().mockResolvedValue(1),
+    resolveGRNPrefix: jest.fn().mockResolvedValue("GRN"),
+    previewNextDocNumber: jest.fn().mockResolvedValue("GRN/2425/001"),
   };
 });
 
@@ -141,7 +146,7 @@ function dbReturns(rows) { _mockRecordset = rows; }
 
 function makeToken(extra) {
   return jwt.sign(
-    Object.assign({ id: 1, userId: 1, name: "test@example.com", email: "test@example.com", role: "admin" }, extra || {}),
+    Object.assign({ id: 1, userId: 1, roleId: 1, name: "test@example.com", email: "test@example.com", role: "admin" }, extra || {}),
     SECRET,
     { expiresIn: "1h" }
   );
@@ -149,6 +154,10 @@ function makeToken(extra) {
 
 function authHeader(token) {
   return { Authorization: "Bearer " + token };
+}
+
+function healthHeader() {
+  return { "x-health-token": process.env.HEALTH_TOKEN };
 }
 
 var _app;
@@ -236,20 +245,88 @@ describe("Health Routes (/health)", function () {
     expect(res.status).toBe(200);
     expect(res.body.status).toBe("alive");
     expect(typeof res.body.uptimeSeconds).toBe("number");
+    expect(res.body).not.toHaveProperty("env");
+    expect(res.body).not.toHaveProperty("nodeEnv");
+    expect(res.body).not.toHaveProperty("details");
+  });
+
+  it("GET /health/ready rejects requests without health token", async function () {
+    var res = await request(await getApp()).get("/health/ready");
+    expect(res.status).toBe(401);
+  });
+
+  it("GET /health/startup rejects requests without health token", async function () {
+    var res = await request(await getApp()).get("/health/startup");
+    expect(res.status).toBe(401);
   });
 
   it("GET /health/startup returns startup metadata", async function () {
-    var res = await request(await getApp()).get("/health/startup");
+    var res = await request(await getApp())
+      .get("/health/startup")
+      .set(healthHeader());
     expect(res.status).toBe(200);
     expect(res.body.status).toBe("ok");
   });
 
   it("GET /health/ready returns ok when dependencies are mocked healthy", async function () {
-    var res = await request(await getApp()).get("/health/ready");
+    var res = await request(await getApp())
+      .get("/health/ready")
+      .set(healthHeader());
     expect(res.status).toBe(200);
     expect(res.body.status).toBe("ok");
     expect(res.body.details.db).toBe("ok");
     expect(res.body.details.redis).toBe("ok");
+  });
+});
+
+describe("Security authorization guards", function () {
+  var userToken;
+
+  beforeAll(function () {
+    userToken = makeToken({
+      id: 42,
+      userId: 42,
+      roleId: 42,
+      role: "user",
+      email: "user@example.com",
+      name: "Standard User",
+    });
+  });
+
+  beforeEach(function () {
+    resetPool();
+    dbReturns([]);
+    require("../middleware/permissions").permissionCache.invalidateAll();
+  });
+
+  it("blocks standard users from tenant management", async function () {
+    var res = await request(await getApp())
+      .get("/api/tenants")
+      .set(authHeader(userToken));
+
+    expect(res.status).toBe(403);
+  });
+
+  it.each([
+    ["GET", "/api/expense-booking"],
+    ["POST", "/api/expense-booking"],
+    ["GET", "/api/new-payment"],
+    ["POST", "/api/new-payment"],
+    ["GET", "/api/transactions"],
+    ["GET", "/api/brs"],
+    ["GET", "/api/reports"],
+    ["GET", "/api/finance-dashboard"],
+    ["GET", "/api/grns"],
+    ["POST", "/api/grns"],
+    ["GET", "/api/purchase-orders"],
+    ["POST", "/api/purchase-orders"],
+  ])("returns 403 for standard users on %s %s", async function (method, path) {
+    var agent = request(await getApp());
+    var res = await agent[method.toLowerCase()](path)
+      .set(authHeader(userToken))
+      .send({});
+
+    expect(res.status).toBe(403);
   });
 });
 // ─── Work Order Routes ────────────────────────────────────────────────────────
