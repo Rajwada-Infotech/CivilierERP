@@ -1,6 +1,9 @@
 const express = require("express");
 const router = express.Router();
 const { getPool } = require("../db");
+const { checkPermissionForMethod } = require("../middleware/routePermission");
+
+router.use(checkPermissionForMethod("Finance", "Transactions"));
 
 /**
  * GET /api/transactions
