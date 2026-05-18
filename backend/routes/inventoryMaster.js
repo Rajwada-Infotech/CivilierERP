@@ -80,12 +80,21 @@ router.get("/", cache("inventory-master", 60), async (req, res) => {
     }
 
     // ── UOM join strategy ────────────────────────────────────────────────────
+    //
+    // FIX (root cause of 0 rows + 500 error):
+    //   Item_Master_Group.M_Id is a UniqueIdentifier (UUID), not an INT.
+    //   The old code used TRY_CAST(sl.ItemID AS INT) which always returns NULL
+    //   for UUID strings, so the JOIN never matched. The old UOM subquery used
+    //   bare equality (sl2.ItemID = img.M_Id) causing the type clash error.
+    //   The correct pattern (used in materialRequests.js) is:
+    //     CONVERT(NVARCHAR(50), sl.ItemID) = CONVERT(NVARCHAR(50), img.M_Id)
+    //
     const uomJoinClause = hasUomOnItem
       ? "LEFT JOIN dbo.UOMMaster uom ON uom.UOMCode = img.M_UOM"
       : hasUomCol
         ? `LEFT JOIN dbo.UOMMaster uom ON uom.UOMCode = (
              SELECT TOP 1 sl2.UOM FROM dbo.StockLedger sl2
-             WHERE sl2.ItemID = img.M_Id
+             WHERE CONVERT(NVARCHAR(50), sl2.ItemID) = CONVERT(NVARCHAR(50), img.M_Id)
              ORDER BY sl2.StockID DESC
            )`
         : "";
@@ -98,14 +107,26 @@ router.get("/", cache("inventory-master", 60), async (req, res) => {
     `;
 
     // ── Godown filter clause for StockLedger ─────────────────────────────────
-    // If GodownID column exists, filter by it. Otherwise show all (legacy).
-    const godownFilter =
-      hasGodownCol && godownId
-        ? `AND (sl.GodownID = ${godownId} OR sl.GodownID IS NULL)`
-        : "";
+    //
+    // FIX (NULL bleed): Old clause was OR sl.GodownID IS NULL which caused
+    //   rows without a godown to count in every godown's balance.
+    //   Migration 061 back-fills all NULLs to Main Godown, so IS NULL is gone.
+    //
+    // FIX (SQL injection): godownId is now a typed @godownId parameter,
+    //   not string-interpolated directly into the query.
+    //
+    let godownFilter = "";
+    if (hasGodownCol && godownId) {
+      godownFilter = "AND sl.GodownID = @godownId";
+    }
 
     const request = pool.request();
     request.input("targetDate", sql.Date, targetDate);
+
+    // Only bind @godownId when it is actually used in the query
+    if (hasGodownCol && godownId) {
+      request.input("godownId", sql.Int, godownId);
+    }
 
     const result = await request.query(`
       SELECT
@@ -140,7 +161,7 @@ router.get("/", cache("inventory-master", 60), async (req, res) => {
         ON grp.M_Id = img.Parent_Id
       ${uomJoinClause}
       LEFT JOIN dbo.StockLedger sl
-        ON TRY_CAST(sl.ItemID AS INT) = img.M_Id
+        ON CONVERT(NVARCHAR(50), sl.ItemID) = CONVERT(NVARCHAR(50), img.M_Id)
         ${godownFilter}
       WHERE img.Parent_Id IS NOT NULL
       GROUP BY
