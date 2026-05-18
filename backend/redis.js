@@ -153,6 +153,14 @@ async function safeExec(fn, fallback = null) {
 // ─────────────────────────────
 const redisGet = (key) => safeExec((r) => r.get(key));
 
+// Security-critical variant — does NOT swallow errors.
+// Use this anywhere a Redis failure must be treated as a hard error
+// (e.g. token blacklist checks) rather than silently returning null.
+async function redisGetStrict(key) {
+  const redis = await getRedis();
+  return redis.get(key);
+}
+
 const redisSet = (key, value, ttl = null) =>
   safeExec((r) => (ttl ? r.set(key, value, "EX", ttl) : r.set(key, value)));
 
@@ -503,6 +511,7 @@ function getDynamicLimit(score, rpm, memoryUsage) {
 module.exports = {
   getRedis,
   isRedisReady,
+  redisGetStrict,
   closeRedis,
   redisGet,
   redisSet,

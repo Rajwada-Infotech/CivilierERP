@@ -192,6 +192,46 @@ const ContractorMaster: React.FC = () => {
           columns: EXPORT_COLUMNS,
           filename: "contractor-master",
         }}
+        viewConfig={{
+          title: "Contractor Details",
+          fields: [
+            { key: "LHeadName", label: "Contractor Name" },
+            { key: "LHeadContactPerson", label: "Contact Person" },
+            { key: "LHeadPhone", label: "Phone" },
+            { key: "LHeadEmail", label: "Email" },
+            { key: "LGST", label: "GST Number", mono: true },
+            { key: "LHeadPan", label: "PAN Number", mono: true },
+            { key: "contractorType", label: "Contractor Type" },
+            { key: "LHeadPaymentTerms", label: "Payment Terms" },
+            { key: "LHeadAddress", label: "Address" },
+            { key: "LHeadStatus", label: "Status" },
+          ],
+        }}
+        onPrint={(row) => {
+          const win = window.open("", "_blank", "width=700,height=600");
+          if (!win) return;
+          win.document.write(`
+            <html><head><title>Contractor — ${row.LHeadName}</title>
+            <style>body{font-family:sans-serif;padding:24px;color:#111}h2{margin-bottom:16px}table{border-collapse:collapse;width:100%}td{padding:6px 12px;border:1px solid #ddd;font-size:13px}td:first-child{font-weight:600;width:40%;background:#f5f5f5}</style>
+            </head><body>
+            <h2>Contractor Details</h2>
+            <table>
+              <tr><td>Name</td><td>${row.LHeadName || "—"}</td></tr>
+              <tr><td>Contact Person</td><td>${row.LHeadContactPerson || "—"}</td></tr>
+              <tr><td>Phone</td><td>${row.LHeadPhone || "—"}</td></tr>
+              <tr><td>Email</td><td>${row.LHeadEmail || "—"}</td></tr>
+              <tr><td>GST Number</td><td>${row.LGST || "—"}</td></tr>
+              <tr><td>PAN Number</td><td>${row.LHeadPan || "—"}</td></tr>
+              <tr><td>Contractor Type</td><td>${row.contractorType || "—"}</td></tr>
+              <tr><td>Payment Terms</td><td>${row.LHeadPaymentTerms || "—"}</td></tr>
+              <tr><td>Address</td><td>${row.LHeadAddress || "—"}</td></tr>
+              <tr><td>Status</td><td>${row.LHeadStatus ? "Active" : "Inactive"}</td></tr>
+            </table>
+            </body></html>
+          `);
+          win.document.close();
+          win.print();
+        }}
       />
     </>
   );
