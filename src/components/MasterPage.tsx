@@ -1,8 +1,24 @@
 import React, { useState } from "react";
-import { Search, Edit2, Trash2, Check, X, Plus, RotateCcw } from "lucide-react";
+import {
+  Search,
+  Edit2,
+  Trash2,
+  Check,
+  X,
+  Plus,
+  RotateCcw,
+  Eye,
+  Printer,
+} from "lucide-react";
 import { toast } from "sonner";
 import { ExportMenu } from "@/components/ExportMenu";
 import type { ExportColumn } from "@/lib/export";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 export interface FieldDef {
   name: string;
@@ -112,6 +128,19 @@ interface MasterPageProps {
   };
   /** When true, hides the records table and shows only the form card */
   hideTable?: boolean;
+  /**
+   * When provided, an Eye button appears per row to show a read-only detail
+   * modal. Pass the field keys + labels you want displayed.
+   */
+  viewConfig?: {
+    title: string;
+    fields: { key: string; label: string; mono?: boolean }[];
+  };
+  /**
+   * When provided, a Print button appears per row. Called with the row record
+   * so the page can open a print layout or window.print().
+   */
+  onPrint?: (row: RecordWithId) => void;
 }
 
 function getDefaults(f: FieldDef[]): Record<string, unknown> {
@@ -147,6 +176,8 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   externalFormPatchKey,
   exportConfig,
   hideTable,
+  viewConfig,
+  onPrint,
 }) => {
   const [data, setData] = useState<RecordWithId[]>(() =>
     seedWithIds(initialData),
@@ -154,6 +185,7 @@ export const MasterPage: React.FC<MasterPageProps> = ({
   const [form, setForm] = useState<Record<string, unknown>>(() =>
     getDefaults(fields),
   );
+  const [viewRow, setViewRow] = useState<RecordWithId | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [search, setSearch] = useState("");
@@ -635,6 +667,24 @@ export const MasterPage: React.FC<MasterPageProps> = ({
                             </>
                           ) : (
                             <>
+                              {viewConfig && (
+                                <button
+                                  onClick={() => setViewRow(row)}
+                                  className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10 transition-colors"
+                                  title="View details"
+                                >
+                                  <Eye size={13} />
+                                </button>
+                              )}
+                              {onPrint && (
+                                <button
+                                  onClick={() => onPrint(row)}
+                                  className="p-1.5 rounded-lg text-amber-500 hover:bg-amber-500/10 transition-colors"
+                                  title="Print"
+                                >
+                                  <Printer size={13} />
+                                </button>
+                              )}
                               <button
                                 onClick={() => handleEdit(row._id)}
                                 className="p-1.5 rounded-lg text-primary hover:bg-primary/10 transition-colors"
@@ -660,6 +710,68 @@ export const MasterPage: React.FC<MasterPageProps> = ({
             </table>
           </div>
         </div>
+      )}
+
+      {/* ── VIEW DETAIL MODAL ── */}
+      {viewConfig && (
+        <Dialog
+          open={!!viewRow}
+          onOpenChange={(open) => !open && setViewRow(null)}
+        >
+          <DialogContent className="max-w-lg">
+            <DialogHeader>
+              <DialogTitle className="font-heading text-base">
+                {viewConfig.title}
+              </DialogTitle>
+            </DialogHeader>
+            {viewRow && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 pt-1">
+                {viewConfig.fields.map(({ key, label, mono }) => {
+                  const val = viewRow[key];
+                  const display =
+                    typeof val === "boolean"
+                      ? val
+                        ? "Active"
+                        : "Inactive"
+                      : val != null && val !== ""
+                        ? String(val)
+                        : "—";
+                  return (
+                    <div key={key}>
+                      <p className="text-[10px] uppercase tracking-widest font-heading text-muted-foreground mb-0.5">
+                        {label}
+                      </p>
+                      <p
+                        className={`text-sm text-foreground break-words ${mono ? "font-mono" : "font-body"}`}
+                      >
+                        {display}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+            <div className="flex justify-end gap-2 pt-2 border-t border-border mt-2">
+              {onPrint && viewRow && (
+                <button
+                  onClick={() => {
+                    onPrint(viewRow);
+                  }}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:bg-muted transition-all"
+                >
+                  <Printer size={13} />
+                  Print
+                </button>
+              )}
+              <button
+                onClick={() => setViewRow(null)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
+              >
+                Close
+              </button>
+            </div>
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   );
