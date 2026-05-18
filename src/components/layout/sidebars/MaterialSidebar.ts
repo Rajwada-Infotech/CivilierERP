@@ -2,11 +2,9 @@ import {
   BarChart3,
   Receipt,
   ClipboardList,
-  Truck,
-  PackageOpen,
-  BookOpen,
   FileEdit,
   ArrowLeftRight,
+  Repeat2,
 } from "lucide-react";
 import { NavItem } from "./SidebarPrimitives";
 
@@ -24,6 +22,7 @@ export const materialNavItems: NavItem[] = [
     ],
   },
   { label: "Stock", icon: ArrowLeftRight, path: "/material/stock" },
+  { label: "Transfer", icon: Repeat2, path: "/material/stock-transfer" },
   { label: "Debit Note", icon: ClipboardList, path: "/material/debit-note" },
   { label: "Amendment Menu", icon: FileEdit, path: "/material/amendment-menu" },
 ];
