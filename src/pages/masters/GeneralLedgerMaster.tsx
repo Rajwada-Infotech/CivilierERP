@@ -23,6 +23,8 @@ import {
   ChevronDown,
   ChevronsUpDown,
   AlertCircle,
+  Eye,
+  XCircle,
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -67,27 +69,34 @@ function buildGLColumns(
   setDeleteConfirm: (id: number | null) => void,
   startEdit: (l: LedgerHead) => void,
   deleteMut: { mutate: (id: number) => void },
+  onView: (l: LedgerHead) => void,
 ): ColumnDef<LedgerHead, unknown>[] {
   return [
     {
       accessorKey: "LHeadCode",
       header: "Code",
       cell: ({ getValue }) => (
-        <span className="font-mono text-xs font-semibold text-primary">{(getValue() as string) || "—"}</span>
+        <span className="font-mono text-xs font-semibold text-primary">
+          {(getValue() as string) || "—"}
+        </span>
       ),
     },
     {
       accessorKey: "LHeadName",
       header: "Account Name",
       cell: ({ getValue }) => (
-        <span className="font-medium text-foreground">{getValue() as string}</span>
+        <span className="font-medium text-foreground">
+          {getValue() as string}
+        </span>
       ),
     },
     {
       accessorKey: "GroupName",
       header: "Account Group",
       cell: ({ getValue }) => (
-        <span className="text-xs text-muted-foreground">{(getValue() as string) || "—"}</span>
+        <span className="text-xs text-muted-foreground">
+          {(getValue() as string) || "—"}
+        </span>
       ),
     },
     {
@@ -96,7 +105,9 @@ function buildGLColumns(
       cell: ({ getValue }) => {
         const active = getValue() as boolean;
         return (
-          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${active ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}>
+          <span
+            className={`px-2 py-0.5 rounded-full text-xs font-medium ${active ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
+          >
             {active ? "Active" : "Inactive"}
           </span>
         );
@@ -111,16 +122,45 @@ function buildGLColumns(
         if (deleteConfirm === id) {
           return (
             <div className="flex items-center gap-1 justify-end">
-              <span className="text-[11px] text-muted-foreground mr-1">Delete?</span>
-              <button onClick={() => deleteMut.mutate(id)} className="p-1 rounded text-destructive hover:bg-destructive/10"><Check size={12} /></button>
-              <button onClick={() => setDeleteConfirm(null)} className="p-1 rounded text-muted-foreground hover:bg-muted"><X size={12} /></button>
+              <span className="text-[11px] text-muted-foreground mr-1">
+                Delete?
+              </span>
+              <button
+                onClick={() => deleteMut.mutate(id)}
+                className="p-1 rounded text-destructive hover:bg-destructive/10"
+              >
+                <Check size={12} />
+              </button>
+              <button
+                onClick={() => setDeleteConfirm(null)}
+                className="p-1 rounded text-muted-foreground hover:bg-muted"
+              >
+                <X size={12} />
+              </button>
             </div>
           );
         }
         return (
           <div className="flex items-center justify-end gap-1">
-            <button onClick={() => startEdit(row.original)} className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"><Pencil size={13} /></button>
-            <button onClick={() => setDeleteConfirm(id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"><Trash2 size={13} /></button>
+            <button
+              onClick={() => onView(row.original)}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-sky-500 hover:bg-sky-500/10"
+              title="View details"
+            >
+              <Eye size={13} />
+            </button>
+            <button
+              onClick={() => startEdit(row.original)}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
+            >
+              <Pencil size={13} />
+            </button>
+            <button
+              onClick={() => setDeleteConfirm(id)}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+            >
+              <Trash2 size={13} />
+            </button>
           </div>
         );
       },
@@ -137,6 +177,7 @@ const GeneralLedgerMaster: React.FC = () => {
     Partial<Record<keyof LedgerForm, boolean>>
   >({});
   const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
+  const [viewRecord, setViewRecord] = useState<LedgerHead | null>(null);
 
   const [search, setSearch] = useState("");
   const [filterGroup, setFilterGroup] = useState("");
@@ -288,7 +329,15 @@ const GeneralLedgerMaster: React.FC = () => {
   };
 
   const columns = useMemo(
-    () => buildGLColumns(editingId, deleteConfirm, setDeleteConfirm, startEdit, deleteMut),
+    () =>
+      buildGLColumns(
+        editingId,
+        deleteConfirm,
+        setDeleteConfirm,
+        startEdit,
+        deleteMut,
+        setViewRecord,
+      ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [editingId, deleteConfirm],
   );
@@ -560,17 +609,23 @@ const GeneralLedgerMaster: React.FC = () => {
 
         {/* Table */}
         <div className="rounded-xl border border-border overflow-hidden bg-card">
-            <DataTable
-              data={filtered}
-              columns={columns}
-              loading={ledgersLoading}
-              searchable={false}
-              paginated={true}
-              defaultPageSize={25}
-              getRowId={(row) => String(row.LHeadId)}
-              emptyMessage={ledgers.length === 0 ? "No ledger accounts yet." : "No results match your search."}
-              rowClassName={(row) => row.original.LHeadId === editingId ? "bg-primary/5" : ""}
-            />
+          <DataTable
+            data={filtered}
+            columns={columns}
+            loading={ledgersLoading}
+            searchable={false}
+            paginated={true}
+            defaultPageSize={25}
+            getRowId={(row) => String(row.LHeadId)}
+            emptyMessage={
+              ledgers.length === 0
+                ? "No ledger accounts yet."
+                : "No results match your search."
+            }
+            rowClassName={(row) =>
+              row.original.LHeadId === editingId ? "bg-primary/5" : ""
+            }
+          />
         </div>
         <div className="flex items-center justify-between border-t border-border px-4 py-3 text-sm">
           <span className="text-muted-foreground">
@@ -594,6 +649,82 @@ const GeneralLedgerMaster: React.FC = () => {
           </div>
         </div>
       </div>
+      {/* ── View Detail Drawer ── */}
+      {viewRecord && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div
+            className="absolute inset-0 bg-black/30 backdrop-blur-sm"
+            onClick={() => setViewRecord(null)}
+          />
+          <div className="relative w-full max-w-sm bg-card border-l border-border shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <div className="flex items-center gap-2">
+                <BookOpen size={15} className="text-primary" />
+                <h3 className="font-heading font-semibold text-sm text-foreground">
+                  Ledger Details
+                </h3>
+              </div>
+              <button
+                onClick={() => setViewRecord(null)}
+                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted"
+              >
+                <XCircle size={15} />
+              </button>
+            </div>
+            <div className="p-5 space-y-4 overflow-y-auto flex-1">
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  Account Name
+                </p>
+                <p className="text-sm font-medium text-foreground">
+                  {viewRecord.LHeadName}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  Short Code
+                </p>
+                <p className="font-mono text-sm font-semibold text-primary">
+                  {viewRecord.LHeadCode || "—"}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  Account Group
+                </p>
+                <p className="text-sm text-foreground">
+                  {viewRecord.GroupName || (
+                    <span className="text-muted-foreground italic">
+                      No group assigned
+                    </span>
+                  )}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  Status
+                </p>
+                <span
+                  className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${viewRecord.LHeadStatus ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
+                >
+                  {viewRecord.LHeadStatus ? "Active" : "Inactive"}
+                </span>
+              </div>
+            </div>
+            <div className="px-5 py-3 border-t border-border">
+              <button
+                onClick={() => {
+                  startEdit(viewRecord);
+                  setViewRecord(null);
+                }}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-heading font-semibold bg-primary text-primary-foreground hover:bg-primary/90"
+              >
+                <Pencil size={13} /> Edit Account
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 };

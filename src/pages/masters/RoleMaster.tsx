@@ -14,8 +14,16 @@ import {
   X,
   Search,
   Calendar,
+  Eye,
+  XCircle,
 } from "lucide-react";
-import { getRoles, addRole, updateRole, deleteRole, type RoleRecord } from "@/api/roleApi";
+import {
+  getRoles,
+  addRole,
+  updateRole,
+  deleteRole,
+  type RoleRecord,
+} from "@/api/roleApi";
 
 // ─── Local form types ────────────────────────────────────────────────────────
 interface FormState {
@@ -40,6 +48,7 @@ function buildRoleColumns(
   setDeleteId: (id: number | null) => void,
   handleEdit: (item: RoleRecord) => void,
   handleDelete: (id: number) => void,
+  onView: (item: RoleRecord) => void,
 ): ColumnDef<RoleRecord, unknown>[] {
   return [
     {
@@ -55,7 +64,9 @@ function buildRoleColumns(
       accessorKey: "RName",
       header: "Role Name",
       cell: ({ getValue }) => (
-        <span className="font-medium text-foreground">{getValue() as string}</span>
+        <span className="font-medium text-foreground">
+          {getValue() as string}
+        </span>
       ),
     },
     {
@@ -76,7 +87,9 @@ function buildRoleColumns(
         if (deleteId === id) {
           return (
             <div className="flex items-center gap-1 justify-end">
-              <span className="text-[11px] text-muted-foreground mr-1">Delete?</span>
+              <span className="text-[11px] text-muted-foreground mr-1">
+                Delete?
+              </span>
               <button
                 onClick={() => handleDelete(id)}
                 className="p-1 rounded text-destructive hover:bg-destructive/10"
@@ -94,6 +107,13 @@ function buildRoleColumns(
         }
         return (
           <div className="flex items-center justify-end gap-1">
+            <button
+              onClick={() => onView(row.original)}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-sky-500 hover:bg-sky-500/10"
+              title="View details"
+            >
+              <Eye size={13} />
+            </button>
             <button
               onClick={() => handleEdit(row.original)}
               className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
@@ -116,11 +136,18 @@ function buildRoleColumns(
 // Client-side code generator (preview only)
 function generateRoleCode(rName: string): string {
   if (!rName.trim()) return "";
-  const words = rName.trim().split(/\s+/).filter(w => w);
+  const words = rName
+    .trim()
+    .split(/\s+/)
+    .filter((w) => w);
   if (words.length === 1) {
     return words[0].slice(0, 3).toUpperCase();
   }
-  return words.map(w => w[0]).join('').slice(0, 5).toUpperCase();
+  return words
+    .map((w) => w[0])
+    .join("")
+    .slice(0, 5)
+    .toUpperCase();
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -144,11 +171,12 @@ const RoleMaster: React.FC = () => {
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [search, setSearch] = useState("");
   const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [viewRecord, setViewRecord] = useState<RoleRecord | null>(null);
 
   // Auto-generate RCode on RName change (preview)
   useEffect(() => {
     const code = generateRoleCode(form.RName);
-    setForm(prev => ({ ...prev, RCode: code }));
+    setForm((prev) => ({ ...prev, RCode: code }));
   }, [form.RName]);
 
   const setField = (k: keyof FormState, v: string) => {
@@ -194,7 +222,15 @@ const RoleMaster: React.FC = () => {
   };
 
   const columns = useMemo(
-    () => buildRoleColumns(editingId, deleteId, setDeleteId, handleEdit, handleDelete),
+    () =>
+      buildRoleColumns(
+        editingId,
+        deleteId,
+        setDeleteId,
+        handleEdit,
+        handleDelete,
+        setViewRecord,
+      ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [editingId, deleteId],
   );
@@ -234,8 +270,10 @@ const RoleMaster: React.FC = () => {
     );
   });
 
-  if (isLoading) return <div className="p-6 text-muted-foreground">Loading roles...</div>;
-  if (error) return <div className="p-6 text-red-500">Failed to load roles.</div>;
+  if (isLoading)
+    return <div className="p-6 text-muted-foreground">Loading roles...</div>;
+  if (error)
+    return <div className="p-6 text-red-500">Failed to load roles.</div>;
 
   return (
     <>
@@ -253,7 +291,9 @@ const RoleMaster: React.FC = () => {
                 {editingId ? "Edit Role" : "Add Role"}
               </h2>
               <p className="text-[11px] text-muted-foreground mt-0.5">
-                {editingId ? "Modify role details below." : "Define a new user role."}
+                {editingId
+                  ? "Modify role details below."
+                  : "Define a new user role."}
               </p>
             </div>
             {editingId && (
@@ -284,7 +324,9 @@ const RoleMaster: React.FC = () => {
                   />
                 </div>
                 {errors.RName && (
-                  <p className="text-[11px] text-destructive mt-1">Role name is required</p>
+                  <p className="text-[11px] text-destructive mt-1">
+                    Role name is required
+                  </p>
                 )}
               </div>
 
@@ -385,12 +427,87 @@ const RoleMaster: React.FC = () => {
               searchable={false}
               paginated={true}
               defaultPageSize={25}
-              emptyMessage={search ? "No roles match your search." : "No roles yet. Add one above."}
-              rowClassName={(row) => row.original.RId === editingId ? "bg-primary/5 border-l-2 border-l-primary" : ""}
+              emptyMessage={
+                search
+                  ? "No roles match your search."
+                  : "No roles yet. Add one above."
+              }
+              rowClassName={(row) =>
+                row.original.RId === editingId
+                  ? "bg-primary/5 border-l-2 border-l-primary"
+                  : ""
+              }
             />
           </div>
         </div>
       </div>
+
+      {/* ── View Detail Drawer ── */}
+      {viewRecord && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div
+            className="absolute inset-0 bg-black/30 backdrop-blur-sm"
+            onClick={() => setViewRecord(null)}
+          />
+          <div className="relative w-full max-w-sm bg-card border-l border-border shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <div className="flex items-center gap-2">
+                <Users size={15} className="text-primary" />
+                <h3 className="font-heading font-semibold text-sm text-foreground">
+                  Role Details
+                </h3>
+              </div>
+              <button
+                onClick={() => setViewRecord(null)}
+                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted"
+              >
+                <XCircle size={15} />
+              </button>
+            </div>
+            <div className="p-5 space-y-4 overflow-y-auto flex-1">
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  Role Name
+                </p>
+                <p className="text-sm font-medium text-foreground">
+                  {viewRecord.RName}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  Role Code
+                </p>
+                <p className="font-mono text-sm font-semibold text-primary">
+                  {viewRecord.RCode || "—"}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  Description
+                </p>
+                <p className="text-sm text-foreground">
+                  {viewRecord.RDesc || (
+                    <span className="text-muted-foreground italic">
+                      No description
+                    </span>
+                  )}
+                </p>
+              </div>
+            </div>
+            <div className="px-5 py-3 border-t border-border">
+              <button
+                onClick={() => {
+                  handleEdit(viewRecord);
+                  setViewRecord(null);
+                }}
+                className="w-full flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-heading font-semibold bg-primary text-primary-foreground hover:bg-primary/90"
+              >
+                <Edit2 size={13} /> Edit Role
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 };
