@@ -8,6 +8,8 @@ import {
   X,
   Loader2,
   ChevronDown,
+  Eye,
+  Printer,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -22,6 +24,12 @@ import { DataTable, type ColumnDef } from "@/components/ui/DataTable";
 import { getItemGroups } from "@/api/itemGroupApi";
 import { getUomList } from "@/api/uomApi";
 import { getHsn } from "@/api/hsnApi";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface HsnCode {
@@ -352,6 +360,7 @@ const ItemMaster: React.FC = () => {
   const [search, setSearch] = useState("");
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [viewRow, setViewRow] = useState<Item | null>(null);
 
   const set = useCallback(
     (key: keyof Omit<Item, "_id">, val: unknown) => {
@@ -438,6 +447,39 @@ const ItemMaster: React.FC = () => {
     setFormState(EMPTY_FORM);
     setEditingId(null);
     setErrors({});
+  };
+
+  const handleItemPrint = (item: Item) => {
+    const group = itemGroups.find((g) => g.id === item.belongsTo);
+    const uomRaw = Array.isArray(dbUoms)
+      ? (dbUoms as any[]).find((u: any) => u.UOMCode === item.uomCode)
+      : null;
+    const uomLabel = uomRaw
+      ? uomRaw.Symbol
+        ? `${uomRaw.UOMName} (${uomRaw.Symbol})`
+        : uomRaw.UOMName
+      : item.uomCode;
+    const win = window.open("", "_blank", "width=700,height=600");
+    if (!win) return;
+    win.document.write(`
+      <html><head><title>Item — ${item.itemName}</title>
+      <style>body{font-family:sans-serif;padding:24px;color:#111}h2{margin-bottom:16px}table{border-collapse:collapse;width:100%}td{padding:6px 12px;border:1px solid #ddd;font-size:13px}td:first-child{font-weight:600;width:40%;background:#f5f5f5}</style>
+      </head><body>
+      <h2>Item Specification Sheet</h2>
+      <table>
+        <tr><td>Item Name</td><td>${item.itemName || "—"}</td></tr>
+        <tr><td>Short Code</td><td>${item.shortCode || "—"}</td></tr>
+        <tr><td>Description</td><td>${item.description || "—"}</td></tr>
+        <tr><td>Type</td><td>${item.itemType || "—"}</td></tr>
+        <tr><td>Item Group</td><td>${group?.description || "—"}</td></tr>
+        <tr><td>HSN Code</td><td>${item.hsnCode || "—"}</td></tr>
+        <tr><td>CGST / SGST / IGST</td><td>${item.cgst}% / ${item.sgst}% / ${item.igst}%</td></tr>
+        <tr><td>UOM</td><td>${uomLabel || "—"}</td></tr>
+      </table>
+      </body></html>
+    `);
+    win.document.close();
+    win.print();
   };
 
   const filtered = data.filter(
@@ -580,6 +622,20 @@ const ItemMaster: React.FC = () => {
               </>
             ) : (
               <>
+                <button
+                  title="View details"
+                  onClick={() => setViewRow(row.original)}
+                  className="p-1 rounded hover:bg-sky-500/10 text-sky-500 transition-colors"
+                >
+                  <Eye size={15} />
+                </button>
+                <button
+                  title="Print"
+                  onClick={() => handleItemPrint(row.original)}
+                  className="p-1 rounded hover:bg-amber-500/10 text-amber-500 transition-colors"
+                >
+                  <Printer size={15} />
+                </button>
                 <button
                   title="Edit"
                   onClick={() => handleEdit(id)}
@@ -841,6 +897,81 @@ const ItemMaster: React.FC = () => {
           }
         />
       </div>
+
+      {/* View Detail Modal */}
+      <Dialog
+        open={!!viewRow}
+        onOpenChange={(open) => !open && setViewRow(null)}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="font-heading text-base">
+              Item Details
+            </DialogTitle>
+          </DialogHeader>
+          {viewRow &&
+            (() => {
+              const group = itemGroups.find((g) => g.id === viewRow.belongsTo);
+              const uomRaw = Array.isArray(dbUoms)
+                ? (dbUoms as any[]).find(
+                    (u: any) => u.UOMCode === viewRow.uomCode,
+                  )
+                : null;
+              const uomLabel = uomRaw
+                ? uomRaw.Symbol
+                  ? `${uomRaw.UOMName} (${uomRaw.Symbol})`
+                  : uomRaw.UOMName
+                : viewRow.uomCode;
+              return (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 pt-1">
+                  {[
+                    { label: "Item Name", value: viewRow.itemName },
+                    {
+                      label: "Short Code",
+                      value: viewRow.shortCode,
+                      mono: true,
+                    },
+                    { label: "Type", value: viewRow.itemType },
+                    { label: "Item Group", value: group?.description },
+                    { label: "HSN Code", value: viewRow.hsnCode, mono: true },
+                    { label: "CGST", value: `${viewRow.cgst}%` },
+                    { label: "SGST", value: `${viewRow.sgst}%` },
+                    { label: "IGST", value: `${viewRow.igst}%` },
+                    { label: "UOM", value: uomLabel },
+                    { label: "Description", value: viewRow.description },
+                  ].map(({ label, value, mono }) => (
+                    <div key={label}>
+                      <p className="text-[10px] uppercase tracking-widest font-heading text-muted-foreground mb-0.5">
+                        {label}
+                      </p>
+                      <p
+                        className={`text-sm text-foreground break-words ${mono ? "font-mono" : "font-body"}`}
+                      >
+                        {value || "—"}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+          <div className="flex justify-end gap-2 pt-2 border-t border-border mt-2">
+            {viewRow && (
+              <button
+                onClick={() => handleItemPrint(viewRow)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:bg-muted transition-all"
+              >
+                <Printer size={13} /> Print
+              </button>
+            )}
+            <button
+              onClick={() => setViewRow(null)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
+            >
+              Close
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 };

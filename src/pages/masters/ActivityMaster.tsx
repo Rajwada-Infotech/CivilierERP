@@ -16,6 +16,8 @@ import {
   Search,
   Download,
   Hash,
+  Eye,
+  XCircle,
 } from "lucide-react";
 import {
   getActivities,
@@ -48,10 +50,12 @@ const GroupRow = ({
   group,
   activities,
   search,
+  onView,
 }: {
   group: DbActivity;
   activities: DbActivity[];
   search: string;
+  onView: (item: DbActivity) => void;
 }) => {
   const [open, setOpen] = useState(true);
 
@@ -89,6 +93,16 @@ const GroupRow = ({
           {group.short_description}
         </span>
         <StatusBadge active={group.is_active} />
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onView(group);
+          }}
+          className="p-1.5 rounded-lg text-muted-foreground hover:text-sky-500 hover:bg-sky-500/10 shrink-0"
+          title="View details"
+        >
+          <Eye size={13} />
+        </button>
       </div>
 
       {/* Activities */}
@@ -103,7 +117,7 @@ const GroupRow = ({
             filtered.map((activity) => (
               <div
                 key={activity.id}
-                className="flex items-center gap-3 px-4 py-2.5 pl-10 hover:bg-muted/20 transition-colors"
+                className="flex items-center gap-3 px-4 py-2.5 pl-10 hover:bg-muted/20 transition-colors group/row"
               >
                 <div className="w-3 h-px bg-border/60 shrink-0" />
                 <Tag size={12} className="text-teal-400 shrink-0" />
@@ -120,6 +134,13 @@ const GroupRow = ({
                   </span>
                 )}
                 <StatusBadge active={activity.is_active} />
+                <button
+                  onClick={() => onView(activity)}
+                  className="p-1.5 rounded-lg text-muted-foreground hover:text-sky-500 hover:bg-sky-500/10 shrink-0 opacity-0 group-hover/row:opacity-100 transition-opacity"
+                  title="View details"
+                >
+                  <Eye size={13} />
+                </button>
               </div>
             ))
           )}
@@ -170,6 +191,7 @@ const exportToCSV = (items: DbActivity[], groups: DbActivity[]) => {
 const ActivityMaster: React.FC = () => {
   const queryClient = useQueryClient();
   const [treeSearch, setTreeSearch] = useState("");
+  const [viewRecord, setViewRecord] = useState<DbActivity | null>(null);
 
   const {
     data: dbData,
@@ -429,6 +451,7 @@ const ActivityMaster: React.FC = () => {
               group={group}
               activities={activityItems.filter((a) => a.group_id === group.id)}
               search={treeSearch}
+              onView={setViewRecord}
             />
           ))}
 
@@ -447,7 +470,7 @@ const ActivityMaster: React.FC = () => {
                 {ungrouped.map((a) => (
                   <div
                     key={a.id}
-                    className="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/20"
+                    className="flex items-center gap-3 px-4 py-2.5 hover:bg-muted/20 group/row"
                   >
                     <Tag size={12} className="text-muted-foreground shrink-0" />
                     <span className="text-sm text-foreground flex-1 truncate">
@@ -457,6 +480,13 @@ const ActivityMaster: React.FC = () => {
                       {a.short_description}
                     </span>
                     <StatusBadge active={a.is_active} />
+                    <button
+                      onClick={() => setViewRecord(a)}
+                      className="p-1.5 rounded-lg text-muted-foreground hover:text-sky-500 hover:bg-sky-500/10 shrink-0 opacity-0 group-hover/row:opacity-100 transition-opacity"
+                      title="View details"
+                    >
+                      <Eye size={13} />
+                    </button>
                   </div>
                 ))}
               </div>
@@ -471,6 +501,102 @@ const ActivityMaster: React.FC = () => {
           )}
         </div>
       </div>
+      {/* ── View Detail Drawer ── */}
+      {viewRecord && (
+        <div className="fixed inset-0 z-50 flex justify-end">
+          <div
+            className="absolute inset-0 bg-black/30 backdrop-blur-sm"
+            onClick={() => setViewRecord(null)}
+          />
+          <div className="relative w-full max-w-sm bg-card border-l border-border shadow-2xl flex flex-col animate-in slide-in-from-right duration-200">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+              <div className="flex items-center gap-2">
+                {viewRecord.activity_type === 0 ? (
+                  <Layers size={15} className="text-violet-400" />
+                ) : (
+                  <Tag size={15} className="text-teal-400" />
+                )}
+                <h3 className="font-heading font-semibold text-sm text-foreground">
+                  {viewRecord.activity_type === 0
+                    ? "Group Details"
+                    : "Activity Details"}
+                </h3>
+              </div>
+              <button
+                onClick={() => setViewRecord(null)}
+                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted"
+              >
+                <XCircle size={15} />
+              </button>
+            </div>
+            <div className="p-5 space-y-4 overflow-y-auto flex-1">
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  {viewRecord.activity_type === 0
+                    ? "Group Name"
+                    : "Activity Name"}
+                </p>
+                <p className="text-sm font-medium text-foreground">
+                  {viewRecord.activity_name}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  Short Description
+                </p>
+                <p className="text-sm text-foreground">
+                  {viewRecord.short_description || (
+                    <span className="text-muted-foreground italic">
+                      No description
+                    </span>
+                  )}
+                </p>
+              </div>
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  Type
+                </p>
+                <span
+                  className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${viewRecord.activity_type === 0 ? "bg-violet-500/10 text-violet-400" : "bg-teal-500/10 text-teal-400"}`}
+                >
+                  {viewRecord.activity_type === 0 ? (
+                    <>
+                      <Layers size={10} /> Group
+                    </>
+                  ) : (
+                    <>
+                      <Tag size={10} /> Activity
+                    </>
+                  )}
+                </span>
+              </div>
+              {viewRecord.activity_type === 1 && (
+                <div>
+                  <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                    HSN Code
+                  </p>
+                  {viewRecord.hsn_code ? (
+                    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-mono bg-blue-500/10 text-blue-400 border border-blue-500/20">
+                      <Hash size={10} />
+                      {viewRecord.hsn_code}
+                    </span>
+                  ) : (
+                    <span className="text-muted-foreground italic text-sm">
+                      Not assigned
+                    </span>
+                  )}
+                </div>
+              )}
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading mb-1">
+                  Status
+                </p>
+                <StatusBadge active={viewRecord.is_active} />
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 };

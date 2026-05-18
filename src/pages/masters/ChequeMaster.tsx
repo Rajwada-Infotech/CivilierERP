@@ -16,7 +16,15 @@ import {
   Hash,
   Calculator,
   BookOpen,
+  Eye,
+  Printer,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   getCheques,
   getBanksForCheque,
@@ -74,6 +82,8 @@ function buildChequeColumns(
   handleEdit: (item: DbCheque) => void,
   handleDelete: (id: string) => void,
   dbBanks: BankOption[],
+  onView: (item: DbCheque) => void,
+  onPrint: (item: DbCheque) => void,
 ): ColumnDef<DbCheque, unknown>[] {
   return [
     {
@@ -81,21 +91,29 @@ function buildChequeColumns(
       header: "Bank",
       cell: ({ row }) => {
         const bank = dbBanks.find((b) => b.id === row.original.BankId);
-        return <span className="font-medium text-foreground">{bank?.label || "—"}</span>;
+        return (
+          <span className="font-medium text-foreground">
+            {bank?.label || "—"}
+          </span>
+        );
       },
     },
     {
       accessorKey: "AccountNumber",
       header: "Account Number",
       cell: ({ getValue }) => (
-        <span className="font-mono text-xs">{(getValue() as string) || "—"}</span>
+        <span className="font-mono text-xs">
+          {(getValue() as string) || "—"}
+        </span>
       ),
     },
     {
       accessorKey: "ChequeLotNumber",
       header: "Lot Number",
       cell: ({ getValue }) => (
-        <span className="font-mono text-xs text-primary">{(getValue() as string) || "—"}</span>
+        <span className="font-mono text-xs text-primary">
+          {(getValue() as string) || "—"}
+        </span>
       ),
     },
     {
@@ -103,7 +121,8 @@ function buildChequeColumns(
       header: "Range",
       cell: ({ row }) => (
         <span className="font-mono text-xs text-muted-foreground">
-          {row.original.ChequeStartNumber ?? "—"} – {row.original.ChequeEndNumber ?? "—"}
+          {row.original.ChequeStartNumber ?? "—"} –{" "}
+          {row.original.ChequeEndNumber ?? "—"}
         </span>
       ),
     },
@@ -122,7 +141,9 @@ function buildChequeColumns(
       cell: ({ getValue }) => {
         const active = getValue() as boolean;
         return (
-          <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${active ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}>
+          <span
+            className={`px-2 py-0.5 rounded-full text-xs font-medium ${active ? "bg-emerald-500/10 text-emerald-600" : "bg-muted text-muted-foreground"}`}
+          >
             {active ? "Active" : "Inactive"}
           </span>
         );
@@ -137,16 +158,52 @@ function buildChequeColumns(
         if (deleteId === id) {
           return (
             <div className="flex items-center gap-1 justify-end">
-              <span className="text-[11px] text-muted-foreground mr-1">Delete?</span>
-              <button onClick={() => handleDelete(id)} className="p-1 rounded text-destructive hover:bg-destructive/10"><Check size={12} /></button>
-              <button onClick={() => setDeleteId(null)} className="p-1 rounded text-muted-foreground hover:bg-muted"><X size={12} /></button>
+              <span className="text-[11px] text-muted-foreground mr-1">
+                Delete?
+              </span>
+              <button
+                onClick={() => handleDelete(id)}
+                className="p-1 rounded text-destructive hover:bg-destructive/10"
+              >
+                <Check size={12} />
+              </button>
+              <button
+                onClick={() => setDeleteId(null)}
+                className="p-1 rounded text-muted-foreground hover:bg-muted"
+              >
+                <X size={12} />
+              </button>
             </div>
           );
         }
         return (
           <div className="flex items-center justify-end gap-1">
-            <button onClick={() => handleEdit(row.original)} className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"><Edit2 size={13} /></button>
-            <button onClick={() => setDeleteId(id)} className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"><Trash2 size={13} /></button>
+            <button
+              onClick={() => onView(row.original)}
+              className="p-1.5 rounded-lg text-sky-500 hover:bg-sky-500/10 transition-colors"
+              title="View details"
+            >
+              <Eye size={13} />
+            </button>
+            <button
+              onClick={() => onPrint(row.original)}
+              className="p-1.5 rounded-lg text-amber-500 hover:bg-amber-500/10 transition-colors"
+              title="Print"
+            >
+              <Printer size={13} />
+            </button>
+            <button
+              onClick={() => handleEdit(row.original)}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-primary hover:bg-primary/10"
+            >
+              <Edit2 size={13} />
+            </button>
+            <button
+              onClick={() => setDeleteId(id)}
+              className="p-1.5 rounded-lg text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+            >
+              <Trash2 size={13} />
+            </button>
           </div>
         );
       },
@@ -182,6 +239,34 @@ const ChequeMaster: React.FC = () => {
   const [errors, setErrors] = useState<Record<string, boolean>>({});
   const [search, setSearch] = useState("");
   const [deleteId, setDeleteId] = useState<string | null>(null);
+  const [viewRow, setViewRow] = useState<DbCheque | null>(null);
+
+  const handlePrint = (cheque: DbCheque) => {
+    const win = window.open("", "_blank", "width=700,height=580");
+    if (!win) return;
+    win.document.write(`
+      <html><head><title>Cheque Lot — ${cheque.ChequeLotNumber || cheque.CId}</title>
+      <style>body{font-family:sans-serif;padding:24px;color:#111}h2{margin-bottom:16px}table{border-collapse:collapse;width:100%}td{padding:6px 12px;border:1px solid #ddd;font-size:13px}td:first-child{font-weight:600;width:40%;background:#f5f5f5}</style>
+      </head><body>
+      <h2>Cheque Lot Details</h2>
+      <table>
+        <tr><td>Company</td><td>${cheque.CompanyName || "—"}</td></tr>
+        <tr><td>Bank</td><td>${cheque.BankName || "—"}</td></tr>
+        <tr><td>Branch</td><td>${cheque.BankBranch || "—"}</td></tr>
+        <tr><td>Account Number</td><td>${cheque.AccountNumber || "—"}</td></tr>
+        <tr><td>IFSC Code</td><td>${cheque.IFSCCode || "—"}</td></tr>
+        <tr><td>Account Type</td><td>${cheque.BankAccountType || "—"}</td></tr>
+        <tr><td>Lot Number</td><td>${cheque.ChequeLotNumber || "—"}</td></tr>
+        <tr><td>Cheque Range</td><td>${cheque.ChequeStartNumber ?? "—"} → ${cheque.ChequeEndNumber ?? "—"}</td></tr>
+        <tr><td>Total Cheques</td><td>${cheque.TotalCheques ?? "—"}</td></tr>
+        <tr><td>Remarks</td><td>${cheque.Remarks || "—"}</td></tr>
+        <tr><td>Status</td><td>${cheque.Status ? "Active" : "Inactive"}</td></tr>
+      </table>
+      </body></html>
+    `);
+    win.document.close();
+    win.print();
+  };
 
   const handleBankChange = (bankId: string) => {
     const bank = dbBanks.find((b) => String(b.id) === bankId);
@@ -290,7 +375,17 @@ const ChequeMaster: React.FC = () => {
   };
 
   const columns = useMemo(
-    () => buildChequeColumns(editingId, deleteId, setDeleteId, handleEdit, handleDelete, dbBanks),
+    () =>
+      buildChequeColumns(
+        editingId,
+        deleteId,
+        setDeleteId,
+        handleEdit,
+        handleDelete,
+        dbBanks,
+        setViewRow,
+        handlePrint,
+      ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [editingId, deleteId, dbBanks],
   );
@@ -694,12 +789,96 @@ const ChequeMaster: React.FC = () => {
               searchable={false}
               paginated={true}
               defaultPageSize={20}
-              emptyMessage={search ? "No cheque lots match your search." : "No cheque lots yet. Add one above."}
-              rowClassName={(row) => String(row.original.CId) === editingId ? "bg-primary/5 border-l-2 border-l-primary" : ""}
+              emptyMessage={
+                search
+                  ? "No cheque lots match your search."
+                  : "No cheque lots yet. Add one above."
+              }
+              rowClassName={(row) =>
+                String(row.original.CId) === editingId
+                  ? "bg-primary/5 border-l-2 border-l-primary"
+                  : ""
+              }
             />
           </div>
         </div>
       </div>
+
+      {/* View Detail Modal */}
+      <Dialog
+        open={!!viewRow}
+        onOpenChange={(open) => !open && setViewRow(null)}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="font-heading text-base">
+              Cheque Lot Details
+            </DialogTitle>
+          </DialogHeader>
+          {viewRow && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 pt-1">
+              {[
+                { label: "Company", value: viewRow.CompanyName },
+                { label: "Bank", value: viewRow.BankName },
+                { label: "Branch", value: viewRow.BankBranch },
+                {
+                  label: "Account Number",
+                  value: viewRow.AccountNumber,
+                  mono: true,
+                },
+                { label: "IFSC Code", value: viewRow.IFSCCode, mono: true },
+                { label: "Account Type", value: viewRow.BankAccountType },
+                {
+                  label: "Lot Number",
+                  value: viewRow.ChequeLotNumber,
+                  mono: true,
+                },
+                {
+                  label: "Cheque Range",
+                  value: `${viewRow.ChequeStartNumber ?? "—"} → ${viewRow.ChequeEndNumber ?? "—"}`,
+                  mono: true,
+                },
+                {
+                  label: "Total Cheques",
+                  value: String(viewRow.TotalCheques ?? "—"),
+                },
+                { label: "Remarks", value: viewRow.Remarks },
+                {
+                  label: "Status",
+                  value: viewRow.Status ? "Active" : "Inactive",
+                },
+              ].map(({ label, value, mono }) => (
+                <div key={label}>
+                  <p className="text-[10px] uppercase tracking-widest font-heading text-muted-foreground mb-0.5">
+                    {label}
+                  </p>
+                  <p
+                    className={`text-sm text-foreground break-words ${mono ? "font-mono" : "font-body"}`}
+                  >
+                    {value || "—"}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="flex justify-end gap-2 pt-2 border-t border-border mt-2">
+            {viewRow && (
+              <button
+                onClick={() => handlePrint(viewRow)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading border border-border text-muted-foreground hover:bg-muted transition-all"
+              >
+                <Printer size={13} /> Print
+              </button>
+            )}
+            <button
+              onClick={() => setViewRow(null)}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-heading bg-primary text-primary-foreground hover:bg-primary/90 transition-all"
+            >
+              Close
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 };

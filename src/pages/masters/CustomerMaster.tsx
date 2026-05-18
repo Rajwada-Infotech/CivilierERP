@@ -110,7 +110,7 @@ const CustomerMaster: React.FC = () => {
         await updateRecord(
           Number(event.id),
           toPayload(event.record),
-          CUSTOMER_TYPE
+          CUSTOMER_TYPE,
         );
         toast.success("Customer updated!");
       }
@@ -125,7 +125,9 @@ const CustomerMaster: React.FC = () => {
 
   /* -------------------- UI STATES -------------------- */
   if (isLoading)
-    return <div className="p-6 text-muted-foreground">Loading customers...</div>;
+    return (
+      <div className="p-6 text-muted-foreground">Loading customers...</div>
+    );
 
   if (error)
     return <div className="p-6 text-red-500">Failed to load customers.</div>;
@@ -149,13 +151,51 @@ const CustomerMaster: React.FC = () => {
           title: "Customer Master",
           filename: "customer-master",
           columns: [
-            { header: "Customer Name",  accessor: "name" },
+            { header: "Customer Name", accessor: "name" },
             { header: "Contact Person", accessor: "contact" },
-            { header: "Phone",          accessor: "phone" },
-            { header: "GST No.",        accessor: "gst" },
-            { header: "Payment Terms",  accessor: "paymentTerms" },
-            { header: "Status",         accessor: "status" },
+            { header: "Phone", accessor: "phone" },
+            { header: "GST No.", accessor: "gst" },
+            { header: "Payment Terms", accessor: "paymentTerms" },
+            { header: "Status", accessor: "status" },
           ],
+        }}
+        viewConfig={{
+          title: "Customer Details",
+          fields: [
+            { key: "name", label: "Customer Name" },
+            { key: "contact", label: "Contact Person" },
+            { key: "phone", label: "Phone" },
+            { key: "email", label: "Email" },
+            { key: "gst", label: "GST Number", mono: true },
+            { key: "pan", label: "PAN Number", mono: true },
+            { key: "paymentTerms", label: "Payment Terms" },
+            { key: "address", label: "Address" },
+            { key: "status", label: "Status" },
+          ],
+        }}
+        onPrint={(row) => {
+          const win = window.open("", "_blank", "width=700,height=600");
+          if (!win) return;
+          win.document.write(`
+            <html><head><title>Customer — ${row.name}</title>
+            <style>body{font-family:sans-serif;padding:24px;color:#111}h2{margin-bottom:16px}table{border-collapse:collapse;width:100%}td{padding:6px 12px;border:1px solid #ddd;font-size:13px}td:first-child{font-weight:600;width:40%;background:#f5f5f5}</style>
+            </head><body>
+            <h2>Customer Card</h2>
+            <table>
+              <tr><td>Customer Name</td><td>${row.name || "—"}</td></tr>
+              <tr><td>Contact Person</td><td>${row.contact || "—"}</td></tr>
+              <tr><td>Phone</td><td>${row.phone || "—"}</td></tr>
+              <tr><td>Email</td><td>${row.email || "—"}</td></tr>
+              <tr><td>GST Number</td><td>${row.gst || "—"}</td></tr>
+              <tr><td>PAN Number</td><td>${row.pan || "—"}</td></tr>
+              <tr><td>Payment Terms</td><td>${row.paymentTerms || "—"}</td></tr>
+              <tr><td>Address</td><td>${row.address || "—"}</td></tr>
+              <tr><td>Status</td><td>${row.status ? "Active" : "Inactive"}</td></tr>
+            </table>
+            </body></html>
+          `);
+          win.document.close();
+          win.print();
         }}
       />
     </>
