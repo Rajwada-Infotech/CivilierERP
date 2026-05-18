@@ -220,7 +220,7 @@ function AvailableStockTable({
                     {fmtNum(r.ClosingStock)}
                   </td>
                   <td className="px-4 py-2 text-muted-foreground">
-                    {r.UOMCode || "—"}
+                    {r.UOMName || r.UOMCode || "—"}
                   </td>
                 </tr>
               ))}
@@ -499,7 +499,7 @@ export default function StockTransfer() {
         .map((r) => ({
           itemId: r.ItemID,
           itemName: r.ItemName || "",
-          uom: r.UOMCode || "",
+          uom: r.UOMName || r.UOMCode || "",
           available: r.ClosingStock,
         })),
     [fromStockData],
