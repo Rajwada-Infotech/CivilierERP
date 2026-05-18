@@ -20,31 +20,27 @@ async function hasColumn(pool, tableName, columnName) {
 
 /**
  * GET /api/inventory-master
- *
- * Returns inventory master records for a given date and godown.
- *
- * Query params:
- *  ?date=YYYY-MM-DD      (default: today)
- *  ?godownId=<int>       (default: Main Godown)
+ * ?date=YYYY-MM-DD  (default: today)
+ * ?godownId=<int>   (default: Main Godown)
  */
 router.get("/", cache("inventory-master", 60), async (req, res) => {
   try {
     const pool = getPool();
 
     // ── Detect optional columns ──────────────────────────────────────────────
-    const hasCreatedDate = await hasColumn(
-      pool,
-      "dbo.StockLedger",
-      "CreatedDate",
-    );
-    const hasEntryDate = await hasColumn(pool, "dbo.StockLedger", "EntryDate");
-    const hasUomCol = await hasColumn(pool, "dbo.StockLedger", "UOM");
-    const hasUomOnItem = await hasColumn(
-      pool,
-      "dbo.Item_Master_Group",
-      "M_UOM",
-    );
-    const hasGodownCol = await hasColumn(pool, "dbo.StockLedger", "GodownID");
+    const [
+      hasCreatedDate,
+      hasEntryDate,
+      hasUomCol,
+      hasUomOnItem,
+      hasGodownCol,
+    ] = await Promise.all([
+      hasColumn(pool, "dbo.StockLedger", "CreatedDate"),
+      hasColumn(pool, "dbo.StockLedger", "EntryDate"),
+      hasColumn(pool, "dbo.StockLedger", "UOM"),
+      hasColumn(pool, "dbo.Item_Master_Group", "M_UOM"),
+      hasColumn(pool, "dbo.StockLedger", "GodownID"),
+    ]);
 
     const ledgerDateExpr =
       hasCreatedDate && hasEntryDate
@@ -53,9 +49,9 @@ router.get("/", cache("inventory-master", 60), async (req, res) => {
           ? "sl.CreatedDate"
           : hasEntryDate
             ? "sl.EntryDate"
-            : "NULL";
+            : null;
 
-    // ── Parse & validate params ───────────────────────────────────────────────
+    // ── Parse params ─────────────────────────────────────────────────────────
     const rawDate = req.query.date;
     const targetDate =
       rawDate && /^\d{4}-\d{2}-\d{2}$/.test(rawDate)
@@ -65,7 +61,6 @@ router.get("/", cache("inventory-master", 60), async (req, res) => {
     const rawGodownId = req.query.godownId;
     let godownId = rawGodownId ? parseInt(rawGodownId, 10) : null;
 
-    // If no godownId supplied, resolve Main Godown ID from DB
     if (!godownId) {
       try {
         const mainRes = await pool
@@ -80,82 +75,77 @@ router.get("/", cache("inventory-master", 60), async (req, res) => {
     }
 
     // ── UOM join strategy ────────────────────────────────────────────────────
-    //
-    // FIX (root cause of 0 rows + 500 error):
-    //   Item_Master_Group.M_Id is a UniqueIdentifier (UUID), not an INT.
-    //   The old code used TRY_CAST(sl.ItemID AS INT) which always returns NULL
-    //   for UUID strings, so the JOIN never matched. The old UOM subquery used
-    //   bare equality (sl2.ItemID = img.M_Id) causing the type clash error.
-    //   The correct pattern (used in materialRequests.js) is:
-    //     CONVERT(NVARCHAR(50), sl.ItemID) = CONVERT(NVARCHAR(50), img.M_Id)
-    //
-    const uomJoinClause = hasUomOnItem
-      ? "LEFT JOIN dbo.UOMMaster uom ON uom.UOMCode = img.M_UOM"
-      : hasUomCol
-        ? `LEFT JOIN dbo.UOMMaster uom ON uom.UOMCode = (
-             SELECT TOP 1 sl2.UOM FROM dbo.StockLedger sl2
-             WHERE CONVERT(NVARCHAR(50), sl2.ItemID) = CONVERT(NVARCHAR(50), img.M_Id)
-             ORDER BY sl2.StockID DESC
-           )`
-        : "";
+    // Prefer M_UOM on item table; fall back to last UOM in StockLedger.
+    // When neither exists, return NULLs for UOM columns (no join at all).
+    let uomJoinClause = "";
+    let uomSelect =
+      "NULL AS UOMID, NULL AS UOMName, NULL AS UOMCode, NULL AS UOMSymbol";
+    let uomGroupBy = "";
 
-    const uomSelect = `
-      uom.Id        AS UOMID,
-      uom.UOMName   AS UOMName,
-      uom.UOMCode   AS UOMCode,
-      uom.Symbol    AS UOMSymbol
-    `;
+    if (hasUomOnItem) {
+      uomJoinClause = "LEFT JOIN dbo.UOMMaster uom ON uom.UOMCode = img.M_UOM";
+      uomSelect =
+        "uom.Id AS UOMID, uom.UOMName AS UOMName, uom.UOMCode AS UOMCode, uom.Symbol AS UOMSymbol";
+      uomGroupBy = ", uom.Id, uom.UOMName, uom.UOMCode, uom.Symbol";
+    } else if (hasUomCol) {
+      uomJoinClause = `LEFT JOIN dbo.UOMMaster uom ON uom.UOMCode = (
+        SELECT TOP 1 sl2.UOM FROM dbo.StockLedger sl2
+        WHERE CONVERT(NVARCHAR(50), sl2.ItemID) = CONVERT(NVARCHAR(50), img.M_Id)
+        ORDER BY sl2.StockID DESC
+      )`;
+      uomSelect =
+        "uom.Id AS UOMID, uom.UOMName AS UOMName, uom.UOMCode AS UOMCode, uom.Symbol AS UOMSymbol";
+      uomGroupBy = ", uom.Id, uom.UOMName, uom.UOMCode, uom.Symbol";
+    }
 
-    // ── Godown filter clause for StockLedger ─────────────────────────────────
-    //
-    // FIX (NULL bleed): Old clause was OR sl.GodownID IS NULL which caused
-    //   rows without a godown to count in every godown's balance.
-    //   Migration 061 back-fills all NULLs to Main Godown, so IS NULL is gone.
-    //
-    // FIX (SQL injection): godownId is now a typed @godownId parameter,
-    //   not string-interpolated directly into the query.
-    //
+    // ── Godown filter ────────────────────────────────────────────────────────
     let godownFilter = "";
     if (hasGodownCol && godownId) {
       godownFilter = "AND sl.GodownID = @godownId";
     }
 
-    const request = pool.request();
-    request.input("targetDate", sql.Date, targetDate);
+    // ── Date filter expressions ──────────────────────────────────────────────
+    const openingExpr = ledgerDateExpr
+      ? `ISNULL(SUM(CASE
+           WHEN CAST(${ledgerDateExpr} AS DATE) < @targetDate
+           THEN CASE WHEN sl.Type = 'IN' THEN sl.Qty ELSE -sl.Qty END
+           ELSE 0
+         END), 0)`
+      : "0";
 
-    // Only bind @godownId when it is actually used in the query
+    const stockInExpr = ledgerDateExpr
+      ? `ISNULL(SUM(CASE
+           WHEN CAST(${ledgerDateExpr} AS DATE) = @targetDate AND sl.Type = 'IN'
+           THEN sl.Qty ELSE 0
+         END), 0)`
+      : "0";
+
+    const stockOutExpr = ledgerDateExpr
+      ? `ISNULL(SUM(CASE
+           WHEN CAST(${ledgerDateExpr} AS DATE) = @targetDate AND sl.Type = 'OUT'
+           THEN sl.Qty ELSE 0
+         END), 0)`
+      : "0";
+
+    const dateRangeFilter = ledgerDateExpr
+      ? `AND (${ledgerDateExpr} IS NULL OR CAST(${ledgerDateExpr} AS DATE) <= @targetDate)`
+      : "";
+
+    // ── Build & run query ────────────────────────────────────────────────────
+    const request = pool.request().input("targetDate", sql.Date, targetDate);
     if (hasGodownCol && godownId) {
       request.input("godownId", sql.Int, godownId);
     }
 
     const result = await request.query(`
       SELECT
-        @targetDate                                        AS AcquiringDate,
-        CONVERT(NVARCHAR(50), img.M_Id)                   AS ItemID,
-        img.M_Name                                        AS ItemName,
-        ISNULL(grp.M_Name, img.M_Group)                   AS ItemGroupName,
+        CONVERT(NVARCHAR(50), img.M_Id)          AS ItemID,
+        img.M_Name                               AS ItemName,
+        ISNULL(grp.M_Name, img.M_Group)          AS ItemGroupName,
         ${uomSelect},
-        ISNULL(SUM(
-          CASE
-            WHEN CAST(${ledgerDateExpr || "NULL"} AS DATE) < @targetDate
-            THEN CASE WHEN sl.Type = 'IN' THEN sl.Qty ELSE -sl.Qty END
-            ELSE 0
-          END
-        ), 0)                                             AS OpeningStock,
-        ISNULL(SUM(
-          CASE
-            WHEN CAST(${ledgerDateExpr || "NULL"} AS DATE) = @targetDate
-             AND sl.Type = 'IN'
-            THEN sl.Qty ELSE 0
-          END
-        ), 0)                                             AS StockIn,
-        ISNULL(SUM(
-          CASE
-            WHEN CAST(${ledgerDateExpr || "NULL"} AS DATE) = @targetDate
-             AND sl.Type = 'OUT'
-            THEN sl.Qty ELSE 0
-          END
-        ), 0)                                             AS StockOut
+        ${openingExpr}                           AS OpeningStock,
+        ${stockInExpr}                           AS StockIn,
+        ${stockOutExpr}                          AS StockOut
       FROM dbo.Item_Master_Group img
       LEFT JOIN dbo.Item_Master_Group grp
         ON grp.M_Id = img.Parent_Id
@@ -163,10 +153,11 @@ router.get("/", cache("inventory-master", 60), async (req, res) => {
       LEFT JOIN dbo.StockLedger sl
         ON CONVERT(NVARCHAR(50), sl.ItemID) = CONVERT(NVARCHAR(50), img.M_Id)
         ${godownFilter}
+        ${dateRangeFilter}
       WHERE img.Parent_Id IS NOT NULL
       GROUP BY
-        img.M_Id, img.M_Name, img.M_Group, grp.M_Name,
-        uom.Id, uom.UOMName, uom.UOMCode, uom.Symbol
+        img.M_Id, img.M_Name, img.M_Group, grp.M_Name
+        ${uomGroupBy}
       ORDER BY ItemGroupName, ItemName
     `);
 
@@ -183,7 +174,7 @@ router.get("/", cache("inventory-master", 60), async (req, res) => {
 
     res.json({
       date: targetDate,
-      godownId: godownId,
+      godownId,
       data: rows,
       total: rows.length,
     });

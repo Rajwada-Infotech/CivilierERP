@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import {
@@ -7,7 +7,6 @@ import {
   RefreshCw,
   AlertCircle,
   CheckCircle2,
-  Package,
   Plus,
   Trash2,
   X,
@@ -15,6 +14,10 @@ import {
   Send,
   ArrowLeftRight,
   ChevronDown,
+  Search,
+  Building2,
+  FolderKanban,
+  Package,
 } from "lucide-react";
 import { getGodowns, type Godown } from "@/api/godownsApi";
 import { getInventoryMaster } from "@/api/inventoryMasterApi";
@@ -23,8 +26,8 @@ import {
   getStockTransfers,
   type StockTransfer,
 } from "@/api/stockTransferApi";
+import { getEnterpriseOptions } from "@/api/enterpriseApi";
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 const fmtNum = (n: number) =>
   new Intl.NumberFormat("en-IN", { maximumFractionDigits: 2 }).format(n ?? 0);
 
@@ -37,7 +40,6 @@ const fmtDate = (d: string) =>
 
 const today = new Date().toISOString().slice(0, 10);
 
-// ─── Transfer Item ────────────────────────────────────────────────────────────
 interface TItem {
   itemId: string;
   itemName: string;
@@ -47,52 +49,89 @@ interface TItem {
   remarks: string;
 }
 
-// ─── Godown Badge ─────────────────────────────────────────────────────────────
-function GodownBadge({
-  godown,
-  variant,
+interface AvailableItem {
+  itemId: string;
+  itemName: string;
+  uom: string;
+  available: number;
+}
+
+const emptyItem = (): TItem => ({
+  itemId: "",
+  itemName: "",
+  qty: "",
+  uom: "",
+  availableQty: 0,
+  remarks: "",
+});
+
+// ─── Filter Select ────────────────────────────────────────────────────────────
+function FilterSelect({
+  icon: Icon,
+  label,
+  value,
+  onChange,
+  options,
+  placeholder,
+  color,
 }: {
-  godown: Godown;
-  variant: "from" | "to";
+  icon: React.ElementType;
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+  placeholder: string;
+  color: "blue" | "violet";
 }) {
-  const isFrom = variant === "from";
-  return (
-    <div
-      className={`flex items-center gap-2 px-3 py-2 rounded-xl border-2 ${
-        isFrom
-          ? "border-orange-400/40 bg-orange-500/5"
-          : "border-emerald-400/40 bg-emerald-500/5"
-      }`}
-    >
-      <Warehouse
-        size={14}
-        className={
-          isFrom ? "text-orange-500 shrink-0" : "text-emerald-600 shrink-0"
+  const c =
+    color === "blue"
+      ? {
+          border: "border-blue-400/40 focus:border-blue-500/60",
+          bg: "bg-blue-500/5",
+          icon: "text-blue-500",
+          label: "text-blue-600",
         }
-      />
-      <div className="min-w-0">
-        <p
-          className={`text-sm font-semibold truncate ${isFrom ? "text-orange-700 dark:text-orange-400" : "text-emerald-700 dark:text-emerald-400"}`}
-        >
-          {godown.GodownName}
-        </p>
-        {godown.ShortDesc && (
-          <p className="text-[10px] text-muted-foreground truncate">
-            {godown.ShortDesc}
-          </p>
-        )}
-      </div>
-      {godown.IsMain && (
-        <span className="text-[9px] bg-emerald-500/15 text-emerald-600 px-1.5 py-0.5 rounded-full font-bold shrink-0">
-          MAIN
+      : {
+          border: "border-violet-400/40 focus:border-violet-500/60",
+          bg: "bg-violet-500/5",
+          icon: "text-violet-500",
+          label: "text-violet-600",
+        };
+
+  return (
+    <div className="flex-1 space-y-1.5">
+      <p
+        className={`text-xs font-semibold uppercase tracking-wider ${c.label}`}
+      >
+        {label}
+      </p>
+      <div className="relative">
+        <span className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none">
+          <Icon size={14} className={c.icon} />
         </span>
-      )}
+        <select
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          className={`w-full pl-9 pr-8 py-2.5 rounded-xl border-2 text-sm text-foreground outline-none appearance-none transition-colors ${c.border} ${c.bg}`}
+        >
+          <option value="">{placeholder}</option>
+          {options.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+        </select>
+        <ChevronDown
+          size={13}
+          className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground"
+        />
+      </div>
     </div>
   );
 }
 
-// ─── Godown Picker ────────────────────────────────────────────────────────────
-function GodownPicker({
+// ─── Godown Select ────────────────────────────────────────────────────────────
+function GodownSelect({
   label,
   value,
   onChange,
@@ -115,7 +154,9 @@ function GodownPicker({
   return (
     <div className="flex-1 space-y-2">
       <p
-        className={`text-xs font-semibold uppercase tracking-wider ${isFrom ? "text-orange-600" : "text-emerald-600"}`}
+        className={`text-xs font-semibold uppercase tracking-wider ${
+          isFrom ? "text-orange-600" : "text-emerald-600"
+        }`}
       >
         {label}
       </p>
@@ -152,142 +193,186 @@ function GodownPicker({
           className="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-muted-foreground"
         />
       </div>
-      {selected && <GodownBadge godown={selected} variant={variant} />}
+      {selected && (
+        <div
+          className={`flex items-center gap-2 px-3 py-2 rounded-lg border ${
+            isFrom
+              ? "border-orange-400/30 bg-orange-500/5"
+              : "border-emerald-400/30 bg-emerald-500/5"
+          }`}
+        >
+          <Warehouse
+            size={12}
+            className={
+              isFrom ? "text-orange-500 shrink-0" : "text-emerald-600 shrink-0"
+            }
+          />
+          <p
+            className={`text-xs font-semibold truncate ${
+              isFrom
+                ? "text-orange-700 dark:text-orange-400"
+                : "text-emerald-700 dark:text-emerald-400"
+            }`}
+          >
+            {selected.GodownName}
+          </p>
+          {selected.IsMain && (
+            <span className="text-[9px] bg-emerald-500/15 text-emerald-600 px-1.5 py-0.5 rounded-full font-bold shrink-0 ml-auto">
+              MAIN
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
-// ─── Available Stock Table ────────────────────────────────────────────────────
-function AvailableStockTable({
-  godownId,
-  godownName,
-}: {
-  godownId: number;
-  godownName: string;
-}) {
-  const { data, isLoading } = useQuery({
-    queryKey: ["inventory-master", today, godownId],
-    queryFn: () => getInventoryMaster(today, godownId),
-    staleTime: 60_000,
-  });
-  const rows = (data?.data ?? []).filter((r) => r.ClosingStock > 0);
-
-  return (
-    <div className="rounded-xl border border-border bg-card overflow-hidden">
-      <div className="px-4 py-3 border-b border-border flex items-center gap-2">
-        <Package size={13} className="text-orange-500" />
-        <p className="text-xs font-semibold text-foreground">
-          Available in <span className="text-orange-600">{godownName}</span>
-        </p>
-        <span className="ml-auto text-[10px] text-muted-foreground">
-          {today}
-        </span>
-      </div>
-      <div className="overflow-auto max-h-48">
-        {isLoading ? (
-          <div className="px-4 py-6 flex items-center gap-2 text-xs text-muted-foreground justify-center">
-            <RefreshCw size={12} className="animate-spin" /> Loading stock…
-          </div>
-        ) : rows.length === 0 ? (
-          <div className="px-4 py-6 text-xs text-muted-foreground text-center">
-            No stock available in this godown.
-          </div>
-        ) : (
-          <table className="w-full text-xs">
-            <thead className="bg-muted/40 border-b border-border">
-              <tr>
-                <th className="px-4 py-2 text-left font-semibold text-muted-foreground">
-                  Item
-                </th>
-                <th className="px-4 py-2 text-right font-semibold text-muted-foreground">
-                  Available
-                </th>
-                <th className="px-4 py-2 text-left font-semibold text-muted-foreground">
-                  UOM
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr
-                  key={r.ItemID}
-                  className="border-b border-border/50 hover:bg-muted/20"
-                >
-                  <td className="px-4 py-2 font-medium text-foreground">
-                    {r.ItemName}
-                  </td>
-                  <td className="px-4 py-2 text-right font-semibold text-emerald-600">
-                    {fmtNum(r.ClosingStock)}
-                  </td>
-                  <td className="px-4 py-2 text-muted-foreground">
-                    {r.UOMCode || "—"}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
-    </div>
-  );
-}
-
-// ─── Item Row ─────────────────────────────────────────────────────────────────
-function ItemRow({
+// ─── Item Search Row ──────────────────────────────────────────────────────────
+function ItemSearchRow({
   item,
   idx,
   onUpdate,
   onRemove,
   availableItems,
+  isLoadingStock,
 }: {
   item: TItem;
   idx: number;
   onUpdate: (idx: number, patch: Partial<TItem>) => void;
   onRemove: (idx: number) => void;
-  availableItems: {
-    itemId: string;
-    itemName: string;
-    uom: string;
-    available: number;
-  }[];
+  availableItems: AvailableItem[];
+  isLoadingStock: boolean;
 }) {
-  const selected = availableItems.find((a) => a.itemId === item.itemId);
-  const maxQty = selected?.available ?? 0;
+  const [search, setSearch] = useState(item.itemName || "");
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const filtered = useMemo(() => {
+    if (!search.trim()) return availableItems.slice(0, 10);
+    const q = search.toLowerCase();
+    return availableItems
+      .filter((a) => a.itemName.toLowerCase().includes(q))
+      .slice(0, 12);
+  }, [search, availableItems]);
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(e.target as Node)
+      ) {
+        setOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const selectItem = (a: AvailableItem) => {
+    onUpdate(idx, {
+      itemId: a.itemId,
+      itemName: a.itemName,
+      uom: a.uom,
+      availableQty: a.available,
+    });
+    setSearch(a.itemName);
+    setOpen(false);
+  };
+
   const qtyNum = parseFloat(item.qty) || 0;
-  const overLimit = qtyNum > maxQty && maxQty > 0;
+  const overLimit = qtyNum > item.availableQty && item.availableQty > 0;
 
   return (
     <div
-      className={`grid grid-cols-12 gap-2 items-start p-3 rounded-xl border transition-colors ${overLimit ? "border-red-400/40 bg-red-500/5" : "border-border bg-muted/20"}`}
+      className={`grid grid-cols-12 gap-2 items-start p-3 rounded-xl border transition-colors ${
+        overLimit
+          ? "border-red-400/40 bg-red-500/5"
+          : "border-border bg-muted/20"
+      }`}
     >
+      {/* # */}
       <div className="col-span-1 flex items-center h-9 text-xs font-mono text-muted-foreground">
         {idx + 1}
       </div>
 
-      {/* Item */}
-      <div className="col-span-4">
-        <select
-          value={item.itemId}
-          onChange={(e) => {
-            const found = availableItems.find(
-              (a) => a.itemId === e.target.value,
-            );
-            onUpdate(idx, {
-              itemId: e.target.value,
-              itemName: found?.itemName ?? "",
-              uom: found?.uom ?? "",
-              availableQty: found?.available ?? 0,
-            });
-          }}
-          className="w-full px-2 py-2 rounded-lg border border-border bg-background text-xs text-foreground outline-none"
-        >
-          <option value="">Select item…</option>
-          {availableItems.map((a) => (
-            <option key={a.itemId} value={a.itemId}>
-              {a.itemName} (avail: {fmtNum(a.available)})
-            </option>
-          ))}
-        </select>
+      {/* Item search */}
+      <div className="col-span-5 relative" ref={containerRef}>
+        <div className="relative">
+          <Search
+            size={12}
+            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+          />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => {
+              setSearch(e.target.value);
+              setOpen(true);
+              if (!e.target.value) {
+                onUpdate(idx, {
+                  itemId: "",
+                  itemName: "",
+                  uom: "",
+                  availableQty: 0,
+                });
+              }
+            }}
+            onFocus={() => setOpen(true)}
+            placeholder={isLoadingStock ? "Loading items…" : "Search item…"}
+            disabled={isLoadingStock}
+            className="w-full pl-8 pr-3 py-2 rounded-lg border border-border bg-background text-xs text-foreground outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500/50 disabled:opacity-60"
+          />
+        </div>
+
+        {open && search.length >= 1 && (
+          <div className="absolute z-50 top-full left-0 right-0 mt-1 rounded-lg border border-border bg-popover shadow-lg overflow-hidden">
+            {filtered.length === 0 ? (
+              <div className="px-3 py-4 text-xs text-muted-foreground text-center">
+                No items match "{search}"
+              </div>
+            ) : (
+              <div className="max-h-52 overflow-y-auto">
+                {filtered.map((a) => (
+                  <button
+                    key={a.itemId}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      selectItem(a);
+                    }}
+                    className="w-full flex items-center justify-between px-3 py-2.5 hover:bg-muted/60 text-left transition-colors border-b border-border/40 last:border-0"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-foreground truncate">
+                        {a.itemName}
+                      </p>
+                      <p className="text-[10px] text-muted-foreground mt-0.5">
+                        {a.uom}
+                      </p>
+                    </div>
+                    <span
+                      className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0 ml-2 ${
+                        a.available > 0
+                          ? "bg-emerald-500/10 text-emerald-600"
+                          : "bg-red-500/10 text-red-500"
+                      }`}
+                    >
+                      {fmtNum(a.available)} {a.uom}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Available badge */}
+      <div className="col-span-1 flex items-center h-9">
+        {item.itemId && (
+          <span className="text-[10px] text-emerald-600 bg-emerald-500/10 px-1.5 py-0.5 rounded-full font-semibold whitespace-nowrap">
+            {fmtNum(item.availableQty)}
+          </span>
+        )}
       </div>
 
       {/* Qty */}
@@ -299,11 +384,14 @@ function ItemRow({
           value={item.qty}
           onChange={(e) => onUpdate(idx, { qty: e.target.value })}
           placeholder="Qty"
-          className={`w-full px-2 py-2 rounded-lg border text-xs text-foreground bg-background outline-none ${overLimit ? "border-red-400" : "border-border"}`}
+          disabled={!item.itemId}
+          className={`w-full px-2 py-2 rounded-lg border text-xs text-foreground bg-background outline-none disabled:opacity-50 ${
+            overLimit ? "border-red-400" : "border-border"
+          }`}
         />
         {overLimit && (
           <p className="text-[10px] text-red-500 mt-0.5">
-            Max: {fmtNum(maxQty)}
+            Max: {fmtNum(item.availableQty)}
           </p>
         )}
       </div>
@@ -315,16 +403,6 @@ function ItemRow({
           readOnly
           placeholder="UOM"
           className="w-full px-2 py-2 rounded-lg border border-border bg-muted text-xs text-muted-foreground outline-none"
-        />
-      </div>
-
-      {/* Remarks */}
-      <div className="col-span-2">
-        <input
-          value={item.remarks}
-          onChange={(e) => onUpdate(idx, { remarks: e.target.value })}
-          placeholder="Remarks"
-          className="w-full px-2 py-2 rounded-lg border border-border bg-background text-xs text-foreground outline-none"
         />
       </div>
 
@@ -450,7 +528,7 @@ function TransferHistory() {
   );
 }
 
-// ─── Main Transfer Page ───────────────────────────────────────────────────────
+// ─── Main Page ────────────────────────────────────────────────────────────────
 export default function StockTransfer() {
   const qc = useQueryClient();
 
@@ -458,54 +536,83 @@ export default function StockTransfer() {
     "transfer",
   );
 
+  const [filterCompanyId, setFilterCompanyId] = useState("");
+  const [filterProjectId, setFilterProjectId] = useState("");
+
   const [fromGodownId, setFromGodownId] = useState<number | null>(null);
   const [toGodownId, setToGodownId] = useState<number | null>(null);
-  const [items, setItems] = useState<TItem[]>([
-    {
-      itemId: "",
-      itemName: "",
-      qty: "",
-      uom: "",
-      availableQty: 0,
-      remarks: "",
-    },
-  ]);
+  const [items, setItems] = useState<TItem[]>([emptyItem()]);
   const [remarks, setRemarks] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
 
-  // Load godowns
   const { data: godownsData } = useQuery({
     queryKey: ["godowns"],
     queryFn: getGodowns,
     staleTime: 120_000,
   });
-  const godowns: Godown[] = godownsData?.data ?? [];
+  const allGodowns: Godown[] = godownsData?.data ?? [];
 
-  const fromGodown = godowns.find((g) => g.GodownID === fromGodownId) || null;
-  const toGodown = godowns.find((g) => g.GodownID === toGodownId) || null;
+  const { data: enterprisesData } = useQuery({
+    queryKey: ["enterprise-options", "C"],
+    queryFn: () => getEnterpriseOptions(undefined, "C"),
+    staleTime: 120_000,
+  });
 
-  // Available stock in FROM godown
-  const { data: fromStockData } = useQuery({
+  const { data: projectsData } = useQuery({
+    queryKey: ["enterprise-options", "P"],
+    queryFn: () => getEnterpriseOptions(undefined, "P"),
+    staleTime: 120_000,
+  });
+  const allProjects: {
+    id: number;
+    label: string;
+    belongs_to: string | null;
+  }[] = projectsData ?? [];
+
+  const filteredGodowns = useMemo(() => {
+    return allGodowns.filter((g) => {
+      if (
+        filterCompanyId &&
+        g.EnterpriseID != null &&
+        String(g.EnterpriseID) !== filterCompanyId
+      )
+        return false;
+      if (
+        filterProjectId &&
+        g.ProjectID != null &&
+        String(g.ProjectID) !== filterProjectId
+      )
+        return false;
+      return true;
+    });
+  }, [allGodowns, filterCompanyId, filterProjectId]);
+
+  const projectOptions = useMemo(() => {
+    if (!filterCompanyId) return allProjects;
+    return allProjects.filter((p) => String(p.belongs_to) === filterCompanyId);
+  }, [allProjects, filterCompanyId]);
+
+  const { data: fromStockData, isLoading: isLoadingStock } = useQuery({
     queryKey: ["inventory-master", today, fromGodownId],
     queryFn: () => getInventoryMaster(today, fromGodownId!),
     staleTime: 60_000,
     enabled: !!fromGodownId,
   });
-  const availableItems = useMemo(
+
+  const availableItems: AvailableItem[] = useMemo(
     () =>
       (fromStockData?.data ?? [])
         .filter((r) => r.ClosingStock > 0)
         .map((r) => ({
           itemId: r.ItemID,
           itemName: r.ItemName || "",
-          uom: r.UOMCode || "",
+          uom: r.UOMName || r.UOMCode || "",
           available: r.ClosingStock,
         })),
     [fromStockData],
   );
 
-  // Transfer mutation
   const transferMut = useMutation({
     mutationFn: createStockTransfer,
     onSuccess: (res) => {
@@ -513,16 +620,7 @@ export default function StockTransfer() {
       setErrorMsg("");
       setFromGodownId(null);
       setToGodownId(null);
-      setItems([
-        {
-          itemId: "",
-          itemName: "",
-          qty: "",
-          uom: "",
-          availableQty: 0,
-          remarks: "",
-        },
-      ]);
+      setItems([emptyItem()]);
       setRemarks("");
       qc.invalidateQueries({ queryKey: ["inventory-master"] });
       qc.invalidateQueries({ queryKey: ["stock-transfers"] });
@@ -531,25 +629,13 @@ export default function StockTransfer() {
     onError: (e: Error) => setErrorMsg(e.message),
   });
 
-  // Item helpers
   const updateItem = (idx: number, patch: Partial<TItem>) =>
     setItems((prev) =>
       prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)),
     );
   const removeItem = (idx: number) =>
     setItems((prev) => prev.filter((_, i) => i !== idx));
-  const addItem = () =>
-    setItems((prev) => [
-      ...prev,
-      {
-        itemId: "",
-        itemName: "",
-        qty: "",
-        uom: "",
-        availableQty: 0,
-        remarks: "",
-      },
-    ]);
+  const addItem = () => setItems((prev) => [...prev, emptyItem()]);
 
   const canTransfer =
     !!fromGodownId &&
@@ -580,26 +666,32 @@ export default function StockTransfer() {
   const handleReset = () => {
     setFromGodownId(null);
     setToGodownId(null);
-    setItems([
-      {
-        itemId: "",
-        itemName: "",
-        qty: "",
-        uom: "",
-        availableQty: 0,
-        remarks: "",
-      },
-    ]);
+    setItems([emptyItem()]);
     setRemarks("");
     setErrorMsg("");
   };
+
+  const fromGodown =
+    filteredGodowns.find((g) => g.GodownID === fromGodownId) || null;
+  const toGodown =
+    filteredGodowns.find((g) => g.GodownID === toGodownId) || null;
+
+  const companyOptions = (enterprisesData ?? []).map((e) => ({
+    value: String(e.id),
+    label: e.label,
+  }));
+
+  const projectSelectOptions = projectOptions.map((p) => ({
+    value: String(p.id),
+    label: p.label,
+  }));
 
   return (
     <>
       <Breadcrumbs items={["Dashboard", "Material Module", "Stock Transfer"]} />
 
       <div className="p-6 space-y-5">
-        {/* Header + tabs */}
+        {/* Header */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-xl font-heading font-bold text-foreground flex items-center gap-2">
@@ -614,13 +706,21 @@ export default function StockTransfer() {
           <div className="flex items-center gap-1 p-1 rounded-xl bg-muted border border-border">
             <button
               onClick={() => setActiveTab("transfer")}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === "transfer" ? "bg-emerald-600 text-white shadow-sm" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                activeTab === "transfer"
+                  ? "bg-emerald-600 text-white shadow-sm"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              }`}
             >
               <Send size={14} /> New Transfer
             </button>
             <button
               onClick={() => setActiveTab("history")}
-              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeTab === "history" ? "bg-emerald-600 text-white shadow-sm" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+              className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                activeTab === "history"
+                  ? "bg-emerald-600 text-white shadow-sm"
+                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
+              }`}
             >
               <ClipboardList size={14} /> History
             </button>
@@ -631,7 +731,6 @@ export default function StockTransfer() {
 
         {activeTab === "transfer" && (
           <div className="space-y-4">
-            {/* Banners */}
             {successMsg && (
               <div className="px-4 py-3 rounded-lg bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 flex items-center gap-2 text-sm">
                 <CheckCircle2 size={15} /> {successMsg}
@@ -649,49 +748,148 @@ export default function StockTransfer() {
               </div>
             )}
 
-            {/* ── UPI-style transfer card ──────────────────────────────────── */}
+            {/* ── Filters ─────────────────────────────────────────────────── */}
+            <div className="rounded-xl border border-border bg-card p-5 space-y-4">
+              <div className="flex items-center gap-2">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                  Filters
+                </p>
+                <span className="text-[10px] text-muted-foreground/60">
+                  — narrow godowns by company or project
+                </span>
+                {(filterCompanyId || filterProjectId) && (
+                  <button
+                    onClick={() => {
+                      setFilterCompanyId("");
+                      setFilterProjectId("");
+                      setFromGodownId(null);
+                      setToGodownId(null);
+                      setItems([emptyItem()]);
+                    }}
+                    className="ml-auto text-[10px] text-muted-foreground hover:text-red-500 flex items-center gap-1 transition-colors"
+                  >
+                    <X size={10} /> Clear filters
+                  </button>
+                )}
+              </div>
+
+              <div className="flex flex-col sm:flex-row gap-3">
+                <FilterSelect
+                  icon={Building2}
+                  label="Company"
+                  value={filterCompanyId}
+                  onChange={(v) => {
+                    setFilterCompanyId(v);
+                    setFilterProjectId("");
+                    setFromGodownId(null);
+                    setToGodownId(null);
+                    setItems([emptyItem()]);
+                  }}
+                  options={companyOptions}
+                  placeholder="All companies"
+                  color="blue"
+                />
+                <FilterSelect
+                  icon={FolderKanban}
+                  label="Project"
+                  value={filterProjectId}
+                  onChange={(v) => {
+                    setFilterProjectId(v);
+                    setFromGodownId(null);
+                    setToGodownId(null);
+                    setItems([emptyItem()]);
+                  }}
+                  options={projectSelectOptions}
+                  placeholder={
+                    filterCompanyId ? "All projects in company" : "All projects"
+                  }
+                  color="violet"
+                />
+              </div>
+
+              {(filterCompanyId || filterProjectId) && (
+                <div className="flex flex-wrap gap-2 pt-1">
+                  {filterCompanyId && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] bg-blue-500/10 text-blue-600 border border-blue-400/20 font-medium">
+                      <Building2 size={10} />
+                      {
+                        companyOptions.find((o) => o.value === filterCompanyId)
+                          ?.label
+                      }
+                      <button
+                        onClick={() => {
+                          setFilterCompanyId("");
+                          setFilterProjectId("");
+                          setFromGodownId(null);
+                          setToGodownId(null);
+                          setItems([emptyItem()]);
+                        }}
+                        className="ml-0.5 hover:opacity-70"
+                      >
+                        <X size={9} />
+                      </button>
+                    </span>
+                  )}
+                  {filterProjectId && (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] bg-violet-500/10 text-violet-600 border border-violet-400/20 font-medium">
+                      <FolderKanban size={10} />
+                      {
+                        projectSelectOptions.find(
+                          (o) => o.value === filterProjectId,
+                        )?.label
+                      }
+                      <button
+                        onClick={() => {
+                          setFilterProjectId("");
+                          setFromGodownId(null);
+                          setToGodownId(null);
+                          setItems([emptyItem()]);
+                        }}
+                        className="ml-0.5 hover:opacity-70"
+                      >
+                        <X size={9} />
+                      </button>
+                    </span>
+                  )}
+                  <span className="text-[10px] text-muted-foreground self-center">
+                    {filteredGodowns.length} godown
+                    {filteredGodowns.length !== 1 ? "s" : ""} available
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* ── Transfer Route ───────────────────────────────────────────── */}
             <div className="rounded-xl border border-border bg-card p-5 space-y-4">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
                 Transfer Route
               </p>
 
               <div className="flex flex-col sm:flex-row items-stretch sm:items-end gap-3">
-                {/* FROM */}
-                <GodownPicker
+                <GodownSelect
                   label="From"
                   value={fromGodownId}
                   onChange={(v) => {
                     setFromGodownId(v);
-                    setItems([
-                      {
-                        itemId: "",
-                        itemName: "",
-                        qty: "",
-                        uom: "",
-                        availableQty: 0,
-                        remarks: "",
-                      },
-                    ]);
+                    setItems([emptyItem()]);
                   }}
-                  godowns={godowns}
+                  godowns={filteredGodowns}
                   exclude={toGodownId}
                   variant="from"
                   placeholder="Select source godown…"
                 />
 
-                {/* Arrow */}
                 <div className="flex items-center justify-center sm:pb-[36px]">
                   <div className="w-9 h-9 rounded-full bg-emerald-600 flex items-center justify-center shadow-md shrink-0">
                     <ArrowRight size={16} className="text-white" />
                   </div>
                 </div>
 
-                {/* TO */}
-                <GodownPicker
+                <GodownSelect
                   label="To"
                   value={toGodownId}
                   onChange={setToGodownId}
-                  godowns={godowns}
+                  godowns={filteredGodowns}
                   exclude={fromGodownId}
                   variant="to"
                   placeholder="Select destination godown…"
@@ -705,7 +903,6 @@ export default function StockTransfer() {
                 </p>
               )}
 
-              {/* Transfer summary badge when both selected */}
               {fromGodown && toGodown && fromGodownId !== toGodownId && (
                 <div className="flex items-center gap-2 px-3 py-2 rounded-lg bg-muted/50 border border-border text-xs text-muted-foreground">
                   <span className="font-medium text-orange-600">
@@ -719,15 +916,7 @@ export default function StockTransfer() {
               )}
             </div>
 
-            {/* ── Available stock preview ───────────────────────────────────── */}
-            {fromGodownId && fromGodown && (
-              <AvailableStockTable
-                godownId={fromGodownId}
-                godownName={fromGodown.GodownName}
-              />
-            )}
-
-            {/* ── Items table ───────────────────────────────────────────────── */}
+            {/* ── Items Table ───────────────────────────────────────────────── */}
             {fromGodownId && (
               <div className="rounded-xl border border-border bg-card overflow-hidden">
                 <div className="px-5 py-3 border-b border-border flex items-center justify-between">
@@ -736,30 +925,42 @@ export default function StockTransfer() {
                       Items to Transfer
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      Only items with available stock in the source godown are
-                      listed
+                      Search for items available in the source godown
                     </p>
                   </div>
-                  <button
-                    onClick={addItem}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 transition-colors"
-                  >
-                    <Plus size={12} /> Add Item
-                  </button>
+                  <div className="flex items-center gap-3">
+                    {isLoadingStock ? (
+                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <RefreshCw size={11} className="animate-spin" />
+                        Loading stock…
+                      </span>
+                    ) : fromStockData ? (
+                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <Package size={11} className="text-emerald-600" />
+                        {availableItems.length} items in stock
+                      </span>
+                    ) : null}
+                    <button
+                      onClick={addItem}
+                      className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-medium hover:bg-emerald-700 transition-colors"
+                    >
+                      <Plus size={12} /> Add Item
+                    </button>
+                  </div>
                 </div>
+
                 <div className="p-4 space-y-2">
-                  {/* Column headers */}
                   <div className="grid grid-cols-12 gap-2 px-1 mb-1">
-                    {["#", "Item", "Qty", "UOM", "Remarks", ""].map((h, i) => (
+                    {["#", "Item", "Avail", "Qty", "UOM", ""].map((h, i) => (
                       <span
                         key={i}
                         className={`text-[10px] font-semibold text-muted-foreground uppercase tracking-wider ${
                           i === 0
                             ? "col-span-1"
                             : i === 1
-                              ? "col-span-4"
+                              ? "col-span-5"
                               : i === 2
-                                ? "col-span-2"
+                                ? "col-span-1"
                                 : i === 3
                                   ? "col-span-2"
                                   : i === 4
@@ -771,19 +972,20 @@ export default function StockTransfer() {
                       </span>
                     ))}
                   </div>
+
                   {items.map((it, idx) => (
-                    <ItemRow
+                    <ItemSearchRow
                       key={idx}
                       item={it}
                       idx={idx}
                       onUpdate={updateItem}
                       onRemove={removeItem}
                       availableItems={availableItems}
+                      isLoadingStock={isLoadingStock}
                     />
                   ))}
                 </div>
 
-                {/* Remarks + actions */}
                 <div className="px-5 py-4 border-t border-border space-y-3">
                   <div>
                     <label className="text-xs font-medium text-muted-foreground block mb-1.5">
@@ -825,7 +1027,6 @@ export default function StockTransfer() {
               </div>
             )}
 
-            {/* Empty state */}
             {!fromGodownId && (
               <div className="rounded-xl border border-dashed border-border bg-muted/20 py-20 text-center">
                 <ArrowLeftRight
@@ -836,8 +1037,7 @@ export default function StockTransfer() {
                   Select a source godown to begin a transfer
                 </p>
                 <p className="text-xs text-muted-foreground/60 mt-1">
-                  You can transfer from Main to any branch, or between any two
-                  godowns
+                  Use the filters above to narrow godowns by company or project
                 </p>
               </div>
             )}

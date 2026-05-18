@@ -59,6 +59,7 @@ const LINK_OPTIONS = [
   { value: "GRN", label: "GRN" },
   { value: "BOQ", label: "BOQ" },
   { value: "Expense Booking", label: "Expense Booking" },
+  { value: "Material Request", label: "Material Request" },
   { value: "Material Issue", label: "Material Issue" },
   { value: "Payment", label: "Payment (Outgoing)" },
   { value: "Received Payment", label: "Received Payment" },
