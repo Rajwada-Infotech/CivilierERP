@@ -4,21 +4,26 @@ const authMiddleware = require("../middleware/auth");
 
 const router = express.Router();
 
+// ─── Sources ──────────────────────────────────────────────────────────────────
+// Applicant  → dbo.AccountHeadMaster  WHERE LHeadType = 'A'  (LHeadId, LHeadName/DisplayName, LHeadCode)
+// Company    → dbo.enterprise         WHERE business_type = 'C'  (id, name)
+// Project    → dbo.enterprise         WHERE business_type = 'P'  (id, name)
+
 const LIST_COLUMNS = `
   fn.Id,
   fn.NOCNo,
   fn.ApplicantId,
-  fa.ApplicantNo,
-  fa.ApplicantName,
+  ISNULL(ahm.DisplayName, ahm.LHeadName) AS ApplicantName,
+  ahm.LHeadCode                          AS ApplicantNo,
   fn.UnitSelectionId,
   fus.SelectionNo,
   fus.UnitNo,
   fn.AgreementId,
   fag.AgreementNo,
   fn.ProjectId,
-  pm.Name AS ProjectName,
+  ep.name  AS ProjectName,
   fn.CompanyId,
-  cm.Name AS CompanyName,
+  ec.name  AS CompanyName,
   CONVERT(VARCHAR(10), fn.NOCDate, 23)      AS NOCDate,
   CONVERT(VARCHAR(10), fn.ApprovalDate, 23) AS ApprovalDate,
   CONVERT(VARCHAR(10), fn.IssuedDate, 23)   AS IssuedDate,
@@ -60,14 +65,17 @@ function normalizeNumber(value) {
   return Number.isFinite(numeric) ? numeric : Number.NaN;
 }
 
+// Validate applicant exists in AccountHeadMaster LHeadType='A'
 async function getApplicantSnapshot(applicantId) {
   if (!applicantId) return null;
   const result = await getPool()
     .request()
     .input("ApplicantId", sql.Int, applicantId).query(`
-      SELECT TOP 1 Id, ProjectId, CompanyId
-      FROM dbo.FollowupApplicants
-      WHERE Id = @ApplicantId AND IsDeleted = 0
+      SELECT TOP 1 LHeadId AS Id
+      FROM dbo.AccountHeadMaster
+      WHERE LHeadId = @ApplicantId
+        AND LHeadType = 'A'
+        AND LHeadStatus = 1
     `);
   return result.recordset[0] ?? null;
 }
@@ -135,35 +143,56 @@ async function buildOptions() {
     projectsResult,
     companiesResult,
   ] = await Promise.all([
+    // Applicants from AccountHeadMaster where LHeadType = 'A'
     pool.request().query(`
-        SELECT Id, ApplicantNo, ApplicantName, ProjectId, CompanyId
-        FROM dbo.FollowupApplicants
-        WHERE IsDeleted = 0
-        ORDER BY ApplicantName
+        SELECT
+          LHeadId                        AS Id,
+          ISNULL(DisplayName, LHeadName) AS ApplicantName,
+          LHeadCode                      AS ApplicantNo
+        FROM dbo.AccountHeadMaster
+        WHERE LHeadType = 'A'
+          AND LHeadStatus = 1
+        ORDER BY ISNULL(DisplayName, LHeadName)
       `),
+    // Unit selections (linked by ApplicantId = LHeadId)
     pool.request().query(`
-        SELECT fus.Id, fus.SelectionNo, fus.UnitNo, fus.ApplicantId, fus.ProjectId, fus.CompanyId
+        SELECT
+          fus.Id,
+          fus.SelectionNo,
+          fus.UnitNo,
+          fus.ApplicantId,
+          fus.ProjectId,
+          fus.CompanyId
         FROM dbo.FollowupUnitSelections fus
         WHERE fus.IsDeleted = 0
         ORDER BY fus.CreatedAt DESC, fus.Id DESC
       `),
+    // Agreements
     pool.request().query(`
-        SELECT fag.Id, fag.AgreementNo, fag.ApplicantId, fag.UnitSelectionId
+        SELECT
+          fag.Id,
+          fag.AgreementNo,
+          fag.ApplicantId,
+          fag.UnitSelectionId
         FROM dbo.FollowupAgreements fag
         WHERE fag.IsDeleted = 0
         ORDER BY fag.CreatedAt DESC, fag.Id DESC
       `),
+    // Projects from enterprise where business_type = 'P'
     pool.request().query(`
-        SELECT Id, Name
-        FROM dbo.ProjectMaster
-        WHERE ISNULL(IsDeleted, 0) = 0 AND ISNULL(IsActive, 1) = 1
-        ORDER BY Name
+        SELECT id AS Id, name AS Name
+        FROM dbo.enterprise
+        WHERE business_type = 'P'
+          AND ISNULL(discontinue, 0) = 0
+        ORDER BY name
       `),
+    // Companies from enterprise where business_type = 'C'
     pool.request().query(`
-        SELECT Id, Name
-        FROM dbo.CompanyMaster
-        WHERE ISNULL(IsDeleted, 0) = 0 AND ISNULL(IsActive, 1) = 1
-        ORDER BY Name
+        SELECT id AS Id, name AS Name
+        FROM dbo.enterprise
+        WHERE business_type = 'C'
+          AND ISNULL(discontinue, 0) = 0
+        ORDER BY name
       `),
   ]);
 
@@ -210,12 +239,12 @@ router.get("/", async (req, res) => {
     if (search) {
       filters.push(`
         (
-          fn.NOCNo           LIKE @Search
-          OR fa.ApplicantNo  LIKE @Search
-          OR fa.ApplicantName LIKE @Search
-          OR fus.UnitNo      LIKE @Search
-          OR fag.AgreementNo LIKE @Search
-          OR pm.Name         LIKE @Search
+          fn.NOCNo                                    LIKE @Search
+          OR ahm.LHeadCode                            LIKE @Search
+          OR ISNULL(ahm.DisplayName, ahm.LHeadName)  LIKE @Search
+          OR fus.UnitNo                               LIKE @Search
+          OR fag.AgreementNo                          LIKE @Search
+          OR ep.name                                  LIKE @Search
         )
       `);
     }
@@ -224,6 +253,15 @@ router.get("/", async (req, res) => {
 
     const whereClause = `WHERE ${filters.join(" AND ")}`;
     const pool = getPool();
+
+    const BASE_JOINS = `
+      FROM dbo.FollowupNOCs fn
+      INNER JOIN dbo.AccountHeadMaster ahm  ON ahm.LHeadId = fn.ApplicantId AND ahm.LHeadType = 'A'
+      LEFT JOIN  dbo.FollowupUnitSelections fus ON fus.Id  = fn.UnitSelectionId
+      LEFT JOIN  dbo.FollowupAgreements fag     ON fag.Id  = fn.AgreementId
+      LEFT JOIN  dbo.enterprise ep              ON ep.id   = fn.ProjectId  AND ep.business_type = 'P'
+      LEFT JOIN  dbo.enterprise ec              ON ec.id   = fn.CompanyId  AND ec.business_type = 'C'
+    `;
 
     const buildRequest = () => {
       const request = pool.request();
@@ -235,11 +273,7 @@ router.get("/", async (req, res) => {
 
     const countResult = await buildRequest().query(`
       SELECT COUNT(*) AS Total
-      FROM dbo.FollowupNOCs fn
-      INNER JOIN dbo.FollowupApplicants fa ON fa.Id = fn.ApplicantId
-      LEFT JOIN  dbo.FollowupUnitSelections fus ON fus.Id = fn.UnitSelectionId
-      LEFT JOIN  dbo.FollowupAgreements fag     ON fag.Id = fn.AgreementId
-      LEFT JOIN  dbo.ProjectMaster pm           ON pm.Id  = fn.ProjectId
+      ${BASE_JOINS}
       ${whereClause}
     `);
 
@@ -247,12 +281,7 @@ router.get("/", async (req, res) => {
       .input("Offset", sql.Int, offset)
       .input("PageSize", sql.Int, pageSize).query(`
         SELECT ${LIST_COLUMNS}
-        FROM dbo.FollowupNOCs fn
-        INNER JOIN dbo.FollowupApplicants fa     ON fa.Id  = fn.ApplicantId
-        LEFT JOIN  dbo.FollowupUnitSelections fus ON fus.Id = fn.UnitSelectionId
-        LEFT JOIN  dbo.FollowupAgreements fag     ON fag.Id = fn.AgreementId
-        LEFT JOIN  dbo.ProjectMaster pm           ON pm.Id  = fn.ProjectId
-        LEFT JOIN  dbo.CompanyMaster cm           ON cm.Id  = fn.CompanyId
+        ${BASE_JOINS}
         ${whereClause}
         ORDER BY fn.CreatedAt DESC, fn.Id DESC
         OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY
@@ -285,7 +314,9 @@ router.post("/", async (req, res) => {
   try {
     const applicant = await getApplicantSnapshot(payload.ApplicantId);
     if (!applicant)
-      return res.status(404).json({ error: "Applicant not found" });
+      return res
+        .status(404)
+        .json({ error: "Applicant not found in account master" });
 
     const unitSelection = await getUnitSelectionSnapshot(
       payload.UnitSelectionId,
@@ -302,17 +333,6 @@ router.post("/", async (req, res) => {
           error: "The selected unit does not belong to the selected applicant.",
         });
 
-    const projectId =
-      payload.ProjectId ||
-      unitSelection?.ProjectId ||
-      applicant.ProjectId ||
-      null;
-    const companyId =
-      payload.CompanyId ||
-      unitSelection?.CompanyId ||
-      applicant.CompanyId ||
-      null;
-
     const transaction = new sql.Transaction(getPool());
     await transaction.begin();
 
@@ -320,8 +340,8 @@ router.post("/", async (req, res) => {
       .input("ApplicantId", sql.Int, payload.ApplicantId)
       .input("UnitSelectionId", sql.Int, payload.UnitSelectionId)
       .input("AgreementId", sql.Int, payload.AgreementId)
-      .input("ProjectId", sql.Int, projectId)
-      .input("CompanyId", sql.Int, companyId)
+      .input("ProjectId", sql.Int, payload.ProjectId)
+      .input("CompanyId", sql.Int, payload.CompanyId)
       .input("NOCDate", sql.Date, payload.NOCDate)
       .input("ApprovalDate", sql.Date, payload.ApprovalDate)
       .input("IssuedDate", sql.Date, payload.IssuedDate)
@@ -377,7 +397,9 @@ router.put("/:id", async (req, res) => {
   try {
     const applicant = await getApplicantSnapshot(payload.ApplicantId);
     if (!applicant)
-      return res.status(404).json({ error: "Applicant not found" });
+      return res
+        .status(404)
+        .json({ error: "Applicant not found in account master" });
 
     const unitSelection = await getUnitSelectionSnapshot(
       payload.UnitSelectionId,
@@ -410,22 +432,8 @@ router.put("/:id", async (req, res) => {
       .input("ApplicantId", sql.Int, payload.ApplicantId)
       .input("UnitSelectionId", sql.Int, payload.UnitSelectionId)
       .input("AgreementId", sql.Int, payload.AgreementId)
-      .input(
-        "ProjectId",
-        sql.Int,
-        payload.ProjectId ||
-          unitSelection?.ProjectId ||
-          applicant.ProjectId ||
-          null,
-      )
-      .input(
-        "CompanyId",
-        sql.Int,
-        payload.CompanyId ||
-          unitSelection?.CompanyId ||
-          applicant.CompanyId ||
-          null,
-      )
+      .input("ProjectId", sql.Int, payload.ProjectId)
+      .input("CompanyId", sql.Int, payload.CompanyId)
       .input("NOCDate", sql.Date, payload.NOCDate)
       .input("ApprovalDate", sql.Date, payload.ApprovalDate)
       .input("IssuedDate", sql.Date, payload.IssuedDate)
