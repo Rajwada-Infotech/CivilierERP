@@ -206,15 +206,9 @@ const POReminders = lazy(() => import("./pages/followup/POReminders"));
 const WOReminders = lazy(() => import("./pages/followup/WOReminders"));
 const FollowupTasks = lazy(() => import("./pages/followup/FollowupTasks"));
 const FollowupLog = lazy(() => import("./pages/followup/FollowupLog"));
-const FollowupApplicants = lazy(() =>
-  import("./pages/followup/FollowupPipelinePage").then((module) => ({
-    default: module.ApplicantsPage,
-  })),
-);
-const FollowupUnitSelection = lazy(() =>
-  import("./pages/followup/FollowupPipelinePage").then((module) => ({
-    default: module.UnitSelectionPage,
-  })),
+const FollowupApplicants = lazy(() => import("./pages/followup/Applicants"));
+const FollowupUnitSelection = lazy(
+  () => import("./pages/followup/UnitSelection"),
 );
 const FollowupAgreements = lazy(() =>
   import("./pages/followup/FollowupPipelinePage").then((module) => ({

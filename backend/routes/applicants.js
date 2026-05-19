@@ -1,40 +1,35 @@
 // routes/applicants.js
 const express = require("express");
+const { getPool, sql } = require("../db");
+
 const router = express.Router();
-const sql = require("mssql");
-const { poolPromise } = require("../db");
 
 // GET /api/applicants
 // Fetches all records from AccountHeadMaster where LHeadType = 'A'
 router.get("/", async (req, res) => {
   try {
-    const pool = await poolPromise;
-    const { search, status, city } = req.query;
+    const pool = getPool();
+    const { search, status } = req.query;
 
     let query = `
       SELECT
+        AHM.LHeadId,
         AHM.LHeadCode,
         AHM.LHeadName,
-        AHM.LHeadAlias,
         AHM.LHeadType,
         AHM.LHeadStatus,
-        AHM.Address1,
-        AHM.Address2,
-        AHM.City,
-        AHM.State,
-        AHM.PinCode,
-        AHM.Phone1,
-        AHM.Phone2,
-        AHM.Mobile,
-        AHM.Email,
-        AHM.GSTNo,
-        AHM.PANNo,
-        AHM.OpeningBalance,
-        AHM.CreditLimit,
-        AHM.CreditDays,
-        AHM.CreatedDate,
-        AHM.ModifiedDate
-      FROM AccountHeadMaster AHM
+        AHM.LHeadPhone,
+        AHM.LHeadEmail,
+        AHM.LHeadAddress,
+        AHM.LHeadContactPerson,
+        AHM.LHeadPaymentTerms,
+        AHM.LGST,
+        AHM.LGSTState,
+        AHM.LCountry,
+        AHM.LBelongsTo,
+        AHM.LDescription,
+        AHM.LBranchName
+      FROM dbo.AccountHeadMaster AHM
       WHERE AHM.LHeadType = 'A'
     `;
 
@@ -44,22 +39,17 @@ router.get("/", async (req, res) => {
       query += ` AND (
         AHM.LHeadName LIKE @search OR
         AHM.LHeadCode LIKE @search OR
-        AHM.Mobile LIKE @search OR
-        AHM.Email LIKE @search OR
-        AHM.GSTNo LIKE @search OR
-        AHM.City LIKE @search
+        AHM.LHeadPhone LIKE @search OR
+        AHM.LHeadEmail LIKE @search OR
+        AHM.LGST LIKE @search OR
+        AHM.LHeadAddress LIKE @search
       )`;
       request.input("search", sql.NVarChar, `%${search}%`);
     }
 
-    if (status) {
+    if (status !== undefined && status !== "") {
       query += ` AND AHM.LHeadStatus = @status`;
-      request.input("status", sql.NVarChar, status);
-    }
-
-    if (city) {
-      query += ` AND AHM.City = @city`;
-      request.input("city", sql.NVarChar, city);
+      request.input("status", sql.Bit, status === "1" ? 1 : 0);
     }
 
     query += ` ORDER BY AHM.LHeadName ASC`;
@@ -75,14 +65,14 @@ router.get("/", async (req, res) => {
 // GET /api/applicants/:code — single applicant detail
 router.get("/:code", async (req, res) => {
   try {
-    const pool = await poolPromise;
+    const pool = getPool();
     const { code } = req.params;
 
     const result = await pool
       .request()
       .input("code", sql.NVarChar, code)
       .query(
-        `SELECT * FROM AccountHeadMaster WHERE LHeadCode = @code AND LHeadType = 'A'`,
+        `SELECT * FROM dbo.AccountHeadMaster WHERE LHeadCode = @code AND LHeadType = 'A'`,
       );
 
     if (!result.recordset.length) {
