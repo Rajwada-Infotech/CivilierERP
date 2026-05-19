@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { useNavigate } from "react-router-dom"; // React Router
+import { useNavigate } from "react-router-dom";
 import {
   Bell,
   RefreshCw,
@@ -13,7 +13,13 @@ import {
 } from "lucide-react";
 import { useReminders, formatRelative, formatDate } from "@/hooks/useReminders";
 
-const TYPE_META: Record<string, any> = {
+type ReminderMeta = {
+  icon: React.ElementType;
+  label: string;
+  color: string;
+};
+
+const TYPE_META: Record<string, ReminderMeta> = {
   purchase_order: { icon: ShoppingCart, label: "PO", color: "text-violet-500" },
   work_order: { icon: HardHat, label: "WO", color: "text-orange-500" },
   cheque: { icon: BookOpen, label: "CHQ", color: "text-cyan-500" },
@@ -23,9 +29,28 @@ const TYPE_META: Record<string, any> = {
   material_request: { icon: ClipboardList, label: "MR", color: "text-blue-500" },
 };
 
-export const ReminderBell = () => {
+interface ReminderBellProps {
+  open?: boolean;
+  onToggle?: () => void;
+  onClose?: () => void;
+}
+
+export const ReminderBell = ({
+  open: openProp,
+  onToggle: onToggleProp,
+  onClose: onCloseProp,
+}: ReminderBellProps) => {
   const navigate = useNavigate();
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = openProp ?? internalOpen;
+  const fallbackToggle = React.useCallback(() => {
+    setInternalOpen((prev) => !prev);
+  }, []);
+  const fallbackClose = React.useCallback(() => {
+    setInternalOpen(false);
+  }, []);
+  const onToggle = onToggleProp ?? fallbackToggle;
+  const onClose = onCloseProp ?? fallbackClose;
   const [filter, setFilter] = useState("all");
   const { reminders, loading, badgeCount, refresh, isLocked } = useReminders({
     pollingInterval: 0,
@@ -35,12 +60,13 @@ export const ReminderBell = () => {
   // Close when clicking outside
   useEffect(() => {
     const clickOut = (e: MouseEvent) => {
-      if (panelRef.current && !panelRef.current.contains(e.target as Node))
-        setOpen(false);
+      if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
+        onClose();
+      }
     };
     if (open) document.addEventListener("mousedown", clickOut);
     return () => document.removeEventListener("mousedown", clickOut);
-  }, [open]);
+  }, [open, onClose]);
 
   const filtered =
     filter === "all" ? reminders : reminders.filter((r) => r.type === filter);
@@ -73,7 +99,7 @@ export const ReminderBell = () => {
       />
 
       <button
-        onClick={() => setOpen(!open)}
+        onClick={onToggle}
         className="relative p-2.5 hover:bg-muted rounded-full transition-all active:scale-95"
       >
         <Bell
@@ -102,8 +128,8 @@ export const ReminderBell = () => {
             </span>
             <button
               onClick={(e) => {
-                e.stopPropagation();
-                if (!isLocked) refresh(true);
+                  e.stopPropagation();
+                  if (!isLocked) refresh(true);
               }}
               disabled={loading || isLocked}
               className={`p-1.5 rounded-md transition-all ${isLocked ? "bg-red-50 text-red-400" : "hover:bg-background"}`}
@@ -156,7 +182,7 @@ export const ReminderBell = () => {
                 <div
                   key={r.id}
                   onClick={() => {
-                    setOpen(false);
+                    onClose();
                     navigate(r.path);
                   }}
                   className="p-4 hover:bg-muted/50 transition-colors cursor-pointer group"

@@ -7,7 +7,9 @@ async function handleResponse<T = unknown>(res: Response): Promise<T> {
   let data: any = null;
   try {
     data = await res.json();
-  } catch {}
+  } catch (_e) {
+    // ignore invalid JSON — error message falls back to HTTP status
+  }
   if (!res.ok) {
     const msg = data?.message || data?.error || `HTTP ${res.status}`;
     throw new Error(msg);
