@@ -1,0 +1,1285 @@
+import { useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  ArrowLeft,
+  Phone,
+  PhoneMissed,
+  PhoneCall,
+  Plus,
+  Search,
+  X,
+  Clock,
+  Calendar,
+  User,
+  StickyNote,
+  CheckCircle2,
+  Voicemail,
+} from "lucide-react";
+import { toast } from "sonner";
+
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type CallOutcome =
+  | "connected"
+  | "no_answer"
+  | "callback"
+  | "voicemail"
+  | "note";
+
+interface CallEntry {
+  id: string;
+  date: string;
+  type: CallOutcome;
+  customer: string;
+  amount: number | null;
+  notes: string;
+  user: string;
+  createdAt: string;
+}
+
+interface FormState {
+  date: string;
+  outcome: CallOutcome;
+  customer: string;
+  duration: string;
+  notes: string;
+}
+
+const EMPTY_FORM: FormState = {
+  date: new Date().toISOString().slice(0, 10),
+  outcome: "connected",
+  customer: "",
+  duration: "",
+  notes: "",
+};
+
+// ─── Outcome config ───────────────────────────────────────────────────────────
+
+const OUTCOME_CONFIG: Record<
+  CallOutcome,
+  {
+    label: string;
+    icon: React.ReactNode;
+    color: string;
+    dot: string;
+    bg: string;
+    iconBg: string;
+  }
+> = {
+  connected: {
+    label: "Connected",
+    icon: <PhoneCall className="w-4 h-4" />,
+    color: "text-emerald-700",
+    dot: "bg-emerald-500",
+    bg: "bg-emerald-50 border-emerald-200 text-emerald-700",
+    iconBg: "bg-emerald-100 text-emerald-600",
+  },
+  no_answer: {
+    label: "No Answer",
+    icon: <PhoneMissed className="w-4 h-4" />,
+    color: "text-red-600",
+    dot: "bg-red-400",
+    bg: "bg-red-50 border-red-200 text-red-700",
+    iconBg: "bg-red-100 text-red-500",
+  },
+  callback: {
+    label: "Callback",
+    icon: <Phone className="w-4 h-4" />,
+    color: "text-blue-600",
+    dot: "bg-blue-500",
+    bg: "bg-blue-50 border-blue-200 text-blue-700",
+    iconBg: "bg-blue-100 text-blue-600",
+  },
+  voicemail: {
+    label: "Voicemail",
+    icon: <Voicemail className="w-4 h-4" />,
+    color: "text-amber-600",
+    dot: "bg-amber-400",
+    bg: "bg-amber-50 border-amber-200 text-amber-700",
+    iconBg: "bg-amber-100 text-amber-600",
+  },
+  note: {
+    label: "Note",
+    icon: <StickyNote className="w-4 h-4" />,
+    color: "text-slate-500",
+    dot: "bg-slate-400",
+    bg: "bg-slate-100 border-slate-200 text-slate-600",
+    iconBg: "bg-slate-100 text-slate-500",
+  },
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function initials(name: string) {
+  return (
+    name
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((w) => w[0])
+      .join("")
+      .toUpperCase() || "?"
+  );
+}
+
+const AVATAR_COLORS = [
+  "#2563eb",
+  "#7c3aed",
+  "#0891b2",
+  "#059669",
+  "#d97706",
+  "#dc2626",
+  "#db2777",
+  "#4f46e5",
+];
+
+function avatarColor(name: string) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return AVATAR_COLORS[h % AVATAR_COLORS.length];
+}
+
+function relativeTime(isoStr: string) {
+  if (!isoStr) return "";
+  const diff = Date.now() - new Date(isoStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return `${days}d ago`;
+  return new Date(isoStr).toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+  });
+}
+
+function fmtDate(str: string) {
+  if (!str) return "";
+  return new Date(str).toLocaleDateString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  });
+}
+
+// ─── API ──────────────────────────────────────────────────────────────────────
+
+async function fetchCalls(): Promise<CallEntry[]> {
+  const res = await fetchWithAuth("/api/followup-log?module=welcome_call");
+  if (!res.ok) throw new Error("Failed to load welcome calls");
+  return res.json();
+}
+
+async function createCall(payload: {
+  date?: string;
+  type: string;
+  module: string;
+  customer: string;
+  amount?: number;
+  notes?: string;
+}) {
+  const res = await fetchWithAuth("/api/followup-log", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(
+      (err as { error?: string }).error || "Failed to create entry",
+    );
+  }
+}
+
+async function deleteCall(id: string) {
+  const res = await fetchWithAuth(`/api/followup-log/${id}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("Failed to delete entry");
+}
+
+interface Applicant {
+  LHeadId: number;
+  LHeadCode: string;
+  LHeadName: string;
+  LHeadPhone?: string;
+}
+
+async function fetchApplicants(): Promise<Applicant[]> {
+  const res = await fetchWithAuth("/api/applicants");
+  if (!res.ok) throw new Error("Failed to load applicants");
+  const json = await res.json();
+  return json.data ?? json;
+}
+
+// ─── Call Entry Card ──────────────────────────────────────────────────────────
+
+function CallCard({
+  entry,
+  onDelete,
+}: {
+  entry: CallEntry;
+  onDelete: () => void;
+}) {
+  const cfg = OUTCOME_CONFIG[entry.type] ?? OUTCOME_CONFIG.note;
+  const color = avatarColor(entry.customer);
+
+  return (
+    <div className="wc-card group">
+      {/* Timeline dot + line */}
+      <div className="wc-timeline">
+        <div
+          className="wc-tl-dot"
+          style={{ background: cfg.dot.replace("bg-", "") }}
+        >
+          <span className={`wc-tl-dot-inner ${cfg.dot}`} />
+        </div>
+        <div className="wc-tl-line" />
+      </div>
+
+      {/* Card body */}
+      <div className="wc-card-body">
+        {/* Row 1: avatar + name + outcome + time */}
+        <div className="wc-card-header">
+          <div className="wc-avatar" style={{ background: color }}>
+            {initials(entry.customer)}
+          </div>
+          <div className="wc-card-meta">
+            <span className="wc-customer-name">{entry.customer}</span>
+            <div className="wc-card-sub">
+              {entry.date && (
+                <span className="wc-meta-item">
+                  <Calendar className="w-3 h-3" />
+                  {fmtDate(entry.date)}
+                </span>
+              )}
+              {entry.user && (
+                <span className="wc-meta-item">
+                  <User className="w-3 h-3" />
+                  {entry.user}
+                </span>
+              )}
+              {entry.amount && (
+                <span className="wc-meta-item">
+                  <Clock className="w-3 h-3" />
+                  {entry.amount}m
+                </span>
+              )}
+            </div>
+          </div>
+          <div className="wc-card-right">
+            <span className={`wc-outcome-chip ${cfg.bg}`}>
+              <span className={`wc-chip-icon ${cfg.iconBg}`}>{cfg.icon}</span>
+              {cfg.label}
+            </span>
+            <span className="wc-time-ago">{relativeTime(entry.createdAt)}</span>
+          </div>
+        </div>
+
+        {/* Notes */}
+        {entry.notes && <p className="wc-notes">{entry.notes}</p>}
+
+        {/* Delete (hover reveal) */}
+        <button
+          className="wc-delete-btn"
+          onClick={onDelete}
+          title="Delete entry"
+        >
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
+
+export function WelcomeCallsPage() {
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+
+  const [search, setSearch] = useState("");
+  const [outcomeFilter, setOutcomeFilter] = useState<CallOutcome | "all">(
+    "all",
+  );
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [form, setForm] = useState<FormState>(EMPTY_FORM);
+  const [applOpen, setApplOpen] = useState(false);
+  const [applSearch, setApplSearch] = useState("");
+
+  const { data: entries = [], isLoading } = useQuery({
+    queryKey: ["welcome-calls"],
+    queryFn: fetchCalls,
+  });
+
+  const { data: applicants = [] } = useQuery({
+    queryKey: ["applicants"],
+    queryFn: fetchApplicants,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const filteredApplicants = useMemo(() => {
+    const q = applSearch.toLowerCase();
+    if (!q) return applicants;
+    return applicants.filter(
+      (a) =>
+        a.LHeadName.toLowerCase().includes(q) ||
+        a.LHeadCode.toLowerCase().includes(q) ||
+        (a.LHeadPhone ?? "").toLowerCase().includes(q),
+    );
+  }, [applicants, applSearch]);
+
+  const createMutation = useMutation({
+    mutationFn: createCall,
+    onSuccess: () => {
+      toast.success("Call logged");
+      queryClient.invalidateQueries({ queryKey: ["welcome-calls"] });
+      setForm(EMPTY_FORM);
+      setDialogOpen(false);
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: deleteCall,
+    onSuccess: () => {
+      toast.success("Deleted");
+      queryClient.invalidateQueries({ queryKey: ["welcome-calls"] });
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
+  const stats = useMemo(() => {
+    const total = entries.length;
+    const connected = entries.filter((e) => e.type === "connected").length;
+    const noAnswer = entries.filter((e) => e.type === "no_answer").length;
+    const callback = entries.filter((e) => e.type === "callback").length;
+    const rate = total > 0 ? Math.round((connected / total) * 100) : 0;
+    return { total, connected, noAnswer, callback, rate };
+  }, [entries]);
+
+  const filtered = useMemo(() => {
+    return entries.filter((e) => {
+      const matchOutcome = outcomeFilter === "all" || e.type === outcomeFilter;
+      const q = search.toLowerCase();
+      const matchSearch =
+        !q || [e.customer, e.notes, e.user].join(" ").toLowerCase().includes(q);
+      return matchOutcome && matchSearch;
+    });
+  }, [entries, outcomeFilter, search]);
+
+  const set = (k: keyof FormState, v: string) =>
+    setForm((f) => ({ ...f, [k]: v }));
+
+  return (
+    <>
+      <style>{`
+        /* ── Root ── */
+        .wc-page {
+          min-height: 100vh;
+          background: #f8fafc;
+          font-family: 'DM Sans', 'Segoe UI', sans-serif;
+          color: #0f172a;
+        }
+
+        /* ── Header ── */
+        .wc-header {
+          background: #fff;
+          border-bottom: 1px solid #e2e8f0;
+          padding: 20px 28px 0;
+          position: sticky;
+          top: 0;
+          z-index: 20;
+        }
+        .wc-header-top {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          margin-bottom: 16px;
+          gap: 16px;
+        }
+        .wc-breadcrumb {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 12px;
+          color: #94a3b8;
+          margin-bottom: 6px;
+        }
+        .wc-breadcrumb button {
+          background: none;
+          border: none;
+          cursor: pointer;
+          color: #94a3b8;
+          font-size: 12px;
+          padding: 0;
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          transition: color 0.15s;
+        }
+        .wc-breadcrumb button:hover { color: #475569; }
+        .wc-breadcrumb-sep { font-size: 10px; }
+        .wc-breadcrumb-cur { color: #475569; font-weight: 500; }
+
+        .wc-title-row {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+        }
+        .wc-title-icon {
+          width: 36px; height: 36px;
+          background: #2563eb;
+          border-radius: 9px;
+          display: flex; align-items: center; justify-content: center;
+          color: #fff;
+          flex-shrink: 0;
+        }
+        .wc-title {
+          font-size: 22px;
+          font-weight: 700;
+          letter-spacing: -0.4px;
+          color: #0f172a;
+        }
+        .wc-count {
+          font-size: 13px;
+          font-weight: 500;
+          color: #64748b;
+          background: #f1f5f9;
+          border-radius: 20px;
+          padding: 2px 10px;
+        }
+        .wc-log-btn {
+          display: flex; align-items: center; gap: 6px;
+          background: #2563eb;
+          color: #fff;
+          border: none;
+          border-radius: 9px;
+          padding: 9px 16px;
+          font-size: 13px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: background 0.15s;
+          white-space: nowrap;
+          flex-shrink: 0;
+        }
+        .wc-log-btn:hover { background: #1d4ed8; }
+
+        /* ── Stats strip ── */
+        .wc-stats {
+          display: flex;
+          gap: 0;
+          border-top: 1px solid #f1f5f9;
+          margin-top: 4px;
+        }
+        .wc-stat {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          padding: 12px 8px;
+          border-right: 1px solid #f1f5f9;
+          gap: 2px;
+          min-width: 0;
+        }
+        .wc-stat:last-child { border-right: none; }
+        .wc-stat-value {
+          font-size: 20px;
+          font-weight: 700;
+          line-height: 1;
+          color: #0f172a;
+        }
+        .wc-stat-label {
+          font-size: 11px;
+          color: #94a3b8;
+          text-transform: uppercase;
+          letter-spacing: 0.5px;
+          white-space: nowrap;
+        }
+        .wc-stat-dot {
+          width: 7px; height: 7px;
+          border-radius: 50%;
+          margin-bottom: 2px;
+        }
+
+        /* ── Filter bar ── */
+        .wc-filter-bar {
+          background: #fff;
+          border-bottom: 1px solid #e2e8f0;
+          padding: 10px 28px;
+          display: flex;
+          gap: 10px;
+          align-items: center;
+          flex-wrap: wrap;
+        }
+        .wc-search-wrap {
+          position: relative;
+          flex: 1;
+          min-width: 200px;
+        }
+        .wc-search-wrap svg {
+          position: absolute;
+          left: 11px; top: 50%;
+          transform: translateY(-50%);
+          color: #94a3b8;
+          pointer-events: none;
+          width: 14px; height: 14px;
+        }
+        .wc-search {
+          width: 100%;
+          padding: 8px 12px 8px 34px;
+          border: 1.5px solid #e2e8f0;
+          border-radius: 9px;
+          font-size: 13.5px;
+          background: #f8fafc;
+          color: #0f172a;
+          outline: none;
+          transition: border-color 0.15s;
+          box-sizing: border-box;
+          font-family: inherit;
+        }
+        .wc-search:focus { border-color: #2563eb; background: #fff; }
+        .wc-search-clear {
+          position: absolute;
+          right: 10px; top: 50%;
+          transform: translateY(-50%);
+          background: none; border: none;
+          cursor: pointer;
+          color: #94a3b8;
+          padding: 2px;
+          display: flex;
+        }
+        .wc-search-clear:hover { color: #475569; }
+
+        .wc-pills { display: flex; gap: 6px; flex-wrap: wrap; }
+        .wc-pill {
+          display: flex; align-items: center; gap: 5px;
+          padding: 6px 12px;
+          border-radius: 9px;
+          font-size: 12px;
+          font-weight: 600;
+          border: 1.5px solid #e2e8f0;
+          background: #f8fafc;
+          color: #64748b;
+          cursor: pointer;
+          transition: all 0.15s;
+          white-space: nowrap;
+        }
+        .wc-pill:hover { border-color: #2563eb; color: #2563eb; }
+        .wc-pill.active {
+          background: #2563eb;
+          border-color: #2563eb;
+          color: #fff;
+        }
+        .wc-pill-dot {
+          width: 6px; height: 6px;
+          border-radius: 50%;
+          flex-shrink: 0;
+        }
+
+        /* ── Body ── */
+        .wc-body {
+          padding: 24px 28px;
+          max-width: 900px;
+        }
+
+        /* ── Timeline feed ── */
+        .wc-feed { display: flex; flex-direction: column; gap: 0; }
+
+        .wc-card {
+          display: flex;
+          gap: 0;
+          position: relative;
+        }
+
+        /* Timeline column */
+        .wc-timeline {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          width: 32px;
+          flex-shrink: 0;
+          padding-top: 18px;
+        }
+        .wc-tl-dot {
+          width: 20px; height: 20px;
+          border-radius: 50%;
+          background: #f1f5f9;
+          border: 2px solid #fff;
+          box-shadow: 0 0 0 2px #e2e8f0;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+          z-index: 1;
+        }
+        .wc-tl-dot-inner {
+          width: 8px; height: 8px;
+          border-radius: 50%;
+          display: block;
+        }
+        .wc-tl-line {
+          flex: 1;
+          width: 2px;
+          background: #e2e8f0;
+          min-height: 16px;
+        }
+        .wc-card:last-child .wc-tl-line { display: none; }
+
+        /* Card body */
+        .wc-card-body {
+          flex: 1;
+          background: #fff;
+          border: 1.5px solid #e2e8f0;
+          border-radius: 12px;
+          padding: 14px 16px;
+          margin: 10px 0 10px 12px;
+          position: relative;
+          transition: border-color 0.15s, box-shadow 0.15s;
+        }
+        .wc-card-body:hover {
+          border-color: #bfdbfe;
+          box-shadow: 0 2px 12px rgba(37,99,235,0.07);
+        }
+
+        .wc-card-header {
+          display: flex;
+          align-items: flex-start;
+          gap: 10px;
+        }
+        .wc-avatar {
+          width: 36px; height: 36px;
+          border-radius: 10px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          font-size: 13px;
+          font-weight: 700;
+          color: #fff;
+          flex-shrink: 0;
+          letter-spacing: 0.3px;
+        }
+        .wc-card-meta { flex: 1; min-width: 0; }
+        .wc-customer-name {
+          font-size: 14.5px;
+          font-weight: 600;
+          color: #0f172a;
+          display: block;
+          margin-bottom: 3px;
+        }
+        .wc-card-sub {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 10px;
+        }
+        .wc-meta-item {
+          display: flex;
+          align-items: center;
+          gap: 4px;
+          font-size: 12px;
+          color: #64748b;
+        }
+        .wc-card-right {
+          display: flex;
+          flex-direction: column;
+          align-items: flex-end;
+          gap: 4px;
+          flex-shrink: 0;
+        }
+
+        /* Outcome chip */
+        .wc-outcome-chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 0;
+          font-size: 11.5px;
+          font-weight: 600;
+          border-radius: 8px;
+          border: 1.5px solid;
+          overflow: hidden;
+          line-height: 1;
+        }
+        .wc-chip-icon {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 24px; height: 24px;
+          border-radius: 0;
+        }
+        .wc-outcome-chip span.wc-chip-icon + * { padding: 0 8px; }
+
+        .wc-time-ago {
+          font-size: 11px;
+          color: #94a3b8;
+        }
+
+        /* Notes */
+        .wc-notes {
+          margin: 10px 0 0 0;
+          font-size: 13px;
+          color: #475569;
+          line-height: 1.55;
+          background: #f8fafc;
+          border-radius: 8px;
+          padding: 8px 12px;
+          border-left: 3px solid #e2e8f0;
+        }
+
+        /* Delete btn */
+        .wc-delete-btn {
+          position: absolute;
+          top: 10px; right: 10px;
+          background: none;
+          border: none;
+          cursor: pointer;
+          color: #cbd5e1;
+          padding: 4px;
+          border-radius: 6px;
+          display: none;
+          transition: color 0.15s, background 0.15s;
+        }
+        .wc-card-body:hover .wc-delete-btn { display: flex; }
+        .wc-delete-btn:hover { color: #dc2626; background: #fee2e2; }
+
+        /* ── Empty state ── */
+        .wc-empty {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          justify-content: center;
+          padding: 60px 24px;
+          color: #94a3b8;
+          gap: 12px;
+        }
+        .wc-empty-icon {
+          width: 56px; height: 56px;
+          background: #eff6ff;
+          border-radius: 14px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .wc-empty h3 {
+          font-size: 15px;
+          font-weight: 600;
+          color: #64748b;
+          margin: 0;
+        }
+        .wc-empty p {
+          font-size: 13px;
+          color: #94a3b8;
+          margin: 0;
+          text-align: center;
+        }
+
+        /* ── Skeleton ── */
+        .wc-skeleton-card {
+          display: flex;
+          gap: 12px;
+          align-items: flex-start;
+          margin-bottom: 10px;
+        }
+        .wc-skel {
+          background: #f1f5f9;
+          border-radius: 6px;
+          animation: wc-pulse 1.4s ease-in-out infinite;
+        }
+        @keyframes wc-pulse { 0%,100%{opacity:1} 50%{opacity:.5} }
+
+        /* ── Dialog form ── */
+        .wc-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+        .wc-outcome-grid {
+          display: grid;
+          grid-template-columns: repeat(5, 1fr);
+          gap: 8px;
+        }
+        .wc-outcome-option {
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          gap: 5px;
+          padding: 10px 6px;
+          border: 1.5px solid #e2e8f0;
+          border-radius: 10px;
+          cursor: pointer;
+          font-size: 11px;
+          font-weight: 600;
+          color: #64748b;
+          background: #f8fafc;
+          transition: all 0.15s;
+          text-align: center;
+          line-height: 1.2;
+        }
+        .wc-outcome-option:hover { border-color: #2563eb; color: #2563eb; background: #eff6ff; }
+        .wc-outcome-option.selected {
+          border-color: #2563eb;
+          background: #eff6ff;
+          color: #1d4ed8;
+        }
+        .wc-outcome-option .icon-wrap {
+          width: 28px; height: 28px;
+          border-radius: 8px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        @media (max-width: 640px) {
+          .wc-header { padding: 16px 16px 0; }
+          .wc-filter-bar { padding: 10px 16px; }
+          .wc-body { padding: 16px; }
+          .wc-form-grid { grid-template-columns: 1fr; }
+          .wc-outcome-grid { grid-template-columns: repeat(3, 1fr); }
+          .wc-stats { flex-wrap: wrap; }
+          .wc-stat { min-width: calc(50% - 1px); }
+        }
+
+        /* ── Applicant combobox ── */
+        .wc-combobox { position: relative; width: 100%; }
+        .wc-combobox-trigger {
+          width: 100%; display: flex; align-items: center;
+          justify-content: space-between; gap: 8px;
+          padding: 8px 12px; border: 1.5px solid #e2e8f0;
+          border-radius: 9px; font-size: 14px; background: #fff;
+          color: #0f172a; cursor: pointer; text-align: left;
+          transition: border-color 0.15s; font-family: inherit; min-height: 38px;
+        }
+        .wc-combobox-trigger:focus { outline: none; border-color: #2563eb; }
+        .wc-combobox-trigger.open { border-color: #2563eb; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+        .wc-combobox-trigger.empty { color: #94a3b8; }
+        .wc-combobox-trigger-left { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
+        .wc-combobox-avatar {
+          width: 24px; height: 24px; border-radius: 6px; font-size: 10px;
+          font-weight: 700; color: #fff; display: flex; align-items: center;
+          justify-content: center; flex-shrink: 0; letter-spacing: 0.3px;
+        }
+        .wc-combobox-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .wc-combobox-code { font-size: 11px; color: #94a3b8; flex-shrink: 0; }
+        .wc-combobox-chevron { color: #94a3b8; flex-shrink: 0; transition: transform 0.15s; }
+        .wc-combobox-chevron.open { transform: rotate(180deg); }
+        .wc-combobox-clear {
+          background: none; border: none; cursor: pointer; color: #94a3b8;
+          padding: 2px; display: flex; flex-shrink: 0; border-radius: 4px;
+        }
+        .wc-combobox-clear:hover { color: #64748b; background: #f1f5f9; }
+        .wc-combobox-dropdown {
+          position: absolute; top: 100%; left: 0; right: 0; background: #fff;
+          border: 1.5px solid #2563eb; border-top: 1px solid #e2e8f0;
+          border-radius: 0 0 9px 9px; box-shadow: 0 8px 24px rgba(0,0,0,0.10);
+          z-index: 100; overflow: hidden; max-height: 280px; display: flex; flex-direction: column;
+        }
+        .wc-combobox-search-wrap { position: relative; border-bottom: 1px solid #f1f5f9; flex-shrink: 0; }
+        .wc-combobox-search-wrap svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #94a3b8; pointer-events: none; }
+        .wc-combobox-search {
+          width: 100%; padding: 9px 12px 9px 36px; border: none; font-size: 13px;
+          color: #0f172a; background: #f8fafc; outline: none; font-family: inherit; box-sizing: border-box;
+        }
+        .wc-combobox-list { overflow-y: auto; flex: 1; }
+        .wc-combobox-item {
+          display: flex; align-items: center; gap: 10px; padding: 9px 12px;
+          cursor: pointer; transition: background 0.1s; border: none; background: none;
+          width: 100%; text-align: left; font-family: inherit;
+        }
+        .wc-combobox-item:hover { background: #eff6ff; }
+        .wc-combobox-item.selected { background: #dbeafe; }
+        .wc-combobox-item-name { font-size: 13.5px; font-weight: 500; color: #0f172a; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .wc-combobox-item-code { font-size: 11px; color: #94a3b8; flex-shrink: 0; }
+        .wc-combobox-item-phone { font-size: 11px; color: #64748b; flex-shrink: 0; }
+        .wc-combobox-empty { padding: 20px; text-align: center; font-size: 13px; color: #94a3b8; }
+      `}</style>
+
+      <div className="wc-page">
+        {/* ── Header ── */}
+        <div className="wc-header">
+          <div className="wc-header-top">
+            <div>
+              <div className="wc-breadcrumb">
+                <button onClick={() => navigate("/followup")}>
+                  <ArrowLeft style={{ width: 12, height: 12 }} /> Follow-Up
+                </button>
+                <span className="wc-breadcrumb-sep">›</span>
+                <span className="wc-breadcrumb-cur">Welcome Calls</span>
+              </div>
+              <div className="wc-title-row">
+                <div className="wc-title-icon">
+                  <Phone style={{ width: 18, height: 18 }} />
+                </div>
+                <span className="wc-title">Welcome Calls</span>
+                <span className="wc-count">{entries.length}</span>
+              </div>
+            </div>
+            <button className="wc-log-btn" onClick={() => setDialogOpen(true)}>
+              <Plus style={{ width: 15, height: 15 }} />
+              Log Call
+            </button>
+          </div>
+
+          {/* Stats strip */}
+          <div className="wc-stats">
+            {[
+              { label: "Total", value: stats.total, dot: "#94a3b8" },
+              { label: "Connected", value: stats.connected, dot: "#10b981" },
+              { label: "No Answer", value: stats.noAnswer, dot: "#f87171" },
+              { label: "Callback", value: stats.callback, dot: "#3b82f6" },
+              {
+                label: "Connect Rate",
+                value: `${stats.rate}%`,
+                dot: "#8b5cf6",
+              },
+            ].map(({ label, value, dot }) => (
+              <div key={label} className="wc-stat">
+                <div className="wc-stat-dot" style={{ background: dot }} />
+                <div className="wc-stat-value">{value}</div>
+                <div className="wc-stat-label">{label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* ── Filter bar ── */}
+        <div className="wc-filter-bar">
+          <div className="wc-search-wrap">
+            <Search />
+            <input
+              className="wc-search"
+              placeholder="Search by name or notes…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            {search && (
+              <button className="wc-search-clear" onClick={() => setSearch("")}>
+                <X style={{ width: 13, height: 13 }} />
+              </button>
+            )}
+          </div>
+          <div className="wc-pills">
+            {(
+              [
+                "all",
+                "connected",
+                "no_answer",
+                "callback",
+                "voicemail",
+                "note",
+              ] as const
+            ).map((o) => {
+              const isAll = o === "all";
+              const cfg = isAll ? null : OUTCOME_CONFIG[o];
+              return (
+                <button
+                  key={o}
+                  className={`wc-pill ${outcomeFilter === o ? "active" : ""}`}
+                  onClick={() => setOutcomeFilter(o)}
+                >
+                  {cfg && (
+                    <span
+                      className="wc-pill-dot"
+                      style={{
+                        background:
+                          outcomeFilter === o
+                            ? "#fff"
+                            : cfg.dot.replace("bg-", ""),
+                        opacity: outcomeFilter === o ? 0.8 : 1,
+                      }}
+                    />
+                  )}
+                  {isAll ? "All" : cfg!.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* ── Body / Timeline feed ── */}
+        <div className="wc-body">
+          {isLoading ? (
+            <div className="wc-feed">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="wc-skeleton-card">
+                  <div
+                    className="wc-skel"
+                    style={{
+                      width: 20,
+                      height: 20,
+                      borderRadius: "50%",
+                      marginTop: 18,
+                      flexShrink: 0,
+                    }}
+                  />
+                  <div style={{ flex: 1 }}>
+                    <div
+                      className="wc-skel"
+                      style={{ height: 80, borderRadius: 12, marginBottom: 10 }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : filtered.length === 0 ? (
+            <div className="wc-empty">
+              <div className="wc-empty-icon">
+                <PhoneCall
+                  style={{ width: 26, height: 26, color: "#3b82f6" }}
+                />
+              </div>
+              <h3>
+                {search || outcomeFilter !== "all"
+                  ? "No matching calls"
+                  : "No welcome calls yet"}
+              </h3>
+              <p>
+                {search || outcomeFilter !== "all"
+                  ? "Try changing your search or filter"
+                  : "Log the first welcome call to get started"}
+              </p>
+              {!search && outcomeFilter === "all" && (
+                <button
+                  className="wc-log-btn"
+                  onClick={() => setDialogOpen(true)}
+                  style={{ marginTop: 4 }}
+                >
+                  <Plus style={{ width: 14, height: 14 }} /> Log Call
+                </button>
+              )}
+            </div>
+          ) : (
+            <div className="wc-feed">
+              {filtered.map((entry) => (
+                <CallCard
+                  key={entry.id}
+                  entry={entry}
+                  onDelete={() => deleteMutation.mutate(entry.id)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Log Call Dialog ── */}
+      <Dialog
+        open={dialogOpen}
+        onOpenChange={(v) => {
+          if (!v) setDialogOpen(false);
+        }}
+      >
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-base font-bold flex items-center gap-2">
+              <div
+                style={{
+                  width: 28,
+                  height: 28,
+                  background: "#2563eb",
+                  borderRadius: 7,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <Phone style={{ width: 14, height: 14, color: "#fff" }} />
+              </div>
+              Log Welcome Call
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-4 py-1">
+            {/* Outcome selector */}
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                Call Outcome
+              </Label>
+              <div className="wc-outcome-grid">
+                {(
+                  [
+                    "connected",
+                    "no_answer",
+                    "callback",
+                    "voicemail",
+                    "note",
+                  ] as CallOutcome[]
+                ).map((o) => {
+                  const cfg = OUTCOME_CONFIG[o];
+                  return (
+                    <button
+                      key={o}
+                      className={`wc-outcome-option ${form.outcome === o ? "selected" : ""}`}
+                      onClick={() => set("outcome", o)}
+                    >
+                      <div
+                        className="icon-wrap"
+                        style={{
+                          background:
+                            form.outcome === o ? "#dbeafe" : "#f1f5f9",
+                          color: form.outcome === o ? "#2563eb" : "#64748b",
+                        }}
+                      >
+                        {cfg.icon}
+                      </div>
+                      {cfg.label}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Customer */}
+            <div className="space-y-2">
+              <Label>
+                Customer / Applicant <span className="text-red-500">*</span>
+              </Label>
+              <div className="wc-combobox">
+                <button
+                  type="button"
+                  className={`wc-combobox-trigger${applOpen ? " open" : ""}${!form.customer ? " empty" : ""}`}
+                  onClick={() => { setApplOpen((v) => !v); setApplSearch(""); }}
+                >
+                  <span className="wc-combobox-trigger-left">
+                    {form.customer ? (
+                      <>
+                        <span className="wc-combobox-avatar" style={{ background: avatarColor(form.customer) }}>
+                          {initials(form.customer)}
+                        </span>
+                        <span className="wc-combobox-name">{form.customer}</span>
+                      </>
+                    ) : (
+                      <span>Select applicant…</span>
+                    )}
+                  </span>
+                  <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                    {form.customer && (
+                      <span className="wc-combobox-clear" onClick={(e) => { e.stopPropagation(); set("customer", ""); setApplOpen(false); }}>
+                        <X style={{ width: 13, height: 13 }} />
+                      </span>
+                    )}
+                    <svg className={`wc-combobox-chevron${applOpen ? " open" : ""}`} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M6 9l6 6 6-6"/></svg>
+                  </span>
+                </button>
+                {applOpen && (
+                  <div className="wc-combobox-dropdown">
+                    <div className="wc-combobox-search-wrap">
+                      <Search style={{ width: 14, height: 14 }} />
+                      <input
+                        className="wc-combobox-search"
+                        placeholder="Search by name, code or phone…"
+                        value={applSearch}
+                        onChange={(e) => setApplSearch(e.target.value)}
+                        autoFocus
+                      />
+                    </div>
+                    <div className="wc-combobox-list">
+                      {filteredApplicants.length === 0 ? (
+                        <div className="wc-combobox-empty">No applicants found</div>
+                      ) : (
+                        filteredApplicants.map((a) => (
+                          <button
+                            key={a.LHeadId}
+                            type="button"
+                            className={`wc-combobox-item${form.customer === a.LHeadName ? " selected" : ""}`}
+                            onClick={() => { set("customer", a.LHeadName); setApplOpen(false); setApplSearch(""); }}
+                          >
+                            <span className="wc-combobox-avatar" style={{ background: avatarColor(a.LHeadName) }}>
+                              {initials(a.LHeadName)}
+                            </span>
+                            <span className="wc-combobox-item-name">{a.LHeadName}</span>
+                            {a.LHeadCode && <span className="wc-combobox-item-code">{a.LHeadCode}</span>}
+                            {a.LHeadPhone && <span className="wc-combobox-item-phone">{a.LHeadPhone}</span>}
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Date + Duration */}
+            <div className="wc-form-grid">
+              <div className="space-y-2">
+                <Label>Call Date</Label>
+                <Input
+                  type="date"
+                  value={form.date}
+                  onChange={(e) => set("date", e.target.value)}
+                  className="rounded-[9px]"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Duration (minutes)</Label>
+                <Input
+                  type="number"
+                  min="0"
+                  value={form.duration}
+                  onChange={(e) => set("duration", e.target.value)}
+                  placeholder="e.g. 5"
+                  className="rounded-[9px]"
+                />
+              </div>
+            </div>
+
+            {/* Notes */}
+            <div className="space-y-2">
+              <Label>Notes</Label>
+              <Textarea
+                value={form.notes}
+                onChange={(e) => set("notes", e.target.value)}
+                placeholder="What was discussed? Any follow-up needed?"
+                rows={3}
+                className="rounded-[9px] resize-none"
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDialogOpen(false)}
+              className="rounded-[9px]"
+            >
+              Cancel
+            </Button>
+            <Button
+              disabled={!form.customer.trim() || createMutation.isPending}
+              onClick={() =>
+                createMutation.mutate({
+                  date: form.date || undefined,
+                  type: form.outcome,
+                  module: "welcome_call",
+                  customer: form.customer.trim(),
+                  amount: form.duration ? Number(form.duration) : undefined,
+                  notes: form.notes.trim() || undefined,
+                })
+              }
+              className="bg-blue-600 hover:bg-blue-700 text-white rounded-[9px] gap-2"
+            >
+              {createMutation.isPending ? (
+                "Saving…"
+              ) : (
+                <>
+                  <CheckCircle2 className="w-4 h-4" /> Save Call
+                </>
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+export default WelcomeCallsPage;
