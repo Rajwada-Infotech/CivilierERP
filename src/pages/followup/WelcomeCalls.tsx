@@ -595,7 +595,9 @@ export function WelcomeCallsPage() {
         /* ── Body ── */
         .wc-body {
           padding: 24px 28px;
-          max-width: 900px;
+          width: 100%;
+          display: flex;
+          flex-direction: column;
         }
 
         /* ── Timeline feed ── */
@@ -1147,27 +1149,54 @@ export function WelcomeCallsPage() {
                 <button
                   type="button"
                   className={`wc-combobox-trigger${applOpen ? " open" : ""}${!form.customer ? " empty" : ""}`}
-                  onClick={() => { setApplOpen((v) => !v); setApplSearch(""); }}
+                  onClick={() => {
+                    setApplOpen((v) => !v);
+                    setApplSearch("");
+                  }}
                 >
                   <span className="wc-combobox-trigger-left">
                     {form.customer ? (
                       <>
-                        <span className="wc-combobox-avatar" style={{ background: avatarColor(form.customer) }}>
+                        <span
+                          className="wc-combobox-avatar"
+                          style={{ background: avatarColor(form.customer) }}
+                        >
                           {initials(form.customer)}
                         </span>
-                        <span className="wc-combobox-name">{form.customer}</span>
+                        <span className="wc-combobox-name">
+                          {form.customer}
+                        </span>
                       </>
                     ) : (
                       <span>Select applicant…</span>
                     )}
                   </span>
-                  <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <span
+                    style={{ display: "flex", alignItems: "center", gap: 4 }}
+                  >
                     {form.customer && (
-                      <span className="wc-combobox-clear" onClick={(e) => { e.stopPropagation(); set("customer", ""); setApplOpen(false); }}>
+                      <span
+                        className="wc-combobox-clear"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          set("customer", "");
+                          setApplOpen(false);
+                        }}
+                      >
                         <X style={{ width: 13, height: 13 }} />
                       </span>
                     )}
-                    <svg className={`wc-combobox-chevron${applOpen ? " open" : ""}`} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M6 9l6 6 6-6"/></svg>
+                    <svg
+                      className={`wc-combobox-chevron${applOpen ? " open" : ""}`}
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2.5"
+                    >
+                      <path d="M6 9l6 6 6-6" />
+                    </svg>
                   </span>
                 </button>
                 {applOpen && (
@@ -1184,21 +1213,40 @@ export function WelcomeCallsPage() {
                     </div>
                     <div className="wc-combobox-list">
                       {filteredApplicants.length === 0 ? (
-                        <div className="wc-combobox-empty">No applicants found</div>
+                        <div className="wc-combobox-empty">
+                          No applicants found
+                        </div>
                       ) : (
                         filteredApplicants.map((a) => (
                           <button
                             key={a.LHeadId}
                             type="button"
                             className={`wc-combobox-item${form.customer === a.LHeadName ? " selected" : ""}`}
-                            onClick={() => { set("customer", a.LHeadName); setApplOpen(false); setApplSearch(""); }}
+                            onClick={() => {
+                              set("customer", a.LHeadName);
+                              setApplOpen(false);
+                              setApplSearch("");
+                            }}
                           >
-                            <span className="wc-combobox-avatar" style={{ background: avatarColor(a.LHeadName) }}>
+                            <span
+                              className="wc-combobox-avatar"
+                              style={{ background: avatarColor(a.LHeadName) }}
+                            >
                               {initials(a.LHeadName)}
                             </span>
-                            <span className="wc-combobox-item-name">{a.LHeadName}</span>
-                            {a.LHeadCode && <span className="wc-combobox-item-code">{a.LHeadCode}</span>}
-                            {a.LHeadPhone && <span className="wc-combobox-item-phone">{a.LHeadPhone}</span>}
+                            <span className="wc-combobox-item-name">
+                              {a.LHeadName}
+                            </span>
+                            {a.LHeadCode && (
+                              <span className="wc-combobox-item-code">
+                                {a.LHeadCode}
+                              </span>
+                            )}
+                            {a.LHeadPhone && (
+                              <span className="wc-combobox-item-phone">
+                                {a.LHeadPhone}
+                              </span>
+                            )}
                           </button>
                         ))
                       )}
