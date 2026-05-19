@@ -69,8 +69,6 @@ interface OptionItem {
   Name?: string;
   ApplicantNo?: string;
   ApplicantName?: string;
-  ProjectId?: number | null;
-  CompanyId?: number | null;
 }
 
 interface Options {
@@ -459,18 +457,7 @@ function FormDialog({
   }
 
   const set = (key: keyof FormState, value: string) =>
-    setForm((f) => {
-      const next = { ...f, [key]: value };
-      // Auto-fill project/company from applicant
-      if (key === "ApplicantId") {
-        const appl = options.applicants.find((a) => String(a.Id) === value);
-        if (appl) {
-          if (appl.ProjectId) next.ProjectId = String(appl.ProjectId);
-          if (appl.CompanyId) next.CompanyId = String(appl.CompanyId);
-        }
-      }
-      return next;
-    });
+    setForm((f) => ({ ...f, [key]: value }));
 
   const computed = computedValue(form);
 
@@ -787,213 +774,238 @@ export function UnitSelectionPage() {
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@400;500;600&display=swap');
-        .us-page { font-family: 'DM Sans', sans-serif; }
-        .us-heading { font-family: 'Syne', sans-serif; }
+        .us-page { font-family: 'DM Sans', 'Segoe UI', sans-serif; color: #0f172a; }
+        .us-heading { font-family: 'DM Sans', 'Segoe UI', sans-serif; font-weight: 700; letter-spacing: -0.4px; }
       `}</style>
 
-      <div className="us-page min-h-screen bg-slate-50/60 p-6">
-        <div className="max-w-7xl mx-auto space-y-6">
-          {/* Header */}
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+      <div className="us-page min-h-screen bg-[#f8fafc]">
+        {/* ── White sticky header (matches Applicants layout) ── */}
+        <div className="bg-white border-b border-slate-200 px-7 pt-5 pb-0">
+          {/* Breadcrumb + title row */}
+          <div className="flex items-center justify-between mb-4">
             <div>
-              <div className="flex items-center gap-2 text-sm text-slate-500 mb-2">
+              <div className="flex items-center gap-1.5 text-sm text-slate-400 mb-1.5">
                 <button
                   onClick={() => navigate("/followup")}
-                  className="hover:text-slate-800 transition-colors flex items-center gap-1"
+                  className="hover:text-slate-700 transition-colors flex items-center gap-1"
                 >
                   <ArrowLeft className="w-3.5 h-3.5" /> Follow-Up
                 </button>
                 <ChevronRight className="w-3.5 h-3.5" />
-                <span className="text-slate-800 font-medium">
+                <span className="text-slate-700 font-medium">
                   Unit Selection
                 </span>
               </div>
-              <h1 className="us-heading text-3xl font-bold text-slate-900 tracking-tight">
+              <div className="us-heading flex items-center gap-3 text-[22px] text-slate-900">
+                <div className="w-9 h-9 bg-violet-600 rounded-[9px] flex items-center justify-center flex-shrink-0">
+                  <Home className="w-[18px] h-[18px] text-white" />
+                </div>
                 Unit Selection
-              </h1>
-              <p className="text-slate-500 text-sm mt-1">
-                Reserve, negotiate, and confirm units against applicants.
-              </p>
+                <span className="text-[13px] font-medium text-slate-500 bg-slate-100 rounded-full px-2.5 py-0.5">
+                  {stats.total}
+                </span>
+              </div>
             </div>
             <Button
               onClick={openCreate}
-              className="bg-violet-600 hover:bg-violet-700 text-white gap-2 rounded-xl px-5 self-start sm:self-auto"
+              className="bg-violet-600 hover:bg-violet-700 text-white gap-2 rounded-xl px-5"
             >
               <Plus className="w-4 h-4" /> New Selection
             </Button>
           </div>
 
-          {/* Stats */}
-          <div className="grid grid-cols-3 gap-4">
-            <div className="bg-white rounded-2xl border border-slate-200 p-5">
-              <div className="flex items-center gap-3 mb-1">
-                <div className="w-9 h-9 rounded-xl bg-violet-50 flex items-center justify-center">
-                  <Layers className="w-4.5 h-4.5 text-violet-600" />
+          {/* Stats row (matches Applicants stats-row pattern) */}
+          <div className="flex gap-3 pb-[18px] overflow-x-auto">
+            {[
+              {
+                icon: <Layers className="w-4 h-4" />,
+                label: "Total",
+                value: stats.total,
+                accent: "#7c3aed",
+              },
+              {
+                icon: <Building2 className="w-4 h-4" />,
+                label: "Confirmed",
+                value: stats.confirmed,
+                accent: "#15803d",
+              },
+            ].map(({ icon, label, value, accent }) => (
+              <div
+                key={label}
+                className="flex items-center gap-2.5 bg-slate-50 border border-slate-200 rounded-[10px] px-4 py-2.5 min-w-[130px] flex-shrink-0"
+              >
+                <div
+                  className="w-[34px] h-[34px] rounded-lg flex items-center justify-center flex-shrink-0"
+                  style={{ background: `${accent}18`, color: accent }}
+                >
+                  {icon}
                 </div>
-                <span className="text-sm text-slate-500">Total</span>
-              </div>
-              <div className="us-heading text-3xl font-bold text-slate-900">
-                {stats.total}
-              </div>
-            </div>
-            <div className="bg-white rounded-2xl border border-slate-200 p-5">
-              <div className="flex items-center gap-3 mb-1">
-                <div className="w-9 h-9 rounded-xl bg-emerald-50 flex items-center justify-center">
-                  <Building2 className="w-4.5 h-4.5 text-emerald-600" />
+                <div>
+                  <div className="text-xl font-bold leading-tight text-slate-900">
+                    {value}
+                  </div>
+                  <div className="text-[11px] text-slate-400 uppercase tracking-[0.5px]">
+                    {label}
+                  </div>
                 </div>
-                <span className="text-sm text-slate-500">Confirmed</span>
               </div>
-              <div className="us-heading text-3xl font-bold text-slate-900">
-                {stats.confirmed}
+            ))}
+            <div className="flex items-center gap-2.5 bg-slate-50 border border-slate-200 rounded-[10px] px-4 py-2.5 min-w-[180px] flex-shrink-0">
+              <div
+                className="w-[34px] h-[34px] rounded-lg flex items-center justify-center flex-shrink-0"
+                style={{ background: "#b4530018", color: "#b45300" }}
+              >
+                <IndianRupee className="w-4 h-4" />
               </div>
-            </div>
-            <div className="bg-white rounded-2xl border border-slate-200 p-5">
-              <div className="flex items-center gap-3 mb-1">
-                <div className="w-9 h-9 rounded-xl bg-amber-50 flex items-center justify-center">
-                  <IndianRupee className="w-4.5 h-4.5 text-amber-600" />
+              <div>
+                <div className="text-xl font-bold leading-tight text-slate-900">
+                  ₹{stats.totalValue.toLocaleString("en-IN")}
                 </div>
-                <span className="text-sm text-slate-500">Visible value</span>
-              </div>
-              <div className="us-heading text-2xl font-bold text-slate-900">
-                ₹{stats.totalValue.toLocaleString("en-IN")}
+                <div className="text-[11px] text-slate-400 uppercase tracking-[0.5px]">
+                  Visible Value
+                </div>
               </div>
             </div>
           </div>
+        </div>
 
-          {/* Filters */}
-          <div className="flex flex-col sm:flex-row gap-3">
-            <div className="relative flex-1 max-w-sm">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400 pointer-events-none" />
-              <input
-                className="w-full pl-9 pr-9 py-2.5 border border-slate-200 rounded-xl text-sm bg-white focus:outline-none focus:ring-2 focus:ring-violet-500/30 focus:border-violet-400 transition-colors"
-                placeholder="Search unit, applicant, project…"
-                value={search}
-                onChange={(e) => {
-                  setSearch(e.target.value);
+        {/* ── Filter bar strip (matches Applicants filter-bar) ── */}
+        <div className="bg-white border-b border-slate-200 px-7 py-3 flex gap-2.5 items-center flex-wrap">
+          <div className="relative flex-1 min-w-[220px]">
+            <Search className="absolute left-[11px] top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
+            <input
+              className="w-full pl-9 pr-9 py-[9px] border-[1.5px] border-slate-200 rounded-[9px] text-sm bg-slate-50 text-slate-900 outline-none focus:border-violet-600 focus:bg-white transition-colors box-border"
+              placeholder="Search unit, applicant, project…"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setPage(1);
+              }}
+            />
+            {search && (
+              <button
+                onClick={() => {
+                  setSearch("");
                   setPage(1);
                 }}
-              />
-              {search && (
-                <button
-                  onClick={() => {
-                    setSearch("");
-                    setPage(1);
-                  }}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-            <div className="flex gap-2 flex-wrap">
-              {["all", ...statusOptions].map((s) => (
-                <button
-                  key={s}
-                  onClick={() => {
-                    setStatusFilter(s);
-                    setPage(1);
-                  }}
-                  className={`px-3.5 py-2 rounded-xl text-xs font-semibold border transition-all ${
-                    statusFilter === s
-                      ? "bg-violet-600 text-white border-violet-600 shadow-sm"
-                      : "bg-white text-slate-600 border-slate-200 hover:border-violet-300"
-                  }`}
-                >
-                  {s === "all" ? "All" : s}
-                </button>
-              ))}
-            </div>
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
           </div>
+          {["all", ...statusOptions].map((s) => (
+            <button
+              key={s}
+              onClick={() => {
+                setStatusFilter(s);
+                setPage(1);
+              }}
+              className={`px-3.5 py-[9px] rounded-[9px] text-xs font-semibold border-[1.5px] transition-all ${
+                statusFilter === s
+                  ? "bg-violet-600 text-white border-violet-600 shadow-sm"
+                  : "bg-slate-50 text-slate-600 border-slate-200 hover:border-violet-300"
+              }`}
+            >
+              {s === "all" ? "All" : s}
+            </button>
+          ))}
+        </div>
 
-          {/* Grid */}
-          {isLoading ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <div
-                  key={i}
-                  className="bg-white border border-slate-200 rounded-2xl p-5 animate-pulse"
-                >
-                  <div className="flex items-center gap-3 mb-4">
-                    <div className="w-10 h-10 bg-slate-100 rounded-xl" />
-                    <div className="flex-1 space-y-1.5">
-                      <div className="h-4 bg-slate-100 rounded w-2/3" />
-                      <div className="h-3 bg-slate-100 rounded w-1/3" />
+        {/* ── Body ── */}
+        <div className="px-7 py-5">
+          <div className="max-w-7xl mx-auto">
+            {/* Grid */}
+            {isLoading ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="bg-white border border-slate-200 rounded-2xl p-5 animate-pulse"
+                  >
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="w-10 h-10 bg-slate-100 rounded-xl" />
+                      <div className="flex-1 space-y-1.5">
+                        <div className="h-4 bg-slate-100 rounded w-2/3" />
+                        <div className="h-3 bg-slate-100 rounded w-1/3" />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      {[0, 1, 2].map((j) => (
+                        <div key={j} className="h-14 bg-slate-100 rounded-xl" />
+                      ))}
                     </div>
                   </div>
-                  <div className="grid grid-cols-3 gap-2">
-                    {[0, 1, 2].map((j) => (
-                      <div key={j} className="h-14 bg-slate-100 rounded-xl" />
-                    ))}
-                  </div>
+                ))}
+              </div>
+            ) : records.length === 0 ? (
+              <div className="bg-white border border-slate-200 rounded-2xl p-16 text-center">
+                <div className="w-16 h-16 bg-violet-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                  <Home className="w-8 h-8 text-violet-400" />
                 </div>
-              ))}
-            </div>
-          ) : records.length === 0 ? (
-            <div className="bg-white border border-slate-200 rounded-2xl p-16 text-center">
-              <div className="w-16 h-16 bg-violet-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                <Home className="w-8 h-8 text-violet-400" />
+                <h3 className="us-heading text-lg font-bold text-slate-700 mb-1">
+                  No unit selections
+                </h3>
+                <p className="text-slate-400 text-sm mb-5">
+                  {search || statusFilter !== "all"
+                    ? "Try changing your filters"
+                    : "Create the first unit selection to get started"}
+                </p>
+                {!search && statusFilter === "all" && (
+                  <Button
+                    onClick={openCreate}
+                    className="bg-violet-600 hover:bg-violet-700 text-white gap-2 rounded-xl"
+                  >
+                    <Plus className="w-4 h-4" /> New Selection
+                  </Button>
+                )}
               </div>
-              <h3 className="us-heading text-lg font-bold text-slate-700 mb-1">
-                No unit selections
-              </h3>
-              <p className="text-slate-400 text-sm mb-5">
-                {search || statusFilter !== "all"
-                  ? "Try changing your filters"
-                  : "Create the first unit selection to get started"}
-              </p>
-              {!search && statusFilter === "all" && (
-                <Button
-                  onClick={openCreate}
-                  className="bg-violet-600 hover:bg-violet-700 text-white gap-2 rounded-xl"
-                >
-                  <Plus className="w-4 h-4" /> New Selection
-                </Button>
-              )}
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {records.map((r) => (
-                <UnitCard
-                  key={r.Id}
-                  record={r}
-                  onEdit={() => openEdit(r)}
-                  onDelete={() => setDeleteTarget(r)}
-                />
-              ))}
-            </div>
-          )}
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {records.map((r) => (
+                  <UnitCard
+                    key={r.Id}
+                    record={r}
+                    onEdit={() => openEdit(r)}
+                    onDelete={() => setDeleteTarget(r)}
+                  />
+                ))}
+              </div>
+            )}
 
-          {/* Pagination */}
-          {pagination && pagination.totalPages > 1 && (
-            <div className="flex items-center justify-between text-sm text-slate-500">
-              <span>
-                Page {pagination.page} of {pagination.totalPages} ·{" "}
-                {pagination.total} total
-              </span>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={page <= 1}
-                  onClick={() => setPage((p) => p - 1)}
-                  className="rounded-xl"
-                >
-                  Previous
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={page >= pagination.totalPages}
-                  onClick={() => setPage((p) => p + 1)}
-                  className="rounded-xl"
-                >
-                  Next
-                </Button>
+            {/* Pagination */}
+            {pagination && pagination.totalPages > 1 && (
+              <div className="flex items-center justify-between text-sm text-slate-500 mt-2">
+                <span>
+                  Page {pagination.page} of {pagination.totalPages} ·{" "}
+                  {pagination.total} total
+                </span>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={page <= 1}
+                    onClick={() => setPage((p) => p - 1)}
+                    className="rounded-xl"
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={page >= pagination.totalPages}
+                    onClick={() => setPage((p) => p + 1)}
+                    className="rounded-xl"
+                  >
+                    Next
+                  </Button>
+                </div>
               </div>
-            </div>
-          )}
+            )}
+          </div>
+          {/* end max-w */}
         </div>
+        {/* end body */}
       </div>
 
       {/* Create / Edit Dialog */}
