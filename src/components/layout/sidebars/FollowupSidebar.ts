@@ -25,11 +25,11 @@ export const followupNavItems: NavItem[] = [
     children: [
       {
         label: "PO Reminders",
-        path: "/followup/follow-ups/reminders?module=PO",
+        path: "/followup/follow-ups/po-reminders",
       },
       {
         label: "WO Reminders",
-        path: "/followup/follow-ups/reminders?module=WO",
+        path: "/followup/follow-ups/wo-reminders",
       },
       {
         label: "CHQ Reminders",
