@@ -111,11 +111,15 @@ const EMPTY_FORM: FollowupLogFormState = {
 function formatDate(value?: string | null) {
   if (!value) return "-";
   const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString("en-IN");
+  return Number.isNaN(date.getTime())
+    ? value
+    : date.toLocaleDateString("en-IN");
 }
 
 function formatMoney(value?: number | null) {
-  return typeof value === "number" ? `Rs ${value.toLocaleString("en-IN")}` : "-";
+  return typeof value === "number"
+    ? `Rs ${value.toLocaleString("en-IN")}`
+    : "-";
 }
 
 function getTypeLabel(type: LogType) {
@@ -134,7 +138,9 @@ function getTypeLabel(type: LogType) {
 }
 
 async function fetchLogs(moduleName: string) {
-  const response = await fetchWithAuth(`/api/followup-log?module=${encodeURIComponent(moduleName)}`);
+  const response = await fetchWithAuth(
+    `/api/followup-log?module=${encodeURIComponent(moduleName)}`,
+  );
   if (!response.ok) throw new Error("Failed to load follow-up records");
   return response.json() as Promise<LogRecord[]>;
 }
@@ -159,21 +165,36 @@ async function createLog(payload: {
 }
 
 async function fetchApplicants() {
-  const response = await fetchWithAuth("/api/followup-applicants?page=1&pageSize=50");
+  const response = await fetchWithAuth(
+    "/api/followup-applicants?page=1&pageSize=50",
+  );
   if (!response.ok) throw new Error("Failed to load applicants");
-  return response.json() as Promise<{ data: ApplicantRecord[]; pagination: { total: number } }>;
+  return response.json() as Promise<{
+    data: ApplicantRecord[];
+    pagination: { total: number };
+  }>;
 }
 
 async function fetchAgreements() {
-  const response = await fetchWithAuth("/api/followup-agreements?page=1&pageSize=50");
+  const response = await fetchWithAuth(
+    "/api/followup-agreements?page=1&pageSize=50",
+  );
   if (!response.ok) throw new Error("Failed to load agreements");
-  return response.json() as Promise<{ data: AgreementRecord[]; pagination: { total: number } }>;
+  return response.json() as Promise<{
+    data: AgreementRecord[];
+    pagination: { total: number };
+  }>;
 }
 
 async function fetchUnitSelections() {
-  const response = await fetchWithAuth("/api/followup-unit-selections?page=1&pageSize=50");
+  const response = await fetchWithAuth(
+    "/api/followup-unit-selections?page=1&pageSize=50",
+  );
   if (!response.ok) throw new Error("Failed to load unit selections");
-  return response.json() as Promise<{ data: UnitSelectionRecord[]; pagination: { total: number } }>;
+  return response.json() as Promise<{
+    data: UnitSelectionRecord[];
+    pagination: { total: number };
+  }>;
 }
 
 function ScopedLogPage({
@@ -198,7 +219,11 @@ function ScopedLogPage({
     type: defaultType,
   });
 
-  const { data: logs = [], isLoading, isError } = useQuery({
+  const {
+    data: logs = [],
+    isLoading,
+    isError,
+  } = useQuery({
     queryKey: ["followup-log", moduleName],
     queryFn: () => fetchLogs(moduleName),
   });
@@ -215,7 +240,9 @@ function ScopedLogPage({
   });
 
   const filteredLogs = logs.filter((entry) => {
-    const haystack = [entry.customer, entry.notes, entry.user, entry.type].join(" ").toLowerCase();
+    const haystack = [entry.customer, entry.notes, entry.user, entry.type]
+      .join(" ")
+      .toLowerCase();
     return haystack.includes(search.toLowerCase());
   });
 
@@ -229,17 +256,26 @@ function ScopedLogPage({
     );
   }, [logs]);
 
-  const totalAmount = logs.reduce((sum, entry) => sum + (Number(entry.amount) || 0), 0);
+  const totalAmount = logs.reduce(
+    (sum, entry) => sum + (Number(entry.amount) || 0),
+    0,
+  );
 
   return (
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="text-3xl font-heading font-bold text-foreground">{title}</h1>
+          <h1 className="text-3xl font-heading font-bold text-foreground">
+            {title}
+          </h1>
           <p className="text-muted-foreground mt-1">{description}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => navigate("/followup")} className="gap-2">
+          <Button
+            variant="outline"
+            onClick={() => navigate("/followup")}
+            className="gap-2"
+          >
             <ArrowLeft className="w-4 h-4" />
             Dashboard
           </Button>
@@ -264,7 +300,9 @@ function ScopedLogPage({
           <CardContent className="pt-5 flex items-center gap-3">
             <IndianRupee className="w-5 h-5 text-amber-600" />
             <div>
-              <div className="text-2xl font-bold">{totalAmount.toLocaleString("en-IN")}</div>
+              <div className="text-2xl font-bold">
+                {totalAmount.toLocaleString("en-IN")}
+              </div>
               <div className="text-sm text-muted-foreground">Visible value</div>
             </div>
           </CardContent>
@@ -309,21 +347,30 @@ function ScopedLogPage({
               <TableBody>
                 {isLoading && (
                   <TableRow>
-                    <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+                    <TableCell
+                      colSpan={6}
+                      className="py-8 text-center text-muted-foreground"
+                    >
                       Loading records...
                     </TableCell>
                   </TableRow>
                 )}
                 {isError && (
                   <TableRow>
-                    <TableCell colSpan={6} className="py-8 text-center text-destructive">
+                    <TableCell
+                      colSpan={6}
+                      className="py-8 text-center text-destructive"
+                    >
                       Failed to load records.
                     </TableCell>
                   </TableRow>
                 )}
                 {!isLoading && !isError && filteredLogs.length === 0 && (
                   <TableRow>
-                    <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
+                    <TableCell
+                      colSpan={6}
+                      className="py-8 text-center text-muted-foreground"
+                    >
                       No records found.
                     </TableCell>
                   </TableRow>
@@ -332,15 +379,23 @@ function ScopedLogPage({
                   !isError &&
                   filteredLogs.map((entry) => (
                     <TableRow key={entry.id}>
-                      <TableCell className="font-mono text-sm">{formatDate(entry.date)}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline">{getTypeLabel(entry.type)}</Badge>
+                      <TableCell className="font-mono text-sm">
+                        {formatDate(entry.date)}
                       </TableCell>
-                      <TableCell className="font-medium">{entry.customer}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline">
+                          {getTypeLabel(entry.type)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="font-medium">
+                        {entry.customer}
+                      </TableCell>
                       <TableCell>{formatMoney(entry.amount)}</TableCell>
                       <TableCell>{entry.user || "-"}</TableCell>
                       <TableCell className="max-w-md">
-                        <span className="text-sm line-clamp-2">{entry.notes || "-"}</span>
+                        <span className="text-sm line-clamp-2">
+                          {entry.notes || "-"}
+                        </span>
                       </TableCell>
                     </TableRow>
                   ))}
@@ -363,7 +418,12 @@ function ScopedLogPage({
                 <Input
                   type="date"
                   value={form.date}
-                  onChange={(event) => setForm((current) => ({ ...current, date: event.target.value }))}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      date: event.target.value,
+                    }))
+                  }
                 />
               </div>
               <div className="space-y-2">
@@ -371,7 +431,10 @@ function ScopedLogPage({
                 <Select
                   value={form.type}
                   onValueChange={(value) =>
-                    setForm((current) => ({ ...current, type: value as LogType }))
+                    setForm((current) => ({
+                      ...current,
+                      type: value as LogType,
+                    }))
                   }
                 >
                   <SelectTrigger>
@@ -393,7 +456,10 @@ function ScopedLogPage({
               <Input
                 value={form.customer}
                 onChange={(event) =>
-                  setForm((current) => ({ ...current, customer: event.target.value }))
+                  setForm((current) => ({
+                    ...current,
+                    customer: event.target.value,
+                  }))
                 }
                 placeholder="Customer / applicant / unit"
               />
@@ -404,7 +470,10 @@ function ScopedLogPage({
               <Input
                 value={form.amount}
                 onChange={(event) =>
-                  setForm((current) => ({ ...current, amount: event.target.value }))
+                  setForm((current) => ({
+                    ...current,
+                    amount: event.target.value,
+                  }))
                 }
                 placeholder="Optional"
               />
@@ -415,7 +484,10 @@ function ScopedLogPage({
               <Textarea
                 value={form.notes}
                 onChange={(event) =>
-                  setForm((current) => ({ ...current, notes: event.target.value }))
+                  setForm((current) => ({
+                    ...current,
+                    notes: event.target.value,
+                  }))
                 }
                 placeholder="Activity notes"
               />
@@ -479,9 +551,17 @@ function ReportPage({
     const applicantCount = applicantsPage?.pagination.total ?? 0;
     const agreementCount = agreementsPage?.pagination.total ?? 0;
     const selectionCount = unitSelectionsPage?.pagination.total ?? 0;
-    const agreementValue = agreementRows.reduce((sum, item) => sum + (Number(item.AgreementValue) || 0), 0);
+    const agreementValue = agreementRows.reduce(
+      (sum, item) => sum + (Number(item.AgreementValue) || 0),
+      0,
+    );
     return { applicantCount, agreementCount, selectionCount, agreementValue };
-  }, [applicantsPage?.pagination.total, agreementsPage?.pagination.total, unitSelectionsPage?.pagination.total, agreementRows]);
+  }, [
+    applicantsPage?.pagination.total,
+    agreementsPage?.pagination.total,
+    unitSelectionsPage?.pagination.total,
+    agreementRows,
+  ]);
 
   const customerRows = applicantRows.slice(0, 8);
   const financialRows = agreementRows.slice(0, 8);
@@ -491,10 +571,16 @@ function ReportPage({
     <div className="p-6 space-y-6 max-w-7xl mx-auto">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
-          <h1 className="text-3xl font-heading font-bold text-foreground">{title}</h1>
+          <h1 className="text-3xl font-heading font-bold text-foreground">
+            {title}
+          </h1>
           <p className="text-muted-foreground mt-1">{description}</p>
         </div>
-        <Button variant="outline" onClick={() => navigate("/followup")} className="gap-2">
+        <Button
+          variant="outline"
+          onClick={() => navigate("/followup")}
+          className="gap-2"
+        >
           <ArrowLeft className="w-4 h-4" />
           Dashboard
         </Button>
@@ -521,7 +607,9 @@ function ReportPage({
         </Card>
         <Card>
           <CardContent className="pt-5">
-            <div className="text-2xl font-bold">{stats.agreementValue.toLocaleString("en-IN")}</div>
+            <div className="text-2xl font-bold">
+              {stats.agreementValue.toLocaleString("en-IN")}
+            </div>
             <div className="text-sm text-muted-foreground">Agreement value</div>
           </CardContent>
         </Card>
@@ -546,7 +634,9 @@ function ReportPage({
               <TableBody>
                 {customerRows.map((row) => (
                   <TableRow key={row.Id}>
-                    <TableCell className="font-medium">{row.ApplicantName || row.ApplicantNo || "-"}</TableCell>
+                    <TableCell className="font-medium">
+                      {row.ApplicantName || row.ApplicantNo || "-"}
+                    </TableCell>
                     <TableCell>{row.ProjectName || "-"}</TableCell>
                     <TableCell>{row.Status || "-"}</TableCell>
                     <TableCell>{formatMoney(row.BudgetAmount)}</TableCell>
@@ -579,7 +669,9 @@ function ReportPage({
               <TableBody>
                 {financialRows.map((row) => (
                   <TableRow key={row.Id}>
-                    <TableCell className="font-medium">{row.AgreementNo || "-"}</TableCell>
+                    <TableCell className="font-medium">
+                      {row.AgreementNo || "-"}
+                    </TableCell>
                     <TableCell>{row.ApplicantName || "-"}</TableCell>
                     <TableCell>{row.UnitNo || "-"}</TableCell>
                     <TableCell>{formatDate(row.AgreementDate)}</TableCell>
@@ -613,7 +705,9 @@ function ReportPage({
               <TableBody>
                 {projectRows.map((row) => (
                   <TableRow key={row.Id}>
-                    <TableCell className="font-medium">{row.SelectionNo || "-"}</TableCell>
+                    <TableCell className="font-medium">
+                      {row.SelectionNo || "-"}
+                    </TableCell>
                     <TableCell>{row.ApplicantName || "-"}</TableCell>
                     <TableCell>{row.UnitNo || "-"}</TableCell>
                     <TableCell>{row.ProjectName || "-"}</TableCell>
@@ -630,17 +724,7 @@ function ReportPage({
   );
 }
 
-export function WelcomeCallsPage() {
-  return (
-    <ScopedLogPage
-      title="Welcome Calls"
-      description="Track post-booking welcome calls using the shared follow-up log."
-      moduleName="welcome_call"
-      defaultType="call"
-      helpText="Every entry is stored in FollowupLog with module=welcome_call."
-    />
-  );
-}
+export { WelcomeCallsPage } from "./WelcomeCalls";
 
 export function NocPage() {
   return (
