@@ -199,9 +199,10 @@ export default function Issues() {
 
   // Header form
   const [header, setHeader] = useState<IssueHeader>(defaultHeader);
-  const { activeYear } = useFinYear();
+  const { finYears } = useFinYear();
+  const activeYear = finYears.find((y) => y.status === "Active") ?? null;
   const finYearStr = activeYear
-    ? `${String(activeYear.StartYear).slice(-2)}-${String(activeYear.EndYear).slice(-2)}`
+    ? `${String(activeYear.startDate).slice(2, 4)}-${String(activeYear.endDate).slice(2, 4)}`
     : undefined;
   const [loadingPrefill, setLoadingPrefill] = useState(false);
   // Cart
@@ -520,7 +521,7 @@ export default function Issues() {
         Remarks: ci.Remarks || null,
       })),
     };
-    editingId ? updateMutation.mutate(payload) : createMutation.mutate(payload);
+    if (editingId) { updateMutation.mutate(payload); } else { createMutation.mutate(payload); }
   };
 
   // ── Columns ───────────────────────────────────────────────────────────────

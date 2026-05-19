@@ -455,6 +455,7 @@ const TypeOfDocMaster: React.FC = () => {
   };
 
   const columns = useMemo(
+<<<<<<< HEAD
     () =>
       buildDocColumns(
         editingId,
@@ -463,6 +464,10 @@ const TypeOfDocMaster: React.FC = () => {
         setViewRecord,
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
+=======
+    () => buildDocColumns(editingId, openEdit, deleteMutation.mutate),
+     
+>>>>>>> e4cf594 (Followup module)
     [editingId, deleteMutation.mutate],
   );
 

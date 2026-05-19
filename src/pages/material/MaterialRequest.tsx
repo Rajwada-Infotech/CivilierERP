@@ -172,9 +172,10 @@ export default function MaterialRequest() {
 
   // ── Master data ──────────────────────────────────────────────────────────────
 
-  const { activeYear } = useFinYear();
+  const { finYears: ctxFinYears } = useFinYear();
+  const activeYear = ctxFinYears.find((y) => y.status === "Active") ?? null;
   const finYearStr = activeYear
-    ? `${String(activeYear.StartYear).slice(-2)}-${String(activeYear.EndYear).slice(-2)}`
+    ? `${String(activeYear.startDate).slice(2, 4)}-${String(activeYear.endDate).slice(2, 4)}`
     : undefined;
 
   const { data: companies = [] } = useQuery({
@@ -442,7 +443,7 @@ export default function MaterialRequest() {
         Remarks: ci.Remarks || null,
       })),
     };
-    editingId ? updateMutation.mutate(payload) : createMutation.mutate(payload);
+    if (editingId) { updateMutation.mutate(payload); } else { createMutation.mutate(payload); }
   };
 
   // ── Columns ───────────────────────────────────────────────────────────────────
