@@ -41,7 +41,7 @@ export const followupNavItems: NavItem[] = [
       },
       {
         label: "GRN Reminders",
-        path: "/followup/follow-ups/reminders?module=GRN",
+        path: "/followup/follow-ups/grn-reminders",
       },
     ],
   },
