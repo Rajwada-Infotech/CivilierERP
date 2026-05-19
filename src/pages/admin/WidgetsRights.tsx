@@ -266,7 +266,7 @@ export default function WidgetsRights() {
       const u = dropdownUsers.find((d) => String(d.id) === String(userId));
       if (u) setSelectedUser(u);
     }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
     [dropdownUsers]
   );
   const [pendingPermissions, setPending] = useState<PagePermission[]>([]);
