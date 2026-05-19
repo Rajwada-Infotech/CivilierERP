@@ -202,36 +202,34 @@ const FollowupDashboard = lazy(
   () => import("./pages/followup/FollowupDashboard"),
 );
 const FollowupReminders = lazy(() => import("./pages/followup/Reminders"));
+const POReminders = lazy(() => import("./pages/followup/POReminders"));
+const WOReminders = lazy(() => import("./pages/followup/WOReminders"));
 const FollowupTasks = lazy(() => import("./pages/followup/FollowupTasks"));
 const FollowupLog = lazy(() => import("./pages/followup/FollowupLog"));
-const FollowupApplicants = lazy(() =>
-  import("./pages/followup/FollowupPipelinePage").then((module) => ({
-    default: module.ApplicantsPage,
-  })),
-);
-const FollowupUnitSelection = lazy(() =>
-  import("./pages/followup/FollowupPipelinePage").then((module) => ({
-    default: module.UnitSelectionPage,
-  })),
+const FollowupApplicants = lazy(() => import("./pages/followup/Applicants"));
+const FollowupUnitSelection = lazy(
+  () => import("./pages/followup/UnitSelection"),
 );
 const FollowupAgreements = lazy(() =>
-  import("./pages/followup/FollowupPipelinePage").then((module) => ({
+  import("./pages/followup/Agreements").then((module) => ({
     default: module.AgreementsPage,
   })),
 );
-const ApplicantTimeline = lazy(() => import("./pages/followup/ApplicantTimeline"));
+const ApplicantTimeline = lazy(
+  () => import("./pages/followup/ApplicantTimeline"),
+);
 const WelcomeCallsPage = lazy(() =>
   import("./pages/followup/FollowupExtraPages").then((module) => ({
     default: module.WelcomeCallsPage,
   })),
 );
 const NocPage = lazy(() =>
-  import("./pages/followup/FollowupExtraPages").then((module) => ({
-    default: module.NocPage,
+  import("./pages/followup/NOC").then((module) => ({
+    default: module.NOCPage,
   })),
 );
 const SalesDeedPage = lazy(() =>
-  import("./pages/followup/FollowupExtraPages").then((module) => ({
+  import("./pages/followup/SalesDeed").then((module) => ({
     default: module.SalesDeedPage,
   })),
 );
@@ -539,6 +537,22 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <FollowupReminders />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/follow-ups/po-reminders"
+        element={
+          <ProtectedRoute>
+            <POReminders />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/follow-ups/wo-reminders"
+        element={
+          <ProtectedRoute>
+            <WOReminders />
           </ProtectedRoute>
         }
       />
