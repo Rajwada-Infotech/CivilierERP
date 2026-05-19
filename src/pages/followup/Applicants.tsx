@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import axios from "axios";
+import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   Search,
   Filter,
@@ -18,55 +18,54 @@ import {
   Users,
   CheckCircle,
   XCircle,
-  Clock,
 } from "lucide-react";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 interface Applicant {
-  LHeadCode: string;
+  LHeadId: number;
+  LHeadCode: string | null;
   LHeadName: string;
-  LHeadAlias?: string;
-  LHeadStatus: string; // e.g. "A" = Active, "I" = Inactive, "P" = Pending
-  Address1?: string;
-  Address2?: string;
-  City?: string;
-  State?: string;
-  PinCode?: string;
-  Phone1?: string;
-  Phone2?: string;
-  Mobile?: string;
-  Email?: string;
-  GSTNo?: string;
-  PANNo?: string;
-  OpeningBalance?: number;
-  CreditLimit?: number;
-  CreditDays?: number;
-  CreatedDate?: string;
+  LHeadType: string;
+  LHeadStatus: number; // 1 = Active, 0 = Inactive
+  LHeadPhone?: string;
+  LHeadEmail?: string;
+  LHeadAddress?: string;
+  LHeadContactPerson?: string;
+  LHeadPaymentTerms?: string;
+  LGST?: string;
+  LGSTState?: string;
+  LCountry?: string;
+  LBelongsTo?: string;
+  LDescription?: string;
+  LBranchName?: string;
 }
 
 // ─── Status helpers ──────────────────────────────────────────────────────────
 
 const STATUS_MAP: Record<
-  string,
+  number,
   { label: string; color: string; icon: React.ReactNode }
 > = {
-  A: {
+  1: {
     label: "Active",
     color: "status-active",
     icon: <CheckCircle size={12} />,
   },
-  I: {
+  0: {
     label: "Inactive",
     color: "status-inactive",
     icon: <XCircle size={12} />,
   },
-  P: { label: "Pending", color: "status-pending", icon: <Clock size={12} /> },
 };
 
-function getStatus(code: string) {
+function getStatus(code: number) {
   return (
-    STATUS_MAP[code] ?? { label: code, color: "status-default", icon: null }
+    STATUS_MAP[code] ?? {
+      label: "Unknown",
+      color: "status-default",
+      icon: null,
+    }
   );
 }
 
@@ -159,39 +158,33 @@ function ApplicantCard({
         <span className="card-code">{applicant.LHeadCode}</span>
 
         <div className="card-meta">
-          {applicant.Mobile && (
+          {applicant.LHeadPhone && (
             <span className="meta-item">
-              <Phone size={12} /> {applicant.Mobile}
+              <Phone size={12} /> {applicant.LHeadPhone}
             </span>
           )}
-          {applicant.Email && (
+          {applicant.LHeadEmail && (
             <span className="meta-item">
               <Mail size={12} />
-              <span className="meta-email">{applicant.Email}</span>
+              <span className="meta-email">{applicant.LHeadEmail}</span>
             </span>
           )}
-          {applicant.City && (
+          {applicant.LHeadAddress && (
             <span className="meta-item">
-              <MapPin size={12} /> {applicant.City}
-              {applicant.State ? `, ${applicant.State}` : ""}
+              <MapPin size={12} /> {applicant.LHeadAddress}
             </span>
           )}
         </div>
 
         <div className="card-chips">
-          {applicant.GSTNo && (
+          {applicant.LGST && (
             <span className="chip chip-gst">
-              <Building2 size={10} /> GST: {applicant.GSTNo}
+              <Building2 size={10} /> GST: {applicant.LGST}
             </span>
           )}
-          {applicant.PANNo && (
+          {applicant.LHeadContactPerson && (
             <span className="chip chip-pan">
-              <CreditCard size={10} /> PAN: {applicant.PANNo}
-            </span>
-          )}
-          {applicant.CreditLimit != null && applicant.CreditLimit > 0 && (
-            <span className="chip chip-credit">
-              Limit ₹{applicant.CreditLimit.toLocaleString("en-IN")}
+              <CreditCard size={10} /> Contact: {applicant.LHeadContactPerson}
             </span>
           )}
         </div>
@@ -214,35 +207,26 @@ const Applicants: React.FC = () => {
   // Filters
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
-  const [cityFilter, setCityFilter] = useState("");
-  const [cities, setCities] = useState<string[]>([]);
 
   const fetchApplicants = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const params: Record<string, string> = {};
-      if (search) params.search = search;
-      if (statusFilter) params.status = statusFilter;
-      if (cityFilter) params.city = cityFilter;
+      const params = new URLSearchParams();
+      if (search) params.set("search", search);
+      if (statusFilter) params.set("status", statusFilter);
 
-      const res = await axios.get("/api/applicants", { params });
-      const data: Applicant[] = res.data.data ?? [];
+      const res = await fetchWithAuth(`/api/applicants?${params.toString()}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      const data: Applicant[] = json.data ?? [];
       setApplicants(data);
-
-      // Build city list from full dataset (only on first load / no city filter)
-      if (!cityFilter) {
-        const uniqueCities = [
-          ...new Set(data.map((a) => a.City).filter(Boolean)),
-        ] as string[];
-        setCities(uniqueCities.sort());
-      }
     } catch (err: any) {
       setError(err?.response?.data?.message ?? "Failed to load applicants");
     } finally {
       setLoading(false);
     }
-  }, [search, statusFilter, cityFilter]);
+  }, [search, statusFilter]);
 
   // Debounced search
   useEffect(() => {
@@ -252,17 +236,15 @@ const Applicants: React.FC = () => {
 
   // Stats
   const total = applicants.length;
-  const active = applicants.filter((a) => a.LHeadStatus === "A").length;
-  const inactive = applicants.filter((a) => a.LHeadStatus === "I").length;
-  const pending = applicants.filter((a) => a.LHeadStatus === "P").length;
+  const active = applicants.filter((a) => a.LHeadStatus === 1).length;
+  const inactive = applicants.filter((a) => a.LHeadStatus === 0).length;
 
   const clearFilters = () => {
     setSearch("");
     setStatusFilter("");
-    setCityFilter("");
   };
 
-  const hasFilters = search || statusFilter || cityFilter;
+  const hasFilters = search || statusFilter;
 
   return (
     <>
@@ -548,12 +530,6 @@ const Applicants: React.FC = () => {
               value={inactive}
               accent="#b91c1c"
             />
-            <StatCard
-              icon={<Clock size={16} />}
-              label="Pending"
-              value={pending}
-              accent="#b45309"
-            />
           </div>
         </div>
 
@@ -575,25 +551,9 @@ const Applicants: React.FC = () => {
             onChange={(e) => setStatusFilter(e.target.value)}
           >
             <option value="">All Status</option>
-            <option value="A">Active</option>
-            <option value="I">Inactive</option>
-            <option value="P">Pending</option>
+            <option value="1">Active</option>
+            <option value="0">Inactive</option>
           </select>
-
-          {cities.length > 0 && (
-            <select
-              className="filter-select"
-              value={cityFilter}
-              onChange={(e) => setCityFilter(e.target.value)}
-            >
-              <option value="">All Cities</option>
-              {cities.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-          )}
 
           {hasFilters && (
             <button className="clear-btn" onClick={clearFilters}>
@@ -632,10 +592,10 @@ const Applicants: React.FC = () => {
           ) : (
             applicants.map((a) => (
               <ApplicantCard
-                key={a.LHeadCode}
+                key={a.LHeadId ?? a.LHeadCode}
                 applicant={a}
                 onClick={() =>
-                  navigate(`/applicant-timeline/${a.LHeadCode}`, {
+                  navigate(`/applicant-timeline/${a.LHeadId}`, {
                     state: { applicant: a },
                   })
                 }
