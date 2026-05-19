@@ -229,7 +229,7 @@ const NocPage = lazy(() =>
   })),
 );
 const SalesDeedPage = lazy(() =>
-  import("./pages/followup/FollowupExtraPages").then((module) => ({
+  import("./pages/followup/SalesDeed").then((module) => ({
     default: module.SalesDeedPage,
   })),
 );
