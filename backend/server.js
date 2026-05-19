@@ -128,6 +128,7 @@ const ALL_ROUTES = [
     file: "./routes/followupUnitSelections",
   },
   { path: "/api/followup-agreements", file: "./routes/followupAgreements" },
+  { path: "/api/followup-noc", file: "./routes/followupNoc" },
   { path: "/api/company-master", file: "./routes/companyMaster" },
   { path: "/api/project-master", file: "./routes/projectMaster" },
   { path: "/api/signatures", file: "./routes/signatures" },
