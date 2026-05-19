@@ -82,10 +82,8 @@ interface NOC {
 
 interface OptionApplicant {
   Id: number;
-  ApplicantNo: string;
-  ApplicantName: string;
-  ProjectId: number | null;
-  CompanyId: number | null;
+  ApplicantNo: string | null; // LHeadCode from AccountHeadMaster
+  ApplicantName: string; // ISNULL(DisplayName, LHeadName)
 }
 
 interface OptionUnitSelection {
@@ -493,11 +491,7 @@ export function NOCPage() {
     setForm((f) => {
       const next = { ...f, [k]: v };
       if (k === "ApplicantId") {
-        const appl = meta?.applicants.find((a) => String(a.Id) === v);
-        if (appl) {
-          if (appl.ProjectId) next.ProjectId = String(appl.ProjectId);
-          if (appl.CompanyId) next.CompanyId = String(appl.CompanyId);
-        }
+        // Clear dependent fields when applicant changes
         next.UnitSelectionId = "";
         next.AgreementId = "";
       }
