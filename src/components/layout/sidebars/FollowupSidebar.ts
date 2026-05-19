@@ -10,7 +10,7 @@ import {
 import { NavItem } from "./SidebarPrimitives";
 
 export const followupNavItems: NavItem[] = [
-  { label: "Follow-Up Dashboard", icon: BarChart3, path: "/followup" },
+  { label: "Dashboard", icon: BarChart3, path: "/followup" },
   {
     label: "Tasks",
     icon: ListTodo,
@@ -33,7 +33,7 @@ export const followupNavItems: NavItem[] = [
       },
       {
         label: "CHQ Reminders",
-        path: "/followup/follow-ups/reminders?module=CHQ",
+        path: "/followup/follow-ups/chq-reminders",
       },
       {
         label: "TDS Reminders",

@@ -12,12 +12,12 @@ import {
 import { NavItem } from "./SidebarPrimitives";
 
 export const buildAdminNavItems = (pendingCount: number): NavItem[] => [
-  { label: "Dashboard", icon: BarChart3, path: "/admin/dashboard" },
+  { label: "Control Center", icon: BarChart3, path: "/admin/dashboard" },
   {
     label: "User Control",
     icon: Users,
     children: [
-      { label: "Manage Users",     path: "/users" },
+      { label: "Manage Users", path: "/users" },
       { label: "Activity Browser", path: "/admin/activity-browser" },
     ],
   },
@@ -25,8 +25,8 @@ export const buildAdminNavItems = (pendingCount: number): NavItem[] => [
     label: "Rights",
     icon: Shield,
     children: [
-      { label: "Menu",           path: "/admin/rights/menu" },
-      { label: "Widgets",        path: "/admin/rights/widgets" },
+      { label: "Menu", path: "/admin/rights/menu" },
+      { label: "Widgets", path: "/admin/rights/widgets" },
       { label: "Financial Year", path: "/admin/rights/fin-year" },
     ],
   },
@@ -35,8 +35,8 @@ export const buildAdminNavItems = (pendingCount: number): NavItem[] => [
     icon: Building2,
     children: [
       { label: "Enterprise", path: "/admin/masters/business-unit" },
-      { label: "Company",    path: "/admin/masters/company" },
-      { label: "Project",    path: "/admin/masters/project" },
+      { label: "Company", path: "/admin/masters/company" },
+      { label: "Project", path: "/admin/masters/project" },
     ],
   },
   {
@@ -48,7 +48,7 @@ export const buildAdminNavItems = (pendingCount: number): NavItem[] => [
         path: "/admin/approval/inbox",
         badge: pendingCount > 0 ? pendingCount : undefined,
       },
-      { label: "Approval Setup",       path: "/admin/approval/setup" },
+      { label: "Approval Setup", path: "/admin/approval/setup" },
       { label: "Post Approval Rights", path: "/admin/approval/post-rights" },
     ],
   },
@@ -63,12 +63,12 @@ export const buildAdminNavItems = (pendingCount: number): NavItem[] => [
     label: "Communicator",
     icon: MessageSquare,
     children: [
-      { label: "SMS Setup",      path: "/admin/communicator/sms-setup" },
-      { label: "Email Setup",    path: "/admin/communicator/email-setup" },
+      { label: "SMS Setup", path: "/admin/communicator/sms-setup" },
+      { label: "Email Setup", path: "/admin/communicator/email-setup" },
       { label: "WhatsApp Setup", path: "/admin/communicator/whatsapp-setup" },
     ],
   },
-  { label: "API Integration", icon: Shield,     path: "/admin/api-integration" },
-  { label: "Live Metrics",    icon: TrendingUp, path: "/admin/metrics" },
-  { label: "Signature",       icon: FileText,   path: "/admin/signature" },
+  { label: "API Integration", icon: Shield, path: "/admin/api-integration" },
+  { label: "Live Metrics", icon: TrendingUp, path: "/admin/metrics" },
+  { label: "Signature", icon: FileText, path: "/admin/signature" },
 ];
