@@ -204,6 +204,7 @@ const FollowupDashboard = lazy(
 const FollowupReminders = lazy(() => import("./pages/followup/Reminders"));
 const POReminders = lazy(() => import("./pages/followup/POReminders"));
 const WOReminders = lazy(() => import("./pages/followup/WOReminders"));
+const CHQReminders = lazy(() => import("./pages/followup/CHQReminders"));
 const FollowupTasks = lazy(() => import("./pages/followup/FollowupTasks"));
 const FollowupLog = lazy(() => import("./pages/followup/FollowupLog"));
 const FollowupApplicants = lazy(() => import("./pages/followup/Applicants"));
@@ -553,6 +554,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <WOReminders />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/follow-ups/chq-reminders"
+        element={
+          <ProtectedRoute>
+            <CHQReminders />
           </ProtectedRoute>
         }
       />
