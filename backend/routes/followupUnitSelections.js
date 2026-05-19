@@ -8,12 +8,12 @@ const LIST_COLUMNS = `
   fus.Id,
   fus.SelectionNo,
   fus.ApplicantId,
-  fa.ApplicantNo,
-  fa.ApplicantName,
+  ahm.LHeadCode AS ApplicantNo,
+  ISNULL(ahm.DisplayName, ahm.LHeadName) AS ApplicantName,
   fus.ProjectId,
-  pm.Name AS ProjectName,
+  pm.name AS ProjectName,
   fus.CompanyId,
-  cm.Name AS CompanyName,
+  cm.name AS CompanyName,
   fus.UnitNo,
   fus.BlockName,
   fus.FloorName,
@@ -65,11 +65,10 @@ async function getApplicantSnapshot(applicantId) {
   if (!applicantId) return null;
   const result = await getPool()
     .request()
-    .input("ApplicantId", sql.Int, applicantId)
-    .query(`
-      SELECT TOP 1 Id, ProjectId, CompanyId
-      FROM dbo.FollowupApplicants
-      WHERE Id = @ApplicantId AND IsDeleted = 0
+    .input("ApplicantId", sql.Int, applicantId).query(`
+      SELECT TOP 1 LHeadId AS Id
+      FROM dbo.AccountHeadMaster
+      WHERE LHeadId = @ApplicantId AND LHeadType = 'A' AND LHeadStatus = 1
     `);
 
   return result.recordset[0] ?? null;
@@ -138,31 +137,34 @@ function getPayload(body) {
 
 async function buildOptions() {
   const pool = getPool();
-  const [applicantsResult, projectsResult, companiesResult] = await Promise.all([
-    pool.request().query(`
+  const [applicantsResult, projectsResult, companiesResult] = await Promise.all(
+    [
+      // Applicants — AccountHeadMaster where LHeadType = 'A'
+      pool.request().query(`
       SELECT
-        Id,
-        ApplicantNo,
-        ApplicantName,
-        ProjectId,
-        CompanyId
-      FROM dbo.FollowupApplicants
-      WHERE IsDeleted = 0
-      ORDER BY ApplicantName
+        LHeadId   AS Id,
+        LHeadCode AS ApplicantNo,
+        ISNULL(DisplayName, LHeadName) AS ApplicantName
+      FROM dbo.AccountHeadMaster
+      WHERE LHeadType = 'A' AND LHeadStatus = 1
+      ORDER BY LHeadName
     `),
-    pool.request().query(`
-      SELECT Id, Name
-      FROM dbo.ProjectMaster
-      WHERE ISNULL(IsDeleted, 0) = 0 AND ISNULL(IsActive, 1) = 1
-      ORDER BY Name
+      // Projects — enterprise where business_type = 'P'
+      pool.request().query(`
+      SELECT id AS Id, name AS Name
+      FROM dbo.enterprise
+      WHERE business_type = 'P' AND ISNULL(discontinue, 0) = 0
+      ORDER BY name
     `),
-    pool.request().query(`
-      SELECT Id, Name
-      FROM dbo.CompanyMaster
-      WHERE ISNULL(IsDeleted, 0) = 0 AND ISNULL(IsActive, 1) = 1
-      ORDER BY Name
+      // Companies — enterprise where business_type = 'C'
+      pool.request().query(`
+      SELECT id AS Id, name AS Name
+      FROM dbo.enterprise
+      WHERE business_type = 'C' AND ISNULL(discontinue, 0) = 0
+      ORDER BY name
     `),
-  ]);
+    ],
+  );
 
   return {
     applicants: applicantsResult.recordset,
@@ -184,14 +186,19 @@ router.get("/meta/options", async (req, res) => {
 router.get("/", async (req, res) => {
   try {
     const page = Math.max(1, parseInt(req.query.page, 10) || 1);
-    const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize, 10) || 20));
+    const pageSize = Math.min(
+      100,
+      Math.max(1, parseInt(req.query.pageSize, 10) || 20),
+    );
     const offset = (page - 1) * pageSize;
     const search = normalizeText(req.query.search);
     const status = normalizeText(req.query.status);
     const applicantId = normalizeNumber(req.query.applicantId);
 
     if (Number.isNaN(applicantId)) {
-      return res.status(400).json({ error: "applicantId must be a valid number" });
+      return res
+        .status(400)
+        .json({ error: "applicantId must be a valid number" });
     }
 
     const filters = ["fus.IsDeleted = 0"];
@@ -199,10 +206,10 @@ router.get("/", async (req, res) => {
       filters.push(`
         (
           fus.SelectionNo LIKE @Search
-          OR fa.ApplicantNo LIKE @Search
-          OR fa.ApplicantName LIKE @Search
+          OR ahm.LHeadCode LIKE @Search
+          OR ISNULL(ahm.DisplayName, ahm.LHeadName) LIKE @Search
           OR fus.UnitNo LIKE @Search
-          OR pm.Name LIKE @Search
+          OR pm.name LIKE @Search
         )
       `);
     }
@@ -222,20 +229,19 @@ router.get("/", async (req, res) => {
     const countResult = await buildRequest().query(`
       SELECT COUNT(*) AS Total
       FROM dbo.FollowupUnitSelections fus
-      INNER JOIN dbo.FollowupApplicants fa ON fa.Id = fus.ApplicantId
-      LEFT JOIN dbo.ProjectMaster pm ON pm.Id = fus.ProjectId
+      INNER JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = fus.ApplicantId AND ahm.LHeadType = 'A'
+      LEFT JOIN dbo.enterprise pm ON pm.id = fus.ProjectId AND pm.business_type = 'P'
       ${whereClause}
     `);
 
     const dataResult = await buildRequest()
       .input("Offset", sql.Int, offset)
-      .input("PageSize", sql.Int, pageSize)
-      .query(`
+      .input("PageSize", sql.Int, pageSize).query(`
         SELECT ${LIST_COLUMNS}
         FROM dbo.FollowupUnitSelections fus
-        INNER JOIN dbo.FollowupApplicants fa ON fa.Id = fus.ApplicantId
-        LEFT JOIN dbo.ProjectMaster pm ON pm.Id = fus.ProjectId
-        LEFT JOIN dbo.CompanyMaster cm ON cm.Id = fus.CompanyId
+        INNER JOIN dbo.AccountHeadMaster ahm ON ahm.LHeadId = fus.ApplicantId AND ahm.LHeadType = 'A'
+        LEFT JOIN dbo.enterprise pm ON pm.id = fus.ProjectId AND pm.business_type = 'P'
+        LEFT JOIN dbo.enterprise cm ON cm.id = fus.CompanyId AND cm.business_type = 'C'
         ${whereClause}
         ORDER BY fus.CreatedAt DESC, fus.Id DESC
         OFFSET @Offset ROWS FETCH NEXT @PageSize ROWS ONLY
@@ -275,8 +281,8 @@ router.post("/", async (req, res) => {
     const transaction = new sql.Transaction(getPool());
     await transaction.begin();
 
-    const projectId = payload.ProjectId || applicant.ProjectId || null;
-    const companyId = payload.CompanyId || applicant.CompanyId || null;
+    const projectId = payload.ProjectId || null;
+    const companyId = payload.CompanyId || null;
 
     const insertResult = await new sql.Request(transaction)
       .input("ApplicantId", sql.Int, payload.ApplicantId)
@@ -293,8 +299,7 @@ router.post("/", async (req, res) => {
       .input("SelectionDate", sql.Date, payload.SelectionDate)
       .input("Status", sql.NVarChar(30), payload.Status)
       .input("Notes", sql.NVarChar(sql.MAX), payload.Notes)
-      .input("CreatedBy", sql.NVarChar(100), userName)
-      .query(`
+      .input("CreatedBy", sql.NVarChar(100), userName).query(`
         INSERT INTO dbo.FollowupUnitSelections (
           SelectionNo,
           ApplicantId,
@@ -341,15 +346,16 @@ router.post("/", async (req, res) => {
 
     await new sql.Request(transaction)
       .input("Id", sql.Int, id)
-      .input("SelectionNo", sql.NVarChar(50), selectionNo)
-      .query(`
+      .input("SelectionNo", sql.NVarChar(50), selectionNo).query(`
         UPDATE dbo.FollowupUnitSelections
         SET SelectionNo = @SelectionNo
         WHERE Id = @Id
       `);
 
     await transaction.commit();
-    res.status(201).json({ Id: id, SelectionNo: selectionNo, Status: payload.Status });
+    res
+      .status(201)
+      .json({ Id: id, SelectionNo: selectionNo, Status: payload.Status });
   } catch (err) {
     console.error("followupUnitSelections POST error:", err);
     res.status(500).json({ error: "Failed to create unit selection" });
@@ -376,9 +382,7 @@ router.put("/:id", async (req, res) => {
       return res.status(404).json({ error: "Applicant not found" });
     }
 
-    const existingResult = await getPool()
-      .request()
-      .input("Id", sql.Int, id)
+    const existingResult = await getPool().request().input("Id", sql.Int, id)
       .query(`
         SELECT Id
         FROM dbo.FollowupUnitSelections
@@ -393,8 +397,8 @@ router.put("/:id", async (req, res) => {
       .request()
       .input("Id", sql.Int, id)
       .input("ApplicantId", sql.Int, payload.ApplicantId)
-      .input("ProjectId", sql.Int, payload.ProjectId || applicant.ProjectId || null)
-      .input("CompanyId", sql.Int, payload.CompanyId || applicant.CompanyId || null)
+      .input("ProjectId", sql.Int, payload.ProjectId || null)
+      .input("CompanyId", sql.Int, payload.CompanyId || null)
       .input("UnitNo", sql.NVarChar(100), payload.UnitNo)
       .input("BlockName", sql.NVarChar(100), payload.BlockName)
       .input("FloorName", sql.NVarChar(100), payload.FloorName)
@@ -406,8 +410,7 @@ router.put("/:id", async (req, res) => {
       .input("SelectionDate", sql.Date, payload.SelectionDate)
       .input("Status", sql.NVarChar(30), payload.Status)
       .input("Notes", sql.NVarChar(sql.MAX), payload.Notes)
-      .input("UpdatedBy", sql.NVarChar(100), userName)
-      .query(`
+      .input("UpdatedBy", sql.NVarChar(100), userName).query(`
         UPDATE dbo.FollowupUnitSelections
         SET
           ApplicantId = @ApplicantId,
@@ -446,9 +449,7 @@ router.delete("/:id", async (req, res) => {
   if (!userName) return;
 
   try {
-    const dependencyResult = await getPool()
-      .request()
-      .input("Id", sql.Int, id)
+    const dependencyResult = await getPool().request().input("Id", sql.Int, id)
       .query(`
         SELECT COUNT(*) AS Agreements
         FROM dbo.FollowupAgreements
@@ -457,15 +458,15 @@ router.delete("/:id", async (req, res) => {
 
     if (Number(dependencyResult.recordset[0]?.Agreements ?? 0) > 0) {
       return res.status(400).json({
-        error: "This unit selection is already linked to an agreement and cannot be deleted.",
+        error:
+          "This unit selection is already linked to an agreement and cannot be deleted.",
       });
     }
 
     await getPool()
       .request()
       .input("Id", sql.Int, id)
-      .input("UpdatedBy", sql.NVarChar(100), userName)
-      .query(`
+      .input("UpdatedBy", sql.NVarChar(100), userName).query(`
         UPDATE dbo.FollowupUnitSelections
         SET IsDeleted = 1, UpdatedBy = @UpdatedBy, UpdatedAt = SYSDATETIME()
         WHERE Id = @Id AND IsDeleted = 0
