@@ -753,7 +753,7 @@ export default function ProjectMaster() {
 
   const columns = useMemo(
     () => buildProjectColumns(openView, openEdit, setDeleteConfirm),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
     [],
   );
 
