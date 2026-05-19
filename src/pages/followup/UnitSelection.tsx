@@ -2,10 +2,8 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
-  ArrowLeft,
   Building2,
   CalendarDays,
-  ChevronRight,
   Edit2,
   Home,
   IndianRupee,
@@ -19,6 +17,8 @@ import {
 import { toast } from "sonner";
 
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { DashboardBackground } from "@/components/DashboardBackground";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -125,27 +125,27 @@ const NONE = "__none__";
 
 const STATUS_CONFIG: Record<string, { color: string; dot: string }> = {
   Reserved: {
-    color: "bg-amber-100 text-amber-800 border-amber-200",
+    color: "bg-amber-500/15 text-amber-600 border border-amber-400/30",
     dot: "bg-amber-500",
   },
   Negotiation: {
-    color: "bg-blue-100 text-blue-800 border-blue-200",
+    color: "bg-blue-500/15 text-blue-600 border border-blue-400/30",
     dot: "bg-blue-500",
   },
   Confirmed: {
-    color: "bg-emerald-100 text-emerald-800 border-emerald-200",
+    color: "bg-emerald-500/15 text-emerald-600 border border-emerald-400/30",
     dot: "bg-emerald-500",
   },
   Released: {
-    color: "bg-slate-100 text-slate-600 border-slate-200",
-    dot: "bg-slate-400",
+    color: "bg-muted text-muted-foreground border border-border",
+    dot: "bg-muted-foreground",
   },
 };
 
 function StatusBadge({ status }: { status: string }) {
   const cfg = STATUS_CONFIG[status] ?? {
-    color: "bg-slate-100 text-slate-600 border-slate-200",
-    dot: "bg-slate-400",
+    color: "bg-muted text-muted-foreground border border-border",
+    dot: "bg-muted-foreground",
   };
   return (
     <span
@@ -259,25 +259,25 @@ function UnitCard({
   } as FormState);
 
   return (
-    <div className="group relative bg-white border border-slate-200 rounded-2xl p-5 hover:border-violet-300 hover:shadow-lg hover:shadow-violet-500/5 transition-all duration-200">
+    <div className="group relative bg-card border border-border rounded-2xl p-5 hover:border-primary/30 hover:shadow-lg hover:shadow-primary/5 transition-all duration-200">
       {/* Top row */}
       <div className="flex items-start justify-between gap-3 mb-4">
         <div className="flex items-center gap-3 min-w-0">
-          <div className="w-10 h-10 rounded-xl bg-violet-50 border border-violet-100 flex items-center justify-center flex-shrink-0">
-            <Home className="w-5 h-5 text-violet-600" />
+          <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/20 flex items-center justify-center flex-shrink-0">
+            <Home className="w-5 h-5 text-primary" />
           </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-bold text-slate-900 text-base">
+              <span className="font-bold text-foreground text-base">
                 Unit {record.UnitNo}
               </span>
               {record.SelectionNo && (
-                <span className="text-xs text-slate-400 font-mono">
+                <span className="text-xs text-muted-foreground font-mono">
                   #{record.SelectionNo}
                 </span>
               )}
             </div>
-            <div className="flex items-center gap-1.5 mt-0.5 text-xs text-slate-500 flex-wrap">
+            <div className="flex items-center gap-1.5 mt-0.5 text-xs text-muted-foreground flex-wrap">
               {record.BlockName && <span>{record.BlockName}</span>}
               {record.BlockName && record.FloorName && <span>·</span>}
               {record.FloorName && <span>{record.FloorName}</span>}
@@ -297,12 +297,14 @@ function UnitCard({
       <div className="space-y-1.5 mb-4">
         {record.ApplicantName && (
           <div className="flex items-center gap-2 text-sm">
-            <span className="w-4 h-4 text-slate-400 flex-shrink-0">👤</span>
-            <span className="text-slate-700 font-medium truncate">
+            <span className="w-4 h-4 text-muted-foreground flex-shrink-0">
+              👤
+            </span>
+            <span className="text-foreground font-medium truncate">
               {record.ApplicantName}
             </span>
             {record.ApplicantNo && (
-              <span className="text-xs text-slate-400 font-mono flex-shrink-0">
+              <span className="text-xs text-muted-foreground font-mono flex-shrink-0">
                 ({record.ApplicantNo})
               </span>
             )}
@@ -310,16 +312,16 @@ function UnitCard({
         )}
         {record.ProjectName && (
           <div className="flex items-center gap-2 text-sm">
-            <MapPin className="w-4 h-4 text-slate-400 flex-shrink-0" />
-            <span className="text-slate-600 truncate">
+            <MapPin className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+            <span className="text-foreground/80 truncate">
               {record.ProjectName}
             </span>
           </div>
         )}
         {record.SelectionDate && (
           <div className="flex items-center gap-2 text-sm">
-            <CalendarDays className="w-4 h-4 text-slate-400 flex-shrink-0" />
-            <span className="text-slate-600">
+            <CalendarDays className="w-4 h-4 text-muted-foreground flex-shrink-0" />
+            <span className="text-foreground/80">
               {dateStr(record.SelectionDate)}
             </span>
           </div>
@@ -328,56 +330,56 @@ function UnitCard({
 
       {/* Financials */}
       <div className="grid grid-cols-3 gap-2 mb-4">
-        <div className="bg-slate-50 rounded-xl p-3 text-center">
-          <div className="text-xs text-slate-400 mb-0.5">Area</div>
-          <div className="font-semibold text-slate-800 text-sm">
+        <div className="bg-muted rounded-xl p-3 text-center">
+          <div className="text-xs text-muted-foreground mb-0.5">Area</div>
+          <div className="font-semibold text-foreground text-sm">
             {record.AreaSqFt
               ? `${Number(record.AreaSqFt).toLocaleString("en-IN")} ft²`
               : "—"}
           </div>
         </div>
-        <div className="bg-slate-50 rounded-xl p-3 text-center">
-          <div className="text-xs text-slate-400 mb-0.5">Rate/ft²</div>
-          <div className="font-semibold text-slate-800 text-sm">
+        <div className="bg-muted rounded-xl p-3 text-center">
+          <div className="text-xs text-muted-foreground mb-0.5">Rate/ft²</div>
+          <div className="font-semibold text-foreground text-sm">
             {record.RatePerSqFt
               ? `₹${Number(record.RatePerSqFt).toLocaleString("en-IN")}`
               : "—"}
           </div>
         </div>
-        <div className="bg-violet-50 rounded-xl p-3 text-center">
-          <div className="text-xs text-violet-500 mb-0.5">Total</div>
-          <div className="font-bold text-violet-700 text-sm">
+        <div className="bg-primary/10 rounded-xl p-3 text-center">
+          <div className="text-xs text-primary mb-0.5">Total</div>
+          <div className="font-bold text-primary text-sm">
             {money(record.TotalValue ?? computed)}
           </div>
         </div>
       </div>
 
       {record.BookingAmount && (
-        <div className="flex items-center justify-between text-xs text-slate-500 mb-4 px-1">
+        <div className="flex items-center justify-between text-xs text-muted-foreground mb-4 px-1">
           <span>Booking amount</span>
-          <span className="font-semibold text-slate-700">
+          <span className="font-semibold text-foreground">
             {money(record.BookingAmount)}
           </span>
         </div>
       )}
 
       {record.Notes && (
-        <p className="text-xs text-slate-500 bg-slate-50 rounded-lg px-3 py-2 mb-4 line-clamp-2">
+        <p className="text-xs text-muted-foreground bg-muted rounded-lg px-3 py-2 mb-4 line-clamp-2">
           {record.Notes}
         </p>
       )}
 
       {/* Actions */}
-      <div className="flex gap-2 pt-1 border-t border-slate-100">
+      <div className="flex gap-2 pt-1 border-t border-border/60">
         <button
           onClick={onEdit}
-          className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium text-slate-600 hover:text-violet-700 hover:bg-violet-50 rounded-lg py-2 transition-colors"
+          className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-primary hover:bg-primary/10 rounded-lg py-2 transition-colors"
         >
           <Edit2 className="w-3.5 h-3.5" /> Edit
         </button>
         <button
           onClick={onDelete}
-          className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg py-2 transition-colors"
+          className="flex-1 flex items-center justify-center gap-1.5 text-xs font-medium text-muted-foreground hover:text-destructive hover:bg-destructive/10 rounded-lg py-2 transition-colors"
         >
           <Trash2 className="w-3.5 h-3.5" /> Delete
         </button>
@@ -586,8 +588,8 @@ function FormDialog({
           </div>
 
           {/* Financials */}
-          <div className="bg-slate-50 rounded-xl p-4 space-y-4">
-            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+          <div className="bg-muted rounded-xl p-4 space-y-4">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
               Financials
             </p>
             <div className="grid grid-cols-2 gap-4">
@@ -682,7 +684,7 @@ function FormDialog({
           <Button
             onClick={() => onSave(form)}
             disabled={!form.ApplicantId || !form.UnitNo.trim() || isSaving}
-            className="bg-violet-600 hover:bg-violet-700 text-white"
+            className="bg-primary hover:bg-primary/90 text-primary-foreground"
           >
             {isSaving ? "Saving…" : editing ? "Update" : "Create"}
           </Button>
@@ -773,108 +775,93 @@ export function UnitSelectionPage() {
 
   return (
     <>
-      <style>{`
-        .us-page { font-family: 'DM Sans', 'Segoe UI', sans-serif; color: #0f172a; }
-        .us-heading { font-family: 'DM Sans', 'Segoe UI', sans-serif; font-weight: 700; letter-spacing: -0.4px; }
-      `}</style>
-
-      <div className="us-page min-h-screen bg-[#f8fafc]">
-        {/* ── White sticky header (matches Applicants layout) ── */}
-        <div className="bg-white border-b border-slate-200 px-7 pt-5 pb-0">
-          {/* Breadcrumb + title row */}
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <div className="flex items-center gap-1.5 text-sm text-slate-400 mb-1.5">
-                <button
-                  onClick={() => navigate("/followup")}
-                  className="hover:text-slate-700 transition-colors flex items-center gap-1"
-                >
-                  <ArrowLeft className="w-3.5 h-3.5" /> Follow-Up
-                </button>
-                <ChevronRight className="w-3.5 h-3.5" />
-                <span className="text-slate-700 font-medium">
-                  Unit Selection
-                </span>
-              </div>
-              <div className="us-heading flex items-center gap-3 text-[22px] text-slate-900">
-                <div className="w-9 h-9 bg-violet-600 rounded-[9px] flex items-center justify-center flex-shrink-0">
-                  <Home className="w-[18px] h-[18px] text-white" />
-                </div>
-                Unit Selection
-                <span className="text-[13px] font-medium text-slate-500 bg-slate-100 rounded-full px-2.5 py-0.5">
-                  {stats.total}
-                </span>
-              </div>
-            </div>
-            <Button
-              onClick={openCreate}
-              className="bg-violet-600 hover:bg-violet-700 text-white gap-2 rounded-xl px-5"
-            >
-              <Plus className="w-4 h-4" /> New Selection
-            </Button>
-          </div>
-
-          {/* Stats row (matches Applicants stats-row pattern) */}
-          <div className="flex gap-3 pb-[18px] overflow-x-auto">
-            {[
-              {
-                icon: <Layers className="w-4 h-4" />,
-                label: "Total",
-                value: stats.total,
-                accent: "#7c3aed",
-              },
-              {
-                icon: <Building2 className="w-4 h-4" />,
-                label: "Confirmed",
-                value: stats.confirmed,
-                accent: "#15803d",
-              },
-            ].map(({ icon, label, value, accent }) => (
-              <div
-                key={label}
-                className="flex items-center gap-2.5 bg-slate-50 border border-slate-200 rounded-[10px] px-4 py-2.5 min-w-[130px] flex-shrink-0"
-              >
-                <div
-                  className="w-[34px] h-[34px] rounded-lg flex items-center justify-center flex-shrink-0"
-                  style={{ background: `${accent}18`, color: accent }}
-                >
-                  {icon}
-                </div>
-                <div>
-                  <div className="text-xl font-bold leading-tight text-slate-900">
-                    {value}
-                  </div>
-                  <div className="text-[11px] text-slate-400 uppercase tracking-[0.5px]">
-                    {label}
-                  </div>
-                </div>
-              </div>
-            ))}
-            <div className="flex items-center gap-2.5 bg-slate-50 border border-slate-200 rounded-[10px] px-4 py-2.5 min-w-[180px] flex-shrink-0">
-              <div
-                className="w-[34px] h-[34px] rounded-lg flex items-center justify-center flex-shrink-0"
-                style={{ background: "#b4530018", color: "#b45300" }}
-              >
-                <IndianRupee className="w-4 h-4" />
+      <DashboardBackground />
+      <div className="relative z-10 p-6 space-y-6 max-w-[1400px] mx-auto">
+        {/* ── Page header ── */}
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <Breadcrumbs
+              items={[
+                { label: "Follow-Up", path: "/followup" },
+                {
+                  label: "Unit Selection",
+                  path: "/followup/sales/unit-selection",
+                },
+              ]}
+            />
+            <div className="flex items-center gap-3 mt-1.5">
+              <div className="p-2.5 rounded-xl bg-primary/10">
+                <Home size={20} className="text-primary" />
               </div>
               <div>
-                <div className="text-xl font-bold leading-tight text-slate-900">
-                  ₹{stats.totalValue.toLocaleString("en-IN")}
-                </div>
-                <div className="text-[11px] text-slate-400 uppercase tracking-[0.5px]">
-                  Visible Value
-                </div>
+                <h1 className="text-2xl font-heading font-bold text-foreground">
+                  Unit Selection
+                </h1>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  Manage unit bookings and applicant selections
+                </p>
               </div>
             </div>
           </div>
+          <Button
+            onClick={openCreate}
+            className="bg-primary hover:bg-primary/90 text-primary-foreground gap-2 rounded-xl px-5 mt-1"
+          >
+            <Plus className="w-4 h-4" /> New Selection
+          </Button>
         </div>
 
-        {/* ── Filter bar strip (matches Applicants filter-bar) ── */}
-        <div className="bg-white border-b border-slate-200 px-7 py-3 flex gap-2.5 items-center flex-wrap">
+        {/* ── KPI strip ── */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          {[
+            {
+              icon: <Layers size={16} />,
+              label: "Total",
+              value: stats.total,
+              accent: "text-primary",
+              bg: "bg-primary/10",
+            },
+            {
+              icon: <Building2 size={16} />,
+              label: "Confirmed",
+              value: stats.confirmed,
+              accent: "text-emerald-600",
+              bg: "bg-emerald-500/10",
+            },
+            {
+              icon: <IndianRupee size={16} />,
+              label: "Visible Value",
+              value: `₹${stats.totalValue.toLocaleString("en-IN")}`,
+              accent: "text-amber-600",
+              bg: "bg-amber-500/10",
+            },
+          ].map((t) => (
+            <div
+              key={t.label}
+              className="rounded-xl border border-border bg-card p-4"
+            >
+              <div className={`p-2 rounded-lg ${t.bg} w-fit mb-3`}>
+                <span className={t.accent}>{t.icon}</span>
+              </div>
+              <p className="text-2xl font-bold font-heading text-foreground leading-none">
+                {t.value}
+              </p>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                {t.label}
+              </p>
+            </div>
+          ))}
+        </div>
+
+        {/* ── Filter bar ── */}
+        <div className="flex gap-2.5 items-center flex-wrap">
           <div className="relative flex-1 min-w-[220px]">
-            <Search className="absolute left-[11px] top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400 pointer-events-none" />
+            <Search
+              size={14}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+            />
             <input
-              className="w-full pl-9 pr-9 py-[9px] border-[1.5px] border-slate-200 rounded-[9px] text-sm bg-slate-50 text-slate-900 outline-none focus:border-violet-600 focus:bg-white transition-colors box-border"
+              className="w-full pl-9 pr-9 py-[9px] border border-border rounded-lg text-sm bg-card text-foreground outline-none focus:border-primary/60 transition-colors"
               placeholder="Search unit, applicant, project…"
               value={search}
               onChange={(e) => {
@@ -888,7 +875,7 @@ export function UnitSelectionPage() {
                   setSearch("");
                   setPage(1);
                 }}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
@@ -901,10 +888,10 @@ export function UnitSelectionPage() {
                 setStatusFilter(s);
                 setPage(1);
               }}
-              className={`px-3.5 py-[9px] rounded-[9px] text-xs font-semibold border-[1.5px] transition-all ${
+              className={`px-3.5 py-[9px] rounded-lg text-xs font-semibold border transition-all ${
                 statusFilter === s
-                  ? "bg-violet-600 text-white border-violet-600 shadow-sm"
-                  : "bg-slate-50 text-slate-600 border-slate-200 hover:border-violet-300"
+                  ? "bg-primary text-primary-foreground border-primary shadow-sm"
+                  : "bg-card text-muted-foreground border-border hover:border-primary/40"
               }`}
             >
               {s === "all" ? "All" : s}
@@ -912,100 +899,93 @@ export function UnitSelectionPage() {
           ))}
         </div>
 
-        {/* ── Body ── */}
-        <div className="px-7 py-5">
-          <div className="max-w-7xl mx-auto">
-            {/* Grid */}
-            {isLoading ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <div
-                    key={i}
-                    className="bg-white border border-slate-200 rounded-2xl p-5 animate-pulse"
-                  >
-                    <div className="flex items-center gap-3 mb-4">
-                      <div className="w-10 h-10 bg-slate-100 rounded-xl" />
-                      <div className="flex-1 space-y-1.5">
-                        <div className="h-4 bg-slate-100 rounded w-2/3" />
-                        <div className="h-3 bg-slate-100 rounded w-1/3" />
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-3 gap-2">
-                      {[0, 1, 2].map((j) => (
-                        <div key={j} className="h-14 bg-slate-100 rounded-xl" />
-                      ))}
-                    </div>
+        {/* ── Grid / empty / loading ── */}
+        {isLoading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div
+                key={i}
+                className="bg-card border border-border rounded-xl p-5 animate-pulse"
+              >
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 bg-muted rounded-xl" />
+                  <div className="flex-1 space-y-1.5">
+                    <div className="h-4 bg-muted rounded w-2/3" />
+                    <div className="h-3 bg-muted rounded w-1/3" />
                   </div>
-                ))}
-              </div>
-            ) : records.length === 0 ? (
-              <div className="bg-white border border-slate-200 rounded-2xl p-16 text-center">
-                <div className="w-16 h-16 bg-violet-50 rounded-2xl flex items-center justify-center mx-auto mb-4">
-                  <Home className="w-8 h-8 text-violet-400" />
                 </div>
-                <h3 className="us-heading text-lg font-bold text-slate-700 mb-1">
-                  No unit selections
-                </h3>
-                <p className="text-slate-400 text-sm mb-5">
-                  {search || statusFilter !== "all"
-                    ? "Try changing your filters"
-                    : "Create the first unit selection to get started"}
-                </p>
-                {!search && statusFilter === "all" && (
-                  <Button
-                    onClick={openCreate}
-                    className="bg-violet-600 hover:bg-violet-700 text-white gap-2 rounded-xl"
-                  >
-                    <Plus className="w-4 h-4" /> New Selection
-                  </Button>
-                )}
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                {records.map((r) => (
-                  <UnitCard
-                    key={r.Id}
-                    record={r}
-                    onEdit={() => openEdit(r)}
-                    onDelete={() => setDeleteTarget(r)}
-                  />
-                ))}
-              </div>
-            )}
-
-            {/* Pagination */}
-            {pagination && pagination.totalPages > 1 && (
-              <div className="flex items-center justify-between text-sm text-slate-500 mt-2">
-                <span>
-                  Page {pagination.page} of {pagination.totalPages} ·{" "}
-                  {pagination.total} total
-                </span>
-                <div className="flex gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={page <= 1}
-                    onClick={() => setPage((p) => p - 1)}
-                    className="rounded-xl"
-                  >
-                    Previous
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={page >= pagination.totalPages}
-                    onClick={() => setPage((p) => p + 1)}
-                    className="rounded-xl"
-                  >
-                    Next
-                  </Button>
+                <div className="grid grid-cols-3 gap-2">
+                  {[0, 1, 2].map((j) => (
+                    <div key={j} className="h-14 bg-muted rounded-xl" />
+                  ))}
                 </div>
               </div>
+            ))}
+          </div>
+        ) : records.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center">
+            <div className="p-4 rounded-2xl bg-muted mb-4">
+              <Home size={28} className="text-muted-foreground" />
+            </div>
+            <p className="text-sm font-semibold text-foreground">
+              No unit selections
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              {search || statusFilter !== "all"
+                ? "Try changing your filters"
+                : "Create the first unit selection to get started"}
+            </p>
+            {!search && statusFilter === "all" && (
+              <Button
+                onClick={openCreate}
+                className="bg-primary hover:bg-primary/90 text-primary-foreground gap-2 rounded-xl mt-4"
+              >
+                <Plus className="w-4 h-4" /> New Selection
+              </Button>
             )}
           </div>
-          {/* end max-w */}
-        </div>
-        {/* end body */}
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {records.map((r) => (
+              <UnitCard
+                key={r.Id}
+                record={r}
+                onEdit={() => openEdit(r)}
+                onDelete={() => setDeleteTarget(r)}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* ── Pagination ── */}
+        {pagination && pagination.totalPages > 1 && (
+          <div className="flex items-center justify-between text-sm text-muted-foreground">
+            <span>
+              Page {pagination.page} of {pagination.totalPages} ·{" "}
+              {pagination.total} total
+            </span>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => p - 1)}
+                className="rounded-xl"
+              >
+                Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page >= pagination.totalPages}
+                onClick={() => setPage((p) => p + 1)}
+                className="rounded-xl"
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Create / Edit Dialog */}
@@ -1030,7 +1010,7 @@ export function UnitSelectionPage() {
           <DialogHeader>
             <DialogTitle>Delete unit selection?</DialogTitle>
           </DialogHeader>
-          <p className="text-sm text-slate-600">
+          <p className="text-sm text-muted-foreground">
             Unit <strong>{deleteTarget?.UnitNo}</strong>
             {deleteTarget?.ApplicantName
               ? ` for ${deleteTarget.ApplicantName}`
