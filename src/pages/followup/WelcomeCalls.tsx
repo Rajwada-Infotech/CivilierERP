@@ -19,6 +19,8 @@ import {
 import { toast } from "sonner";
 
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { DashboardBackground } from "@/components/DashboardBackground";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -85,40 +87,40 @@ const OUTCOME_CONFIG: Record<
     icon: <PhoneCall className="w-4 h-4" />,
     color: "text-emerald-700",
     dot: "bg-emerald-500",
-    bg: "bg-emerald-50 border-emerald-200 text-emerald-700",
-    iconBg: "bg-emerald-100 text-emerald-600",
+    bg: "bg-emerald-500/10 border-emerald-400/30 text-emerald-600",
+    iconBg: "bg-emerald-500/15 text-emerald-600",
   },
   no_answer: {
     label: "No Answer",
     icon: <PhoneMissed className="w-4 h-4" />,
     color: "text-red-600",
     dot: "bg-red-400",
-    bg: "bg-red-50 border-red-200 text-red-700",
-    iconBg: "bg-red-100 text-red-500",
+    bg: "bg-red-500/10 border-red-400/30 text-red-500",
+    iconBg: "bg-red-500/15 text-red-500",
   },
   callback: {
     label: "Callback",
     icon: <Phone className="w-4 h-4" />,
     color: "text-blue-600",
     dot: "bg-blue-500",
-    bg: "bg-blue-50 border-blue-200 text-blue-700",
-    iconBg: "bg-blue-100 text-blue-600",
+    bg: "bg-blue-500/10 border-blue-400/30 text-blue-600",
+    iconBg: "bg-blue-500/15 text-blue-600",
   },
   voicemail: {
     label: "Voicemail",
     icon: <Voicemail className="w-4 h-4" />,
     color: "text-amber-600",
     dot: "bg-amber-400",
-    bg: "bg-amber-50 border-amber-200 text-amber-700",
-    iconBg: "bg-amber-100 text-amber-600",
+    bg: "bg-amber-500/10 border-amber-400/30 text-amber-600",
+    iconBg: "bg-amber-500/15 text-amber-600",
   },
   note: {
     label: "Note",
     icon: <StickyNote className="w-4 h-4" />,
     color: "text-slate-500",
     dot: "bg-slate-400",
-    bg: "bg-slate-100 border-slate-200 text-slate-600",
-    iconBg: "bg-slate-100 text-slate-500",
+    bg: "bg-muted border-border text-muted-foreground",
+    iconBg: "bg-muted text-muted-foreground",
   },
 };
 
@@ -392,15 +394,14 @@ export function WelcomeCallsPage() {
         /* ── Root ── */
         .wc-page {
           min-height: 100vh;
-          background: #f8fafc;
           font-family: 'DM Sans', 'Segoe UI', sans-serif;
-          color: #0f172a;
+          color: hsl(var(--foreground));
         }
 
         /* ── Header ── */
         .wc-header {
-          background: #fff;
-          border-bottom: 1px solid #e2e8f0;
+          background: hsl(var(--card));
+          border-bottom: 1px solid hsl(var(--border));
           padding: 20px 28px 0;
           position: sticky;
           top: 0;
@@ -418,14 +419,14 @@ export function WelcomeCallsPage() {
           align-items: center;
           gap: 6px;
           font-size: 12px;
-          color: #94a3b8;
+          color: hsl(var(--muted-foreground));
           margin-bottom: 6px;
         }
         .wc-breadcrumb button {
           background: none;
           border: none;
           cursor: pointer;
-          color: #94a3b8;
+          color: hsl(var(--muted-foreground));
           font-size: 12px;
           padding: 0;
           display: flex;
@@ -433,9 +434,9 @@ export function WelcomeCallsPage() {
           gap: 4px;
           transition: color 0.15s;
         }
-        .wc-breadcrumb button:hover { color: #475569; }
+        .wc-breadcrumb button:hover { color: hsl(var(--foreground)); }
         .wc-breadcrumb-sep { font-size: 10px; }
-        .wc-breadcrumb-cur { color: #475569; font-weight: 500; }
+        .wc-breadcrumb-cur { color: hsl(var(--foreground)); font-weight: 500; }
 
         .wc-title-row {
           display: flex;
@@ -444,30 +445,30 @@ export function WelcomeCallsPage() {
         }
         .wc-title-icon {
           width: 36px; height: 36px;
-          background: #2563eb;
+          background: hsl(var(--primary));
           border-radius: 9px;
           display: flex; align-items: center; justify-content: center;
-          color: #fff;
+          color: hsl(var(--primary-foreground));
           flex-shrink: 0;
         }
         .wc-title {
           font-size: 22px;
           font-weight: 700;
           letter-spacing: -0.4px;
-          color: #0f172a;
+          color: hsl(var(--foreground));
         }
         .wc-count {
           font-size: 13px;
           font-weight: 500;
-          color: #64748b;
-          background: #f1f5f9;
+          color: hsl(var(--muted-foreground));
+          background: hsl(var(--muted));
           border-radius: 20px;
           padding: 2px 10px;
         }
         .wc-log-btn {
           display: flex; align-items: center; gap: 6px;
-          background: #2563eb;
-          color: #fff;
+          background: hsl(var(--primary));
+          color: hsl(var(--primary-foreground));
           border: none;
           border-radius: 9px;
           padding: 9px 16px;
@@ -478,13 +479,13 @@ export function WelcomeCallsPage() {
           white-space: nowrap;
           flex-shrink: 0;
         }
-        .wc-log-btn:hover { background: #1d4ed8; }
+        .wc-log-btn:hover { background: hsl(var(--primary) / 0.85); }
 
         /* ── Stats strip ── */
         .wc-stats {
           display: flex;
           gap: 0;
-          border-top: 1px solid #f1f5f9;
+          border-top: 1px solid hsl(var(--border));
           margin-top: 4px;
         }
         .wc-stat {
@@ -493,7 +494,7 @@ export function WelcomeCallsPage() {
           flex-direction: column;
           align-items: center;
           padding: 12px 8px;
-          border-right: 1px solid #f1f5f9;
+          border-right: 1px solid hsl(var(--border));
           gap: 2px;
           min-width: 0;
         }
@@ -502,11 +503,11 @@ export function WelcomeCallsPage() {
           font-size: 20px;
           font-weight: 700;
           line-height: 1;
-          color: #0f172a;
+          color: hsl(var(--foreground));
         }
         .wc-stat-label {
           font-size: 11px;
-          color: #94a3b8;
+          color: hsl(var(--muted-foreground));
           text-transform: uppercase;
           letter-spacing: 0.5px;
           white-space: nowrap;
@@ -519,8 +520,8 @@ export function WelcomeCallsPage() {
 
         /* ── Filter bar ── */
         .wc-filter-bar {
-          background: #fff;
-          border-bottom: 1px solid #e2e8f0;
+          background: hsl(var(--card));
+          border-bottom: 1px solid hsl(var(--border));
           padding: 10px 28px;
           display: flex;
           gap: 10px;
@@ -536,35 +537,35 @@ export function WelcomeCallsPage() {
           position: absolute;
           left: 11px; top: 50%;
           transform: translateY(-50%);
-          color: #94a3b8;
+          color: hsl(var(--muted-foreground));
           pointer-events: none;
           width: 14px; height: 14px;
         }
         .wc-search {
           width: 100%;
           padding: 8px 12px 8px 34px;
-          border: 1.5px solid #e2e8f0;
+          border: 1.5px solid hsl(var(--border));
           border-radius: 9px;
           font-size: 13.5px;
-          background: #f8fafc;
-          color: #0f172a;
+          background: hsl(var(--muted));
+          color: hsl(var(--foreground));
           outline: none;
-          transition: border-color 0.15s;
+          transition: border-color 0.15s, background 0.15s;
           box-sizing: border-box;
           font-family: inherit;
         }
-        .wc-search:focus { border-color: #2563eb; background: #fff; }
+        .wc-search:focus { border-color: hsl(var(--primary)); background: hsl(var(--card)); }
         .wc-search-clear {
           position: absolute;
           right: 10px; top: 50%;
           transform: translateY(-50%);
           background: none; border: none;
           cursor: pointer;
-          color: #94a3b8;
+          color: hsl(var(--muted-foreground));
           padding: 2px;
           display: flex;
         }
-        .wc-search-clear:hover { color: #475569; }
+        .wc-search-clear:hover { color: hsl(var(--foreground)); }
 
         .wc-pills { display: flex; gap: 6px; flex-wrap: wrap; }
         .wc-pill {
@@ -573,18 +574,18 @@ export function WelcomeCallsPage() {
           border-radius: 9px;
           font-size: 12px;
           font-weight: 600;
-          border: 1.5px solid #e2e8f0;
-          background: #f8fafc;
-          color: #64748b;
+          border: 1.5px solid hsl(var(--border));
+          background: hsl(var(--muted));
+          color: hsl(var(--muted-foreground));
           cursor: pointer;
           transition: all 0.15s;
           white-space: nowrap;
         }
-        .wc-pill:hover { border-color: #2563eb; color: #2563eb; }
+        .wc-pill:hover { border-color: hsl(var(--primary)); color: hsl(var(--primary)); }
         .wc-pill.active {
-          background: #2563eb;
-          border-color: #2563eb;
-          color: #fff;
+          background: hsl(var(--primary));
+          border-color: hsl(var(--primary));
+          color: hsl(var(--primary-foreground));
         }
         .wc-pill-dot {
           width: 6px; height: 6px;
@@ -621,9 +622,9 @@ export function WelcomeCallsPage() {
         .wc-tl-dot {
           width: 20px; height: 20px;
           border-radius: 50%;
-          background: #f1f5f9;
-          border: 2px solid #fff;
-          box-shadow: 0 0 0 2px #e2e8f0;
+          background: hsl(var(--muted));
+          border: 2px solid hsl(var(--card));
+          box-shadow: 0 0 0 2px hsl(var(--border));
           display: flex;
           align-items: center;
           justify-content: center;
@@ -638,7 +639,7 @@ export function WelcomeCallsPage() {
         .wc-tl-line {
           flex: 1;
           width: 2px;
-          background: #e2e8f0;
+          background: hsl(var(--border));
           min-height: 16px;
         }
         .wc-card:last-child .wc-tl-line { display: none; }
@@ -646,8 +647,8 @@ export function WelcomeCallsPage() {
         /* Card body */
         .wc-card-body {
           flex: 1;
-          background: #fff;
-          border: 1.5px solid #e2e8f0;
+          background: hsl(var(--card));
+          border: 1.5px solid hsl(var(--border));
           border-radius: 12px;
           padding: 14px 16px;
           margin: 10px 0 10px 12px;
@@ -655,8 +656,8 @@ export function WelcomeCallsPage() {
           transition: border-color 0.15s, box-shadow 0.15s;
         }
         .wc-card-body:hover {
-          border-color: #bfdbfe;
-          box-shadow: 0 2px 12px rgba(37,99,235,0.07);
+          border-color: hsl(var(--primary) / 0.4);
+          box-shadow: 0 2px 12px hsl(var(--primary) / 0.07);
         }
 
         .wc-card-header {
@@ -680,7 +681,7 @@ export function WelcomeCallsPage() {
         .wc-customer-name {
           font-size: 14.5px;
           font-weight: 600;
-          color: #0f172a;
+          color: hsl(var(--foreground));
           display: block;
           margin-bottom: 3px;
         }
@@ -694,7 +695,7 @@ export function WelcomeCallsPage() {
           align-items: center;
           gap: 4px;
           font-size: 12px;
-          color: #64748b;
+          color: hsl(var(--muted-foreground));
         }
         .wc-card-right {
           display: flex;
@@ -727,19 +728,19 @@ export function WelcomeCallsPage() {
 
         .wc-time-ago {
           font-size: 11px;
-          color: #94a3b8;
+          color: hsl(var(--muted-foreground));
         }
 
         /* Notes */
         .wc-notes {
           margin: 10px 0 0 0;
           font-size: 13px;
-          color: #475569;
+          color: hsl(var(--muted-foreground));
           line-height: 1.55;
-          background: #f8fafc;
+          background: hsl(var(--muted));
           border-radius: 8px;
           padding: 8px 12px;
-          border-left: 3px solid #e2e8f0;
+          border-left: 3px solid hsl(var(--border));
         }
 
         /* Delete btn */
@@ -749,14 +750,14 @@ export function WelcomeCallsPage() {
           background: none;
           border: none;
           cursor: pointer;
-          color: #cbd5e1;
+          color: hsl(var(--border));
           padding: 4px;
           border-radius: 6px;
           display: none;
           transition: color 0.15s, background 0.15s;
         }
         .wc-card-body:hover .wc-delete-btn { display: flex; }
-        .wc-delete-btn:hover { color: #dc2626; background: #fee2e2; }
+        .wc-delete-btn:hover { color: hsl(var(--destructive)); background: hsl(var(--destructive) / 0.1); }
 
         /* ── Empty state ── */
         .wc-empty {
@@ -765,12 +766,12 @@ export function WelcomeCallsPage() {
           align-items: center;
           justify-content: center;
           padding: 60px 24px;
-          color: #94a3b8;
+          color: hsl(var(--muted-foreground));
           gap: 12px;
         }
         .wc-empty-icon {
           width: 56px; height: 56px;
-          background: #eff6ff;
+          background: hsl(var(--primary) / 0.1);
           border-radius: 14px;
           display: flex;
           align-items: center;
@@ -779,12 +780,12 @@ export function WelcomeCallsPage() {
         .wc-empty h3 {
           font-size: 15px;
           font-weight: 600;
-          color: #64748b;
+          color: hsl(var(--foreground));
           margin: 0;
         }
         .wc-empty p {
           font-size: 13px;
-          color: #94a3b8;
+          color: hsl(var(--muted-foreground));
           margin: 0;
           text-align: center;
         }
@@ -797,7 +798,7 @@ export function WelcomeCallsPage() {
           margin-bottom: 10px;
         }
         .wc-skel {
-          background: #f1f5f9;
+          background: hsl(var(--muted));
           border-radius: 6px;
           animation: wc-pulse 1.4s ease-in-out infinite;
         }
@@ -816,22 +817,22 @@ export function WelcomeCallsPage() {
           align-items: center;
           gap: 5px;
           padding: 10px 6px;
-          border: 1.5px solid #e2e8f0;
+          border: 1.5px solid hsl(var(--border));
           border-radius: 10px;
           cursor: pointer;
           font-size: 11px;
           font-weight: 600;
-          color: #64748b;
-          background: #f8fafc;
+          color: hsl(var(--muted-foreground));
+          background: hsl(var(--muted));
           transition: all 0.15s;
           text-align: center;
           line-height: 1.2;
         }
-        .wc-outcome-option:hover { border-color: #2563eb; color: #2563eb; background: #eff6ff; }
+        .wc-outcome-option:hover { border-color: hsl(var(--primary)); color: hsl(var(--primary)); background: hsl(var(--primary) / 0.08); }
         .wc-outcome-option.selected {
-          border-color: #2563eb;
-          background: #eff6ff;
-          color: #1d4ed8;
+          border-color: hsl(var(--primary));
+          background: hsl(var(--primary) / 0.1);
+          color: hsl(var(--primary));
         }
         .wc-outcome-option .icon-wrap {
           width: 28px; height: 28px;
@@ -856,14 +857,14 @@ export function WelcomeCallsPage() {
         .wc-combobox-trigger {
           width: 100%; display: flex; align-items: center;
           justify-content: space-between; gap: 8px;
-          padding: 8px 12px; border: 1.5px solid #e2e8f0;
-          border-radius: 9px; font-size: 14px; background: #fff;
-          color: #0f172a; cursor: pointer; text-align: left;
+          padding: 8px 12px; border: 1.5px solid hsl(var(--border));
+          border-radius: 9px; font-size: 14px; background: hsl(var(--card));
+          color: hsl(var(--foreground)); cursor: pointer; text-align: left;
           transition: border-color 0.15s; font-family: inherit; min-height: 38px;
         }
-        .wc-combobox-trigger:focus { outline: none; border-color: #2563eb; }
-        .wc-combobox-trigger.open { border-color: #2563eb; border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
-        .wc-combobox-trigger.empty { color: #94a3b8; }
+        .wc-combobox-trigger:focus { outline: none; border-color: hsl(var(--primary)); }
+        .wc-combobox-trigger.open { border-color: hsl(var(--primary)); border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+        .wc-combobox-trigger.empty { color: hsl(var(--muted-foreground)); }
         .wc-combobox-trigger-left { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
         .wc-combobox-avatar {
           width: 24px; height: 24px; border-radius: 6px; font-size: 10px;
@@ -871,25 +872,25 @@ export function WelcomeCallsPage() {
           justify-content: center; flex-shrink: 0; letter-spacing: 0.3px;
         }
         .wc-combobox-name { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .wc-combobox-code { font-size: 11px; color: #94a3b8; flex-shrink: 0; }
-        .wc-combobox-chevron { color: #94a3b8; flex-shrink: 0; transition: transform 0.15s; }
+        .wc-combobox-code { font-size: 11px; color: hsl(var(--muted-foreground)); flex-shrink: 0; }
+        .wc-combobox-chevron { color: hsl(var(--muted-foreground)); flex-shrink: 0; transition: transform 0.15s; }
         .wc-combobox-chevron.open { transform: rotate(180deg); }
         .wc-combobox-clear {
-          background: none; border: none; cursor: pointer; color: #94a3b8;
+          background: none; border: none; cursor: pointer; color: hsl(var(--muted-foreground));
           padding: 2px; display: flex; flex-shrink: 0; border-radius: 4px;
         }
-        .wc-combobox-clear:hover { color: #64748b; background: #f1f5f9; }
+        .wc-combobox-clear:hover { color: hsl(var(--foreground)); background: hsl(var(--muted)); }
         .wc-combobox-dropdown {
-          position: absolute; top: 100%; left: 0; right: 0; background: #fff;
-          border: 1.5px solid #2563eb; border-top: 1px solid #e2e8f0;
-          border-radius: 0 0 9px 9px; box-shadow: 0 8px 24px rgba(0,0,0,0.10);
+          position: absolute; top: 100%; left: 0; right: 0; background: hsl(var(--card));
+          border: 1.5px solid hsl(var(--primary)); border-top: 1px solid hsl(var(--border));
+          border-radius: 0 0 9px 9px; box-shadow: 0 8px 24px hsl(var(--foreground) / 0.1);
           z-index: 100; overflow: hidden; max-height: 280px; display: flex; flex-direction: column;
         }
-        .wc-combobox-search-wrap { position: relative; border-bottom: 1px solid #f1f5f9; flex-shrink: 0; }
-        .wc-combobox-search-wrap svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #94a3b8; pointer-events: none; }
+        .wc-combobox-search-wrap { position: relative; border-bottom: 1px solid hsl(var(--border)); flex-shrink: 0; }
+        .wc-combobox-search-wrap svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: hsl(var(--muted-foreground)); pointer-events: none; }
         .wc-combobox-search {
           width: 100%; padding: 9px 12px 9px 36px; border: none; font-size: 13px;
-          color: #0f172a; background: #f8fafc; outline: none; font-family: inherit; box-sizing: border-box;
+          color: hsl(var(--foreground)); background: hsl(var(--muted)); outline: none; font-family: inherit; box-sizing: border-box;
         }
         .wc-combobox-list { overflow-y: auto; flex: 1; }
         .wc-combobox-item {
@@ -897,15 +898,16 @@ export function WelcomeCallsPage() {
           cursor: pointer; transition: background 0.1s; border: none; background: none;
           width: 100%; text-align: left; font-family: inherit;
         }
-        .wc-combobox-item:hover { background: #eff6ff; }
-        .wc-combobox-item.selected { background: #dbeafe; }
-        .wc-combobox-item-name { font-size: 13.5px; font-weight: 500; color: #0f172a; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .wc-combobox-item-code { font-size: 11px; color: #94a3b8; flex-shrink: 0; }
-        .wc-combobox-item-phone { font-size: 11px; color: #64748b; flex-shrink: 0; }
-        .wc-combobox-empty { padding: 20px; text-align: center; font-size: 13px; color: #94a3b8; }
+        .wc-combobox-item:hover { background: hsl(var(--primary) / 0.08); }
+        .wc-combobox-item.selected { background: hsl(var(--primary) / 0.15); }
+        .wc-combobox-item-name { font-size: 13.5px; font-weight: 500; color: hsl(var(--foreground)); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .wc-combobox-item-code { font-size: 11px; color: hsl(var(--muted-foreground)); flex-shrink: 0; }
+        .wc-combobox-item-phone { font-size: 11px; color: hsl(var(--muted-foreground)); flex-shrink: 0; }
+        .wc-combobox-empty { padding: 20px; text-align: center; font-size: 13px; color: hsl(var(--muted-foreground)); }
       `}</style>
 
-      <div className="wc-page">
+      <DashboardBackground />
+      <div className="relative z-10 wc-page">
         {/* ── Header ── */}
         <div className="wc-header">
           <div className="wc-header-top">
@@ -992,10 +994,6 @@ export function WelcomeCallsPage() {
                     <span
                       className="wc-pill-dot"
                       style={{
-                        background:
-                          outcomeFilter === o
-                            ? "#fff"
-                            : cfg.dot.replace("bg-", ""),
                         opacity: outcomeFilter === o ? 0.8 : 1,
                       }}
                     />
@@ -1036,7 +1034,7 @@ export function WelcomeCallsPage() {
             <div className="wc-empty">
               <div className="wc-empty-icon">
                 <PhoneCall
-                  style={{ width: 26, height: 26, color: "#3b82f6" }}
+                  style={{ width: 26, height: 26 }} className="text-primary"
                 />
               </div>
               <h3>
@@ -1094,7 +1092,7 @@ export function WelcomeCallsPage() {
                   justifyContent: "center",
                 }}
               >
-                <Phone style={{ width: 14, height: 14, color: "#fff" }} />
+                <Phone style={{ width: 14, height: 14, color: "hsl(var(--primary-foreground))" }} />
               </div>
               Log Welcome Call
             </DialogTitle>
@@ -1127,8 +1125,8 @@ export function WelcomeCallsPage() {
                         className="icon-wrap"
                         style={{
                           background:
-                            form.outcome === o ? "#dbeafe" : "#f1f5f9",
-                          color: form.outcome === o ? "#2563eb" : "#64748b",
+                            form.outcome === o ? "hsl(var(--primary) / 0.15)" : "hsl(var(--muted))",
+                          color: form.outcome === o ? "hsl(var(--primary))" : "hsl(var(--muted-foreground))",
                         }}
                       >
                         {cfg.icon}
@@ -1313,7 +1311,7 @@ export function WelcomeCallsPage() {
                   notes: form.notes.trim() || undefined,
                 })
               }
-              className="bg-blue-600 hover:bg-blue-700 text-white rounded-[9px] gap-2"
+              className="bg-primary hover:bg-primary/90 text-primary-foreground rounded-[9px] gap-2"
             >
               {createMutation.isPending ? (
                 "Saving…"

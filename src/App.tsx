@@ -211,7 +211,7 @@ const FollowupUnitSelection = lazy(
   () => import("./pages/followup/UnitSelection"),
 );
 const FollowupAgreements = lazy(() =>
-  import("./pages/followup/FollowupPipelinePage").then((module) => ({
+  import("./pages/followup/Agreements").then((module) => ({
     default: module.AgreementsPage,
   })),
 );

@@ -3,7 +3,6 @@ import { useNavigate } from "react-router-dom";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import {
   Search,
-  Filter,
   User,
   Phone,
   Mail,
@@ -19,15 +18,15 @@ import {
   CheckCircle,
   XCircle,
 } from "lucide-react";
-
-// ─── Types ──────────────────────────────────────────────────────────────────
+import { DashboardBackground } from "@/components/DashboardBackground";
+import { Breadcrumbs } from "@/components/Breadcrumbs";
 
 interface Applicant {
   LHeadId: number;
   LHeadCode: string | null;
   LHeadName: string;
   LHeadType: string;
-  LHeadStatus: number; // 1 = Active, 0 = Inactive
+  LHeadStatus: number;
   LHeadPhone?: string;
   LHeadEmail?: string;
   LHeadAddress?: string;
@@ -41,29 +40,27 @@ interface Applicant {
   LBranchName?: string;
 }
 
-// ─── Status helpers ──────────────────────────────────────────────────────────
-
-const STATUS_MAP: Record<
+const STATUS_CONFIG: Record<
   number,
-  { label: string; color: string; icon: React.ReactNode }
+  { label: string; pill: string; icon: React.ReactNode }
 > = {
   1: {
     label: "Active",
-    color: "status-active",
-    icon: <CheckCircle size={12} />,
+    pill: "bg-emerald-500/10 text-emerald-600 border border-emerald-400/20",
+    icon: <CheckCircle size={11} />,
   },
   0: {
     label: "Inactive",
-    color: "status-inactive",
-    icon: <XCircle size={12} />,
+    pill: "bg-red-500/10 text-red-500 border border-red-400/20",
+    icon: <XCircle size={11} />,
   },
 };
 
 function getStatus(code: number) {
   return (
-    STATUS_MAP[code] ?? {
+    STATUS_CONFIG[code] ?? {
       label: "Unknown",
-      color: "status-default",
+      pill: "bg-muted text-muted-foreground border border-border",
       icon: null,
     }
   );
@@ -78,7 +75,6 @@ function initials(name: string) {
     .toUpperCase();
 }
 
-// Deterministic avatar color from name
 const AVATAR_COLORS = [
   "#2563EB",
   "#7C3AED",
@@ -95,35 +91,6 @@ function avatarColor(name: string) {
   return AVATAR_COLORS[h % AVATAR_COLORS.length];
 }
 
-// ─── Sub-components ──────────────────────────────────────────────────────────
-
-function StatCard({
-  icon,
-  label,
-  value,
-  accent,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: number | string;
-  accent: string;
-}) {
-  return (
-    <div className="stat-card">
-      <div
-        className="stat-icon"
-        style={{ background: accent + "18", color: accent }}
-      >
-        {icon}
-      </div>
-      <div className="stat-body">
-        <span className="stat-value">{value}</span>
-        <span className="stat-label">{label}</span>
-      </div>
-    </div>
-  );
-}
-
 function ApplicantCard({
   applicant,
   onClick,
@@ -136,75 +103,82 @@ function ApplicantCard({
 
   return (
     <div
-      className="applicant-card"
+      className="group flex items-start gap-3.5 bg-card border border-border rounded-xl px-4 py-3.5 mb-2.5 cursor-pointer transition-all duration-200 hover:border-primary/30 hover:shadow-md hover:-translate-y-px focus:outline-none focus:ring-2 focus:ring-primary/40"
       onClick={onClick}
       tabIndex={0}
       onKeyDown={(e) => e.key === "Enter" && onClick()}
     >
-      {/* Avatar */}
-      <div className="card-avatar" style={{ background: bg }}>
+      <div
+        className="w-11 h-11 rounded-xl flex items-center justify-center text-[15px] font-bold text-white flex-shrink-0"
+        style={{ background: bg }}
+      >
         {initials(applicant.LHeadName)}
       </div>
 
-      {/* Main info */}
-      <div className="card-main">
-        <div className="card-header-row">
-          <span className="card-name">{applicant.LHeadName}</span>
-          <span className={`status-badge ${status.color}`}>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap mb-0.5">
+          <span className="text-[15px] font-semibold text-foreground">
+            {applicant.LHeadName}
+          </span>
+          <span
+            className={`inline-flex items-center gap-1 text-[11px] font-semibold rounded-full px-2 py-0.5 ${status.pill}`}
+          >
             {status.icon}
             {status.label}
           </span>
         </div>
-        <span className="card-code">{applicant.LHeadCode}</span>
-
-        <div className="card-meta">
+        {applicant.LHeadCode && (
+          <span className="block text-[12px] text-muted-foreground mb-2">
+            {applicant.LHeadCode}
+          </span>
+        )}
+        <div className="flex flex-wrap gap-2.5 mb-2">
           {applicant.LHeadPhone && (
-            <span className="meta-item">
+            <span className="flex items-center gap-1 text-[12.5px] text-muted-foreground">
               <Phone size={12} /> {applicant.LHeadPhone}
             </span>
           )}
           {applicant.LHeadEmail && (
-            <span className="meta-item">
+            <span className="flex items-center gap-1 text-[12.5px] text-muted-foreground">
               <Mail size={12} />
-              <span className="meta-email">{applicant.LHeadEmail}</span>
+              <span className="max-w-[180px] truncate">
+                {applicant.LHeadEmail}
+              </span>
             </span>
           )}
           {applicant.LHeadAddress && (
-            <span className="meta-item">
+            <span className="flex items-center gap-1 text-[12.5px] text-muted-foreground">
               <MapPin size={12} /> {applicant.LHeadAddress}
             </span>
           )}
         </div>
-
-        <div className="card-chips">
+        <div className="flex flex-wrap gap-1.5">
           {applicant.LGST && (
-            <span className="chip chip-gst">
+            <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-blue-500/10 text-blue-600 border border-blue-400/20 rounded-md px-2 py-0.5">
               <Building2 size={10} /> GST: {applicant.LGST}
             </span>
           )}
           {applicant.LHeadContactPerson && (
-            <span className="chip chip-pan">
+            <span className="inline-flex items-center gap-1 text-[11px] font-medium bg-violet-500/10 text-violet-600 border border-violet-400/20 rounded-md px-2 py-0.5">
               <CreditCard size={10} /> Contact: {applicant.LHeadContactPerson}
             </span>
           )}
         </div>
       </div>
 
-      <ChevronRight size={16} className="card-arrow" />
+      <ChevronRight
+        size={16}
+        className="text-muted-foreground/40 mt-1 flex-shrink-0 group-hover:text-primary group-hover:translate-x-0.5 transition-all"
+      />
     </div>
   );
 }
 
-// ─── Main Page ───────────────────────────────────────────────────────────────
-
 const Applicants: React.FC = () => {
   const navigate = useNavigate();
-
   const [applicants, setApplicants] = useState<Applicant[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-
-  // Filters
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
 
@@ -215,338 +189,130 @@ const Applicants: React.FC = () => {
       const params = new URLSearchParams();
       if (search) params.set("search", search);
       if (statusFilter) params.set("status", statusFilter);
-
       const res = await fetchWithAuth(`/api/applicants?${params.toString()}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
-      const data: Applicant[] = json.data ?? [];
-      setApplicants(data);
+      setApplicants(json.data ?? []);
     } catch (err: any) {
-      setError(err?.response?.data?.message ?? "Failed to load applicants");
+      setError(err?.message ?? "Failed to load applicants");
     } finally {
       setLoading(false);
     }
   }, [search, statusFilter]);
 
-  // Debounced search
   useEffect(() => {
     const timer = setTimeout(fetchApplicants, 300);
     return () => clearTimeout(timer);
   }, [fetchApplicants]);
 
-  // Stats
   const total = applicants.length;
   const active = applicants.filter((a) => a.LHeadStatus === 1).length;
   const inactive = applicants.filter((a) => a.LHeadStatus === 0).length;
-
-  const clearFilters = () => {
-    setSearch("");
-    setStatusFilter("");
-  };
-
   const hasFilters = search || statusFilter;
 
   return (
     <>
-      <style>{`
-        /* ── Root ── */
-        .appl-page {
-          min-height: 100vh;
-          background: #f8fafc;
-          font-family: 'DM Sans', 'Segoe UI', sans-serif;
-          color: #0f172a;
-        }
-
-        /* ── Header ── */
-        .appl-header {
-          background: #fff;
-          border-bottom: 1px solid #e2e8f0;
-          padding: 20px 28px 0;
-        }
-        .appl-header-top {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          margin-bottom: 20px;
-        }
-        .appl-title {
-          font-size: 22px;
-          font-weight: 700;
-          letter-spacing: -0.4px;
-          color: #0f172a;
-          display: flex;
-          align-items: center;
-          gap: 10px;
-        }
-        .appl-title-icon {
-          width: 36px; height: 36px;
-          background: #1d4ed8;
-          border-radius: 9px;
-          display: flex; align-items: center; justify-content: center;
-          color: #fff;
-        }
-        .appl-count {
-          font-size: 13px;
-          font-weight: 500;
-          color: #64748b;
-          background: #f1f5f9;
-          border-radius: 20px;
-          padding: 2px 10px;
-          margin-left: 4px;
-        }
-
-        .refresh-btn {
-          display: flex; align-items: center; gap: 6px;
-          background: #f1f5f9;
-          border: none; border-radius: 8px;
-          padding: 8px 14px;
-          font-size: 13px; font-weight: 500;
-          color: #475569; cursor: pointer;
-          transition: background 0.15s;
-        }
-        .refresh-btn:hover { background: #e2e8f0; }
-        .refresh-btn.loading svg { animation: spin 1s linear infinite; }
-        @keyframes spin { to { transform: rotate(360deg); } }
-
-        /* ── Stats ── */
-        .stats-row {
-          display: flex;
-          gap: 12px;
-          padding-bottom: 18px;
-          overflow-x: auto;
-        }
-        .stat-card {
-          display: flex; align-items: center; gap: 10px;
-          background: #f8fafc;
-          border: 1px solid #e2e8f0;
-          border-radius: 10px;
-          padding: 10px 16px;
-          min-width: 130px;
-          flex-shrink: 0;
-        }
-        .stat-icon {
-          width: 34px; height: 34px;
-          border-radius: 8px;
-          display: flex; align-items: center; justify-content: center;
-        }
-        .stat-body { display: flex; flex-direction: column; }
-        .stat-value { font-size: 20px; font-weight: 700; line-height: 1.2; }
-        .stat-label { font-size: 11px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px; }
-
-        /* ── Filters ── */
-        .filter-bar {
-          background: #fff;
-          border-bottom: 1px solid #e2e8f0;
-          padding: 12px 28px;
-          display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
-        }
-        .search-wrap {
-          position: relative; flex: 1; min-width: 220px;
-        }
-        .search-wrap svg {
-          position: absolute; left: 11px; top: 50%; transform: translateY(-50%);
-          color: #94a3b8; pointer-events: none;
-        }
-        .search-input {
-          width: 100%; padding: 9px 12px 9px 36px;
-          border: 1.5px solid #e2e8f0; border-radius: 9px;
-          font-size: 14px; background: #f8fafc; color: #0f172a;
-          outline: none; transition: border-color 0.15s;
-          box-sizing: border-box;
-        }
-        .search-input:focus { border-color: #1d4ed8; background: #fff; }
-
-        .filter-select {
-          padding: 9px 12px; border: 1.5px solid #e2e8f0; border-radius: 9px;
-          font-size: 13px; background: #f8fafc; color: #475569;
-          outline: none; cursor: pointer; transition: border-color 0.15s;
-        }
-        .filter-select:focus { border-color: #1d4ed8; }
-
-        .clear-btn {
-          display: flex; align-items: center; gap: 5px;
-          padding: 9px 12px; border: 1.5px solid #fca5a5;
-          background: #fff1f2; border-radius: 9px;
-          font-size: 13px; color: #dc2626; cursor: pointer;
-          transition: background 0.15s;
-        }
-        .clear-btn:hover { background: #fee2e2; }
-
-        /* ── List ── */
-        .appl-body { padding: 20px 28px; }
-
-        .applicant-card {
-          display: flex; align-items: flex-start; gap: 14px;
-          background: #fff;
-          border: 1.5px solid #e2e8f0;
-          border-radius: 12px;
-          padding: 16px 18px;
-          margin-bottom: 10px;
-          cursor: pointer;
-          transition: border-color 0.15s, box-shadow 0.15s, transform 0.1s;
-          position: relative;
-        }
-        .applicant-card:hover {
-          border-color: #1d4ed8;
-          box-shadow: 0 4px 16px rgba(29,78,216,0.08);
-          transform: translateY(-1px);
-        }
-        .applicant-card:focus { outline: 2px solid #1d4ed8; outline-offset: 2px; }
-
-        .card-avatar {
-          width: 44px; height: 44px; border-radius: 12px;
-          display: flex; align-items: center; justify-content: center;
-          font-size: 15px; font-weight: 700; color: #fff;
-          flex-shrink: 0; letter-spacing: 0.5px;
-        }
-
-        .card-main { flex: 1; min-width: 0; }
-        .card-header-row {
-          display: flex; align-items: center; gap: 8px;
-          flex-wrap: wrap; margin-bottom: 2px;
-        }
-        .card-name {
-          font-size: 15px; font-weight: 600; color: #0f172a;
-        }
-        .card-code {
-          display: block;
-          font-size: 12px; color: #94a3b8;
-          margin-bottom: 8px;
-        }
-
-        /* Status badges */
-        .status-badge {
-          display: inline-flex; align-items: center; gap: 4px;
-          font-size: 11px; font-weight: 600;
-          border-radius: 20px; padding: 2px 9px;
-        }
-        .status-active   { background: #dcfce7; color: #15803d; }
-        .status-inactive { background: #fee2e2; color: #b91c1c; }
-        .status-pending  { background: #fef3c7; color: #b45309; }
-        .status-default  { background: #f1f5f9; color: #475569; }
-
-        .card-meta {
-          display: flex; flex-wrap: wrap; gap: 10px;
-          margin-bottom: 8px;
-        }
-        .meta-item {
-          display: flex; align-items: center; gap: 4px;
-          font-size: 12.5px; color: #475569;
-        }
-        .meta-email {
-          max-width: 180px;
-          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-        }
-
-        .card-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-        .chip {
-          display: inline-flex; align-items: center; gap: 4px;
-          font-size: 11px; font-weight: 500;
-          border-radius: 6px; padding: 3px 8px;
-        }
-        .chip-gst    { background: #eff6ff; color: #1d4ed8; }
-        .chip-pan    { background: #f5f3ff; color: #6d28d9; }
-        .chip-credit { background: #f0fdf4; color: #15803d; }
-
-        .card-arrow {
-          color: #cbd5e1; margin-top: 4px; flex-shrink: 0;
-          transition: color 0.15s, transform 0.15s;
-        }
-        .applicant-card:hover .card-arrow {
-          color: #1d4ed8; transform: translateX(3px);
-        }
-
-        /* ── States ── */
-        .state-box {
-          display: flex; flex-direction: column; align-items: center;
-          justify-content: center; padding: 60px 20px; color: #94a3b8;
-          gap: 12px;
-        }
-        .state-box svg { color: #cbd5e1; }
-        .state-box p { font-size: 15px; margin: 0; }
-        .state-box span { font-size: 13px; }
-
-        .error-box {
-          display: flex; align-items: center; gap: 10px;
-          background: #fff1f2; border: 1px solid #fca5a5;
-          border-radius: 10px; padding: 14px 18px;
-          color: #b91c1c; font-size: 14px; margin-bottom: 16px;
-        }
-
-        /* ── Skeleton ── */
-        .skeleton-card {
-          background: #fff; border: 1.5px solid #e2e8f0;
-          border-radius: 12px; padding: 16px 18px;
-          margin-bottom: 10px; display: flex; gap: 14px; align-items: flex-start;
-        }
-        .skel { background: #f1f5f9; border-radius: 6px; animation: pulse 1.4s ease-in-out infinite; }
-        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
-        .skel-avatar { width: 44px; height: 44px; border-radius: 12px; flex-shrink: 0; }
-        .skel-body { flex: 1; }
-        .skel-line { height: 13px; margin-bottom: 8px; }
-        .skel-line.w-60 { width: 60%; }
-        .skel-line.w-40 { width: 40%; }
-        .skel-line.w-80 { width: 80%; }
-      `}</style>
-
-      <div className="appl-page">
+      <DashboardBackground />
+      <div className="relative z-10 p-6 space-y-6 max-w-[1400px] mx-auto">
         {/* Header */}
-        <div className="appl-header">
-          <div className="appl-header-top">
-            <div className="appl-title">
-              <div className="appl-title-icon">
-                <Users size={18} />
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <Breadcrumbs
+              items={[
+                { label: "Follow-Up", path: "/followup" },
+                { label: "Applicants", path: "/followup/sales/applicants" },
+              ]}
+            />
+            <div className="flex items-center gap-3 mt-1.5">
+              <div className="p-2.5 rounded-xl bg-blue-500/10">
+                <Users size={20} className="text-blue-600" />
               </div>
-              Applicants
-              {!loading && <span className="appl-count">{total}</span>}
+              <div>
+                <h1 className="text-2xl font-heading font-bold text-foreground">
+                  Applicants
+                </h1>
+                <p className="text-xs text-muted-foreground mt-0.5">
+                  All registered applicants and leads
+                </p>
+              </div>
             </div>
-            <button
-              className={`refresh-btn ${loading ? "loading" : ""}`}
-              onClick={fetchApplicants}
-              disabled={loading}
-            >
-              <RefreshCw size={14} />
-              Refresh
-            </button>
           </div>
-
-          {/* Stats */}
-          <div className="stats-row">
-            <StatCard
-              icon={<TrendingUp size={16} />}
-              label="Total"
-              value={total}
-              accent="#1d4ed8"
-            />
-            <StatCard
-              icon={<CheckCircle size={16} />}
-              label="Active"
-              value={active}
-              accent="#15803d"
-            />
-            <StatCard
-              icon={<XCircle size={16} />}
-              label="Inactive"
-              value={inactive}
-              accent="#b91c1c"
-            />
-          </div>
+          <button
+            onClick={fetchApplicants}
+            disabled={loading}
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-1.5 hover:bg-muted transition-colors mt-1"
+          >
+            <RefreshCw size={13} className={loading ? "animate-spin" : ""} />
+            Refresh
+          </button>
         </div>
 
-        {/* Filter Bar */}
-        <div className="filter-bar">
-          <div className="search-wrap">
-            <Search size={14} />
+        {/* KPI strip */}
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          {[
+            {
+              icon: <TrendingUp size={16} />,
+              label: "Total",
+              value: total,
+              accent: "text-blue-600",
+              bg: "bg-blue-500/10",
+            },
+            {
+              icon: <CheckCircle size={16} />,
+              label: "Active",
+              value: active,
+              accent: "text-emerald-600",
+              bg: "bg-emerald-500/10",
+            },
+            {
+              icon: <XCircle size={16} />,
+              label: "Inactive",
+              value: inactive,
+              accent: "text-red-500",
+              bg: "bg-red-500/10",
+            },
+          ].map((t) => (
+            <div
+              key={t.label}
+              className="rounded-xl border border-border bg-card p-4"
+            >
+              <div className={`p-2 rounded-lg ${t.bg} w-fit mb-3`}>
+                <span className={t.accent}>{t.icon}</span>
+              </div>
+              <p className="text-2xl font-bold font-heading text-foreground leading-none">
+                {t.value}
+              </p>
+              <p className="text-[11px] text-muted-foreground mt-1">
+                {t.label}
+              </p>
+            </div>
+          ))}
+        </div>
+
+        {/* Filter bar */}
+        <div className="flex gap-2.5 items-center flex-wrap">
+          <div className="relative flex-1 min-w-[220px]">
+            <Search
+              size={14}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none"
+            />
             <input
-              className="search-input"
+              className="w-full pl-9 pr-9 py-[9px] border border-border rounded-lg text-sm bg-card text-foreground outline-none focus:border-primary/60 transition-colors"
               placeholder="Search by name, code, mobile, email, GST…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
+            {search && (
+              <button
+                onClick={() => setSearch("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
+                <X size={13} />
+              </button>
+            )}
           </div>
-
           <select
-            className="filter-select"
+            className="px-3 py-[9px] border border-border rounded-lg text-sm bg-card text-muted-foreground outline-none cursor-pointer focus:border-primary/60 transition-colors"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
           >
@@ -554,43 +320,60 @@ const Applicants: React.FC = () => {
             <option value="1">Active</option>
             <option value="0">Inactive</option>
           </select>
-
           {hasFilters && (
-            <button className="clear-btn" onClick={clearFilters}>
+            <button
+              className="flex items-center gap-1.5 px-3 py-[9px] border border-red-400/30 bg-red-500/5 text-red-500 rounded-lg text-xs font-medium hover:bg-red-500/10 transition-colors"
+              onClick={() => {
+                setSearch("");
+                setStatusFilter("");
+              }}
+            >
               <X size={13} /> Clear
             </button>
           )}
         </div>
 
-        {/* Body */}
-        <div className="appl-body">
-          {error && (
-            <div className="error-box">
-              <AlertCircle size={16} />
-              {error}
-            </div>
-          )}
+        {/* Error */}
+        {error && (
+          <div className="flex items-center gap-2.5 bg-red-500/10 border border-red-400/30 rounded-xl px-4 py-3 text-sm text-red-500">
+            <AlertCircle size={16} /> {error}
+          </div>
+        )}
 
-          {loading ? (
-            // Skeleton
-            Array.from({ length: 6 }).map((_, i) => (
-              <div className="skeleton-card" key={i}>
-                <div className="skel skel-avatar" />
-                <div className="skel-body">
-                  <div className="skel skel-line w-60" />
-                  <div className="skel skel-line w-40" />
-                  <div className="skel skel-line w-80" />
+        {/* List */}
+        {loading ? (
+          <div className="space-y-2.5">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div
+                key={i}
+                className="flex gap-3.5 bg-card border border-border rounded-xl px-4 py-3.5 animate-pulse"
+              >
+                <div className="w-11 h-11 rounded-xl bg-muted flex-shrink-0" />
+                <div className="flex-1 space-y-2">
+                  <div className="h-4 bg-muted rounded w-3/5" />
+                  <div className="h-3 bg-muted rounded w-2/5" />
+                  <div className="h-3 bg-muted rounded w-4/5" />
                 </div>
               </div>
-            ))
-          ) : applicants.length === 0 ? (
-            <div className="state-box">
-              <User size={40} />
-              <p>No applicants found</p>
-              {hasFilters && <span>Try clearing filters</span>}
+            ))}
+          </div>
+        ) : applicants.length === 0 ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center">
+            <div className="p-4 rounded-2xl bg-muted mb-4">
+              <User size={28} className="text-muted-foreground" />
             </div>
-          ) : (
-            applicants.map((a) => (
+            <p className="text-sm font-semibold text-foreground">
+              No applicants found
+            </p>
+            {hasFilters && (
+              <p className="text-xs text-muted-foreground mt-1">
+                Try clearing filters
+              </p>
+            )}
+          </div>
+        ) : (
+          <div>
+            {applicants.map((a) => (
               <ApplicantCard
                 key={a.LHeadId ?? a.LHeadCode}
                 applicant={a}
@@ -600,9 +383,9 @@ const Applicants: React.FC = () => {
                   })
                 }
               />
-            ))
-          )}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </>
   );
