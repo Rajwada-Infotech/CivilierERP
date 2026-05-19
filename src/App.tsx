@@ -241,10 +241,8 @@ const HandoverPage = lazy(() =>
     default: module.HandoverPage,
   })),
 );
-const ConstructionUpdatesPage = lazy(() =>
-  import("./pages/followup/FollowupExtraPages").then((module) => ({
-    default: module.ConstructionUpdatesPage,
-  })),
+const ConstructionUpdatesPage = lazy(
+  () => import("./pages/followup/ConstructionUpdates"),
 );
 const FinanceDemandsPage = lazy(() =>
   import("./pages/followup/FollowupExtraPages").then((module) => ({
