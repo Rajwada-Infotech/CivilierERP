@@ -750,15 +750,205 @@ export function SalesDeedPage() {
   );
 }
 
+interface HandoverRecord {
+  Id: number;
+  HandoverNo?: string | null;
+  ApplicantName?: string | null;
+  ApplicantNo?: string | null;
+  UnitNo?: string | null;
+  SelectionNo?: string | null;
+  AgreementNo?: string | null;
+  DeedNo?: string | null;
+  ProjectName?: string | null;
+  CompanyName?: string | null;
+  HandoverDate?: string | null;
+  ActualHandoverDate?: string | null;
+  KeyHandoverDate?: string | null;
+  UnitCondition?: string | null;
+  HandedOverBy?: string | null;
+  ReceivedBy?: string | null;
+  Status?: string | null;
+  Notes?: string | null;
+  CreatedBy?: string | null;
+  CreatedAt?: string | null;
+}
+
 export function HandoverPage() {
+  const navigate = useNavigate();
+  const [search, setSearch] = useState("");
+
+  const {
+    data,
+    isLoading,
+    isError,
+  } = useQuery({
+    queryKey: ["followup-handover"],
+    queryFn: async () => {
+      const res = await fetchWithAuth("/api/followup-handover?page=1&pageSize=100");
+      if (!res.ok) throw new Error("Failed to load records.");
+      return res.json() as Promise<{ data: HandoverRecord[]; pagination: { total: number } }>;
+    },
+  });
+
+  const rows = data?.data ?? [];
+
+  const filtered = rows.filter((row) => {
+    const haystack = [
+      row.HandoverNo,
+      row.ApplicantName,
+      row.ApplicantNo,
+      row.UnitNo,
+      row.AgreementNo,
+      row.ProjectName,
+      row.Status,
+    ]
+      .join(" ")
+      .toLowerCase();
+    return haystack.includes(search.toLowerCase());
+  });
+
   return (
-    <ScopedLogPage
-      title="Handover"
-      description="Track possession handover activity and final closure notes."
-      moduleName="closure_handover"
-      defaultType="note"
-      helpText="Record possession dates, document handover, and completion notes."
-    />
+    <div className="p-6 space-y-6 max-w-7xl mx-auto">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <h1 className="text-3xl font-heading font-bold text-foreground">Handover</h1>
+          <p className="text-muted-foreground mt-1">
+            Track possession handover activity and final closure notes.
+          </p>
+        </div>
+        <Button variant="outline" onClick={() => navigate("/followup")} className="gap-2">
+          <ArrowLeft className="w-4 h-4" />
+          Dashboard
+        </Button>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Card>
+          <CardContent className="pt-5 flex items-center gap-3">
+            <Home className="w-5 h-5 text-primary" />
+            <div>
+              <div className="text-2xl font-bold">{data?.pagination.total ?? 0}</div>
+              <div className="text-sm text-muted-foreground">Total Handovers</div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-5 flex items-center gap-3">
+            <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+            <div>
+              <div className="text-2xl font-bold">
+                {rows.filter((r) => r.Status === "Completed").length}
+              </div>
+              <div className="text-sm text-muted-foreground">Completed</div>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardContent className="pt-5 flex items-center gap-3">
+            <Bell className="w-5 h-5 text-amber-600" />
+            <div>
+              <div className="text-2xl font-bold">
+                {rows.filter((r) => r.Status === "Scheduled").length}
+              </div>
+              <div className="text-sm text-muted-foreground">Scheduled</div>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card>
+        <CardHeader className="gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <CardTitle>Handover Records</CardTitle>
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search handovers…"
+            className="sm:w-72"
+          />
+        </CardHeader>
+        <CardContent>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Handover No</TableHead>
+                  <TableHead>Applicant</TableHead>
+                  <TableHead>Unit</TableHead>
+                  <TableHead>Project</TableHead>
+                  <TableHead>Handover Date</TableHead>
+                  <TableHead>Actual Date</TableHead>
+                  <TableHead>Condition</TableHead>
+                  <TableHead>Status</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {isLoading && (
+                  <TableRow>
+                    <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+                      Loading records...
+                    </TableCell>
+                  </TableRow>
+                )}
+                {isError && (
+                  <TableRow>
+                    <TableCell colSpan={8} className="py-8 text-center text-destructive">
+                      Failed to load records.
+                    </TableCell>
+                  </TableRow>
+                )}
+                {!isLoading && !isError && filtered.length === 0 && (
+                  <TableRow>
+                    <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+                      No handover records found.
+                    </TableCell>
+                  </TableRow>
+                )}
+                {!isLoading &&
+                  !isError &&
+                  filtered.map((row) => (
+                    <TableRow key={row.Id}>
+                      <TableCell className="font-mono text-sm font-medium">
+                        {row.HandoverNo || "-"}
+                      </TableCell>
+                      <TableCell>
+                        <div className="font-medium">{row.ApplicantName || "-"}</div>
+                        {row.ApplicantNo && (
+                          <div className="text-xs text-muted-foreground">{row.ApplicantNo}</div>
+                        )}
+                      </TableCell>
+                      <TableCell>{row.UnitNo || "-"}</TableCell>
+                      <TableCell>{row.ProjectName || "-"}</TableCell>
+                      <TableCell className="font-mono text-sm">
+                        {formatDate(row.HandoverDate)}
+                      </TableCell>
+                      <TableCell className="font-mono text-sm">
+                        {formatDate(row.ActualHandoverDate)}
+                      </TableCell>
+                      <TableCell>{row.UnitCondition || "-"}</TableCell>
+                      <TableCell>
+                        <Badge
+                          variant="outline"
+                          className={
+                            row.Status === "Completed"
+                              ? "border-emerald-500 text-emerald-600"
+                              : row.Status === "Delayed"
+                                ? "border-red-400 text-red-500"
+                                : row.Status === "Cancelled"
+                                  ? "border-gray-400 text-gray-500"
+                                  : "border-amber-400 text-amber-600"
+                          }
+                        >
+                          {row.Status || "-"}
+                        </Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+              </TableBody>
+            </Table>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
   );
 }
 
