@@ -1,21 +1,58 @@
-name: Push to Dev
+name: CI
 
 on:
   push:
     branches:
       - dev
+      - main
+  pull_request:
+    branches:
+      - dev
+      - main
 
 jobs:
-  notify:
-    name: Dev branch updated
+  frontend:
+    name: Frontend checks
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Confirm push
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  backend:
+    name: Backend syntax check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install backend dependencies
+        run: npm ci --prefix backend
+
+      - name: Check backend JavaScript syntax
         run: |
-          echo "✅ Successfully pushed to dev branch"
-          echo "Commit: ${{ github.sha }}"
-          echo "By: ${{ github.actor }}"
-          echo "Message: ${{ github.event.head_commit.message }}"
+          find backend \
+            -path backend/node_modules -prune -o \
+            -name '*.js' -print0 |
+          xargs -0 -n1 node --check

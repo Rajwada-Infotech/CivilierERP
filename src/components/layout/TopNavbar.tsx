@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useGracefulLogout } from "@/hooks/useGracefulLogout";
 import { useNavigate, useLocation } from "react-router-dom";
 import { LogoFull } from "../Logo";
-import { useModule, MODULE_DASHBOARD_ROUTES } from "@/contexts/ModuleContext";
+import { useModule, MODULE_DASHBOARD_ROUTES, type Module } from "@/contexts/ModuleContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavbarCollapse } from "./AppLayout";
 import { ReminderBell } from "@/components/navbar/ReminderBell";
@@ -393,13 +393,15 @@ const UserMenuContent: React.FC<{
     <button
       onMouseDown={() => {
         onClose();
-        isSuperAdmin
-          ? navigate("/superadmin/profile")
-          : isDba
-            ? navigate("/dba/profile")
-            : currentUser?.role === "admin"
-              ? navigate("/admin/profile")
-              : navigate("/user/profile");
+        if (isSuperAdmin) {
+          navigate("/superadmin/profile");
+        } else if (isDba) {
+          navigate("/dba/profile");
+        } else if (currentUser?.role === "admin") {
+          navigate("/admin/profile");
+        } else {
+          navigate("/user/profile");
+        }
       }}
       className="w-full flex items-center gap-2 px-3 py-2 text-sm rounded-md hover:bg-muted transition-colors text-foreground"
     >
@@ -546,7 +548,7 @@ export const TopNavbar = () => {
 
   const handleModuleSwitch = async (
     name: string,
-    id: string,
+    id: Module,
     route: string,
   ) => {
     setModuleOpen(false);
@@ -561,6 +563,48 @@ export const TopNavbar = () => {
 
   const navBtnCls = (active: boolean) =>
     `flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-heading transition-all whitespace-nowrap ${active ? "bg-muted text-foreground" : "hover:bg-muted text-foreground"}`;
+
+  const moduleOptions: Array<{
+    id: NonNullable<Module>;
+    name: string;
+    icon: React.ElementType;
+    desc: string;
+    route: string;
+    color: string;
+  }> = [
+    {
+      id: "finance",
+      name: "Finance",
+      icon: TrendingUp,
+      desc: "Ledger, payments & BRS",
+      route: MODULE_DASHBOARD_ROUTES.finance,
+      color: "text-primary",
+    },
+    {
+      id: "material",
+      name: "Material",
+      icon: Package,
+      desc: "GRN, PO & work orders",
+      route: MODULE_DASHBOARD_ROUTES.material,
+      color: "text-emerald-500",
+    },
+    {
+      id: "followup",
+      name: "Follow-Up",
+      icon: Calendar,
+      desc: "Sales, agreements & CRM",
+      route: MODULE_DASHBOARD_ROUTES.followup,
+      color: "text-indigo-500",
+    },
+    {
+      id: "engineering",
+      name: "Engineering",
+      icon: Wrench,
+      desc: "Projects, work orders & site",
+      route: MODULE_DASHBOARD_ROUTES.engineering,
+      color: "text-orange-500",
+    },
+  ];
 
   return (
     <>
@@ -652,43 +696,10 @@ export const TopNavbar = () => {
               <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading px-3 pt-2 pb-2">
                 Switch Module
               </p>
-              {[
-                {
-                  id: "finance",
-                  name: "Finance",
-                  icon: TrendingUp,
-                  desc: "Ledger, payments & BRS",
-                  route: MODULE_DASHBOARD_ROUTES.finance,
-                  color: "text-primary",
-                },
-                {
-                  id: "material",
-                  name: "Material",
-                  icon: Package,
-                  desc: "GRN, PO & work orders",
-                  route: MODULE_DASHBOARD_ROUTES.material,
-                  color: "text-emerald-500",
-                },
-                {
-                  id: "followup",
-                  name: "Follow-Up",
-                  icon: Calendar,
-                  desc: "Sales, agreements & CRM",
-                  route: MODULE_DASHBOARD_ROUTES.followup,
-                  color: "text-indigo-500",
-                },
-                {
-                  id: "engineering",
-                  name: "Engineering",
-                  icon: Wrench,
-                  desc: "Projects, work orders & site",
-                  route: MODULE_DASHBOARD_ROUTES.engineering,
-                  color: "text-orange-500",
-                },
-              ].map((m) => (
+              {moduleOptions.map((m) => (
                 <button
                   key={m.id}
-                  onClick={() => handleModuleSwitch(m.name, m.id, m.route)}
+                  onClick={() => handleModuleSwitch(m.name, m.id as Module, m.route)}
                   className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${activeModule === m.id && !isAdminPage ? "bg-primary/10" : "hover:bg-muted"}`}
                 >
                   <span

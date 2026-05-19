@@ -66,7 +66,9 @@ async function fetchEmiReminders(): Promise<ReminderItem[]> {
       let emiData: any = null;
       try {
         emiData = JSON.parse(row.EEmiData || "{}");
-      } catch {}
+      } catch (_e) {
+        // ignore malformed EMI JSON — treat as empty schedule
+      }
       const schedule: any[] = emiData?.schedule ?? [];
 
       for (const inst of schedule) {

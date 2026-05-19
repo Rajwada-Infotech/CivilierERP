@@ -656,7 +656,7 @@ export default function CompanyMaster() {
         openEdit,
         setDeleteConfirm,
       ),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
     [],
   );
 

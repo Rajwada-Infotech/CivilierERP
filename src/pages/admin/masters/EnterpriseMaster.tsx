@@ -507,7 +507,7 @@ export default function EnterpriseMaster() {
         openEdit,
         setDeleteTarget,
       ),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
     [],
   );
 

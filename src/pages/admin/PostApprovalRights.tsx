@@ -307,7 +307,7 @@ export default function PostApprovalRights() {
 
   const columns = useMemo(
     () => buildPostApprovalColumns(postApprovalPending, togglePermission),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
     [postApprovalPending]
   );
   const [userFilter, setUserFilter] = useState<string>("all");
