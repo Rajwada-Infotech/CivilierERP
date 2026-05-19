@@ -224,8 +224,8 @@ const WelcomeCallsPage = lazy(() =>
   })),
 );
 const NocPage = lazy(() =>
-  import("./pages/followup/FollowupExtraPages").then((module) => ({
-    default: module.NocPage,
+  import("./pages/followup/NOC").then((module) => ({
+    default: module.NOCPage,
   })),
 );
 const SalesDeedPage = lazy(() =>
