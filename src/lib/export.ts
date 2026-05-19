@@ -51,7 +51,7 @@ function sanitizeForPdf(value: string): string {
   return value
     .replace(/₹/g, "Rs.")
     .replace(/[─━─\u2500-\u257F]/g, "-")
-    .replace(/[^\x00-\xFF]/g, "?");
+    .replace(/[^\u0020-\u00FF]/g, "?");
 }
 
 function getPdfCell(row: Record<string, unknown>, col: ExportColumn): string {
@@ -171,7 +171,7 @@ export async function exportToXlsx(
     "xl/_rels/workbook.xml.rels": strToU8(wbRels),
     "xl/worksheets/sheet1.xml": strToU8(wsXml),
   });
-  const blob = new Blob([zipped], {
+  const blob = new Blob([zipped.buffer as ArrayBuffer], {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   });
   triggerDownload(blob, `${filename}.xlsx`);

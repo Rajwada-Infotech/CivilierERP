@@ -7,7 +7,7 @@ import React, {
 } from "react";
 import { useLocation } from "react-router-dom";
 
-type Module =
+export type Module =
   | "finance"
   | "material"
   | "followup"

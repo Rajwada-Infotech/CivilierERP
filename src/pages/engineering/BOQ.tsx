@@ -20,6 +20,7 @@ import {
   Settings2,
   Printer,
   ArrowLeft,
+  Send,
 } from "lucide-react";
 
 import { Input } from "@/components/ui/input";
@@ -1661,6 +1662,25 @@ const DetailModal: React.FC<DetailModalProps> = ({
     }
   };
 
+  const doTransition = async (action: string) => {
+    setActing(true);
+    try {
+      await apiFetch(`/api/boq/${record.BoqID}/transition`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action }),
+      });
+      toast.success(
+        action === "submit" ? "Submitted for approval" : "Status updated",
+      );
+      onRefresh();
+    } catch (err: any) {
+      toast.error(err.message ?? "Action failed");
+    } finally {
+      setActing(false);
+    }
+  };
+
   const itemsTotal = (record.BoqItems ?? []).reduce(
     (s, r) => s + (parseFloat(String(r.amount ?? 0)) || 0),
     0,
@@ -1780,8 +1800,6 @@ const DetailModal: React.FC<DetailModalProps> = ({
                 {record.Status === "Pending" ? (
                   "Awaiting admin approval from the Approval Inbox."
                 ) : null}
-                {false && record.Status === "Pending" &&
-                  "Awaiting approval."}
                 {record.Status === "Approved" &&
                   `✓ Approved${record.ApprovedBy ? ` by ${record.ApprovedBy}` : ""}.`}
                 {record.Status === "Rejected" &&
