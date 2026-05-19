@@ -37,7 +37,7 @@ export const followupNavItems: NavItem[] = [
       },
       {
         label: "TDS Reminders",
-        path: "/followup/follow-ups/reminders?module=TDS",
+        path: "/followup/follow-ups/tds-reminders",
       },
       {
         label: "GRN Reminders",
