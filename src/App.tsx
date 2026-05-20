@@ -218,9 +218,7 @@ const FollowupAgreements = lazy(() =>
     default: module.AgreementsPage,
   })),
 );
-const ApplicantTimeline = lazy(
-  () => import("./pages/followup/ApplicantTimeline"),
-);
+const ApplicantDetail = lazy(() => import("./pages/followup/ApplicantDetail"));
 const WelcomeCallsPage = lazy(() =>
   import("./pages/followup/FollowupExtraPages").then((module) => ({
     default: module.WelcomeCallsPage,
@@ -609,7 +607,15 @@ function AppRoutes() {
         path="/followup/sales/applicants/:id"
         element={
           <ProtectedRoute>
-            <ApplicantTimeline />
+            <ApplicantDetail />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/applicant-timeline/:id"
+        element={
+          <ProtectedRoute>
+            <ApplicantDetail />
           </ProtectedRoute>
         }
       />
