@@ -383,6 +383,29 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   );
 }
 
+// ─── Normal User Route (non-admin only) ──────────────────────────────────────
+// Use for pages that only normal users should access (e.g. /ticket/my-tickets)
+function NormalUserRoute({ children }: { children: React.ReactNode }) {
+  const { currentUser } = useAuth();
+  const ADMIN_ROLES = ["super_admin", "admin", "dba"];
+  if (!currentUser) {
+    return <Navigate to="/login" replace />;
+  }
+  if (ADMIN_ROLES.includes(currentUser.role)) {
+    // Admin landed on a user-only page — send them to pending tickets instead
+    return <Navigate to="/ticket/pending" replace />;
+  }
+  return (
+    <ProtectedProviders>
+      <AppLayout>
+        <RouteErrorBoundary>
+          <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
+        </RouteErrorBoundary>
+      </AppLayout>
+    </ProtectedProviders>
+  );
+}
+
 // ─── Auth Session Bridge ──────────────────────────────────────────────────────
 function AuthSessionBridge({ children }: { children: React.ReactNode }) {
   const { recordLogin, recordLogout } = useActivityBrowser();
@@ -967,18 +990,18 @@ function AppRoutes() {
 <Route
   path="/ticket/my-tickets"
   element={
-    <ProtectedRoute>
+    <NormalUserRoute>
       <MyTickets />
-    </ProtectedRoute>
+    </NormalUserRoute>
   }
 />
 
 <Route
   path="/ticket/pending"
   element={
-    <ProtectedRoute>
+    <AdminRoute>
       <PendingTickets />
-    </ProtectedRoute>
+    </AdminRoute>
   }
 />
 
