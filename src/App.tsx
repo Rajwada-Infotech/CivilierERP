@@ -970,49 +970,49 @@ function AppRoutes() {
         }
       />
       <Route
-  path="/ticket"
-  element={
-    <ProtectedRoute>
-      <TicketDashboard />
-    </ProtectedRoute>
-  }
-/>
+        path="/ticket"
+        element={
+          <ProtectedRoute>
+            <TicketDashboard />
+          </ProtectedRoute>
+        }
+      />
 
-<Route
-  path="/ticket/create"
-  element={
-    <ProtectedRoute>
-      <CreateTicket />
-    </ProtectedRoute>
-  }
-/>
+      <Route
+        path="/ticket/create"
+        element={
+          <ProtectedRoute>
+            <CreateTicket />
+          </ProtectedRoute>
+        }
+      />
 
-<Route
-  path="/ticket/my-tickets"
-  element={
-    <NormalUserRoute>
-      <MyTickets />
-    </NormalUserRoute>
-  }
-/>
+      <Route
+        path="/ticket/my-tickets"
+        element={
+          <ProtectedRoute>
+            <MyTickets />
+          </ProtectedRoute>
+        }
+      />
 
-<Route
-  path="/ticket/pending"
-  element={
-    <AdminRoute>
-      <PendingTickets />
-    </AdminRoute>
-  }
-/>
+      <Route
+        path="/ticket/pending"
+        element={
+          <AdminRoute>
+            <PendingTickets />
+          </AdminRoute>
+        }
+      />
 
-<Route
-  path="/ticket/resolved"
-  element={
-    <ProtectedRoute>
-      <ResolvedTickets />
-    </ProtectedRoute>
-  }
-/>
+      <Route
+        path="/ticket/resolved"
+        element={
+          <ProtectedRoute>
+            <ResolvedTickets />
+          </ProtectedRoute>
+        }
+      />
       <Route
         path="/engineering/work-done"
         element={

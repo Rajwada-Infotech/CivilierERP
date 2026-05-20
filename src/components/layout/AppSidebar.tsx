@@ -28,6 +28,7 @@ import { followupNavItems } from "./sidebars/FollowupSidebar";
 import { buildAdminNavItems } from "./sidebars/AdminSidebar";
 import { dbaNavItems } from "./sidebars/DbaSidebar";
 import { superAdminNavItems } from "./sidebars/SuperAdminSidebar";
+import { buildTicketNavItems } from "./sidebars/TicketSidebar";
 import { SidebarNav, NavItem } from "./sidebars/SidebarPrimitives";
 
 // ── User sidebar (tiny — lives here) ─────────────────────────────────────────
@@ -148,41 +149,6 @@ const MODULE_META: Record<
     dot: "bg-pink-500",
   },
 };
-
-// ── Build role-aware ticket nav ───────────────────────────────────────────────
-function buildTicketNavItems(isAdminUser: boolean): NavItem[] {
-  return [
-    {
-      label: "Dashboard",
-      icon: BarChart3,
-      path: "/ticket",
-    },
-    {
-      label: "Ticket",
-      icon: MessageSquare,
-      children: [
-        // "Create Ticket" — visible to all
-        {
-          label: "Create Ticket",
-          path: "/ticket/create",
-        },
-        // "My Tickets" — visible ONLY to normal users (not admin/super_admin)
-        ...(!isAdminUser
-          ? [{ label: "My Tickets", path: "/ticket/my-tickets" }]
-          : []),
-        // "Pending Tickets" — visible ONLY to admin/super_admin
-        ...(isAdminUser
-          ? [{ label: "Pending Tickets", path: "/ticket/pending" }]
-          : []),
-        // "Resolved Tickets" — visible to all
-        {
-          label: "Resolved Tickets",
-          path: "/ticket/resolved",
-        },
-      ],
-    },
-  ];
-}
 
 // ── AppSidebar ────────────────────────────────────────────────────────────────
 export const AppSidebar = () => {
