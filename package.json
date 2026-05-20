@@ -46,6 +46,7 @@
     "@react-pdf/renderer": "^4.5.1",
     "@tanstack/react-query": "^5.83.0",
     "@tanstack/react-table": "^8.21.0",
+    "@types/react-webcam": "^1.1.0",
     "axios": "^1.15.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
