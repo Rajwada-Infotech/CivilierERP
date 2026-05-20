@@ -225,12 +225,6 @@ export default function Issues() {
     staleTime: 5 * 60_000,
   });
 
-  const { data: dbFinYears = [], isLoading: loadingFinYears } = useQuery({
-    queryKey: ["issues-finyears"],
-    queryFn: issuesApi.getFinYears,
-    staleTime: 5 * 60_000,
-  });
-
   const { data: itemOptions = [], isLoading: loadingItems } = useQuery({
     queryKey: ["issues-items"],
     queryFn: issuesApi.getItemOptions,
@@ -258,15 +252,15 @@ export default function Issues() {
 
   useEffect(() => {
     if (
-      dbFinYears.length > 0 &&
+      finYears.length > 0 &&
       !header.finYearId &&
       viewMode === "form" &&
       !editingId
     ) {
-      const active = (dbFinYears as any[]).find((f) => f.isActive);
+      const active = (finYears as any[]).find((f) => f.isActive);
       if (active) setH("finYearId", String(active.id));
     }
-  }, [dbFinYears, viewMode, editingId]);
+  }, [finYears, viewMode, editingId]);
 
   // ── Item lookup helpers ──────────────────────────────────────────────────
 
@@ -521,7 +515,11 @@ export default function Issues() {
         Remarks: ci.Remarks || null,
       })),
     };
-    if (editingId) { updateMutation.mutate(payload); } else { createMutation.mutate(payload); }
+    if (editingId) {
+      updateMutation.mutate(payload);
+    } else {
+      createMutation.mutate(payload);
+    }
   };
 
   // ── Columns ───────────────────────────────────────────────────────────────
@@ -863,14 +861,10 @@ export default function Issues() {
                       size={13}
                       className="text-muted-foreground shrink-0"
                     />
-                    <SelectValue
-                      placeholder={
-                        loadingFinYears ? "Loading…" : "Select fin year"
-                      }
-                    />
+                    <SelectValue placeholder={"Select fin year"} />
                   </SelectTrigger>
                   <SelectContent>
-                    {(dbFinYears as any[]).map((fy) => (
+                    {(finYears as any[]).map((fy) => (
                       <SelectItem
                         key={fy.id}
                         value={String(fy.id)}
