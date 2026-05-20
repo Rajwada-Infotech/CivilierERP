@@ -33,7 +33,7 @@
     "socket.io": "^4.8.3",
     "socket.io-client": "^4.8.3",
     "umzug": "^3.8.2",
-    "uuid": "^11.1.0",
+    "uuid": "^11.1.1",
     "zod": "^3.25.76"
   },
   "devDependencies": {
@@ -58,5 +58,9 @@
   "description": "",
   "trustedDependencies": [
     "unrs-resolver"
-  ]
+  ],
+  "overrides": {
+    "ajv": ">=8.18.0",
+    "ip-address": ">=10.1.1"
+  }
 }
