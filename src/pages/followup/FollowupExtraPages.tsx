@@ -750,17 +750,7 @@ export function SalesDeedPage() {
   );
 }
 
-export function HandoverPage() {
-  return (
-    <ScopedLogPage
-      title="Handover"
-      description="Track possession handover activity and final closure notes."
-      moduleName="closure_handover"
-      defaultType="note"
-      helpText="Record possession dates, document handover, and completion notes."
-    />
-  );
-}
+export { HandoverPage } from "./Handover";
 
 export function ConstructionUpdatesPage() {
   return (
