@@ -1,28 +1,47 @@
 import Webcam from "react-webcam";
-import React, { useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import { Badge } from "@/components/ui/badge";
 import {
   AlertCircle,
   ArrowLeft,
   Building2,
   Camera,
+  Check,
   CheckCircle2,
-  ChevronDown,
+  ChevronsUpDown,
   FolderOpen,
   Loader2,
   Paperclip,
   Phone,
-  Search,
   Send,
   ShieldAlert,
   User,
   X,
   XCircle,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -41,7 +60,7 @@ interface CustomerOption {
 
 const PRIORITIES = [
   {
-    value: "Urgent",
+    value: "Urgent" as const,
     label: "Urgent",
     color: "text-red-600",
     bg: "bg-red-500/10",
@@ -50,145 +69,143 @@ const PRIORITIES = [
     icon: ShieldAlert,
   },
   {
-    value: "High",
+    value: "High" as const,
     label: "High",
-    color: "text-orange-600",
+    color: "text-orange-500",
     bg: "bg-orange-500/10",
     border: "border-orange-400/30",
     ring: "ring-orange-400/40",
     icon: AlertCircle,
   },
   {
-    value: "Medium",
+    value: "Medium" as const,
     label: "Medium",
-    color: "text-amber-600",
+    color: "text-amber-500",
     bg: "bg-amber-500/10",
     border: "border-amber-400/30",
     ring: "ring-amber-400/40",
     icon: AlertCircle,
   },
   {
-    value: "Low",
+    value: "Low" as const,
     label: "Low",
-    color: "text-blue-600",
+    color: "text-blue-500",
     bg: "bg-blue-500/10",
     border: "border-blue-400/30",
     ring: "ring-blue-400/40",
     icon: AlertCircle,
   },
-] as const;
+];
 
-// ─── Searchable Select ────────────────────────────────────────────────────────
+// ─── Combobox (shadcn Popover + Command) ──────────────────────────────────────
 
-function SearchableSelect({
+function Combobox({
   options,
   value,
-  onChange,
+  onSelect,
   placeholder,
   loading,
+  error,
 }: {
-  options: { id: number | string; label: string; sub?: string }[];
+  options: { value: string; label: string; sub?: string }[];
   value: string;
-  onChange: (id: string, label: string) => void;
+  onSelect: (value: string, label: string) => void;
   placeholder: string;
   loading?: boolean;
+  error?: boolean;
 }) {
   const [open, setOpen] = useState(false);
-  const [q, setQ] = useState("");
-  const ref = React.useRef<HTMLDivElement>(null);
-
-  const filtered = options.filter((o) =>
-    o.label.toLowerCase().includes(q.toLowerCase()),
-  );
-
-  const selected = options.find((o) => String(o.id) === value);
-
-  // Close on outside click
-  React.useEffect(() => {
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) {
-        setOpen(false);
-        setQ("");
-      }
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, []);
+  const selected = options.find((o) => o.value === value);
 
   return (
-    <div ref={ref} className="relative">
-      <button
-        type="button"
-        onClick={() => setOpen((p) => !p)}
-        className={`w-full flex items-center justify-between gap-2 px-3.5 py-2.5 rounded-xl border text-sm transition-all
-          ${open ? "border-primary ring-2 ring-primary/20" : "border-border hover:border-muted-foreground/40"}
-          bg-background text-foreground`}
-      >
-        <span
-          className={selected ? "text-foreground" : "text-muted-foreground"}
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          className={cn(
+            "w-full justify-between font-normal h-10",
+            !selected && "text-muted-foreground",
+            error && "border-red-400 ring-2 ring-red-400/20",
+          )}
         >
-          {selected ? selected.label : placeholder}
-        </span>
-        <ChevronDown
-          size={14}
-          className={`text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
-        />
-      </button>
-
-      {open && (
-        <div className="absolute z-50 mt-1.5 w-full rounded-xl border border-border bg-card shadow-xl overflow-hidden">
-          <div className="flex items-center gap-2 px-3 py-2 border-b border-border">
-            <Search size={13} className="text-muted-foreground shrink-0" />
-            <input
-              autoFocus
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search…"
-              className="flex-1 text-sm bg-transparent outline-none text-foreground placeholder:text-muted-foreground"
-            />
-            {q && (
-              <button onClick={() => setQ("")}>
-                <X
-                  size={12}
-                  className="text-muted-foreground hover:text-foreground"
-                />
-              </button>
-            )}
-          </div>
-          <div className="max-h-52 overflow-y-auto">
+          <span className="truncate">
+            {selected ? selected.label : placeholder}
+          </span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        className="w-[--radix-popover-trigger-width] p-0"
+        align="start"
+      >
+        <Command>
+          <CommandInput placeholder="Search..." />
+          <CommandList>
             {loading ? (
               <div className="flex items-center justify-center py-6 gap-2 text-muted-foreground text-xs">
                 <Loader2 size={13} className="animate-spin" /> Loading…
               </div>
-            ) : filtered.length === 0 ? (
-              <div className="py-6 text-center text-xs text-muted-foreground">
-                No results
-              </div>
             ) : (
-              filtered.map((o) => (
-                <button
-                  key={o.id}
-                  type="button"
-                  onClick={() => {
-                    onChange(String(o.id), o.label);
-                    setOpen(false);
-                    setQ("");
-                  }}
-                  className={`w-full flex flex-col items-start px-3.5 py-2.5 text-sm hover:bg-muted/60 transition-colors text-left
-                    ${String(o.id) === value ? "bg-primary/8 text-primary font-medium" : "text-foreground"}`}
-                >
-                  {o.label}
-                  {o.sub && (
-                    <span className="text-[11px] text-muted-foreground mt-0.5">
-                      {o.sub}
-                    </span>
-                  )}
-                </button>
-              ))
+              <>
+                <CommandEmpty>No results found.</CommandEmpty>
+                <CommandGroup>
+                  {options.map((opt) => (
+                    <CommandItem
+                      key={opt.value}
+                      value={opt.label}
+                      onSelect={() => {
+                        onSelect(opt.value, opt.label);
+                        setOpen(false);
+                      }}
+                    >
+                      <Check
+                        className={cn(
+                          "mr-2 h-4 w-4",
+                          value === opt.value ? "opacity-100" : "opacity-0",
+                        )}
+                      />
+                      <span className="flex flex-col">
+                        {opt.label}
+                        {opt.sub && (
+                          <span className="text-xs text-muted-foreground">
+                            {opt.sub}
+                          </span>
+                        )}
+                      </span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              </>
             )}
-          </div>
-        </div>
-      )}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// ─── Section card ─────────────────────────────────────────────────────────────
+
+function Section({
+  icon: Icon,
+  title,
+  children,
+}: {
+  icon: React.ElementType;
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="rounded-2xl border border-border bg-card overflow-hidden">
+      <div className="px-5 py-3.5 border-b border-border bg-muted/30 flex items-center gap-2">
+        <Icon size={13} className="text-muted-foreground" />
+        <span className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+          {title}
+        </span>
+      </div>
+      <div className="p-5">{children}</div>
     </div>
   );
 }
@@ -198,20 +215,20 @@ function SearchableSelect({
 function Field({
   label,
   required,
-  children,
   error,
+  children,
 }: {
   label: string;
   required?: boolean;
-  children: React.ReactNode;
   error?: string;
+  children: React.ReactNode;
 }) {
   return (
     <div className="space-y-1.5">
-      <label className="text-[11px] font-heading font-semibold uppercase tracking-widest text-muted-foreground">
+      <Label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">
         {label}
         {required && <span className="text-red-500 ml-0.5">*</span>}
-      </label>
+      </Label>
       {children}
       {error && <p className="text-xs text-red-500">{error}</p>}
     </div>
@@ -223,9 +240,9 @@ function Field({
 const CreateTicket = () => {
   const navigate = useNavigate();
 
-  // Form state
   const [companyId, setCompanyId] = useState("");
   const [projectId, setProjectId] = useState("");
+  const [customerId, setCustomerId] = useState("");
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [priority, setPriority] = useState<
@@ -236,6 +253,7 @@ const CreateTicket = () => {
   const [attachmentFile, setAttachmentFile] = useState<File | null>(null);
   const [showCamera, setShowCamera] = useState(false);
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
+  const [cameraError, setCameraError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -268,13 +286,16 @@ const CreateTicket = () => {
     staleTime: 5 * 60_000,
   });
 
-  const companies = dropdownData?.companies ?? [];
-  const projects = dropdownData?.projects ?? [];
-
-  const companyOptions = companies.map((c) => ({ id: c.id, label: c.name }));
-  const projectOptions = projects.map((p) => ({ id: p.id, label: p.name }));
+  const companyOptions = (dropdownData?.companies ?? []).map((c) => ({
+    value: String(c.id),
+    label: c.name,
+  }));
+  const projectOptions = (dropdownData?.projects ?? []).map((p) => ({
+    value: String(p.id),
+    label: p.name,
+  }));
   const customerOptions = customers.map((c) => ({
-    id: c.LHeadId,
+    value: String(c.LHeadId),
     label: c.LHeadName,
     sub: c.LHeadPhone ?? undefined,
   }));
@@ -282,6 +303,7 @@ const CreateTicket = () => {
   // ── Handlers ───────────────────────────────────────────────────────────────
 
   const handleCustomerSelect = (id: string, label: string) => {
+    setCustomerId(id);
     setCustomerName(label);
     const found = customers.find((c) => String(c.LHeadId) === id);
     if (found?.LHeadPhone) setCustomerPhone(found.LHeadPhone);
@@ -343,16 +365,18 @@ const CreateTicket = () => {
       <Breadcrumbs items={["Tickets", "Create Ticket"]} />
 
       <div className="max-w-3xl mx-auto pb-10">
-        {/* ── Page header ── */}
+        {/* Header */}
         <div className="flex items-center gap-3 mb-6">
-          <button
+          <Button
+            variant="outline"
+            size="icon"
+            className="h-8 w-8 rounded-lg"
             onClick={() => navigate("/ticket")}
-            className="w-8 h-8 flex items-center justify-center rounded-lg border border-border hover:bg-muted transition-colors text-muted-foreground"
           >
             <ArrowLeft size={14} />
-          </button>
+          </Button>
           <div>
-            <h1 className="text-xl font-heading font-bold text-foreground">
+            <h1 className="text-xl font-bold text-foreground">
               New Support Ticket
             </h1>
             <p className="text-xs text-muted-foreground mt-0.5">
@@ -363,58 +387,40 @@ const CreateTicket = () => {
 
         <div className="space-y-5">
           {/* ── Section 1: Context ── */}
-          <div className="rounded-2xl border border-border bg-card overflow-hidden">
-            <div className="px-5 py-3.5 border-b border-border bg-muted/30 flex items-center gap-2">
-              <Building2 size={13} className="text-muted-foreground" />
-              <span className="text-xs font-heading font-semibold uppercase tracking-widest text-muted-foreground">
-                Context
-              </span>
-            </div>
-            <div className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Section icon={Building2} title="Context">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Field label="Company">
-                <SearchableSelect
+                <Combobox
                   options={companyOptions}
                   value={companyId}
-                  onChange={(id) => setCompanyId(id)}
+                  onSelect={(id) => setCompanyId(id)}
                   placeholder="Select company"
                   loading={loadingDropdowns}
                 />
               </Field>
               <Field label="Project">
-                <SearchableSelect
+                <Combobox
                   options={projectOptions}
                   value={projectId}
-                  onChange={(id) => setProjectId(id)}
+                  onSelect={(id) => setProjectId(id)}
                   placeholder="Select project"
                   loading={loadingDropdowns}
                 />
               </Field>
             </div>
-          </div>
+          </Section>
 
           {/* ── Section 2: Customer ── */}
-          <div className="rounded-2xl border border-border bg-card overflow-hidden">
-            <div className="px-5 py-3.5 border-b border-border bg-muted/30 flex items-center gap-2">
-              <User size={13} className="text-muted-foreground" />
-              <span className="text-xs font-heading font-semibold uppercase tracking-widest text-muted-foreground">
-                Customer
-              </span>
-            </div>
-            <div className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Section icon={User} title="Customer">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <Field label="Customer Name" required error={errors.customerName}>
-                <SearchableSelect
+                <Combobox
                   options={customerOptions}
-                  value={
-                    customers.find((c) => c.LHeadName === customerName)
-                      ? String(
-                          customers.find((c) => c.LHeadName === customerName)!
-                            .LHeadId,
-                        )
-                      : ""
-                  }
-                  onChange={handleCustomerSelect}
+                  value={customerId}
+                  onSelect={handleCustomerSelect}
                   placeholder="Select customer"
                   loading={loadingCustomers}
+                  error={!!errors.customerName}
                 />
               </Field>
               <Field label="Phone Number">
@@ -423,27 +429,21 @@ const CreateTicket = () => {
                     size={13}
                     className="absolute left-3.5 top-1/2 -translate-y-1/2 text-muted-foreground"
                   />
-                  <input
+                  <Input
                     value={customerPhone}
                     onChange={(e) => setCustomerPhone(e.target.value)}
                     placeholder="Auto-filled from customer"
-                    className="w-full pl-9 pr-3.5 py-2.5 rounded-xl border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
+                    className="pl-9"
                   />
                 </div>
               </Field>
             </div>
-          </div>
+          </Section>
 
           {/* ── Section 3: Ticket Details ── */}
-          <div className="rounded-2xl border border-border bg-card overflow-hidden">
-            <div className="px-5 py-3.5 border-b border-border bg-muted/30 flex items-center gap-2">
-              <FolderOpen size={13} className="text-muted-foreground" />
-              <span className="text-xs font-heading font-semibold uppercase tracking-widest text-muted-foreground">
-                Ticket Details
-              </span>
-            </div>
-            <div className="p-5 space-y-4">
-              {/* Priority selector */}
+          <Section icon={FolderOpen} title="Ticket Details">
+            <div className="space-y-4">
+              {/* Priority */}
               <Field label="Priority">
                 <div className="grid grid-cols-4 gap-2">
                   {PRIORITIES.map((p) => {
@@ -454,12 +454,12 @@ const CreateTicket = () => {
                         key={p.value}
                         type="button"
                         onClick={() => setPriority(p.value)}
-                        className={`flex flex-col items-center gap-1.5 py-2.5 px-2 rounded-xl border text-xs font-heading font-medium transition-all
-                          ${
-                            active
-                              ? `${p.bg} ${p.border} ${p.color} ring-2 ${p.ring}`
-                              : "border-border text-muted-foreground hover:bg-muted/50"
-                          }`}
+                        className={cn(
+                          "flex flex-col items-center gap-1.5 py-2.5 px-2 rounded-xl border text-xs font-medium transition-all",
+                          active
+                            ? `${p.bg} ${p.border} ${p.color} ring-2 ${p.ring}`
+                            : "border-border text-muted-foreground hover:bg-muted/50",
+                        )}
                       >
                         <Icon size={14} />
                         {p.label}
@@ -471,7 +471,7 @@ const CreateTicket = () => {
 
               {/* Subject */}
               <Field label="Subject" required error={errors.subject}>
-                <input
+                <Input
                   value={subject}
                   onChange={(e) => {
                     setSubject(e.target.value);
@@ -479,14 +479,17 @@ const CreateTicket = () => {
                       setErrors((p) => ({ ...p, subject: "" }));
                   }}
                   placeholder="Brief description of the issue"
-                  className={`w-full px-3.5 py-2.5 rounded-xl border text-sm text-foreground placeholder:text-muted-foreground/50 bg-background focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all
-                    ${errors.subject ? "border-red-400 ring-2 ring-red-400/20" : "border-border"}`}
+                  className={
+                    errors.subject
+                      ? "border-red-400 ring-2 ring-red-400/20"
+                      : ""
+                  }
                 />
               </Field>
 
               {/* Issue details */}
               <Field label="Issue Details" required error={errors.issueDetails}>
-                <textarea
+                <Textarea
                   value={issueDetails}
                   onChange={(e) => {
                     setIssueDetails(e.target.value);
@@ -495,102 +498,118 @@ const CreateTicket = () => {
                   }}
                   rows={5}
                   placeholder="Describe the problem in detail — steps to reproduce, error messages, etc."
-                  className={`w-full px-3.5 py-2.5 rounded-xl border text-sm text-foreground placeholder:text-muted-foreground/50 bg-background resize-none focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all
-                    ${errors.issueDetails ? "border-red-400 ring-2 ring-red-400/20" : "border-border"}`}
+                  className={cn(
+                    "resize-none",
+                    errors.issueDetails
+                      ? "border-red-400 ring-2 ring-red-400/20"
+                      : "",
+                  )}
                 />
               </Field>
             </div>
-          </div>
+          </Section>
 
           {/* ── Section 4: Attachment ── */}
-          <div className="rounded-2xl border border-border bg-card overflow-hidden">
-            <div className="px-5 py-3.5 border-b border-border bg-muted/30 flex items-center gap-2">
-              <Paperclip size={13} className="text-muted-foreground" />
-              <span className="text-xs font-heading font-semibold uppercase tracking-widest text-muted-foreground">
-                Attachment
-              </span>
-            </div>
-            <div className="p-5">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                {/* File upload */}
-                <div>
-                  <p className="text-[11px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-1.5">
-                    File
-                  </p>
-                  <input
-                    ref={fileRef}
-                    type="file"
-                    accept="image/*,.pdf"
-                    className="hidden"
-                    onChange={(e) =>
-                      setAttachmentFile(e.target.files?.[0] ?? null)
-                    }
-                  />
-                  <button
-                    type="button"
-                    onClick={() => fileRef.current?.click()}
-                    className="w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border border-dashed border-border hover:border-primary/50 hover:bg-muted/30 transition-all text-sm text-muted-foreground"
-                  >
-                    <Paperclip size={14} />
-                    {attachmentFile ? (
-                      <span className="text-foreground truncate">
-                        {attachmentFile.name}
-                      </span>
-                    ) : (
-                      "Choose file…"
-                    )}
-                  </button>
-                </div>
-
-                {/* Camera */}
-                <div>
-                  <p className="text-[11px] font-heading font-semibold uppercase tracking-widest text-muted-foreground mb-1.5">
-                    Camera
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => setShowCamera(true)}
-                    className="w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border border-border hover:bg-muted/30 transition-all text-sm text-muted-foreground"
-                  >
-                    <Camera size={14} />
-                    {capturedImage ? "Retake photo" : "Open camera"}
-                  </button>
-                </div>
+          <Section icon={Paperclip} title="Attachment">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              {/* File upload */}
+              <div>
+                <Label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-1.5 block">
+                  File
+                </Label>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/*,.pdf"
+                  className="hidden"
+                  onChange={(e) =>
+                    setAttachmentFile(e.target.files?.[0] ?? null)
+                  }
+                />
+                <button
+                  type="button"
+                  onClick={() => fileRef.current?.click()}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border border-dashed border-border hover:border-primary/50 hover:bg-muted/30 transition-all text-sm text-muted-foreground"
+                >
+                  <Paperclip size={14} />
+                  {attachmentFile ? (
+                    <span className="text-foreground truncate">
+                      {attachmentFile.name}
+                    </span>
+                  ) : (
+                    "Choose file…"
+                  )}
+                </button>
               </div>
 
-              {/* Captured image preview */}
-              {capturedImage && (
-                <div className="mt-4 relative inline-block">
-                  <img
-                    src={capturedImage}
-                    alt="Captured"
-                    className="h-28 w-auto rounded-xl border border-border object-cover"
-                  />
-                  <button
-                    onClick={() => setCapturedImage(null)}
-                    className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center hover:bg-red-600 transition-colors"
-                  >
-                    <X size={10} />
-                  </button>
-                </div>
-              )}
+              {/* Camera */}
+              <div>
+                <Label className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground mb-1.5 block">
+                  Camera
+                </Label>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCameraError(null);
+                    setShowCamera(true);
+                  }}
+                  className="w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl border border-border hover:bg-muted/30 transition-all text-sm text-muted-foreground"
+                >
+                  <Camera size={14} />
+                  {capturedImage ? "Retake photo" : "Open camera"}
+                </button>
+              </div>
             </div>
-          </div>
 
-          {/* ── Submit ── */}
+            {/* Attachment badges */}
+            {(attachmentFile || capturedImage) && (
+              <div className="flex flex-wrap gap-2 mt-4">
+                {attachmentFile && (
+                  <Badge variant="secondary" className="gap-1.5 pr-1">
+                    <Paperclip size={11} />
+                    <span className="max-w-[160px] truncate">
+                      {attachmentFile.name}
+                    </span>
+                    <button
+                      onClick={() => setAttachmentFile(null)}
+                      className="ml-0.5 rounded-full hover:bg-muted-foreground/20 p-0.5 transition-colors"
+                    >
+                      <X size={10} />
+                    </button>
+                  </Badge>
+                )}
+                {capturedImage && (
+                  <div className="relative inline-block">
+                    <img
+                      src={capturedImage}
+                      alt="Captured"
+                      className="h-20 w-auto rounded-lg border border-border object-cover"
+                    />
+                    <button
+                      onClick={() => setCapturedImage(null)}
+                      className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-red-500 text-white flex items-center justify-center hover:bg-red-600 transition-colors"
+                    >
+                      <X size={10} />
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+          </Section>
+
+          {/* ── Submit row ── */}
           <div className="flex items-center justify-between gap-3">
-            <button
-              type="button"
+            <Button
+              variant="outline"
               onClick={() => navigate("/ticket")}
-              className="px-4 py-2.5 rounded-xl border border-border text-sm text-muted-foreground hover:bg-muted transition-colors flex items-center gap-2"
+              className="gap-2"
             >
               <ArrowLeft size={13} /> Cancel
-            </button>
-            <button
-              type="button"
+            </Button>
+            <Button
               onClick={handleSubmit}
               disabled={submitting}
-              className="px-6 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-heading font-semibold hover:opacity-90 disabled:opacity-60 transition-all flex items-center gap-2"
+              className="gap-2 px-6"
             >
               {submitting ? (
                 <>
@@ -601,7 +620,7 @@ const CreateTicket = () => {
                   <Send size={13} /> Submit Ticket
                 </>
               )}
-            </button>
+            </Button>
           </div>
         </div>
       </div>
@@ -613,38 +632,71 @@ const CreateTicket = () => {
             <div className="flex items-center justify-between px-5 py-4 border-b border-border">
               <div className="flex items-center gap-2">
                 <Camera size={15} className="text-muted-foreground" />
-                <h2 className="text-sm font-heading font-semibold text-foreground">
+                <h2 className="text-sm font-semibold text-foreground">
                   Capture Photo
                 </h2>
               </div>
-              <button
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
                 onClick={() => setShowCamera(false)}
-                className="p-1.5 rounded-lg text-muted-foreground hover:bg-muted transition-colors"
               >
                 <XCircle size={15} />
-              </button>
+              </Button>
             </div>
+
             <div className="p-4">
-              <Webcam
-                ref={webcamRef}
-                screenshotFormat="image/jpeg"
-                className="rounded-xl w-full"
-                videoConstraints={{ facingMode: "environment" }}
-              />
+              {cameraError ? (
+                <div className="flex flex-col items-center justify-center py-8 gap-3 text-center">
+                  <XCircle size={32} className="text-red-400" />
+                  <p className="text-sm text-muted-foreground">{cameraError}</p>
+                  <p className="text-xs text-muted-foreground/60">
+                    Please allow camera access in your browser settings and try
+                    again.
+                  </p>
+                </div>
+              ) : (
+                <Webcam
+                  ref={webcamRef}
+                  screenshotFormat="image/jpeg"
+                  className="rounded-xl w-full"
+                  width={640}
+                  height={480}
+                  mirrored={true}
+                  videoConstraints={{
+                    width: 640,
+                    height: 480,
+                    facingMode: { ideal: "environment" },
+                  }}
+                  onUserMediaError={(err) => {
+                    const msg =
+                      err instanceof Error ? err.message : String(err);
+                    setCameraError(
+                      msg.toLowerCase().includes("permission")
+                        ? "Camera permission denied."
+                        : "Could not access camera: " + msg,
+                    );
+                  }}
+                />
+              )}
             </div>
+
             <div className="flex gap-3 px-5 py-4 border-t border-border">
-              <button
+              <Button
+                className="flex-1 gap-2 bg-emerald-600 hover:bg-emerald-700 text-white"
                 onClick={capturePhoto}
-                className="flex-1 flex items-center justify-center gap-2 h-10 rounded-xl bg-emerald-600 text-white text-sm font-heading font-semibold hover:bg-emerald-700 transition-colors"
+                disabled={!!cameraError}
               >
                 <CheckCircle2 size={14} /> Capture
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="outline"
+                className="flex-1"
                 onClick={() => setShowCamera(false)}
-                className="flex-1 flex items-center justify-center gap-2 h-10 rounded-xl border border-border text-sm text-muted-foreground hover:bg-muted transition-colors"
               >
                 Cancel
-              </button>
+              </Button>
             </div>
           </div>
         </div>
