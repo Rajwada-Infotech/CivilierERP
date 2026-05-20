@@ -5,6 +5,7 @@ import {
   FileText,
   Clock,
   CheckCircle2,
+  LayoutList,
 } from "lucide-react";
 import { NavItem } from "./SidebarPrimitives";
 
@@ -16,9 +17,12 @@ export const buildTicketNavItems = (isAdminUser: boolean): NavItem[] => [
     children: [
       { label: "Create Ticket", path: "/ticket/create" },
       { label: "My Tickets", path: "/ticket/my-tickets" },
-      // Pending — admin/super_admin/dba only
+      // Admin-only items
       ...(isAdminUser
-        ? [{ label: "Pending Tickets", path: "/ticket/pending" }]
+        ? [
+            { label: "All Tickets", path: "/ticket/all" },
+            { label: "Pending Tickets", path: "/ticket/pending" },
+          ]
         : []),
       { label: "Resolved Tickets", path: "/ticket/resolved" },
     ],
