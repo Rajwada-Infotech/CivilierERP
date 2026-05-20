@@ -33,7 +33,7 @@ BEGIN
         Notes            NVARCHAR(MAX) NULL,
         IsDeleted        BIT           NOT NULL DEFAULT 0,
         CreatedBy        NVARCHAR(100) NULL,
-        CreatedAt        DATETIME2     NOT NULL DEFAULT SYSDATETIME(),
+        CreatedAt        DATETIME2     NOT NULL DEFAULT SYSUTCDATETIME(),
         UpdatedBy        NVARCHAR(100) NULL,
         UpdatedAt        DATETIME2     NULL,
 
