@@ -6,6 +6,8 @@ import MyTickets from "@/pages/ticket/MyTickets";
 
 import PendingTickets from "@/pages/ticket/PendingTickets";
 
+import AllTickets from "@/pages/ticket/AllTickets";
+
 import ResolvedTickets from "@/pages/ticket/ResolvedTickets";
 import React, { Suspense, lazy, useState, useEffect } from "react";
 import { RouteErrorBoundary } from "./components/ErrorBoundary";
@@ -161,6 +163,8 @@ const BOQ = lazy(() => import("./pages/engineering/BOQ"));
 
 // Admin Pages
 const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard"));
+const AdminTicketPanel = lazy(() => import("./pages/admin/AdminTicketPanel"));
+const TicketResolution = lazy(() => import("./pages/ticket/TicketResolution"));
 const Users = lazy(() => import("./pages/Users"));
 const MenuRights = lazy(() => import("./pages/admin/MenuRights"));
 const WidgetRights = lazy(() => import("./pages/admin/WidgetsRights"));
@@ -1006,6 +1010,15 @@ function AppRoutes() {
       />
 
       <Route
+        path="/ticket/all"
+        element={
+          <AdminRoute>
+            <AllTickets />
+          </AdminRoute>
+        }
+      />
+
+      <Route
         path="/ticket/resolved"
         element={
           <ProtectedRoute>
@@ -1385,6 +1398,22 @@ function AppRoutes() {
         element={
           <AdminRoute>
             <AdminControlPanel />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/tickets"
+        element={
+          <AdminRoute>
+            <AdminTicketPanel />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/tickets/resolution"
+        element={
+          <AdminRoute>
+            <TicketResolution />
           </AdminRoute>
         }
       />
