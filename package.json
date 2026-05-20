@@ -46,7 +46,7 @@
     "@react-pdf/renderer": "^4.5.1",
     "@tanstack/react-query": "^5.83.0",
     "@tanstack/react-table": "^8.21.0",
-    "@types/react-webcam": "^1.1.0",
+    "@types/react-webcam": "^3.0.0",
     "axios": "^1.15.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -97,5 +97,8 @@
     "typescript-eslint": "^8.38.0",
     "vite": "^7.3.3",
     "vitest": "^3.2.4"
+  },
+  "overrides": {
+    "ws": ">=8.20.1"
   }
 }
