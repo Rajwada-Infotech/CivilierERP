@@ -267,11 +267,7 @@ function TreeRow({
             setDeleteConfirm={setDeleteConfirm}
             activeEditId={activeEditId}
             allGroups={allGroups}
-<<<<<<< HEAD
-            onView={onView}
-=======
             onViewGL={onViewGL}
->>>>>>> e4cf594 (Followup module)
           />
         ))}
     </>
@@ -786,11 +782,7 @@ const AccountGroupMaster: React.FC = () => {
                       setDeleteConfirm={setDeleteConfirm}
                       activeEditId={editingId}
                       allGroups={allGroups}
-<<<<<<< HEAD
-                      onView={setViewRecord}
-=======
                       onViewGL={setSelectedGroupId}
->>>>>>> e4cf594 (Followup module)
                     />
                   ))
                 )}

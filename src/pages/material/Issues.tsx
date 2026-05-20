@@ -225,7 +225,7 @@ export default function Issues() {
     staleTime: 5 * 60_000,
   });
 
-  const { data: finYears = [], isLoading: loadingFinYears } = useQuery({
+  const { data: dbFinYears = [], isLoading: loadingFinYears } = useQuery({
     queryKey: ["issues-finyears"],
     queryFn: issuesApi.getFinYears,
     staleTime: 5 * 60_000,
@@ -258,15 +258,15 @@ export default function Issues() {
 
   useEffect(() => {
     if (
-      finYears.length > 0 &&
+      dbFinYears.length > 0 &&
       !header.finYearId &&
       viewMode === "form" &&
       !editingId
     ) {
-      const active = (finYears as any[]).find((f) => f.isActive);
+      const active = (dbFinYears as any[]).find((f) => f.isActive);
       if (active) setH("finYearId", String(active.id));
     }
-  }, [finYears, viewMode, editingId]);
+  }, [dbFinYears, viewMode, editingId]);
 
   // ── Item lookup helpers ──────────────────────────────────────────────────
 
@@ -870,7 +870,7 @@ export default function Issues() {
                     />
                   </SelectTrigger>
                   <SelectContent>
-                    {(finYears as any[]).map((fy) => (
+                    {(dbFinYears as any[]).map((fy) => (
                       <SelectItem
                         key={fy.id}
                         value={String(fy.id)}

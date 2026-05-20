@@ -454,8 +454,11 @@ const TypeOfDocMaster: React.FC = () => {
     }));
   };
 
+
+
+=======
+
   const columns = useMemo(
-<<<<<<< HEAD
     () =>
       buildDocColumns(
         editingId,
@@ -464,10 +467,20 @@ const TypeOfDocMaster: React.FC = () => {
         setViewRecord,
       ),
     // eslint-disable-next-line react-hooks/exhaustive-deps
+    [editingId, deleteMutation.mutate],
+  );
+
+
 =======
-    () => buildDocColumns(editingId, openEdit, deleteMutation.mutate),
-     
->>>>>>> e4cf594 (Followup module)
+  const columns = useMemo(
+    () =>
+      buildDocColumns(
+        editingId,
+        openEdit,
+        deleteMutation.mutate,
+        setViewRecord,
+      ),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [editingId, deleteMutation.mutate],
   );
 
