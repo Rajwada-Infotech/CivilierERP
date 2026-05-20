@@ -86,7 +86,8 @@ type ModuleKey =
   | "admin"
   | "super_admin"
   | "dba"
-  | "user";
+  | "user"
+  | "ticket";
 
 const MODULE_META: Record<
   ModuleKey,
@@ -140,7 +141,48 @@ const MODULE_META: Record<
     color: "bg-gray-500/10 text-gray-500 border-gray-500/20",
     dot: "bg-gray-400",
   },
+  ticket: {
+    label: "Ticket",
+    icon: MessageSquare,
+    color: "bg-pink-500/10 text-pink-500 border-pink-500/20",
+    dot: "bg-pink-500",
+  },
 };
+
+// ── Build role-aware ticket nav ───────────────────────────────────────────────
+function buildTicketNavItems(isAdminUser: boolean): NavItem[] {
+  return [
+    {
+      label: "Dashboard",
+      icon: BarChart3,
+      path: "/ticket",
+    },
+    {
+      label: "Ticket",
+      icon: MessageSquare,
+      children: [
+        // "Create Ticket" — visible to all
+        {
+          label: "Create Ticket",
+          path: "/ticket/create",
+        },
+        // "My Tickets" — visible ONLY to normal users (not admin/super_admin)
+        ...(!isAdminUser
+          ? [{ label: "My Tickets", path: "/ticket/my-tickets" }]
+          : []),
+        // "Pending Tickets" — visible ONLY to admin/super_admin
+        ...(isAdminUser
+          ? [{ label: "Pending Tickets", path: "/ticket/pending" }]
+          : []),
+        // "Resolved Tickets" — visible to all
+        {
+          label: "Resolved Tickets",
+          path: "/ticket/resolved",
+        },
+      ],
+    },
+  ];
+}
 
 // ── AppSidebar ────────────────────────────────────────────────────────────────
 export const AppSidebar = () => {
@@ -188,41 +230,9 @@ export const AppSidebar = () => {
         return materialNavItems;
       case "followup":
         return followupNavItems;
-        case "ticket":
-          return [
-            {
-              label: "Dashboard",
-              icon: BarChart3,
-              path: "/ticket",
-            },
-        
-            {
-              label: "Ticket",
-              icon: MessageSquare,
-        
-              children: [
-                {
-                  label: "Create Ticket",
-                  path: "/ticket/create",
-                },
-              
-                {
-                  label: "My Tickets",
-                  path: "/ticket/my-tickets",
-                },
-              
-                {
-                  label: "Pending Tickets",
-                  path: "/ticket/pending",
-                },
-              
-                {
-                  label: "Resolved Tickets",
-                  path: "/ticket/resolved",
-                },
-              ],
-            },
-          ];
+      case "ticket":
+        // Pass isAdminTier so the nav reflects what the logged-in role can see
+        return buildTicketNavItems(isAdminTier);
       case "admin":
         return buildAdminNavItems(pendingApprovalCount);
       default:
