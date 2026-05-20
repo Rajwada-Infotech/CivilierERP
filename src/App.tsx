@@ -1,3 +1,12 @@
+import TicketDashboard from "@/pages/ticket/TicketDashboard";
+
+import CreateTicket from "@/pages/ticket/CreateTicket";
+
+import MyTickets from "@/pages/ticket/MyTickets";
+
+import PendingTickets from "@/pages/ticket/PendingTickets";
+
+import ResolvedTickets from "@/pages/ticket/ResolvedTickets";
 import React, { Suspense, lazy, useState, useEffect } from "react";
 import { RouteErrorBoundary } from "./components/ErrorBoundary";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -937,6 +946,50 @@ function AppRoutes() {
           </ProtectedRoute>
         }
       />
+      <Route
+  path="/ticket"
+  element={
+    <ProtectedRoute>
+      <TicketDashboard />
+    </ProtectedRoute>
+  }
+/>
+
+<Route
+  path="/ticket/create"
+  element={
+    <ProtectedRoute>
+      <CreateTicket />
+    </ProtectedRoute>
+  }
+/>
+
+<Route
+  path="/ticket/my-tickets"
+  element={
+    <ProtectedRoute>
+      <MyTickets />
+    </ProtectedRoute>
+  }
+/>
+
+<Route
+  path="/ticket/pending"
+  element={
+    <ProtectedRoute>
+      <PendingTickets />
+    </ProtectedRoute>
+  }
+/>
+
+<Route
+  path="/ticket/resolved"
+  element={
+    <ProtectedRoute>
+      <ResolvedTickets />
+    </ProtectedRoute>
+  }
+/>
       <Route
         path="/engineering/work-done"
         element={
