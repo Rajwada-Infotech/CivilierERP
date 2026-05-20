@@ -1,22 +1,21 @@
 const express = require("express");
-
 const router = express.Router();
-
-const sql = require("mssql");
+const { getPool } = require("../db");
 
 router.get("/dropdown", async (req, res) => {
   try {
+    const pool = getPool();
 
-    const companies = await sql.query(`
+    const companies = await pool.request().query(`
       SELECT id, name
-      FROM enterprise
+      FROM dbo.enterprise
       WHERE business_type = 'C'
       ORDER BY name
     `);
 
-    const projects = await sql.query(`
+    const projects = await pool.request().query(`
       SELECT id, name
-      FROM enterprise
+      FROM dbo.enterprise
       WHERE business_type = 'P'
       ORDER BY name
     `);
@@ -25,13 +24,9 @@ router.get("/dropdown", async (req, res) => {
       companies: companies.recordset,
       projects: projects.recordset,
     });
-
   } catch (err) {
     console.log(err);
-
-    res.status(500).json({
-      error: "Failed to fetch dropdown data",
-    });
+    res.status(500).json({ error: "Failed to fetch dropdown data" });
   }
 });
 
