@@ -127,6 +127,7 @@ const ALL_ROUTES = [
   { path: "/api/followup-handover", file: "./routes/followupHandover" },
   { path: "/api/company-master", file: "./routes/companyMaster" },
   { path: "/api/project-master", file: "./routes/projectMaster" },
+  { path: "/api/business", file: "./routes/businessRoutes" },
   { path: "/api/signatures", file: "./routes/signatures" },
   { path: "/api/communicator", file: "./routes/communicator" },
   { path: "/api/system/metrics", file: "./routes/systemMetrics" },
@@ -138,6 +139,7 @@ const ALL_ROUTES = [
   { path: "/api/app-version", file: "./routes/appVersion" },
   { path: "/api/godowns", file: "./routes/godowns" },
   { path: "/api/stock-transfers", file: "./routes/stockTransfers" },
+  { path: "/api/tickets", file: "./routes/ticketRoutes" },
 ];
 
 // ─── createApp ──────────────────────────────────────────────────────────────

@@ -38,6 +38,7 @@ import {
   TrendingUp,
   ClipboardList,
   Wrench,
+  MessageSquare,
 } from "lucide-react";
 import { BillingIcon } from "@/components/icons/BillingIcon";
 import { ADMIN_PATHS } from "@/constants/pageDefinitions";
@@ -604,7 +605,17 @@ export const TopNavbar = () => {
       route: MODULE_DASHBOARD_ROUTES.engineering,
       color: "text-orange-500",
     },
+    {
+      id: "ticket",
+      name: "Ticket",
+      icon: MessageSquare,
+      desc: "Support & issue tracking",
+      route: MODULE_DASHBOARD_ROUTES.ticket,
+      color: "text-pink-500",
+    },
   ];
+
+    
 
   return (
     <>
