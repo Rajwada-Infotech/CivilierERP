@@ -122,16 +122,15 @@ const ALL_ROUTES = [
   { path: "/api/reminders", file: "./routes/tenantReminders" },
   { path: "/api/followup-log", file: "./routes/followupLog" },
   { path: "/api/followup-applicants", file: "./routes/followupApplicants" },
-  { path: "/api/applicants", file: "./routes/applicants" },
-  {
-    path: "/api/followup-unit-selections",
-    file: "./routes/followupUnitSelections",
-  },
+  { path: "/api/followup-unit-selections", file: "./routes/followupUnitSelections" },
   { path: "/api/followup-agreements", file: "./routes/followupAgreements" },
   { path: "/api/followup-noc", file: "./routes/followupNoc" },
   { path: "/api/followup-sales-deed", file: "./routes/followupSalesDeed" },
+  { path: "/api/followup-handover", file: "./routes/followupHandover" },
+  { path: "/api/followup-construction-updates", file: "./routes/followupConstructionUpdates" },
   { path: "/api/company-master", file: "./routes/companyMaster" },
   { path: "/api/project-master", file: "./routes/projectMaster" },
+  { path: "/api/business", file: "./routes/businessRoutes" },
   { path: "/api/signatures", file: "./routes/signatures" },
   { path: "/api/communicator", file: "./routes/communicator" },
   { path: "/api/system/metrics", file: "./routes/systemMetrics" },
@@ -143,6 +142,7 @@ const ALL_ROUTES = [
   { path: "/api/app-version", file: "./routes/appVersion" },
   { path: "/api/godowns", file: "./routes/godowns" },
   { path: "/api/stock-transfers", file: "./routes/stockTransfers" },
+  { path: "/api/tickets", file: "./routes/ticketRoutes" },
 ];
 
 // ─── createApp ──────────────────────────────────────────────────────────────

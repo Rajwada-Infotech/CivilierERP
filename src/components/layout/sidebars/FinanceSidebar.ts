@@ -2,7 +2,7 @@ import { BarChart3, Landmark, Scale } from "lucide-react";
 import { NavItem } from "./SidebarPrimitives";
 
 export const buildFinanceNavItems = (_overdueCount: number): NavItem[] => [
-  { label: "Dashboard", icon: BarChart3, path: "/finance" },
+  { label: "Proceeding", icon: BarChart3, path: "/finance" },
   {
     label: "Transaction",
     icon: Landmark,
