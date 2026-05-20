@@ -235,10 +235,13 @@ export default function Issues() {
     queryKey: ["issues-uoms"],
     queryFn: async () => {
       const data = await issuesApi.getUomOptions();
-      // IsActive comes as integer 1/0 from MSSQL, not a boolean
-      return (Array.isArray(data) ? data : []).filter(
-        (u: any) => u.IsActive === true || u.IsActive === 1,
-      );
+      // Normalize IsActive from MSSQL 1/0 (or boolean) to a strict boolean at the boundary.
+      return (Array.isArray(data) ? data : [])
+        .map((u: any) => ({
+          ...u,
+          IsActive: u.IsActive === true || u.IsActive === 1,
+        }))
+        .filter((u: any) => u.IsActive);
     },
     staleTime: 5 * 60_000,
   });
