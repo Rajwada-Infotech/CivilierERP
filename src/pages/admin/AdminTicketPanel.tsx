@@ -24,7 +24,13 @@ import { fetchWithAuth } from "@/lib/fetchWithAuth";
 import { invalidateTicketQueries } from "@/lib/ticketQuerySync";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
+import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import {
   Select,
   SelectContent,
@@ -287,6 +293,12 @@ function TicketDetailDialog({
         The [&>button:first-of-type]:hidden selector targets the auto-injected × button.
       */}
       <DialogContent className="max-w-xl p-0 gap-0 overflow-hidden [&>button:first-of-type]:hidden">
+        <VisuallyHidden>
+          <DialogTitle>
+            Ticket #{t.id}: {t.subject}
+          </DialogTitle>
+          <DialogDescription>Ticket details and management</DialogDescription>
+        </VisuallyHidden>
         {/* Header — ticket id | subject | close — all in one row, no overlap possible */}
         <div className="flex items-center gap-2.5 px-5 py-3.5 border-b border-border">
           <span className="shrink-0 font-mono text-[11px] font-medium text-muted-foreground bg-muted border border-border rounded px-1.5 py-0.5">

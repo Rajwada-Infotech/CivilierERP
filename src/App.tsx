@@ -383,6 +383,29 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   );
 }
 
+// ─── Normal User Route (non-admin only) ──────────────────────────────────────
+// Use for pages that only normal users should access (e.g. /ticket/my-tickets)
+function NormalUserRoute({ children }: { children: React.ReactNode }) {
+  const { currentUser } = useAuth();
+  const ADMIN_ROLES = ["super_admin", "admin", "dba"];
+  if (!currentUser) {
+    return <Navigate to="/login" replace />;
+  }
+  if (ADMIN_ROLES.includes(currentUser.role)) {
+    // Admin landed on a user-only page — send them to pending tickets instead
+    return <Navigate to="/ticket/pending" replace />;
+  }
+  return (
+    <ProtectedProviders>
+      <AppLayout>
+        <RouteErrorBoundary>
+          <Suspense fallback={<PageSkeleton />}>{children}</Suspense>
+        </RouteErrorBoundary>
+      </AppLayout>
+    </ProtectedProviders>
+  );
+}
+
 // ─── Auth Session Bridge ──────────────────────────────────────────────────────
 function AuthSessionBridge({ children }: { children: React.ReactNode }) {
   const { recordLogin, recordLogout } = useActivityBrowser();
@@ -947,49 +970,49 @@ function AppRoutes() {
         }
       />
       <Route
-  path="/ticket"
-  element={
-    <ProtectedRoute>
-      <TicketDashboard />
-    </ProtectedRoute>
-  }
-/>
+        path="/ticket"
+        element={
+          <ProtectedRoute>
+            <TicketDashboard />
+          </ProtectedRoute>
+        }
+      />
 
-<Route
-  path="/ticket/create"
-  element={
-    <ProtectedRoute>
-      <CreateTicket />
-    </ProtectedRoute>
-  }
-/>
+      <Route
+        path="/ticket/create"
+        element={
+          <ProtectedRoute>
+            <CreateTicket />
+          </ProtectedRoute>
+        }
+      />
 
-<Route
-  path="/ticket/my-tickets"
-  element={
-    <ProtectedRoute>
-      <MyTickets />
-    </ProtectedRoute>
-  }
-/>
+      <Route
+        path="/ticket/my-tickets"
+        element={
+          <ProtectedRoute>
+            <MyTickets />
+          </ProtectedRoute>
+        }
+      />
 
-<Route
-  path="/ticket/pending"
-  element={
-    <ProtectedRoute>
-      <PendingTickets />
-    </ProtectedRoute>
-  }
-/>
+      <Route
+        path="/ticket/pending"
+        element={
+          <AdminRoute>
+            <PendingTickets />
+          </AdminRoute>
+        }
+      />
 
-<Route
-  path="/ticket/resolved"
-  element={
-    <ProtectedRoute>
-      <ResolvedTickets />
-    </ProtectedRoute>
-  }
-/>
+      <Route
+        path="/ticket/resolved"
+        element={
+          <ProtectedRoute>
+            <ResolvedTickets />
+          </ProtectedRoute>
+        }
+      />
       <Route
         path="/engineering/work-done"
         element={
