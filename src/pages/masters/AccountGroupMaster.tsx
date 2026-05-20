@@ -267,11 +267,7 @@ function TreeRow({
             setDeleteConfirm={setDeleteConfirm}
             activeEditId={activeEditId}
             allGroups={allGroups}
-<<<<<<< HEAD
             onView={onView}
-=======
-            onViewGL={onViewGL}
->>>>>>> e4cf594 (Followup module)
           />
         ))}
     </>
@@ -337,7 +333,11 @@ const AccountGroupMaster: React.FC = () => {
   const toggleExpand = (id: string) =>
     setExpanded((prev) => {
       const n = new Set(prev);
-      if (n.has(id)) { n.delete(id); } else { n.add(id); }
+      if (n.has(id)) {
+        n.delete(id);
+      } else {
+        n.add(id);
+      }
       return n;
     });
   const expandAll = () => setExpanded(new Set(allGroups.map((g) => g._id)));
@@ -786,11 +786,7 @@ const AccountGroupMaster: React.FC = () => {
                       setDeleteConfirm={setDeleteConfirm}
                       activeEditId={editingId}
                       allGroups={allGroups}
-<<<<<<< HEAD
                       onView={setViewRecord}
-=======
-                      onViewGL={setSelectedGroupId}
->>>>>>> e4cf594 (Followup module)
                     />
                   ))
                 )}

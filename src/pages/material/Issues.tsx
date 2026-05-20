@@ -225,12 +225,6 @@ export default function Issues() {
     staleTime: 5 * 60_000,
   });
 
-  const { data: finYears = [], isLoading: loadingFinYears } = useQuery({
-    queryKey: ["issues-finyears"],
-    queryFn: issuesApi.getFinYears,
-    staleTime: 5 * 60_000,
-  });
-
   const { data: itemOptions = [], isLoading: loadingItems } = useQuery({
     queryKey: ["issues-items"],
     queryFn: issuesApi.getItemOptions,
@@ -521,7 +515,11 @@ export default function Issues() {
         Remarks: ci.Remarks || null,
       })),
     };
-    if (editingId) { updateMutation.mutate(payload); } else { createMutation.mutate(payload); }
+    if (editingId) {
+      updateMutation.mutate(payload);
+    } else {
+      createMutation.mutate(payload);
+    }
   };
 
   // ── Columns ───────────────────────────────────────────────────────────────
@@ -863,11 +861,7 @@ export default function Issues() {
                       size={13}
                       className="text-muted-foreground shrink-0"
                     />
-                    <SelectValue
-                      placeholder={
-                        loadingFinYears ? "Loading…" : "Select fin year"
-                      }
-                    />
+                    <SelectValue placeholder={"Select fin year"} />
                   </SelectTrigger>
                   <SelectContent>
                     {(finYears as any[]).map((fy) => (
