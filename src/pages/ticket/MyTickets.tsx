@@ -44,10 +44,22 @@ const fmtDate = (d?: string | null) =>
     : null;
 
 const priorityConfig: Record<string, { cls: string; dot: string }> = {
-  Urgent: { cls: "bg-red-500/10 text-red-600 border-red-400/20", dot: "bg-red-500" },
-  High:   { cls: "bg-orange-500/10 text-orange-600 border-orange-400/20", dot: "bg-orange-500" },
-  Medium: { cls: "bg-amber-500/10 text-amber-600 border-amber-400/20", dot: "bg-amber-500" },
-  Low:    { cls: "bg-blue-500/10 text-blue-600 border-blue-400/20", dot: "bg-blue-500" },
+  Urgent: {
+    cls: "bg-red-500/10 text-red-600 border-red-400/20",
+    dot: "bg-red-500",
+  },
+  High: {
+    cls: "bg-orange-500/10 text-orange-600 border-orange-400/20",
+    dot: "bg-orange-500",
+  },
+  Medium: {
+    cls: "bg-amber-500/10 text-amber-600 border-amber-400/20",
+    dot: "bg-amber-500",
+  },
+  Low: {
+    cls: "bg-blue-500/10 text-blue-600 border-blue-400/20",
+    dot: "bg-blue-500",
+  },
 };
 
 function PriorityBadge({ priority }: { priority: string }) {
@@ -56,7 +68,9 @@ function PriorityBadge({ priority }: { priority: string }) {
     dot: "bg-muted",
   };
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border ${cfg.cls}`}>
+    <span
+      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border ${cfg.cls}`}
+    >
       <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot}`} />
       {priority}
     </span>
@@ -65,15 +79,17 @@ function PriorityBadge({ priority }: { priority: string }) {
 
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, string> = {
-    Resolved:   "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
-    Pending:    "bg-amber-500/10 text-amber-600 border-amber-400/20",
+    Resolved: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
+    Pending: "bg-amber-500/10 text-amber-600 border-amber-400/20",
     InProgress: "bg-blue-500/10 text-blue-600 border-blue-400/20",
   };
   const Icon = status === "Resolved" ? CheckCircle2 : Clock;
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border ${map[status] ?? "bg-muted text-muted-foreground border-border"}`}>
+    <span
+      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border ${map[status] ?? "bg-muted text-muted-foreground border-border"}`}
+    >
       <Icon size={10} />
-      {label}
+      {status}
     </span>
   );
 }
@@ -84,7 +100,9 @@ function TicketCard({ ticket }: { ticket: Ticket }) {
     <div className="rounded-xl border border-border bg-card overflow-hidden hover:border-border/80 hover:shadow-sm transition-all">
       <div className="px-5 py-4">
         <div className="flex items-start gap-3">
-          <div className={`w-1 self-stretch rounded-full shrink-0 mt-0.5 ${priorityConfig[ticket.priority]?.dot ?? "bg-muted"}`} />
+          <div
+            className={`w-1 self-stretch rounded-full shrink-0 mt-0.5 ${priorityConfig[ticket.priority]?.dot ?? "bg-muted"}`}
+          />
           <div className="flex-1 min-w-0">
             <div className="flex items-start justify-between gap-3">
               <h3 className="text-sm font-heading font-semibold text-foreground leading-snug">
@@ -101,16 +119,24 @@ function TicketCard({ ticket }: { ticket: Ticket }) {
                 <span>{ticket.customer_name || "—"}</span>
               </div>
               {ticket.customer_phone && (
-                <span className="text-[11px] text-muted-foreground">{ticket.customer_phone}</span>
+                <span className="text-[11px] text-muted-foreground">
+                  {ticket.customer_phone}
+                </span>
               )}
               {fmtDate(ticket.created_at) && (
-                <span className="text-[11px] text-muted-foreground">{fmtDate(ticket.created_at)}</span>
+                <span className="text-[11px] text-muted-foreground">
+                  {fmtDate(ticket.created_at)}
+                </span>
               )}
-              <span className="text-[11px] font-mono text-muted-foreground/60">#{ticket.id}</span>
+              <span className="text-[11px] font-mono text-muted-foreground/60">
+                #{ticket.id}
+              </span>
             </div>
             {ticket.issue_details && (
               <div className="mt-2">
-                <p className={`text-xs text-muted-foreground leading-relaxed ${expanded ? "" : "line-clamp-2"}`}>
+                <p
+                  className={`text-xs text-muted-foreground leading-relaxed ${expanded ? "" : "line-clamp-2"}`}
+                >
                   {ticket.issue_details}
                 </p>
                 {ticket.issue_details.length > 120 && (
@@ -119,7 +145,10 @@ function TicketCard({ ticket }: { ticket: Ticket }) {
                     className="text-[11px] text-primary mt-0.5 hover:underline flex items-center gap-0.5"
                   >
                     {expanded ? "Show less" : "Show more"}
-                    <ChevronDown size={10} className={`transition-transform ${expanded ? "rotate-180" : ""}`} />
+                    <ChevronDown
+                      size={10}
+                      className={`transition-transform ${expanded ? "rotate-180" : ""}`}
+                    />
                   </button>
                 )}
               </div>
@@ -140,22 +169,28 @@ const MyTickets: React.FC = () => {
   const [search, setSearch] = useState("");
   const [priorityFilter, setPriorityFilter] = useState<string>("all");
 
-  const { data: allTickets = [], isLoading, isError, refetch, isFetching } =
-    useQuery<Ticket[]>({
-      queryKey: ["tickets", "my"],
-      queryFn: async () => {
-        // Always hit /api/tickets/my — this endpoint returns only the current user's tickets
-        const res = await fetchWithAuth("/api/tickets/my");
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      },
-      staleTime: 0,
-      refetchOnWindowFocus: true,
-    });
+  const {
+    data: allTickets = [],
+    isLoading,
+    isError,
+    refetch,
+    isFetching,
+  } = useQuery<Ticket[]>({
+    queryKey: ["tickets", "my"],
+    queryFn: async () => {
+      // Always hit /api/tickets/my — this endpoint returns only the current user's tickets
+      const res = await fetchWithAuth("/api/tickets/my");
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    },
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+  });
 
   const tickets = useMemo(() => {
     let list = [...allTickets];
-    if (priorityFilter !== "all") list = list.filter((t) => t.priority === priorityFilter);
+    if (priorityFilter !== "all")
+      list = list.filter((t) => t.priority === priorityFilter);
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter(
@@ -185,11 +220,15 @@ const MyTickets: React.FC = () => {
               <ArrowLeft size={14} />
             </button>
             <div>
-              <h1 className="text-xl font-heading font-bold text-foreground">My Tickets</h1>
+              <h1 className="text-xl font-heading font-bold text-foreground">
+                My Tickets
+              </h1>
               <p className="text-xs text-muted-foreground mt-0.5">
                 {allTickets.length} ticket{allTickets.length !== 1 ? "s" : ""}
                 {urgentCount > 0 && (
-                  <span className="text-red-500 ml-1.5 font-medium">· {urgentCount} urgent</span>
+                  <span className="text-red-500 ml-1.5 font-medium">
+                    · {urgentCount} urgent
+                  </span>
                 )}
               </p>
             </div>
@@ -206,7 +245,10 @@ const MyTickets: React.FC = () => {
               disabled={isFetching}
               className="w-8 h-8 flex items-center justify-center rounded-lg border border-border hover:bg-muted transition-colors text-muted-foreground disabled:opacity-50"
             >
-              <RefreshCw size={13} className={isFetching ? "animate-spin" : ""} />
+              <RefreshCw
+                size={13}
+                className={isFetching ? "animate-spin" : ""}
+              />
             </button>
           </div>
         </div>
@@ -221,7 +263,10 @@ const MyTickets: React.FC = () => {
         {/* Filters */}
         <div className="flex items-center gap-2 flex-wrap">
           <div className="relative flex-1 min-w-48">
-            <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Search
+              size={13}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+            />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -229,7 +274,10 @@ const MyTickets: React.FC = () => {
               className="w-full pl-8 pr-8 py-2 rounded-xl border border-border bg-background text-sm text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary transition-all"
             />
             {search && (
-              <button onClick={() => setSearch("")} className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+              <button
+                onClick={() => setSearch("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+              >
                 <X size={12} />
               </button>
             )}
@@ -255,7 +303,10 @@ const MyTickets: React.FC = () => {
         {isLoading ? (
           <div className="space-y-3">
             {Array.from({ length: 4 }).map((_, i) => (
-              <div key={i} className="rounded-xl border border-border bg-card p-5 animate-pulse">
+              <div
+                key={i}
+                className="rounded-xl border border-border bg-card p-5 animate-pulse"
+              >
                 <div className="flex gap-3">
                   <div className="w-1 h-16 bg-muted rounded-full" />
                   <div className="flex-1 space-y-2">
@@ -271,7 +322,9 @@ const MyTickets: React.FC = () => {
           <div className="rounded-xl border border-border bg-card py-16 flex flex-col items-center gap-3 text-muted-foreground">
             <CheckCircle2 size={32} className="opacity-20" />
             <p className="text-sm">
-              {search || priorityFilter !== "all" ? "No tickets match your filters" : "No tickets yet"}
+              {search || priorityFilter !== "all"
+                ? "No tickets match your filters"
+                : "No tickets yet"}
             </p>
             {!search && priorityFilter === "all" && (
               <button
@@ -290,11 +343,13 @@ const MyTickets: React.FC = () => {
           </div>
         )}
 
-        {!isLoading && tickets.length > 0 && (search || priorityFilter !== "all") && (
-          <p className="text-xs text-muted-foreground text-center">
-            Showing {tickets.length} of {allTickets.length} tickets
-          </p>
-        )}
+        {!isLoading &&
+          tickets.length > 0 &&
+          (search || priorityFilter !== "all") && (
+            <p className="text-xs text-muted-foreground text-center">
+              Showing {tickets.length} of {allTickets.length} tickets
+            </p>
+          )}
       </div>
     </>
   );
