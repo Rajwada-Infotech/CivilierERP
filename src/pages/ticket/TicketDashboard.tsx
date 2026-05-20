@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { invalidateTicketQueries } from "@/lib/ticketQuerySync";
 import { DashboardBackground } from "@/components/DashboardBackground";
 import { toast } from "sonner";
 import {
@@ -36,7 +37,7 @@ interface Ticket {
   company_id: number | null;
   project_id: number | null;
   attachment_path: string | null;
-  status: "Pending" | "Resolved";
+  status: "Pending" | "InProgress" | "Resolved" | "Closed";
   created_at?: string;
 }
 
@@ -260,9 +261,9 @@ export default function TicketDashboard() {
     refetch,
     isFetching,
   } = useQuery<Ticket[]>({
-    queryKey: ["tickets"],
+    queryKey: ["ticket-dashboard"],
     queryFn: async () => {
-      const res = await fetchWithAuth("/api/tickets");
+      const res = await fetchWithAuth("/api/tickets/mine");
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body?.error || `HTTP ${res.status}`);
@@ -270,8 +271,9 @@ export default function TicketDashboard() {
       return res.json();
     },
     staleTime: 0,
+    refetchOnMount: "always",
     refetchOnWindowFocus: true,
-    refetchInterval: 30_000,
+    refetchInterval: 5_000,
     retry: 1,
   });
 
@@ -285,7 +287,7 @@ export default function TicketDashboard() {
     },
     onSuccess: () => {
       toast.success("Ticket resolved");
-      queryClient.invalidateQueries({ queryKey: ["tickets"] });
+      invalidateTicketQueries(queryClient);
     },
     onError: () => toast.error("Failed to resolve ticket"),
   });
@@ -294,12 +296,15 @@ export default function TicketDashboard() {
   const stats = useMemo(() => {
     const total = tickets.length;
     const pending = tickets.filter((t) => t.status === "Pending").length;
+    const inProgress = tickets.filter((t) => t.status === "InProgress").length;
     const resolved = tickets.filter((t) => t.status === "Resolved").length;
+    const closed = tickets.filter((t) => t.status === "Closed").length;
+    const openStatuses = ["Pending", "InProgress"];
     const urgent = tickets.filter(
-      (t) => t.priority === "Urgent" && t.status === "Pending",
+      (t) => t.priority === "Urgent" && openStatuses.includes(t.status),
     ).length;
     const high = tickets.filter(
-      (t) => t.priority === "High" && t.status === "Pending",
+      (t) => t.priority === "High" && openStatuses.includes(t.status),
     ).length;
     const resolvedPct = total > 0 ? Math.round((resolved / total) * 100) : 0;
 
@@ -310,13 +315,13 @@ export default function TicketDashboard() {
       Low: 0,
     };
     tickets
-      .filter((t) => t.status === "Pending")
+      .filter((t) => openStatuses.includes(t.status))
       .forEach((t) => {
         if (t.priority in priorityCounts) priorityCounts[t.priority]++;
       });
 
     const recentPending = tickets
-      .filter((t) => t.status === "Pending")
+      .filter((t) => ["Pending", "InProgress"].includes(t.status))
       .slice(0, 6);
     const recentResolved = tickets
       .filter((t) => t.status === "Resolved")
@@ -325,7 +330,9 @@ export default function TicketDashboard() {
     return {
       total,
       pending,
+      inProgress,
       resolved,
+      closed,
       urgent,
       high,
       resolvedPct,
@@ -401,12 +408,12 @@ export default function TicketDashboard() {
               />
               <StatCard
                 label="Pending"
-                value={stats.pending}
+                value={stats.pending + stats.inProgress}
                 sub={`${stats.urgent} urgent · ${stats.high} high priority`}
                 icon={Clock}
                 iconColor="text-amber-600"
                 iconBg="bg-amber-500/10"
-                trend={stats.pending > 0 ? "down" : "neutral"}
+                trend={stats.pending + stats.inProgress > 0 ? "down" : "neutral"}
                 onClick={() => navigate("/ticket/pending")}
               />
               <StatCard
@@ -454,7 +461,7 @@ export default function TicketDashboard() {
               <div>
                 <p className="text-xs text-muted-foreground">Open Tickets</p>
                 <p className="text-lg font-heading font-bold text-foreground leading-tight mt-0.5">
-                  {stats.pending}
+                  {stats.pending + stats.inProgress}
                 </p>
               </div>
             </div>
@@ -596,7 +603,7 @@ export default function TicketDashboard() {
                   <div key={i} className="h-5 bg-muted rounded" />
                 ))}
               </div>
-            ) : stats.pending === 0 ? (
+            ) : stats.pending + stats.inProgress === 0 ? (
               <p className="text-xs text-muted-foreground py-2">
                 No pending tickets
               </p>
@@ -605,8 +612,8 @@ export default function TicketDashboard() {
                 {(["Urgent", "High", "Medium", "Low"] as const).map((p) => {
                   const count = stats.priorityCounts[p] ?? 0;
                   const pct =
-                    stats.pending > 0
-                      ? Math.round((count / stats.pending) * 100)
+                    stats.pending + stats.inProgress > 0
+                      ? Math.round((count / (stats.pending + stats.inProgress)) * 100)
                       : 0;
                   const cfg = priorityConfig[p];
                   return (
@@ -627,7 +634,7 @@ export default function TicketDashboard() {
                   );
                 })}
                 <p className="text-xs text-muted-foreground pt-1">
-                  {stats.pending} total pending · {stats.total} total
+                  {stats.pending + stats.inProgress} total open · {stats.total} total
                 </p>
               </div>
             )}
@@ -651,9 +658,19 @@ export default function TicketDashboard() {
                     color: "bg-amber-500",
                   },
                   {
+                    label: "In Progress",
+                    count: stats.inProgress,
+                    color: "bg-blue-500",
+                  },
+                  {
                     label: "Resolved",
                     count: stats.resolved,
                     color: "bg-emerald-500",
+                  },
+                  {
+                    label: "Closed",
+                    count: stats.closed,
+                    color: "bg-muted-foreground",
                   },
                 ].map(({ label, count, color }) => {
                   const pct =

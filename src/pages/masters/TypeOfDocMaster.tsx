@@ -454,6 +454,7 @@ const TypeOfDocMaster: React.FC = () => {
     }));
   };
 
+
   const columns = useMemo(
     () =>
       buildDocColumns(

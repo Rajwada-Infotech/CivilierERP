@@ -1,10 +1,11 @@
 import Webcam from "react-webcam";
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { invalidateTicketQueries } from "@/lib/ticketQuerySync";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -239,6 +240,7 @@ function Field({
 
 const CreateTicket = () => {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
 
   const [companyId, setCompanyId] = useState("");
   const [projectId, setProjectId] = useState("");
@@ -346,6 +348,7 @@ const CreateTicket = () => {
       });
       const data = await res.json();
       if (data.success) {
+        invalidateTicketQueries(queryClient);
         toast.success("Ticket created successfully");
         navigate("/ticket/pending");
       } else {
