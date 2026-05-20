@@ -455,23 +455,6 @@ const TypeOfDocMaster: React.FC = () => {
   };
 
 
-
-=======
-
-  const columns = useMemo(
-    () =>
-      buildDocColumns(
-        editingId,
-        openEdit,
-        deleteMutation.mutate,
-        setViewRecord,
-      ),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [editingId, deleteMutation.mutate],
-  );
-
-
-=======
   const columns = useMemo(
     () =>
       buildDocColumns(
