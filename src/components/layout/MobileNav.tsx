@@ -78,6 +78,7 @@ const MODULE_META: Record<
     route: string;
   }
 > = {
+  __none__: { h: 240, s: 6, l: 55, icon: Grip, label: "Menu", route: "/home" },
   finance: {
     h: 217,
     s: 91,
@@ -440,12 +441,12 @@ export const MobileNav: React.FC = () => {
     return false;
   };
 
-  // Active module info
-  const activeModKey = isAdminPage ? "admin" : (activeModule ?? "finance");
-  const activeMod = MODULE_META[activeModKey] ?? MODULE_META.finance;
+  // Active module info — falls back to __none__ (neutral) on home page with no module
+  const activeModKey = isAdminPage ? "admin" : (activeModule ?? "__none__");
+  const activeMod = MODULE_META[activeModKey] ?? MODULE_META.__none__;
 
   const moduleModules = Object.entries(MODULE_META).filter(
-    ([id]) => id !== "admin" || isAdmin,
+    ([id]) => id !== "__none__" && (id !== "admin" || isAdmin),
   );
 
   // Theme checkmark colours
@@ -471,25 +472,38 @@ export const MobileNav: React.FC = () => {
           right: "max(1.25rem, env(safe-area-inset-right, 1.25rem))",
         }}
       >
-        {/* Outer glow ring */}
+        {/* Outer glow ring — only when a module is active */}
+        {activeModule && !isAdminPage && (
+          <span
+            className="absolute inset-0 rounded-2xl animate-pulse"
+            style={{
+              background: `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.25)`,
+              filter: "blur(8px)",
+              transform: "scale(1.3)",
+            }}
+          />
+        )}
         <span
-          className="absolute inset-0 rounded-2xl animate-pulse"
-          style={{
-            background: `hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}% / 0.25)`,
-            filter: "blur(8px)",
-            transform: "scale(1.3)",
-          }}
-        />
-        <span
-          className="relative flex items-center gap-2 px-4 py-3 rounded-2xl text-white text-sm font-semibold shadow-2xl"
-          style={{
-            background: `linear-gradient(135deg, hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}%), hsl(${activeMod.h} ${activeMod.s}% ${Math.max(activeMod.l - 12, 20)}%))`,
-          }}
+          className="relative flex items-center gap-2 px-4 py-3 rounded-2xl text-sm font-semibold shadow-2xl"
+          style={
+            activeModule || isAdminPage
+              ? {
+                  background: `linear-gradient(135deg, hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}%), hsl(${activeMod.h} ${activeMod.s}% ${Math.max(activeMod.l - 12, 20)}%))`,
+                  color: "white",
+                }
+              : {
+                  background: "hsl(var(--card))",
+                  color: "hsl(var(--foreground))",
+                  border: "1px solid hsl(var(--border))",
+                }
+          }
         >
           <Grip size={16} />
-          <span className="text-xs tracking-wide font-heading">
-            {activeMod.label}
-          </span>
+          {(activeModule || isAdminPage) && (
+            <span className="text-xs tracking-wide font-heading">
+              {activeMod.label}
+            </span>
+          )}
         </span>
       </button>
 
@@ -542,12 +556,26 @@ export const MobileNav: React.FC = () => {
             <div className="flex items-center gap-3 px-5 py-3 flex-shrink-0">
               {/* Avatar */}
               <div
-                className="relative w-10 h-10 rounded-xl flex items-center justify-center text-white font-heading font-bold text-sm flex-shrink-0"
-                style={{
-                  background: `linear-gradient(135deg, hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}%), hsl(${activeMod.h} ${activeMod.s}% ${Math.max(activeMod.l - 15, 20)}%))`,
-                }}
+                className="relative w-10 h-10 rounded-xl flex-shrink-0 overflow-hidden"
+                style={
+                  currentUser?.avatarUrl
+                    ? { background: "hsl(var(--muted))" }
+                    : {
+                        background: `linear-gradient(135deg, hsl(${activeMod.h} ${activeMod.s}% ${activeMod.l}%), hsl(${activeMod.h} ${activeMod.s}% ${Math.max(activeMod.l - 15, 20)}%))`,
+                      }
+                }
               >
-                {currentUser?.initials || "?"}
+                {currentUser?.avatarUrl ? (
+                  <img
+                    src={currentUser.avatarUrl}
+                    alt={currentUser.name}
+                    className="w-full h-full object-cover"
+                  />
+                ) : (
+                  <span className="w-full h-full flex items-center justify-center text-white font-heading font-bold text-sm">
+                    {currentUser?.initials || "?"}
+                  </span>
+                )}
                 {isSuperAdmin && (
                   <span className="absolute -top-1 -right-1 w-5 h-5 rounded-full bg-violet-600 border-2 border-card flex items-center justify-center">
                     <Crown size={9} className="text-white" />
@@ -613,55 +641,53 @@ export const MobileNav: React.FC = () => {
                 className="flex gap-1.5 overflow-x-auto pb-0.5 scrollbar-none"
                 style={{ scrollbarWidth: "none" }}
               >
-                {Object.entries(MODULE_META)
-                  .filter(([id]) => id !== "admin" || isAdmin)
-                  .map(([id, meta], i) => {
-                    const isActive = isAdminPage
-                      ? id === "admin"
-                      : activeModule === id;
-                    const Icon = meta.icon;
-                    return (
-                      <button
-                        key={id}
-                        onClick={() => {
-                          if (id === "admin") {
-                            navigate("/admin/dashboard");
-                            setOpen(false);
-                            return;
-                          }
-                          setActiveModule(id as any);
-                          navigate(meta.route);
+                {moduleModules.map(([id, meta], i) => {
+                  const isActive = isAdminPage
+                    ? id === "admin"
+                    : activeModule === id;
+                  const Icon = meta.icon;
+                  return (
+                    <button
+                      key={id}
+                      onClick={() => {
+                        if (id === "admin") {
+                          navigate("/admin/dashboard");
                           setOpen(false);
-                        }}
-                        className="flex items-center gap-1.5 px-3 py-2 rounded-xl flex-shrink-0 transition-all duration-200 text-xs font-heading font-medium border"
-                        style={
-                          isActive
-                            ? {
-                                background: `hsl(${meta.h} ${meta.s}% ${meta.l}% / 0.15)`,
-                                borderColor: `hsl(${meta.h} ${meta.s}% ${meta.l}% / 0.4)`,
-                                color: `hsl(${meta.h} ${meta.s}% ${meta.l}%)`,
-                                backdropFilter: "blur(8px)",
-                              }
-                            : {
-                                borderColor: "hsl(var(--border))",
-                                color: "hsl(var(--muted-foreground))",
-                                background: "transparent",
-                              }
+                          return;
                         }
-                      >
-                        <Icon size={13} />
-                        {meta.label}
-                        {isActive && (
-                          <span
-                            className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-                            style={{
-                              background: `hsl(${meta.h} ${meta.s}% ${meta.l}%)`,
-                            }}
-                          />
-                        )}
-                      </button>
-                    );
-                  })}
+                        setActiveModule(id as any);
+                        navigate(meta.route);
+                        setOpen(false);
+                      }}
+                      className="flex items-center gap-1.5 px-3 py-2 rounded-xl flex-shrink-0 transition-all duration-200 text-xs font-heading font-medium border"
+                      style={
+                        isActive
+                          ? {
+                              background: `hsl(${meta.h} ${meta.s}% ${meta.l}% / 0.15)`,
+                              borderColor: `hsl(${meta.h} ${meta.s}% ${meta.l}% / 0.4)`,
+                              color: `hsl(${meta.h} ${meta.s}% ${meta.l}%)`,
+                              backdropFilter: "blur(8px)",
+                            }
+                          : {
+                              borderColor: "hsl(var(--border))",
+                              color: "hsl(var(--muted-foreground))",
+                              background: "transparent",
+                            }
+                      }
+                    >
+                      <Icon size={13} />
+                      {meta.label}
+                      {isActive && (
+                        <span
+                          className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                          style={{
+                            background: `hsl(${meta.h} ${meta.s}% ${meta.l}%)`,
+                          }}
+                        />
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
@@ -730,11 +756,15 @@ export const MobileNav: React.FC = () => {
                   </div>
 
                   {/* Section label */}
-                  {navItems.length > 0 && (
+                  {navItems.length > 0 ? (
                     <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading px-1 pb-1 pt-1">
                       {isAdminPage ? "Admin" : `${activeMod.label} Module`}
                     </p>
-                  )}
+                  ) : !activeModule && !isAdminPage ? (
+                    <p className="text-[10px] uppercase tracking-widest text-muted-foreground font-heading px-1 pb-1 pt-1">
+                      Select a module above to get started
+                    </p>
+                  ) : null}
 
                   {/* Nav items */}
                   {navItems.map((item, idx) => {

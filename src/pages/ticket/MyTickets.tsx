@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Breadcrumbs } from "@/components/Breadcrumbs";
 import { fetchWithAuth } from "@/lib/fetchWithAuth";
+import { invalidateTicketQueries } from "@/lib/ticketQuerySync";
 import {
   AlertCircle,
   ArrowLeft,
@@ -32,7 +33,7 @@ interface Ticket {
   company_id: number | null;
   project_id: number | null;
   attachment_path: string | null;
-  status: "Pending" | "Resolved";
+  status: "Pending" | "InProgress" | "Resolved" | "Closed";
   created_at?: string;
 }
 
@@ -90,17 +91,17 @@ function PriorityBadge({ priority }: { priority: string }) {
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const cls =
-    status === "Resolved"
-      ? "bg-emerald-500/10 text-emerald-600 border-emerald-400/20"
-      : "bg-amber-500/10 text-amber-600 border-amber-400/20";
-  const Icon = status === "Resolved" ? CheckCircle2 : Clock;
+  const map: Record<string, { cls: string; Icon: React.ElementType; label: string }> = {
+    Pending:    { cls: "bg-amber-500/10 text-amber-600 border-amber-400/20",       Icon: Clock,        label: "Pending"     },
+    InProgress: { cls: "bg-blue-500/10 text-blue-600 border-blue-400/20",         Icon: RefreshCw,    label: "In Progress" },
+    Resolved:   { cls: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20", Icon: CheckCircle2, label: "Resolved"    },
+    Closed:     { cls: "bg-muted text-muted-foreground border-border",             Icon: CheckCircle2, label: "Closed"      },
+  };
+  const { cls, Icon, label } = map[status] ?? map.Pending;
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border ${cls}`}
-    >
+    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border ${cls}`}>
       <Icon size={10} />
-      {status}
+      {label}
     </span>
   );
 }
@@ -224,8 +225,8 @@ const MyTickets = () => {
   // Determine mode from route
   const isPending = location.pathname.includes("pending");
   const isResolved = location.pathname.includes("resolved");
-  const filterStatus: "Pending" | "Resolved" | null = isPending
-    ? "Pending"
+  const filterStatus: "open" | "Resolved" | null = isPending
+    ? "open"
     : isResolved
       ? "Resolved"
       : null;
@@ -255,14 +256,16 @@ const MyTickets = () => {
     refetch,
     isFetching,
   } = useQuery<Ticket[]>({
-    queryKey: ["tickets"],
+    queryKey: ["my-tickets"],
     queryFn: async () => {
-      const res = await fetchWithAuth("/api/tickets");
+      const res = await fetchWithAuth("/api/tickets/mine");
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return res.json();
     },
     staleTime: 0,
+    refetchOnMount: "always",
     refetchOnWindowFocus: true,
+    refetchInterval: 5_000,
   });
 
   const resolveMutation = useMutation({
@@ -276,7 +279,7 @@ const MyTickets = () => {
     },
     onSuccess: () => {
       toast.success("Ticket resolved");
-      queryClient.invalidateQueries({ queryKey: ["tickets"] });
+      invalidateTicketQueries(queryClient);
     },
     onError: () => toast.error("Failed to resolve ticket"),
     onSettled: () => setResolvingId(null),
@@ -285,9 +288,12 @@ const MyTickets = () => {
   // ── Filtering ─────────────────────────────────────────────────────────────
 
   const tickets = useMemo(() => {
-    let list = filterStatus
-      ? allTickets.filter((t) => t.status === filterStatus)
-      : allTickets;
+    let list =
+      filterStatus === "open"
+        ? allTickets.filter((t) => ["Pending", "InProgress"].includes(t.status))
+        : filterStatus
+          ? allTickets.filter((t) => t.status === filterStatus)
+          : allTickets;
 
     if (priorityFilter !== "all")
       list = list.filter((t) => t.priority === priorityFilter);
@@ -306,9 +312,12 @@ const MyTickets = () => {
   }, [allTickets, filterStatus, priorityFilter, search]);
 
   const counts = useMemo(() => {
-    const base = filterStatus
-      ? allTickets.filter((t) => t.status === filterStatus)
-      : allTickets;
+    const base =
+      filterStatus === "open"
+        ? allTickets.filter((t) => ["Pending", "InProgress"].includes(t.status))
+        : filterStatus
+          ? allTickets.filter((t) => t.status === filterStatus)
+          : allTickets;
     return {
       total: base.length,
       urgent: base.filter((t) => t.priority === "Urgent").length,
@@ -441,7 +450,7 @@ const MyTickets = () => {
             <p className="text-sm">
               {search || priorityFilter !== "all"
                 ? "No tickets match your filters"
-                : filterStatus === "Pending"
+                : filterStatus === "open"
                   ? "No pending tickets — all clear!"
                   : filterStatus === "Resolved"
                     ? "No resolved tickets yet"
@@ -462,7 +471,7 @@ const MyTickets = () => {
               <TicketCard
                 key={t.id}
                 ticket={t}
-                showResolve={t.status === "Pending"}
+                showResolve={["Pending", "InProgress"].includes(t.status)}
                 onResolve={(id) => resolveMutation.mutate(id)}
                 resolving={resolvingId === t.id && resolveMutation.isPending}
               />

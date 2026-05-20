@@ -14,6 +14,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Shield, Lock } from "lucide-react";
+import AdminTicketPanel from "./AdminTicketPanel";
 
 // ─── TYPES ────────────────────────────────────────────────────────────────────
 interface AdminUser {
@@ -341,6 +342,11 @@ export default function AdminDashboard() {
               </ScrollArea>
             </CardContent>
           </Card>
+        </div>
+
+        {/* ── Ticket Panel ──────────────────────────────────────────────── */}
+        <div className="mt-6">
+          <AdminTicketPanel />
         </div>
       </div>
     </>
