@@ -2,7 +2,11 @@ import React, { useState, useRef, useEffect, useCallback } from "react";
 import { useGracefulLogout } from "@/hooks/useGracefulLogout";
 import { useNavigate, useLocation } from "react-router-dom";
 import { LogoFull } from "../Logo";
-import { useModule, MODULE_DASHBOARD_ROUTES, type Module } from "@/contexts/ModuleContext";
+import {
+  useModule,
+  MODULE_DASHBOARD_ROUTES,
+  type Module,
+} from "@/contexts/ModuleContext";
 import { useAuth } from "@/contexts/AuthContext";
 import { useNavbarCollapse } from "./AppLayout";
 import { ReminderBell } from "@/components/navbar/ReminderBell";
@@ -206,15 +210,9 @@ const followupSetupItems = [
     color: "text-indigo-500",
   },
   {
-    icon: FileText,
-    label: "Follow-up Log",
-    path: "/followup/follow-ups/log",
-    color: "text-violet-500",
-  },
-  {
     icon: Activity,
     label: "Pending Tasks",
-    path: "/followup/follow-ups/tasks",
+    path: "/followup/setup/pending-tasks",
     color: "text-purple-500",
   },
 ];
@@ -710,7 +708,9 @@ export const TopNavbar = () => {
               {moduleOptions.map((m) => (
                 <button
                   key={m.id}
-                  onClick={() => handleModuleSwitch(m.name, m.id as Module, m.route)}
+                  onClick={() =>
+                    handleModuleSwitch(m.name, m.id as Module, m.route)
+                  }
                   className={`group w-full flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all ${activeModule === m.id && !isAdminPage ? "bg-primary/10" : "hover:bg-muted"}`}
                 >
                   <span
