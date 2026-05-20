@@ -6,120 +6,120 @@
  */
 
 const express = require("express");
-const router  = express.Router();
-const { getPool, sql } = require("../db");
-const allowRoles = require("../middleware/role");
+const router = express.Router();
+const sql = require("mssql");
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function userFromReq(req) {
-  // req.user is set by authMiddleware: { userId, name, role, email }
-  return {
-    id:   req.user?.userId ?? null,
-    name: req.user?.name   ?? req.user?.email ?? "Unknown",
-    role: req.user?.role   ?? "user",
-  };
-}
-
-function isTicketAdmin(role) {
-  return ["admin", "super_admin", "dba"].includes(role);
-}
-
-async function getAccessibleTicket(pool, id, actor) {
-  const result = await pool.request()
-    .input("id", sql.Int, id)
-    .query(`SELECT * FROM dbo.tickets WHERE id = @id`);
-
-  if (!result.recordset.length) return { status: 404 };
-
-  const ticket = result.recordset[0];
-  if (
-    !isTicketAdmin(actor.role) &&
-    ticket.created_by_id !== actor.id &&
-    ticket.assigned_to_id !== actor.id
-  ) {
-    return { status: 403 };
-  }
-
-  return { status: 200, ticket };
-}
-
-// ─── GET /api/tickets ─────────────────────────────────────────────────────────
-// Admins/super_admin/dba see ALL tickets.
-// Regular users see tickets they created or tickets assigned to them.
-router.get("/", async (req, res) => {
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /api/tickets/create
+// ─────────────────────────────────────────────────────────────────────────────
+router.post("/create", async (req, res) => {
   try {
-    const actor = userFromReq(req);
-    const pool  = getPool();
-    const isAdmin = isTicketAdmin(actor.role);
+    const {
+      subject,
+      priority,
+      issue_details,
+      customer_name,
+      customer_phone,
+      company_id,
+      project_id,
+      attachment_path,
+    } = req.body;
 
-    const request = pool.request();
-    let query;
+    const created_by = req.user?.userId ?? null;
 
-    if (isAdmin) {
-      query = `
-        SELECT t.*,
-               (SELECT COUNT(*) FROM dbo.ticket_comments tc WHERE tc.ticket_id = t.id) AS comment_count
-        FROM dbo.tickets t
-        ORDER BY
-          CASE t.status WHEN 'Pending' THEN 0 WHEN 'InProgress' THEN 1 ELSE 2 END,
-          CASE t.priority WHEN 'Urgent' THEN 0 WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 ELSE 3 END,
-          t.created_at DESC
-      `;
-    } else {
-      // Regular users see tickets they created or tickets assigned to them.
-      request.input("userId", sql.Int, actor.id);
-      query = `
-        SELECT t.*,
-               (SELECT COUNT(*) FROM dbo.ticket_comments tc WHERE tc.ticket_id = t.id) AS comment_count
-        FROM dbo.tickets t
-        WHERE t.created_by_id = @userId OR t.assigned_to_id = @userId
-        ORDER BY
-          CASE t.status WHEN 'Pending' THEN 0 WHEN 'InProgress' THEN 1 ELSE 2 END,
-          t.created_at DESC
-      `;
-    }
+    await sql.query`
+      INSERT INTO tickets (
+        subject,
+        priority,
+        issue_details,
+        customer_name,
+        customer_phone,
+        company_id,
+        project_id,
+        attachment_path,
+        status,
+        created_by
+      )
+      VALUES (
+        ${subject},
+        ${priority},
+        ${issue_details},
+        ${customer_name},
+        ${customer_phone},
+        ${company_id},
+        ${project_id},
+        ${attachment_path},
+        'Pending',
+        ${created_by}
+      )
+    `;
 
-    const result = await request.query(query);
-    res.json(result.recordset);
+    res.json({ success: true });
   } catch (err) {
-    console.error("[Tickets GET /]", err.message);
+    console.log(err);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ─── GET /api/tickets/stats ───────────────────────────────────────────────────
-// Summary stats for Admin Dashboard widget — admin+ only
-router.get("/stats", allowRoles("admin", "super_admin", "dba"), async (req, res) => {
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/tickets
+// Returns ALL tickets — for super_admin
+// ─────────────────────────────────────────────────────────────────────────────
+router.get("/", async (req, res) => {
   try {
-    const pool = getPool();
-    const result = await pool.request().query(`
-      SELECT
-        COUNT(*)                                                     AS total,
-        SUM(CASE WHEN status = 'Pending'    THEN 1 ELSE 0 END)      AS pending,
-        SUM(CASE WHEN status = 'InProgress' THEN 1 ELSE 0 END)      AS in_progress,
-        SUM(CASE WHEN status = 'Resolved'   THEN 1 ELSE 0 END)      AS resolved,
-        SUM(CASE WHEN status = 'Closed'     THEN 1 ELSE 0 END)      AS closed,
-        SUM(CASE WHEN priority = 'Urgent' AND status NOT IN ('Resolved','Closed') THEN 1 ELSE 0 END) AS urgent_open,
-        SUM(CASE WHEN priority = 'High'   AND status NOT IN ('Resolved','Closed') THEN 1 ELSE 0 END) AS high_open
-      FROM dbo.tickets
+    const result = await sql.query(`
+      SELECT *
+      FROM tickets
+      ORDER BY id DESC
     `);
 
-    const recentPending = await pool.request().query(`
-      SELECT TOP 5 id, subject, priority, customer_name, created_at, assigned_to
-      FROM dbo.tickets
-      WHERE status IN ('Pending','InProgress')
-      ORDER BY
-        CASE priority WHEN 'Urgent' THEN 0 WHEN 'High' THEN 1 WHEN 'Medium' THEN 2 ELSE 3 END,
-        created_at DESC
-    `);
-
-    res.json({
-      counts:        result.recordset[0],
-      recentPending: recentPending.recordset,
-    });
+    // Always return an array
+    res.json(result.recordset ?? []);
   } catch (err) {
-    console.error("[Tickets GET /stats]", err.message);
+    console.log(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /api/tickets/my
+// Returns only tickets created by the logged-in user
+// ─────────────────────────────────────────────────────────────────────────────
+router.get("/my", async (req, res) => {
+  try {
+    const userId = req.user?.userId;
+
+    if (!userId) {
+      return res.status(401).json({ error: "Unauthorized" });
+    }
+
+    const result = await sql.query`
+      SELECT *
+      FROM tickets
+      WHERE created_by = ${userId}
+      ORDER BY id DESC
+    `;
+
+    // Always return an array
+    res.json(result.recordset ?? []);
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// PUT /api/tickets/resolve/:id
+// ─────────────────────────────────────────────────────────────────────────────
+router.put("/resolve/:id", async (req, res) => {
+  try {
+    await sql.query`
+      UPDATE tickets
+      SET status = 'Resolved'
+      WHERE id = ${req.params.id}
+    `;
+    res.json({ success: true });
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });

@@ -400,28 +400,34 @@ export const MobileNav: React.FC = () => {
             ],
           },
         ];
+
       case "ticket":
         return [
-          { label: "Dashboard", icon: BarChart3, path: "/ticket" },
           {
-            label: "Tickets",
+            label: "Dashboard",
+            icon: BarChart3,
+            path: "/ticket",
+          },
+          {
+            label: "Ticket",
             icon: MessageSquare,
             children: [
-              {
-                label: "Create Ticket",
-                path: "/ticket/create",
-                icon: FileText,
-              },
-              {
-                label: "My Tickets",
-                path: "/ticket/my-tickets",
-                icon: FileText,
-              },
-              { label: "Pending", path: "/ticket/pending", icon: FileText },
-              { label: "Resolved", path: "/ticket/resolved", icon: FileText },
+              // Create Ticket — visible to all
+              { label: "Create Ticket", path: "/ticket/create", icon: FileText },
+              // My Tickets — only for normal users (not admin/super_admin)
+              ...(!isAdmin
+                ? [{ label: "My Tickets", path: "/ticket/my-tickets", icon: FileText }]
+                : []),
+              // Pending Tickets — only for admin/super_admin
+              ...(isAdmin
+                ? [{ label: "Pending Tickets", path: "/ticket/pending", icon: FileText }]
+                : []),
+              // Resolved Tickets — visible to all
+              { label: "Resolved Tickets", path: "/ticket/resolved", icon: FileText },
             ],
           },
         ];
+
       default:
         return [];
     }
