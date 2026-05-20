@@ -208,6 +208,7 @@ const CHQReminders = lazy(() => import("./pages/followup/CHQReminders"));
 const GRNReminders = lazy(() => import("./pages/followup/GRNReminders"));
 const TDSReminders = lazy(() => import("./pages/followup/TDSReminders"));
 const FollowupTasks = lazy(() => import("./pages/followup/FollowupTasks"));
+const PendingTasksPage = lazy(() => import("./pages/followup/PendingTasks"));
 const FollowupLog = lazy(() => import("./pages/followup/FollowupLog"));
 const FollowupApplicants = lazy(() => import("./pages/followup/Applicants"));
 const FollowupUnitSelection = lazy(
@@ -584,6 +585,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <FollowupTasks />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/setup/pending-tasks"
+        element={
+          <ProtectedRoute>
+            <PendingTasksPage />
           </ProtectedRoute>
         }
       />
