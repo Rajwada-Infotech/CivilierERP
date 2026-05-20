@@ -204,7 +204,11 @@ const FollowupDashboard = lazy(
 const FollowupReminders = lazy(() => import("./pages/followup/Reminders"));
 const POReminders = lazy(() => import("./pages/followup/POReminders"));
 const WOReminders = lazy(() => import("./pages/followup/WOReminders"));
+const CHQReminders = lazy(() => import("./pages/followup/CHQReminders"));
+const GRNReminders = lazy(() => import("./pages/followup/GRNReminders"));
+const TDSReminders = lazy(() => import("./pages/followup/TDSReminders"));
 const FollowupTasks = lazy(() => import("./pages/followup/FollowupTasks"));
+const PendingTasksPage = lazy(() => import("./pages/followup/PendingTasks"));
 const FollowupLog = lazy(() => import("./pages/followup/FollowupLog"));
 const FollowupApplicants = lazy(() => import("./pages/followup/Applicants"));
 const FollowupUnitSelection = lazy(
@@ -215,9 +219,7 @@ const FollowupAgreements = lazy(() =>
     default: module.AgreementsPage,
   })),
 );
-const ApplicantTimeline = lazy(
-  () => import("./pages/followup/ApplicantTimeline"),
-);
+const ApplicantDetail = lazy(() => import("./pages/followup/ApplicantDetail"));
 const WelcomeCallsPage = lazy(() =>
   import("./pages/followup/FollowupExtraPages").then((module) => ({
     default: module.WelcomeCallsPage,
@@ -238,10 +240,8 @@ const HandoverPage = lazy(() =>
     default: module.HandoverPage,
   })),
 );
-const ConstructionUpdatesPage = lazy(() =>
-  import("./pages/followup/FollowupExtraPages").then((module) => ({
-    default: module.ConstructionUpdatesPage,
-  })),
+const ConstructionUpdatesPage = lazy(
+  () => import("./pages/followup/ConstructionUpdates"),
 );
 const FinanceDemandsPage = lazy(() =>
   import("./pages/followup/FollowupExtraPages").then((module) => ({
@@ -557,10 +557,42 @@ function AppRoutes() {
         }
       />
       <Route
+        path="/followup/follow-ups/chq-reminders"
+        element={
+          <ProtectedRoute>
+            <CHQReminders />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/follow-ups/grn-reminders"
+        element={
+          <ProtectedRoute>
+            <GRNReminders />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/follow-ups/tds-reminders"
+        element={
+          <ProtectedRoute>
+            <TDSReminders />
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/followup/follow-ups/tasks"
         element={
           <ProtectedRoute>
             <FollowupTasks />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/followup/setup/pending-tasks"
+        element={
+          <ProtectedRoute>
+            <PendingTasksPage />
           </ProtectedRoute>
         }
       />
@@ -584,7 +616,15 @@ function AppRoutes() {
         path="/followup/sales/applicants/:id"
         element={
           <ProtectedRoute>
-            <ApplicantTimeline />
+            <ApplicantDetail />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/applicant-timeline/:id"
+        element={
+          <ProtectedRoute>
+            <ApplicantDetail />
           </ProtectedRoute>
         }
       />
