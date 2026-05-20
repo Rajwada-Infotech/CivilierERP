@@ -17,6 +17,7 @@ import {
   ShieldCheck,
   User,
   Wrench,
+  MessageSquare,
 } from "lucide-react";
 
 // ── Per-module nav definitions ────────────────────────────────────────────────
@@ -146,7 +147,7 @@ export const AppSidebar = () => {
   const location = useLocation();
   const { activeModule } = useModule();
   const { collapsed, setCollapsed } = useSidebarState();
-  const { overdueTaskCount: overdueCount } = useReminders();
+  const { badgeCount: overdueCount } = useReminders();
   const { currentUser } = useAuth();
   const { version } = useAppVersion();
   const pendingApprovalCount = useApprovalCount();
@@ -187,6 +188,41 @@ export const AppSidebar = () => {
         return materialNavItems;
       case "followup":
         return followupNavItems;
+        case "ticket":
+          return [
+            {
+              label: "Dashboard",
+              icon: BarChart3,
+              path: "/ticket",
+            },
+        
+            {
+              label: "Ticket",
+              icon: MessageSquare,
+        
+              children: [
+                {
+                  label: "Create Ticket",
+                  path: "/ticket/create",
+                },
+              
+                {
+                  label: "My Tickets",
+                  path: "/ticket/my-tickets",
+                },
+              
+                {
+                  label: "Pending Tickets",
+                  path: "/ticket/pending",
+                },
+              
+                {
+                  label: "Resolved Tickets",
+                  path: "/ticket/resolved",
+                },
+              ],
+            },
+          ];
       case "admin":
         return buildAdminNavItems(pendingApprovalCount);
       default:
