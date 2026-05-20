@@ -261,7 +261,7 @@ const SetupDropdown = ({
   onToggle,
   items,
   moduleLabel,
-  moduleColor,
+  colorStyle,
   setupAvailable,
   navigate,
   location,
@@ -276,7 +276,7 @@ const SetupDropdown = ({
     color: string;
   }[];
   moduleLabel: string;
-  moduleColor: string;
+  colorStyle: React.CSSProperties;
   setupAvailable: boolean;
   navigate: (p: string) => void;
   location: { pathname: string };
@@ -313,7 +313,8 @@ const SetupDropdown = ({
         </span>
       </div>
       <span
-        className={`text-[10px] font-heading px-2 py-0.5 rounded-full border ${moduleColor}`}
+        className="text-[10px] font-heading px-2 py-0.5 rounded-full border"
+        style={colorStyle}
       >
         {moduleLabel}
       </span>
@@ -419,79 +420,63 @@ const UserMenuContent: React.FC<{
 );
 
 // ─── Module color helpers ──────────────────────────────────────────────────────
+// Each module gets a CSS custom-property colour token (--mod-*) so the active
+// state, glassmorphism layer, and pip all read from a single source of truth
+// that works across every theme (dark, light, midnight, sepia, crimson).
 
+const MODULE_COLORS: Record<string, { h: number; s: number; l: number }> = {
+  finance: { h: 217, s: 91, l: 60 }, // blue
+  material: { h: 160, s: 60, l: 45 }, // emerald
+  followup: { h: 263, s: 70, l: 58 }, // violet
+  engineering: { h: 38, s: 92, l: 50 }, // amber
+  ticket: { h: 330, s: 80, l: 60 }, // pink
+  admin: { h: 217, s: 91, l: 60 }, // blue (same as finance)
+};
+
+/** Inject a --mod-h/s/l triplet onto the element so child utilities can use it */
+function moduleColorVars(id: string): React.CSSProperties {
+  const c = MODULE_COLORS[id] ?? MODULE_COLORS.finance;
+  return {
+    "--mod-h": c.h,
+    "--mod-s": `${c.s}%`,
+    "--mod-l": `${c.l}%`,
+  } as React.CSSProperties;
+}
+
+// Static class sets — colours come from the CSS vars above, not hardcoded hues.
+// The glassmorphism selected-module style uses backdrop-filter + a semi-transparent
+// tinted background so it looks great on every theme.
 const MODULE_STYLES: Record<
   string,
   {
-    active: string;
-    iconWrap: string;
-    iconColor: string;
+    activeClass: string;
+    activeStyle: React.CSSProperties;
+    iconWrapClass: string;
+    iconColorClass: string;
     pip: string;
-    chipActive: string;
-    chipText: string;
+    chipActiveClass: string;
+    chipTextClass: string;
   }
-> = {
-  finance: {
-    active:
-      "bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800",
-    iconWrap: "bg-blue-100 dark:bg-blue-900/40",
-    iconColor: "text-blue-700 dark:text-blue-300",
-    pip: "bg-blue-500",
-    chipActive:
-      "bg-blue-50 dark:bg-blue-950/40 border-blue-200 dark:border-blue-800",
-    chipText: "text-blue-700 dark:text-blue-300",
-  },
-  material: {
-    active:
-      "bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 dark:border-emerald-800",
-    iconWrap: "bg-emerald-100 dark:bg-emerald-900/40",
-    iconColor: "text-emerald-700 dark:text-emerald-300",
-    pip: "bg-emerald-500",
-    chipActive:
-      "bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800",
-    chipText: "text-emerald-700 dark:text-emerald-300",
-  },
-  followup: {
-    active:
-      "bg-violet-50 dark:bg-violet-950/30 border-violet-200 dark:border-violet-800",
-    iconWrap: "bg-violet-100 dark:bg-violet-900/40",
-    iconColor: "text-violet-700 dark:text-violet-300",
-    pip: "bg-violet-500",
-    chipActive:
-      "bg-violet-50 dark:bg-violet-950/40 border-violet-200 dark:border-violet-800",
-    chipText: "text-violet-700 dark:text-violet-300",
-  },
-  engineering: {
-    active:
-      "bg-amber-50 dark:bg-amber-950/30 border-amber-200 dark:border-amber-800",
-    iconWrap: "bg-amber-100 dark:bg-amber-900/40",
-    iconColor: "text-amber-700 dark:text-amber-300",
-    pip: "bg-amber-500",
-    chipActive:
-      "bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800",
-    chipText: "text-amber-700 dark:text-amber-300",
-  },
-  ticket: {
-    active:
-      "bg-pink-50 dark:bg-pink-950/30 border-pink-200 dark:border-pink-800",
-    iconWrap: "bg-pink-100 dark:bg-pink-900/40",
-    iconColor: "text-pink-700 dark:text-pink-300",
-    pip: "bg-pink-500",
-    chipActive:
-      "bg-pink-50 dark:bg-pink-950/40 border-pink-200 dark:border-pink-800",
-    chipText: "text-pink-700 dark:text-pink-300",
-  },
-  admin: {
-    active:
-      "bg-blue-50 dark:bg-blue-950/30 border-blue-200 dark:border-blue-800",
-    iconWrap: "bg-blue-100 dark:bg-blue-900/40",
-    iconColor: "text-blue-700 dark:text-blue-300",
-    pip: "bg-blue-500",
-    chipActive:
-      "bg-blue-50 dark:bg-blue-950/40 border-blue-200 dark:border-blue-800",
-    chipText: "text-blue-700 dark:text-blue-300",
-  },
-};
+> = Object.fromEntries(
+  Object.keys(MODULE_COLORS).map((id) => [
+    id,
+    {
+      // Glassmorphism card: semi-transparent tinted bg + blur + tinted border
+      activeClass: "border backdrop-blur-md",
+      activeStyle: {
+        background: "hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.12)",
+        borderColor: "hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.35)",
+        boxShadow:
+          "0 2px 16px 0 hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.18), inset 0 1px 0 hsl(0 0% 100% / 0.08)",
+      } as React.CSSProperties,
+      iconWrapClass: "mod-icon-wrap", // handled via inline style below
+      iconColorClass: "mod-icon-color", // handled via inline style below
+      pip: "mod-pip",
+      chipActiveClass: "border backdrop-blur-sm",
+      chipTextClass: "mod-chip-text",
+    },
+  ]),
+);
 
 // ─── Redesigned Module Dropdown content ───────────────────────────────────────
 
@@ -538,37 +523,58 @@ const ModuleDropdownContent = ({
     >
       {moduleOptions.map((m) => {
         const isActive = activeModule === m.id && !isAdminPage;
-        const style = MODULE_STYLES[m.id] ?? MODULE_STYLES.finance;
+        const colorVars = moduleColorVars(m.id);
         return (
           <button
             key={m.id}
             onMouseDown={() =>
               handleModuleSwitch(m.name, m.id as Module, m.route)
             }
-            className={`group relative w-full min-w-0 flex items-center gap-2 px-2.5 py-2.5 rounded-xl border transition-all duration-150 active:scale-[0.98] text-left
+            style={
+              isActive
+                ? { ...colorVars, ...MODULE_STYLES[m.id].activeStyle }
+                : colorVars
+            }
+            className={`group relative w-full min-w-0 flex items-center gap-2 px-2.5 py-2.5 rounded-xl transition-all duration-150 active:scale-[0.98] text-left
               ${
                 isActive
-                  ? `${style.active} border`
-                  : "border-transparent hover:border-border hover:bg-muted/50"
+                  ? MODULE_STYLES[m.id].activeClass
+                  : "border border-transparent hover:border-border hover:bg-muted/50"
               }`}
           >
             <div
-              className={`w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-colors
-              ${isActive ? style.iconWrap : "bg-muted group-hover:bg-muted/80"}`}
+              className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 transition-colors bg-muted group-hover:bg-muted/80"
+              style={
+                isActive
+                  ? {
+                      background:
+                        "hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.20)",
+                    }
+                  : undefined
+              }
             >
               <m.icon
                 size={15}
+                style={
+                  isActive
+                    ? { color: "hsl(var(--mod-h) var(--mod-s) var(--mod-l))" }
+                    : undefined
+                }
                 className={
                   isActive
-                    ? style.iconColor
+                    ? ""
                     : "text-muted-foreground group-hover:text-foreground"
                 }
               />
             </div>
             <div className="min-w-0 flex-1 overflow-hidden">
               <p
-                className={`text-[13px] font-heading font-medium leading-none whitespace-nowrap
-                ${isActive ? style.iconColor : "text-foreground"}`}
+                className="text-[13px] font-heading font-medium leading-none whitespace-nowrap"
+                style={
+                  isActive
+                    ? { color: "hsl(var(--mod-h) var(--mod-s) var(--mod-l))" }
+                    : undefined
+                }
               >
                 {m.name}
               </p>
@@ -578,7 +584,10 @@ const ModuleDropdownContent = ({
             </div>
             {isActive && (
               <span
-                className={`absolute top-2 right-2 w-1.5 h-1.5 rounded-full flex-shrink-0 ${style.pip}`}
+                className="absolute top-2 right-2 w-1.5 h-1.5 rounded-full flex-shrink-0"
+                style={{
+                  background: "hsl(var(--mod-h) var(--mod-s) var(--mod-l))",
+                }}
               />
             )}
           </button>
@@ -598,29 +607,54 @@ const ModuleDropdownContent = ({
                 MODULE_DASHBOARD_ROUTES.admin,
               )
             }
-            className={`group w-full flex items-center gap-2.5 px-3 py-2 rounded-xl border transition-all duration-150 active:scale-[0.98] text-left
+            style={
+              isAdminPage
+                ? {
+                    ...moduleColorVars("admin"),
+                    ...MODULE_STYLES.admin.activeStyle,
+                  }
+                : moduleColorVars("admin")
+            }
+            className={`group w-full flex items-center gap-2.5 px-3 py-2 rounded-xl transition-all duration-150 active:scale-[0.98] text-left
               ${
                 isAdminPage
-                  ? `${MODULE_STYLES.admin.active} border`
-                  : "border-transparent hover:border-border hover:bg-muted/50"
+                  ? MODULE_STYLES.admin.activeClass
+                  : "border border-transparent hover:border-border hover:bg-muted/50"
               }`}
           >
             <div
-              className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0
-              ${isAdminPage ? MODULE_STYLES.admin.iconWrap : "bg-muted group-hover:bg-muted/80"}`}
+              className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+              style={
+                isAdminPage
+                  ? {
+                      background:
+                        "hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.20)",
+                    }
+                  : undefined
+              }
             >
               <ShieldCheck
                 size={14}
+                style={
+                  isAdminPage
+                    ? { color: "hsl(var(--mod-h) var(--mod-s) var(--mod-l))" }
+                    : undefined
+                }
                 className={
                   isAdminPage
-                    ? MODULE_STYLES.admin.iconColor
+                    ? ""
                     : "text-muted-foreground group-hover:text-foreground"
                 }
               />
             </div>
             <div className="min-w-0 flex-1">
               <p
-                className={`text-[13px] font-heading font-medium leading-none ${isAdminPage ? MODULE_STYLES.admin.iconColor : "text-foreground"}`}
+                className="text-[13px] font-heading font-medium leading-none"
+                style={
+                  isAdminPage
+                    ? { color: "hsl(var(--mod-h) var(--mod-s) var(--mod-l))" }
+                    : undefined
+                }
               >
                 Admin
               </p>
@@ -630,7 +664,10 @@ const ModuleDropdownContent = ({
             </div>
             {isAdminPage && (
               <span
-                className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${MODULE_STYLES.admin.pip}`}
+                className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                style={{
+                  background: "hsl(var(--mod-h) var(--mod-s) var(--mod-l))",
+                }}
               />
             )}
           </button>
@@ -641,29 +678,54 @@ const ModuleDropdownContent = ({
               onNavigate("/dba");
               onClose();
             }}
-            className={`group w-full flex items-center gap-2.5 px-3 py-2 rounded-xl border transition-all duration-150 active:scale-[0.98] text-left
+            style={
+              isDbaPage
+                ? {
+                    ...moduleColorVars("material"),
+                    ...MODULE_STYLES.material.activeStyle,
+                  }
+                : moduleColorVars("material")
+            }
+            className={`group w-full flex items-center gap-2.5 px-3 py-2 rounded-xl transition-all duration-150 active:scale-[0.98] text-left
               ${
                 isDbaPage
-                  ? `${MODULE_STYLES.material.active} border`
-                  : "border-transparent hover:border-border hover:bg-muted/50"
+                  ? MODULE_STYLES.material.activeClass
+                  : "border border-transparent hover:border-border hover:bg-muted/50"
               }`}
           >
             <div
-              className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0
-              ${isDbaPage ? MODULE_STYLES.material.iconWrap : "bg-muted group-hover:bg-muted/80"}`}
+              className="w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0"
+              style={
+                isDbaPage
+                  ? {
+                      background:
+                        "hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.20)",
+                    }
+                  : undefined
+              }
             >
               <Database
                 size={14}
+                style={
+                  isDbaPage
+                    ? { color: "hsl(var(--mod-h) var(--mod-s) var(--mod-l))" }
+                    : undefined
+                }
                 className={
                   isDbaPage
-                    ? MODULE_STYLES.material.iconColor
+                    ? ""
                     : "text-muted-foreground group-hover:text-foreground"
                 }
               />
             </div>
             <div className="min-w-0 flex-1">
               <p
-                className={`text-[13px] font-heading font-medium leading-none ${isDbaPage ? MODULE_STYLES.material.iconColor : "text-foreground"}`}
+                className="text-[13px] font-heading font-medium leading-none"
+                style={
+                  isDbaPage
+                    ? { color: "hsl(var(--mod-h) var(--mod-s) var(--mod-l))" }
+                    : undefined
+                }
               >
                 DBA Console
               </p>
@@ -673,7 +735,10 @@ const ModuleDropdownContent = ({
             </div>
             {isDbaPage && (
               <span
-                className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${MODULE_STYLES.material.pip}`}
+                className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                style={{
+                  background: "hsl(var(--mod-h) var(--mod-s) var(--mod-l))",
+                }}
               />
             )}
           </button>
@@ -728,38 +793,68 @@ export const TopNavbar = () => {
       return {
         items: adminSetupItems,
         label: "Admin",
-        color: "bg-blue-500/10 text-blue-600 border-blue-200/60",
+        colorStyle: {
+          ...moduleColorVars("admin"),
+          color: "hsl(var(--mod-h) var(--mod-s) var(--mod-l))",
+          borderColor: "hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.35)",
+          background: "hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.10)",
+        } as React.CSSProperties,
         available: true,
       };
     if (activeModule === "material")
       return {
         items: materialSetupItems,
         label: "Material",
-        color: "bg-emerald-500/10 text-emerald-600 border-emerald-200/60",
+        colorStyle: {
+          ...moduleColorVars("material"),
+          color: "hsl(var(--mod-h) var(--mod-s) var(--mod-l))",
+          borderColor: "hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.35)",
+          background: "hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.10)",
+        } as React.CSSProperties,
         available: true,
       };
     if (activeModule === "followup")
       return {
         items: followupSetupItems,
         label: "Follow-Up",
-        color: "bg-indigo-500/10 text-indigo-600 border-indigo-200/60",
+        colorStyle: {
+          ...moduleColorVars("followup"),
+          color: "hsl(var(--mod-h) var(--mod-s) var(--mod-l))",
+          borderColor: "hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.35)",
+          background: "hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.10)",
+        } as React.CSSProperties,
         available: true,
       };
     if (activeModule === "engineering")
       return {
         items: engineeringSetupItems,
         label: "Engineering",
-        color: "bg-orange-500/10 text-orange-600 border-orange-200/60",
+        colorStyle: {
+          ...moduleColorVars("engineering"),
+          color: "hsl(var(--mod-h) var(--mod-s) var(--mod-l))",
+          borderColor: "hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.35)",
+          background: "hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.10)",
+        } as React.CSSProperties,
         available: true,
       };
     if (activeModule === "finance")
       return {
         items: financeSetupItems,
         label: "Finance",
-        color: "bg-primary/10 text-primary border-primary/20",
+        colorStyle: {
+          ...moduleColorVars("finance"),
+          color: "hsl(var(--mod-h) var(--mod-s) var(--mod-l))",
+          borderColor: "hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.35)",
+          background: "hsl(var(--mod-h) var(--mod-s) var(--mod-l) / 0.10)",
+        } as React.CSSProperties,
         available: true,
       };
-    return { items: [], label: "No Module", color: "", available: false };
+    return {
+      items: [],
+      label: "No Module",
+      colorStyle: {} as React.CSSProperties,
+      available: false,
+    };
   })();
 
   const closeAll = useCallback(() => {
@@ -921,7 +1016,7 @@ export const TopNavbar = () => {
               onToggle={toggleSetup}
               items={setupConfig.items}
               moduleLabel={setupConfig.label}
-              moduleColor={setupConfig.color}
+              colorStyle={setupConfig.colorStyle}
               setupAvailable={setupConfig.available}
               navigate={navigate}
               location={location}
