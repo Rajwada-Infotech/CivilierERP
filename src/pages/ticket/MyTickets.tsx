@@ -91,15 +91,36 @@ function PriorityBadge({ priority }: { priority: string }) {
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, { cls: string; Icon: React.ElementType; label: string }> = {
-    Pending:    { cls: "bg-amber-500/10 text-amber-600 border-amber-400/20",       Icon: Clock,        label: "Pending"     },
-    InProgress: { cls: "bg-blue-500/10 text-blue-600 border-blue-400/20",         Icon: RefreshCw,    label: "In Progress" },
-    Resolved:   { cls: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20", Icon: CheckCircle2, label: "Resolved"    },
-    Closed:     { cls: "bg-muted text-muted-foreground border-border",             Icon: CheckCircle2, label: "Closed"      },
+  const map: Record<
+    string,
+    { cls: string; Icon: React.ElementType; label: string }
+  > = {
+    Pending: {
+      cls: "bg-amber-500/10 text-amber-600 border-amber-400/20",
+      Icon: Clock,
+      label: "Pending",
+    },
+    InProgress: {
+      cls: "bg-blue-500/10 text-blue-600 border-blue-400/20",
+      Icon: RefreshCw,
+      label: "In Progress",
+    },
+    Resolved: {
+      cls: "bg-emerald-500/10 text-emerald-600 border-emerald-400/20",
+      Icon: CheckCircle2,
+      label: "Resolved",
+    },
+    Closed: {
+      cls: "bg-muted text-muted-foreground border-border",
+      Icon: CheckCircle2,
+      label: "Closed",
+    },
   };
   const { cls, Icon, label } = map[status] ?? map.Pending;
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border ${cls}`}>
+    <span
+      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-medium border ${cls}`}
+    >
       <Icon size={10} />
       {label}
     </span>
@@ -265,7 +286,8 @@ const MyTickets = () => {
     staleTime: 0,
     refetchOnMount: "always",
     refetchOnWindowFocus: true,
-    refetchInterval: 5_000,
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
   });
 
   const resolveMutation = useMutation({

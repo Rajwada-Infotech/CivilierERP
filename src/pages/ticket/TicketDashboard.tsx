@@ -273,7 +273,7 @@ export default function TicketDashboard() {
     staleTime: 0,
     refetchOnMount: "always",
     refetchOnWindowFocus: true,
-    refetchInterval: 5_000,
+    refetchInterval: 30_000,
     retry: 1,
   });
 
@@ -413,7 +413,9 @@ export default function TicketDashboard() {
                 icon={Clock}
                 iconColor="text-amber-600"
                 iconBg="bg-amber-500/10"
-                trend={stats.pending + stats.inProgress > 0 ? "down" : "neutral"}
+                trend={
+                  stats.pending + stats.inProgress > 0 ? "down" : "neutral"
+                }
                 onClick={() => navigate("/ticket/pending")}
               />
               <StatCard
@@ -613,7 +615,9 @@ export default function TicketDashboard() {
                   const count = stats.priorityCounts[p] ?? 0;
                   const pct =
                     stats.pending + stats.inProgress > 0
-                      ? Math.round((count / (stats.pending + stats.inProgress)) * 100)
+                      ? Math.round(
+                          (count / (stats.pending + stats.inProgress)) * 100,
+                        )
                       : 0;
                   const cfg = priorityConfig[p];
                   return (
@@ -634,7 +638,8 @@ export default function TicketDashboard() {
                   );
                 })}
                 <p className="text-xs text-muted-foreground pt-1">
-                  {stats.pending + stats.inProgress} total open · {stats.total} total
+                  {stats.pending + stats.inProgress} total open · {stats.total}{" "}
+                  total
                 </p>
               </div>
             )}
