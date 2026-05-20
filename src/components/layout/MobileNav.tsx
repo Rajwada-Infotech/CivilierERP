@@ -549,6 +549,21 @@ export const MobileNav: React.FC = () => {
     },
   ];
 
+  const followupSetupItems = [
+    {
+      icon: Calendar,
+      label: "Reminders",
+      path: "/followup/follow-ups/reminders",
+      color: "text-indigo-500",
+    },
+    {
+      icon: Activity,
+      label: "Pending Tasks",
+      path: "/followup/setup/pending-tasks",
+      color: "text-purple-500",
+    },
+  ];
+
   const getSetupConfig = () => {
     if (isAdminPage)
       return {
@@ -567,6 +582,15 @@ export const MobileNav: React.FC = () => {
         accent: "text-emerald-500",
         bg: "bg-emerald-500/10",
         border: "border-emerald-400/40",
+      };
+    if (activeModule === "followup")
+      return {
+        items: followupSetupItems,
+        label: "Follow-Up",
+        available: true,
+        accent: "text-indigo-500",
+        bg: "bg-indigo-500/10",
+        border: "border-indigo-400/40",
       };
     if (activeModule === "engineering")
       return {
@@ -776,6 +800,20 @@ export const MobileNav: React.FC = () => {
                       onClick: () => {
                         setActiveModule("engineering");
                         navigate(MODULE_DASHBOARD_ROUTES.engineering);
+                        setOpen(false);
+                      },
+                    },
+                    {
+                      label: "Ticket",
+                      module: "ticket",
+                      active: activeModule === "ticket" && !isAdminPage,
+                      icon: MessageSquare,
+                      activeClass:
+                        "bg-pink-500/10 border-pink-500/40 text-pink-600",
+                      dotClass: "bg-pink-500",
+                      onClick: () => {
+                        setActiveModule("ticket");
+                        navigate(MODULE_DASHBOARD_ROUTES.ticket);
                         setOpen(false);
                       },
                     },
