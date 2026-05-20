@@ -8,6 +8,7 @@ import {
   Building2,
   TrendingUp,
   FileText,
+  Ticket,
 } from "lucide-react";
 import { NavItem } from "./SidebarPrimitives";
 
@@ -67,6 +68,11 @@ export const buildAdminNavItems = (pendingCount: number): NavItem[] => [
       { label: "Email Setup", path: "/admin/communicator/email-setup" },
       { label: "WhatsApp Setup", path: "/admin/communicator/whatsapp-setup" },
     ],
+  },
+  {
+    label: "Support Tickets",
+    icon: Ticket,
+    children: [{ label: "Resolution", path: "/admin/tickets/resolution" }],
   },
   { label: "API Integration", icon: Shield, path: "/admin/api-integration" },
   { label: "Live Metrics", icon: TrendingUp, path: "/admin/metrics" },

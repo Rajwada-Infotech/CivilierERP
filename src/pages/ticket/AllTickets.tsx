@@ -28,12 +28,7 @@ interface Ticket {
   created_at?: string;
 }
 
-type StatusFilter =
-  | "All Tickets"
-  | "Pending"
-  | "InProgress"
-  | "Resolved"
-  | "Closed";
+type StatusFilter = "All" | "Pending" | "InProgress" | "Resolved" | "Closed";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -181,9 +176,10 @@ function TicketCard({ ticket }: { ticket: Ticket }) {
   );
 }
 
-// ─── PendingTickets page ──────────────────────────────────────────────────────
+// ─── AllTickets page ──────────────────────────────────────────────────────────
 
 const STATUS_TABS: StatusFilter[] = [
+  "All",
   "Pending",
   "InProgress",
   "Resolved",
@@ -191,18 +187,18 @@ const STATUS_TABS: StatusFilter[] = [
 ];
 
 const TAB_LABELS: Record<StatusFilter, string> = {
-  "All Tickets": "All",
+  All: "All",
   Pending: "Pending",
   InProgress: "In Progress",
   Resolved: "Resolved",
   Closed: "Closed",
 };
 
-const PendingTickets: React.FC = () => {
+const AllTickets: React.FC = () => {
   const navigate = useNavigate();
 
   const [search, setSearch] = useState("");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("Pending");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("All");
   const [priorityFilter, setPriorityFilter] = useState<string>("All");
 
   const {
@@ -224,7 +220,7 @@ const PendingTickets: React.FC = () => {
 
   const tickets = useMemo(() => {
     let list = [...allTickets];
-    if (statusFilter !== "All Tickets")
+    if (statusFilter !== "All")
       list = list.filter((t) => t.status === statusFilter);
     if (priorityFilter !== "All")
       list = list.filter((t) => t.priority === priorityFilter);
@@ -242,7 +238,7 @@ const PendingTickets: React.FC = () => {
 
   // Counts per tab
   const tabCounts: Record<StatusFilter, number> = {
-    "All Tickets": allTickets.length,
+    All: allTickets.length,
     Pending: allTickets.filter((t) => t.status === "Pending").length,
     InProgress: allTickets.filter((t) => t.status === "InProgress").length,
     Resolved: allTickets.filter((t) => t.status === "Resolved").length,
@@ -251,11 +247,11 @@ const PendingTickets: React.FC = () => {
 
   const urgentCount = allTickets.filter((t) => t.priority === "Urgent").length;
   const isFiltered =
-    statusFilter !== "Pending" || priorityFilter !== "All" || search.trim();
+    statusFilter !== "All" || priorityFilter !== "All" || search.trim();
 
   return (
     <>
-      <Breadcrumbs items={["Tickets", "Pending Tickets"]} />
+      <Breadcrumbs items={["Tickets", "All Tickets"]} />
 
       <div className="max-w-3xl mx-auto pb-10 space-y-5">
         {/* Header */}
@@ -269,10 +265,10 @@ const PendingTickets: React.FC = () => {
             </button>
             <div>
               <h1 className="text-xl font-heading font-bold text-foreground">
-                Tickets
+                All Tickets
               </h1>
               <p className="text-xs text-muted-foreground mt-0.5">
-                {tabCounts["Pending"]} pending · {allTickets.length} total
+                {allTickets.length} total
                 {urgentCount > 0 && (
                   <span className="text-red-500 ml-1.5 font-medium">
                     · {urgentCount} urgent
@@ -394,14 +390,14 @@ const PendingTickets: React.FC = () => {
             <p className="text-sm">
               {isFiltered
                 ? "No tickets match your filters"
-                : "No pending tickets"}
+                : "No tickets found"}
             </p>
             {isFiltered && (
               <button
                 onClick={() => {
                   setSearch("");
                   setPriorityFilter("All");
-                  setStatusFilter("Pending");
+                  setStatusFilter("All");
                 }}
                 className="text-xs text-primary hover:underline"
               >
@@ -427,4 +423,4 @@ const PendingTickets: React.FC = () => {
   );
 };
 
-export default PendingTickets;
+export default AllTickets;
